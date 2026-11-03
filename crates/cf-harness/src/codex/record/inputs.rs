@@ -37,6 +37,28 @@ pub(super) enum Telling {
     Codex,
 }
 
+/// How the words of the user's messages that Codex itself writes in the model's context begin:
+/// its `# AGENTS.md instructions`, the `<environment_context>` of the thread (written when the
+/// thread begins, and again whenever the environment it describes changes: 5 of the 56 in 120
+/// rollouts on the owner's machine came after a ConsensFlow paste), and the
+/// `<subagent_notification>` of a subagent that ended (Codex 0.166's binary names it). Codex
+/// writes `<turn_aborted>`, `<user_shell_command>` and `<skill>` the same way, each beside
+/// something the person did, and they are left as the person's. A message that quotes one of
+/// these further in is the person's.
+const WRITTEN_BY_CODEX: [&str; 3] = [
+    "<environment_context>",
+    "# AGENTS.md instructions",
+    "<subagent_notification>",
+];
+
+/// Whether a user's message is one Codex wrote itself ([`WRITTEN_BY_CODEX`]).
+fn written_by_codex(words: &str) -> bool {
+    let head = words.trim_start();
+    WRITTEN_BY_CODEX
+        .iter()
+        .any(|opening| head.starts_with(opening))
+}
+
 /// An input told once, in a turn, that the other telling has not repeated.
 struct Told {
     telling: Telling,
@@ -98,7 +120,10 @@ impl Rollout {
             return Ok(());
         }
         let words: Arc<str> = Arc::from(text.as_str());
+        let harness = written_by_codex(&text);
         let place = self.add_named(id, Role::User, text, true, at);
+        // No one typed it: Codex put it in the model's context as a user's message.
+        self.items[place].item.synthetic |= harness;
         if let Some(open) = self.turn(turn) {
             open.inputs.told(telling, words, place);
         }

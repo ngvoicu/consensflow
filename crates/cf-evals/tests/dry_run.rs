@@ -30,7 +30,7 @@ use serde_json::Value;
 
 /// The stand-in agent, built (it is built for the tests of `crates/cf-e2e` too).
 fn stand_in() -> PathBuf {
-    let ran = Run::new(env!("CARGO"))
+    let ran = Run::cargo()
         .args([
             "build",
             "--locked",
@@ -42,7 +42,6 @@ fn stand_in() -> PathBuf {
             "fake-agent",
         ])
         .cwd(checkout::root())
-        .inheriting_env()
         .unlimited()
         .run()
         .unwrap();
@@ -133,6 +132,14 @@ fn play(words: &[&str]) -> Played {
             .any(|line| line.starts_with("  report: ")),
         "the run ended without a verdict: {ran}"
     );
+    // The play worked in a folder of its own, taken away once it was measured: the folder the
+    // workspaces are made in is there, and holds none.
+    let workspaces = home.join(".consensflow-candidate/evals/workspaces");
+    let left: Vec<PathBuf> = std::fs::read_dir(&workspaces)
+        .unwrap_or_else(|error| panic!("{}: {error}\n{ran}", workspaces.display()))
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert!(left.is_empty(), "the play's workspace was left: {left:?}");
     // It kept one report, of the shape the summary reads.
     let kept: Vec<PathBuf> = std::fs::read_dir(&reports)
         .unwrap()

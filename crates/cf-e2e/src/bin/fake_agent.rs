@@ -112,6 +112,8 @@ mod noise;
 mod records;
 #[path = "fake_agent/reply.rs"]
 mod reply;
+#[path = "fake_agent/scripted.rs"]
+mod scripted;
 #[path = "fake_agent/signals.rs"]
 mod signals;
 #[path = "fake_agent/status_line.rs"]
@@ -763,6 +765,27 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         },
     };
     steps::write(records, pid, &window.session, &worked).map_err(failed)?;
+    // A turn that works at a pace writes a step, works a while, and writes the next: an
+    // Escape in one of the whiles stops it there.
+    let reply = match reply {
+        Reply::Worked(steps, gap, answer) => {
+            let mut stopped = false;
+            for step in &steps {
+                steps::write(records, pid, &window.session, std::slice::from_ref(step))
+                    .map_err(failed)?;
+                if window.stop.work(gap) {
+                    stopped = true;
+                    break;
+                }
+            }
+            if stopped {
+                Reply::Stopped
+            } else {
+                Reply::Text(answer)
+            }
+        }
+        other => other,
+    };
     // The message id numbers the records so far, this one not yet among them.
     let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
     match reply {
@@ -801,7 +824,8 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                 .map_err(failed)?;
             continue_later(records, pid, window).map_err(failed)?;
         }
-        Reply::Text(reply) => {
+        // `Worked` was turned into a text or a stop above.
+        Reply::Text(reply) | Reply::Worked(_, _, reply) => {
             // The work is done (a `cf` it ran has answered) and the answer is
             // not yet written: the turn is open in the record that long.
             wait_as_told("CF_TEST_ANSWER_MS");

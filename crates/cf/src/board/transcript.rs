@@ -10,6 +10,7 @@
 use cf_base::js;
 use cf_base::text::{utf16_len, utf16_prefix};
 use cf_board::Board;
+use cf_proto::cf_word::CfWord;
 use serde_json::{Map, Value};
 
 use super::words::{quoted, Split};
@@ -37,15 +38,15 @@ pub(super) enum Asked {
 /// the rest, so not with them; a page is a whole number from 1, and a search
 /// has words.
 pub(super) fn asked(words: &Split) -> Result<Asked, Failure> {
-    let (page, find) = (words.value("--page"), words.value("--find"));
+    let (page, find) = (words.value("--page")?, words.value("--find")?);
     if page.is_none() && find.is_none() {
-        let last = words.value("--last").map_or(10.0, js::number);
+        let last = words.value("--last")?.map_or(10.0, js::number);
         if last.fract() != 0.0 || !last.is_finite() || last < 1.0 {
             return Err(Failure::Usage("--last takes a number of items".into()));
         }
         return Ok(Asked::Last(last));
     }
-    if words.value("--last").is_some() {
+    if words.value("--last")?.is_some() {
         return Err(Failure::Usage(
             "--last gives the newest items, and --page and --find the rest: give one or the other"
                 .into(),
@@ -107,6 +108,7 @@ pub(super) fn read(
         ),
         Asked::Page { find, .. } => {
             let paged = Paged {
+                cf: board.cf(),
                 number,
                 page: at("page").unwrap_or_default(),
                 pages: at("pages").unwrap_or_default(),
@@ -128,6 +130,8 @@ pub(super) fn read(
 
 /// A page of a transcript, as the board answered it.
 struct Paged<'a> {
+    /// How a command starts in the window that reads it.
+    cf: &'a CfWord,
     number: u64,
     page: u64,
     pages: u64,
@@ -166,7 +170,8 @@ impl Paged<'_> {
                 .find
                 .map_or_else(String::new, |find| format!(" --find {}", quoted(find)));
             format!(
-                "Older: cf task get T-{} --transcript --page {}{search}",
+                "Older: {} task get T-{} --transcript --page {}{search}",
+                self.cf,
                 self.number,
                 page + 1
             )

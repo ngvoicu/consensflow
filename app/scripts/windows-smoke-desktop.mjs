@@ -10,7 +10,10 @@
  *   node app/scripts/windows-smoke-desktop.mjs [--build | --build-app] [<ConsensFlow.exe>]
  *
  * `--build` builds the app from this checkout first (`npm --prefix app run build --
- * --no-bundle`), and the exe that leaves is the one run when none is named. `--build-app`
+ * --no-bundle`), of the smoke's identity (built-identity.mjs), and the exe that leaves is the
+ * one run when none is named. An exe of any other identity, named or built, is refused before
+ * anything starts: one of the release's keeps its runtime in the release's folder of the
+ * machine's user, whatever the smoke sets LOCALAPPDATA to (T-951). `--build-app`
  * builds the app's crate alone, its staged parts (the page's bundle, `cf`) as the last
  * build left them: Tauri's step before the build (`cargo xtask stage`) is left out, which
  * under the plant runner would link xtask again while it runs, and Windows refuses to
@@ -27,6 +30,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { refusalOf, smokeBuildConfig } from './built-identity.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** How long the smoke is given on the desktop, and how long its task is given to start. */
@@ -51,13 +55,11 @@ const exe = resolve(named[0] ?? join(ROOT, 'app', 'src-tauri', 'target', 'releas
 
 const folder = mkdtempSync(join(tmpdir(), 'cf-windows-smoke-desktop-'))
 if (builds.length > 0) {
-  const words = ['--prefix', 'app', 'run', 'build', '--', '--no-bundle']
-  if (builds[0] === '--build-app') {
-    // Merged into Tauri's config as a JSON merge patch: a null takes the step away.
-    const config = join(folder, 'app-alone.json')
-    writeFileSync(config, JSON.stringify({ build: { beforeBuildCommand: null } }))
-    words.push('--config', config)
-  }
+  // Merged into Tauri's config as a JSON merge patch: the smoke's identity, never the
+  // release's, and for the app alone a null that takes the step before the build away.
+  const config = join(folder, 'smoke-build.json')
+  writeFileSync(config, JSON.stringify(smokeBuildConfig({ appAlone: builds[0] === '--build-app' })))
+  const words = ['--prefix', 'app', 'run', 'build', '--', '--no-bundle', '--config', config]
   console.log(`== build: npm ${words.join(' ')}`)
   rmSync(exe, { force: true })
   const built = spawnSync('npm', words, { cwd: ROOT, stdio: 'inherit', shell: true })
@@ -66,6 +68,15 @@ if (builds.length > 0) {
     rmSync(folder, { recursive: true, force: true })
     process.exit(1)
   }
+}
+
+// Refused here as the smoke would refuse it, before a task is made: an app of the release's
+// identity is never started by a test.
+const refused = refusalOf(exe)
+if (refused) {
+  console.error(`== ${refused}`)
+  rmSync(folder, { recursive: true, force: true })
+  process.exit(2)
 }
 
 const log = join(folder, 'smoke.log')

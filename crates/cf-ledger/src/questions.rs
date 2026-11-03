@@ -148,7 +148,7 @@ pub(crate) fn require_choices(
     if picks.len() != questions.len() {
         return Err(one_answer_each(questions));
     }
-    picks
+    let taken: Vec<Vec<String>> = picks
         .iter()
         .zip(questions)
         .map(|(pick, question)| {
@@ -172,12 +172,6 @@ pub(crate) fn require_choices(
                     if wanted.is_empty() {
                         return Err(bad_choices("empty pick"));
                     }
-                    // A pick in the human's own words ("Something else") is an answer like any other.
-                    if utf16_len(&wanted) > MAX_BODY {
-                        return Err(bad_choices(&format!(
-                            "pick too long (at most {MAX_BODY} characters)"
-                        )));
-                    }
                     let lower = wanted.to_lowercase();
                     Ok(question
                         .options
@@ -187,7 +181,26 @@ pub(crate) fn require_choices(
                 })
                 .collect()
         })
-        .collect()
+        .collect::<Result<_, LedgerError>>()?;
+    // A pick in the human's own words ("Something else") is an answer like any other: it goes
+    // under its question's header with the other picks, and all of that is the answer's text,
+    // which the body limit holds. A pick that does not fit is always refused as a pick too long,
+    // with how long the longest could be (a pick of the limit's own length was once taken here
+    // and then refused by the body's check under another name).
+    let printed = utf16_len(&render_choices(questions, &taken));
+    if printed > MAX_BODY {
+        let longest = taken.iter().flatten().map(|pick| utf16_len(pick)).max();
+        let room = longest.unwrap_or(0).saturating_sub(printed - MAX_BODY);
+        return Err(pick_too_long(room));
+    }
+    Ok(taken)
+}
+
+/// The refusal of a pick that does not fit the answer: how long the longest could be.
+fn pick_too_long(room: usize) -> LedgerError {
+    bad_choices(&format!(
+        "pick too long (at most {room} characters here; the headers of the questions and the other picks count too)"
+    ))
 }
 
 /// The refusal of an answer that does not answer each question once: it says how
@@ -350,5 +363,92 @@ mod tests {
             "answer: Way: one pick"
         );
         assert_eq!(refused(json!([["Left"], [" "]])), "answer: empty pick");
+    }
+
+    /// A question with one pick to give, and what `choices` or the text of an answer make of
+    /// `pick` for it: the pick as taken, or the refusal.
+    fn picked(pick: &str, by_text: bool) -> Result<Vec<Vec<String>>, String> {
+        let questions = require_questions(&json!([
+            { "question": "Which way?", "header": "Way", "options": [{ "label": "Left" }] },
+        ]))
+        .unwrap();
+        let (choices, body) = (json!([[pick]]), json!(pick));
+        let taken = if by_text {
+            require_choices(&questions, None, Some(&body))
+        } else {
+            require_choices(&questions, Some(&choices), None)
+        };
+        taken.map_err(|refused| refused.to_string())
+    }
+
+    /// How many characters a lone pick may have under the header `Way`: the body limit less
+    /// the header and its colon and space, which the answer prints before it.
+    const ROOM: usize = MAX_BODY - "Way: ".len();
+
+    /// The refusal of a pick that does not fit, with how long the longest could be.
+    fn too_long(room: usize) -> String {
+        format!(
+            "answer: pick too long (at most {room} characters here; the headers of the questions and the other picks count too)"
+        )
+    }
+
+    #[test]
+    fn a_pick_in_the_humans_own_words_is_taken_up_to_the_body_limit_less_its_header() {
+        // 6,000 characters was refused as an empty pick when a pick was capped at
+        // `MAX_TITLE * 10` (the long-message evals, 2026-09-27). The limit counts UTF-16 units,
+        // as the body's does: two bytes of text are one unit, and an emoji is two.
+        let own_words = [
+            "x".repeat(6_000),
+            "x".repeat(MAX_TITLE * 10 + 1),
+            "x".repeat(ROOM),
+            "\u{e9}".repeat(ROOM),
+            "\u{1f642}".repeat(ROOM / 2),
+        ];
+        for pick in own_words {
+            for by_text in [false, true] {
+                assert_eq!(
+                    picked(&pick, by_text),
+                    Ok(vec![vec![pick.clone()]]),
+                    "{} units, by text: {by_text}",
+                    utf16_len(&pick)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pick_that_does_not_fit_the_answer_is_too_long_and_not_empty_or_a_body() {
+        // One unit over, and the body limit itself, which the printed answer exceeds by its header.
+        let over = [
+            "x".repeat(ROOM + 1),
+            "x".repeat(MAX_BODY),
+            "x".repeat(MAX_BODY + 1),
+            "\u{1f642}".repeat(ROOM / 2 + 1),
+        ];
+        for pick in over {
+            for by_text in [false, true] {
+                assert_eq!(
+                    picked(&pick, by_text),
+                    Err(too_long(ROOM)),
+                    "{} units",
+                    utf16_len(&pick)
+                );
+            }
+        }
+        // And an empty one is still empty.
+        assert_eq!(picked(" ", false), Err("answer: empty pick".to_owned()));
+    }
+
+    #[test]
+    fn the_other_picks_and_headers_of_the_answer_count_against_a_pick_too() {
+        // The answer prints `Way: <pick>`, a line break and `Colours: Red`: 18 characters besides it.
+        let questions = asked();
+        let room = MAX_BODY - "Way: ".len() - "\nColours: Red".len();
+        let by_choices = |pick: String| {
+            require_choices(&questions, Some(&json!([[pick], ["Red"]])), None)
+                .map_err(|refused| refused.to_string())
+        };
+        assert!(by_choices("x".repeat(room)).is_ok());
+        assert_eq!(by_choices("x".repeat(room + 1)), Err(too_long(room)));
     }
 }

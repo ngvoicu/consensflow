@@ -223,3 +223,37 @@ fn the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_l
     std::fs::write(&file, "{ not json").unwrap();
     assert_eq!(by_default(), AppSpecs::default());
 }
+
+#[test]
+fn a_devin_agent_on_a_model_listed_with_no_level_is_launched_with_no_effort() {
+    // T-609's edge: Devin writes the level into the model's id, and a model it lists with
+    // no level, given the agent's effort, became an id Devin has not
+    // (`claude-opus-4-6-medium-thinking`).
+    let home = tempfile::tempdir().unwrap();
+    let agents = agents_in(
+        home.path(),
+        &json!({
+            "schemaVersion": 1,
+            "agents": [
+                { "id": "mythinker", "kind": "devin", "model": "claude-opus-4-6-thinking", "effort": "medium" },
+                { "id": "myglm", "kind": "devin", "model": "glm-5-2", "effort": "medium" },
+                { "id": "myglmmax", "kind": "devin", "model": "glm-5-2", "effort": "max" },
+                { "id": "myswe", "kind": "devin", "model": "swe-2-lightning", "effort": "high" },
+                { "id": "myown", "kind": "devin", "model": "my-own-model", "effort": "high" },
+                { "id": "myclaude", "harness": "claude", "kind": "claude-code", "model": "claude-opus-4-6", "effort": "high" },
+            ]
+        }),
+    );
+    let effort = |name: &str| {
+        cf_engine::seams::Roster::agent(&agents, name)
+            .unwrap()
+            .unwrap()
+            .effort
+    };
+    assert_eq!(effort("mythinker"), None);
+    assert_eq!(effort("myglm"), None, "GLM 5.2 is listed bare and at max");
+    assert_eq!(effort("myglmmax").as_deref(), Some("max"));
+    assert_eq!(effort("myswe").as_deref(), Some("high"));
+    assert_eq!(effort("myown").as_deref(), Some("high"), "off the catalog");
+    assert_eq!(effort("myclaude").as_deref(), Some("high"));
+}

@@ -72,9 +72,12 @@
 //! after, and a TaskStop of it is refused ("Task … is not running", an error result,
 //! which ends nothing here). So a status or a TaskStop ends only a monitor whose "notice"
 //! was a line of its command's, while the monitor runs on. One whose notice was real is
-//! ended by the look above, where the host can tell the window's commands; elsewhere (a
-//! socket's or an MCP server's monitor, which has no command, and every monitor where a
-//! Windows job has no groups) by Finish alone. A monitor's status ends it as it ends any job: its command
+//! ended by the look above, where the host can tell the window's commands (by their groups
+//! on the Mac, by their chain in a Windows job, which has none: T-906); elsewhere (a
+//! socket's or an MCP server's monitor, which has no command, and every monitor where the
+//! host cannot tell them) by Finish alone. Nothing in the record tells a real notice from
+//! a line: Claude Code 2.1.312 keeps the notice's kind (`monitorEvent.kind`) in its queue,
+//! and its `queue-operation` record holds the text alone. A monitor's status ends it as it ends any job: its command
 //! ended (`completed`,
 //! "Monitor … stream ended", written as its shell exits, whatever the command left running:
 //! T-179's probe), or the human stopped a command's monitor from Claude Code's tasks

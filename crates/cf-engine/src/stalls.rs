@@ -104,11 +104,13 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let key = (project.id, task.requester.clone());
         let earlier = self.stalls.told.borrow().get(&key).copied();
+        let harness_gone = self.harness_gone(project, task);
         let (note, kept) = self.seams.ledger.borrow_mut().note_stall(
             project.id,
             task.number,
             because,
             why,
+            harness_gone,
             earlier,
             except,
         )?;
@@ -117,9 +119,24 @@ impl Dispatcher {
             self.stalls.told.borrow_mut().insert(key, note.id);
         }
         for message in &kept {
-            self.tell_kept(message, why)?;
+            self.tell_kept(message, why, harness_gone)?;
         }
         Ok(())
+    }
+
+    /// Whether `task`'s member runs on a harness this build has no adapter for, as
+    /// [`Dispatcher::why_not_free`] asks it: no resume opens its window again, and its
+    /// pause note says the way on that is left.
+    fn harness_gone(&self, project: &ProjectView, task: &TaskView) -> bool {
+        let assignee = task.session.as_deref().or(task.assignee.as_deref());
+        project
+            .participants
+            .iter()
+            .find(|participant| Some(participant.handle.as_str()) == assignee)
+            .is_some_and(|participant| {
+                let harness = participant.harness.as_deref().unwrap_or("null");
+                self.seams.adapters.adapter(harness).is_none()
+            })
     }
 }
 

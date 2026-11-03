@@ -32,8 +32,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        if delivering.launch && !delivering.chief {"
-replace = "        if true {"
+find = "        if delivering.launch && !delivering.chief && !with_project {"
+replace = "        if true || with_project {"
 
 [[plant]]
 name = "window went: a window that ends with a paste its harness recorded has it given back"
@@ -43,10 +43,9 @@ runs = ["engine-dispatcher-window-went"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-                self.settle_gone(delivering, move |delivering| {
-                    let once_up = delivering.owed.is_some() || delivering.late;
+                self.settle_gone(delivering, closed_with_project, move |delivering| {
                     // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief || (once_up && closed_with_project) {
+                    if delivering.chief || closed_with_project {
                         this.give_back(delivering.message, &told)
                     } else {
                         let retry = !delivering.launch;
@@ -56,9 +55,8 @@ find = '''
                 .await?;'''
 replace = '''
                 let _ = (&this, &told);
-                let once_up = delivering.owed.is_some() || delivering.late;
                 // A chief's first message (a handoff, most often) waits for its next window.
-                if delivering.chief || (once_up && closed_with_project) {
+                if delivering.chief || closed_with_project {
                     self.give_back(delivering.message, &because)?;
                 } else {
                     let retry = !delivering.launch;
@@ -74,7 +72,7 @@ runs = ["engine-dispatcher-window-went", "engine-dispatcher-restart"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
             let this = Rc::clone(self);
-            self.settle_gone(delivering, move |delivering| {
+            self.settle_gone(delivering, false, move |delivering| {
                 this.settle_failure(
                     delivering,
                     "its window closed while it was handed over",
@@ -111,8 +109,8 @@ runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        if delivering.launch && !delivering.chief {"
-replace = "        if delivering.launch || delivering.chief {"
+find = "        if delivering.launch && !delivering.chief && !with_project {"
+replace = "        if (delivering.launch && !with_project) || delivering.chief {"
 
 [[plant]]
 name = "window went: a member's launch's first message is settled by its window's record as it goes, not failed with its launch"
@@ -121,8 +119,8 @@ runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        if delivering.launch && !delivering.chief {"
-replace = "        if false {"
+find = "        if delivering.launch && !delivering.chief && !with_project {"
+replace = "        if false && with_project {"
 
 [[plant]]
 name = "window went: a message cancelled while the window's record is read is confirmed all the same, which fails the chief's exit and leaves its project open (the reviews of 2026-10-16)"

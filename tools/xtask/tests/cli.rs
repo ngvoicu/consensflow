@@ -6,6 +6,10 @@
 
 mod common;
 
+// The cargo a test starts: one file for every crate that starts one.
+#[path = "../../../crates/cf-process/src/nested_cargo.rs"]
+mod nested_cargo;
+
 use std::fs;
 
 use common::{checkout, cwds, err, out, programs, xtask};
@@ -52,7 +56,10 @@ fn a_help_and_a_refusal_start_nothing() {
     for (args, said) in [
         (vec![], "xtask: a command is required\n"),
         (vec!["deploy"], "xtask: unknown command: deploy\n"),
-        (vec!["app"], "xtask: app takes a command: test, clippy\n"),
+        (
+            vec!["app"],
+            "xtask: app takes a command: test, clippy, fresh\n",
+        ),
     ] {
         let ran = xtask(&checkout(), no_programs.path(), &[], &args);
         assert_eq!(ran.status.code(), Some(2), "{args:?}");
@@ -133,9 +140,11 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "portable inspect",
         "app test",
         "app clippy",
+        "app fresh",
         "clippy-windows",
         "--as-archiver",
         "departures",
+        "unreachable-pub",
         "bench records-memory",
         "check",
         "smoke",
@@ -143,6 +152,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "candidate",
         "release alpha",
         "release promote",
+        "release verify",
     ] {
         let mut words: Vec<&str> = command.split(' ').collect();
         words.push("--help");
@@ -187,6 +197,7 @@ fn check_steps() -> Vec<String> {
     let mut steps = vec![
         "cargo fmt --all --check".to_string(),
         "cargo clippy --workspace --exclude app --all-targets -- -D warnings".to_string(),
+        "cargo xtask unreachable-pub".to_string(),
         "cargo clippy --offline --all-targets -- -D warnings".to_string(),
     ];
     if !cfg!(windows) {
@@ -198,6 +209,7 @@ fn check_steps() -> Vec<String> {
         "cargo test --package cf-engine --test dispatcher".to_string(),
         own_tests,
         "cargo test --offline --".to_string(),
+        "cargo xtask app fresh".to_string(),
     ]);
     steps.extend(
         families
@@ -282,7 +294,9 @@ fn cargo_finds_the_xtask_alias_from_the_root_and_from_app() {
     let missing =
         format!(".cargo/config.toml needs, beside its [build] table:\n\n[alias]\n{ALIAS}\n");
     for cwd in [checkout(), checkout().join("app")] {
-        let ran = common::command(env!("CARGO"))
+        let mut cargo = nested_cargo::cargo();
+        cf_process::hold_only_the_streams(&mut cargo);
+        let ran = cargo
             .args(["help", "xtask"])
             .current_dir(&cwd)
             .output()

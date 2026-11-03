@@ -55,7 +55,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
-use cf_proto::panes::HumanInput;
+use cf_proto::panes::{HumanInput, SilentPaste};
 use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
@@ -69,7 +69,7 @@ use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
     Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Over, Pane,
-    PaneHost, Prepared, Readiness, Records, Skill, Window, Work,
+    PaneHost, Prepared, Readiness, Records, Skill, Window, Work, STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -77,7 +77,7 @@ use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
 use crate::shared::left_open::LeftOpen;
-use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
+use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
 
@@ -230,12 +230,19 @@ const DISCOVER_FOR_MS: i64 = 60_000;
 const WINDOWS_PATHS: &str = "This machine runs Windows and your shell is Git Bash: give file tools Windows paths (C:\\Users\\…) or paths relative to the project folder, never /c/… paths, which they write under C:\\c\\.";
 
 /// The role text a Devin window gets: on Windows, with how to name a file
-/// there. A window given none gets none, and is refused as any is.
+/// there, after the role and before the project's rules for the staff where the text
+/// has them: the rules are the human's words, and this sentence is not. A window given
+/// none gets none, and is refused as any is.
 fn role_text(instructions: &str, env: &Env) -> String {
-    if env.on_windows() && !instructions.is_empty() {
-        format!("{instructions}\n\n{WINDOWS_PATHS}\n")
-    } else {
-        instructions.to_owned()
+    if !env.on_windows() || instructions.is_empty() {
+        return instructions.to_owned();
+    }
+    match instructions.find(&format!("\n{STAFF_RULES_HEADING}\n")) {
+        Some(at) => {
+            let (role, rules) = instructions.split_at(at);
+            format!("{role}\n\n{WINDOWS_PATHS}\n{rules}")
+        }
+        None => format!("{instructions}\n\n{WINDOWS_PATHS}\n"),
     }
 }
 
@@ -259,6 +266,17 @@ impl DevinAdapter {
 /// stays) and one Escape leaves the box as it is (`cargo xtask live unsent-box`,
 /// Devin 3000.11.92 on macOS and on Windows, 2026-10-21).
 const CLEAR_INPUT: [u8; 1] = [0x03];
+
+/// How Devin reads a paste ([`DevinAdapter::silent_paste`]), on every platform: about 20 µs a
+/// character; its draw of the paste is the first thing it prints after it; then 80 ms of quiet;
+/// and at the most a second and 0.1 ms a character.
+const DEVIN_PASTE: SilentPaste = SilentPaste {
+    pace_us_per_character: 20,
+    drawn_after_ms: 0,
+    quiet_ms: 80,
+    most_ms: 1_000,
+    most_us_per_character: 100,
+};
 
 impl Adapter for DevinAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
@@ -361,6 +379,20 @@ impl Adapter for DevinAdapter {
         })
     }
 
+    /// Devin loses an Enter that comes before it has drawn a paste: the paste stays in its box.
+    /// A measured heuristic (T-1086, Devin 3000.11.234, 2026-11-02), on every platform:
+    /// - on Windows (zeewin2) it reads the paste's key presses and draws what it read only once it
+    ///   has read it all: a line about 10 ms after the paste, 7,775 characters (`[Pasted text #1
+    ///   +114 lines]`) at about 140-160 ms, about 0.02 ms a character, printing nothing before. An
+    ///   Enter in the paste's own write was lost at every length, and one 59 ms after the long
+    ///   paste, while one 56 ms after the line and 153 ms after the long paste went;
+    /// - on the Mac the terminal hands it the paste whole and it draws it at once (0-10 ms at
+    ///   either length), yet it lost an Enter in the paste's own write at every length, while one
+    ///   64 ms after the paste went.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        Some(DEVIN_PASTE)
+    }
+
     /// Devin's own status line says it: "esc twice to interrupt". The same
     /// two at a Devin already idle open its rewind ("Revert"), and the next
     /// Enter confirms it, cutting the conversation back: a third Escape a
@@ -386,12 +418,13 @@ impl Adapter for DevinAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Devin,
             env,
             variant,
+            folder,
             paths::global_specmint(env, variant),
         )
     }
@@ -570,6 +603,10 @@ impl DevinWindow {
 impl Window for DevinWindow {
     fn opened(&self, _pid: Option<u32>) {}
 
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Devin, snapshot)
+    }
+
     /// The window is on `session` from now on: a switch to full permission begun for
     /// the conversation it was on is that one's, and another's time runs from the
     /// first look that finds it in the normal mode.
@@ -583,7 +620,7 @@ impl Window for DevinWindow {
         *self.left_open.borrow_mut() = None;
     }
 
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.session.borrow().is_some() {
                 return Ok(None);
@@ -750,9 +787,9 @@ impl Window for DevinWindow {
             .await;
             let wire = wire?;
             self.looked.set(self.history().map(|seen| seen.prompts));
-            let mut observed = record_state(Arc::clone(&reading));
+            // What Devin's wire says of its quota is the live word beside the record's.
+            let mut observed = observed_from(Arc::clone(&reading), wire.quota);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
-            observed.quota = wire.quota;
             // What the record held when the window was opened with no message is the old
             // process's, whatever it says of the turn: no process is in a turn that was
             // cut, and one the record cannot end ended. The window has been given nothing

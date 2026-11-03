@@ -37,6 +37,35 @@ pub(super) static REFUSED: LazyLock<Regex> =
 /// usage is spent, which it sends as a 400 (Pi's sessions, 2026-10).
 pub(super) static SPENT: LazyLock<Regex> = LazyLock::new(|| compile(r"(?i-u:out of extra usage)"));
 
+/// An account's billing refused (nothing resets it): Muse's `billing_error`, OpenRouter's
+/// "requires more credits", Anthropic's "credit balance is too low", OpenAI's
+/// `insufficient_quota`.
+pub(super) static BILLING: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"(?i-u:billing_error|requires more credits|credit balance is too low|insufficient_quota)",
+    )
+});
+
+/// An account's login refused (nothing resets it): Anthropic's `authentication_error`, a key
+/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10).
+pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\))",
+    )
+});
+
+/// A provider's words for a request it refused for a moment (T-1112): Anthropic's
+/// `overloaded_error` ("Overloaded"), a model "at capacity" (Codex's "Selected model is at
+/// capacity"), servers "currently busy" or in "high demand", a service "temporarily
+/// unavailable", a server error by its name: the load and server words of Pi's own retry
+/// classifier (pi-ai's `utils/retry.js`, 2026-11), without its network and limit words. A
+/// quota ("rate limit") and an account's refusal are read before these.
+pub(super) static BUSY: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"(?i-u:overloaded|at capacity|server(?:s)? (?:is |are )?(?:currently )?busy|server_busy|high demand|temporarily unavailable|service unavailable|service_unavailable|internal server error|internal_server_error|bad gateway|gateway time-?out)",
+    )
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,5 +76,8 @@ mod tests {
             assert!(pattern.captures_len() > 1, "{}", pattern.as_str());
         }
         assert!(SPENT.is_match("You're OUT of extra usage."));
+        assert!(BILLING.is_match("... (billing_error)"));
+        assert!(CREDENTIALS.is_match("Invalid API key"));
+        assert!(BUSY.is_match("Selected model is at capacity. Please try a different model."));
     }
 }

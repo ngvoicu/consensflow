@@ -36,6 +36,7 @@ pub(crate) mod machine;
 mod options;
 pub(crate) mod owner;
 mod report;
+pub(crate) mod stand_in;
 pub(crate) mod workspace;
 pub(crate) mod wrappers;
 
@@ -51,8 +52,11 @@ use machine::Machine;
 pub use options::{Arm, Crew, Options};
 use wrappers::Wrappers;
 
-use crate::plan::{chief_environment, harness, staff_for, Agent, ChiefSetup, Staff};
-use crate::Result;
+use crate::plan::{
+    chief_environment, harness, staff_for, with_stand_in_reviewer, with_stand_in_worker, Agent,
+    ChiefSetup, Staff,
+};
+use crate::{Error, Result};
 
 /// What is decided before a run begins, and holds for each run of them.
 pub struct Plan<'a> {
@@ -64,6 +68,9 @@ pub struct Plan<'a> {
     /// harness, model and effort.
     pub agent: Agent,
     pub staff: Staff,
+    /// The stand-in reviewer and worker of a scenario that scripts them, whose folders are made
+    /// again as each play begins and removed with the run.
+    pub stand_ins: Option<stand_in::StandIns>,
 }
 
 /// `run`: plays the scenario `repeat` times and says whether it held each time: the
@@ -73,12 +80,35 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
     // The harness code of the product is asked as a process: built first, before the
     // first harness spends anything, so that a build that cannot be made stops the run here.
     ask::prepare()?;
+    // The stand-in members' program, built here for the same reason: before anything is spent.
+    let stand_in_agent = if options.scenario.has_a_stand_in() {
+        if cfg!(windows) {
+            return Err(Error::Refused(format!(
+                "{} has stand-in members, whose wrapper is a shell script: run it on the Mac",
+                options.scenario.id
+            )));
+        }
+        Some(cf_e2e::cf::fake_agent()?)
+    } else {
+        None
+    };
     let chief = chief_environment(&options.chief, options.model.as_deref())?;
     let staff = staff_for(
         &options.staff,
         &options.staff_models(),
         Some(&options.staff_effort),
     )?;
+    let effort = Some(options.staff_effort.as_str());
+    let staff = if options.scenario.stand_in_reviews.is_empty() {
+        staff
+    } else {
+        with_stand_in_reviewer(staff, effort)?
+    };
+    let staff = if options.scenario.stand_in_work.is_empty() {
+        staff
+    } else {
+        with_stand_in_worker(staff, effort)?
+    };
     let agent = Agent::new(
         format!("eval-{}-chief", options.chief),
         harness(&options.chief)?,
@@ -95,7 +125,9 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
         options.planned(),
     );
     let machine = Machine::of(&crew, login)?;
-    let wrappers = wrappers::write(&machine, &crew, &chief)?;
+    let stand_ins =
+        stand_in_agent.and_then(|agent| stand_in::StandIns::of(&machine, &options.scenario, agent));
+    let wrappers = wrappers::write_with(&machine, &crew, &chief, stand_ins.as_ref())?;
     let plan = Plan {
         options: &options,
         machine: &machine,
@@ -103,6 +135,7 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
         chief: &chief,
         agent,
         staff,
+        stand_ins,
     };
     let mut held = true;
     for index in 1..=options.repeat {

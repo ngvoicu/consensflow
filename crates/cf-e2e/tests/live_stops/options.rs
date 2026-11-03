@@ -8,7 +8,8 @@ use cf_e2e::live::members::{member, named, stand_in_chief, Plan};
 use cf_e2e::live::Harness;
 use cf_e2e::Result;
 
-use crate::{midturn, slow, stuck};
+use crate::midturn::{self, tool};
+use crate::{slow, stuck};
 
 /// A case of the check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +22,12 @@ pub enum Case {
     Stuck,
     MidTurn,
     MidTool,
+    /// `midtool` with the field's command (T-1117): a sleep in WSL's Ubuntu, through
+    /// `wsl.exe`. Windows only, and run only when named.
+    MidWsl,
+    /// `midtool` after a command started in the background, which the pause must leave
+    /// running (T-1117). Run only when named.
+    MidBg,
     Tell,
 }
 
@@ -38,6 +45,21 @@ impl Case {
         Case::Tell,
     ];
 
+    /// Every case a command line may name: [`Case::ALL`], and those run only when named.
+    pub const NAMED: [Case; 11] = [
+        Case::Command,
+        Case::Early,
+        Case::Hook,
+        Case::Escape,
+        Case::SlowHook,
+        Case::Stuck,
+        Case::MidTurn,
+        Case::MidTool,
+        Case::MidWsl,
+        Case::MidBg,
+        Case::Tell,
+    ];
+
     pub const fn name(self) -> &'static str {
         match self {
             Case::Command => "command",
@@ -48,13 +70,18 @@ impl Case {
             Case::Stuck => "stuck",
             Case::MidTurn => "midturn",
             Case::MidTool => "midtool",
+            Case::MidWsl => "midwsl",
+            Case::MidBg => "midbg",
             Case::Tell => "tell",
         }
     }
 
     /// Whether the case runs on any harness, the ones the command line names.
     pub const fn on_any_harness(self) -> bool {
-        matches!(self, Case::Stuck | Case::MidTurn | Case::MidTool)
+        matches!(
+            self,
+            Case::Stuck | Case::MidTurn | Case::MidTool | Case::MidWsl | Case::MidBg
+        )
     }
 }
 
@@ -68,7 +95,7 @@ pub struct Options {
     pub transcripts: Option<PathBuf>,
 }
 
-/// The cases and the harnesses the words ask for, or all the cases and OpenCode.
+/// The cases and the harnesses the words ask for, or all the cases and Devin.
 pub fn options(
     cases: &[String],
     hook: Option<&str>,
@@ -76,14 +103,14 @@ pub fn options(
     transcripts: Option<String>,
 ) -> Result<Options> {
     Ok(Options {
-        cases: named(cases, &Case::ALL, Case::name, "case", &Case::ALL)?,
+        cases: named(cases, &Case::NAMED, Case::name, "case", &Case::ALL)?,
         hook: slow::variant(hook.unwrap_or("stop"))?,
         harnesses: named(
             harnesses,
             &Harness::ALL,
             Harness::name,
             "harness",
-            &[Harness::OpenCode],
+            &[Harness::Devin],
         )?,
         transcripts: transcripts.map(PathBuf::from),
     })
@@ -109,12 +136,20 @@ pub fn plan_of(case: Case, harness: Harness, options: &Options) -> Plan {
             .with_file(stuck::SCRIPT, stuck::script_text()),
         // Their folders tell a window to do what each message asks, and run no tools but
         // the one a message tells it to.
-        Case::MidTurn | Case::MidTool => Plan::new(
+        Case::MidTurn | Case::MidWsl => Plan::new(
             &format!("stops-{name}-{}", harness.name()),
             stand_in_chief(),
         )
         .with(member(harness))
         .told(midturn::FOLDER_BRIEF),
+        // The command they run is the project's ticker.
+        Case::MidTool | Case::MidBg => Plan::new(
+            &format!("stops-{name}-{}", harness.name()),
+            stand_in_chief(),
+        )
+        .with(member(harness))
+        .told(midturn::FOLDER_BRIEF)
+        .with_file(tool::TICKER, tool::ticker_text().to_owned()),
         _ => Plan::new(&format!("stops-{name}"), stand_in_chief()).with(member(harness)),
     }
 }
@@ -130,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn every_case_is_run_unless_some_are_named_and_the_any_harness_ones_run_on_opencode_unless_a_harness_is(
+    fn every_case_is_run_unless_some_are_named_and_the_any_harness_ones_run_on_devin_unless_a_harness_is(
     ) {
         let all = options(&[], None, &[], None).unwrap();
         let names: Vec<&str> = all.cases.iter().map(|case| case.name()).collect();
@@ -141,7 +176,7 @@ mod tests {
                 "tell"
             ]
         );
-        assert_eq!(all.harnesses, [Harness::OpenCode]);
+        assert_eq!(all.harnesses, [Harness::Devin]);
         assert_eq!(all.hook.name, "stop");
         assert!(all.transcripts.is_none());
 
@@ -211,11 +246,11 @@ mod tests {
         assert_eq!(folder(Case::MidTool, Harness::Devin), "stops-midtool-devin");
         let midtool = plan_of(Case::MidTool, Harness::Codex, &options);
         assert_eq!(midtool.brief, midturn::FOLDER_BRIEF);
-        assert!(midtool.files.is_empty());
+        assert_eq!(midtool.files[0].0, "tick-cf-stops-live.cjs");
         assert_eq!(midtool.roster[1]["kind"], "codex");
         let stuck = plan_of(Case::Stuck, Harness::Codex, &options);
-        assert_eq!(stuck.files[0].0, "ignore-signals-cf-stops-live.sh");
-        assert!(stuck.files[0].1.contains("trap '' INT TERM HUP"));
+        assert_eq!(stuck.files[0].0, "ignore-signals-cf-stops-live.cjs");
+        assert!(stuck.files[0].1.contains("process.on(signal, () => {})"));
         assert!(plan_of(Case::Command, Harness::Claude, &options)
             .files
             .is_empty());

@@ -9,6 +9,7 @@ import {
   linkTarget,
   measure,
   readRegistry,
+  rowFile,
   specFile,
 } from '../app/ui/core/specs-folder.js'
 
@@ -140,6 +141,85 @@ describe('the registry', () => {
     )
   })
 
+  it('reads its columns by their names, in whatever order, each as it is named', () => {
+    // A kluris registry has Progress before Priority; the names are read in any case.
+    const rows = (head) =>
+      readRegistry(
+        [
+          head,
+          '|---|---|---|---|---|---|',
+          '| kluris-v3-rust | Kluris 3 | completed | 52/52 | high | 2026-10-28 |',
+        ].join('\n'),
+      ).rows[0]
+    const as = ({ id, title, status, priority, progress, updated, done, total }) => [
+      id,
+      title,
+      status,
+      priority,
+      progress,
+      updated,
+      done,
+      total,
+    ]
+    assert.deepEqual(as(rows('| ID | Title | Status | Progress | Priority | Updated |')), [
+      'kluris-v3-rust',
+      'Kluris 3',
+      'completed',
+      'high',
+      '52/52',
+      '2026-10-28',
+      52,
+      52,
+    ])
+    // Another order: the cells of each row are those of the names above them.
+    const scrambled = readRegistry(
+      [
+        '| UPDATED | priority | Title | PROGRESS | id | Status |',
+        '|---|---|---|---|---|---|',
+        '| 2026-10-09 | medium | API | 2/8 | api | paused |',
+      ].join('\n'),
+    ).rows[0]
+    assert.deepEqual(as(scrambled), ['api', 'API', 'paused', 'medium', '2/8', '2026-10-09', 2, 8])
+  })
+
+  it("reads a link in a spec's cell as the spec's id, and keeps where it leads", () => {
+    // The registry as a Specmint that links each spec writes it (a field report, 2026-11-03):
+    // the id is the link's words, not the markdown around them.
+    const head = [
+      '# Spec Registry',
+      '',
+      '| ID | Title | Status | Priority | Progress | Updated |',
+      '|----|-------|--------|----------|----------|---------|',
+    ]
+    const registry = readRegistry(
+      [
+        ...head,
+        '| [user-auth](./user-auth/SPEC.md) | User Auth | Active | high | 0/17 | 2026-11-03 |',
+        '| [api](<./api/SPEC.md>) | API [docs](x.md) | Paused | low | 2/8 | 2026-10-09 |',
+        '| plain | Plain | active | low | 1/1 | 2026-10-09 |',
+        '| [](./empty/SPEC.md) | No words | active | low | 1/1 | 2026-10-09 |',
+        '| see [user-auth](./user-auth/SPEC.md) | More than a link | active | low | 1/1 | 2026 |',
+      ].join('\n'),
+    )
+    assert.deepEqual(
+      registry.rows.map(({ id, href, title }) => [id, href, title]),
+      [
+        ['user-auth', './user-auth/SPEC.md', 'User Auth'],
+        ['api', './api/SPEC.md', 'API [docs](x.md)'],
+        ['plain', null, 'Plain'],
+        ['', './empty/SPEC.md', 'No words'],
+        // A cell that is more than a link stays as it is written.
+        ['see [user-auth](./user-auth/SPEC.md)', null, 'More than a link'],
+      ],
+    )
+    // The tree follows the registry again: the specs by their titles, in its order.
+    const tree = [
+      folder('api', [file('api/SPEC.md')]),
+      folder('user-auth', [file('user-auth/SPEC.md')]),
+    ]
+    assert.deepEqual(labels(arrange(tree, registry.rows)), ['User Auth/', 'API [docs](x.md)/'])
+  })
+
   it('is none where the text holds no such table', () => {
     assert.equal(readRegistry('# Our specs\n\n| Spec | State |\n|---|---|\n| a | b |\n'), null)
     // As many columns as Specmint's, but other ones.
@@ -153,6 +233,15 @@ describe('the registry', () => {
       readRegistry('| ID | Title | Status | Priority | Progress | Updated |\n| no rule |'),
       null,
     )
+    // One of the six twice, one missing, or one more.
+    for (const head of [
+      '| ID | Title | Status | Status | Progress | Updated |',
+      '| ID | Title | Status | Progress | Updated |',
+      '| ID | Title | Status | Priority | Progress | Updated | Owner |',
+    ]) {
+      const rule = `|${'---|'.repeat(head.split('|').length - 2)}`
+      assert.equal(readRegistry(`${head}\n${rule}\n| a | b | c | d | e | f |`), null, head)
+    }
     assert.equal(readRegistry(''), null)
   })
 
@@ -173,8 +262,55 @@ describe('the registry', () => {
     )
     assert.equal(registry.rows[0].title, '|'.repeat(250_000))
     assert.equal(registry.rows[0].status, 'active')
+    // A link cell built to make its pattern back up over spaces and brackets.
+    for (const cell of [
+      `[a](${' '.repeat(131_072)}x`,
+      `[${'['.repeat(65_536)}](x)`,
+      `[a](${'('.repeat(65_536)}`,
+      `[${'a]['.repeat(65_536)}](x)`,
+      // Words and address that a greedy pattern splits at every `](`, and reads the rest for each.
+      `[${']('.repeat(30_000)}x`,
+    ]) {
+      assert.equal(
+        readRegistry(`${head}\n|---|---|---|---|---|---|\n| ${cell} | t | s | p | 1/2 | u |`).rows
+          .length,
+        1,
+      )
+    }
     // The pattern it had took 9 seconds for the first of these.
     assert.ok(performance.now() - started < 500, `${performance.now() - started} ms`)
+  })
+})
+
+describe('the file a registry row opens', () => {
+  const arranged = arrange(TREE, ROWS)
+  const files = new Set(filesOf(arranged))
+  const row = (id, href) => ({ id, href, title: id })
+  const opens = (id, href) => rowFile(row(id, href), arranged, '.specs', files)
+
+  it('is the file its link names, else its spec by the id', () => {
+    assert.equal(opens('user-auth', './user-auth/SPEC.md'), 'user-auth/SPEC.md')
+    assert.equal(opens('user-auth', './user-auth/research-01.md'), 'user-auth/research-01.md')
+    assert.equal(opens('user-auth', null), 'user-auth/SPEC.md')
+    // A link to a file the folder has not (SPEC.md where the spec is a SPEC.html), or to a folder:
+    // the spec opens as the id says.
+    assert.equal(opens('unlisted', './unlisted/SPEC.md'), 'unlisted/SPEC.html')
+    assert.equal(opens('unlisted', './unlisted/'), 'unlisted/SPEC.html')
+    assert.equal(opens('gone', './gone/SPEC.md'), null)
+    assert.equal(opens('gone', null), null)
+  })
+
+  it('never follows a link out of the folder, or one with a scheme: the id decides', () => {
+    for (const href of [
+      'javascript:window.__pwned=1',
+      'https://example.com/user-auth/SPEC.md',
+      '../../package.json',
+      '/etc/passwd',
+      '#user-auth',
+    ]) {
+      assert.equal(opens('user-auth', href), 'user-auth/SPEC.md', href)
+      assert.equal(opens('gone', href), null, href)
+    }
   })
 })
 

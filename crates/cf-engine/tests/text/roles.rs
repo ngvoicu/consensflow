@@ -9,14 +9,14 @@ use std::path::Path;
 
 use cf_base::env::Env;
 use cf_catalog::WorkTier;
-use cf_engine::roles::{role_instructions, StaffRow};
+use cf_engine::roles::{
+    role_instructions, with_staff_rules, ProjectSpecs, StaffRow, STAFF_RULES_HEADING,
+};
+use cf_proto::cf_word::{CfWord, Shell};
+use cf_proto::specs::Variant;
 use regex::Regex;
 
-use super::support::staff_row;
-
-/// The commands of the transport before the board's: no text may teach them.
-const OLD_COMMANDS: &str =
-    r"(?-u:\b)cf (run|say|attach|read|results|projects|chief (send|read))(?-u:\b)";
+use super::support::{found, staff_row, MEMBER_BANS, OLD_COMMANDS};
 
 fn zeus() -> StaffRow {
     staff_row("zeus", &["worker", "reviewer"], WorkTier::Standard)
@@ -24,12 +24,7 @@ fn zeus() -> StaffRow {
 
 /// A role's text with no environment and no word of where its cf is.
 fn instructions(role: &str, staff: &[StaffRow]) -> String {
-    role_instructions(&Env::default(), role, staff, None, None).unwrap()
-}
-
-/// Whether `pattern` (a JavaScript pattern written as a Rust one) matches `text`.
-fn found(pattern: &str, text: &str) -> bool {
-    Regex::new(pattern).unwrap().is_match(text)
+    role_instructions(&Env::default(), role, staff, &CfWord::bare(), None).unwrap()
 }
 
 fn teaches_only_the_boards_commands(role: &str) {
@@ -63,6 +58,15 @@ fn teaches_only_the_boards_commands(role: &str) {
         ] {
             assert!(text.contains(command), "{role} learns {command}");
         }
+        // A question raised from a turn's last words ends with a line that says how to take
+        // them as the result (T-1119): the chief's text says what the line is.
+        assert!(
+            found(
+                r#"One ending "\(ConsensFlow: … If they are its result: `cf task finish T-5`\.\)"\s+is a turn's last words: answer it, or finish the task\."#,
+                &text
+            ),
+            "the chief learns the line of a question raised from a turn's end"
+        );
         // The chief asks the human in its terminal: no command asks on the board.
         assert!(!text.contains("cf ask"));
         assert!(
@@ -110,7 +114,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             &text
         ));
         assert!(found(
-            r"A tier nobody on the staff holds\s+goes to the nearest one somebody does",
+            r"A tier nobody on the staff holds\s+goes to the nearest one somebody does, the next one up first; you are told\s+whose\.",
             &text
         ));
         assert!(text.contains("do not run the command to see the refusal: ask"));
@@ -124,6 +128,13 @@ fn teaches_only_the_boards_commands(role: &str) {
         assert!(text.contains("final message of your turn"));
         assert!(text.contains("Questions go to the chief, never to another member"));
         assert!(
+            found(
+                r"To wait for the chief's answer, ask with `cf ask`, never in your\s+last words\.",
+                &text
+            ),
+            "{role} is told that a question in its last words is its result"
+        );
+        assert!(
             !text.contains("the human"),
             "{role} is asked and answers only through the chief"
         );
@@ -131,21 +142,15 @@ fn teaches_only_the_boards_commands(role: &str) {
             r"(?i)never read another agent's\s+session files",
             &text
         ));
-        assert!(!text.contains("cf task add"));
-        assert!(
-            !found(r"PM(?-u:\b)|coordinator", &text),
-            "{role} answers to the chief"
-        );
+        for (pattern, why) in MEMBER_BANS {
+            assert!(!found(pattern, &text), "{role} {why}");
+        }
         if role == "reviewer" {
             assert!(text.contains("delivers them to the chief, who decides"));
         }
         if role == "tester" {
             assert!(text.contains("delivers it to the chief, who decides"));
         }
-        assert!(
-            !found(r"VERDICT|Review round", &text),
-            "a review is a task: no verdict line"
-        );
         if role == "advisor" {
             assert!(text.contains("You advise this project's chief"));
         }
@@ -213,8 +218,10 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         "Run each of these in your shell (your Bash or terminal tool).",
         "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
         "This window is for one task: it opened with the task and closes when the task\nleaves your hands.",
-        // What the owner decided on 2026-10-13: its answer ends the work its turn left.
-        "Your answer\nends your turn's work: anything you left running is stopped then, so wait for\nwhat your result needs.",
+        // What the engine does since 0eec91d20 (T-1059's read, 2026-11-01): a
+        // turn's end ends no process itself, and a free window's close ends
+        // only what the host can tell is the window's — so nothing is left.
+        "Your answer\nends your turn: wait for what your result needs, and leave nothing running.",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -229,7 +236,9 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         }
         assert!(found(&format!(r"\n# ConsensFlow {title}\n"), &text));
         assert!(found(
-            &format!(r"what your result needs\. Keep this {role} role for the whole session\.\n$"),
+            &format!(
+                r"leave\s+nothing running\.\s+Keep this {role} role for the whole session\.\n$"
+            ),
             &text
         ));
     }
@@ -241,7 +250,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         r"cf task get T-3 {15}a task and its whole thread: the work under test, or this one\n",
         &instructions("tester", &[])
     ));
-    let refused = role_instructions(&Env::default(), "pm", &[], None, None).unwrap_err();
+    let refused = role_instructions(&Env::default(), "pm", &[], &CfWord::bare(), None).unwrap_err();
     assert_eq!(refused.to_string(), "no role instructions for pm");
 }
 
@@ -282,6 +291,52 @@ fn tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_c
 fn tells_the_chief_one_member_runs_as_many_tasks_at_once_as_it_is_given() {
     assert!(found(
         r"however few\s+members a tier has: one worker runs as many tasks at once as you give it,\s+and so does one advisor or one reviewer",
+        &instructions("chief", &[zeus()])
+    ));
+}
+
+/// A chief that read a member as a person who can be busy chained its work through one
+/// window with `--after` and let all of it wait behind a window that stuck (Gabriel's field
+/// board, T-6 then T-8 then T-9, 2026-11-02): a member is a model, and no task waits for one.
+#[test]
+fn never_says_a_member_is_free_or_busy() {
+    let text = instructions("chief", &[zeus()]);
+    let said = Regex::new(r"(?i)\b(free|busy)\b").unwrap().find(&text);
+    assert!(
+        said.is_none(),
+        "the chief's text says a member is free or busy: {:?}",
+        said.map(|word| &text[word.start().saturating_sub(60)..word.end() + 60])
+    );
+}
+
+#[test]
+fn tells_the_chief_each_task_gets_a_new_window_of_a_member_of_its_role_and_tier() {
+    assert!(found(
+        r"Each task gets a new window of a member of that role and tier on this\s+project's staff; you never pick the member\.",
+        &instructions("chief", &[zeus()])
+    ));
+}
+
+#[test]
+fn tells_the_chief_a_member_is_a_model_that_runs_any_number_of_tasks_at_once_each_in_its_own_window(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert!(found(
+        r"Each member is a\s+model, not a person: it runs any number of tasks at once, each in its own\s+window\.\n\n\| Member \|",
+        &text
+    ));
+    // It comes with the staff, and the rule that the human may change it stays.
+    assert!(found(
+        r"`cf staff` shows them as they are now\. Each member is a\s+model",
+        &text
+    ));
+}
+
+#[test]
+fn tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_starts_at_once_beside_it(
+) {
+    assert!(found(
+        r"the next step of that window's own work, only when it needs what that window already knows \(carry out the plan or findings it just wrote, part 2 after its part 1\); reviews, parallel work and work for another role stay fresh, and start at once beside that window's work\n",
         &instructions("chief", &[zeus()])
     ));
 }
@@ -336,7 +391,7 @@ fn says_so_when_the_staff_is_empty() {
 }
 
 #[test]
-fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task(
+fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done(
 ) {
     let text = instructions("chief", &[zeus()]);
     assert!(found(
@@ -344,15 +399,23 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r"A window still at work on T-3\s+takes it too: it waits for T-3 to be accepted and goes in then\.",
+        r"It waits for T-3 and for the\s+window's other done tasks to be accepted, and goes in then\.",
+        &text
+    ));
+    assert!(
+        !text.contains("A window still at work on T-3"),
+        "a follow-up of a task with its result in waits too"
+    );
+    assert!(found(
+        r"A window on\s+another\s+task refuses and tells\s+you to open the task for its tier instead\.",
         &text
     ));
     assert!(found(
-        r"A window on\s+another task refuses and tells you to open the task for its tier instead\.",
+        r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task no window has yet \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
         &text
     ));
     assert!(found(
-        r#"cf task edit T-3 "…"\s+replace the brief of a task no window has yet \(open, queued, or paused\)"#,
+        r#"cf task edit\|reopen\|resume T-3 … --title "…"\s+a new title; edit takes it alone, in any state"#,
         &text
     ));
     assert!(
@@ -365,31 +428,116 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
     ));
 }
 
-#[test]
-fn names_this_window_s_cf_by_its_full_path_for_a_shell_that_finds_another_cf_first() {
+/// Every role's text, with the staff and the specs a chief can be given, for the `cf` a
+/// window is told: the roles a window can have, so a role added later is read too.
+fn every_text_for(cf: &CfWord) -> Vec<(String, String, usize)> {
+    let specs = ProjectSpecs {
+        variant: Variant::Tdd,
+        folder: "docs/specs",
+        skill: "/home/me/.consensflow/skills/specmint-tdd/SKILL.md",
+    };
+    let mut texts = Vec::new();
     for role in [
         "chief", "worker", "advisor", "reviewer", "tester", "designer",
     ] {
-        let text = role_instructions(
+        for specs in [None, Some(&specs)] {
+            let text = role_instructions(&Env::default(), role, &[zeus()], cf, specs).unwrap();
+            // The commands each starts with: the chief's table and prose, a member's table and
+            // the line of its result.
+            let least = if role == "chief" { 37 } else { 7 };
+            texts.push((
+                format!("the {role}'s, specs {}", specs.is_some()),
+                text,
+                least,
+            ));
+        }
+    }
+    texts
+}
+
+/// The line of `text` that says the word `cf` on its own, once `word`, which every command
+/// of a window starts with, is taken out of it.
+fn a_bare_cf(text: &str, word: &str) -> Option<String> {
+    let without = text.replace(word, "");
+    let bare = Regex::new(r"(?-u:\b)cf(?-u:\b)").unwrap().find(&without)?;
+    let from = without[..bare.start()].rfind('\n').map_or(0, |at| at + 1);
+    let to = without[bare.end()..]
+        .find('\n')
+        .map_or(without.len(), |at| bare.end() + at);
+    Some(without[from..to].to_owned())
+}
+
+/// Every text of every role starts each command with `cf`, and says the word on no other
+/// occasion.
+fn holds_for(cf: &CfWord) {
+    let word = cf.as_str();
+    for (which, text, least) in every_text_for(cf) {
+        assert!(
+            !text.contains("This window's cf"),
+            "{which}: the section that asked a window to run it by its path is gone"
+        );
+        assert!(!text.contains("{{"), "{which}: every placeholder is filled");
+        let commands = text.matches(&format!("{word} ")).count();
+        assert!(
+            commands >= least,
+            "{which}: {commands} commands start with {word}"
+        );
+        assert_eq!(a_bare_cf(&text, word), None, "{which}: a bare cf");
+    }
+}
+
+/// A window's shell can find another `cf` first on its PATH (a Devin member's login zsh puts
+/// the user's `~/.local/bin` first, a Claude Code member's login Git Bash `~/bin`, 2026-10-31;
+/// the Cloud Foundry CLI is a `cf` too), so every command a text teaches names this window's
+/// own `cf` by its full path, and no text says the word `cf` of a shell's own finding.
+#[test]
+fn every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path() {
+    holds_for(&CfWord::new("/opt/consensflow/bin/cf", Shell::Posix));
+}
+
+/// The default install of Windows is `C:/Program Files/ConsensFlow/bin/cf.exe`: a path with a
+/// space is one quoted word in bash, and in PowerShell a command only after `&` (T-1049). A
+/// path with a shell's own characters, a quote, a backtick, a `$`, is one in each.
+#[test]
+fn a_cf_a_shell_would_read_is_one_word_in_every_command_as_its_shell_takes_it() {
+    for (path, posix, powershell) in [
+        (
+            "C:/Program Files/ConsensFlow/bin/cf.exe",
+            "'C:/Program Files/ConsensFlow/bin/cf.exe'",
+            "& 'C:/Program Files/ConsensFlow/bin/cf.exe'",
+        ),
+        (
+            "/Users/me/My Apps/cf `x` $HOME 'q'",
+            r"'/Users/me/My Apps/cf `x` $HOME '\''q'\'''",
+            "& '/Users/me/My Apps/cf `x` $HOME ''q'''",
+        ),
+    ] {
+        for (shell, word) in [(Shell::Posix, posix), (Shell::PowerShell, powershell)] {
+            let cf = CfWord::new(path, shell);
+            assert_eq!(cf.as_str(), word);
+            holds_for(&cf);
+        }
+    }
+}
+
+#[test]
+fn with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none() {
+    for text in [
+        instructions("worker", &[]),
+        instructions("chief", &[zeus()]),
+        role_instructions(
             &Env::default(),
-            role,
+            "worker",
             &[],
-            Some("/opt/consensflow/bin/cf"),
+            &CfWord::new("", Shell::Posix),
             None,
         )
-        .unwrap();
-        assert!(
-            found(
-                r"## This window's cf\n\nHere `cf` is /opt/consensflow/bin/cf\. If `cf` says a command is unknown, or answers as another program, another `cf` comes first on this shell's PATH: run /opt/consensflow/bin/cf instead\.\n$",
-                &text
-            ),
-            "{role}"
-        );
+        .unwrap(),
+    ] {
+        assert!(text.contains("\n    cf "), "the commands start with cf");
+        assert!(!text.contains("This window's cf"));
+        assert!(!text.contains("''"), "no quoted nothing");
     }
-    assert!(
-        !instructions("worker", &[]).contains("This window's cf"),
-        "only when the daemon says"
-    );
 }
 
 #[test]
@@ -402,7 +550,8 @@ fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_
 
 #[test]
 fn refuses_an_unknown_role() {
-    let refused = role_instructions(&Env::default(), "king", &[], None, None).unwrap_err();
+    let refused =
+        role_instructions(&Env::default(), "king", &[], &CfWord::bare(), None).unwrap_err();
     assert_eq!(refused.to_string(), "no role instructions for king");
 }
 
@@ -489,14 +638,394 @@ fn gives_the_chief_only_the_named_card_nothing_of_the_board_and_leaves_the_other
     let staff = [staff_row("zeus", &["worker"], WorkTier::Standard)];
     let env = Env::from_vars([("CONSENSFLOW_EVAL_CHIEF_CARD", card.as_os_str())]);
     assert_eq!(
-        role_instructions(&env, "chief", &staff, Some("/app/bin/cf"), None).unwrap(),
+        role_instructions(
+            &env,
+            "chief",
+            &staff,
+            &CfWord::new("/app/bin/cf", Shell::Posix),
+            None
+        )
+        .unwrap(),
         "You work in this project for its owner.\n",
         "no tiers, no staff, no cf"
     );
-    assert!(
-        role_instructions(&env, "worker", &staff, Some("/app/bin/cf"), None)
-            .unwrap()
-            .contains("/app/bin/cf")
-    );
+    assert!(role_instructions(
+        &env,
+        "worker",
+        &staff,
+        &CfWord::new("/app/bin/cf", Shell::Posix),
+        None
+    )
+    .unwrap()
+    .contains("/app/bin/cf"));
     assert!(instructions("chief", &staff).contains("You do not change the project yourself"));
+}
+
+// The rules of spec `smaller-contexts` (T-1009, SCX-06 to SCX-10): reviews that
+// end, fresh windows, targeted checks, briefs that say how a fact is known, and
+// results that begin with the outcome. Each sentence is held by a rule below, and
+// a plant drops it (`tests/plants/daemon/smaller-contexts.toml`).
+
+/// Whether `text` says `sentence`: its words in order, any white space between
+/// two of them (the texts are wrapped).
+fn says(text: &str, sentence: &str) -> bool {
+    let words: Vec<_> = sentence.split_whitespace().map(regex::escape).collect();
+    found(&words.join(r"\s+"), text)
+}
+
+/// Fails for each of `sentences` that `text` does not say.
+#[track_caller]
+fn assert_says(text: &str, whose: &str, sentences: &[&str]) {
+    for sentence in sentences {
+        assert!(says(text, sentence), "{whose} does not say: {sentence}");
+    }
+}
+
+/// The part of the chief's text under the heading `## {heading}`, up to the next.
+fn section<'a>(text: &'a str, heading: &str) -> &'a str {
+    let start = text
+        .find(&format!("\n## {heading}\n"))
+        .unwrap_or_else(|| panic!("no section {heading}"))
+        + 1;
+    let end = text[start + 3..]
+        .find("\n## ")
+        .map_or(text.len(), |at| start + 3 + at);
+    &text[start..end]
+}
+
+#[test]
+fn tells_the_chief_a_blocker_is_evidenced_and_the_rest_does_not_hold_the_work() {
+    let reviews = instructions("chief", &[zeus()]);
+    let reviews = section(&reviews, "Reviews");
+    assert_says(
+        reviews,
+        "the chief's Reviews",
+        &[
+            "A finding blocks the work only when it would make it fail (a wrong result, lost data, a break in normal use, a failure in a case that will really happen) and names the requirement, the case, the failure one would see, and the evidence.",
+            "Reopen for blockers only.",
+            "Whether a blocker belongs in this work at all is a separate question; dropping a capability is an answer to a blocker too.",
+            "The rest (naming, style, wording, unlikely cases, nice-to-haves) doesn't hold the work: accept it, and gather what is worth doing into one later task.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_a_second_review_checks_the_fixes_and_not_the_whole_work_again() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &[
+            "A second review checks the fixes: give it the earlier findings by number and the change since.",
+            "It says of each whether it is fixed, still open, fixed only in part, or newly broken by a fix, and whether a fix broke what it touches; it doesn't review the whole work again.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_change_the_work_after_two_reviews_that_found_blockers_or_to_ask_the_human() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &[
+            "When two reviews of the same work have both found blockers, stop sending it back as it is.",
+            "Change the work: simplify it, turn a capability off, split it, start a fresh window with a short, checked handoff, or try another approach.",
+            "If none fits, ask the human here.",
+            "Accepting work with an open blocker needs the human's yes.",
+        ],
+    );
+    // The earlier rule stays: the chief decides the work and the review, and
+    // nothing on the board sends a review back (CORE-27).
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &["Then decide both: reopen the work with what must change, or accept it, and accept the review."],
+    );
+    assert!(!text.contains("Review round"));
+}
+
+#[test]
+fn tells_the_chief_to_ask_a_reviewer_for_no_pass_or_fail_first_line() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Reviews"),
+        "the chief's Reviews",
+        &[
+            r#"Don't ask a reviewer for a pass-or-fail first line: its own "ready", "ready with notes" or "not ready" stands."#,
+        ],
+    );
+    assert!(!found(r"PUSH AS WRITTEN|FIX FIRST", &text));
+}
+
+#[test]
+fn tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_rounds_of_the_same_work(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "The one exception: continuing a window"),
+        "the chief's section on continuing a window",
+        &[
+            "After about three rounds of the same work (reopens, `--after`), a window's conversation is long and every step re-reads it.",
+            "For the next round add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one: its open findings go on in the new task.",
+            "Accepting releases whatever `--needs` it, so if tasks wait on it, add the new task `--before` them first.",
+            "`--after` is for the next step of a window's own work, not for round after round.",
+        ],
+    );
+}
+
+// What T-1009's cuts took out that the critical review (T-1014, notes 3 and 9) asked back.
+
+#[test]
+fn tells_the_chief_it_may_change_the_project_itself_when_the_human_says_so_and_why_no_work_goes_to_another_window(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you never do"),
+        "the chief's What you never do",
+        &[
+            "Change the project yourself: edit a file, commit, push, build or deploy. That is a worker's task, unless the human told you to do it yourself.",
+            "Send work to another window: the board is the only channel, and only the human gives you work, here in your terminal.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_its_own_later_step_comes_back_when_the_task_it_needs_is_accepted_naming_no_task()
+{
+    let text = instructions("chief", &[zeus()]);
+    let what_you_do = section(&text, "What you do");
+    assert_says(
+        what_you_do,
+        "the chief's What you do",
+        &["A later step of yours goes on the board with `--self` (above): its brief comes back to this window once the task it needs is accepted."],
+    );
+    // The command card defines T-3; the sentence stands alone without it.
+    assert!(!says(what_you_do, "once T-3 is accepted"));
+}
+
+#[test]
+fn tells_the_reviewer_a_review_changes_no_project_file_since_a_long_log_goes_in_a_file_of_its_own()
+{
+    assert_says(
+        &instructions("reviewer", &[zeus()]),
+        "the reviewer",
+        &[
+            "A review changes no project file: suggested fixes belong in your findings.",
+            "A long log, table or listing goes in a file outside the project's tracked files",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_keep_its_own_checks_targeted_and_to_read_no_result_it_already_has() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &[
+            "Keep your own checks targeted (the diff stat, a grep, one test, the lines that changed); a deep check (the whole change, the suites) goes to a reviewer or tester.",
+            "A result already in your conversation needs no `cf task get`.",
+            "Look at an image yourself only when the decision needs your eyes; otherwise ask the member what it shows.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_put_commands_that_go_together_in_one_shell_call() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "Your commands"),
+        "the chief's command card",
+        &["Put commands that go together in one shell call, an accept and the next task for example: each call re-reads everything you hold."],
+    );
+}
+
+#[test]
+fn tells_the_chief_to_say_how_it_knows_each_fact_a_brief_has_a_member_act_on() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &[
+            r#"For each fact a brief states that the member will act on (a version, a commit, "X is on main", a machine's state), say in a few words how you know it: what you ran or read, and when."#,
+            "If you have not checked it, say so and ask the member to check it first and tell you if it does not hold.",
+        ],
+    );
+}
+
+#[test]
+fn tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each_finding_and_say_if_it_blocks(
+) {
+    let text = instructions("reviewer", &[zeus()]);
+    assert_says(
+        &text,
+        "the reviewer",
+        &[
+            "Begin with whether the work is ready (ready, ready with notes, or not ready) and what the chief has to decide, in a few lines.",
+            "Then each finding, numbered so a later review can name it, with its evidence, its location and whether it blocks.",
+            "A finding blocks only when it would make the work fail, and then it names the requirement, the case and the failure one would see.",
+            "The rest is optional.",
+            "The work is ready when nothing blocks.",
+        ],
+    );
+    // The reviewer's rules are its own: no other member is asked to number findings.
+    for role in ["worker", "advisor", "tester", "designer"] {
+        let text = instructions(role, &[zeus()]);
+        assert!(
+            !says(&text, "numbered so a later review can name it"),
+            "{role}"
+        );
+    }
+}
+
+#[test]
+fn tells_the_reviewer_a_second_review_checks_the_earlier_findings_and_what_the_fixes_touch() {
+    assert_says(
+        &instructions("reviewer", &[zeus()]),
+        "the reviewer",
+        &[
+            "On a second review of the same work, check the earlier findings and what the fixes touch, not the whole work again: say of each finding whether it is fixed, still open, fixed only in part, or newly broken.",
+        ],
+    );
+}
+
+#[test]
+fn tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_begin_with_the_outcome_and_what_the_chief_decides(
+) {
+    for (role, begin) in [
+        (
+            "worker",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+        ),
+        (
+            "advisor",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+        ),
+        (
+            "tester",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+        ),
+        // The reviewer's outcome is whether the work is ready (its own rule above).
+        (
+            "reviewer",
+            "Begin with whether the work is ready (ready, ready with notes, or not ready) and what the chief has to decide, in a few lines.",
+        ),
+    ] {
+        assert_says(&instructions(role, &[zeus()]), role, &[begin]);
+    }
+    // The image designer's result is the files it saved and a line on what they show.
+    assert!(!says(
+        &instructions("designer", &[zeus()]),
+        "what the chief has to decide"
+    ));
+}
+
+#[test]
+fn tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_put_a_long_log_in_a_file_outside_the_tracked_files_and_give_its_path(
+) {
+    for (role, gives) in [
+        ("worker", "and the result gives its path."),
+        ("advisor", "and the answer gives its path."),
+        ("reviewer", "and the findings give its path."),
+        ("tester", "and the result gives its path."),
+    ] {
+        assert_says(
+            &instructions(role, &[zeus()]),
+            role,
+            &[&format!(
+                "A long log, table or listing goes in a file outside the project's tracked files (your scratch folder, or where the brief says), {gives}"
+            )],
+        );
+    }
+    assert!(!says(
+        &instructions("designer", &[zeus()]),
+        "A long log, table or listing"
+    ));
+}
+
+// The project's rules for its staff (spec smaller-contexts, SCX-14 and SCX-15):
+// the human's own text, at the end of every window's text under its own heading,
+// a member told to follow them and the chief that every member has them. What
+// ConsensFlow says round them keeps the bans of its texts; the rules themselves
+// are the human's, and are not held to them.
+
+/// Rules a human might write, saying what ConsensFlow's own member texts never
+/// may: they are kept as written.
+const HUMANS_RULES: &str = "- Push to origin only, never to upstream.\n- Ask the human before any cf task add of your own.\n\tIndented, as written.";
+
+/// What ConsensFlow says in a text with rules, the rules themselves taken out.
+fn framing(text: &str) -> String {
+    text.replacen(HUMANS_RULES, "", 1)
+}
+
+#[test]
+fn tells_the_chief_every_member_has_the_projects_rules_so_a_brief_does_not_repeat_them() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &["Every member already has the project's rules for the staff (at the end of this text, when the project has any): a brief doesn't repeat them, and says only what its task needs."],
+    );
+}
+
+#[test]
+fn gives_each_member_the_projects_rules_for_the_staff_under_their_own_heading_after_its_role() {
+    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+        let role_text = instructions(role, &[zeus()]);
+        let text = with_staff_rules(role_text.clone(), role, Some(HUMANS_RULES));
+        assert!(
+            text.starts_with(&role_text),
+            "{role}: the role text comes first, whole"
+        );
+        assert_eq!(
+            &text[role_text.len()..],
+            format!(
+                "\n{STAFF_RULES_HEADING}\n\nEvery member of this project's staff is given these rules after its role, as you are. Follow them in every task, as you follow your role.\n\n{HUMANS_RULES}\n"
+            ),
+            "{role}"
+        );
+        assert_eq!(text.matches(STAFF_RULES_HEADING).count(), 1, "{role}");
+        // The member texts' bans hold of what ConsensFlow says, not of the human's rules.
+        let said = framing(&text);
+        assert!(!said.contains("the human"), "{role}");
+        assert!(!said.contains("cf task add"), "{role}");
+        assert!(text.contains(HUMANS_RULES), "{role}: the rules as written");
+    }
+}
+
+#[test]
+fn shows_the_chief_the_same_rules_marked_as_what_every_member_already_has() {
+    let role_text = instructions("chief", &[zeus()]);
+    let text = with_staff_rules(role_text.clone(), "chief", Some(HUMANS_RULES));
+    assert!(text.starts_with(&role_text));
+    let rules = section(&text, "The project's rules for the staff");
+    assert_says(
+        rules,
+        "the chief's rules for the staff",
+        &[
+            "Every member of your staff already has these rules in its instructions, after its role.",
+            "They are the human's, written in Project settings: to change one, propose it to the human here.",
+        ],
+    );
+    assert!(rules.ends_with(&format!("\n\n{HUMANS_RULES}\n")));
+    assert!(!found(
+        r"VERDICT|review policy|cf task review|Review round",
+        &framing(&text)
+    ));
+}
+
+#[test]
+fn a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte() {
+    for role in [
+        "chief", "worker", "advisor", "reviewer", "tester", "designer",
+    ] {
+        let role_text = instructions(role, &[zeus()]);
+        assert_eq!(
+            with_staff_rules(role_text.clone(), role, None),
+            role_text,
+            "{role}"
+        );
+        assert!(!role_text.contains(STAFF_RULES_HEADING), "{role}");
+    }
 }

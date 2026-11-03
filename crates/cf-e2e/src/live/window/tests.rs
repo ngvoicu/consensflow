@@ -6,7 +6,7 @@ use std::cell::Cell;
 
 use super::open::{
     add_hooks, asked_for, claude_flags, consensflows_hooks_of, new_session, pasted_into,
-    session_for, trust_line, with_hooks, Member,
+    program_of, session_for, trust_line, with_hooks, Member,
 };
 use super::*;
 
@@ -32,7 +32,7 @@ fn the_app_pastes_into_claude_and_devin_and_no_other_harness() {
         [Harness::Claude, Harness::Devin]
     );
     assert!(pasted_into(&[]).unwrap().is_empty());
-    for other in ["codex", "pi", "opencode"] {
+    for other in ["codex", "pi"] {
         let failed = pasted_into(&names(&[other])).unwrap_err().to_string();
         assert_eq!(
             failed,
@@ -44,7 +44,7 @@ fn the_app_pastes_into_claude_and_devin_and_no_other_harness() {
     let failed = pasted_into(&names(&["claud"])).unwrap_err().to_string();
     assert_eq!(
         failed,
-        "no harness is called claud: claude, opencode, pi, devin, codex"
+        "no harness is called claud: claude, pi, devin, codex, muse"
     );
 }
 
@@ -88,7 +88,7 @@ fn claude_code_and_pi_are_opened_on_an_id_they_are_given_and_the_others_name_the
     for kind in ["claude-code", "pi"] {
         assert_eq!(session_for(kind).map(|id| id.len()), Some(36), "{kind}");
     }
-    for kind in ["devin", "codex", "opencode", "claude", ""] {
+    for kind in ["devin", "codex", "claude", ""] {
         assert_eq!(session_for(kind), None, "{kind}");
     }
 }
@@ -348,5 +348,51 @@ fn a_claude_window_shuts_out_every_mcp_server_but_its_files_and_where_asked_its_
     assert_eq!(
         claude_flags(true, Some(servers), &[]),
         ["--no-chrome", "--mcp-config", "/run/servers.json"]
+    );
+}
+
+/// A window is marked as the daemon marks it, with the way its harness keeps its servers that
+/// the product's adapter says: on Windows Claude Code's are by the shell it starts for each
+/// command (T-906), which a live run on zeewin2 marked `inGroup` and read untold (T-946).
+#[test]
+fn a_window_is_marked_with_the_servers_its_adapter_says_on_each_platform() {
+    let on = |windows: bool| {
+        Harness::ALL
+            .iter()
+            .map(|harness| (harness.name(), servers_of(*harness, windows)))
+            .collect::<Vec<_>>()
+    };
+    let said = |name: &str, windows: bool| {
+        on(windows)
+            .into_iter()
+            .find(|(harness, _)| *harness == name)
+            .and_then(|(_, servers)| servers)
+    };
+    assert_eq!(said("claude", true), Some("byShell"));
+    assert_eq!(said("claude", false), Some("inGroup"));
+    assert_eq!(said("codex", false), Some("atLaunch"));
+    assert_eq!(said("pi", false), Some("inGroup"));
+    assert_eq!(said("muse", false), Some("atLaunch"));
+    for name in ["codex", "pi", "muse", "devin"] {
+        assert_eq!(said(name, true), None, "{name} on Windows");
+    }
+    assert_eq!(said("devin", false), None);
+}
+
+/// A Muse window opened here starts on the rig's live launcher, which holds it to the rig's
+/// folders, and never on the machine's Muse itself, which writes the person's
+/// `~/.config/muse` (T-1024); every other harness on the program the kit found.
+#[test]
+fn a_muse_window_starts_on_the_rigs_launcher_and_every_other_on_the_program_found() {
+    let found = Path::new("/opt/bin/muse");
+    let launcher = Path::new("/rig/fake-bin/muse");
+    assert_eq!(
+        program_of(Harness::Muse, found, Some(launcher)).unwrap(),
+        "/rig/fake-bin/muse"
+    );
+    assert!(program_of(Harness::Muse, found, None).is_err());
+    assert_eq!(
+        program_of(Harness::Codex, Path::new("/opt/bin/codex"), Some(launcher)).unwrap(),
+        "/opt/bin/codex"
     );
 }

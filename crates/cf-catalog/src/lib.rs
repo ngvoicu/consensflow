@@ -22,7 +22,7 @@ mod roster;
 
 use std::collections::BTreeMap;
 
-pub use catalog::{efforts, Group};
+pub use catalog::{efforts, Efforts, Group};
 pub use cf_proto::agents::{
     AgentView, CatalogEntry, FoundEntry, Harness, Preferences, Profile, WorkTier, WorkTierInfo,
 };
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn the_bundled_catalog_reads_whole_every_field_known() {
         let catalog = Catalog::bundled().unwrap();
-        assert_eq!(catalog.presets().len(), 251);
+        assert_eq!(catalog.presets().len(), 217);
         assert_eq!(
             catalog
                 .presets()

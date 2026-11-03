@@ -12,7 +12,11 @@
 //! of another task goes into a window that a task's message went into**
 //! ([`Dispatcher::barred`]). The window is closed first, as a free worker's window is
 //! after its result, and the message opens a window of its own ([`Dispatcher::keep_apart`]);
-//! no look at what still runs lets it in earlier (clearance-based reuse is not 3.0.6's).
+//! no look at what still runs lets it in earlier (clearance-based reuse is not 3.0.6's). A
+//! window whose task is done waits to be closed until its screen has been drawn, for a
+//! bounded time, as it does when nothing is next for it
+//! ([`Dispatcher::still_drawing`]); the message waits that time too, and its requester is
+//! told nothing of it.
 //! The message waits, and whoever gave its task is told once, where the window stays
 //! open: the human keeps it open (Show), its close was refused, or its task is still in
 //! the session's hands (paused, whose window stays for the resumption). A pause and a
@@ -125,6 +129,11 @@ impl Dispatcher {
             format!("T-{owner} is still in its hands ({})", thread.task.state)
         } else if pinned && !hidden {
             "the human keeps it open: Hide it, and it closes once its turn is over".to_owned()
+        } else if self.still_drawing(record).await? {
+            // The task that held the window is done and its screen is still being drawn:
+            // the window closes within a moment, and the message waits for it as before,
+            // with nothing to tell its requester.
+            return Ok(());
         } else if self.retire(record).await? {
             return Ok(());
         } else {

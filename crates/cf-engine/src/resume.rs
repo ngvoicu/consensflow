@@ -58,9 +58,12 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 
 use cf_harness::contract::{Opening, TurnLeft};
+// How the chief's note that its turn was cut begins (`CHIEF_CUT`), in this build's
+// words and in those of the builds before it, which said no more: the ledger's, as
+// a meeting with the chief holds no such note and knows one by them.
 use cf_ledger::{
     continuation, continuation_in, continuation_tasks, cut_turn, ConversationView, MessageView,
-    NewNote, ParticipantView, ProjectView, Stop, RESUME_WORDS,
+    NewNote, ParticipantView, ProjectView, Stop, CHIEF_CUT, RESUME_WORDS,
 };
 
 use crate::dispatcher::Dispatcher;
@@ -147,10 +150,6 @@ pub(crate) enum Coming {
     /// ([`Dispatcher::still_coming`]).
     Member { task: i64, paid: Option<Stop> },
 }
-
-/// How the chief's note that its turn was cut begins, in this build's words and in
-/// those of the builds before it, which said no more.
-const CHIEF_CUT: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
 
 impl Coming {
     /// What the window is told when its turn was cut: the turn, where its record
@@ -332,16 +331,23 @@ impl Dispatcher {
             .into_iter()
             .filter(|lane| !matches!(lane.participant.role.as_str(), "chief" | "human"))
             .filter_map(|lane| {
-                let task = lane
-                    .tasks
-                    .iter()
-                    .find(|task| {
-                        matches!(task.state.as_str(), "working" | "waiting")
-                            && task.assignee.as_ref() == Some(&lane.participant.handle)
-                    })?
-                    .number;
-                Some((lane.participant, task))
+                let task = lane.tasks.iter().find(|task| {
+                    matches!(task.state.as_str(), "working" | "waiting")
+                        && task.assignee.as_ref() == Some(&lane.participant.handle)
+                })?;
+                // Shown working for the words that resumed it, which never went in: the
+                // window it was claimed for is gone, and the words open the next, which
+                // is given no note that a turn was cut (T-1153's F2).
+                let numbered = (task.number, task.state.as_str());
+                match self.withdraw_resume_claim(project.id, numbered, "ConsensFlow stopped") {
+                    Ok(true) => return None,
+                    Ok(false) => {}
+                    Err(failed) => return Some(Err(failed)),
+                }
+                Some(Ok((lane.participant, task.number)))
             })
+            .collect::<Result<Vec<_>, EngineError>>()?
+            .into_iter()
             .filter(|(participant, _)| !self.agent_gone(participant))
             .map(|(participant, task)| {
                 let paid = self.seams.ledger.borrow().stop_of(participant.id)?;

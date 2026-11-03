@@ -29,10 +29,14 @@
 //!   in whatever group: the browser of `@playwright/mcp` and `chrome-devtools-mcp`,
 //!   which the stand-in's server launches in a session of its own
 //!   (`CF_TEST_MCP_BROWSER`).
-//! - A job the agent detaches from its shell (`nohup … &`) is not: with the shell gone
-//!   no chain of processes that run leads from it to the shell the harness started, and
-//!   the host ends only what a chain proves the turn's. It is left running and nothing
-//!   is said of it.
+//! - A job the agent detaches from its shell (`nohup … &`) is not the turn's by a chain: with
+//!   the shell gone no chain of processes that run leads from it to the shell the harness
+//!   started, and the host ends only what a chain proves the turn's. While a window the
+//!   human keeps open stays open, nothing is said of it. Where the window's tree holds it
+//!   the host names it as work the close ends (T-1145), which a pause that keeps the window
+//!   and a close then say (`regressions/a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed.rs`);
+//!   a job detached on the Mac from a shell that leads a session of its own is held by no
+//!   tree, and is left running and unnamed, as here.
 //! - A job that ignores the request of the window's close is killed once the grace is
 //!   over, and the result waited for neither.
 //!
@@ -413,14 +417,16 @@ fn a_job_the_agent_leaves_beside_the_harnesss_server_runs_on_and_the_close_names
     Ok(())
 }
 
-/// What the agents of four harnesses did on the Mac (Codex, OpenCode, Pi and Devin, in
+/// What the agents of three harnesses did on the Mac (Codex, Pi and Devin, in
 /// the live run of 2026-10-13): they detached the job from a shell that then ended
 /// (`nohup … &`), which left it to the system's init, with no parent in the window's
 /// tree. Nothing proves whose it is, and the host ends only what a chain of processes
-/// that run proves the turn's: the job is left running, not ended and not named, and
-/// the result is the task's all the same. The window is the human's, open, so that its
-/// close does not end the job before this looks at it (a close ends what the tree finds,
-/// and on a Mac a job in a session of its own with no marker is not found).
+/// that run proves the turn's: the job is left running, not ended, and the result is the
+/// task's all the same, with nothing said while the window is open. The window is the human's,
+/// open, so that its close does not end the job before this looks at it (a close ends what the
+/// tree finds, and on a Mac a job in a session of its own with no marker is not found: the one
+/// shape the host cannot name, which the stand-in's `--detach` makes; where the tree holds the job
+/// (`--detach-here`, and Windows) the host names it, and a pause or a close says so: T-1145).
 #[test]
 fn a_job_the_agent_detached_from_its_shell_is_left_running_and_nothing_is_said_of_it() -> Outcome {
     let rig = Rig::start(config())?;

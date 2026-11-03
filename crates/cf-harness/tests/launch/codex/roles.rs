@@ -144,6 +144,18 @@ fn no_codex_launch_of_either_platform_puts_its_role_on_a_command_line() {
                         "{platform}: {}: no role file is named",
                         scenario["name"]
                     );
+                    // Nor do its sub-agents start with the role (T-766): the file of
+                    // what they start with in its place is named beside it.
+                    let children = settled["answer"]["env"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|pair| pair[0] == "CF_CODEX_SUBAGENT_FILE");
+                    assert!(
+                        children,
+                        "{platform}: {}: no file of what its sub-agents start with is named",
+                        scenario["name"]
+                    );
                     launches += 1;
                 }
             }

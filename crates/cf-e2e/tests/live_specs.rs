@@ -3,8 +3,8 @@
 //! them off, that it plans big work as a spec in the folder the project names, and
 //! carries the spec to the board, which the stand-in agents of the rig cannot give. It
 //! is opt-in (`cargo xtask live specs`, `npm run live:specs`): it spends the
-//! machine's quota on a chief of each of the five harnesses (Claude Code, OpenCode,
-//! Pi, Devin and Codex, each on its cheap model) and needs each one installed and
+//! machine's quota on a chief of each of five harnesses (Claude Code, Pi, Devin,
+//! Codex and Muse Code, each on its cheap model) and needs each one installed and
 //! logged in, so it is ignored unless asked for and is no part of `check` or of CI.
 //!
 //! The native daemon and the real pane host run in a home of the run's own (never
@@ -136,7 +136,13 @@ fn a_chief_of_every_harness_is_told_of_specs_where_they_are_on_plans_one_and_car
 ) -> Result {
     let log = Log::begin("live specs")?;
     let (chiefs, steps, options) = limits()?;
-    let plan = plan::projects(&chiefs, &steps);
+    // A harness the run was limited to, or named a model for, is asked for: a machine
+    // that lacks it is the error. Any other it lacks is left out, and the report says so.
+    let mut named = chiefs.clone();
+    named.extend_from_slice(live::agents::asked()?.named());
+    let (seated, left_out) = live::seated(&named, live::lacks).map_err(Error::Daemon)?;
+    log.leave_out(left_out);
+    let plan = plan::projects(&chiefs, &steps, &seated);
     if plan.is_empty() || plan.iter().all(|project| project.steps.is_empty()) {
         return Err(Error::Daemon(
             "the harnesses and the steps asked for leave nothing to run".to_owned(),

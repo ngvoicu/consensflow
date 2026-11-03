@@ -55,7 +55,11 @@
 //!   and it ends what still runs, so that a run leaves nothing on the machine. An agent
 //!   that detaches it from a shell that then ends (`nohup … &`, `setsid`) leaves it with
 //!   no chain of processes to a shell the harness started, which the close cannot find:
-//!   this step is where that limit shows, harness by harness.
+//!   this step is where that limit shows, harness by harness. On a Mac it shows for Pi and
+//!   Devin, whose tool shells lead sessions of their own (T-1068, T-1100): the step expects
+//!   that of those two (`leaving::Expect`), holds it to the one shape it is (parent 1, no
+//!   terminal, the chief told nothing) and ends the run's own job by which process it is.
+//!   The product neither ends such a job nor names it, and the status page says so.
 //!
 //! Whatever the verdict, a run prints the processes the host listed as the turn's work at
 //! the turn's end (at the first look that found the window at rest, and before one has, at
@@ -79,7 +83,7 @@
 //! ```text
 //! cargo xtask live finish                          Claude, the default: both steps
 //! cargo xtask live finish devin                    one harness
-//! cargo xtask live finish claude codex opencode pi devin    each, one after the other
+//! cargo xtask live finish claude codex pi devin    each, one after the other
 //! cargo xtask live finish claude -- a_worker_that_leaves    only the step that leaves a command
 //! cargo xtask live finish fake                     the rig's stand-in worker: no model, no quota
 //! cargo xtask live finish devin --keep             leaves the run's home and project where they are

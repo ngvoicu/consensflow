@@ -75,7 +75,7 @@ fn no_launch_this_platforms_adapters_make_puts_the_board_token_or_its_name_on_a_
         let case = format!("played: {}", scenario["name"]);
         launches += no_secret_launched(&records, &tokens(scenario), &case);
     }
-    assert!(launches > 300, "{launches} launches played");
+    assert!(launches > 250, "{launches} launches played");
 }
 
 #[test]
@@ -92,6 +92,6 @@ fn no_launch_of_any_harness_on_either_platform_puts_the_board_token_or_its_name_
             let records = scenario["records"].as_array().unwrap();
             launches += no_secret_launched(records, &tokens(scenario), &case);
         }
-        assert!(launches > 300, "{platform}: {launches} launches recorded");
+        assert!(launches > 250, "{platform}: {launches} launches recorded");
     }
 }

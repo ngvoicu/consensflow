@@ -1,9 +1,8 @@
 //! The rig: a real daemon and the real pane host, connected as the app connects
 //! them, in a home of the case's own, with a stand-in `claude` in the windows
 //! it opens (and a stand-in `devin`, for a case that asks for one:
-//! [`Config::devin`]; an `opencode` 1.x: [`Config::opencode`]; an `opencode`
-//! that has updated itself to 2: [`Config::opencode_2`]; or each where it
-//! installs itself, off a `PATH` that is the Finder's:
+//! [`Config::devin`]; or each where it installs itself, off a `PATH` that is
+//! the Finder's:
 //! [`Config::as_the_finder_starts_it`]). The daemon is `cf ui --json --no-open`;
 //! the pane
 //! host is `consensflow-bridge`, which gives each window a terminal of its own
@@ -25,6 +24,7 @@
 //! that finds it ended by something else when it ends fails: the pane host ends a
 //! window's own and nothing of the machine's.
 
+mod commands;
 mod homes;
 mod install;
 mod jobs;
@@ -54,6 +54,7 @@ use crate::outcome::{self, Verdict};
 use crate::process::{Ran, Run, Sink, Spawned};
 use crate::{checkout, files, wire, Error, Result};
 
+pub use commands::names_command;
 pub use homes::HarnessHome;
 pub use jobs::Job;
 pub use names::project_name;
@@ -104,8 +105,9 @@ pub struct Config {
     isolated: Vec<Arc<dyn HarnessHome>>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
-    /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
-    opencode: Option<PathBuf>,
+    /// The machine's own Muse, which the rig's Muse windows run on its fake model,
+    /// each turn this many milliseconds long.
+    muse: Option<(crate::muse::Installed, crate::muse::Run)>,
     finder: bool,
     masker: Option<Masker>,
     reports: Option<PathBuf>,
@@ -175,7 +177,7 @@ impl Config {
             isolated: Vec::new(),
             codex: None,
             devin: None,
-            opencode: None,
+            muse: None,
             finder: false,
             masker: None,
             reports: None,
@@ -188,7 +190,7 @@ impl Config {
     /// As the Finder starts an app's daemon when the login shell gives it no
     /// `PATH`: on the system's alone, `/usr/bin:/bin:/usr/sbin:/sbin`, with no
     /// stand-in on it. Each is where its harness installs itself: `claude` (and a
-    /// Devin's, an OpenCode's) in the home's `.local/bin`, and a Codex's in the
+    /// Devin's) in the home's `.local/bin`, and a Codex's in the
     /// machine's own folder of programs, the one Homebrew's `codex` is in
     /// (`/opt/homebrew/bin`), which is the rig's (`install::tool_folder`). The
     /// owner's machine the night a task to a Codex worker was refused
@@ -272,27 +274,45 @@ impl Config {
         self
     }
 
-    /// With the `opencode` the windows find first on their `PATH` the stand-in
-    /// `program` (the `fake-opencode-2` binary of this crate): the OpenCode of a
-    /// machine that has updated itself to 2, which says so to `--version`, answers
-    /// nothing else, and writes down what it is asked in `opencode.jsonl` of the
-    /// rig's folder ([`Rig::opencode_asked`]).
+    /// With the windows of a Muse agent running `install`, the machine's own Muse, on its
+    /// built-in fake model (`--provider echo`), each turn `delay_ms` long unless a case
+    /// sets `CF_TEST_MUSE_DELAY_MS`: they find the rig's launcher first on their `PATH`
+    /// as `muse`, and the binary it names beside it ([`crate::muse::write_stand_in`]).
+    /// What each was run with is in `muse-argv.log` of the rig's folder
+    /// ([`Rig::muse_launches`]). A script that runs it, so Unix's (a Mac's: no
+    /// Windows machine has Muse yet).
     #[must_use]
-    pub fn opencode_2(mut self, program: impl Into<PathBuf>) -> Self {
-        self.opencode = Some(program.into());
+    pub fn muse(mut self, install: crate::muse::Installed, delay_ms: u64) -> Self {
+        self.muse = Some((install, crate::muse::Run::Echo { turn_ms: delay_ms }));
         self
     }
 
-    /// With the `opencode` the windows find first on their `PATH` the stand-in
-    /// `program` (the `fake-opencode-1` binary of this crate): an OpenCode 1.x the
-    /// daemon launches a window on as it launches one on OpenCode, which serves
-    /// what the launch asks of OpenCode's server and writes down what it is asked
-    /// and the requests it is sent in `opencode.jsonl` of the rig's folder
-    /// ([`Rig::opencode_asked`], [`Rig::opencode_requests`]).
+    /// [`Config::muse`], live: the windows run the machine's Muse on the model each is
+    /// launched on, with the person's login (its secret in the keychain, which Muse finds
+    /// by `real_home`), their settings and sessions in the rig's home
+    /// ([`crate::muse::write_live_stand_in`]). It spends the account's allowance.
     #[must_use]
-    pub fn opencode(mut self, program: impl Into<PathBuf>) -> Self {
-        self.opencode = Some(program.into());
+    pub fn muse_live(
+        mut self,
+        install: crate::muse::Installed,
+        real_home: impl Into<PathBuf>,
+    ) -> Self {
+        self.muse = Some((
+            install,
+            crate::muse::Run::Live {
+                real_home: real_home.into(),
+            },
+        ));
         self
+    }
+
+    /// The person's home a live Muse of the rig finds its keychain login by, where the rig
+    /// runs the machine's Muse live ([`Config::muse_live`]).
+    pub fn muse_live_home(&self) -> Option<&Path> {
+        match &self.muse {
+            Some((_, crate::muse::Run::Live { real_home })) => Some(real_home),
+            _ => None,
+        }
     }
 
     /// With the variable `name` set to `value` in the environment of the
@@ -454,6 +474,9 @@ pub struct Rig {
     /// The `cf` the daemon runs, which its windows find first on their `PATH`: the rig's own
     /// copy (`crate::bundle`).
     cf: PathBuf,
+    /// The launcher a live Muse of the rig runs through ([`Config::muse_live`]), where it
+    /// seats one.
+    muse_launcher: Option<PathBuf>,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// The homes of real harnesses the windows run on, where a case gave any: its Claude
@@ -519,6 +542,13 @@ impl Rig {
             .rev()
             .find(|(given, _)| given == name)
             .map(|(_, value)| value.as_str())
+    }
+
+    /// The launcher the rig's live Muse runs through, where it seats one ([`Config::muse_live`]):
+    /// the machine's Muse on the rig's folders and the person's keychain login, never on their
+    /// `~/.config/muse` ([`crate::muse::write_live_stand_in`]).
+    pub fn muse_launcher(&self) -> Option<&Path> {
+        self.muse_launcher.as_deref()
     }
 
     /// The daemon's home, `CONSENSFLOW_HOME`.

@@ -107,11 +107,15 @@ impl Owner {
             ".codex/config.toml",
             ".codex/history.jsonl",
             ".config/devin/config.json",
-            ".config/opencode/opencode.json",
+            ".config/other-tool/config.json",
             ".local/share/devin/credentials.toml",
             ".local/share/devin/cli/trusted_workspaces.json",
             ".local/share/devin/cli/sessions.db",
-            ".local/share/opencode/auth.json",
+            ".local/share/other-tool/auth.json",
+            ".config/muse/auth.json",
+            ".config/muse/settings.json",
+            ".config/muse/trust.json",
+            ".local/share/muse/session-index.db",
         ] {
             write(&h.join(file), SENTINEL);
         }
@@ -133,6 +137,16 @@ impl Owner {
 
     fn codex(&self) -> Isolation {
         let mut made = Isolation::codex(self.home.path(), &self.path(".codex"));
+        made.parent = self.parent.path().to_path_buf();
+        made
+    }
+
+    fn muse(&self) -> Isolation {
+        let mut made = Isolation::muse(
+            self.home.path(),
+            &self.path(".config"),
+            &self.path(".local/share"),
+        );
         made.parent = self.parent.path().to_path_buf();
         made
     }
@@ -407,6 +421,34 @@ fn a_codex_run_is_given_the_login_alone_and_what_it_configures_goes_in_its_own_h
     assert!(isolation.finish().is_ok());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
+    // `live linked-folder`'s leg A (T-1038): the folders a Devin window is given are spelled
+    // as the folder the home is made in spells them, a Mac's `/var/folders/…` kept so, not
+    // resolved to `/private/var/folders/…`.
+    let owner = Owner::new();
+    let linked = owner.home.path().join("linked-temp");
+    std::os::unix::fs::symlink(owner.parent.path(), &linked).unwrap();
+    let isolation = owner.devin().made_in(&linked);
+    let home = isolation.made_at(at(NOW)).unwrap();
+    assert!(home.starts_with(&linked), "{}", home.display());
+    for (name, value) in isolation.vars_in(&home) {
+        assert!(Path::new(&value).starts_with(&linked), "{name}: {value}");
+        assert_eq!(
+            fs::canonicalize(&value)
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap(),
+            fs::canonicalize(owner.parent.path()).unwrap(),
+            "{name}: the same folder as the one it links to"
+        );
+    }
+    assert_eq!(owner.made(), 1);
+}
+
 #[test]
 fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_other_programs_ones() {
     let owner = Owner::new();
@@ -436,16 +478,16 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
     assert_eq!(mode(&home.join("data/devin/credentials.toml")), 0o600);
     // What other programs keep there is reached through a link, as it was, and Devin's own
     // folders are not: Devin writes in the run's.
-    let link = home.join("data/opencode");
+    let link = home.join("data/other-tool");
     assert!(fs::symlink_metadata(&link)
         .unwrap()
         .file_type()
         .is_symlink());
     assert_eq!(
         fs::read_link(&link).unwrap(),
-        owner.path(".local/share/opencode")
+        owner.path(".local/share/other-tool")
     );
-    assert!(fs::symlink_metadata(home.join("config/opencode")).is_ok());
+    assert!(fs::symlink_metadata(home.join("config/other-tool")).is_ok());
     write(
         &home.join("data/devin/cli/sessions.db"),
         "the run's session",
@@ -464,7 +506,7 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
     );
     // Dropping the home takes the links away, and none of what they reach.
     drop(isolation);
-    assert!(owner.path(".local/share/opencode/auth.json").is_file());
+    assert!(owner.path(".local/share/other-tool/auth.json").is_file());
 }
 
 #[test]
@@ -497,6 +539,12 @@ fn watched(owner: &Owner, which: &str) -> Vec<PathBuf> {
             ".pi/agent/mcp-auth.json",
         ],
         "codex" => &[".codex/auth.json", ".codex/config.toml"],
+        "muse" => &[
+            ".config/muse/auth.json",
+            ".config/muse/settings.json",
+            ".config/muse/trust.json",
+            ".local/share/muse/session-index.db",
+        ],
         _ => &[
             ".local/share/devin/credentials.toml",
             ".config/devin/config.json",
@@ -510,13 +558,14 @@ fn isolation_of(owner: &Owner, which: &str) -> Isolation {
     match which {
         "pi" => owner.pi("openrouter/x", hours(1)),
         "codex" => owner.codex(),
+        "muse" => owner.muse(),
         _ => owner.devin(),
     }
 }
 
 #[test]
 fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_what_it_holds() {
-    for which in ["pi", "codex", "devin"] {
+    for which in ["pi", "codex", "devin", "muse"] {
         let owner = Owner::new();
         let isolation = isolation_of(&owner, which);
         isolation.made_at(at(NOW)).unwrap();
@@ -712,16 +761,32 @@ fn a_home_a_killed_run_left_is_taken_away_by_the_next_that_is_made() {
 #[test]
 fn a_harness_with_no_home_of_its_own_to_make_has_none() {
     let home = Path::new("/home/me");
-    for harness in [Harness::Claude, Harness::OpenCode] {
-        assert!(
-            Isolation::of_machine(harness, home).unwrap().is_none(),
-            "{harness:?}"
-        );
-    }
+    assert!(Isolation::of_machine(Harness::Claude, home)
+        .unwrap()
+        .is_none());
     for harness in [Harness::Codex, Harness::Devin] {
         assert!(
             Isolation::of_machine(harness, home).unwrap().is_some(),
             "{harness:?}"
         );
+    }
+}
+
+/// Every harness the kit can launch runs on a home of the run's own, or is named here with why
+/// it has none. T-724's test named the harnesses of its day, and `of_machine_lasting` took any
+/// other for one with no home, in silence: Muse Code, which came after, ran the live pacing run's
+/// chief on the owner's own `~/.config/muse` and `~/.local/share/muse` (T-946).
+#[test]
+fn every_harness_the_kit_can_launch_has_a_home_of_the_runs_own_or_a_reason_it_has_none() {
+    let home = Path::new("/home/me");
+    // Claude Code's config folder is the kit's copy of the login (`super::login`).
+    let elsewhere = [Harness::Claude];
+    for harness in Harness::ALL {
+        if harness == Harness::Pi {
+            // Pi's home needs the run's model, which this test does not ask.
+            continue;
+        }
+        let made = Isolation::of_machine(harness, home).unwrap();
+        assert_eq!(made.is_some(), !elsewhere.contains(&harness), "{harness:?}");
     }
 }

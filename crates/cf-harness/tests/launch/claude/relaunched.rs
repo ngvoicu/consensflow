@@ -297,3 +297,72 @@ fn a_window_opened_again_without_a_proof_is_at_its_prompt_though_the_closed_proc
     assert!(!observed.settled, "the queued message holds the turn");
     assert!(observed.at_prompt, "Claude waits at its prompt");
 }
+
+/// A job's notification of `status`, queued at second `n`, as a closing Claude Code writes it.
+fn notified_line(session: &str, n: u32, status: &str) -> String {
+    let content = format!(
+        "<task-notification>\n<task-id>bjob00001</task-id>\n<status>{status}</status>\n</task-notification>"
+    );
+    record(
+        session,
+        n,
+        &json!({ "type": "queue-operation", "operation": "enqueue", "content": content }),
+    )
+}
+
+/// Claude's record that it took the oldest message of its queue, at second `n`.
+fn taken_line(session: &str, n: u32) -> String {
+    record(
+        session,
+        n,
+        &json!({ "type": "queue-operation", "operation": "dequeue" }),
+    )
+}
+
+/// T-958 (Gabriel's other Mac, 2026-10-26/27, 3.0.6-alpha.2): the app quit with the chief's
+/// window open, so no host saw its program end, and its window was opened again at the
+/// Resume, told no relaunch. The closing Claude Code had written the notification of the
+/// job it ended (`killed`), queued, or queued and taken. Alpha.2 held every turn after it:
+/// the chief answered the human for 54 hours with its lane read at work and seven results
+/// queued. A notification of a job Claude Code ended begins no turn (T-814), so the turns
+/// of the window opened again end as any, whether the old process took it or not.
+#[test]
+fn a_window_opened_again_without_a_proof_reads_its_turns_at_rest_after_the_closing_process_queued_a_killed_job(
+) {
+    for taken in [false, true] {
+        let home = Home::new();
+        let mut lines = vec![
+            user_line(SESSION, 1, TASK),
+            answer_line(SESSION, 2, "Done"),
+            stop_line(SESSION, 3),
+            notified_line(SESSION, 4, "killed"),
+        ];
+        if taken {
+            lines.push(taken_line(SESSION, 5));
+        }
+        home.transcript(SESSION, &lines);
+        let request = Request {
+            previous_gone: false,
+            ..Request::resumed(SESSION)
+        };
+        let window = window(&home.adapter(), &request);
+        home.status(SESSION, &json!({ "status": "idle" }), me());
+        assert!(
+            at_rest(&window),
+            "at rest before its first prompt (taken: {taken})"
+        );
+        // The human asks, and the window answers, turn after turn.
+        for (n, asked) in [(6, "how do I set the username?"), (9, "and the client?")] {
+            lines.extend([
+                user_line(SESSION, n, asked),
+                answer_line(SESSION, n + 1, "In the admin console."),
+                stop_line(SESSION, n + 2),
+            ]);
+            home.transcript(SESSION, &lines);
+            assert!(
+                at_rest(&window),
+                "its turn on {asked:?} is over (taken: {taken})"
+            );
+        }
+    }
+}

@@ -27,6 +27,7 @@ use cf_ledger::{
     ConversationEnd, HistoryEntry, HistoryFrom, HistoryKey, HistoryRead, HistoryRow,
     MessageOpening, ParticipantConversation, TextCut, OPENING_COST, PAGE_BYTES,
 };
+use cf_proto::cf_word::CfWord;
 use serde::Serialize;
 
 use super::entries::{message_id, outcome_line};
@@ -261,7 +262,8 @@ fn shown(row: &HistoryRow, opening: Openings<'_>) -> Result<ShownItem, Refusal> 
     let item = &row.item;
     let delivery = match folded(row) {
         Some((at, (id, Some(ledger_id)))) => opening(ledger_id)?.map(|found| Delivery {
-            line: outcome_line(&id, &Gist::from(&found)),
+            // The human's page: the commands as the board shows them, bare.
+            line: outcome_line(&id, &Gist::from(&found), &CfWord::bare()),
             at: utf16_len(&item.text[..at]),
         }),
         _ => None,

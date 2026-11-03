@@ -168,3 +168,11 @@ fn a_server_launches_a_browser_where_the_variable_says_any_word() {
     assert!(!launches(Some("")));
     assert!(launches(Some("1")));
 }
+
+/// A job is waited for as long as its shell may take to start on a loaded machine (a PowerShell
+/// on Windows): no less than the rig gives a PowerShell. Given 30 s, a stand-in under the load
+/// of a whole test program on GitHub's Windows runner took its own command for failed (T-1161).
+#[test]
+fn a_job_is_waited_for_as_long_as_its_shell_may_take_to_start_on_a_loaded_machine() {
+    assert!(UP >= cf_e2e::process::POWERSHELL_LIMIT, "{UP:?}");
+}

@@ -1,0 +1,331 @@
+# A parent agent's session reached every window (T-971, issues/inherited-claude-env-in-panes.md
+# in consensflow-sme): an app, a `tauri dev` or a test run started from inside an agent's
+# shell holds the variables that agent marks its own session with (Claude Code's
+# `CLAUDE_CODE_SESSION_ID` and `CLAUDE_CODE_CHILD_SESSION`, Codex's `CODEX_THREAD_ID`, Pi's
+# `PI_SESSION_ID`…), and the pane host started every window from that environment, the login
+# shell the app asks had them too, and the daemon gave them back to every window named in
+# `CONSENSFLOW_TERMINAL_ENV`. Each harness's list is `Harness::session_variables` (cf-proto),
+# which a harness added to `Harness::ALL` must fill; with a board's window's
+# (`cf_base::env::WINDOW_VARIABLES`, T-868, tests/plants/cli/board-env.toml) it is one list,
+# `parent_session_variables`. The pane host takes every one out of what a
+# pane inherits unless the pane's frame sets it; the daemon gives a window none it took of a
+# terminal; the app takes them out of its own environment as it starts, and out of what it
+# takes of a terminal's; and `cf ui` takes them out of the daemon's own environment, which its
+# own programs (a harness's probes, git) run on (T-1024). A terminal marks its pane too, as cmux
+# does (`TERMINAL_SESSION_VARIABLES`), and the one list has it. One plant takes one rule out; a test of it fails. The `rig:` plants
+# hold it end to end through the real daemon and pane host
+# (`crates/cf-e2e/tests/regressions/a_parent_agents_session_reached_every_window.rs`) and say
+# `builds`. Every name holds `parent-sessions`, so `npm run plants:daemon -- parent-sessions`
+# runs them all.
+
+[run]
+parent-sessions-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "agents::tests::"]
+parent-sessions-host = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_pane_inherits_nothing_of_a_session"]
+parent-sessions-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::tests::no_window_is_given_a_harness_session"]
+parent-sessions-app = ["cargo", "xtask", "app", "test", "harness_sessions_variable"]
+parent-sessions-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::tests::an_environment_without"]
+parent-sessions-live-monitor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait", "the_window_is_opened_without"]
+parent-sessions-kit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::window::tests::a_muse_window"]
+parent-sessions-live-check = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_session_vars"]
+parent-sessions-kit-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::tests::a_program_started_outside_a_rig"]
+parent-sessions-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
+parent-sessions-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_parent_agents_session_reached_every_window::"], builds = true }
+
+# --- the list ---
+
+[[plant]]
+name = "parent-sessions: Codex names nothing that marks a session of its own"
+meant = "every_harness_names_the_variables_that_mark_its_own_session"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''            Harness::Codex => &[
+                "CODEX_SANDBOX",
+                "CODEX_SANDBOX_NETWORK_DISABLED",
+                "CODEX_THREAD_ID",
+                "CODEX_SESSION_ID",
+                "CODEX_TOOL_CALL_ID",
+                "CODEX_CI",
+                "CODEX_VERSION",
+                "CODEX_NETWORK_PROXY_ACTIVE",
+                "CODEX_PERMISSION_PROFILE",
+                "CODEX_PLUGIN_METRICS_OUTPUT",
+            ],'''
+replace = '''            Harness::Codex => &[],'''
+
+[[plant]]
+name = "parent-sessions: Codex's list lacks the marks its shell showed live"
+meant = "the_marks_a_harness_s_shell_showed_live_are_its_own"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''                "CODEX_CI",
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: Muse's list lacks its tool call's id"
+meant = "the_marks_a_harness_s_shell_showed_live_are_its_own"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''                "MUSE_TOOL_USE_ID",
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: Devin's list lacks the path of its session store its shell is given"
+meant = "the_marks_a_harness_s_shell_showed_live_are_its_own"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''                "CHISEL_SESSION_DB",
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: the one list leaves out every harness's session"
+meant = "a_parent_session_is_a_boards_window_every_harness_session_and_a_terminals_pane"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''        .chain(
+            Harness::ALL
+                .into_iter()
+                .flat_map(Harness::session_variables)
+                .copied(),
+        )
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: the one list leaves out a terminal's pane (cmux's)"
+meant = "a_parent_session_is_a_boards_window_every_harness_session_and_a_terminals_pane"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''        .chain(TERMINAL_SESSION_VARIABLES)
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: a live window is opened without a copy of Claude's names of its own"
+meant = "the_window_is_opened_without_every_variable_of_claudes_session_the_build_knows"
+runs = ["parent-sessions-live-monitor"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''    cf_proto::agents::parent_session_variables()
+}'''
+replace = '''    [
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_PID",
+        "CLAUDE_EFFORT",
+    ]
+    .into_iter()
+}'''
+
+[[plant]]
+name = "parent-sessions: a harness's home is taken for a mark of its session"
+meant = "a_harness_configuration_marks_no_session"
+runs = ["parent-sessions-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/agents.rs"
+find = '''                "CODEX_PLUGIN_METRICS_OUTPUT",
+            ],'''
+replace = '''                "CODEX_PLUGIN_METRICS_OUTPUT",
+                "CODEX_HOME",
+            ],'''
+
+# --- the pane host ---
+
+[[plant]]
+name = "parent-sessions: the pane host hands a pane the session it was started in"
+meant = "a_pane_inherits_nothing_of_a_session_the_host_was_started_in"
+runs = ["parent-sessions-host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''        forget_parent_sessions(&mut command, env);
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: the pane host takes out a session variable the window's frame sets"
+meant = "a_pane_inherits_nothing_of_a_session_the_host_was_started_in"
+runs = ["parent-sessions-host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''    for name in parent_session_variables() {
+        if !env.contains_key(name) {
+            command.env_remove(name);
+        }'''
+replace = '''    for name in parent_session_variables() {
+        command.env_remove(name);'''
+
+# --- the daemon ---
+
+[[plant]]
+name = "parent-sessions: the daemon gives a window the session a terminal was asked in"
+meant = "no_window_is_given_a_harness_session_a_terminal_was_asked_in"
+runs = ["parent-sessions-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        .filter(|name| !is_parent_session_variable(name))
+'''
+replace = ""
+
+# --- the app ---
+
+[[plant]]
+name = "parent-sessions: the app keeps the session it was started in"
+meant = "no_harness_sessions_variable_is_ever_inherited"
+runs = ["parent-sessions-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''        .filter(|name| cf_proto::agents::is_parent_session_variable(name))'''
+replace = '''        .filter(|name| cf_base::env::is_window_variable(name))'''
+
+[[plant]]
+name = "parent-sessions: the app takes a session's variables of a terminal's environment"
+meant = "of_a_printed_environment_no_harness_sessions_variable_is_taken"
+runs = ["parent-sessions-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''        || cf_proto::agents::is_parent_session_variable(&name)'''
+replace = '''        || cf_base::env::is_window_variable(&name)'''
+
+# --- end to end ---
+
+[[plant]]
+name = "parent-sessions rig: the daemon gives every window the session a terminal was asked in"
+meant = "no_window_is_given_the_session_of_an_agent_the_app_was_started_from"
+runs = ["parent-sessions-rig"]
+builds = true
+# Both of the daemon's: since T-1024 `cf ui` runs it with no session's values, so what it takes
+# of a terminal finds none to give even where `terminal_of` keeps one (its own test holds it).
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        .filter(|name| !is_parent_session_variable(name))
+'''
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''    let env = &outside_parent_sessions(env);
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions rig: the pane host hands every window the session it was started in"
+meant = "no_window_is_given_the_session_of_an_agent_the_app_was_started_from"
+runs = ["parent-sessions-rig"]
+builds = true
+# The case reads a window's own environment where the system shows it (`ps eww`, a Mac's).
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''        forget_parent_sessions(&mut command, env);
+'''
+replace = ""
+
+# --- cf ui (T-1024) ---
+
+[[plant]]
+name = "parent-sessions: an environment without some variables keeps them"
+meant = "an_environment_without_some_variables_keeps_the_rest_its_folders_and_its_path"
+runs = ["parent-sessions-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''        self.vars
+            .retain(|name, _| !dropped(&name.to_string_lossy()));
+'''
+replace = '''        self.vars.retain(|_, _| true);
+        let _ = dropped;
+'''
+
+[[plant]]
+name = "parent-sessions rig: cf ui runs the daemon on the session it was started in"
+meant = "no_program_the_daemon_starts_of_its_own_is_given_the_session_cf_ui_was_started_in"
+runs = ["parent-sessions-rig"]
+builds = true
+# The stand-in Codex the case asks is a script: there is no such shim on Windows.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''    let env = &outside_parent_sessions(env);
+'''
+replace = ""
+
+# --- the live check of the list, and the kit it runs in (T-1024) ---
+
+[[plant]]
+name = "parent-sessions: the live check takes a harness's setting for a mark the list lacks"
+meant = "a_window_s_names_are_its_harness_s_marks_its_settings_the_rig_s_and_what_the_list_lacks"
+runs = ["parent-sessions-live-check"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_session_vars.rs"
+find = '''            && !SETTINGS.iter().any(|setting| setting.name == name)
+'''
+replace = ""
+
+[[plant]]
+name = "parent-sessions: a live Muse window starts on the machine's Muse, which writes the person's ~/.config/muse"
+meant = "a_muse_window_starts_on_the_rigs_launcher_and_every_other_on_the_program_found"
+runs = ["parent-sessions-kit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = '''    if harness != Harness::Muse {
+'''
+replace = '''    if harness != Harness::Muse || launcher.is_some() {
+'''
+
+[[plant]]
+name = "parent-sessions: a harness program a case starts outside a rig is given no home of the run's own"
+meant = "a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_persons"
+runs = ["parent-sessions-kit-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''            Some(isolation) => isolation.vars(),
+'''
+replace = '''            Some(_) => Ok(Vec::new()),
+'''
+
+[[plant]]
+name = "parent-sessions: the Codex interrupt case starts Codex's server on the person's home"
+meant = "a_harness_server_a_live_case_starts_itself_runs_on_the_runs_own_home"
+runs = ["parent-sessions-live-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_codex_interrupt.rs"
+find = '''    let home = install.home_outside_a_rig()?;
+'''
+replace = '''    let home: Vec<(String, String)> = Vec::new();
+'''
+

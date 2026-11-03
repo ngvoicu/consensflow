@@ -13,6 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
+use cf_proto::cf_word::CfWord;
 use cf_proto::panes::{Background, Servers};
 use cf_proto::specs::AppSpecs;
 use cf_proto::trace::TraceLine;
@@ -145,6 +146,12 @@ pub trait Roles {
         project: &ProjectView,
         specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String>;
+
+    /// How a command starts in the window of `participant`: the bundle's own `cf` by its
+    /// whole path, as the window's shell takes it (`CfWord`). The role text starts every
+    /// command with it, and so does each text ConsensFlow writes for the window to read
+    /// ([`CfWord::in_text`]): another `cf` can come first on a shell's PATH.
+    fn cf(&self, participant: &ParticipantView) -> CfWord;
 }
 
 /// The environment a window's pane starts with before its harness's own
@@ -361,8 +368,9 @@ pub trait BackgroundWork {
 pub enum CommandsSeen {
     /// So many run in the window.
     Running(usize),
-    /// The host answered that it cannot tell them: a platform with no groups, or a harness
-    /// that keeps its servers otherwise.
+    /// The host answered that it cannot tell them: a harness that keeps its servers
+    /// otherwise, or a platform whose tree the host does not read (a Windows job tells them
+    /// by their chain since T-906).
     Untold,
     /// The host answered that a process of the window cannot be read (another user's):
     /// a later look may read them all.

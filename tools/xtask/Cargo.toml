@@ -35,6 +35,8 @@ cf-release.workspace = true
 # them: `release alpha` and `release promote` ask it of the feeds.
 cf-publish.workspace = true
 sha2.workspace = true
+# `release verify` checks a published update's signature as an installed app does.
+minisign-verify.workspace = true
 zip.workspace = true
 # The Windows runner's tarball is compressed here, where `gzip` is not on every machine's PATH.
 flate2.workspace = true
@@ -64,7 +66,8 @@ plist.workspace = true
 memchr.workspace = true
 tempfile.workspace = true
 
-# The smoke's input to an app is a FIFO, which is ended by signal and by group.
+# The smoke's input to an app is a FIFO, and the stops' tests raise signals (what the smoke ends,
+# it ends as cf_process::Started).
 # Both calls are safe in nix, where libc's are not (this crate forbids unsafe).
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs", "signal"] }

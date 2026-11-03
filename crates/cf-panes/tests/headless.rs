@@ -2865,9 +2865,9 @@ fn detached_job(file: &std::path::Path) -> i32 {
 /// its group (a server a user wrapped in a shell) is not the turn's, in the
 /// answer to a look and in the exit of a window closed; what a shell it started in
 /// a group of its own runs (a command run by a tool) is. A job detached from a shell
-/// that ended is the window's, but no work of the turn: no chain of processes that
-/// run leads from it to a shell, and it is left alone and not named. A mark that
-/// says nothing, as an older daemon's, is the turn's by what a shell started:
+/// that ended is the window's, in its session, and no work of the turn by a chain of
+/// processes that run: it is named all the same, as detached work a close ends (T-1145).
+/// A mark that says nothing, as an older daemon's, is the turn's by what a shell started:
 /// what the test above holds.
 #[cfg(target_os = "macos")]
 #[test]
@@ -2919,8 +2919,8 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
         "the server stays in the window's group: {left}"
     );
     assert!(
-        !commands.iter().any(|command| command.contains("sleep 33")),
-        "the detached job has no shell that runs: {left}"
+        commands.iter().any(|command| command.contains("sleep 33")),
+        "the detached job has no shell that runs, and is named as detached work: {left}"
     );
     assert!(
         commands.iter().any(|command| command.contains("sleep 32")),
@@ -2938,9 +2938,15 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
             .is_some_and(|work| !work.is_empty()
                 && work.iter().all(|process| {
                     let command = process["command"].as_str().unwrap_or("");
-                    !command.contains("sleep 31") && !command.contains("sleep 33")
+                    !command.contains("sleep 31")
+                })
+                && work.iter().any(|process| {
+                    process["command"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("sleep 33")
                 })),
-        "{exit}"
+        "the exit names the detached job and not the server: {exit}"
     );
     assert!(outsider.runs(), "a process outside the window");
     helper.close_input_and_wait();
@@ -3229,6 +3235,21 @@ fn a_window_closed_names_a_server_its_agents_tool_shell_detached_and_leaves_it_r
         closed.exit
     );
     assert!(alive, "the server runs on");
+    // It is named as possibly the window's and not as work the close ended (T-1145): the close
+    // did not end it, and a job only the window's marker ties to it is not detached work.
+    let ended: Vec<i64> = closed.exit["background"]
+        .as_array()
+        .map(|work| {
+            work.iter()
+                .filter_map(|work| work["pid"].as_i64())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !ended.contains(&i64::from(job)),
+        "the exit says the close ended it: {}",
+        closed.exit
+    );
     assert!(
         closed
             .after
@@ -3434,10 +3455,10 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
         output_until(&helper, &mut events, &pane_id, generation, b"started");
 
         if named {
+            let left = helper.request("pane.background", pane.clone(), &mut events);
             assert_eq!(
-                helper.request("pane.background", pane.clone(), &mut events)["total"],
-                0,
-                "the helper is the harness's, and so is the shell it runs"
+                left["total"], 0,
+                "the helper is the harness's, and so is the shell it runs: {left}"
             );
         } else {
             let left = background_with(&mut helper, &mut events, &pane, "sleep 31");

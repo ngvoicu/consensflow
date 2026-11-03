@@ -23,6 +23,30 @@ pub const TOOL_FOLDERS: &str = "CONSENSFLOW_TOOL_FOLDERS";
 /// the app's own terminal would not have otherwise (T-540).
 pub const TERMINAL_ENV: &str = "CONSENSFLOW_TERMINAL_ENV";
 
+/// What a window gives its member to reach its board with: the address of the board's daemon,
+/// the member's token, and the project and member it is. A program that holds them is a client
+/// of that board, as `cf` is in a window, where it is the board's command and `cf ui`, the
+/// daemon's own, is none; so a program started from a window that is meant to be nothing of
+/// that board's is not to be given them.
+pub const WINDOW_VARIABLES: [&str; 4] = [
+    "CONSENSFLOW_URL",
+    "CONSENSFLOW_TOKEN",
+    "CONSENSFLOW_PARTICIPANT",
+    "CONSENSFLOW_PROJECT",
+];
+
+/// Whether `name` is one of the [`WINDOW_VARIABLES`], as the system compares names: on
+/// Windows in any case.
+pub fn is_window_variable(name: &str) -> bool {
+    WINDOW_VARIABLES.iter().any(|window| {
+        if cfg!(windows) {
+            window.eq_ignore_ascii_case(name)
+        } else {
+            *window == name
+        }
+    })
+}
+
 /// The folders a package manager of the system puts its programs in, which a
 /// login shell puts on the PATH and an app the Finder started is not given:
 /// on a Mac, Homebrew's (`/opt/homebrew`, and `/usr/local` on Intel, which the
@@ -114,6 +138,25 @@ impl Env {
         self
     }
 
+    /// This environment with the variable `name` set to `value`, whatever it held:
+    /// what a program is run with that it is not given otherwise. Its PATH as given
+    /// ([`Env::search_path`]) stays the one it was given.
+    #[must_use]
+    pub fn with_var(mut self, name: &str, value: &str) -> Self {
+        self.vars.insert(key(name.into()), value.into());
+        self
+    }
+
+    /// This environment without each variable `dropped` says of its name (in upper case on
+    /// Windows), and as it was otherwise: on the same machine, its folders of programs and
+    /// the PATH it was given kept.
+    #[must_use]
+    pub fn without_vars(mut self, dropped: impl Fn(&str) -> bool) -> Self {
+        self.vars
+            .retain(|name, _| !dropped(&name.to_string_lossy()));
+        self
+    }
+
     /// The PATH a harness's CLI is looked for on first: the one this
     /// environment was given, before the system's folders were put after it.
     pub fn search_path(&self) -> Option<&OsStr> {
@@ -194,6 +237,32 @@ pub fn path_with_folders(path: &OsStr, folders: &[PathBuf]) -> OsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_variable_set_on_an_environment_is_its_whatever_it_held_and_the_rest_stays() {
+        let given = Env::from_vars([("A", "1"), ("PATH", "/bin")]);
+        let set = given.with_var("A", "2").with_var("B", "3");
+        assert_eq!(set.text("A"), Some("2"));
+        assert_eq!(set.text("B"), Some("3"));
+        assert_eq!(set.text("PATH"), Some("/bin"));
+        assert_eq!(set.search_path(), Some(OsStr::new("/bin")));
+    }
+
+    #[test]
+    fn an_environment_without_some_variables_keeps_the_rest_its_folders_and_its_path() {
+        let given = Env::from_vars([
+            ("A", "1"),
+            ("B", "2"),
+            ("PATH", "/bin"),
+            (TOOL_FOLDERS, "/tools"),
+        ]);
+        let kept = given.without_vars(|name| name == "B" || name == "PATH");
+        assert_eq!(kept.text("A"), Some("1"));
+        assert_eq!(kept.text("B"), None);
+        assert_eq!(kept.text("PATH"), None);
+        assert_eq!(kept.search_path(), Some(OsStr::new("/bin")));
+        assert_eq!(kept.tool_folders(), [PathBuf::from("/tools")]);
+    }
 
     #[test]
     fn is_windows_when_built_for_it_or_when_the_environment_says_so() {
@@ -364,6 +433,33 @@ mod tests {
                 std::env::join_paths([path.as_os_str(), other.as_os_str()]).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn a_windows_variables_are_the_four_a_member_reaches_its_board_with_and_nothing_else() {
+        for name in [
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+            "CONSENSFLOW_PROJECT",
+        ] {
+            assert!(WINDOW_VARIABLES.contains(&name), "{name}");
+            assert!(is_window_variable(name), "{name}");
+        }
+        assert_eq!(WINDOW_VARIABLES.len(), 4);
+        // ConsensFlow's others are no window's: a home a run chose stays the app's.
+        for name in [
+            "CONSENSFLOW_HOME",
+            "CONSENSFLOW_TOOL_FOLDERS",
+            "CONSENSFLOW_",
+            "CONSENSFLOW_TOKENS",
+            "TOKEN",
+            "",
+        ] {
+            assert!(!is_window_variable(name), "{name}");
+        }
+        // Names match in any case on Windows only.
+        assert_eq!(is_window_variable("Consensflow_Token"), cfg!(windows));
     }
 
     #[test]

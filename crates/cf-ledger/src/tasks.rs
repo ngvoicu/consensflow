@@ -19,28 +19,35 @@ use crate::model::LedgerError;
 use crate::store::Store;
 use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT};
 
-pub(crate) use editing::{edit_task, tell_open};
+pub(crate) use editing::{edit_task, edit_task_with, retitle_task, tell_open};
+pub use finishing::reopen_or_accept;
 pub(crate) use finishing::{
-    accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task, note_stranded_waits,
-    record_finished, record_result, release_ready, reopen_task, tell_stranded_waiters, Ending,
+    accept_failed_task, accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task,
+    note_stranded_waits, record_finished, record_result, release_ready, reopen_task,
+    tell_stranded_waiters, tell_waiting_for_failed, waiting_for_it_of, Ending,
 };
 pub use giving::NewTask;
-pub(crate) use giving::{assign_task, check_release, create_task, release_task};
+pub(crate) use giving::{
+    assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
+};
 pub(crate) use own_steps::withdrawn_late;
 pub use pausing::resumed_in_vain;
 pub(crate) use pausing::{
     clear_hold, go_on_in_window, held_for_context, held_tasks_due, hold_for_context, hold_task,
-    pause_again, pause_task, pause_with_project, paused_task, resume_task, resume_with_project,
-    stop_asked_by, stop_of, take_over_pause, task_in_hand, tell_it_goes_on, told_since_paused,
-    unmark_pause,
+    pause_again, pause_task, pause_with_project, paused_task, rest_while_resumed, resume_task,
+    resume_with_project, resume_words, resume_words_not_in, stop_asked_by, stop_of, take_over_pause,
+    task_in_hand, tell_it_goes_on, told_since_paused, unmark_pause, work_while_resumed,
 };
-pub(crate) use releasing::let_go;
 
 /// What a paused task's window is told when it goes on: the human's Resume
 /// and the daemon's alike.
 pub const RESUME_WORDS: &str = "Go on where you stopped.";
 
-const CRITICAL_RULE: &str = "No coding or implementation edits. Do not write or revise specifications. Return analysis, evidence and recommendations to your coordinator.";
+/// What a critical task's lead holds it to, in the role texts' own words: it
+/// changes no file — true of every project, where forbidding specifications
+/// presumed one — and its findings go to the chief, whom the role texts name.
+const CRITICAL_RULE: &str =
+    "It changes no file: return analysis, evidence and recommendations to the chief.";
 
 /// How a task reads when it is handed over: critical work leads with its purpose.
 fn delivery_body(task: &TaskRow) -> String {

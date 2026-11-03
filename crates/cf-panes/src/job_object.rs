@@ -5,9 +5,12 @@
 //! with no `JOB_OBJECT_LIMIT_BREAKAWAY_OK` refuses (this one has only kill-on-close),
 //! and a job object made inside it holds its processes in this one too: a job an
 //! agent detached from a shell that ended (`Start-Process`, `start`) is in the job
-//! still, with no parent, which the window's close ends and the host does not name as
-//! the turn's work: a job with no parent is no proof of whose work it is
-//! ([`crate::background`]). What the job does not hold, and a close does not end:
+//! still, with no parent, which the window's close ends. The host does not call it the turn's work
+//! (a job with no parent is no proof of whose it is: [`crate::background`]) and names it as
+//! detached work when its starter was a shell, for the pause that keeps the window and the note
+//! of the close (T-1145): the job holds a build's daemon as it holds a `Start-Process` job, and
+//! what tells them apart, what started it, is read only while it lives, from the job's completion
+//! port as the process joins ([`Births`]). What the job does not hold, and a close does not end:
 //! - what another program starts for the harness: a service (`schtasks`, a WMI
 //!   `Win32_Process.Create`), the shell or COM activating a program, UAC starting one
 //!   elevated; none of it is a child of the pane's;
@@ -51,33 +54,49 @@ use std::io;
 use std::mem::{offset_of, size_of, size_of_val};
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use windows_sys::Wdk::System::Threading::{
     NtQueryInformationProcess, ProcessBasicInformation, ProcessCommandLineInformation,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE, UNICODE_STRING, WAIT_OBJECT_0,
+    CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, FILETIME, HANDLE, INVALID_HANDLE_VALUE,
+    UNICODE_STRING, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::System::JobObjects::{
-    CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
-    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-    TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    CreateJobObjectW, IsProcessInJob, JobObjectAssociateCompletionPortInformation,
+    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_ASSOCIATE_COMPLETION_PORT,
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
+use windows_sys::Win32::System::SystemServices::{
+    JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS, JOB_OBJECT_MSG_EXIT_PROCESS, JOB_OBJECT_MSG_NEW_PROCESS,
 };
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
     PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_SYNCHRONIZE,
 };
+use windows_sys::Win32::System::IO::{
+    CreateIoCompletionPort, GetQueuedCompletionStatus, PostQueuedCompletionStatus, OVERLAPPED,
+};
 
-use crate::background::{Member, ProcessKey};
+use crate::background::{is_a_shell, Births, Member, ProcessKey};
 
 /// What says `ps -W` of a folder ([`ps_w`]; a test gives its own, which counts what it is asked).
 pub(crate) type Ps<'a> = &'a dyn Fn(&Path) -> Option<String>;
 
 pub(crate) struct JobObject {
     handle: HANDLE,
+    /// How each process that joined the job began, and whether a shell started it: read as it
+    /// joined, from the job's completion port, while its starter lived ([`Births`]), and let
+    /// go of when it exits. The listener that writes it ends when the job is dropped ([`Drop`]).
+    births: Arc<Mutex<Births>>,
+    /// The job's completion port, which the listener reads: none where the job could not be
+    /// given one, and then no job is proved a shell's.
+    port: Option<Arc<Port>>,
 }
 
 // SAFETY: a job handle is a kernel handle, usable from any thread.
@@ -88,12 +107,24 @@ unsafe impl Sync for JobObject {}
 
 impl JobObject {
     pub fn new() -> io::Result<Self> {
+        Self::with_births(Births::default())
+    }
+
+    /// A job whose processes' births are kept in `births` (a test gives one with a bound of
+    /// its own).
+    pub(crate) fn with_births(births: Births) -> io::Result<Self> {
         // SAFETY: no attributes and no name: a private job for this pane.
         let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let job = Self { handle };
+        let births = Arc::new(Mutex::new(births));
+        let port = listen_for_births(handle, &births);
+        let job = Self {
+            handle,
+            births,
+            port,
+        };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         // SAFETY: the structure is the one the information class names, at its size.
@@ -140,6 +171,27 @@ impl JobObject {
         Ok(members_of(self.hold(ps)?.iter()))
     }
 
+    /// [`JobObject::members`], where every process the job lists that is still there and
+    /// still the job's could be looked at: none where one could not be opened, asked of, or
+    /// its start or its path read (a protected process, another user's), which a look at the window's
+    /// commands is not to leave out unsaid (T-906: such a process may be a monitor's
+    /// command).
+    pub fn readable_members(&self) -> io::Result<Option<Vec<Member>>> {
+        let mut held = Vec::new();
+        for pid in self.process_ids()? {
+            match self.look_at(pid) {
+                // A program whose path could not be read is not known to be no shell, unless
+                // it was ending as it was read.
+                Looked::Held(one) if !one.member.exe.is_empty() => held.push(one),
+                Looked::Held(one) if one.process.ends_soon() => {}
+                Looked::Gone => {}
+                Looked::Held(_) | Looked::Unreadable => return Ok(None),
+            }
+        }
+        repair_cygwin_parents(&mut held, &ps_w);
+        Ok(Some(members_of(held.iter())))
+    }
+
     /// The processes of the job, each held open, and each the one the job holds: the
     /// number the system lists may be another's by the time it is opened, and the
     /// handle is asked, not the number. The parents of Git Bash's programs are mended
@@ -148,13 +200,16 @@ impl JobObject {
         let mut held: Vec<Held> = self
             .process_ids()?
             .into_iter()
-            .filter_map(|pid| self.hold_one(pid))
+            .filter_map(|pid| match self.look_at(pid) {
+                Looked::Held(one) => Some(one),
+                Looked::Gone | Looked::Unreadable => None,
+            })
             .collect();
         repair_cygwin_parents(&mut held, ps);
         Ok(held)
     }
 
-    fn hold_one(&self, pid: u32) -> Option<Held> {
+    fn look_at(&self, pid: u32) -> Looked {
         // SAFETY: the rights a look at a process, and the wait that says it has gone,
         // need; the handle is closed by `Process`.
         let handle = unsafe {
@@ -165,27 +220,36 @@ impl JobObject {
             )
         };
         if handle.is_null() {
-            return None;
+            // A number no process has any more is refused as no parameter: it ended since
+            // the list. Any other refusal is of a process that is there.
+            return match io::Error::last_os_error().raw_os_error() {
+                Some(code) if code == ERROR_INVALID_PARAMETER as i32 => Looked::Gone,
+                _ => Looked::Unreadable,
+            };
         }
         let process = Process(handle);
         // One that ended since the list is no process of the job: its object is still
         // there to open while another handle to it is.
         if process.gone() {
-            return None;
+            return Looked::Gone;
         }
         let mut inside = 0;
         // SAFETY: both handles are open, and `inside` is writable.
         let asked = unsafe { IsProcessInJob(process.0, self.handle, &mut inside) };
-        if asked == 0 || inside == 0 {
-            return None;
+        if asked == 0 {
+            return process.unread();
         }
+        // Its number is another's now, which is no process of the job.
+        if inside == 0 {
+            return Looked::Gone;
+        }
+        let Some(began) = began(&process) else {
+            return process.unread();
+        };
         let exe = image_path(&process).unwrap_or_default();
-        Some(Held {
+        Looked::Held(Held {
             member: Member {
-                key: ProcessKey {
-                    pid,
-                    began: began(&process)?,
-                },
+                key: ProcessKey { pid, began },
                 command: command_line(&process).unwrap_or_default(),
                 program: exe
                     .rsplit(['\\', '/'])
@@ -198,7 +262,7 @@ impl JobObject {
                 parent: None,
             },
             parent: parent_of(&process),
-            _process: process,
+            process,
         })
     }
 
@@ -249,11 +313,164 @@ impl JobObject {
     }
 }
 
+impl JobObject {
+    /// Whether the process `key` names was started by a shell, as the job's port told when it
+    /// joined ([`Births`]): false where its birth was not read.
+    pub fn started_by_a_shell(&self, key: ProcessKey) -> bool {
+        self.births
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .started_by_a_shell(key)
+    }
+}
+
 impl Drop for JobObject {
     fn drop(&mut self) {
         // SAFETY: the handle is ours and closed once; kill-on-close ends the tree.
         unsafe { CloseHandle(self.handle) };
+        if let Some(port) = &self.port {
+            // The listener is told to stop through a port this job holds open: it is never a
+            // number the system may have given to another handle, whatever became of the
+            // listener (T-1153's D3). The port is closed by the last of the two to let go.
+            // SAFETY: the port is open, for the job holds it.
+            unsafe { PostQueuedCompletionStatus(port.0, 0, STOP, ptr::null()) };
+        }
     }
+}
+
+/// A completion port, closed when the last that holds it lets go: the job and the listener of
+/// its births each hold it, so that neither can use a handle that is closed, or that the system
+/// has given to another since.
+struct Port(HANDLE);
+
+// SAFETY: a completion port is a kernel handle, usable from any thread.
+unsafe impl Send for Port {}
+// SAFETY: the kernel serializes what is done to one port from several threads.
+unsafe impl Sync for Port {}
+
+impl Drop for Port {
+    fn drop(&mut self) {
+        // SAFETY: the handle is ours, and closed here once.
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// The key of the message that tells the listener to stop: the job's own messages carry the key
+/// the job was given, which is none.
+const STOP: usize = 1;
+
+/// Gives `job` a completion port, and starts the listener that reads each process as it joins
+/// the job (`JOB_OBJECT_MSG_NEW_PROCESS`, whose overlapped pointer is the process's number): its
+/// start, and whether the process that started it was a shell; and lets go of the birth of each
+/// that exits (`JOB_OBJECT_MSG_EXIT_PROCESS`). None where the job could not be given a port or
+/// the listener could not be started.
+fn listen_for_births(job: HANDLE, births: &Arc<Mutex<Births>>) -> Option<Arc<Port>> {
+    // SAFETY: no file is associated; a new port, with as many threads as processors.
+    let raw = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, ptr::null_mut(), 0, 1) };
+    if raw.is_null() {
+        return None;
+    }
+    // From here the port is closed by whoever lets go of it last, on every way out.
+    let port = Arc::new(Port(raw));
+    let association = JOBOBJECT_ASSOCIATE_COMPLETION_PORT {
+        CompletionKey: ptr::null_mut(),
+        CompletionPort: raw,
+    };
+    // SAFETY: the structure is the one the information class names, at its size; the job and
+    // the port are open.
+    let set = unsafe {
+        SetInformationJobObject(
+            job,
+            JobObjectAssociateCompletionPortInformation,
+            (&association as *const JOBOBJECT_ASSOCIATE_COMPLETION_PORT).cast(),
+            size_of::<JOBOBJECT_ASSOCIATE_COMPLETION_PORT>() as u32,
+        )
+    };
+    if set == 0 {
+        return None;
+    }
+    let (listener, births) = (Arc::clone(&port), Arc::clone(births));
+    std::thread::Builder::new()
+        .name("cf-panes-job-births".to_owned())
+        .spawn(move || read_births(&listener, &births))
+        .ok()
+        .map(|_| port)
+}
+
+/// Reads the messages of the job's port until it is told to stop.
+fn read_births(port: &Port, births: &Mutex<Births>) {
+    loop {
+        let (mut message, mut key, mut overlapped) = (0u32, 0usize, ptr::null_mut::<OVERLAPPED>());
+        // SAFETY: the port is open, for the listener holds it; the three are writable.
+        let got = unsafe {
+            GetQueuedCompletionStatus(port.0, &mut message, &mut key, &mut overlapped, u32::MAX)
+        };
+        if got == 0 && overlapped.is_null() {
+            // The wait failed: nothing more will be told.
+            return;
+        }
+        if key == STOP {
+            return;
+        }
+        if got == 0 {
+            continue;
+        }
+        // The process's number, in the place of the pointer.
+        let pid = overlapped as usize as u32;
+        match message {
+            JOB_OBJECT_MSG_NEW_PROCESS => {
+                if let Some((began, by_a_shell)) = read_birth(pid) {
+                    births
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .record(pid, began, by_a_shell);
+                }
+            }
+            // The birth of a process that ended is of no use to anyone, and a number may be
+            // given to another.
+            JOB_OBJECT_MSG_EXIT_PROCESS | JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS => births
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .forget(pid),
+            _ => {}
+        }
+    }
+}
+
+/// When the process `pid` began, and whether the process that started it was a shell, read now,
+/// while its starter is most likely still there: none where it could not be read. A starter that
+/// could not be read, or that began after the process (its number is another's), is no shell.
+fn read_birth(pid: u32) -> Option<(u64, bool)> {
+    let child = open(pid)?;
+    let began = began(&child)?;
+    let starter = parent_of(&child).and_then(open);
+    let by_a_shell = starter.is_some_and(|starter| {
+        began_before(&starter, began)
+            && image_path(&starter)
+                .is_some_and(|path| path.rsplit(['\\', '/']).next().is_some_and(is_a_shell))
+    });
+    Some((began, by_a_shell))
+}
+
+/// Whether `process` began no later than `at`: a number taken by a later process is not the
+/// parent of one that began first.
+fn began_before(process: &Process, at: u64) -> bool {
+    began(process).is_some_and(|began| began <= at)
+}
+
+/// The process `pid`, opened to be read: none where it could not be.
+fn open(pid: u32) -> Option<Process> {
+    // SAFETY: the right a read of a process needs; the handle is closed by `Process`.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    (!handle.is_null()).then(|| Process(handle))
+}
+
+/// What a look at a number the job listed found: the process, held; that it is no
+/// process of the job any more; or a process there that could not be read.
+enum Looked {
+    Held(Held),
+    Gone,
+    Unreadable,
 }
 
 /// A process of the job, held open: what was read of it is of the process the handle
@@ -261,7 +478,7 @@ impl Drop for JobObject {
 struct Held {
     /// Open for as long as what was read of it is: a number is this process's while its
     /// handle is, so a parent named by number in the same look is the process held under it.
-    _process: Process,
+    process: Process,
     member: Member,
     /// The number of the process that started it, as the system names it.
     parent: Option<u32>,
@@ -366,7 +583,29 @@ impl Process {
         // of no time only asks.
         unsafe { WaitForSingleObject(self.0, 0) == WAIT_OBJECT_0 }
     }
+
+    /// Whether the process ends within [`ENDING`]: one that was being ended as it was read
+    /// (T-906 on zeewin: a shell `Stop-Process` had ended, its path no longer to be read
+    /// while its last thread went) fails a read before its handle is signalled.
+    fn ends_soon(&self) -> bool {
+        // SAFETY: the handle is open, and was opened with the right to wait on it.
+        unsafe { WaitForSingleObject(self.0, ENDING) == WAIT_OBJECT_0 }
+    }
+
+    /// What a read of it that failed says: that it is gone, where it was ending, else that
+    /// a process there could not be read.
+    fn unread(&self) -> Looked {
+        if self.ends_soon() {
+            Looked::Gone
+        } else {
+            Looked::Unreadable
+        }
+    }
 }
+
+/// How long, in milliseconds, a look waits for a process whose read failed to end before
+/// it says the process could not be read.
+const ENDING: u32 = 200;
 
 impl Drop for Process {
     fn drop(&mut self) {
@@ -480,5 +719,7 @@ fn command_line(process: &Process) -> Option<String> {
     Some(String::from_utf16_lossy(units))
 }
 
+#[cfg(test)]
+mod listener_tests;
 #[cfg(test)]
 mod tests;

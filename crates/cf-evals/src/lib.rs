@@ -13,12 +13,13 @@
 //!
 //! A module for each thing it does:
 //!
-//! - [`scenarios`] are the thirteen scenarios, code and not data: what the owner
+//! - [`scenarios`] are the fifteen scenarios, code and not data: what the owner
 //!   says, how it answers, and the expectations, closures over the numbers.
 //! - [`plan`] is the pure part of a run: the staff, the chief's model, the owner's
 //!   answers to the chief's questions.
 //! - [`mod@run`] plays a scenario with real harnesses (the arm without ConsensFlow
-//!   is measured by [`bare`], from the harness's own record) and writes its report.
+//!   is measured by [`bare`], from the harness's own record) and writes its report;
+//!   [`chiefs`] plays one once with each harness that can be a chief.
 //! - [`measure`] reads what a chief did from the ledger of a finished run, and
 //!   [`ledger_file`] makes a ledger file without the ledger, which the tests of the
 //!   measure are made of.
@@ -37,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bare;
+pub mod chiefs;
 mod cli;
 pub mod clock;
 mod error;
@@ -69,6 +71,10 @@ usage: cf-evals <command> [flags]
              [--claude-staff-model M] [--pi-staff-model M] [--effort LEVEL]
              [--staff-effort LEVEL] [--arm card|nocard|bare] [--switch-to HARNESS]
              [--gate] [--repeat N] [--timeout-min N] [--reports DIR]
+  chiefs   play a scenario (conversation) once with each harness that can be a chief, on
+           its cheap model, and say what each came to
+             [--scenario NAME] [--chiefs HARNESS,...] [--effort LEVEL] [--timeout-min N]
+             [--reports DIR]
   long     work a real project for hours with a chief and a staff of every harness,
            disrupted on a schedule, and hold ConsensFlow to nine invariants all along
              [--chief HARNESS] [--staff HARNESS,...] [--models HARNESS=M+M,...] [--model M]
@@ -116,6 +122,7 @@ fn dispatch(words: &[String], out: &mut dyn Write) -> Result<i32> {
             Ok(0)
         }
         Some((verb, rest)) if verb == "run" => run::command(rest, out),
+        Some((verb, rest)) if verb == "chiefs" => chiefs::command(rest, out),
         Some((verb, rest)) if verb == "long" => long_run::command(rest, out),
         Some((verb, rest)) if verb == "summary" => summary(rest, out),
         Some((verb, rest)) if verb == "watch" => watch::command(rest, out),

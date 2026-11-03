@@ -189,6 +189,63 @@ fn the_replies_of_a_request_before_its_last_are_never_complete_and_its_last_is_w
     );
 }
 
+/// T-1151, `live tell devin` on the Mac (T-1131's sweep, Devin 3000.11.234, swe-2): the turn on
+/// a chief's tell, as the ledger of the run kept what this reader read of it. The reader is not
+/// where the words written first were lost: it reads them as an item of their own, apart from
+/// the last words by the tools between, which is what the engine's note took for progress.
+#[test]
+fn the_words_devin_wrote_first_in_a_turn_are_an_item_apart_from_its_last_words() {
+    let staged = Staged::new();
+    let output = |id: &str, call: &str, said: &str| json!({ "message_id": id, "role": "tool", "content": said, "tool_call_id": call });
+    let calling = |id: &str, said: &str, call: &str| {
+        let mut message = reply(id, json!(said));
+        message["tool_calls"] = json!([{ "id": call, "name": "exec" }]);
+        message
+    };
+    staged.chain(&[
+        user("u-1", Some(json!("request-1"))),
+        calling("a-1", "TOLD-ANSWER-K3", "c-1"),
+        output(
+            "t-1",
+            "c-1",
+            "No output produced after 10.0 seconds. Command running in background with ID: d186ce.",
+        ),
+        calling("a-2", "", "c-2"),
+        output("t-2", "c-2", "Exited with code 0 and no output"),
+        calling("a-3", "", "c-3"),
+        output("t-3", "c-3", "m-3 answered @chief."),
+        stopped("a-4", "FINAL-RESULT-ALPHA-9Z"),
+    ]);
+    let reading = look(&mut staged.reader());
+    let Reading::Known(record) = &*reading else {
+        panic!("a reading");
+    };
+
+    assert_eq!(record.settlement, Settlement::Settled);
+    let shape: Vec<(Role, bool, &str)> = record
+        .items
+        .iter()
+        .skip(1)
+        .map(|item| (item.role, item.complete, &*item.text))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (Role::Assistant, false, "TOLD-ANSWER-K3"),
+            (
+                Role::Tool,
+                true,
+                "No output produced after 10.0 seconds. Command running in background with ID: d186ce."
+            ),
+            (Role::Assistant, false, ""),
+            (Role::Tool, true, "Exited with code 0 and no output"),
+            (Role::Assistant, false, ""),
+            (Role::Tool, true, "m-3 answered @chief."),
+            (Role::Assistant, true, "FINAL-RESULT-ALPHA-9Z"),
+        ]
+    );
+}
+
 /// The texts of the items one look reads.
 fn texts(staged: &Staged) -> Vec<String> {
     match &*look(&mut staged.reader()) {

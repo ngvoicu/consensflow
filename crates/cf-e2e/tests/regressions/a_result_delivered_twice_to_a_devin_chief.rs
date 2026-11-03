@@ -154,7 +154,16 @@ fn a_project(rig: &Rig) -> cf_e2e::Result<(Project<'_>, String)> {
 /// `seconds` and answers the words.
 fn give(rig: &Rig, project: &Project, tier: &str, asked: Asked, seconds: u64) -> Outcome {
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), secs(30))?;
-    let brief = format!("SLEEP {seconds} Reply with exactly: {}", asked.words);
+    // A turn longer than the daemon's arrival window writes a step to its record every few
+    // seconds, as a harness's turn at work does: one that stood with nothing after its brief
+    // that long would be a window that never began it, and paused (T-1130). It answers its
+    // words as they stand.
+    let brief = if seconds > 10 {
+        let steps = seconds.div_ceil(5);
+        format!("PACED {steps} {} {}", seconds / steps, asked.words)
+    } else {
+        format!("SLEEP {seconds} Reply with exactly: {}", asked.words)
+    };
     let given = rig.cf_in_window(&chief, ["task", "add", "--tier", tier, brief.as_str()])?;
     assert_eq!(given.code, Some(0), "{}", given.output());
     Ok(())
@@ -292,7 +301,7 @@ fn each_went_in_once_whole_and_apart(rig: &Rig, ids: [i64; 2], pasted: [usize; 2
         assert!(
             text.starts_with(&marker)
                 && text.contains(asked.words)
-                && text.contains(&format!("cf task accept T-{}", asked.task)),
+                && cf_e2e::rig::names_command(text, &format!("task accept T-{}", asked.task)),
             "{} (m-{id}) did not go in whole: {text:?}",
             asked.words
         );

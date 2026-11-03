@@ -235,3 +235,67 @@ fn a_ledger_that_could_not_be_written_leaves_the_stop_owed_and_the_next_look_at_
         r"\(kept for you: task m-1 from @chief\)\nParser\n\nResumed: Carry on$",
     );
 }
+
+/// A window stopped by a pause, whose record reads the turn over at the next look and
+/// not yet taken back: the stop is paid then, with the brief still delivered.
+fn paid_before_the_take_back(context: &Context) -> i64 {
+    let project = working(context);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs().len(), 1, "one Escape");
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(1).state,
+        "delivered",
+        "nothing taken back yet"
+    );
+    project
+}
+
+/// T-995's A/B, `muse_window`'s tell case red 2 runs in 5 on main: Muse writes
+/// `run_retracted` 5 to 11 ms after the `terminal cancelled` of a turn stopped before a
+/// word, a line of its own, and the look between the two paid the stop with nothing taken
+/// back. The brief stayed delivered while Muse put it back in its box, which the next
+/// paste empties, and the resume never gave it again. A later look that reads the turn
+/// taken back, nothing said since, takes the brief back then: once, with no key.
+#[test]
+fn a_take_back_the_record_writes_after_the_stop_was_paid_keeps_the_brief_for_the_resume() {
+    let context = Context::new();
+    let project = paid_before_the_take_back(&context);
+
+    context.adapter.with("zeus", |agent| agent.took_back = true);
+    context.pass().unwrap();
+    let kept = context.message(1);
+    assert_eq!(kept.state, "queued", "kept for the words that resume it");
+    assert_eq!(
+        kept.reason.as_deref(),
+        Some("@zeus stopped before a word of its answer and took it back out of its conversation")
+    );
+    assert_eq!(context.host.inputs().len(), 1, "no second key");
+    context.pass().unwrap();
+    assert_eq!(context.message(1).state, "queued", "taken back once");
+
+    context.resume_task(project, 1, "Carry on");
+    context.pass().unwrap();
+    assert_match(
+        &pasted(&context),
+        r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\n\(kept for you: task m-1 from @chief\)\nParser\n\nResumed: Carry on$",
+    );
+}
+
+/// A take-back read after something else went into the window is that turn's, not the
+/// stopped one's: the brief stays where it is.
+#[test]
+fn a_take_back_read_after_another_message_went_in_takes_nothing_back() {
+    let context = Context::new();
+    paid_before_the_take_back(&context);
+
+    let typed = context.adapter.item(Role::User, "What next?");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(typed);
+        agent.took_back = true;
+    });
+    context.pass().unwrap();
+    assert_eq!(context.message(1).state, "delivered");
+}

@@ -29,6 +29,8 @@
 mod a_brief_could_not_be_edited_once_added;
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
 mod a_builds_daemon_held_a_workers_task;
+#[path = "regressions/a_busy_window_was_refused_in_words_that_did_not_say_what_held_it.rs"]
+mod a_busy_window_was_refused_in_words_that_did_not_say_what_held_it;
 #[path = "regressions/a_cancelled_compact_held_the_chief_and_took_its_next_message.rs"]
 mod a_cancelled_compact_held_the_chief_and_took_its_next_message;
 #[path = "regressions/a_cf_a_build_took_away_left_a_window_none.rs"]
@@ -41,6 +43,9 @@ mod a_close_waited_for_a_codex_chiefs_server_to_end;
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
 #[path = "regressions/a_codex_chiefs_lost_turn_end_held_its_next_result.rs"]
 mod a_codex_chiefs_lost_turn_end_held_its_next_result;
+#[path = "regressions/a_codex_window_compacting_before_its_first_message_was_closed.rs"]
+#[cfg(unix)]
+mod a_codex_window_compacting_before_its_first_message_was_closed;
 // The stand-in Codex is a script, so Unix's, and so are `ps` and `pgrep`.
 #[path = "regressions/a_codex_windows_role_was_on_its_command_line.rs"]
 #[cfg(unix)]
@@ -54,6 +59,8 @@ mod a_command_that_never_exits_held_a_workers_result;
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
 #[path = "regressions/a_compaction_written_beside_an_answer_tore_its_line.rs"]
 mod a_compaction_written_beside_an_answer_tore_its_line;
+#[path = "regressions/a_done_task_could_not_be_cancelled_so_the_chief_could_only_accept_it.rs"]
+mod a_done_task_could_not_be_cancelled_so_the_chief_could_only_accept_it;
 #[path = "regressions/a_failure_said_no_reason.rs"]
 mod a_failure_said_no_reason;
 #[path = "regressions/a_final_answer_written_in_a_tells_turn_reached_nobody.rs"]
@@ -62,12 +69,24 @@ mod a_final_answer_written_in_a_tells_turn_reached_nobody;
 mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 #[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
+#[path = "regressions/a_follow_up_whose_window_never_began_read_working_for_an_hour.rs"]
+mod a_follow_up_whose_window_never_began_read_working_for_an_hour;
 #[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
 mod a_job_that_still_ran_was_taken_for_ended;
+#[path = "regressions/a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed.rs"]
+mod a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed;
+#[path = "regressions/a_ledger_of_a_harness_this_build_does_not_run.rs"]
+mod a_ledger_of_a_harness_this_build_does_not_run;
 #[path = "regressions/a_message_the_chief_took_was_typed_in_again_under_load.rs"]
 mod a_message_the_chief_took_was_typed_in_again_under_load;
+#[path = "regressions/a_monitor_claude_ended_by_its_shell_held_its_task.rs"]
+mod a_monitor_claude_ended_by_its_shell_held_its_task;
+#[path = "regressions/a_parent_agents_session_reached_every_window.rs"]
+mod a_parent_agents_session_reached_every_window;
 #[path = "regressions/a_paste_devin_held_pasted_again_after_a_switch_and_a_restart.rs"]
 mod a_paste_devin_held_pasted_again_after_a_switch_and_a_restart;
+#[path = "regressions/a_pause_a_busy_worker_ignored_closed_its_window_and_ended_its_work.rs"]
+mod a_pause_a_busy_worker_ignored_closed_its_window_and_ended_its_work;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
 #[path = "regressions/a_question_the_chief_answered_was_typed_in_later.rs"]
@@ -76,6 +95,8 @@ mod a_question_the_chief_answered_was_typed_in_later;
 mod a_quota_wait_ended_failed;
 #[path = "regressions/a_reopened_window_with_no_task_read_working_for_good.rs"]
 mod a_reopened_window_with_no_task_read_working_for_good;
+#[path = "regressions/a_reply_written_before_the_tools_of_a_tells_turn_reached_nobody.rs"]
+mod a_reply_written_before_the_tools_of_a_tells_turn_reached_nobody;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
 mod a_result_delivered_twice_to_a_devin_chief;
 #[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]
@@ -88,8 +109,12 @@ mod a_resumed_devin_worker_skipped_every_call;
 mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 #[path = "regressions/a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed.rs"]
 mod a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed;
+#[path = "regressions/a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it.rs"]
+mod a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
+#[path = "regressions/a_task_waiting_for_a_failed_one_was_told_to_the_chief_before_the_failure.rs"]
+mod a_task_waiting_for_a_failed_one_was_told_to_the_chief_before_the_failure;
 #[path = "regressions/a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good.rs"]
 mod a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good;
 #[path = "regressions/a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief.rs"]
@@ -108,6 +133,8 @@ mod a_window_with_nothing_to_stop_was_closed_and_its_work_ended;
 mod a_windows_first_message_was_on_its_command_line;
 #[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]
 mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
+#[path = "regressions/a_workers_question_in_its_last_words_was_given_as_its_result.rs"]
+mod a_workers_question_in_its_last_words_was_given_as_its_result;
 #[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
 mod a_workers_still_going_was_given_as_its_result;
 #[path = "regressions/an_idle_quit_with_a_message_queued_read_as_a_cut_turn.rs"]
@@ -143,8 +170,6 @@ mod keys_cleared_with_escape_held_every_delivery;
 #[path = "regressions/mcp_servers_held_a_workers_result.rs"]
 #[cfg(unix)]
 mod mcp_servers_held_a_workers_result;
-#[path = "regressions/opencode_updated_itself_to_2.rs"]
-mod opencode_updated_itself_to_2;
 #[path = "regressions/results_held_for_words_nobody_typed.rs"]
 mod results_held_for_words_nobody_typed;
 #[path = "regressions/results_stay_queued_after_a_quota_pause.rs"]
@@ -165,6 +190,8 @@ mod tell_refused_for_a_queued_task;
 mod the_chiefs_job_was_killed_as_a_workers_turn_ended;
 #[path = "regressions/the_finished_column_could_not_be_cleared_while_its_tasks_were_needed.rs"]
 mod the_finished_column_could_not_be_cleared_while_its_tasks_were_needed;
+#[path = "regressions/the_live_app_wrote_into_projects.rs"]
+mod the_live_app_wrote_into_projects;
 #[path = "regressions/whole_history_across_a_compaction_and_a_switch.rs"]
 #[cfg(unix)]
 mod whole_history_across_a_compaction_and_a_switch;
@@ -183,10 +210,6 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The stand-in for Devin, which the windows of Devin's agents run.
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
-
-/// The stand-in for the `opencode` of a machine whose OpenCode has updated itself
-/// to 2, which the daemon asks its version of before it opens a window on it.
-const FAKE_OPENCODE_2: &str = env!("CARGO_BIN_EXE_fake-opencode-2");
 
 /// The stand-in for Codex, which the windows of Codex's agents run.
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");

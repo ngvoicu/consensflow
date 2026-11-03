@@ -98,6 +98,19 @@ pub fn engine_ask() -> Result<&'static Path> {
     )
 }
 
+/// The stand-in agent, `fake-agent`, which the evals' scripted reviewer is: the test binary of this
+/// crate, built with the feature that makes it, once for a run and never before it.
+pub fn fake_agent() -> Result<&'static Path> {
+    static BUILT: Built = OnceLock::new();
+    built(
+        &BUILT,
+        "cf-e2e",
+        "fake-agent",
+        &["--features", "test-support"],
+        None,
+    )
+}
+
 /// The folder the run built `cf` and the pane host in before it, where it says one.
 fn given() -> Option<PathBuf> {
     own_var(BUILT)
@@ -117,7 +130,7 @@ fn built(
 ) -> Result<&'static Path> {
     built_by(
         cell,
-        Run::new(env!("CARGO")),
+        Run::cargo(),
         &checkout::root(),
         (package, bin, more),
         before,

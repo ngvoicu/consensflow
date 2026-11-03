@@ -18,8 +18,9 @@
 //! tells the verdicts). The status is 1 if any plant is not caught or does not
 //! apply, and 130 if the run was stopped. A word that no plant's name holds is
 //! refused: a filter that picks nothing would otherwise pass. A `cargo test` of a
-//! plant's runs, and a suite of xtask's that is one, is run under nextest (`cargo
-//! install cargo-nextest --locked --root app/src-tauri/target/tools`).
+//! plant's runs, and a suite of xtask's that is one, is run under nextest, which
+//! a fresh tree copies into `app/src-tauri/target/tools/bin/` from
+//! `~/Projects/ngvoicu/consensflow-trees/.runs/tools/bin/cargo-nextest`.
 //!
 //! The modules: [`kit`] (what a plant is, and the data), [`driver`] (planting,
 //! putting back, the trial of one plant), [`runs`] (the commands, the reports their

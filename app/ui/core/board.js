@@ -24,7 +24,7 @@ const PAUSABLE = ['open', 'queued', 'working', 'waiting']
 /** What the human may give back to the board for another member of its tier. */
 const REASSIGNABLE = ['queued', 'working', 'waiting', 'paused']
 /** The states in which the human may take what a worker said last as the task's result. */
-const FINISHABLE = ['working', 'paused']
+const FINISHABLE = ['working', 'waiting', 'paused']
 /** What is over, accepted or not: the human may delete it from the board. */
 const FINISHED = ['accepted', 'failed', 'cancelled']
 /** The columns, in reading order; whatever is over, accepted or not, shares the last one. */
@@ -268,6 +268,16 @@ const backAt = (iso, now = Date.now()) => {
 }
 const outOfQuota = (participant, now) =>
   participant.outUntil !== null && Date.parse(participant.outUntil) > now
+/**
+ * A member out until the year 9999 is held for no time: its account refused for what no
+ * wait cures (its billing or its login), or its harness moved its window's model on its own.
+ * Nothing resets either, so no time is shown, only the human's way back. The daemon marks
+ * the second with the later of its two times (`scheduler.rs`: `MOVED`, `NEVER`), which is
+ * all the ledger keeps of why, across a restart.
+ */
+const MODEL_MOVED = '9999-12-31T23:59:59.999Z'
+const unavailable = (participant) => participant.outUntil?.startsWith('9999-') === true
+const modelMoved = (participant) => participant.outUntil === MODEL_MOVED
 /** "@zeus · amber-pine" for a session; the member's own name otherwise. */
 export const laneName = (participant) =>
   participant.member
@@ -304,7 +314,13 @@ function route(task) {
       : `blocked by ${taskNumbers(task.blockedBy)} · ${waitsFor}`
   }
   if (task.state === 'paused' && task.heldUntil) {
-    return `out of quota until ${backAt(task.heldUntil)} · from ${who(task.requester)}`
+    const until =
+      task.heldUntil === MODEL_MOVED
+        ? 'held until you say its model may go on'
+        : task.heldUntil.startsWith('9999-')
+          ? 'unavailable until you say it works again'
+          : `out of quota until ${backAt(task.heldUntil)}`
+    return `${until} · from ${who(task.requester)}`
   }
   return task.blockedBy.length === 0
     ? `from ${who(task.requester)}`
@@ -369,6 +385,14 @@ export function laneStatus(lane, board, now) {
   if (lane.switching) {
     return ['switching', `Switching the chief to ${lane.switching.agent} after this turn`]
   }
+  // A meeting with the human: what comes for the chief waits until its Stop.
+  if (participant.role === 'chief' && board.project?.meeting) {
+    const held = board.held?.length ?? 0
+    return [
+      'meeting',
+      `In a meeting · ${held === 0 ? 'nothing held yet' : `${plural(held, 'message')} held`}`,
+    ]
+  }
   // A stop its window ignored in every round: the human can cancel the task to end it.
   if (lane.unstopped) {
     return ['unstopped', `Did not stop for T-${lane.unstopped.task}: still on its earlier turn`]
@@ -377,7 +401,18 @@ export function laneStatus(lane, board, now) {
   // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
   const holding = 'A message waits until you send or erase what you typed here'
   if (outOfQuota(participant, now)) {
-    const out = `Out of quota until ${backAt(participant.outUntil, now)}`
+    // Why, in the engine's own words (its account refused, its model moved on its own), where
+    // it said them; else what the time it marked the member out until says of it.
+    const said = (prefix) =>
+      activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+    let out
+    if (modelMoved(participant)) {
+      out = `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
+    } else if (unavailable(participant)) {
+      out = `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Press Try again now once it works`
+    } else {
+      out = `Out of quota until ${backAt(participant.outUntil, now)}`
+    }
     return ['out', lane.holding ? `${out}. ${holding}` : out]
   }
   if (lane.holding) return ['holding', holding]
@@ -403,7 +438,11 @@ export const tryAgain = (participant, action) =>
     'Try again now',
     'quiet-button try-again',
     action,
-    `Try ${laneName(participant)} again now, before its quota resets`,
+    modelMoved(participant)
+      ? `Try ${laneName(participant)} again now, once it is on the model you chose`
+      : unavailable(participant)
+        ? `Try ${laneName(participant)} again now, once its account works`
+        : `Try ${laneName(participant)} again now, before its quota resets`,
   )
 
 /** A participant's lamp: what its window is doing, at a glance, or that it is out of quota. */
@@ -534,6 +573,9 @@ export class BoardView {
   #forYou(inbox, board, now) {
     // What waits for the human's approval.
     const waiting = board.gated ?? []
+    // What the human's meeting with the chief holds for it, in the order it will go: the
+    // human reads it here, and it goes to the chief after the Stop.
+    const held = board.held ?? []
     // The chief waits for the human only in its terminal: its own question,
     // or a prompt. Messages for the chief stay its own, however long it waits.
     const chief = board.lanes.find((lane) => lane.participant.role === 'chief')
@@ -552,9 +594,13 @@ export class BoardView {
       element(
         'span',
         'foryou-status',
-        count === 0 && unread === 0
+        count === 0 && held.length === 0 && unread === 0
           ? 'Nothing waiting'
-          : [count === 0 ? null : `${count} waiting`, unread === 0 ? null : plural(unread, 'note')]
+          : [
+              count === 0 ? null : `${count} waiting`,
+              held.length === 0 ? null : `${held.length} held`,
+              unread === 0 ? null : plural(unread, 'note'),
+            ]
               .filter(Boolean)
               .join(' · '),
       ),
@@ -575,6 +621,12 @@ export class BoardView {
       )
     }
     if (strips.childElementCount > 0) section.append(strips)
+    if (held.length > 0) {
+      const list = element('ol', 'strips')
+      list.setAttribute('aria-label', 'Held for your meeting')
+      for (const message of held) list.append(this.#messageStrip(message, board, now, true))
+      section.append(element('h3', 'foryou-sub', 'Held for your meeting'), list)
+    }
     if (unread > 0) {
       const list = element('ol', 'strips')
       list.setAttribute('aria-label', 'Notes for you')
@@ -627,7 +679,11 @@ export class BoardView {
     return item
   }
 
-  #messageStrip(message, board, now) {
+  /**
+   * A message's strip. One `held` by a meeting only reads: it is the chief's,
+   * and one marked read would never reach it.
+   */
+  #messageStrip(message, board, now, held = false) {
     const item = element('li', 'strip strip-message')
     item.dataset.kind = message.kind
     item.dataset.message = String(message.id)
@@ -641,11 +697,12 @@ export class BoardView {
       element(
         'span',
         'strip-route',
-        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${gated ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${gated ? ' · needs your approval' : ''}`,
+        `${KIND_LABEL[message.kind] ?? message.kind} from ${who(message.sender)}${gated ? ` to ${who(message.recipient)}` : ''}${message.taskNumber ? ` · T-${message.taskNumber}` : ''}${gated ? ' · needs your approval' : ''}${held ? ' · held' : ''}`,
       ),
       element('span', 'strip-age', age(message.createdAt, now)),
     )
     if (gated) item.dataset.gated = 'true'
+    if (held) item.dataset.held = 'true'
     item.append(line)
     const actions = element('div', 'strip-actions')
     if (gated && acts(board)) actions.append(...this.#gateActions(message))
@@ -666,7 +723,7 @@ export class BoardView {
         ),
       )
     }
-    if (!gated && acts(board)) {
+    if (!gated && !held && acts(board)) {
       actions.append(
         button(
           'Mark read',
@@ -1202,10 +1259,11 @@ export class TaskDrawer {
         ),
       )
     }
-    // Any working or paused task of a member's: what its worker said last becomes the result,
+    // Any working, waiting or paused task of a member's: what its worker said last becomes the result,
     // at the human's word (the chief has the same in `cf task finish`), whatever the window's
     // reader says of its turn. A paused task's is the answer its turn on a tell ended with,
-    // which the human is told (T-442). It ends nothing the turn left running, which ends with
+    // which the human is told (T-442). A waiting task's is the words its turn ended on, which
+    // ConsensFlow raised as the question it waits on (T-1119); the question is withdrawn. It ends nothing the turn left running, which ends with
     // its window, or outlives it where the host cannot tell what is the window's: the
     // button promises no end of it.
     if (FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {

@@ -58,7 +58,7 @@ fn a_chief_given_specs_is_given_the_skill_as_a_second_one_after_its_role_s_and_t
             "{variant:?}"
         );
         assert_eq!(
-            adapter.specmint(variant).unwrap(),
+            adapter.specmint(variant, ".specs").unwrap(),
             Skill::Own(skill),
             "the place the role text names is the place written"
         );
@@ -94,7 +94,7 @@ fn a_pi_that_has_the_variant_installed_is_given_no_skill_of_ours_and_an_installe
     assert_eq!(skills_given(&off), 1, "the role's");
     for (variant, file) in [(Variant::CoreHtml, &own), (Variant::TddHtml, &shared)] {
         assert_eq!(
-            adapter.specmint(variant).unwrap(),
+            adapter.specmint(variant, ".specs").unwrap(),
             Skill::Global(file.clone())
         );
         let request = Request {
@@ -131,5 +131,52 @@ fn a_pi_that_has_the_variant_installed_is_given_no_skill_of_ours_and_an_installe
     assert_eq!(
         (fs::read(&own).unwrap(), fs::read(&shared).unwrap()),
         before
+    );
+}
+
+#[test]
+fn a_chief_of_a_project_whose_specs_are_in_another_folder_is_given_a_copy_that_names_it_whether_or_not_pi_has_the_variant_installed(
+) {
+    let home = Home::new();
+    // The human has the variant installed. Its files call `.specs` the folder, and it is
+    // never edited for one project (T-662: a Pi chief on `docs/specs` went by it).
+    let dir = path::join(&[&home.root, "home", ".pi/agent/skills", "specmint-core"]);
+    fs::create_dir_all(&dir).unwrap();
+    let installed = path::join(&[&dir, "SKILL.md"]);
+    let words = "---\nname: specmint-core\n---\nthe human's own, in .specs/registry.md\n";
+    fs::write(&installed, words).unwrap();
+    let (adapter, _fakes) = adapter(&home);
+    assert_eq!(
+        adapter.specmint(Variant::Core, ".specs").unwrap(),
+        Skill::Global(installed.clone()),
+        "a project that keeps its specs in .specs is the installed copy's"
+    );
+    let Skill::Own(copy) = adapter.specmint(Variant::Core, "docs/specs").unwrap() else {
+        panic!("a copy of its own for another folder");
+    };
+    let request = Request {
+        specs: Some(Variant::Core),
+        folder: "docs/specs",
+        ..chief()
+    };
+    let on = prepare(&adapter, &request).unwrap();
+    let skills: Vec<&String> = on
+        .argv
+        .iter()
+        .zip(on.argv.iter().skip(1))
+        .filter(|(flag, _)| *flag == "--skill")
+        .map(|(_, file)| file)
+        .collect();
+    assert_eq!(
+        skills.len(),
+        2,
+        "the role's, and ConsensFlow's for the folder"
+    );
+    assert_eq!(*skills[1], copy);
+    kept::names_only(&copy, "docs/specs");
+    assert_eq!(
+        fs::read_to_string(&installed).unwrap(),
+        words,
+        "not touched"
     );
 }

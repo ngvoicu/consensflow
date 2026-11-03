@@ -14,6 +14,7 @@ pub mod door;
 use std::time::Duration;
 
 use cf_base::env::Env;
+use cf_proto::cf_word::{CfWord, ENV};
 use serde_json::{json, Value};
 
 /// How long one request may take. Node's `fetch`, which this replaces, gave a
@@ -113,11 +114,23 @@ impl Answer {
     }
 }
 
+/// How a command starts in the window `env` is: the word the daemon gave it for its harness and
+/// platform ([`ENV`]), or the word `cf` where it gave none (a window of an older daemon, a
+/// terminal).
+pub fn cf_in(env: &Env) -> CfWord {
+    env.text(ENV)
+        .and_then(CfWord::of_word)
+        .unwrap_or_else(CfWord::bare)
+}
+
 /// One window's way into the daemon's API.
 pub struct Board {
     url: Option<String>,
     token: String,
     agent: ureq::Agent,
+    /// How a command starts in the window this board is: the hints and refusals `cf` prints
+    /// start the commands they name with it ([`CfWord::in_text`]).
+    cf: CfWord,
 }
 
 impl Board {
@@ -135,7 +148,20 @@ impl Board {
             url: url.filter(|url| !url.is_empty()).map(str::to_string),
             token: token.to_string(),
             agent,
+            cf: CfWord::bare(),
         }
+    }
+
+    /// This board for a window whose commands start with `cf`.
+    #[must_use]
+    pub fn with_cf(mut self, cf: CfWord) -> Self {
+        self.cf = cf;
+        self
+    }
+
+    /// How a command starts in this board's window.
+    pub fn cf(&self) -> &CfWord {
+        &self.cf
     }
 
     /// The board of the window `env` is, none outside one: the API at
@@ -147,10 +173,7 @@ impl Board {
         let token = env
             .os("CONSENSFLOW_TOKEN")
             .filter(|token| !token.is_empty())?;
-        Some(Self::new(
-            env.text("CONSENSFLOW_URL"),
-            &token.to_string_lossy(),
-        ))
+        Some(Self::new(env.text("CONSENSFLOW_URL"), &token.to_string_lossy()).with_cf(cf_in(env)))
     }
 
     /// GET `path` (with its query).
@@ -369,6 +392,23 @@ pub mod scripted {
 mod tests {
     use super::scripted::{reply, reply_text, scripted, Received};
     use super::*;
+
+    #[test]
+    fn a_board_of_a_window_carries_the_word_the_daemon_gave_it_for_its_commands() {
+        let given = |word: Option<&str>| {
+            let mut vars = vec![("CONSENSFLOW_URL", "u"), ("CONSENSFLOW_TOKEN", "t")];
+            vars.extend(word.map(|word| ("CONSENSFLOW_CF", word)));
+            Board::from_env(&Env::from_vars(vars)).unwrap()
+        };
+        assert_eq!(
+            given(Some("& 'C:/Program Files/c/cf.exe'")).cf().as_str(),
+            "& 'C:/Program Files/c/cf.exe'"
+        );
+        // A window of a daemon that told it none, and one told what no shell could take, say `cf`.
+        assert_eq!(given(None).cf().as_str(), "cf");
+        assert_eq!(given(Some("a\nb")).cf().as_str(), "cf");
+        assert_eq!(Board::new(Some("u"), "t").cf().as_str(), "cf");
+    }
 
     #[test]
     fn a_post_sends_the_token_and_the_body_and_returns_the_answer() {

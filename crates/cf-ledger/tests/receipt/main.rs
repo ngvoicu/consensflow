@@ -15,21 +15,25 @@
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+mod accept_failed;
 mod answered_again;
 mod approval;
 mod behind_work;
 mod carrying;
+mod cause_first;
 mod continuations;
 mod decided;
 mod doors;
 mod edited_brief;
 mod failed_briefs;
+mod finished_questions;
 mod fixture;
 mod gate;
 mod handed;
 mod legacy;
 mod open_questions;
 mod open_tells;
+mod own_words;
 mod pause_notes;
 mod program_gone;
 mod questions;
@@ -43,4 +47,5 @@ mod told;
 mod told_edges;
 mod told_kept;
 mod transfers;
+mod waiting_after_failure;
 mod waiting_notes;

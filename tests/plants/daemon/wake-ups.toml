@@ -146,6 +146,13 @@ file = "crates/cf-ledger/src/wake_ups/due.rs"
 find = '    if now_ms < origin.saturating_add(wake_up.every_ms) {'
 replace = '    if false {'
 
+# The interval is held a second time since T-1113 (once the human's words and the doubling
+# are counted): both go.
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if now_ms < origin.saturating_add(apart) {'
+replace = '    if false {'
+
 [[plant]]
 name = "wake-up: a wake-up is not from the human"
 meant = "a_wake_up_is_due_once_the_interval_has_passed_and_is_a_note_from_the_human_to_the_chief"
@@ -173,8 +180,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    if project.state != "open" || !wake_up.on {'
-replace = '    if project.state != "open" {'
+find = '    if project.state != "open" || !wake_up.on || project.meeting_at.is_some() {'
+replace = '    if project.state != "open" || project.meeting_at.is_some() {'
 
 [[plant]]
 name = "wake-up: a closed project is sent wake-ups"
@@ -183,8 +190,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    if project.state != "open" || !wake_up.on {'
-replace = '    if !wake_up.on {'
+find = '    if project.state != "open" || !wake_up.on || project.meeting_at.is_some() {'
+replace = '    if !wake_up.on || project.meeting_at.is_some() {'
 
 [[plant]]
 name = "wake-up: a quiet board is asked again"
@@ -193,8 +200,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '        if !begun_since(store, project_id, last)? && !changed_since(store, project_id, last)? {'
-replace = '        if false {'
+find = '            if !changed_since(store, project_id, last)? {'
+replace = '            if false {'
 
 [[plant]]
 name = "wake-up: a task queued for its window is no work on its way"
@@ -343,7 +350,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused' AND t.state = 'working'))"
 
 [[plant]]
@@ -353,7 +361,8 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused' AND t.state = 'working'))"
 
 [[plant]]
@@ -363,7 +372,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused'))"
 
 [[plant]]
@@ -373,7 +383,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused'))"
 
 [[plant]]
@@ -383,7 +394,8 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+find = '''OR (t.state = 'paused' AND t.held_until IS NOT NULL
+                          AND t.held_until < '9999'))'''
 replace = "OR (t.state = 'paused'))"
 
 [[plant]]
@@ -473,8 +485,10 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '                "project.wake_up_skipped",'
-replace = '                "project.wake_up_skipped.never",'
+find = '''                "project.wake_up_skipped",
+                json!({ "tasks": tasks }),'''
+replace = '''                "project.wake_up_skipped.never",
+                json!({ "tasks": tasks }),'''
 
 [[plant]]
 name = "wake-up: the first after the calls are turned on again waits for the board to move"
@@ -483,7 +497,7 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '        .exists(params![project_id, last.event])?)'
+find = '        .exists(params![project_id, event])?)'
 replace = '        .exists(params![project_id, i64::MAX])?)'
 
 [[plant]]
@@ -536,10 +550,9 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '''                OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open'))",
-        [project_id],'''
-replace = '''                )",
-        [project_id],'''
+find = '''                OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open')
+                OR (kind = 'project.meeting' AND json_extract(data, '$.on') = 0))",'''
+replace = '''                OR (kind = 'project.meeting' AND json_extract(data, '$.on') = 0))",'''
 
 [[plant]]
 name = "wake-up: the interval counts from when a wake-up was queued, not from when it was delivered"
@@ -840,4 +853,11 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
 find = '    if now_ms < origin.saturating_add(wake_up.every_ms) {'
+replace = '    if false {'
+
+# The interval is held a second time since T-1113 (once the human's words and the doubling
+# are counted): both go.
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if now_ms < origin.saturating_add(apart) {'
 replace = '    if false {'

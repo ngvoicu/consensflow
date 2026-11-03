@@ -27,6 +27,11 @@
 // The one place a program starts and the test's environment is read; see above.
 #![allow(clippy::disallowed_methods)]
 
+// The cargo a test starts: one file for every crate that starts one (`crates/cf-process` holds its
+// cases), included by its path because this crate depends on none of ours for it.
+#[allow(dead_code)] // Only the cargo's name and the list of variables are used here.
+#[path = "../../cf-process/src/nested_cargo.rs"]
+mod nested_cargo;
 mod pid;
 mod spawned;
 #[cfg(test)]
@@ -53,6 +58,14 @@ pub use spawned::{Sink, Spawned};
 /// How long a program may run before it is ended. A verb of `cf` answers at
 /// once, and one that waited for ever would hold the whole suite with it.
 pub const LIMIT: Duration = Duration::from_secs(30);
+
+/// How long a PowerShell the rig, its checks or its stand-ins start on Windows is given:
+/// well past what one takes to start on a loaded machine. That was 11 to 17 s on GitHub's
+/// Windows runner (2026-10-15), and past [`LIMIT`] under the load of a whole test program
+/// (CI's run of the live suites' offline cases, 2026-11-03, T-1161): a PowerShell ended at
+/// [`LIMIT`] said nothing of processes that ran, and a stand-in that waited no longer for
+/// its own command's PowerShell took the command for failed and left its window.
+pub const POWERSHELL_LIMIT: Duration = Duration::from_secs(120);
 
 /// The case `case` of a test binary (`binary`: the test's own, `std::env::current_exe()`) run
 /// again alone as a program by a test of it, held to `limit`: the most what the case runs may
@@ -130,15 +143,27 @@ pub struct Run {
     program: OsString,
     args: Vec<Arg>,
     vars: Vec<(OsString, OsString)>,
+    removed: Vec<OsString>,
     inherit: bool,
     finding_programs: bool,
     cwd: Option<PathBuf>,
     limit: Option<Duration>,
     input: Input,
     own_group: bool,
+    /// The bundle the release ships, where the run has leave to start it ([`Run::shipped`]).
+    shipped: Option<PathBuf>,
 }
 
 impl Run {
+    /// With leave to start the bundle the release ships, which no case starts otherwise: a
+    /// [`Shipped`](crate::shipped::Shipped), made only on GitHub's runner where its workflow
+    /// asks and no live app runs.
+    #[must_use]
+    pub fn shipped(mut self, leave: &crate::shipped::Shipped) -> Self {
+        self.shipped = Some(leave.app().to_path_buf());
+        self
+    }
+
     /// `program`, with no words, none of the test's environment and the
     /// [`LIMIT`]. A path is started as it is; a bare name is left to the
     /// system to find, which the cases here do not rely on.
@@ -147,12 +172,14 @@ impl Run {
             program: program.as_ref().to_os_string(),
             args: Vec::new(),
             vars: Vec::new(),
+            removed: Vec::new(),
             inherit: false,
             finding_programs: false,
             cwd: None,
             limit: Some(LIMIT),
             input: Input::Default,
             own_group: false,
+            shipped: None,
         }
     }
 
@@ -211,6 +238,31 @@ impl Run {
         self
     }
 
+    /// Without the variable `name`, whichever way the program got it: told, or
+    /// the test's own under [`Run::inheriting_env`].
+    #[must_use]
+    pub fn without(mut self, name: impl AsRef<OsStr>) -> Self {
+        self.removed.push(name.as_ref().to_os_string());
+        self
+    }
+
+    /// The cargo a test starts: the test's own environment underneath, but for
+    /// the variables cargo gave the test (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`...),
+    /// as a shell would start it. With them a build script that watches one (`ring`'s
+    /// does) runs again, and the package and all that is over it are built again,
+    /// in the folder the running build uses (`nested_cargo`, which
+    /// says why and is the one place that names the cargo).
+    #[must_use]
+    pub fn cargo() -> Self {
+        let mut run = Self::new(nested_cargo::CARGO).inheriting_env();
+        for (name, _) in std::env::vars_os() {
+            if name.to_str().is_some_and(nested_cargo::given_to_a_test) {
+                run = run.without(name);
+            }
+        }
+        run
+    }
+
     /// With the test's own environment underneath its variables, instead of
     /// the variables alone.
     #[must_use]
@@ -240,6 +292,12 @@ impl Run {
     pub fn limit(mut self, limit: Duration) -> Self {
         self.limit = Some(limit);
         self
+    }
+
+    /// The most the run may take before it is ended: none for a run never ended.
+    #[cfg(test)]
+    pub(crate) fn limit_given(&self) -> Option<Duration> {
+        self.limit
     }
 
     /// Never ended for running long: for a build, which takes what it takes.
@@ -273,6 +331,29 @@ impl Run {
         self
     }
 
+    /// Refuses a program that is an app a test may not start, or reaches one by its words,
+    /// before anything starts.
+    fn startable(&self) -> Result<()> {
+        let words: Vec<&OsStr> = self
+            .args
+            .iter()
+            .map(|arg| match arg {
+                Arg::Plain(word) => word.as_os_str(),
+                #[cfg(windows)]
+                Arg::Raw(word) => word.as_os_str(),
+            })
+            .collect();
+        let program = std::path::Path::new(&self.program);
+        let shipped = self.shipped.as_deref().is_some_and(|app| {
+            cf_base::bundle::bundle_of(program).is_some_and(|bundle| bundle == app)
+        });
+        if shipped {
+            return cf_base::bundle::words_startable_by_a_test(program, &words)
+                .map_err(Error::LiveApp);
+        }
+        cf_base::bundle::command_startable_by_a_test(program, &words).map_err(Error::LiveApp)
+    }
+
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
@@ -285,6 +366,9 @@ impl Run {
                 .envs(required_on_windows(&self.vars, self.finding_programs));
         }
         command.envs(self.vars.iter().map(|(name, value)| (name, value)));
+        for name in &self.removed {
+            command.env_remove(name);
+        }
         for arg in &self.args {
             arg.add_to(&mut command);
         }
@@ -305,6 +389,7 @@ impl Run {
     /// Only a program that did not start is an error: a code other than 0 is an
     /// answer, for the case to read.
     pub fn run(self) -> Result<Ran> {
+        self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
         let mut command = self.command();
         command
@@ -354,6 +439,7 @@ impl Run {
     /// streams are pipes ([`Spawned`]), its input one too unless it was told to
     /// be closed. Ending it is the case's, or its owner's drop.
     pub fn spawn(self) -> Result<Spawned> {
+        self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
         let mut command = self.command();
         command

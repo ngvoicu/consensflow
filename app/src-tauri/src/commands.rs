@@ -108,27 +108,30 @@ pub fn pane_reply_enqueue<R: Runtime>(
         id,
         generation,
         sequence,
-        InputWork::Write(bytes),
+        InputWork::Reply(bytes),
         false,
     )
 }
 
 #[tauri::command]
 pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value {
-    if let Err(error) = validate_text(&ticket, "pane input ticket") {
-        return json!({"ok":false,"error":error});
-    }
-    let inputs = {
-        let state = app.state::<AppRuntime>();
-        Arc::clone(&state.inputs)
-    };
-    let completion = inputs.take_page_completion(&ticket);
-    let human = completion.as_ref().is_ok_and(|completion| completion.human);
-    let result = input_result(completion).await;
-    if human && result["ok"] == true {
-        let _ = app.emit(PAGE_STATE_EVENT, json!({"reason":"human-input"}));
-    }
-    result
+    crate::panics::settled("pane_input_wait", async move {
+        if let Err(error) = validate_text(&ticket, "pane input ticket") {
+            return json!({"ok":false,"error":error});
+        }
+        let inputs = {
+            let state = app.state::<AppRuntime>();
+            Arc::clone(&state.inputs)
+        };
+        let completion = inputs.take_page_completion(&ticket);
+        let human = completion.as_ref().is_ok_and(|completion| completion.human);
+        let result = input_result(completion).await;
+        if human && result["ok"] == true {
+            let _ = app.emit(PAGE_STATE_EVENT, json!({"reason":"human-input"}));
+        }
+        result
+    })
+    .await
 }
 
 #[tauri::command]
@@ -139,22 +142,25 @@ pub async fn pane_resize<R: Runtime>(
     cols: u16,
     rows: u16,
 ) -> Value {
-    if let Err(error) = validate_size(cols, rows) {
-        return json!({"ok":false,"error":error});
-    }
-    let key = match pane_key(&id, generation) {
-        Ok(key) => key,
-        Err(error) => return json!({"ok":false,"error":error}),
-    };
-    let panes = {
-        let state = app.state::<AppRuntime>();
-        Arc::clone(&state.panes)
-    };
-    run_blocking("pane_resize", move || {
-        match panes.resize(&key, rows, cols) {
-            Ok(()) => json!({"ok":true}),
-            Err(error) => json!({"ok":false,"error":error.to_string()}),
+    crate::panics::settled("pane_resize", async move {
+        if let Err(error) = validate_size(cols, rows) {
+            return json!({"ok":false,"error":error});
         }
+        let key = match pane_key(&id, generation) {
+            Ok(key) => key,
+            Err(error) => return json!({"ok":false,"error":error}),
+        };
+        let panes = {
+            let state = app.state::<AppRuntime>();
+            Arc::clone(&state.panes)
+        };
+        run_blocking("pane_resize", move || {
+            match panes.resize(&key, rows, cols) {
+                Ok(()) => json!({"ok":true}),
+                Err(error) => json!({"ok":false,"error":error.to_string()}),
+            }
+        })
+        .await
     })
     .await
 }
@@ -166,21 +172,24 @@ pub async fn pane_ack<R: Runtime>(
     generation: u64,
     seq: u64,
 ) -> Value {
-    if let Err(error) = validate_seq(seq) {
-        return json!({"ok":false,"error":error});
-    }
-    let key = match pane_key(&id, generation) {
-        Ok(key) => key,
-        Err(error) => return json!({"ok":false,"error":error}),
-    };
-    let panes = {
-        let state = app.state::<AppRuntime>();
-        Arc::clone(&state.panes)
-    };
-    match panes.ack(&key, seq) {
-        Ok(()) => json!({"ok":true}),
-        Err(error) => json!({"ok":false,"error":error.to_string()}),
-    }
+    crate::panics::settled("pane_ack", async move {
+        if let Err(error) = validate_seq(seq) {
+            return json!({"ok":false,"error":error});
+        }
+        let key = match pane_key(&id, generation) {
+            Ok(key) => key,
+            Err(error) => return json!({"ok":false,"error":error}),
+        };
+        let panes = {
+            let state = app.state::<AppRuntime>();
+            Arc::clone(&state.panes)
+        };
+        match panes.ack(&key, seq) {
+            Ok(()) => json!({"ok":true}),
+            Err(error) => json!({"ok":false,"error":error.to_string()}),
+        }
+    })
+    .await
 }
 
 async fn task_operation<R: Runtime>(
@@ -243,6 +252,9 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "history.part",
     "computer_use.get",
     "computer_use.open",
+    "project.meeting",
+    "project.rules",
+    "project.compaction",
 ];
 
 #[tauri::command]
@@ -251,16 +263,19 @@ pub async fn daemon_request<R: Runtime>(
     operation: String,
     body: Value,
 ) -> Value {
-    let Some(operation) = DAEMON_OPERATIONS
-        .iter()
-        .find(|allowed| **allowed == operation)
-    else {
-        return json!({"ok":false,"error":format!("unknown daemon operation {operation}")});
-    };
-    if !body.is_object() {
-        return json!({"ok":false,"error":"a daemon request body is an object"});
-    }
-    task_operation(app, operation, body).await
+    crate::panics::settled("daemon_request", async move {
+        let Some(operation) = DAEMON_OPERATIONS
+            .iter()
+            .find(|allowed| **allowed == operation)
+        else {
+            return json!({"ok":false,"error":format!("unknown daemon operation {operation}")});
+        };
+        if !body.is_object() {
+            return json!({"ok":false,"error":"a daemon request body is an object"});
+        }
+        task_operation(app, operation, body).await
+    })
+    .await
 }
 
 /// The page's pane-output subscription, taken ONCE for the life of the page.
@@ -294,35 +309,46 @@ pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
-    let (panes, output, inputs, daemon) = {
-        let state = app.state::<AppRuntime>();
-        (
-            Arc::clone(&state.panes),
-            Arc::clone(&state.output),
-            Arc::clone(&state.inputs),
-            Arc::clone(&state.daemon),
-        )
-    };
-    inputs.begin_page();
-    output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
-    // Once the new page listens: everything sent before it went to the old.
-    panes.ack_all();
-    daemon.tell_again();
-    json!({"ok":true})
+    crate::panics::settled("subscribe_output", async move {
+        let (panes, output, inputs, daemon) = {
+            let state = app.state::<AppRuntime>();
+            (
+                Arc::clone(&state.panes),
+                Arc::clone(&state.output),
+                Arc::clone(&state.inputs),
+                Arc::clone(&state.daemon),
+            )
+        };
+        inputs.begin_page();
+        output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
+        // Once the new page listens: everything sent before it went to the old.
+        panes.ack_all();
+        daemon.tell_again();
+        json!({"ok":true})
+    })
+    .await
 }
 
 /// The address of one agents screen (the agents, the harnesses): the
 /// daemon's page with the UI token, which the board's page frames in a
 /// dialog of its own.
 #[tauri::command]
-pub fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
-    let Some(roster) = app.state::<AppRuntime>().daemon.roster() else {
-        return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
-    };
-    match agents_url(&roster, &page) {
-        Ok(url) => json!({"ok":true,"url":url.as_str()}),
-        Err(error) => json!({"ok":false,"error":error}),
-    }
+pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
+    crate::panics::settled("agents_screen", async move {
+    let daemon = Arc::clone(&app.state::<AppRuntime>().daemon);
+    // Off the async runtime: asked while the daemon is starting, it waits.
+    run_blocking("agents_screen", move || {
+        let Some(roster) = daemon.roster() else {
+            return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
+        };
+        match agents_url(&roster, &page) {
+            Ok(url) => json!({"ok":true,"url":url.as_str()}),
+            Err(error) => json!({"ok":false,"error":error}),
+        }
+    })
+    .await
+})
+    .await
 }
 
 const AGENTS_PAGES: &[&str] = &["", "harnesses"];
@@ -433,7 +459,13 @@ mod tests {
                 "{command} must not be scheduled before input admission"
             );
         }
-        for command in ["pane_input_wait", "pane_resize", "pane_ack"] {
+        // `agents_screen` waits for the daemon's first start, as a request does (T-951).
+        for command in [
+            "pane_input_wait",
+            "pane_resize",
+            "pane_ack",
+            "agents_screen",
+        ] {
             assert!(
                 source.contains(&format!("pub async fn {command}")),
                 "{command} can wait and must leave Tauri's main thread"
@@ -684,6 +716,130 @@ mod tests {
             .map(|byte| u8::from_str_radix(std::str::from_utf8(byte).unwrap(), 16).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(actual, b"KC");
+
+        drop(webview);
+        drop(app);
+    }
+
+    /// The page's terminal answers what the program asked of it (where its cursor is) past
+    /// the human's keys held after their paste (T-1048): Codex on Windows asks as a paste comes
+    /// and reads none of it until it has the answer, and the page's answer waited behind the
+    /// human's held Enter. Here the program records what it reads: the answer, sent once the
+    /// paste and its Enter were admitted, comes back at once and is read before the Enter.
+    #[cfg(unix)]
+    #[test]
+    fn the_pages_reply_goes_past_the_humans_keys_held_after_their_paste() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("replied-command", 1);
+        let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "/bin/stty raw -echo; printf ready; /usr/bin/od -An -tx1 -N {}",
+                        paste.len() + 2
+                    ),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the replied pane");
+        // Held until the window draws the paste, which the recorder never does: at the most.
+        let silent = cf_proto::panes::SilentPaste {
+            pace_us_per_character: 0,
+            drawn_after_ms: 0,
+            quiet_ms: 100,
+            most_ms: 1_500,
+            most_us_per_character: 0,
+        };
+        arbiter
+            .register_with(&key, Some(silent))
+            .expect("register the replied pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader
+            .read_exact(&mut ready)
+            .expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+
+        let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![
+                pane_input_enqueue,
+                pane_reply_enqueue,
+                pane_input_wait
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().expect("invoke URL"),
+                    body: tauri::ipc::InvokeBody::Json(args),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .expect("command succeeds")
+            .deserialize::<Value>()
+            .expect("command response JSON")
+        };
+
+        let pasted = [paste, b"\r"].concat();
+        let typed = invoke(
+            "pane_input_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":1,"bytes":pasted}),
+        );
+        assert_eq!(typed["ok"], true, "{typed}");
+        thread::sleep(Duration::from_millis(200));
+        let replied = invoke(
+            "pane_reply_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":2,"bytes":[82]}),
+        );
+        assert_eq!(replied["ok"], true, "{replied}");
+        let asked = std::time::Instant::now();
+        let answered = invoke("pane_input_wait", json!({"ticket":replied["ticket"]}));
+        assert_eq!(answered["ok"], true, "{answered}");
+        assert!(
+            asked.elapsed() < Duration::from_millis(1_000),
+            "{:?}: the page's answer waited behind the human's held Enter",
+            asked.elapsed()
+        );
+        let sent = invoke("pane_input_wait", json!({"ticket":typed["ticket"]}));
+        assert_eq!(sent["ok"], true, "{sent}");
+        let mut output = Vec::new();
+        reader
+            .read_to_end(&mut output)
+            .expect("read the replied bytes");
+        let actual = output
+            .split(|byte| byte.is_ascii_whitespace())
+            .filter(|field| !field.is_empty())
+            .map(|byte| u8::from_str_radix(std::str::from_utf8(byte).unwrap(), 16).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            actual.ends_with(b"R\r"),
+            "the answer came after the Enter: {actual:?}"
+        );
 
         drop(webview);
         drop(app);

@@ -6,12 +6,17 @@
 //! marker, when it is there, says that turn is in flight, not unknown.
 //!
 //! The session's last assistant step decides the turn. It is settled when
-//! that step stopped or was aborted (an Escape: a pause, a tell, the human),
-//! no tool call is open, and either the extension's evidence names it, or the
-//! file has been quiet for 120 seconds (`QUIET_MS`): Pi's agent retry is
-//! capped at 60 seconds (`retry.maxAgentDelayMs`, since Pi 0.86.0 and still in
-//! 1.3.0, the newest seen), so two of them without an append say no retry is
-//! coming.
+//! that step stopped, was aborted (an Escape: a pause, a tell, the human) or
+//! failed (a provider's error), no tool call is open, and either the
+//! extension's evidence names it, or the file has been quiet for 120 seconds
+//! (`QUIET_MS`): Pi's agent retry is capped at 60 seconds
+//! (`retry.maxAgentDelayMs`, since Pi 0.86.0 and still in 1.3.0, the newest
+//! seen), so two of them without an append say no retry is coming. A failed
+//! step is a turn that ended like the others: Pi writes a new step for each
+//! retry, so a failure with nothing after it for that long is the last, and
+//! a window whose evidence is gone (a conversation followed with `/resume`, a
+//! launch folder swept, an extension that could not write) must not read at
+//! work for good (T-781).
 //!
 //! Pi's reader is no `TranscriptReader`: its answer also rests on the
 //! evidence and on the file's quiet, which change while the transcript does
@@ -36,7 +41,10 @@ use jiff::tz::TimeZone;
 use serde_json::Value;
 
 use super::paths::transcript;
-use crate::shared::quota::{exhausted_quota, refused_for_quota, Quota};
+use crate::shared::quota::{
+    account_refusal, busy_quota, busy_refusal, exhausted_quota, refused_for_quota,
+    unavailable_quota, Quota,
+};
 use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Followed, Parser};
 use crate::shared::record::jsonl::Stop;
@@ -121,30 +129,14 @@ struct Session {
     /// The tool calls made and not yet answered in the turn.
     open_tools: HashSet<Key>,
     turn_open: bool,
-    /// How the last assistant step ended, if it ended.
-    terminal: Option<Terminal>,
+    /// The last assistant step, if it ended: it stopped, was aborted or failed.
+    terminal: Option<Arc<str>>,
     failed: bool,
     /// Why the latest turn failed, where Pi said (`errorMessage`).
     failure: Option<String>,
     quota: Option<Arc<Quota>>,
     records: usize,
     keys: Keys,
-}
-
-/// The end of the last assistant step: how, and which item it was.
-struct Terminal {
-    how: End,
-    id: Arc<str>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum End {
-    /// `stopReason: "stop"`.
-    Stopped,
-    /// `stopReason: "aborted"`: the turn is over, not failed.
-    Aborted,
-    /// `stopReason: "error"`.
-    Failed,
 }
 
 impl Session {
@@ -266,21 +258,11 @@ impl Session {
         self.quota = None;
         self.turn_open = true;
         match stop {
-            Some("stop") => {
+            // An abort is a turn over, not a failed one.
+            Some("stop" | "aborted") => {
                 self.failed = false;
                 self.failure = None;
-                self.terminal = Some(Terminal {
-                    how: End::Stopped,
-                    id,
-                });
-            }
-            Some("aborted") => {
-                self.failed = false;
-                self.failure = None;
-                self.terminal = Some(Terminal {
-                    how: End::Aborted,
-                    id,
-                });
+                self.terminal = Some(id);
             }
             Some("error") => {
                 self.failed = true;
@@ -293,16 +275,25 @@ impl Session {
                 };
                 let said = !matches!(field("errorMessage"), None | Some(Value::Null));
                 self.failure = said.then(|| failure.clone());
-                if refused_for_quota(&failure) {
+                // An account refused for its billing or its login has no reset to wait for
+                // (MUS-23); a limit that resets is the quota.
+                let refusal = account_refusal(&failure, None);
+                // A provider's refusal for a moment (an overloaded model, a 5xx) is held and
+                // tried again, not the turn's failure (T-1112).
+                let busy = busy_refusal(&failure, None);
+                if refusal.is_some() || refused_for_quota(&failure) || busy {
                     let at_ms = js::to_number(field("timestamp")).map_err(Stop::Failed)?;
-                    let quota =
-                        exhausted_quota(&failure, at_ms, &self.local).map_err(Stop::Failed)?;
+                    let quota = match refusal {
+                        Some(refusal) => unavailable_quota(at_ms, refusal, &failure),
+                        None if refused_for_quota(&failure) => {
+                            exhausted_quota(&failure, at_ms, &self.local)
+                        }
+                        None => busy_quota(at_ms, &failure),
+                    }
+                    .map_err(Stop::Failed)?;
                     self.quota = Some(Arc::new(quota));
                 }
-                self.terminal = Some(Terminal {
-                    how: End::Failed,
-                    id,
-                });
+                self.terminal = Some(id);
             }
             _ => self.terminal = None,
         }
@@ -325,8 +316,8 @@ impl Session {
         let frontier = evidence::frontier(&self.session, env, options)?;
         let has_native_boundary = self
             .terminal
-            .as_ref()
-            .is_some_and(|terminal| frontier.as_deref() == Some(&*terminal.id));
+            .as_deref()
+            .is_some_and(|terminal| frontier.as_deref() == Some(terminal));
         let written = stat(file)
             .map_err(|error| format!("{}: {error}", file.display()))?
             .mtime_ms;
@@ -334,12 +325,7 @@ impl Session {
         #[allow(clippy::cast_precision_loss)]
         let quiet = now_ms as f64 - written >= QUIET_MS;
         let open = !self.open_tools.is_empty();
-        let can_settle = self
-            .terminal
-            .as_ref()
-            .is_some_and(|terminal| terminal.how != End::Failed)
-            && quiet
-            && !open;
+        let can_settle = self.terminal.is_some() && quiet && !open;
         let native_settled = has_native_boundary && !open;
         let in_flight = open
             || match self.terminal {

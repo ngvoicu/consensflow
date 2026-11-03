@@ -14,7 +14,7 @@
 //! Each harness is the one worker of a project on the native daemon, whose chief is
 //! the stand-in; the check, as the chief, gives it a brief of forty numbered lines
 //! that ends asking for a sum, through the real path a message takes to it (pasted
-//! into Claude Code and Devin, put to Codex, Pi and OpenCode through their own
+//! into Claude Code and Devin, put to Codex and Pi through their own
 //! queues). The worker's window is kept open as the human keeps one (`session.open`):
 //! it closes with its task otherwise. Through the turn, twice a second, and once at
 //! rest after it, the check asks the pane host for the window's screen as the
@@ -44,7 +44,7 @@
 //! home goes with the run.
 //!
 //! ```text
-//! cargo xtask live paste-screen                         all five, one after another
+//! cargo xtask live paste-screen                         every harness, one after another
 //! cargo xtask live paste-screen claude devin            those named
 //! cargo xtask live paste-screen pi --keep               leaves the run's home and project
 //! ```
@@ -126,7 +126,10 @@ impl Shows {
             .iter()
             .any(|line| line.contains("[Pasted text #") || line.contains("[Pasted Content "));
         let lines = (1..=LINES)
-            .filter(|n| tail.iter().any(|line| line.contains(&mark(*n))))
+            .filter(|n| {
+                let numbered = format!("{}:", mark(*n));
+                tail.iter().any(|line| begun(line).starts_with(&numbered))
+            })
             .count();
         Self {
             header,
@@ -195,7 +198,8 @@ fn tail(members: &Members, pane: &Value, lines: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The harnesses the words of the command line name, or all five where they name none.
+/// The harnesses the words of the command line name, or every one where they name
+/// none.
 fn harnesses(named: &[String]) -> Result<Vec<Harness>> {
     if named.is_empty() {
         return Ok(Harness::ALL.to_vec());
@@ -291,17 +295,56 @@ fn look(members: &mut Members, harness: Harness, log: &Log) -> Result<(bool, See
             .unwrap_or_default();
         // The thread holds the worker's result to the chief too: the engine reads what
         // went into the window by its recipient.
-        seen.wrong = misread(&lines, &ask::ours(&lines, &handle, &pasted)?);
+        let window = ask::For::new(members.rig().cf(), harness.name());
+        let ours = ask::ours(&lines, &handle, &pasted, window)?;
+        seen.wrong = misread(&lines, &ours);
+        // A screen the rule misread is said whole, each line with the rule's word on it,
+        // so the red case can be read and kept (T-1000, T-784): what it holds is the
+        // check's own brief and the window's frame.
+        if seen.wrong.is_some() {
+            log.say(format!(
+                "the look at rest, as the rule read it:\n{}",
+                read_as(&lines, &ours)
+            ));
+        }
     }
     let state = ended.unwrap_or_else(|| "not over".to_owned());
     log.say(format!("T-{number} is {state}; {}", seen.line()));
     Ok((state == "done", seen))
 }
 
+/// `lines`, each after the rule's word on it: `ours` for ConsensFlow's, `    ` for the
+/// window's, and its place in the look.
+fn read_as(lines: &[String], ours: &[bool]) -> String {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(at, line)| {
+            let said = if ours.get(at).copied().unwrap_or(false) {
+                "ours"
+            } else {
+                "    "
+            };
+            format!("{:>2} {said} |{line}", at + 1)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `line` after the window's frame: what it begins with that is no letter, digit or `[`
+/// (a prompt's `>`, a box's `│`, the indent).
+fn begun(line: &str) -> &str {
+    line.trim_start_matches(|c: char| !(c.is_alphanumeric() || c == '['))
+}
+
 /// Whether the brief's line `line` is: one of its numbered lines, or the sum it
-/// asks for.
+/// asks for, begun after the window's frame. A line that only names the brief's marks
+/// is the window's: Devin 3000.11.228 draws a title of the conversation, made from its
+/// words, in the line above its input (`─── Analyze PSL-01–PSL-40 Brief and Provide… ─`),
+/// which the check took for the brief, and failed 2 runs of 3 (T-1000, T-784).
 fn of_the_brief(line: &str) -> bool {
-    line.contains("PSL-") || line.contains("Reply with only the sum of")
+    let begun = begun(line);
+    begun.starts_with("PSL-") || begun.starts_with("Reply with only the sum of")
 }
 
 /// What the engine's rule (`ours`, a line to each of `lines`) took otherwise than
@@ -431,7 +474,40 @@ mod tests {
     }
 
     #[test]
-    fn with_no_harness_named_all_five_run_and_those_named_run_in_their_order() {
+    fn a_title_devin_draws_from_the_briefs_words_is_the_windows_and_no_line_of_the_brief() {
+        // The screen at rest of a run on Devin 3000.11.228 (2026-10-31), as the engine's
+        // rule read it: the brief's last lines ConsensFlow's, and from the answer down the
+        // window's, its title of the conversation among them.
+        let screen = lines(&[
+            "  PSL-36: line 36 of the brief, nothing to do for it.",
+            "  PSL-37: line 37 of the brief, nothing to do for it.",
+            "  PSL-38: line 38 of the brief, nothing to do for it.",
+            "  PSL-39: line 39 of the brief, nothing to do for it.",
+            "  PSL-40: line 40 of the brief, nothing to do for it.",
+            "  Reply with only the sum of 2357 and 1113, in digits, and run no tools.",
+            " 3470",
+            " ⏺ ~/.consensflow-candidate/live/paste-screen-devin",
+            "───────────────────────────────────── Analyze PSL-01–PSL-40 Brief and Provide… ─",
+            "❭ Ask Devin to build features, fix bugs, or work on your code",
+            "SWE-2 Medium · bypass                            Context: 16k / 262k tokens (6%)",
+            "Update v3000.11.234 available!",
+        ]);
+        let ours = [
+            true, true, true, true, true, true, false, false, false, false, false, false,
+        ];
+        assert_eq!(misread(&screen, &ours), None);
+        assert_eq!(
+            Shows::of(&screen).lines,
+            5,
+            "the title names no line it shows"
+        );
+        // A line of the brief is one still, after any frame.
+        assert!(of_the_brief("│ PSL-02: line 2 of the brief"));
+        assert!(of_the_brief("> Reply with only the sum of 2357 and 1113"));
+    }
+
+    #[test]
+    fn with_no_harness_named_all_run_and_those_named_run_in_their_order() {
         assert_eq!(harnesses(&[]).unwrap(), Harness::ALL.to_vec());
         assert_eq!(
             harnesses(&["pi".to_owned(), "claude".to_owned()]).unwrap(),

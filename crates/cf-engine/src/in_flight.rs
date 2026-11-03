@@ -31,10 +31,11 @@ use cf_harness::contract::TurnLeft;
 use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::MessageView;
 use cf_proto::agents::Harness;
+use cf_proto::cf_word::CfWord;
 use serde_json::json;
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::{delivery_text, delivery_text_sent_again, is_paste_of, marker_of};
+use crate::delivery_text::{delivery_text_beside, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{caught, returning};
@@ -46,12 +47,33 @@ pub(crate) const TOOK_BEFORE_A_RESTART: &str =
     "the daemon stopped before its record showed it, and its window took it";
 
 impl Dispatcher {
+    /// How a command starts in the window `message` is for: the bundle's own `cf` by its
+    /// whole path, as that window's shell takes it ([`Roles::cf`]), or the word `cf` where
+    /// its recipient is no participant of the project any more. The texts typed into the
+    /// window start the commands they name with it ([`crate::delivery_text::delivery_text`]).
+    ///
+    /// [`Roles::cf`]: crate::seams::Roles::cf
+    pub(crate) fn cf_for(&self, message: &MessageView) -> Result<CfWord, EngineError> {
+        let project = self.seams.ledger.borrow().project(message.project_id)?;
+        Ok(project
+            .and_then(|project| {
+                project
+                    .participants
+                    .into_iter()
+                    .find(|participant| participant.id == message.recipient_id)
+            })
+            .map_or_else(CfWord::bare, |participant| {
+                self.seams.roles.cf(&participant)
+            }))
+    }
+
     /// How `message` reads in its window, with the rows it `carried`: as it always does
-    /// ([`delivery_text`]), but for one a start gave back though its window took it
-    /// ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again
-    /// ([`delivery_text_sent_again`]), whatever gave it back since (Resume after Close
-    /// turns a paste away at its hand-over, its project closed): that first copy may be
-    /// there still.
+    /// ([`crate::delivery_text::delivery_text`]), but for one a start gave back though its
+    /// window took it ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again, whatever
+    /// gave it back since (Resume after Close turns a paste away at its hand-over, its
+    /// project closed): that first copy may be there still. A result whose task's turn on
+    /// a tell was told in a note names it, and says that it is the one to decide
+    /// ([`delivery_text_beside`], T-958).
     pub(crate) fn delivery_text_of(
         &self,
         message: &MessageView,
@@ -62,11 +84,17 @@ impl Dispatcher {
             .ledger
             .borrow()
             .given_back_because(message.id, TOOK_BEFORE_A_RESTART)?;
-        Ok(if again {
-            delivery_text_sent_again(message, carried)
-        } else {
-            delivery_text(message, carried)
-        })
+        // A result whose task's turn on a tell was told in a note says which to decide.
+        let told_in = match (message.kind.as_str(), message.task_number) {
+            ("result", Some(number)) => self.seams.ledger.borrow().paused_answer_given(
+                message.project_id,
+                number,
+                message.id,
+            )?,
+            _ => None,
+        };
+        let cf = self.cf_for(message)?;
+        Ok(delivery_text_beside(message, carried, &cf, again, told_in))
     }
 
     /// Once, at start: what was on its way to a window when the previous process
@@ -163,9 +191,12 @@ impl Dispatcher {
     /// (its handoff, and what its launch put ahead of its queue), which `otherwise`
     /// gives back to wait for its next window, on the same conversation: one its
     /// record shows went there was given again (a review of 2026-10-16: a Codex chief
-    /// that recorded its handoff and closed before a look was given it twice). A
-    /// member's launch's first message is `otherwise`'s alone: it fails with the
-    /// launch, and is never pasted again. The message is read
+    /// that recorded its handoff and closed before a look was given it twice). So is a
+    /// member's launch's first message whose window closed `with_project`, which
+    /// `otherwise` gives back for the Resume: one its record shows is the conversation's
+    /// already, and the Resume goes on there without it (T-1076). Any other member's
+    /// launch's first message is `otherwise`'s alone: it fails with the launch, and is
+    /// never pasted again. The message is read
     /// again once the record is: one that is on its way no more (its task cancelled
     /// meanwhile, or taken back) is left as it is, and the window's end goes on (a
     /// review of 2026-10-16: a confirm of a message cancelled meanwhile failed, and the
@@ -175,9 +206,10 @@ impl Dispatcher {
     pub(crate) async fn settle_gone(
         self: &Rc<Self>,
         delivering: Delivering,
+        with_project: bool,
         otherwise: impl FnOnce(Delivering) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
-        if delivering.launch && !delivering.chief {
+        if delivering.launch && !delivering.chief && !with_project {
             return otherwise(delivering);
         }
         let Some(message) = self.still_delivering(delivering.message)? else {

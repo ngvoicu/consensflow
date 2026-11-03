@@ -5,6 +5,7 @@
 //! 2026-10-19: two tasks held out of quota ended failed at the reset).
 
 use super::*;
+use crate::records::ModelMoved;
 use crate::shared::quota::Level;
 
 /// The rate limits as a `token_count` reports them: the primary window `used`
@@ -76,14 +77,109 @@ fn a_reset_the_limits_named_before_the_refusal_is_none_of_its_own() {
 
 #[test]
 fn another_error_fails_its_turn_and_says_nothing_of_quota() {
+    for info in ["context_window_exceeded", "bad_request", "sandbox_error"] {
+        let read = read(&[
+            limits(40.0, RESETS),
+            started(json!("t1")),
+            failed("t1", info, AT),
+        ])
+        .unwrap();
+        assert!(read.failed, "{info}");
+        assert_eq!(
+            read.quota.as_deref().map(Quota::level),
+            Some(Level::Ok),
+            "{info}"
+        );
+    }
+}
+
+/// A turn's end with `error` saying `message`, its `codex_error_info` `info`, at `at`.
+fn errored(info: Value, message: &str) -> Value {
+    json!({
+        "timestamp": AT,
+        "type": "event_msg",
+        "payload": {
+            "type": "task_complete",
+            "turn_id": "t1",
+            "last_agent_message": null,
+            "error": { "message": message, "codex_error_info": info },
+        },
+    })
+}
+
+#[test]
+fn a_turn_its_server_refused_for_a_moment_is_busy_and_no_quota() {
+    // T-1112: the words and kind `errored-task-complete.jsonl` recorded (codex-cli 0.153.4),
+    // a server's own error, a request Codex gave up on with a server's status, and words
+    // only.
+    let at_capacity = "Selected model is at capacity. Please try a different model.";
+    for (info, message) in [
+        (json!("server_overloaded"), at_capacity),
+        (json!("internal_server_error"), "Internal server error"),
+        (
+            json!("policy_capacity_unavailable"),
+            "Policy-restricted capacity is unavailable. Please try again later.",
+        ),
+        (
+            json!({ "response_too_many_failed_attempts": { "http_status_code": 503 } }),
+            "exceeded retry limit, last status: 503 Service Unavailable",
+        ),
+        (
+            json!({ "http_connection_failed": { "http_status_code": 529 } }),
+            "unexpected status 529",
+        ),
+        (json!("other"), "The server is overloaded, try again later"),
+    ] {
+        let read = read(&[
+            limits(40.0, RESETS),
+            started(json!("t1")),
+            errored(info.clone(), message),
+        ])
+        .unwrap();
+        assert!(read.failed, "{info}");
+        assert_eq!(
+            read.quota.as_deref(),
+            Some(&Quota::Busy {
+                at: Some(AT.to_owned()),
+                because: message.to_owned(),
+            }),
+            "{info}"
+        );
+    }
+}
+
+#[test]
+fn a_request_codex_gave_up_on_for_no_server_error_is_no_refusal() {
     let read = read(&[
         limits(40.0, RESETS),
         started(json!("t1")),
-        failed("t1", "server_overloaded", AT),
+        errored(
+            json!({ "response_stream_disconnected": { "http_status_code": 400 } }),
+            "stream disconnected",
+        ),
     ])
     .unwrap();
     assert!(read.failed);
     assert_eq!(read.quota.as_deref().map(Quota::level), Some(Level::Ok));
+}
+
+#[test]
+fn a_turn_ended_for_a_login_codex_refused_is_the_account_unavailable_and_no_quota_that_resets() {
+    // MUS-23: `unauthorized` (an expired or revoked login) has no reset, as a usage limit has.
+    let read = read(&[
+        limits(40.0, RESETS),
+        started(json!("t1")),
+        failed("t1", "unauthorized", AT),
+    ])
+    .unwrap();
+    assert!(read.failed);
+    assert_eq!(
+        read.quota.as_deref(),
+        Some(&Quota::Unavailable {
+            at: Some(AT.to_owned()),
+            because: "its login was refused: You've hit your usage limit.".to_owned(),
+        })
+    );
 }
 
 #[test]
@@ -222,4 +318,77 @@ fn a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them() {
     let after = read(&[started(json!("t1")), end, started(json!("t2"))]).unwrap();
     assert!(!after.failed);
     assert_eq!(after.failure, None);
+}
+
+#[test]
+fn a_model_codex_rerouted_a_turn_to_is_a_move_nobody_chose() {
+    // MUS-24. Provisional: Codex 0.164 names `model_reroute` (its `EventMsg::ModelReroute`, and
+    // `exec` prints "model rerouted: <from> -> <to> (<reason>)"); none was ever recorded on this
+    // machine, so the fields are the protocol's: `from_model`, `to_model` and `reason`.
+    let rerouted = json!({
+        "timestamp": AT,
+        "type": "event_msg",
+        "payload": {
+            "type": "model_reroute",
+            "from_model": "gpt-6-astra",
+            "to_model": "gpt-6-safe",
+            "reason": "high_risk_cyber_activity",
+        },
+    });
+    let read = read(&[started(json!("t1")), rerouted.clone()]).unwrap();
+    assert_eq!(
+        read.model_moved.as_deref(),
+        Some(&ModelMoved {
+            from: "gpt-6-astra".to_owned(),
+            to: "gpt-6-safe".to_owned(),
+            because: "Codex rerouted it: high_risk_cyber_activity".to_owned(),
+            at: Some(AT.to_owned()),
+        })
+    );
+    // One that names the same model, or none, moved nothing.
+    for (from, to) in [("gpt-6-astra", "gpt-6-astra"), ("", "gpt-6-safe")] {
+        let mut same = rerouted.clone();
+        same["payload"]["from_model"] = json!(from);
+        same["payload"]["to_model"] = json!(to);
+        assert_eq!(
+            read_ok(&[started(json!("t1")), same]).model_moved,
+            None,
+            "{from:?} -> {to:?}"
+        );
+    }
+    assert_eq!(read_ok(&[started(json!("t1"))]).model_moved, None);
+}
+
+#[test]
+fn a_turn_that_begins_after_a_reroute_ends_it_and_one_inside_the_turn_does_not() {
+    // T-816 P2-1: a reroute is a turn's. Held for, it is over where the human's Try again
+    // starts another turn; read for good, the window was held again at every look.
+    let rerouted = |from: &str, to: &str| {
+        json!({
+            "timestamp": AT,
+            "type": "event_msg",
+            "payload": { "type": "model_reroute", "from_model": from, "to_model": to,
+                         "reason": "high_risk_cyber_activity" },
+        })
+    };
+    let inside = read_ok(&[started(json!("t1")), rerouted("gpt-6-astra", "gpt-6-safe")]);
+    assert!(inside.model_moved.is_some());
+    let after = read_ok(&[
+        started(json!("t1")),
+        rerouted("gpt-6-astra", "gpt-6-safe"),
+        started(json!("t2")),
+    ]);
+    assert_eq!(after.model_moved, None, "the next turn began");
+    // And one that is rerouted again says so again.
+    let again = read_ok(&[
+        started(json!("t1")),
+        rerouted("gpt-6-astra", "gpt-6-safe"),
+        started(json!("t2")),
+        rerouted("gpt-6-astra", "gpt-6-safe"),
+    ]);
+    assert!(again.model_moved.is_some());
+}
+
+fn read_ok(records: &[Value]) -> Record {
+    read(records).unwrap()
 }

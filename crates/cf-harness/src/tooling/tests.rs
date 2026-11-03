@@ -300,7 +300,7 @@ fn a_turn_is_interrupted_as_the_harness_says() {
     );
     // Devin's rewind opens at a turn just ended: a second Escape, and one more a second later.
     assert_eq!(keys("devin"), json!({ "presses": 2, "closeAfterMs": 1000 }));
-    for kind in ["codex", "pi", "opencode"] {
+    for kind in ["codex", "pi"] {
         assert_eq!(keys(kind)["presses"], json!(1), "{kind}");
     }
 }
@@ -316,7 +316,7 @@ fn a_window_takes_what_it_is_handed_pasted_or_over_a_channel_as_the_harness_says
             "{kind}"
         );
     }
-    for kind in ["codex", "pi", "opencode"] {
+    for kind in ["codex", "pi"] {
         assert_eq!(
             input(kind),
             json!({ "pasted": false, "clear": null }),
@@ -387,7 +387,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     // screen shows: Codex's own question is its window's opened alone.
     let none = json!({ "asks": false, "key": null, "grants": false, "servers": false, "prompt": false, "names": false });
     assert_eq!(read("codex", &codex), none);
-    for kind in ["pi", "opencode", "devin"] {
+    for kind in ["pi", "devin"] {
         assert_eq!(read(kind, &claude), none, "{kind}");
     }
     let home = tempfile::tempdir().unwrap();
@@ -428,6 +428,42 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
 }
 
 #[test]
+fn a_claude_member_of_a_project_that_chose_a_size_gets_it_in_the_settings_file_of_its_launch() {
+    let home = tempfile::tempdir().unwrap();
+    let settings = |compaction: Option<u64>| {
+        let mut question = json!({
+            "env": { "CONSENSFLOW_HOME": home.path().to_str().unwrap() },
+            "launch": LAUNCH,
+            "cf": "/bundle/bin/cf",
+        });
+        if let Some(size) = compaction {
+            question["compaction"] = json!(size);
+        }
+        let args = answer(&ask("claude_settings", question)).unwrap();
+        let file = args[1].as_str().unwrap().to_owned();
+        serde_json::from_str::<Value>(&fs::read_to_string(file).unwrap()).unwrap()
+    };
+    assert_eq!(settings(Some(400_000))["autoCompactWindow"], json!(400_000));
+    assert!(
+        settings(None).get("autoCompactWindow").is_none(),
+        "no size, no key: the file is as it always was"
+    );
+    let refused = answer(&ask(
+        "claude_settings",
+        json!({
+            "env": { "CONSENSFLOW_HOME": home.path().to_str().unwrap() },
+            "launch": LAUNCH,
+            "cf": "/bundle/bin/cf",
+            "compaction": u64::MAX,
+        }),
+    ));
+    assert_eq!(
+        refused.unwrap_err(),
+        format!("the compaction {} is too large", u64::MAX)
+    );
+}
+
+#[test]
 fn a_claude_window_gets_the_settings_file_of_its_launch() {
     let home = tempfile::tempdir().unwrap();
     let settings = |board_questions: bool| {
@@ -437,6 +473,7 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
                 "env": { "CONSENSFLOW_HOME": home.path().to_str().unwrap() },
                 "launch": LAUNCH,
                 "boardQuestions": board_questions,
+                "cf": "/bundle/bin/cf",
             }),
         );
         let args = answer(&question).unwrap();
@@ -454,6 +491,11 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
         members["hooks"]["PreToolUse"][0]["matcher"],
         json!("AskUserQuestion")
     );
+    // The hook is run by the bundle's own `cf` by its whole path, not the word.
+    assert_eq!(
+        members["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        json!("'/bundle/bin/cf' hook claude")
+    );
     // A question that is not put to the board is Claude's own: the hook is not there.
     assert_eq!(settings(false)["hooks"]["PreToolUse"], json!([]));
     assert!(home
@@ -466,7 +508,7 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
     // The id of a launch is a uuid, and the file is written nowhere else.
     let refused = answer(&ask(
         "claude_settings",
-        json!({ "env": { "CONSENSFLOW_HOME": "/nowhere" }, "launch": "../live" }),
+        json!({ "env": { "CONSENSFLOW_HOME": "/nowhere" }, "launch": "../live", "cf": "/b/cf" }),
     ));
     assert!(refused.unwrap_err().contains("not a launch id"));
 }
@@ -551,33 +593,33 @@ fn a_script_of_another_shape_cannot_open_a_window_and_the_error_says_so() {
 #[test]
 fn the_newest_session_of_a_folder_is_asked_of_the_store_the_environment_names() {
     let root = tempfile::tempdir().unwrap();
-    let store = root.path().join("opencode.db");
+    let store = root.path().join("devin").join("cli").join("sessions.db");
+    fs::create_dir_all(store.parent().unwrap()).unwrap();
     let db = rusqlite::Connection::open(&store).unwrap();
     db.execute_batch(
-        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, parent_id TEXT, time_created INTEGER);
-         INSERT INTO session VALUES ('mine', '/work/a', NULL, 5000);",
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT, created_at INTEGER);
+         INSERT INTO sessions VALUES ('mine', '/work/a', 5);",
     )
     .unwrap();
     drop(db);
+    // Devin's store is in its data folder: `%APPDATA%` on Windows, `XDG_DATA_HOME` elsewhere.
+    let data = root.path().to_str().unwrap();
     let asked = |kind: &str, workspace: &str, since: Value| {
         answer(&ask(
             "newest_session",
             json!({
                 "kind": kind, "workspace": workspace, "since": since,
-                "env": { "OPENCODE_DB": store.to_str().unwrap() },
+                "env": { "XDG_DATA_HOME": data, "APPDATA": data, "HOME": "/nowhere" },
             }),
         ))
     };
     assert_eq!(
-        asked("opencode", "/work/a", json!(1000)).unwrap(),
+        asked("devin", "/work/a", json!(1000)).unwrap(),
         json!("mine")
     );
     // Nothing yet is null, which is not a failure.
-    assert_eq!(
-        asked("opencode", "/work/a", json!(6000)).unwrap(),
-        Value::Null
-    );
-    assert_eq!(asked("opencode", "/work/b", json!(0)).unwrap(), Value::Null);
+    assert_eq!(asked("devin", "/work/a", json!(6000)).unwrap(), Value::Null);
+    assert_eq!(asked("devin", "/work/b", json!(0)).unwrap(), Value::Null);
     // Claude and Pi are opened on an id they are given.
     let refused = asked("claude-code", "/work/a", json!(0)).unwrap_err();
     assert!(
@@ -587,7 +629,7 @@ fn the_newest_session_of_a_folder_is_asked_of_the_store_the_environment_names() 
     assert!(asked("kimi", "/work/a", json!(0))
         .unwrap_err()
         .contains("no harness runs as kimi"));
-    assert!(asked("opencode", "/work/a", Value::Null)
+    assert!(asked("devin", "/work/a", Value::Null)
         .unwrap_err()
         .contains("names no since"));
 }
@@ -610,8 +652,8 @@ fn the_specmint_variant_a_harness_has_installed_is_asked_of_its_adapter_in_the_h
             json!({ "kind": kind, "variant": variant, "env": env }),
         ))
     };
-    // Codex, OpenCode, Pi and Devin read the agents' folder: it has the variant there.
-    for kind in ["codex", "opencode", "pi", "devin"] {
+    // Codex, Pi and Devin read the agents' folder: it has the variant there.
+    for kind in ["codex", "pi", "devin"] {
         assert_eq!(
             asked(kind, "tdd").unwrap(),
             json!({ "installed": true, "skill": skills.join("SKILL.md").to_str().unwrap() }),
@@ -652,7 +694,7 @@ fn the_input_box_is_read_as_the_adapter_reads_it_and_a_harness_with_no_reader_re
     );
     assert_eq!(read("claude-code", &["no box"]), Value::Null);
     assert_eq!(read("devin", &[RULE, "❭", RULE]), json!("empty"));
-    for kind in ["codex", "pi", "opencode"] {
+    for kind in ["codex", "pi"] {
         assert_eq!(read(kind, &[RULE, "❯", RULE]), Value::Null, "{kind}");
     }
 }
@@ -687,4 +729,22 @@ fn the_unsent_question_answers_the_adapters_decision_of_a_snapshot() {
     assert!(answer(&ask("unsent", json!({ "kind": "claude-code" })))
         .unwrap_err()
         .contains("no snapshot"));
+}
+
+#[test]
+fn a_question_for_no_op_names_every_op_the_table_of_the_tool_has() {
+    // The table at the head of `tooling.rs` is the list of what the tool answers; the error
+    // for a question that asks for another says the same (T-816: it lacked `muse_models` and
+    // `muse_usage`).
+    let source = include_str!("../tooling.rs");
+    let ops: Vec<&str> = source
+        .lines()
+        .filter_map(|line| line.strip_prefix("//! | `"))
+        .filter_map(|row| row.split('`').next())
+        .collect();
+    assert!(ops.len() >= 20, "the table's ops are read: {ops:?}");
+    let refused = answer(&json!({ "op": "no_such_op" })).unwrap_err();
+    for op in ops {
+        assert!(refused.contains(op), "{op} is not in: {refused}");
+    }
 }

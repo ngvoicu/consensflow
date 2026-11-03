@@ -1,5 +1,6 @@
 use super::*;
 use crate::testing::{EPOCH_MS, LONG_AFTER_MS};
+use std::cell::Cell;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -436,6 +437,252 @@ fn a_file_last_written_well_before_the_look_that_read_it_is_not_read_again_while
     ));
 }
 
+// The four limits of `record-readers-trust-what-a-file-time-cannot-prove` (T-971), each
+// a file rewritten so that its size and its time say nothing: only its bytes tell.
+
+/// Limit 1: a record rewritten at its length more than an edge before the end, the file's
+/// size and time kept and the look within a step of its time, was taken for the one read:
+/// only the last kilobyte and the tail were checked. Its bytes are read again at the look
+/// whose time settles the file (T-1024), not at each look before it: it is told then.
+#[test]
+fn a_record_rewritten_at_its_length_before_the_edge_is_not_the_one_read_at_the_look_that_settles_it(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    // Twice the edge: its first byte is a kilobyte and more before the end.
+    let long = "a".repeat(2_048);
+    assert_eq!(EDGE_BYTES, 1_024);
+    fs::write(&file, format!("{{\"x\":\"{long}\"}}\n{{\"y\":1}}\n")).unwrap();
+    stamp(&file, written as u64);
+    let seen = read(collect_at(&file, None, written + 500, None).0);
+    let rewritten = format!("b{}", &long[1..]);
+    fs::write(&file, format!("{{\"x\":\"{rewritten}\"}}\n{{\"y\":1}}\n")).unwrap();
+    stamp(&file, written as u64);
+    // Within the step its edge and tail are as they were: held, a look later at most.
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 1_000, None).0 else {
+        panic!("a look within the step reads no more than the edge, the tail and the rest");
+    };
+    assert!(matches!(
+        collect_at(&file, Some(&seen), written + 2_500, None).0,
+        Ok(Looked::NotTheFile)
+    ));
+}
+
+/// What limit 1's fix must not lose: a file read in two looks, and as they left it since,
+/// is held by its bytes within a step of its time and at the look that settles it, which
+/// hashes it whole: what the looks hashed as they read is the same.
+#[test]
+fn a_file_read_in_two_looks_and_unchanged_since_is_held_within_a_step_and_as_it_settles() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n").unwrap();
+    stamp(&file, written as u64);
+    let seen = read(collect_at(&file, None, written + 100, None).0);
+    append(&file, "{\"a\":2}\n{\"a\":", (written + 200) as u64);
+    let seen = read(collect_at(&file, Some(&seen), written + 300, None).0);
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 400, None).0 else {
+        panic!("not held within the step");
+    };
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 2_500, None).0 else {
+        panic!("not held at the look that settles it");
+    };
+    assert!(matches!(
+        collect_at(&file, Some(&seen), written + 3_000, None).0,
+        Ok(Looked::Unchanged)
+    ));
+}
+
+/// What a look reads of the file: its tail, its edge, its rest and every byte it reads on
+/// from, as the test's own thread counts them.
+fn bytes_read<T>(look: impl FnOnce() -> T) -> (T, u64) {
+    let before = READ.with(Cell::get);
+    let looked = look();
+    (looked, READ.with(Cell::get) - before)
+}
+
+thread_local! {
+    /// The bytes the reader read of a file on this thread (`count_read`).
+    static READ: Cell<u64> = const { Cell::new(0) };
+}
+
+/// `read` more bytes read of a file, on this thread.
+pub(super) fn count_read(read: usize) {
+    READ.with(|count| count.set(count.get() + read as u64));
+}
+
+/// A file of many records and a last line not finished, bigger than a chunk many times
+/// over, written at `written`: its size.
+fn a_large_record(file: &Path, written: i64) -> u64 {
+    let line = format!("{{\"text\":\"{}\"}}\n", "x".repeat(1_000));
+    let text = format!("{}{{\"unfinished\":", line.repeat(400));
+    fs::write(file, &text).unwrap();
+    stamp(file, written as u64);
+    text.len() as u64
+}
+
+/// The cost of limit 1's fix (T-1024): a transcript of hundreds of megabytes read again
+/// whole at each look of the step after a write held up every other window's look. Its
+/// first read reads each byte once (the hash is made as the lines are parsed, not by a read
+/// of its own); a look within the step reads no more than the edge, the tail and the rest;
+/// the look that settles it reads it whole, once; and none after reads a byte.
+#[test]
+fn a_file_is_read_whole_once_at_its_first_look_and_once_at_the_look_that_settles_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    let size = a_large_record(&file, written);
+    let rest = "{\"unfinished\":".len() as u64;
+    let (looked, first) = bytes_read(|| collect_at(&file, None, written + 100, None).0);
+    let seen = read(looked);
+    assert!(
+        first <= size + EDGE_BYTES + rest,
+        "the first read read {first} bytes of {size}"
+    );
+    let (looked, within) = bytes_read(|| collect_at(&file, Some(&seen), written + 1_000, None).0);
+    let Ok(Looked::Held(seen)) = looked else {
+        panic!("not held within the step: {looked:?}");
+    };
+    assert!(
+        within <= EDGE_BYTES + rest,
+        "a look within the step read {within} bytes of {size}"
+    );
+    let (looked, settling) = bytes_read(|| collect_at(&file, Some(&seen), written + 2_500, None).0);
+    let Ok(Looked::Held(seen)) = looked else {
+        panic!("not held at the look that settles it: {looked:?}");
+    };
+    assert!(
+        (size - rest..=size + EDGE_BYTES + rest).contains(&settling),
+        "the look that settles it read {settling} bytes of {size}"
+    );
+    let (looked, after) = bytes_read(|| collect_at(&file, Some(&seen), written + 3_000, None).0);
+    assert!(matches!(looked, Ok(Looked::Unchanged)));
+    assert_eq!(after, 0);
+}
+
+/// What the hash made as a look parses must hold: a tail visited and finished by a later
+/// look, a torn line the look stops before, and lines another session's (`only`) passed
+/// over unparsed, each go into it as a read of the whole file from its start would, so the
+/// look that settles it holds it.
+#[test]
+fn the_hash_made_as_looks_read_is_the_whole_file_s_through_a_tail_a_torn_line_and_lines_passed_over(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    let only: &[u8] = b"\"mine\"";
+    fs::write(&file, "{\"s\":\"mine\",\"a\":1}\n{\"s\":\"mine\",\"a\":2}").unwrap();
+    stamp(&file, written as u64);
+    let seen = read(collect_at(&file, None, written + 100, Some(only)).0);
+    append(
+        &file,
+        "\n{\"s\":\"theirs\",\"a\":3}\n{\"s\":\"mine\",\"a\":4}\ntorn \"mine\"\n",
+        (written + 200) as u64,
+    );
+    let (looked, visited) = collect_at(&file, Some(&seen), written + 300, Some(only));
+    assert_eq!(visited.len(), 1, "the record after the tail: {visited:?}");
+    let seen = read(looked);
+    let Ok(Looked::Held(seen)) = collect_at(&file, Some(&seen), written + 2_500, Some(only)).0
+    else {
+        panic!("not held at the look that settles it");
+    };
+    assert!(matches!(
+        collect_at(&file, Some(&seen), written + 3_000, Some(only)).0,
+        Ok(Looked::Unchanged)
+    ));
+}
+
+/// Limit 2: a last line finished at its size (its spaces a brace and a newline) within a
+/// step of the look was never read: the unfinished rest was kept nowhere.
+#[test]
+fn a_last_line_finished_at_its_size_within_a_step_is_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n{\"b\":2  ").unwrap();
+    stamp(&file, written as u64);
+    let (looked, visited) = collect_at(&file, None, written + 500, None);
+    assert_eq!(visited.len(), 1);
+    let seen = read(looked);
+    fs::write(&file, "{\"a\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, written as u64);
+    let (looked, visited) = collect_at(&file, Some(&seen), written + 1_000, None);
+    assert_eq!(visited, [(serde_json::json!({ "b": 2 }), 1)]);
+    assert_eq!(read(looked).records, 2);
+}
+
+/// Limit 3, a known failure: a writer whose clock is behind this one's (a network file
+/// system) dates its fresh write in the past, so it reads as settled at once, and a
+/// rewrite at its size in the same tick is taken for the file read. It cannot be told
+/// from a file long quiet, which `a_file_last_written_well_before_the_look_…` takes so as
+/// git takes a clean entry; only checking every file's bytes for a step after it is first
+/// found tells them apart, at the cost of reading every file found again for that step.
+#[test]
+#[ignore = "known failure, record-readers-trust-what-a-file-time-cannot-prove limit 3: a writer's clock behind this one's"]
+fn a_fresh_write_by_a_clock_behind_this_one_rewritten_in_its_tick_is_not_the_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let looked = EPOCH_MS;
+    // Written now, by a clock ten seconds behind.
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, (looked - 10_000) as u64);
+    let seen = read(collect_at(&file, None, looked, None).0);
+    fs::write(&file, "{\"b\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, (looked - 10_000) as u64);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), looked + 100, None).0,
+        Ok(Looked::NotTheFile)
+    ));
+}
+
+/// Limit 4: a file dated ahead of the clock was read again at every look until the clock
+/// passed its time. Its bytes are checked for a step after the look that first found it
+/// so; after that it is not read again while its time stays a step ahead of the look.
+#[test]
+fn a_file_dated_ahead_of_the_clock_is_read_again_only_for_a_step_after_it_is_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let found = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, (found + 86_400_000) as u64);
+    let seen = read(collect_at(&file, None, found, None).0);
+    let held = |looked: Result<Looked, Stop>| match looked {
+        Ok(Looked::Held(held)) => held,
+        other => panic!("not held: {other:?}"),
+    };
+    let seen = held(collect_at(&file, Some(&seen), found + 1_000, None).0);
+    let seen = held(collect_at(&file, Some(&seen), found + 2_500, None).0);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), found + 3_000, None).0,
+        Ok(Looked::Unchanged)
+    ));
+    assert!(matches!(
+        collect_at(&file, Some(&seen), found + 3_600_000, None).0,
+        Ok(Looked::Unchanged)
+    ));
+}
+
+/// What limit 4's fix must not lose: a file dated ahead of the clock (a writer's clock
+/// ahead of this one's), rewritten at its size in its tick within a step of the look that
+/// first found it so, is told by its bytes.
+#[test]
+fn a_file_dated_ahead_of_the_clock_rewritten_within_a_step_of_being_found_is_not_the_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let found = EPOCH_MS;
+    let ahead = (found + 10_000) as u64;
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, ahead);
+    let seen = read(collect_at(&file, None, found, None).0);
+    fs::write(&file, "{\"b\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, ahead);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), found + 100, None).0,
+        Ok(Looked::NotTheFile)
+    ));
+}
+
 #[test]
 fn a_file_that_is_not_there_is_an_io_failure() {
     let dir = tempfile::tempdir().unwrap();
@@ -679,4 +926,67 @@ fn whole_records_run_together_in_one_line_are_each_read_in_their_place() {
     assert_eq!(visited.len(), 2);
     assert_eq!(read(looked).passed_over(), [2]);
     assert_eq!(*said.lock().unwrap(), [passed_over(&file, 2, 8)]);
+}
+
+/// What each look at a large transcript costs (T-1024), timed on a copy of a real one:
+/// `CF_MEASURE_JSONL=<the copy> cargo test -p cf-harness --lib measure_the_looks -- --ignored
+/// --nocapture`. The looks are those of a transcript's quiet moment after a write, by the
+/// file's own time: the first read, a look within the step, the look that settles it, and
+/// one after. It prints the file's size, each look's time and what it came to, three times
+/// over, and never a byte of the file.
+#[test]
+#[ignore = "a measurement: CF_MEASURE_JSONL names the large transcript to time the looks at"]
+fn measure_the_looks_at_a_large_transcript() {
+    let file = std::path::PathBuf::from(
+        cf_base::env::Env::from_process()
+            .os("CF_MEASURE_JSONL")
+            .expect("CF_MEASURE_JSONL names the file to measure"),
+    );
+    let metadata = fs::metadata(&file).unwrap();
+    // A file's time in whole milliseconds, as a look's is.
+    #[allow(clippy::cast_possible_truncation)]
+    let written = mtime_ms(&metadata).unwrap() as i64;
+    println!("size {} bytes", metadata.len());
+    for round in 1..=3 {
+        let mut records = 0usize;
+        let mut look = |seen: Option<&Seen>, after_ms: i64| {
+            let started = std::time::Instant::now();
+            let looked = read_on(
+                &file,
+                seen,
+                written + after_ms,
+                &mut |_, _| {
+                    records += 1;
+                    Ok(())
+                },
+                None,
+            )
+            .unwrap();
+            (looked, started.elapsed())
+        };
+        let said = |looked: &Looked| match looked {
+            Looked::Unchanged => "unchanged",
+            Looked::Held(_) => "held",
+            Looked::Read(_) => "read",
+            Looked::NotTheFile => "not the file",
+        };
+        let mut lines = Vec::new();
+        let (first, took) = look(None, 100);
+        lines.push(format!("first read {took:?} ({})", said(&first)));
+        let Looked::Read(mut seen) = first else {
+            panic!("the first look did not read");
+        };
+        for (name, after_ms) in [
+            ("a look within the step", 1_000),
+            ("the look that settles it", 2_500),
+            ("a look after", 3_000),
+        ] {
+            let (looked, took) = look(Some(&seen), after_ms);
+            lines.push(format!("{name} {took:?} ({})", said(&looked)));
+            if let Looked::Held(held) | Looked::Read(held) = looked {
+                seen = held;
+            }
+        }
+        println!("round {round}, {records} records: {}", lines.join("; "));
+    }
 }

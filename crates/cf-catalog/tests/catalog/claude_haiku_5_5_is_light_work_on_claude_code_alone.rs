@@ -2,7 +2,7 @@
 //! alone')` of Node's catalog suite.
 //!
 //! 2026-10-08: Claude Code 2.1.294 answers claude-haiku-5-5 as itself at every level it lists.
-//! Pi and OpenCode (OpenRouter) carry Haiku 4.5 and a `~anthropic/claude-haiku-latest` alias,
+//! Pi (OpenRouter) carries Haiku 4.5 and a `~anthropic/claude-haiku-latest` alias,
 //! no 5.5. Devin lists it since (3000.11.205, 2026-10-25), at every level, and the catalog
 //! carries every model Devin lists: light work there too.
 //!
@@ -62,14 +62,12 @@ fn is_the_one_haiku_of_the_catalog_with_its_label_its_route_and_its_effort() {
             profile.model_key.as_str(),
             profile.model_label.as_str(),
             profile.route_label.as_str(),
-            profile.route_note.as_deref(),
             profile.work_tier,
         ),
         (
             "claude-haiku-5.5",
             "Claude Haiku 5.5",
             "Claude Code account",
-            None,
             WorkTier::Light
         )
     );
@@ -96,7 +94,7 @@ fn opens_a_claude_code_window_on_its_model_and_effort() {
     );
     let effort = row.effort().unwrap();
     assert!(
-        efforts(Harness::Claude).contains(&effort),
+        efforts(Harness::Claude).levels.contains(&effort),
         "{effort} is an effort Claude Code takes"
     );
 }
@@ -105,7 +103,12 @@ fn opens_a_claude_code_window_on_its_model_and_effort() {
 fn is_light_work_at_every_effort_and_the_tier_the_human_chose_still_comes_last() {
     let catalog = catalog();
     // A bogus or an absent effort too: the tier follows the model alone.
-    let mut tried: Vec<Option<&str>> = efforts(Harness::Claude).iter().copied().map(Some).collect();
+    let mut tried: Vec<Option<&str>> = efforts(Harness::Claude)
+        .levels
+        .iter()
+        .copied()
+        .map(Some)
+        .collect();
     tried.extend([None, Some(""), Some("bogus")]);
     for effort in tried {
         let profile = catalog.profile(&Settings {

@@ -139,6 +139,14 @@ pub enum Servers {
     /// process, which is in the window's group. What any of them starts later is
     /// the harness's.
     AtLaunch,
+    /// Where the platform has no process groups to keep them in (a Windows job object,
+    /// which holds the window's processes whole): the harness runs every command of its
+    /// agent in a shell it starts for that command (Claude Code's Git Bash `bash.exe`, or
+    /// PowerShell), and starts its servers as the programs they are (`node`, `uvx`, npm's
+    /// `cmd.exe /c npx …`), never in a shell of its own. No process is the harness's by
+    /// where it is; a command is such a shell, and what runs under it while it runs
+    /// (`cf-panes`' `background`). Claude Code on Windows (T-906).
+    ByShell,
     /// Not known: no process is told for the harness's by where it is, so only what
     /// the host can prove the harness's by its program (a program named for it
     /// that is beside its own binary, and what descends from one) is left alone, and
@@ -199,7 +207,9 @@ pub struct PossiblyLeft {
 
 /// `pane.background`'s answer: what the window's tree has running that began
 /// after the window's last `pane.mark` and that the host can tell is the turn's
-/// work, `total` of it and the first `processes` of it by how long ago they began.
+/// work, or work detached from it that the window's close ends (a job whose shell has gone:
+/// `nohup … &`, `Start-Process`), `total` of it and the first `processes` of it by how long ago
+/// they began.
 /// A window with no mark has none: nothing says where its turn began. And what may be
 /// the window's and runs outside its tree (`possiblyLeft`, as `pane.exit` names it at a
 /// close), which the host names and never signals: a pause leaves both running (T-487).
@@ -223,8 +233,11 @@ pub struct Background {
 /// agent so (a Bash call, a Monitor's, a background job's, in the foreground or not, and
 /// what one `exec`s keeps the group), and its hooks and status line, a moment each; its
 /// MCP servers and helpers stay in the window's group. The host tells them only of a
-/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]),
-/// on a platform with groups: nowhere else does a group say what a process is. It is
+/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]), on
+/// a platform with groups, and of one whose harness runs each command in a shell of its
+/// own where there are none ([`Servers::ByShell`], a Windows job object): there a command
+/// is such a shell the harness started after the rest the request names, or the window's
+/// launch, and what runs under it while it runs (T-906). It is
 /// `null` too where a process of the window cannot be read (another user's, as a command
 /// that `exec`s `sudo` becomes), which may be a command: the answer says so then
 /// ([`CommandsAnswer`]). What ran at the rest the request
@@ -388,8 +401,71 @@ pub struct SnapshotTail {
     pub tail: Option<Vec<String>>,
 }
 
+/// How a harness's window reads a human's paste where it reads the paste's keys without drawing
+/// anything until it has read them all (`pane.open`'s `silentPaste`, from the adapter). On Windows
+/// the console hands a paste on to the program as key presses, and such a harness takes an Enter
+/// that comes while they are still coming for a line break in the paste. Where a window declares
+/// it, the pane host holds the human's keys after their paste until the window has drawn it:
+/// never sooner than `pace` says it could have read it, by output that came `drawn_after_ms` or
+/// more after the paste (its reaction to the first key comes sooner), then `quiet_ms` of nothing,
+/// and at the most `most_ms` and `most_us_per_character` for each character, whatever it drew. A
+/// window that declares nothing has the human's keys written as they come.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SilentPaste {
+    /// How long the window takes to read each character, in microseconds.
+    pub pace_us_per_character: u64,
+    pub drawn_after_ms: u64,
+    pub quiet_ms: u64,
+    pub most_ms: u64,
+    pub most_us_per_character: u64,
+}
+
+impl SilentPaste {
+    /// How long a paste of `characters` takes the window to read, at its pace.
+    pub fn read_ms(&self, characters: usize) -> u64 {
+        per_character_ms(self.pace_us_per_character, characters)
+    }
+
+    /// The longest the human's keys wait after a paste of `characters`.
+    pub fn most_ms(&self, characters: usize) -> u64 {
+        self.most_ms
+            .saturating_add(per_character_ms(self.most_us_per_character, characters))
+    }
+}
+
+/// `characters` at `us` microseconds each, in milliseconds.
+fn per_character_ms(us: u64, characters: usize) -> u64 {
+    us.saturating_mul(u64::try_from(characters).unwrap_or(u64::MAX)) / 1_000
+}
+
 #[cfg(test)]
 mod tests {
+    /// A silent paste's wait is its pace and its cap for the paste's length, and goes on the
+    /// wire in the words the pane host reads.
+    #[test]
+    fn a_silent_paste_says_its_read_time_and_its_cap_for_a_pastes_length() {
+        let silent = SilentPaste {
+            pace_us_per_character: 600,
+            drawn_after_ms: 50,
+            quiet_ms: 120,
+            most_ms: 1_000,
+            most_us_per_character: 1_000,
+        };
+        assert_eq!(silent.read_ms(7_775), 4_665);
+        assert_eq!(silent.most_ms(7_775), 8_775);
+        assert_eq!(silent.most_ms(0), 1_000);
+        let wire = serde_json::to_value(silent).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "paceUsPerCharacter": 600, "drawnAfterMs": 50, "quietMs": 120,
+                "mostMs": 1000, "mostUsPerCharacter": 1000,
+            })
+        );
+        assert_eq!(serde_json::from_value::<SilentPaste>(wire).unwrap(), silent);
+    }
+
     use serde_json::json;
 
     use super::*;
@@ -511,6 +587,7 @@ mod tests {
         for (word, servers) in [
             ("inGroup", Servers::InGroup),
             ("atLaunch", Servers::AtLaunch),
+            ("byShell", Servers::ByShell),
         ] {
             let body = json!({ "id": "p1-zeus", "generation": 4, "servers": word });
             let said: MarkRequest = serde_json::from_value(body.clone()).unwrap();
@@ -547,6 +624,7 @@ mod tests {
         assert_eq!(said.servers, Servers::Unknown);
         assert!(said.servers.is_unknown());
         assert!(!Servers::InGroup.is_unknown() && !Servers::AtLaunch.is_unknown());
+        assert!(!Servers::ByShell.is_unknown());
     }
 
     #[test]

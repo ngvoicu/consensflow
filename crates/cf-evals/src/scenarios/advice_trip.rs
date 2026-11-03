@@ -24,6 +24,8 @@ pub(super) fn scenario() -> Scenario {
         fallback: "Da.".to_owned(),
         nudge: None,
         quiet: Duration::from_secs(90),
+        stand_in_reviews: Vec::new(),
+        stand_in_work: Vec::new(),
         expectations: vec![
             expect("one advice task goes on the board", |m| m.advice == 1),
             expect("the advice task is accepted", |m| {

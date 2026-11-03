@@ -18,17 +18,32 @@ use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
 use cf_board::{Board, BoardError};
+use cf_proto::cf_word::CfWord;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
-use lines::{list, message_line};
+use cf_base::role_read::role_read_whole;
+use lines::{list, message_line, printed_body};
 use usage::usage;
 use words::{message_id, quoted, require_text, split, task_number, Shape};
 
 /// The flags of `cf note`.
 const NOTE: Shape = Shape {
     switches: &["--human"],
+    valued: &[brief::FILE],
     ..Shape::TEXT
+};
+
+/// The flags of `cf ask`.
+const ASK: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::TEXT
+};
+
+/// The flags of `cf answer`, which names its message first.
+const ANSWER: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::NUMBERED
 };
 
 /// The flags of `cf tell`, which names its task first.
@@ -65,13 +80,19 @@ pub struct Said {
     data: Value,
     text: String,
     wrote: Option<Wrote>,
+    /// Whether every word of `text` is `cf`'s own (a usage), so that each command it names
+    /// is started by the window's `cf` as it is printed. What holds a task's, a message's or
+    /// the human's words is not: those are printed as they were written.
+    own: bool,
 }
 
 /// The messages a command's output carries whole, and how it was read: what
-/// `cf` says to the board, once the output is complete, to have them received.
+/// `cf` says to the board, once the output is complete, to have them received,
+/// if its window reads all of the output (`seen`).
 struct Wrote {
     via: &'static str,
     answers: Vec<i64>,
+    seen: fn(&str) -> bool,
 }
 
 impl Said {
@@ -80,14 +101,51 @@ impl Said {
             data,
             text,
             wrote: None,
+            own: false,
         }
+    }
+
+    /// A usage: `cf`'s own words, in the sentence and in the JSON's `usage`.
+    fn usage(text: String) -> Self {
+        Self {
+            own: true,
+            ..Self::new(json!({ "usage": text }), text)
+        }
+    }
+
+    /// This output as it is printed in the window of `cf`: where it is all `cf`'s own words,
+    /// each command it names started by the window's `cf`.
+    fn in_words_of(mut self, cf: &CfWord) -> Self {
+        if self.own {
+            self.text = cf.in_text(&self.text).into_owned();
+            if let Some(usage) = self.data.get("usage").and_then(Value::as_str) {
+                self.data["usage"] = json!(cf.in_text(usage));
+            }
+        }
+        self
     }
 
     /// Of an output that carries the whole body of each of `answers` (one that
     /// cuts them, or leaves them out, has none to say): those are the ones it
     /// wrote whole, `via` the way it was read.
     fn having_written(mut self, via: &'static str, answers: Vec<i64>) -> Self {
-        self.wrote = Some(Wrote { via, answers });
+        self.wrote = Some(Wrote {
+            via,
+            answers,
+            seen: cut::seen_whole,
+        });
+        self
+    }
+
+    /// Of an output that carries whole the role the note `id` told its window
+    /// in part: it is read whole by the windows a role goes to by a note up to a
+    /// bound of its own, past the one every harness shows (`role_read_whole`).
+    fn having_written_a_role(mut self, id: i64) -> Self {
+        self.wrote = Some(Wrote {
+            via: "inbox",
+            answers: vec![id],
+            seen: role_read_whole,
+        });
         self
     }
 }
@@ -113,8 +171,7 @@ impl Wrote {
 /// What `cf <path…> --help` answers: the usage of that command, and nothing
 /// asked of the board.
 fn help_of(path: &[&str]) -> Said {
-    let usage = usage::of(path);
-    Said::new(json!({ "usage": usage }), usage)
+    Said::usage(usage::of(path))
 }
 
 /// Runs the command in `given`, its words as the system gave them, against
@@ -138,8 +195,10 @@ pub fn run(
         .iter()
         .map(|word| word.to_string_lossy().into_owned())
         .collect();
-    match command(&words, given, board, input) {
-        Ok(Said { data, text, wrote }) => {
+    match command(&words, given, board, input).map(|said| said.in_words_of(board.cf())) {
+        Ok(Said {
+            data, text, wrote, ..
+        }) => {
             let printed = if json {
                 let data = cf_base::json::js_order(data);
                 format!("{}\n", serde_json::to_string_pretty(&data)?)
@@ -148,17 +207,20 @@ pub fn run(
             };
             out.write_all(printed.as_bytes())?;
             out.flush()?;
-            if let Some(wrote) = wrote.filter(|_| cut::seen_whole(&printed)) {
+            if let Some(wrote) = wrote.filter(|wrote| (wrote.seen)(&printed)) {
                 wrote.acknowledge(board);
             }
             Ok(0)
         }
+        // What `cf` says of a command written wrong, and what the board refused (its own
+        // words, the daemon's and the ledger's: `cf task resume T-3 "…"`), start each command
+        // they name with the window's `cf`.
         Err(Failure::Usage(message)) => {
-            writeln!(err, "cf: {message}")?;
+            writeln!(err, "cf: {}", board.cf().in_text(&message))?;
             Ok(2)
         }
         Err(Failure::Failed(message)) => {
-            writeln!(err, "cf: {message}")?;
+            writeln!(err, "cf: {}", board.cf().in_text(&message))?;
             Ok(1)
         }
     }
@@ -176,13 +238,13 @@ fn command(
         None => ("help", words),
     };
     match verb {
-        "help" | "--help" | "-h" => Ok(Said::new(json!({ "usage": usage() }), usage().to_string())),
+        "help" | "--help" | "-h" => Ok(Said::usage(usage().to_string())),
         "task" => task::command(rest, given, board, input),
         "inbox" => inbox(rest, board),
-        "note" => note(rest, board, input),
-        "ask" => ask(rest, board, input),
+        "note" => note(rest, given, board, input),
+        "ask" => ask(rest, given, board, input),
         "tell" => tell(rest, given, board, input),
-        "answer" => answer(rest, board, input),
+        "answer" => answer(rest, given, board, input),
         "staff" => staff(rest, board),
         "history" => history(rest, board),
         "whoami" => whoami(rest, board),
@@ -194,8 +256,12 @@ fn command(
 }
 
 /// `cf inbox read m-N` prints a message whole, and so says it wrote it whole
-/// when it still waited to be pasted: the board decides what that receives. `cf inbox` lists first lines, cut, and says nothing of what
-/// it printed: no preview is a body, and a list does not know which are.
+/// when it still waited to be pasted: the board decides what that receives. It
+/// says so too of a role that went into its window in part (the board answers
+/// `"role": true` of a note that tells its reader a role), once it was
+/// delivered: the role is told once the window has read it. `cf inbox` lists
+/// first lines, cut, and says nothing of what it printed: no preview is a body,
+/// and a list does not know which are.
 fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let reading = rest.first().map(String::as_str) == Some("read");
     let asked = if reading {
@@ -214,14 +280,30 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     if reading {
         let id = message_id(rest.get(1).map(String::as_str))?;
         let path = format!("/api/inbox/{id}");
-        let message = board.get(&path)?.take("message")?;
+        let mut answer = board.get(&path)?;
+        let role = answer.value().get("role") == Some(&Value::Bool(true));
+        let message = answer.take("message")?;
         let text = format!(
             "{}\n\n{}",
             message_line(&message),
-            js::text(message.get("body"))
+            printed_body(&message, board.cf())
         );
+        // A role goes in by a note, and a window reads it as soon as it has the paste:
+        // before the daemon has seen the paste arrive, as often as after.
+        let reached = matches!(
+            message.get("state").and_then(Value::as_str),
+            Some("delivered" | "delivering")
+        );
+        let told = message
+            .get("id")
+            .and_then(Value::as_i64)
+            .filter(|_| role && reached);
         let waiting = lines::waiting_message(&message);
-        return Ok(Said::new(message, text).having_written("inbox", waiting));
+        let said = Said::new(message, text);
+        return Ok(match told {
+            Some(id) => said.having_written_a_role(id),
+            None => said.having_written("inbox", waiting),
+        });
     }
     let mut answer = board.get("/api/inbox")?;
     let messages = answer.take("messages")?;
@@ -232,7 +314,12 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(messages, text))
 }
 
-fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+fn note(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let words = split(rest, NOTE);
     if words.asks_for_help() {
         return Ok(help_of(&["note"]));
@@ -241,7 +328,11 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
     let mut body = Map::new();
     body.insert(
         "body".into(),
-        require_text(text_of(words.text, input)?, "cf note \"what to know\"")?.into(),
+        require_text(
+            brief::brief_of(&words, given, input)?,
+            "cf note \"what to know\"",
+        )?
+        .into(),
     );
     if human {
         body.insert("to".into(), "human".into());
@@ -255,8 +346,13 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
     Ok(Said::new(message, text))
 }
 
-fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::TEXT);
+fn ask(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let words = split(rest, ASK);
     if words.asks_for_help() {
         return Ok(help_of(&["ask"]));
     }
@@ -266,7 +362,10 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
             "the human is not asked with cf ask: the chief asks them in its own terminal".into(),
         ));
     }
-    let question = require_text(text_of(words.text, input)?, "cf ask \"your question\"")?;
+    let question = require_text(
+        brief::brief_of(&words, given, input)?,
+        "cf ask \"your question\"",
+    )?;
     let message = posted(board, "/api/questions", body_of(question))?;
     let text = format!(
         "m-{} asked @{}. The answer arrives as a message; end your turn now.",
@@ -317,14 +416,20 @@ fn tell(
         )
     } else {
         format!(
-            "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: cf task resume T-{number} \"…\""
+            "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: {} task resume T-{number} \"…\"",
+            board.cf()
         )
     };
     Ok(Said::new(message, format!("{text}\n{sent}")))
 }
 
-fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::NUMBERED);
+fn answer(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let words = split(rest, ANSWER);
     if words.asks_for_help() {
         return Ok(help_of(&["answer"]));
     }
@@ -334,7 +439,7 @@ fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, 
     body.insert(
         "body".into(),
         require_text(
-            text_of(words.text, input)?,
+            brief::brief_of(&words, given, input)?,
             "cf answer m-<id> \"your answer\"",
         )?
         .into(),
@@ -386,14 +491,19 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
         return Ok(help_of(&["history"]));
     }
     let mut query = form_urlencoded::Serializer::new(String::new());
-    if let Some(page) = words.value("--page") {
+    if let Some(page) = words.value("--page")? {
         query.append_pair("page", page);
     }
-    if let Some(find) = words.value("--find") {
+    if let Some(find) = words.value("--find")? {
         query.append_pair("find", find);
     }
     if words.on("--tools") {
         query.append_pair("tools", "1");
+    }
+    // The page says the commands it names (`Older: cf history --page 2`) started by the
+    // window's `cf`, which its length is made with.
+    if board.cf().as_str() != "cf" {
+        query.append_pair("cf", board.cf().as_str());
     }
     let query = query.finish();
     let path = if query.is_empty() {
@@ -436,7 +546,8 @@ fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {
 /// The text a command was given, or standard input when it is `-`: a brief
 /// in a quoted heredoc (`cf task add --tier standard - <<'BRIEF'`) reaches
 /// the board as written, where the shell would run the backticks and `$( )`
-/// of a double-quoted one. The final newline is the heredoc's, not the text's.
+/// of a double-quoted one. The final line ending is the heredoc's, not the text's: a `\n`,
+/// or the `\r\n` that PowerShell and `type` end what they pipe with.
 /// The commands that give a window work take a file as well (`brief`).
 fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
     if text != "-" {
@@ -447,7 +558,11 @@ fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
         .read_to_end(&mut bytes)
         .map_err(|cause| Failure::Failed(format!("cannot read standard input ({cause})")))?;
     let text = String::from_utf8_lossy(&bytes);
-    Ok(text.strip_suffix('\n').unwrap_or(&text).to_string())
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
+    Ok(text.to_owned())
 }
 
 /// `{ body }`, the request most commands send.

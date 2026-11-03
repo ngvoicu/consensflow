@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 mod arrival;
+mod at_work;
 mod background;
 mod chief_switch;
 pub mod computer_use;
@@ -24,10 +25,12 @@ pub mod dispatcher;
 pub mod handoff;
 pub mod host;
 mod in_flight;
+mod never_began;
 mod ownership;
 mod pacing;
 mod record;
 mod resume;
+mod resumed_at_work;
 mod role_change;
 pub mod roles;
 pub mod runtime;

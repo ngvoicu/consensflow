@@ -194,13 +194,15 @@ fn what_was_seen_to_be_the_turns_work_is_still_it_when_the_shell_that_started_it
 }
 
 #[test]
-fn a_job_that_has_lost_its_shell_is_no_work_of_the_turn_and_is_not_named() {
+fn a_job_that_has_lost_its_shell_is_not_the_turns_work_by_a_chain_and_is_named_as_work_left_running(
+) {
     let baseline = marked(&[program()], None, None);
     let tree = vec![
         program(),
         // `nohup sleep 600 &` from a shell that ended, and a shell that lost its own
         // parent with what it runs: no chain of processes that run leads to a shell the
-        // harness started.
+        // harness started, so none of them is the turn's by a chain (T-1145: they are
+        // named all the same, as the work a pause or a close would end).
         member(70, "sleep 600", "sleep", None),
         member(71, "bash -c sleep 700", "bash", None),
         member(72, "sleep 700", "sleep", of(71)),
@@ -208,9 +210,11 @@ fn a_job_that_has_lost_its_shell_is_no_work_of_the_turn_and_is_not_named() {
         member(40, "/bin/bash -c sleep 800", "bash", of(10)),
         member(41, "sleep 800", "sleep", of(40)),
     ];
-    assert_eq!(turns(&baseline, &tree), [40, 41]);
+    assert_eq!(turns(&baseline, &tree), [40, 41], "by a chain");
     let left = baseline.left_running(&tree);
-    assert_eq!(left.total, 2, "the others are not even named");
+    assert_eq!(left.total, 5, "the job that lost its shell is named");
+    let named: Vec<u32> = left.processes.iter().map(|process| process.pid).collect();
+    assert_eq!(named, [40, 41, 70, 71, 72]);
 }
 
 #[test]
@@ -546,6 +550,8 @@ fn the_commands_are_not_told_of_a_window_whose_servers_are_not_in_its_group() {
     for kept in [
         None,
         Kept::of(Servers::AtLaunch, Some(10)),
+        Kept::of(Servers::AtLaunch, None),
+        // A window in the window's group where there are no groups claims what cannot be.
         Kept::of(Servers::InGroup, None),
     ] {
         assert_eq!(commands(&marked(&[], kept, None), &tree), None, "{kept:?}");
@@ -589,6 +595,90 @@ fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() 
     let mut untold = marked(&[], None, None);
     assert_eq!(untold.rest(&resting, &[]), None);
     assert!(!untold.tells_commands());
+}
+
+/// The window of a Claude Code on Windows, whose job has no groups (T-906): the program, an
+/// MCP server it started as the program it is, and one npm put behind a `cmd.exe /c`.
+fn windows_at_rest() -> Vec<Member> {
+    vec![
+        member(10, "claude.exe", "claude.exe", None),
+        member(11, "node.exe server.js", "node.exe", of(10)),
+        member(12, "cmd.exe /c npx -y mcp-server", "cmd.exe", of(10)),
+        member(13, "node.exe mcp-server", "node.exe", of(12)),
+    ]
+}
+
+#[test]
+fn where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is() {
+    // T-906: Windows' host answered that it cannot tell, and a monitor whose command
+    // Claude Code had ended held its task until Finish.
+    let baseline = marked(
+        &[member(10, "claude.exe", "claude.exe", None)],
+        Kept::of(Servers::ByShell, None),
+        Some("claude"),
+    );
+    assert!(baseline.tells_commands());
+    let resting = windows_at_rest();
+    assert_eq!(
+        commands(&baseline, &resting),
+        Some(vec![]),
+        "no server is one"
+    );
+    let mut running = resting.clone();
+    running.extend([
+        // A Monitor's command: the shell Claude Code started, and what it runs.
+        member(41, "bash.exe -c exec sleep 611", "bash.exe", of(10)),
+        member(42, "sleep.exe 611", "sleep.exe", of(41)),
+        // What the server behind `cmd.exe` started: the server's.
+        member(43, "bash.exe -c git status", "bash.exe", of(13)),
+    ]);
+    assert_eq!(commands(&baseline, &running), Some(vec![41, 42]));
+    // Claude Code ends the monitor's command as it writes its notice, by its shell's number
+    // (T-906): the `sleep.exe` the shell `exec`ed runs on, with no parent, and is no command.
+    let mut ended = resting.clone();
+    ended.push(member(42, "sleep.exe 611", "sleep.exe", None));
+    assert_eq!(commands(&baseline, &ended), Some(vec![]));
+    // Nor is what an interrupted Bash call was running, or what a command detached.
+    ended.extend([
+        member(
+            44,
+            "node.exe -e setTimeout(() => {}, 300000)",
+            "node.exe",
+            None,
+        ),
+        member(45, "python.exe -m http.server", "python.exe", None),
+    ]);
+    assert_eq!(commands(&baseline, &ended), Some(vec![]));
+}
+
+#[test]
+fn where_the_platform_has_no_groups_what_ran_at_the_rest_a_look_names_is_no_command() {
+    let mut baseline = marked(
+        &[member(10, "claude.exe", "claude.exe", None)],
+        Kept::of(Servers::ByShell, None),
+        Some("claude"),
+    );
+    // A shell the harness started before the rest, which runs on: a server the user
+    // wrapped in `bash`, started after the launch.
+    let mut resting = windows_at_rest();
+    resting.push(member(20, "bash.exe -c ./serve.sh", "bash.exe", of(10)));
+    let rest = baseline.rest(&resting, &[]);
+    assert!(
+        rest.is_some(),
+        "a rest kept where the platform has no groups"
+    );
+    let mut running = resting.clone();
+    running.push(member(41, "bash.exe -c exec sleep 611", "bash.exe", of(10)));
+    assert_eq!(commands_since(&baseline, &running, rest), Some(vec![41]));
+    // A look that names no rest, or one not kept, leaves out the launch alone.
+    assert_eq!(
+        commands_since(&baseline, &running, None),
+        Some(vec![20, 41])
+    );
+    assert_eq!(
+        commands_since(&baseline, &running, rest.map(|rest| rest + 1)),
+        Some(vec![20, 41])
+    );
 }
 
 /// [`commands`], less what ran at the rest `since`.
@@ -745,4 +835,274 @@ fn a_command_begun_after_its_call_while_the_clock_was_set_back_is_counted() {
         Some(vec![11, 41]),
         "the command runs, and the server cannot be told from one"
     );
+}
+
+/// The numbers of the detached work in `tree`, as `baseline` tells it.
+fn detached(baseline: &Baseline, tree: &[Member]) -> Vec<u32> {
+    baseline
+        .detached(tree)
+        .iter()
+        .map(|member| member.key.pid)
+        .collect()
+}
+
+#[test]
+fn a_job_that_lost_its_starter_before_the_first_mark_is_nobodys_to_name_and_one_that_began_after_is_detached_work(
+) {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let baseline = marked(&[program(), orphan(30)], None, None);
+    let tree = vec![program(), orphan(30), orphan(31)];
+
+    // The one the window had when the turn began is not the turn's to name; the one that
+    // began after is.
+    assert_eq!(detached(&baseline, &tree), [31]);
+    // And a window never marked names none: nothing says where its turn began.
+    assert_eq!(detached(&Baseline::default(), &tree), Vec::<u32>::new());
+}
+
+/// Every paste marks a turn (a tell, the words of a resume, a follow-up), and a mark takes what
+/// the tree has as what came before (T-1153's D1). A job the agent detached in an earlier turn
+/// is the window's still, and is named at the marks that follow it.
+#[test]
+fn a_detached_job_is_still_named_at_the_turns_after_the_one_it_was_detached_in() {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let mut baseline = marked(&[program(), orphan(30)], None, None);
+    let turn_one = vec![program(), orphan(30), orphan(31)];
+    assert_eq!(detached(&baseline, &turn_one), [31]);
+
+    // A note is pasted, then the resume's words: two more marks, with the job in the tree.
+    baseline.mark(&turn_one, None, None);
+    assert_eq!(detached(&baseline, &turn_one), [31], "after the next mark");
+    baseline.mark(&turn_one, None, None);
+    assert_eq!(detached(&baseline, &turn_one), [31], "and the one after");
+    // What the window had before the first turn is still nobody's to name.
+    assert!(!baseline
+        .detached(&turn_one)
+        .iter()
+        .any(|job| job.key.pid == 30));
+    // A job the agent detaches in a later turn is named beside it.
+    let turn_three = vec![program(), orphan(30), orphan(31), orphan(32)];
+    assert_eq!(detached(&baseline, &turn_three), [31, 32]);
+}
+
+#[test]
+fn what_a_carried_job_starts_in_a_later_turn_is_named_with_it_and_a_job_that_ended_is_forgotten() {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let mut baseline = marked(&[program()], None, None);
+    let turn_one = vec![program(), orphan(31)];
+    assert_eq!(detached(&baseline, &turn_one), [31]);
+    baseline.mark(&turn_one, None, None);
+
+    // The job starts a worker after the next mark: it is what the job started, and named.
+    let later = vec![
+        program(),
+        orphan(31),
+        member(33, "python worker", "python", of(31)),
+    ];
+    assert_eq!(detached(&baseline, &later), [31, 33]);
+
+    // The job ends before the mark after: it is forgotten, and a process that takes its
+    // number later (another start) is a job of its own, not the old one carried.
+    baseline.mark(&[program()], None, None);
+    assert!(
+        baseline.carried.is_empty(),
+        "nothing is carried for a job that ended"
+    );
+    let reused = Member {
+        key: ProcessKey {
+            pid: 31,
+            began: 999,
+        },
+        ..orphan(31)
+    };
+    let tree = vec![program(), reused];
+    assert_eq!(detached(&baseline, &tree), [31]);
+    baseline.mark(&tree, None, None);
+    assert_eq!(baseline.carried.len(), 1);
+    assert!(baseline.carried.contains(&ProcessKey {
+        pid: 31,
+        began: 999
+    }));
+    assert!(
+        !baseline.carried.contains(&key(31)),
+        "not the process that ended"
+    );
+}
+
+#[test]
+fn a_carried_job_is_proved_again_when_the_host_names_it() {
+    let orphan = |pid| member(pid, "sleep 600", "sleep", None);
+    let mut baseline = marked(&[program()], None, None);
+    let tree = vec![program(), orphan(31), orphan(32)];
+    baseline.mark(&tree, None, None);
+    baseline.mark(&tree, None, None);
+
+    // Of the two carried, the platform proves one (a Windows job: one a shell started).
+    let named = baseline
+        .named(&tree, |candidates| {
+            assert_eq!(candidates.len(), 2, "both are asked of");
+            Ok(Some([key(32)].into_iter().collect()))
+        })
+        .expect("named");
+    assert_eq!(
+        named
+            .iter()
+            .map(|member| member.key.pid)
+            .collect::<Vec<_>>(),
+        [32]
+    );
+}
+
+#[test]
+fn a_job_that_lost_its_starter_is_not_named_where_the_harness_keeps_it_as_a_server_or_names_it_for_its_own(
+) {
+    let at = |exe: &str, member: Member| Member {
+        exe: exe.to_owned(),
+        ..member
+    };
+    let codex = at("/opt/codex/bin/codex", member(11, "codex", "codex", of(10)));
+    let helper = at(
+        "/opt/codex/bin/codex-code-mode-host",
+        member(50, "codex-code-mode-host", "codex-code-mode-host", None),
+    );
+    let tree = vec![
+        program(),
+        codex.clone(),
+        helper,
+        member(51, "sleep 5", "sleep", of(50)),
+        // The agent's job, which lost its starter.
+        member(70, "sleep 600", "sleep", None),
+    ];
+    let before = [program(), codex];
+
+    // Where the harness is named, the helper that lost its starter, and what it runs, are the
+    // harness's own; the job is not.
+    assert_eq!(detached(&marked(&before, None, Some("codex")), &tree), [70]);
+    // Where it is not, nothing tells the helper from the agent's job.
+    assert_eq!(detached(&marked(&before, None, None), &tree), [50, 51, 70]);
+}
+
+#[test]
+fn a_server_in_the_windows_group_that_lost_its_starter_is_the_harnesss_and_not_detached_work() {
+    let in_group = |member: Member| Member {
+        group: Some(10),
+        ..member
+    };
+    let baseline = marked(&[program()], Kept::of(Servers::InGroup, Some(10)), None);
+    let tree = vec![
+        program(),
+        // A server the harness started late, in the window's group, whose starter has gone.
+        in_group(member(20, "node server.js", "node", None)),
+        // A job the agent detached, in a group of its own.
+        Member {
+            group: Some(70),
+            ..member(70, "sleep 600", "sleep", None)
+        },
+    ];
+    assert_eq!(detached(&baseline, &tree), [70]);
+}
+
+#[test]
+fn the_names_are_the_turns_work_and_the_detached_work_that_a_close_ends_oldest_first() {
+    let baseline = marked(&[program()], None, None);
+    let tree = vec![
+        program(),
+        member(40, "/bin/bash -c sleep 800", "bash", of(10)),
+        member(41, "sleep 800", "sleep", of(40)),
+        member(30, "sleep 600", "sleep", None),
+        member(31, "sleep 601", "sleep", None),
+    ];
+    let named = |closing: &[u32]| -> Vec<u32> {
+        baseline
+            .named(&tree, |_| {
+                Ok(Some(closing.iter().map(|pid| key(*pid)).collect()))
+            })
+            .expect("named")
+            .iter()
+            .map(|member| member.key.pid)
+            .collect()
+    };
+
+    // Where a close ends every one (a Windows job), all of them.
+    let every = baseline.named(&tree, |_| Ok(None)).expect("named");
+    assert_eq!(
+        every
+            .iter()
+            .map(|member| member.key.pid)
+            .collect::<Vec<_>>(),
+        [30, 31, 40, 41]
+    );
+    // Where it ends the ones it names, only those of the detached work, and always the turn's.
+    assert_eq!(named(&[31]), [31, 40, 41]);
+    assert_eq!(named(&[]), [40, 41]);
+}
+
+#[test]
+fn the_host_is_asked_what_a_close_ends_only_when_a_job_lost_its_starter() {
+    let baseline = marked(&[program()], None, None);
+    let calls = std::cell::Cell::new(0);
+    let counting = |_: &[Member]| {
+        calls.set(calls.get() + 1);
+        Ok(None)
+    };
+
+    // The turn's work alone: a look at the system's table to ask is a cost of every look.
+    let tree = vec![
+        program(),
+        member(40, "/bin/bash -c sleep 800", "bash", of(10)),
+    ];
+    assert_eq!(baseline.named(&tree, counting).expect("named").len(), 1);
+    assert_eq!(calls.get(), 0, "nothing detached: nothing to ask");
+
+    let tree = vec![program(), member(30, "sleep 600", "sleep", None)];
+    assert_eq!(baseline.named(&tree, counting).expect("named").len(), 1);
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn of_the_detached_work_a_windows_job_proves_those_whose_starter_was_a_shell_and_what_descends_from_them(
+) {
+    let detached = vec![
+        // `Start-Process ping` from a PowerShell that ended, and a job it started.
+        member(30, "ping -n 600 127.0.0.1", "ping.exe", None),
+        member(31, "ffmpeg", "ffmpeg.exe", of(30)),
+        // A build's daemon, whose starter was the build tool, and what it started.
+        member(40, "java GradleDaemon", "java.exe", None),
+        member(41, "java worker", "java.exe", of(40)),
+        // A job whose birth was never read.
+        member(50, "sleep", "sleep.exe", None),
+    ];
+    let born_of_a_shell = |key: ProcessKey| key.pid == 30;
+
+    let proved = proved_by_birth(&detached, born_of_a_shell);
+
+    let mut proved: Vec<u32> = proved.iter().map(|key| key.pid).collect();
+    proved.sort_unstable();
+    assert_eq!(proved, [30, 31]);
+}
+
+#[test]
+fn a_process_whose_parent_is_not_among_the_detached_work_is_never_proved_by_a_birth() {
+    // A list that is not closed under descent (a parent that is the turn's, say): nothing is
+    // concluded from the birth of a process that is no root.
+    let detached = vec![member(31, "ffmpeg", "ffmpeg.exe", of(30))];
+
+    assert!(proved_by_birth(&detached, |_| true).is_empty());
+}
+
+#[test]
+fn a_shell_is_told_by_the_host_with_or_without_its_extension() {
+    for shell in [
+        "powershell.exe",
+        "PowerShell.EXE",
+        "pwsh",
+        "bash.exe",
+        "sh",
+        "zsh",
+    ] {
+        assert!(is_a_shell(shell), "{shell}");
+    }
+    for other in ["cmd.exe", "java.exe", "ping.exe", "node", ""] {
+        assert!(!is_a_shell(other), "{other}");
+    }
 }

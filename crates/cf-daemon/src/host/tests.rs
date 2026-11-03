@@ -5,6 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::future::pending;
 
+use cf_proto::panes::SilentPaste;
 use serde_json::json;
 use tokio::task::LocalSet;
 
@@ -30,6 +31,7 @@ fn open(env: &[(&str, &str)]) -> OpenPane {
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect(),
         drop_env: vec!["TERM".to_owned()],
+        silent_paste: None,
     }
 }
 
@@ -59,6 +61,221 @@ async fn an_open_is_sent_with_the_keys_node_sent_and_its_env_as_the_engine_gave_
                 serde_json::to_string(&body).unwrap(),
                 r#"{"id":"p1-chief","generation":1,"cwd":"/work/app","argv":["claude","--x"],"env":{"A":"3","B":"2","CONSENSFLOW_TOKEN":"t"},"dropEnv":["TERM"]}"#
             );
+        })
+        .await;
+}
+
+/// A window whose harness reads a paste silently is opened saying how, for the pane host to
+/// hold the human's keys after their paste by (T-1048); every other open is as Node sent it.
+#[tokio::test]
+async fn an_open_of_a_harness_that_reads_a_paste_silently_says_how() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            app.on("pane.open", move |_, body| {
+                heard.borrow_mut().push(body);
+                async { Ok(json!({ "ok": true, "id": "p1-chief", "generation": 1 })) }
+            });
+            let host = host_over(&daemon);
+            let silent = SilentPaste {
+                pace_us_per_character: 600,
+                drawn_after_ms: 50,
+                quiet_ms: 120,
+                most_ms: 1_000,
+                most_us_per_character: 1_000,
+            };
+            let declared = OpenPane {
+                silent_paste: Some(silent),
+                ..open(&[])
+            };
+            host.open(declared).await.unwrap();
+            assert_eq!(
+                seen.borrow()[0]["silentPaste"],
+                json!({
+                    "paceUsPerCharacter": 600, "drawnAfterMs": 50, "quietMs": 120,
+                    "mostMs": 1000, "mostUsPerCharacter": 1000,
+                })
+            );
+        })
+        .await;
+}
+
+/// How a window declares that it reads a paste at 0.5 ms a character and may take a second and
+/// 2 ms a character at the most (Muse on Windows, T-1126): the pane host holds a delivery's
+/// Enter that long, and the daemon waits for its answer as long.
+const SLOW_READER: SilentPaste = SilentPaste {
+    pace_us_per_character: 500,
+    drawn_after_ms: 0,
+    quiet_ms: 200,
+    most_ms: 1_000,
+    most_us_per_character: 2_000,
+};
+
+/// A host that answers `pane.open` and holds each `pane.write_paste` for `held` before it
+/// answers `ok`, as the pane host does while it waits to press a delivery's Enter: the daemon's
+/// end of it (with the app's, which it needs to go on), and the pane `p1-chief` opened as
+/// `silent` says it reads a paste.
+async fn a_host_that_holds_a_paste_for(
+    held: Duration,
+    silent: Option<SilentPaste>,
+) -> (BridgeHost, Bridge) {
+    let (daemon, app) = bridge_pair();
+    app.on("pane.open", |_, _| async {
+        Ok(json!({ "ok": true, "id": "p1-chief", "generation": 1 }))
+    });
+    app.on("pane.write_paste", move |_, _| async move {
+        tokio::time::sleep(held).await;
+        Ok(json!({ "ok": true }))
+    });
+    let host = host_over(&daemon);
+    host.open(OpenPane {
+        silent_paste: silent,
+        ..open(&[])
+    })
+    .await
+    .unwrap();
+    (host, app)
+}
+
+fn a_paste_of(characters: usize) -> Value {
+    json!({ "id": "p1-chief", "generation": 1, "body": "x".repeat(characters) })
+}
+
+/// The pane host holds a delivery's Enter for the window's own read of the paste, up to its cap
+/// (a second and 2 ms a character for a window like Muse's): 33 s for a brief of 16,000
+/// characters. The daemon's request is answered by then, not cut at the bridge's 30 s, which
+/// every long delivery to such a window was (T-1127, T-1126).
+#[tokio::test(start_paused = true)]
+async fn a_paste_into_a_window_that_declared_its_read_is_answered_after_the_hosts_own_cap() {
+    LocalSet::new()
+        .run_until(async {
+            // 1 s and 2 ms each of 16,000 characters.
+            let cap = Duration::from_secs(33);
+            let (host, _app) = a_host_that_holds_a_paste_for(cap, Some(SLOW_READER)).await;
+            let started = tokio::time::Instant::now();
+            let answer = host
+                .request("pane.write_paste", a_paste_of(16_000))
+                .await
+                .unwrap();
+            assert_eq!(
+                answer,
+                json!({ "ok": true }),
+                "after {:?}",
+                started.elapsed()
+            );
+            assert_eq!(started.elapsed(), cap);
+        })
+        .await;
+}
+
+/// Its time is the cap and five seconds more: a pane host that has not answered by then has not
+/// held the Enter for the window's read, and the daemon stops waiting.
+#[tokio::test(start_paused = true)]
+async fn a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_the_hosts_cap() {
+    LocalSet::new()
+        .run_until(async {
+            let (host, _app) =
+                a_host_that_holds_a_paste_for(Duration::from_secs(60), Some(SLOW_READER)).await;
+            let started = tokio::time::Instant::now();
+            let answer = host
+                .request("pane.write_paste", a_paste_of(16_000))
+                .await
+                .unwrap();
+            assert_eq!(answer, json!({ "ok": false, "error": "deadline" }));
+            assert_eq!(started.elapsed(), Duration::from_secs(38));
+        })
+        .await;
+}
+
+/// A short brief to such a window has the bridge's thirty seconds, as every paste has had: the
+/// cap and five seconds are the floor's only where they are more.
+#[tokio::test(start_paused = true)]
+async fn a_short_paste_into_a_window_that_declared_its_read_has_thirty_seconds_at_the_least() {
+    LocalSet::new()
+        .run_until(async {
+            // 100 characters: a cap of 1.2 s, and 6.2 s with the margin.
+            let (host, _app) =
+                a_host_that_holds_a_paste_for(Duration::from_secs(29), Some(SLOW_READER)).await;
+            let answer = host
+                .request("pane.write_paste", a_paste_of(100))
+                .await
+                .unwrap();
+            assert_eq!(answer, json!({ "ok": true }));
+
+            let (host, _app) =
+                a_host_that_holds_a_paste_for(Duration::from_secs(40), Some(SLOW_READER)).await;
+            let started = tokio::time::Instant::now();
+            let answer = host
+                .request("pane.write_paste", a_paste_of(100))
+                .await
+                .unwrap();
+            assert_eq!(answer, json!({ "ok": false, "error": "deadline" }));
+            assert_eq!(started.elapsed(), Duration::from_secs(30));
+        })
+        .await;
+}
+
+/// A window whose harness declared nothing has the bridge's thirty seconds for a paste, however
+/// long: the pane host holds a delivery's Enter for 2 s at the most there.
+#[tokio::test(start_paused = true)]
+async fn a_paste_into_a_window_that_declared_nothing_has_the_bridges_thirty_seconds() {
+    LocalSet::new()
+        .run_until(async {
+            let (host, _app) = a_host_that_holds_a_paste_for(Duration::from_secs(33), None).await;
+            let started = tokio::time::Instant::now();
+            let answer = host
+                .request("pane.write_paste", a_paste_of(16_000))
+                .await
+                .unwrap();
+            assert_eq!(answer, json!({ "ok": false, "error": "deadline" }));
+            assert_eq!(started.elapsed(), Duration::from_secs(30));
+        })
+        .await;
+}
+
+/// Only a paste has the longer time, and only the pane the declaration was made for: a newer
+/// generation of the pane, opened with none, has the bridge's.
+#[tokio::test(start_paused = true)]
+async fn what_a_window_declared_is_for_its_paste_and_its_generation_alone() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            app.on("pane.open", |_, _| async {
+                Ok(json!({ "ok": true, "id": "p1-chief", "generation": 1 }))
+            });
+            for op in ["pane.write_paste", "pane.snapshot"] {
+                app.on(op, |_, _| async {
+                    tokio::time::sleep(Duration::from_secs(33)).await;
+                    Ok(json!({ "ok": true }))
+                });
+            }
+            let host = host_over(&daemon);
+            host.open(OpenPane {
+                silent_paste: Some(SLOW_READER),
+                ..open(&[])
+            })
+            .await
+            .unwrap();
+            // A request that is not a paste has the bridge's, whatever it says of the pane (a
+            // body as long as a brief would give a paste 38 s).
+            let snapshot = host
+                .request("pane.snapshot", a_paste_of(16_000))
+                .await
+                .unwrap();
+            assert_eq!(snapshot, json!({ "ok": false, "error": "deadline" }));
+            let newer = json!({ "id": "p1-chief", "generation": 2, "body": "x".repeat(16_000) });
+            let answer = host.request("pane.write_paste", newer).await.unwrap();
+            assert_eq!(answer, json!({ "ok": false, "error": "deadline" }));
+            // And what the last open of a pane said is what it declares: opened again with
+            // nothing, the pane has the bridge's.
+            host.open(open(&[])).await.unwrap();
+            let again = host
+                .request("pane.write_paste", a_paste_of(16_000))
+                .await
+                .unwrap();
+            assert_eq!(again, json!({ "ok": false, "error": "deadline" }));
         })
         .await;
 }
@@ -303,6 +520,40 @@ async fn a_kill_is_asked_by_the_panes_id_and_generation() {
                     json!({ "id": "p1-zeus", "generation": 1 }),
                     json!({ "id": "p1-zeus", "generation": 2 })
                 ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn how_long_a_pane_has_printed_nothing_is_what_its_snapshot_says_and_none_where_it_says_nothing(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            app.on("pane.snapshot", move |_, body| {
+                let answer = match body["generation"].as_u64() {
+                    Some(1) => json!({ "ok": true, "outputQuietMs": 320 }),
+                    // A pane that has printed nothing yet.
+                    Some(2) => json!({ "ok": true, "outputQuietMs": null }),
+                    // An answer that does not say, as a host older than the field's.
+                    Some(3) => json!({ "ok": true }),
+                    _ => json!({ "ok": false, "error": "no such pane" }),
+                };
+                heard.borrow_mut().push(body);
+                async move { Ok(answer) }
+            });
+            let host = host_over(&daemon);
+            assert_eq!(host.quiet(&pane("p1-zeus", 1)).await, Ok(Some(320.0)));
+            assert_eq!(host.quiet(&pane("p1-zeus", 2)).await, Ok(None));
+            assert_eq!(host.quiet(&pane("p1-zeus", 3)).await, Ok(None));
+            assert_eq!(host.quiet(&pane("p1-zeus", 4)).await, Ok(None));
+            // The request is the plain look at a pane: its id and generation, no tail asked.
+            assert_eq!(
+                seen.borrow()[0],
+                json!({ "id": "p1-zeus", "generation": 1 })
             );
         })
         .await;

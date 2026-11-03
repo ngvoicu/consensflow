@@ -174,7 +174,7 @@ fn a_question_the_chief_read_and_answered_in_its_turn_is_not_typed_in_when_the_t
         "the question the chief answered is not typed in: {record}"
     );
     assert!(
-        !record.contains(&format!("cf answer m-{id}")),
+        !cf_e2e::rig::names_command(&record, &format!("answer m-{id}")),
         "nor is the chief told to answer it: {record}"
     );
     let question = now(&project, "chief", id)?;

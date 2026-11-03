@@ -13,10 +13,7 @@ fn names<'a>(listed: &[(&'a str, &[CatalogEntry])]) -> Vec<&'a str> {
 fn every_harness_is_listed_in_the_order_its_first_preset_comes_in() {
     let catalog = Catalog::bundled().unwrap();
     let listed = selected(catalog.groups(), None);
-    assert_eq!(
-        names(&listed),
-        ["devin", "codex", "pi", "opencode", "claude"]
-    );
+    assert_eq!(names(&listed), ["devin", "codex", "pi", "claude"]);
     assert!(listed.iter().all(|(_, entries)| !entries.is_empty()));
 }
 

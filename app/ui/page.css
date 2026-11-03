@@ -133,6 +133,22 @@ button:disabled { opacity: .45; cursor: default; }
   font-size: 13px;
 }
 .daemon-down strong { color: var(--buoy); }
+/* Over an open modal (core/app.js, `placeDaemonDown`): a notice of its own at the top of the
+   window, opaque, for the dialog's backdrop is under it. */
+.daemon-down:popover-open {
+  position: fixed;
+  inset: 12px 12px auto;
+  width: fit-content;
+  max-width: min(760px, calc(100vw - 24px));
+  margin: 0 auto;
+  border: 1px solid rgba(255, 120, 104, .6);
+  border-left: 4px solid var(--buoy);
+  border-radius: 8px;
+  background: linear-gradient(rgba(255, 120, 104, .14), rgba(255, 120, 104, .14)), var(--panel-raised);
+  color: var(--foam);
+  box-shadow: 0 8px 24px var(--shadow);
+  overflow: visible;
+}
 
 /* Projects. */
 .sidebar {
@@ -575,6 +591,8 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .strip-chief .strip-route { color: var(--amber); }
 .strip[data-gated="true"] .strip-route { color: var(--seafoam); }
 .strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
+/* What a meeting holds for the chief only reads: marked apart from what waits for approval. */
+.strip[data-held="true"] { border-left: 3px solid var(--line); }
 /* A list too narrow for the text beside who sent it (For you at the
    default window): the number, who and when head the strip, and the text
    has its whole width under them. */
@@ -638,6 +656,17 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .wakeup-section .wakeup-when input[type="number"] { width: 6em; }
 .wakeup-section .staff-hint { color: var(--buoy); }
 .wakeup-section textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: inherit; resize: vertical; }
+/* The rules for the staff: the human's text, and its count against the ledger's bounds. */
+.staff-rules textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px/1.45 var(--mono); resize: vertical; min-height: 9em; }
+.staff-rules .staff-rules-count { margin: 0; font: 11px var(--mono); color: var(--muted); text-align: right; }
+.staff-rules .staff-rules-count.over { color: var(--buoy); }
+.staff-rules textarea[aria-invalid="true"] { border-color: var(--buoy); }
+.staff-rules .staff-hint { color: var(--buoy); }
+/* The size the project's Claude members compact at: Claude's own point, or a size. */
+.claude-compaction .claude-compaction-choice { display: flex; align-items: center; gap: 8px; }
+.claude-compaction input[type="text"] { width: 10em; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px var(--mono); }
+.claude-compaction input[aria-invalid="true"] { border-color: var(--buoy); }
+.claude-compaction .staff-hint { color: var(--buoy); }
 /* The project's specs: the controls one under another. */
 .project-specs { gap: 10px; }
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
@@ -850,8 +879,10 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .terminal-card[data-role="chief"] { grid-template-rows: auto minmax(0, 1fr); }
 .terminal-card[data-role="chief"] .terminal-head { flex-wrap: wrap; row-gap: 3px; padding: 6px 10px; }
 .terminal-head > .quiet-button { margin-left: auto; padding: 2px 9px; }
-/* History and Switch chief sit together at the head's end. */
-.terminal-head > .quiet-button + .quiet-button { margin-left: 0; }
+/* History, Switch chief and the meeting's button sit together at the head's end: on a
+   narrow card they go under the name together, and wrap there, each line at the end. */
+.terminal-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 8px; margin-left: auto; }
+.terminal-tools > .quiet-button { padding: 2px 9px; }
 .terminal-about { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding-left: 18px; }
 .terminal-about .terminal-meta { flex: 0 1 auto; }
 .terminal-status { font-weight: 600; color: var(--muted); }
@@ -1069,6 +1100,7 @@ button.registry-row:hover:not(:disabled) { border-color: var(--seafoam-dim); }
 .registry-title > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .registry-title strong { font-size: 13.5px; font-weight: 650; }
 .registry-title small { font: 11px var(--mono); color: var(--muted); }
+.registry-title small.registry-link { color: var(--seafoam); text-decoration: underline; text-underline-offset: 2px; }
 .registry-priority, .registry-updated { color: var(--muted); }
 .registry-updated { font: 11.5px var(--mono); }
 .status-chip { justify-self: start; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 650; text-transform: capitalize; }

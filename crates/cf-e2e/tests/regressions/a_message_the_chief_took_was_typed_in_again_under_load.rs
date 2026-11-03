@@ -40,8 +40,10 @@ use crate::{config, secs, Outcome};
 /// that goes red does not wait out the rest (a plant's run is given five minutes).
 const STALL: Duration = Duration::from_secs(200);
 
-/// Words only the paste of a result to the chief holds: what it decides with.
-const RESULT_WORDS: &str = "cf task accept T-1";
+/// Words only the paste of a result to the chief holds: what it decides with, after the
+/// window's own cf, which the footer names by its whole path (`…/cf` on the Mac,
+/// `…/cf.exe` on Windows, T-1049).
+const RESULT_WORDS: &str = " task accept T-1";
 
 /// The daemon's events of `kind` about the message `id`.
 fn of_message<'a>(events: &'a [Value], kind: &str, id: i64) -> Vec<&'a Value> {

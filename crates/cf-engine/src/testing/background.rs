@@ -40,7 +40,8 @@ pub struct FakeBackground {
     rests: RefCell<Vec<(Pane, Vec<u64>)>>,
     /// The word that a turn begins waits for this gate before it is taken.
     mark_hold: RefCell<Option<Gate>>,
-    /// What a look at what a window left running answers: no answer, unless a test says.
+    /// What a look at what a window left running answers: that it runs nothing, unless
+    /// a test says (no answer among it).
     left: RefCell<Option<Background>>,
     /// The panes the engine looked at what they left running, in order.
     left_asked: RefCell<Vec<Pane>>,
@@ -48,7 +49,10 @@ pub struct FakeBackground {
 
 impl FakeBackground {
     pub fn new() -> Rc<Self> {
-        Rc::new(Self::default())
+        Rc::new(Self {
+            left: RefCell::new(Some(Background::default())),
+            ..Self::default()
+        })
     }
 
     /// The host takes its time over the word that a turn begins: it is not taken

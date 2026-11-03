@@ -13,6 +13,10 @@
 pacing-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 # The engine's pacing and arrival cases (`tests/dispatcher/pacing.rs`, `unproven.rs`, `still_there.rs`, `quoted_headers.rs`).
 pacing-kit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "unproven::", "still_there::", "quoted_headers::"]
+# The box an interrupt of the engine's would go into, read empty or not (`withheld_enter.rs`).
+pacing-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "withheld_enter::"]
+# A launch's first message handed over once its window is up (`tests/dispatcher/first_delivered.rs`).
+pacing-first-delivered = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "first_delivered::"]
 # The ledger's order of a queue.
 pacing-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "questions_first"]
 # Codex's broker, and what its window makes of it.
@@ -360,9 +364,11 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            Some(held) if held.reason == reason => held,"
+find = "            Some(held) if held.reason == reason && held.traced => held,"
 replace = "            Some(held) if held.reason == reason || true => held,"
 
+# Re-aimed in integration D2b (T-996): T-901 (in D1) gave `snapshot_now` a `tail`, and this plant's
+# replace still called it with one argument, so it did not compile on main. `false` is the call it made.
 [[plant]]
 name = "pacing review: snapshot: the gate's snapshot has the arrival's 5 s"
 meant = "a_pane_host_that_answers_late_holds_nothing_back"
@@ -376,7 +382,7 @@ find = '''
             .ok()
             .filter(|snapshot| snapshot.get("ok") == Some(&Value::Bool(true)));'''
 replace = '''
-        let asked = self.snapshot_now(&pane).await;'''
+        let asked = self.snapshot_now(&pane, false).await;'''
 
 [[plant]]
 name = "pacing review: unreadable: the lane of a window whose record cannot be read says nothing of it"
@@ -591,7 +597,7 @@ replace = "                    .is_some_and(|held| Some(held.message) != head &&
 
 [[plant]]
 name = "pacing review: paced kit: the gate's kit runs without the pacing on"
-meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable"
+meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_platform_free_job_with_its_variable"
 runs = ["pacing-gate-steps"]
 
 [[plant.edit]]
@@ -601,8 +607,8 @@ find = '''
 replace = ","
 
 [[plant]]
-name = "pacing review: paced kit: CI's checks job runs the kit without the pacing on"
-meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable"
+name = "pacing review: paced kit: CI's platform-free job runs the kit without the pacing on"
+meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_platform_free_job_with_its_variable"
 runs = ["pacing-gate-steps"]
 
 [[plant.edit]]
@@ -628,3 +634,98 @@ replace = '''
                 return Ok(Pace::Go);
             }
             let unrest'''
+
+# T-946: a window read by the fallback is up only once its harness shows its prompt: Muse 1.4.14 held
+# still six seconds as it started, and the fallback read it at rest, so the live pacing run typed into a
+# Muse that took no keys yet.
+[[plant]]
+name = "pacing: a window read by the fallback is drawn by a quiet screen alone"
+meant = "a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let drawn = quiet && up;'''
+replace = '''        let drawn = quiet || up && false;'''
+
+[[plant]]
+name = "pacing: a window read by the fallback whose record has items is not asked whether it is drawn"
+meant = "a_window_read_by_the_fallback_whose_record_has_items_is_not_at_rest_before_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''            || ((observed.items().is_empty() || unnamed || !self.idle_word(record))'''
+replace = '''            || ((observed.items().is_empty() || unnamed)'''
+
+[[plant]]
+name = "pacing: a window read by the fallback is asked for its prompt in a screen it never sent"
+meant = "a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                window.shows_prompt(&drawn_lines(snapshot))'''
+replace = '''                window.shows_prompt(Shown::from_snapshot(snapshot).lines())'''
+
+[[plant]]
+name = "pacing: a window read by the fallback is asked whether it is drawn with no lines of its screen"
+meant = "a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_prompt"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                let body = if fallback {'''
+replace = '''                let body = if fallback && false {'''
+
+# T-946: the engine read the input box from a snapshot it asked no drawn lines of, so every box read
+# not empty in the product, and the key went into empty ones too (T-829's rule); the fake host had sent
+# the lines unasked.
+[[plant]]
+name = "pacing: the box is read empty or not from a snapshot that holds none of the screen's lines"
+meant = "a_box_its_harness_reads_empty_is_pressed_no_key_and_the_words_go_into_it"
+runs = ["pacing-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                .request("pane.snapshot", pane_body_drawn(pane)),'''
+replace = '''                .request("pane.snapshot", json!({ "id": pane.id, "generation": pane.generation })),'''
+
+# --- Calliope's P3s on T-919: a window that answers Busy (Pi's extension, D9) ---
+
+[[plant]]
+name = "pacing busy: a busy refusal starts the hold's clock again"
+meant = "a_window_that_refuses_every_attempt_for_being_busy_is_told_at_ten_minutes"
+runs = ["pacing-kit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+replace = '''
+                .is_none_or(|next| next.id != message.id)
+        {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().held = None;
+        let (Some(window), Some(pane)) = self.window_of(record) else {'''
+
+[[plant]]
+name = "pacing busy: a first message refused for being busy is taken as handed over"
+meant = "a_first_message_refused_for_being_busy_is_pasted_later_once"
+runs = ["pacing-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if let Admission::Busy { reason } = &outcome {
+            let reason =
+                format!("its harness refused its first message for being at work: {reason}");'''
+replace = '''
+        if let (Admission::Busy { reason }, true) = (&outcome, false) {
+            let reason =
+                format!("its harness refused its first message for being at work: {reason}");'''

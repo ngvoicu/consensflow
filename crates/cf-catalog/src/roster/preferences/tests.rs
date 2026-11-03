@@ -162,14 +162,11 @@ fn the_app_s_specs_are_no_choice_about_the_roster_and_are_refused_by_name_leavin
 }
 
 #[test]
-fn claude_and_openai_models_are_hidden_on_pi_opencode_and_devin_when_the_human_keeps_to_their_own()
-{
+fn claude_and_openai_models_are_hidden_on_pi_and_devin_when_the_human_keeps_to_their_own() {
     for (kind, model) in [
         ("pi", "openrouter/anthropic/claude-fable-5.1"),
         ("pi", "openai-codex/gpt-6-astra"),
         ("pi", "openai-codex/gpt-6.1-sol"),
-        ("opencode", "openrouter/anthropic/claude-fable-5.1"),
-        ("opencode", "openrouter/openai/gpt-6-astra"),
         // Devin reaches them too (the owner, 2026-10-25).
         ("devin", "claude-fable-5-1"),
         ("devin", "claude-opus-5-5"),
@@ -193,10 +190,9 @@ fn nothing_is_hidden_on_the_harnesses_that_run_those_models_themselves() {
 }
 
 #[test]
-fn other_makers_models_are_never_hidden_on_pi_opencode_or_devin() {
+fn other_makers_models_are_never_hidden_on_pi_or_devin() {
     for (kind, model) in [
         ("pi", "openrouter/moonshotai/kimi-k3"),
-        ("opencode", "opencode/muse-spark-1.3-contributor-free"),
         ("devin", "swe-2"),
         ("devin", "swe-1-6"),
         ("devin", "gemini-4-argon"),
@@ -237,7 +233,7 @@ fn a_model_off_the_catalog_is_hidden_by_the_key_it_is_given_under() {
     // A model the catalog does not run is keyed as it is written: its
     // provider path is not stripped, so only a bare `claude-` or `gpt-` name counts.
     assert!(hides(ON, &view("pi", "claude-x")));
-    assert!(hides(ON, &view("opencode", "gpt-9")));
+    assert!(hides(ON, &view("devin", "gpt-9")));
     assert!(!hides(ON, &view("pi", "openrouter/anthropic/claude-x")));
 }
 

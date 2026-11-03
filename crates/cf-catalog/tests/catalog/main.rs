@@ -14,7 +14,6 @@ mod catalog_presentation_follows_actual_model_and_effort;
 mod claude_haiku_5_5_is_light_work_on_claude_code_alone;
 mod every_model_devin_lists_is_a_preset;
 mod every_tool_ships_a_list_of_ready_made_agents;
-mod nemotron_3_5_super_vl_is_light_work_on_opencode_zen_at_its_ceiling;
 
 fn catalog() -> Catalog {
     Catalog::bundled().unwrap()
@@ -89,32 +88,14 @@ fn ships_all_compatible_low_medium_choices_with_stable_identities_and_pi_openrou
     let matrix = [
         (Harness::Codex, "gpt-6.1-sol", "hemera", "phaethon"),
         (Harness::Pi, "openai-codex/gpt-6.1-sol", "leto", "asterope"),
-        (
-            Harness::Opencode,
-            "openrouter/openai/gpt-6.1-sol",
-            "arvakr",
-            "alsvidr",
-        ),
         (Harness::Codex, "gpt-6-astra", "electra", "maia"),
         (Harness::Pi, "openai-codex/gpt-6-astra", "alcyone", "merope"),
-        (
-            Harness::Opencode,
-            "openrouter/openai/gpt-6-astra",
-            "dagr",
-            "skirnir",
-        ),
         (Harness::Claude, "claude-fable-5-1", "terpsichore", "thalia"),
         (
             Harness::Pi,
             "openrouter/anthropic/claude-fable-5.1",
             "musaeus",
             "erato",
-        ),
-        (
-            Harness::Opencode,
-            "openrouter/anthropic/claude-fable-5.1",
-            "suttung",
-            "kvasir",
         ),
     ];
     for (harness, model, low, medium) in matrix {
@@ -125,7 +106,7 @@ fn ships_all_compatible_low_medium_choices_with_stable_identities_and_pi_openrou
             assert_eq!(entry.entry.effort.as_deref(), Some(effort), "{name}");
         }
     }
-    assert_eq!(entries(&catalog).count(), 251);
+    assert_eq!(entries(&catalog).count(), 217);
     for name in ["orpheus", "linus", "erato", "kronos", "atlas"] {
         let entry = found(&catalog, name);
         assert!(
@@ -154,34 +135,6 @@ fn gemini_3_1_pro_preview_is_retired_on_every_harness_while_gemini_3_8_flash_rem
     assert_eq!(
         found(&catalog, "nike").entry.model,
         "openrouter/google/gemini-3.8-flash"
-    );
-    assert_eq!(
-        found(&catalog, "sif").entry.model,
-        "openrouter/google/gemini-3.8-flash"
-    );
-}
-
-#[test]
-fn muse_contributor_variants_share_model_identity_while_retaining_route_terms_and_execution_ids() {
-    let catalog = catalog();
-    for name in ["eos", "logi", "gefjon"] {
-        let p = found(&catalog, name);
-        assert_eq!(p.entry.profile.model_key, "muse-spark-1.3");
-        assert_eq!(p.entry.profile.model_label, "Muse Spark 1.3");
-        if name == "gefjon" {
-            assert!(p.entry.model.contains("contributor"));
-            assert!(p.entry.profile.route_label.contains("Contributor"));
-            assert_eq!(
-                p.entry.profile.route_note.as_deref(),
-                Some("Prompts and replies may train Meta models.")
-            );
-        } else {
-            assert_eq!(p.entry.profile.route_note, None);
-        }
-    }
-    assert_eq!(
-        found(&catalog, "gefjon").entry.profile.route_label,
-        "OpenCode Zen · Contributor · Free"
     );
 }
 
@@ -230,7 +183,7 @@ fn offers_devin_s_swe_1_6_by_name_and_no_agent_on_devin_s_own_setting() {
     // The levels Devin writes into its model ids (claude-opus-5-5-max), for
     // an agent that names a family that has them.
     assert_eq!(
-        efforts(Harness::Devin),
+        efforts(Harness::Devin).levels,
         ["low", "medium", "high", "xhigh", "max"]
     );
 }
@@ -246,7 +199,6 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
         ("asteria", "complex"),
         ("celaeno", "complex"),
         ("taygete", "complex"),
-        ("vidar", "complex"),
         ("clio", "complex"),
         ("endymion", "complex"),
         ("apollo", "complex"),
@@ -260,7 +212,6 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
         ("artemis", "standard"),
         ("anubis", "standard"),
         ("atlas", "standard"),
-        ("vali", "standard"),
         ("thalia", "standard"),
         ("maia", "standard"),
         ("phoebus", "standard"),
@@ -272,7 +223,6 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
         ("phaethon", "light"),
         ("asterope", "light"),
         ("huginn", "light"),
-        ("buri", "light"),
     ] {
         let entry = found(&catalog, name);
         assert_eq!(entry.entry.profile.work_tier.as_str(), tier, "{name}");
@@ -351,10 +301,9 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
 }
 
 #[test]
-fn carries_gpt_6_1_sol_wherever_sol_was_sonnet_5_5_and_mimo_v2_6_pro_through_openrouter_on_pi_and_opencode(
-) {
-    // 2026-09-30: every Sol preset moved to 6.1 (probed on Codex 0.159.2, Pi 0.99.1,
-    // OpenCode 1.18.33), Sonnet to 5.5, and MiMo V2.6 Pro joined.
+fn carries_gpt_6_1_sol_wherever_sol_was_sonnet_5_5_and_mimo_v2_6_pro_through_openrouter_on_pi() {
+    // 2026-09-30: every Sol preset moved to 6.1 (probed on Codex 0.159.2 and Pi
+    // 0.99.1), Sonnet to 5.5, and MiMo V2.6 Pro joined.
     let catalog = catalog();
     // `/gpt-[\d.]+-sol$/`: "gpt-", digits and dots, and "-sol" to the end.
     let is_sol = |model: &str| {
@@ -370,7 +319,7 @@ fn carries_gpt_6_1_sol_wherever_sol_was_sonnet_5_5_and_mimo_v2_6_pro_through_ope
         .map(|(_, entry)| entry)
         .filter(|entry| is_sol(&entry.model) && entry.model != "gpt-6-sol")
         .collect();
-    assert_eq!(sol.len(), 13);
+    assert_eq!(sol.len(), 9);
     for entry in sol {
         assert!(entry.model.ends_with("gpt-6.1-sol"), "{}", entry.name);
         assert_eq!(entry.profile.model_label, "GPT-6.1 Sol", "{}", entry.name);
@@ -406,15 +355,13 @@ fn carries_gpt_6_1_sol_wherever_sol_was_sonnet_5_5_and_mimo_v2_6_pro_through_ope
         );
         assert_eq!(entry.entry.profile.work_tier.as_str(), tier, "{name}");
     }
-    for (name, harness) in [("selene", Harness::Pi), ("idun", Harness::Opencode)] {
-        let entry = found(&catalog, name);
-        assert_eq!(entry.harness, harness);
-        assert_eq!(entry.entry.model, "openrouter/xiaomi/mimo-v2.6-pro");
-        // MiMo takes reasoning on or off, no level: its presets name none.
-        assert_eq!(entry.entry.effort, None, "{name}");
-        assert_eq!(entry.entry.profile.model_label, "MiMo V2.6 Pro");
-        assert_eq!(entry.entry.profile.route_label, "OpenRouter · API");
-    }
+    let selene = found(&catalog, "selene");
+    assert_eq!(selene.harness, Harness::Pi);
+    assert_eq!(selene.entry.model, "openrouter/xiaomi/mimo-v2.6-pro");
+    // MiMo takes reasoning on or off, no level: its preset names none.
+    assert_eq!(selene.entry.effort, None);
+    assert_eq!(selene.entry.profile.model_label, "MiMo V2.6 Pro");
+    assert_eq!(selene.entry.profile.route_label, "OpenRouter · API");
 }
 
 #[test]
@@ -433,15 +380,10 @@ fn offers_devin_s_models_as_presets_each_on_its_twin_s_tier() {
         .filter(|entry| entry.effort.is_some())
         .collect();
     assert_eq!(devin.len(), 143);
-    let twins: Vec<&CatalogEntry> = [
-        Harness::Claude,
-        Harness::Codex,
-        Harness::Pi,
-        Harness::Opencode,
-    ]
-    .into_iter()
-    .flat_map(|harness| listed(&catalog, harness))
-    .collect();
+    let twins: Vec<&CatalogEntry> = [Harness::Claude, Harness::Codex, Harness::Pi]
+        .into_iter()
+        .flat_map(|harness| listed(&catalog, harness))
+        .collect();
     for entry in devin {
         let level = entry.effort.as_deref().unwrap();
         assert!(
@@ -462,7 +404,6 @@ fn offers_devin_s_models_as_presets_each_on_its_twin_s_tier() {
             entry.name
         );
         assert_eq!(entry.profile.route_label, "Devin account", "{}", entry.name);
-        assert_eq!(entry.profile.route_note, None, "{}", entry.name);
         if entry.model == "swe-2" {
             assert_eq!(entry.profile.model_label, "SWE-2", "{}", entry.name);
             continue;

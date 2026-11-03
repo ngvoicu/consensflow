@@ -34,6 +34,7 @@ fn every_command_of_the_plan_is_there_once() {
             "portable inspect",
             "app test",
             "app clippy",
+            "app fresh",
             "clippy-windows",
             "--as-archiver",
             "test daemons",
@@ -47,12 +48,15 @@ fn every_command_of_the_plan_is_there_once() {
             "windows",
             "windows-matrix",
             "eval summary",
+            "eval chiefs",
             "eval long",
             "eval",
             "watch",
             "scrub-transcript",
+            "scrub-muse-session",
             "specmint-sync",
             "departures",
+            "unreachable-pub",
             "bench records-memory",
             "plants",
             "smoke",
@@ -60,6 +64,7 @@ fn every_command_of_the_plan_is_there_once() {
             "candidate",
             "release alpha",
             "release promote",
+            "release verify",
             "check",
             "ci-times",
         ]
@@ -168,7 +173,10 @@ fn a_group_of_commands_has_its_help_and_wants_a_command_of_it() {
         "{help}"
     );
     assert!(!help.contains("departures"), "{help}");
-    assert_eq!(parsed("app"), "usage app takes a command: test, clippy");
+    assert_eq!(
+        parsed("app"),
+        "usage app takes a command: test, clippy, fresh"
+    );
     assert_eq!(
         parsed("test"),
         "usage test takes a command: daemons, daemon-and-rig, integration, regressions, clis, agents, load"

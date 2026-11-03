@@ -7,10 +7,14 @@
 //! cannot say: its thread keeps the instructions it began with, so the section of
 //! specs is there only as a message ConsensFlow gave it.
 
+use std::path::Path;
+
 use cf_e2e::live::cut;
 use cf_e2e::rollout;
 use regex::Regex;
 use serde_json::Value;
+
+use crate::evidence::DEFAULT_FOLDER;
 
 /// What the section of specs in a chief's text begins with.
 const SECTION: &str = "## This project's specs";
@@ -101,9 +105,9 @@ pub fn skill_named_in(role: &str) -> Option<String> {
         .map(|found| found[1].to_owned())
 }
 
-/// The folder the text says specs are kept in, where it says `.specs`.
+/// The folder the text says the specs and their registry are in.
 pub fn folder_named_in(role: &str) -> Option<String> {
-    Regex::new(r"Where Specmint says `\.specs`, it means `([^`]+)`")
+    Regex::new(r"Your specs and their registry are in `([^`]+)`:")
         .ok()?
         .captures(role)
         .map(|found| found[1].to_owned())
@@ -119,7 +123,7 @@ pub fn skill_called(file_text: &str) -> Option<String> {
 }
 
 /// Where a window was given its role text, by what its `pane.open` says: a file
-/// (Claude's, OpenCode's, Devin's and Codex's), or the text itself (Pi's).
+/// (Claude's, Devin's and Codex's), or the text itself (Pi's).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoleText {
     File(String),
@@ -127,9 +131,11 @@ pub enum RoleText {
 }
 
 /// How the window of `frame` (a `pane.open` request) was given its role: Claude
-/// appends a file to its system prompt, Pi appends the text, Codex's broker and
-/// Devin read the file their environment names, and OpenCode has it as the last of
-/// the instructions its configuration lists.
+/// appends a file to its system prompt, Pi appends what its last
+/// `--append-system-prompt` says, a text or (since Pi 1.4.0, which ConsensFlow gives the
+/// role by a file so that no process of the machine reads it) a file's path
+/// ([`RoleText::Inline`] holds either; [`text_of`] tells them apart), and Codex's broker
+/// and Devin read the file their environment names.
 pub fn role_of(frame: &Value) -> Option<RoleText> {
     let argv: Vec<&str> = frame["argv"]
         .as_array()
@@ -137,9 +143,11 @@ pub fn role_of(frame: &Value) -> Option<RoleText> {
         .flatten()
         .filter_map(Value::as_str)
         .collect();
+    // The last: the file Pi appends of the user's own (`APPEND_SYSTEM.md`) comes first, and
+    // the role after it.
     let after = |flag: &str| {
         argv.iter()
-            .position(|word| *word == flag)
+            .rposition(|word| *word == flag)
             .and_then(|at| argv.get(at + 1))
             .map(|word| (*word).to_owned())
     };
@@ -154,10 +162,18 @@ pub fn role_of(frame: &Value) -> Option<RoleText> {
             return Some(RoleText::File(file.to_owned()));
         }
     }
-    let configuration: Value =
-        serde_json::from_str(frame["env"]["OPENCODE_CONFIG_CONTENT"].as_str()?).ok()?;
-    let file = configuration["instructions"].as_array()?.last()?.as_str()?;
-    Some(RoleText::File(file.to_owned()))
+    None
+}
+
+/// The words a Pi window's `--append-system-prompt` says: the file the path names, where
+/// it names one (Pi reads the text of a path that is a file, `resolvePromptInput`), else
+/// the argument is the text.
+pub fn text_of(appended: &str) -> std::result::Result<String, String> {
+    if !appended.contains('\n') && Path::new(appended).is_file() {
+        return std::fs::read_to_string(appended)
+            .map_err(|failed| format!("the role text {appended} cannot be read: {failed}"));
+    }
+    Ok(appended.to_owned())
 }
 
 /// That no word of the window's launch (its command line and its environment)
@@ -188,6 +204,51 @@ pub fn carries_no_skill(frame: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// That the skill the chief is given names the project's folder and no other: no file of
+/// its folder `skill` (the folder of its `SKILL.md`, with its `references` and `assets`)
+/// says `.specs` where the project keeps its specs in `folder`, and its `SKILL.md` says
+/// `folder`. The skill's own files call `.specs` the place the specs and the registry are
+/// in, and a chief that read both went by the skill (T-662, Pi on `docs/specs`). Where
+/// the folder is `.specs` there is no other to name. What the run says of it, in a line.
+pub fn names_the_folder_alone(skill: &Path, folder: &str) -> Result<String, String> {
+    if folder == DEFAULT_FOLDER {
+        return Ok(format!("{folder} is the folder the skill names"));
+    }
+    let mut named = false;
+    let mut files = 0;
+    let mut pending = vec![skill.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        let entries = std::fs::read_dir(&next)
+            .map_err(|failed| format!("{} cannot be read: {failed}", next.display()))?;
+        for entry in entries {
+            let path = entry.map_err(|failed| failed.to_string())?.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let text = std::fs::read_to_string(&path)
+                .map_err(|failed| format!("{} cannot be read: {failed}", path.display()))?;
+            files += 1;
+            if let Some(at) = text.find(DEFAULT_FOLDER) {
+                return Err(format!(
+                    "{} still says {DEFAULT_FOLDER}: {}",
+                    path.display(),
+                    cut(&text[at..], MARGIN * 3)
+                ));
+            }
+            named |=
+                path.file_name().is_some_and(|name| name == "SKILL.md") && text.contains(folder);
+        }
+    }
+    named
+        .then(|| {
+            format!(
+                "{files} files, none of them says {DEFAULT_FOLDER}, and its SKILL.md says {folder}"
+            )
+        })
+        .ok_or_else(|| format!("its SKILL.md does not say {folder}"))
 }
 
 /// The path as the product compares paths: with slashes, as the section of specs

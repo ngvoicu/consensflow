@@ -26,9 +26,9 @@ use cf_harness::contract::{
     Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
     Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
-use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
-use cf_proto::panes::Servers;
-use cf_proto::specs::Variant;
+use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_proto::panes::{Servers, SilentPaste};
+use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
 use super::holds::{Holds, Wrapped};
@@ -56,6 +56,9 @@ pub struct FakeAgent {
     pub says_places: bool,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
+    /// The model its harness's records say changed with no word of the harness's own
+    /// for it (Claude Code's drift): said to the human, never held on.
+    pub model_drift: Option<Arc<ModelMoved>>,
     /// Whether a delivery is taken.
     pub admit: bool,
     /// Whether a delivery taken shows in the record.
@@ -72,6 +75,9 @@ pub struct FakeAgent {
     pub failure: Option<String>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
+    /// The conversations the window was switched to that no hook of its harness greeted
+    /// with its role text (`Window::greeted`, Muse's `/clear`).
+    pub ungreeted: Vec<String>,
     /// Each conversation's record, once the window switched away from it.
     pub records: HashMap<String, Vec<Item>>,
     /// Whether each of those records, read with no window open, reads at rest: as the
@@ -133,6 +139,9 @@ pub struct FakeAgent {
     /// Why its record cannot be read now: each look reads none (`Reading::Unknown`),
     /// as when the reader's read of the transcript fails.
     pub unreadable: Option<String>,
+    /// The commands its harness says it keeps running (`Window::kept_commands`): none
+    /// unless a test says, and none where it says the harness could not tell.
+    pub kept_commands: Option<Vec<String>>,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -210,6 +219,9 @@ pub struct FakeAdapter {
     /// How its windows' harness keeps its servers (`adapter.servers`): not known,
     /// as an adapter that says no more.
     pub servers: Cell<Servers>,
+    /// How its windows' harness reads a human's paste (`adapter.silent_paste`, which no
+    /// trace of Node's has): as one that declares nothing.
+    pub silent_paste: Cell<Option<SilentPaste>>,
     /// Whether its windows' harness keeps the instructions a resumed
     /// conversation began with (`adapter.keeps_first_instructions`, which no
     /// trace of Node's has): not, as an adapter that says no more.
@@ -236,18 +248,20 @@ pub struct FakeAdapter {
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
     /// How its windows take their first message: as they open, as Devin's does
-    /// from its file (as the fake of Node's suite took it); posted once they are up,
-    /// as OpenCode's through its server, only if the host admits it then; or
-    /// delivered once they are up as any later message is, as Claude Code's, Pi's
-    /// and Codex's are.
+    /// from its file (as the fake of Node's suite took it); or delivered once they
+    /// are up as any later message is, as Claude Code's, Pi's and Codex's are.
     pub first: Cell<FirstMessage>,
     /// Where its harness has the Specmint variant installed, when the test says
-    /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
-    /// keep for it, which is the same for every launch.
+    /// it has: the `SKILL.md` it answers, for a project whose specs are in the folder
+    /// that copy names (`.specs`). Without, or for any other folder, the copy
+    /// ConsensFlow would keep for it, which is the same for every launch.
     pub specmint_installed: RefCell<Option<String>>,
     /// The variants it was asked where its harness has them, in order: a launch
     /// that is given no specs asks none.
     pub specmint_asked: RefCell<Vec<Variant>>,
+    /// The folder of each of those asks, in the same order: where the project keeps
+    /// its specs.
+    pub specmint_folders: RefCell<Vec<String>>,
     /// Asks of whether a conversation can be gone on with that the test holds,
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
@@ -301,6 +315,18 @@ pub struct FakeAdapter {
     /// What its windows' input box holds on their screen (`Window::input_box`): none,
     /// as a window whose box no reader reads, unless a test says.
     pub input_box: Cell<Option<InputBox>>,
+    /// A window opened again on a conversation reads what the one before it ended in, as a
+    /// harness's record keeps it: the failure of its last turn and the quota it said (a
+    /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
+    /// suite, where each window began clean.
+    pub rereads_failures: Cell<bool>,
+    /// Its windows record what they are given, a launch's first message too, and begin
+    /// no turn on it: the message stays the last item of their record, and the window
+    /// reads at rest (`Some(true)`: Devin and Muse past their first moments) or in flight
+    /// (`Some(false)`: Claude Code, Codex and Pi, whose readers take a record that ends on
+    /// a message of the user's for a turn begun). None: a message that arrives begins a
+    /// turn, as the fake of Node's suite's did (the field bug T-1130).
+    pub never_begins: Cell<Option<bool>>,
 }
 
 impl FakeAdapter {
@@ -352,6 +378,7 @@ impl FakeAdapter {
                 close_after: None,
             }),
             servers: Cell::new(Servers::Unknown),
+            silent_paste: Cell::new(None),
             keeps_first_instructions: Cell::new(false),
             one_account: Cell::new(false),
             ready_while_drawing: Cell::new(false),
@@ -363,6 +390,7 @@ impl FakeAdapter {
             first: Cell::new(FirstMessage::Opened),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
+            specmint_folders: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
             cleared: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
@@ -376,6 +404,8 @@ impl FakeAdapter {
             says_places: Cell::new(true),
             idle_word: Cell::new(true),
             input_box: Cell::new(None),
+            rereads_failures: Cell::new(false),
+            never_begins: Cell::new(None),
         })
     }
 
@@ -628,11 +658,28 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.quota = quota.map(Arc::new));
     }
 
+    /// The window's records say its model changed from `from` to `to` at `at`, with no word
+    /// of its harness's own for it.
+    pub fn drifts(&self, handle: &str, from: &str, to: &str, at: Option<&str>) {
+        let drift = ModelMoved {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            because: "its records name another model with no word of Claude Code's own for it"
+                .to_owned(),
+            at: at.map(str::to_owned),
+        };
+        self.with(handle, |agent| agent.model_drift = Some(Arc::new(drift)));
+    }
+
     /// The harness refuses the turn, as Claude Code writes its limit: the
     /// turn ends on the refusal, which the record reads as a failure.
     pub fn refuse(&self, handle: &str, quota: Quota) {
         let mut item = self.item(Role::Assistant, "You've hit your weekly limit");
-        if let Quota::Exhausted { at: Some(at), .. } = &quota {
+        if let Quota::Exhausted { at: Some(at), .. }
+        | Quota::Unavailable { at: Some(at), .. }
+        | Quota::Moved { at: Some(at), .. }
+        | Quota::Busy { at: Some(at), .. } = &quota
+        {
             item.at = Some(json!(at));
         }
         self.with(handle, |agent| {
@@ -784,6 +831,17 @@ impl FakeAdapter {
             .unwrap_or_default()
     }
 
+    /// What the last window on `session` ended in: its failure, with its words, and the quota
+    /// it said.
+    fn failure_of(&self, session: &str) -> Option<(bool, Option<String>, Option<Arc<Quota>>)> {
+        self.agents
+            .borrow()
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .map(|agent| (agent.failed, agent.failure.clone(), agent.quota.clone()))
+    }
+
     /// What the record of `session` holds (`adapter.record`): the latest
     /// window's on it, none where no window had it, and whether the turn it
     /// ends in is over (an agent that was never answered is in one still, as a
@@ -835,7 +893,7 @@ impl FakeAdapter {
                     // The harness's own words, as the reader makes of the companion.
                     agent.items.push(self.item(Role::Custom, &sources));
                 }
-                agent.settled = false;
+                agent.settled = self.never_begins.get().unwrap_or(false);
                 agent.pending = Pending::default();
                 agent.monitors.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
@@ -970,6 +1028,11 @@ impl Asked {
             .resume
             .map(|session| fake.lost_of(session))
             .unwrap_or_default();
+        let (failed, failure, quota) = launch
+            .resume
+            .filter(|_| fake.rereads_failures.get())
+            .and_then(|session| fake.failure_of(session))
+            .unwrap_or((false, None, None));
         let mut agent = FakeAgent {
             launch: id.clone(),
             handle: launch.handle.to_owned(),
@@ -981,15 +1044,17 @@ impl Asked {
             lost,
             says_places: fake.says_places.get(),
             waiting: None,
-            quota: None,
+            quota,
+            model_drift: None,
             admit: true,
             arrive: true,
             queued: false,
             took: false,
             held: false,
-            failed: false,
-            failure: None,
+            failed,
+            failure,
             shows: None,
+            ungreeted: Vec::new(),
             records: HashMap::new(),
             records_settled: HashMap::new(),
             stored: HashMap::new(),
@@ -1011,17 +1076,14 @@ impl Asked {
             opening: None,
             resumable: Some(true),
             unreadable: None,
+            kept_commands: Some(Vec::new()),
         };
-        let seeded = launch
-            .message
-            .filter(|_| fake.first.get() == FirstMessage::Started)
-            .map(str::to_owned);
         if let Some(message) = launch
             .message
-            .filter(|_| seeded.is_none() && !fake.forgets_first_messages.get())
+            .filter(|_| !fake.forgets_first_messages.get())
         {
             agent.items.push(fake.item(Role::User, message));
-            agent.settled = false;
+            agent.settled = fake.never_begins.get().unwrap_or(false);
         }
         fake.agents.borrow_mut().push(agent);
         let handle = launch.handle.to_owned();
@@ -1030,7 +1092,6 @@ impl Asked {
             id.clone(),
             native.clone(),
             Rc::clone(fake),
-            seeded,
         ));
         Box::pin(async move {
             // A test's own `prepare` is an async function that returns the
@@ -1084,10 +1145,16 @@ impl Adapter for Asked {
             })),
             "instructions": launch.instructions,
         });
+        // Said only where the project chose a size for its Claude members' windows to
+        // compact at, which no trace of Node's has.
+        if let Some(size) = launch.compaction {
+            asked["compaction"] = json!(size);
+        }
         // Said only where specs were given, which no trace of Node's has.
         if let Some(specs) = launch.specs {
             asked["specs"] = json!({
                 "variant": specs.variant.as_str(),
+                "folder": specs.folder,
                 "skill": specs.skill.path(),
                 "installed": matches!(specs.skill, Skill::Global(_)),
             });
@@ -1138,6 +1205,11 @@ impl Adapter for Asked {
         self.fake.servers.get()
     }
 
+    /// Not a call of Node's adapter: nothing is written down of it in the traces.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.fake.silent_paste.get()
+    }
+
     /// Not a call of Node's adapter: nothing is written down of it in the
     /// traces.
     fn keeps_first_instructions(&self) -> bool {
@@ -1170,13 +1242,27 @@ impl Adapter for Asked {
     /// traces. What the fake says is where the test says its harness has the
     /// variant installed, else the copy ConsensFlow would keep for it: at a
     /// place that no launch is in, as the adapters' is.
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         self.fake.specmint_asked.borrow_mut().push(variant);
-        Ok(match self.fake.specmint_installed.borrow().clone() {
-            Some(file) => Skill::Global(file),
-            None => Skill::Own(format!(
+        self.fake
+            .specmint_folders
+            .borrow_mut()
+            .push(folder.to_owned());
+        let installed = self.fake.specmint_installed.borrow().clone();
+        Ok(match (installed, folder == DEFAULT_FOLDER) {
+            // An installed copy names the default folder, and serves only a project that
+            // keeps its specs there.
+            (Some(file), true) => Skill::Global(file),
+            (None, true) => Skill::Own(format!(
                 "/consensflow/integrations/specmint/fake/{}/.claude/skills/{}/SKILL.md",
                 variant.as_str(),
+                variant.skill_name()
+            )),
+            // Another folder is a copy of its own, in a place of its own.
+            (_, false) => Skill::Own(format!(
+                "/consensflow/integrations/specmint/fake/{}-{}/.claude/skills/{}/SKILL.md",
+                variant.as_str(),
+                folder.replace('/', "-"),
                 variant.skill_name()
             )),
         })

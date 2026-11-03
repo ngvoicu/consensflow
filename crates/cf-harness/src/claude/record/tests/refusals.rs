@@ -39,8 +39,8 @@ fn a_status_of_429_and_an_error_that_is_rate_limit_are_each_a_refusal_for_quota(
         (r#"{"apiErrorStatus":"429"}"#, false),
         (r#"{"apiErrorStatus":[429]}"#, false),
         (r#"{"apiErrorStatus":true}"#, false),
-        (r#"{"apiErrorStatus":402}"#, false),
-        (r#"{"apiErrorStatus":500,"error":"overloaded"}"#, false),
+        // A server's error is no quota: a refusal for a moment (below).
+        (r#"{"apiErrorStatus":400,"error":"overloaded"}"#, false),
         (r#"{"error":"Rate_Limit"}"#, false),
         (r#"{"error":["rate_limit"]}"#, false),
         ("{}", false),
@@ -300,4 +300,97 @@ fn a_refused_turn_keeps_the_words_the_api_refused_it_in_and_the_next_turn_drops_
     );
     let next = user("u2", json!("a1"), json!("Try again"));
     assert_eq!(failure_of(&[hello(), refusal, next]), None);
+}
+
+/// The `quota` of the reading of a refusal that says `said` and has `fields`.
+fn quota_of(said: &str, fields: &str) -> Value {
+    let record = having(
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!(said))]),
+            Value::Null,
+        ),
+        json!({ "isApiErrorMessage": true, "timestamp": "2026-09-19T10:00:00.000Z" }),
+    );
+    let record = having(record, serde_json::from_str(fields).unwrap());
+    let reading: Value = serde_json::from_str(&once(&[hello(), record])).unwrap();
+    reading["quota"].clone()
+}
+
+#[test]
+fn claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota(
+) {
+    // MUS-23: a 402, a 401, and the words Anthropic gives an API account with no credit or
+    // a key it does not know have no reset, as a 429's has: unavailable until the human fixes it.
+    for (said, fields, because) in [
+        (
+            "Payment required.",
+            r#"{"apiErrorStatus":402}"#,
+            "its billing was refused: Payment required.",
+        ),
+        (
+            "Invalid API key",
+            r#"{"apiErrorStatus":401}"#,
+            "its login was refused: Invalid API key",
+        ),
+        (
+            "Your credit balance is too low to access the Anthropic API.",
+            r#"{"apiErrorStatus":400}"#,
+            "its billing was refused: Your credit balance is too low to access the Anthropic API.",
+        ),
+    ] {
+        let quota = quota_of(said, fields);
+        assert_eq!(
+            quota,
+            json!({ "state": "unavailable", "at": AT, "resetsAt": null, "because": because }),
+            "{said}"
+        );
+    }
+    // A limit that resets is a quota still, and a server's error is neither: a refusal for a
+    // moment (T-1112).
+    assert_eq!(
+        quota_of("You've hit your limit.", r#"{"apiErrorStatus":429}"#)["state"],
+        "exhausted"
+    );
+    assert_eq!(
+        quota_of("Overloaded", r#"{"apiErrorStatus":529}"#),
+        json!({ "state": "busy", "at": AT, "resetsAt": null, "because": "Overloaded" })
+    );
+}
+
+/// A reading of a failure, its turn settled natively, that its provider refused for a moment
+/// (T-1112): `Quota::Busy`, in the refusal's words, at its time.
+fn busy(items: &str) -> String {
+    format!(
+        r#"{{"items":{items},"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"busy","at":"{AT}","resetsAt":null,"because":"{LIMIT}"}},"settlement":"settled"}}"#
+    )
+}
+
+#[test]
+fn a_server_error_or_an_overloaded_model_is_a_refusal_for_a_moment_and_no_quota() {
+    // T-1112: Anthropic's 529 (`overloaded_error`), a 5xx, the error `server_error`. A 429
+    // stays the quota's, a 401 or 402 the account's, and a 400 the turn's failure.
+    let cases: &[(&str, Option<bool>)] = &[
+        (r#"{"apiErrorStatus":529}"#, Some(true)),
+        (r#"{"apiErrorStatus":500}"#, Some(true)),
+        (r#"{"apiErrorStatus":503}"#, Some(true)),
+        (r#"{"apiErrorStatus":500,"error":"overloaded"}"#, Some(true)),
+        (r#"{"error":"server_error"}"#, Some(true)),
+        (
+            r#"{"apiErrorStatus":529,"error":"rate_limit"}"#,
+            Some(false),
+        ),
+        (r#"{"apiErrorStatus":400}"#, None),
+        (r#"{"apiErrorStatus":"529"}"#, None),
+    ];
+    for &(fields, busy_or_quota) in cases {
+        let expected = match busy_or_quota {
+            Some(true) => busy(&items(&format!("\"{AT}\""))),
+            Some(false) => failed(&items(&format!("\"{AT}\"")), true),
+            None => failed(&items(&format!("\"{AT}\"")), false),
+        };
+        assert_eq!(once(&[hello(), with(fields)]), expected, "{fields}");
+    }
 }

@@ -131,7 +131,7 @@ impl Admin {
     }
 }
 
-/// The harnesses the command line names, or all five.
+/// The harnesses the command line names, or every one.
 fn named() -> Result<Vec<Harness>> {
     let words = live::list("harness");
     if words.is_empty() {

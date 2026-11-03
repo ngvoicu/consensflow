@@ -50,6 +50,14 @@ pub struct Split {
     /// Whether a `--` ended the flags: the operands after it are text, whatever
     /// they say.
     literal: bool,
+    /// The first word that looks like a flag but is none of the command's,
+    /// stood where a flag may — in front of the text, where it would be kept
+    /// as the text's own words without a word of complaint (the field report
+    /// of 2026-11-02: `--file` on `task done`, which had no `--file`, stored
+    /// as the result itself). None after the text's first word: a flag in the
+    /// text is words. The word that asks for help is no stray: it answers
+    /// alone, and is words among others.
+    stray: Option<String>,
     /// The operands after the leading ones, joined by spaces: the command's text.
     pub text: String,
 }
@@ -60,21 +68,63 @@ impl Split {
         self.switches.contains(&flag)
     }
 
-    /// The word after the last `flag`; none when it was not given, or ended the words.
-    pub fn value(&self, flag: &str) -> Option<&str> {
-        self.last(flag).map(|(word, _)| word.as_str())
+    /// The word after `flag`; none when it was not given, or ended the words.
+    /// Said wrong: the flag was given more than once — a valued flag takes one
+    /// word, and a flag's every word is read with [`Split::each`].
+    pub fn value(&self, flag: &str) -> Result<Option<&str>, Failure> {
+        self.once(flag)?;
+        Ok(self.last(flag).map(|(word, _)| word.as_str()))
     }
 
-    /// How many words from the end of the words split the word after the last
-    /// `flag` stands, 1 for the last: where the system's own spelling of it is
-    /// found among words those were the last of. None as for [`Split::value`].
-    pub fn value_back(&self, flag: &str) -> Option<usize> {
-        self.last(flag).map(|(_, back)| *back)
+    /// How many words from the end of the words split the word after `flag`
+    /// stands, 1 for the last: where the system's own spelling of it is found
+    /// among words those were the last of. None and the refusal as for
+    /// [`Split::value`].
+    pub fn value_back(&self, flag: &str) -> Result<Option<usize>, Failure> {
+        self.once(flag)?;
+        Ok(self.last(flag).map(|(_, back)| *back))
+    }
+
+    /// Every word `flag` was given, in the order its flags stand: the list a
+    /// flag that may be given more than once carries (`--needs T-3 --needs
+    /// T-4` is "T-3" then "T-4"). A flag that ended the words has no word, and
+    /// gives none.
+    pub fn each<'a>(&'a self, flag: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.values
+            .iter()
+            .filter(move |(name, _)| *name == flag)
+            .filter_map(|(_, value)| value.as_ref().map(|(word, _)| word.as_str()))
     }
 
     /// Whether the valued `flag` was given, with a word after it or not.
     pub fn given(&self, flag: &str) -> bool {
         self.values.iter().any(|(name, _)| *name == flag)
+    }
+
+    /// The flag-like word in front of the text, for the command to refuse:
+    /// it is none of this command's flags. None when the text's words come
+    /// first, or a `--` made words of it.
+    pub fn stray_flag(&self) -> Option<&str> {
+        self.stray.as_deref()
+    }
+
+    /// Said wrong when `flag` was given more than once: a valued flag takes
+    /// one word, and keeping the last's alone dropped the rest without a word
+    /// (the field report of 2026-11-02). The lists a flag may carry are read
+    /// with [`Split::each`], which never refuses.
+    fn once(&self, flag: &str) -> Result<(), Failure> {
+        if self
+            .values
+            .iter()
+            .filter(|(name, _)| *name == flag)
+            .nth(1)
+            .is_some()
+        {
+            return Err(Failure::Usage(format!(
+                "{flag} takes one value: it was given more than once"
+            )));
+        }
+        Ok(())
     }
 
     fn last(&self, flag: &str) -> Option<&(String, usize)> {
@@ -105,6 +155,10 @@ impl Split {
 /// valued one taking the word after it, whatever that word is. A `--` before
 /// any text ends the flags: the words after it are text, flags and `--help`
 /// included, and the `--` is not. A `--` after text is text, as it always was.
+/// A word that looks like a flag but is none of the shape's is an operand, as
+/// a flag in the text is words — but the first one to stand in front of the
+/// text is kept in `stray` as well ([`Split::stray_flag`]), for the command
+/// to refuse rather than store.
 pub fn split(words: &[String], shape: Shape) -> Split {
     let mut split = Split {
         leading: shape.leading,
@@ -125,6 +179,13 @@ pub fn split(words: &[String], shape: Shape) -> Split {
                 .map(|(at, value)| (value.clone(), words.len() - at));
             split.values.push((flag, value));
         } else {
+            if split.stray.is_none()
+                && word.starts_with("--")
+                && !HELP.contains(&word.as_str())
+                && split.operands.len() <= shape.leading
+            {
+                split.stray = Some(word.clone());
+            }
             split.operands.push(word.clone());
         }
     }
@@ -146,14 +207,20 @@ pub fn task_number(word: Option<&str>) -> Result<u64, Failure> {
     })
 }
 
-/// The numbers in `T-3,T-4`; none when the flag was not given.
-pub fn task_numbers(word: Option<&str>) -> Result<Option<Vec<u64>>, Failure> {
-    word.map(|list| {
-        list.split(',')
-            .map(|part| task_number(Some(js::trim(part))))
-            .collect()
-    })
-    .transpose()
+/// The numbers in `T-3,T-4`, in every list a flag was given, in the order they
+/// came and each number once; none when the flag was not given, or given with
+/// no word after it.
+pub fn task_numbers<'a>(lists: impl Iterator<Item = &'a str>) -> Result<Option<Vec<u64>>, Failure> {
+    let mut numbers: Vec<u64> = Vec::new();
+    for list in lists {
+        for part in list.split(',') {
+            let number = task_number(Some(js::trim(part)))?;
+            if !numbers.contains(&number) {
+                numbers.push(number);
+            }
+        }
+    }
+    Ok((!numbers.is_empty()).then_some(numbers))
 }
 
 /// The number in `m-12` (or `12`, `M-12`).
@@ -208,6 +275,25 @@ mod tests {
         leading: 0,
     };
 
+    /// What `flag`'s read answers, whatever it went wrong with: the value or
+    /// the refusal's words.
+    fn read(result: Result<Option<&str>, Failure>) -> Result<Option<String>, String> {
+        result
+            .map(|word| word.map(str::to_owned))
+            .map_err(|failure| match failure {
+                Failure::Usage(message) => message,
+                Failure::Failed(_) => panic!("not a usage failure: {failure:?}"),
+            })
+    }
+
+    /// As [`read`], for where a flag's word stands.
+    fn read_back(result: Result<Option<usize>, Failure>) -> Result<Option<usize>, String> {
+        result.map_err(|failure| match failure {
+            Failure::Usage(message) => message,
+            Failure::Failed(_) => panic!("not a usage failure: {failure:?}"),
+        })
+    }
+
     #[test]
     fn picks_flags_out_wherever_they_stand_and_keeps_unknown_ones_as_text() {
         let split = split(
@@ -217,14 +303,14 @@ mod tests {
         assert_eq!(split.text, "fix the --force flag");
         assert!(split.on("--self"));
         assert!(!split.on("--advice"));
-        assert_eq!(split.value("--tier"), Some("light"));
-        assert_eq!(split.value("--needs"), None);
+        assert_eq!(read(split.value("--tier")), Ok(Some("light".into())));
+        assert_eq!(read(split.value("--needs")), Ok(None));
     }
 
     #[test]
-    fn a_flag_takes_the_next_word_whatever_it_is_and_the_last_one_counts() {
+    fn a_flag_takes_the_next_word_whatever_it_is_and_one_at_the_end_has_none() {
         let split = split(
-            &words(&["--tier", "--self", "x", "--tier", "light", "--tier"]),
+            &words(&["--tier", "--self", "x"]),
             Shape {
                 switches: &["--self"],
                 valued: &["--tier"],
@@ -232,29 +318,91 @@ mod tests {
             },
         );
         assert_eq!(split.text, "x");
-        assert!(!split.on("--self"), "--self was the first --tier's value");
+        assert!(!split.on("--self"), "--self was the --tier's value");
+        assert_eq!(read(split.value("--tier")), Ok(Some("--self".into())));
+        let ended = super::split(&words(&["x", "--tier"]), FLAGS);
+        assert!(ended.given("--tier"));
         assert_eq!(
-            split.value("--tier"),
-            None,
-            "the last --tier ended the words"
+            (
+                read(ended.value("--tier")),
+                read_back(ended.value_back("--tier"))
+            ),
+            (Ok(None), Ok(None))
         );
+    }
+
+    #[test]
+    fn a_flag_of_one_value_given_more_than_once_is_refused_not_overwritten() {
+        for line in [
+            &["--tier", "light", "--tier", "heavy", "x"][..],
+            &["--tier", "light", "x", "--tier", "heavy"][..],
+            &["--tier", "a", "--tier", "b", "--tier", "c"][..],
+        ] {
+            let split = split(&words(line), FLAGS);
+            assert_eq!(
+                read(split.value("--tier")),
+                Err("--tier takes one value: it was given more than once".into()),
+                "{line:?}"
+            );
+            assert_eq!(
+                read_back(split.value_back("--tier")),
+                Err("--tier takes one value: it was given more than once".into()),
+                "{line:?}"
+            );
+        }
+        // Once, or never: as they were.
+        for line in [&["x", "--tier", "light"][..], &["x"][..]] {
+            let split = split(&words(line), FLAGS);
+            assert!(split.value("--tier").is_ok(), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_flag_the_shape_has_not_is_stray_in_front_of_the_text_and_words_inside_it() {
+        let stray = |line: &[&str]| split(&words(line), FLAGS).stray_flag().map(str::to_owned);
+        assert_eq!(stray(&["--bogus", "hi"]), Some("--bogus".to_owned()));
+        assert_eq!(stray(&["--bogus"]), Some("--bogus".to_owned()));
+        assert_eq!(
+            stray(&["--bogus", "--tier", "light", "hi"]),
+            Some("--bogus".to_owned())
+        );
+        assert_eq!(stray(&["hi", "--bogus"]), None);
+        assert_eq!(stray(&["--tier", "light", "hi", "--bogus"]), None);
+        // A `--` makes words of it, and a known flag is no stray.
+        assert_eq!(stray(&["--", "--bogus"]), None);
+        assert_eq!(
+            stray(&["--tier", "--bogus"]),
+            None,
+            "--bogus is --tier's word"
+        );
+    }
+
+    #[test]
+    fn a_flag_of_a_list_gives_every_word_it_was_given_in_order() {
+        let split = split(
+            &words(&[
+                "--needs", "T-3,T-4", "x", "--needs", "T-5", "--needs", "T-4",
+            ]),
+            FLAGS,
+        );
+        assert_eq!(
+            split.each("--needs").collect::<Vec<_>>(),
+            ["T-3,T-4", "T-5", "T-4"]
+        );
+        assert!(split.each("--tier").next().is_none());
+        // A flag that ends the words has no word and gives none.
+        let ended = super::split(&words(&["--needs", "T-3", "--needs"]), FLAGS);
+        assert_eq!(ended.each("--needs").collect::<Vec<_>>(), ["T-3"]);
     }
 
     #[test]
     fn a_value_is_found_by_how_far_from_the_end_it_stands_and_a_flag_that_ended_the_words_was_given(
     ) {
-        let twice = split(
-            &words(&["x", "--tier", "light", "--tier", "heavy", "y"]),
-            FLAGS,
-        );
-        assert_eq!(twice.value_back("--tier"), Some(2), "the last one's");
-        assert!(twice.given("--tier"));
+        let given = split(&words(&["x", "--tier", "light", "y"]), FLAGS);
+        assert_eq!(read_back(given.value_back("--tier")), Ok(Some(2)));
+        assert!(given.given("--tier"));
         let ended = split(&words(&["x", "--needs"]), FLAGS);
         assert!(ended.given("--needs"));
-        assert_eq!(
-            (ended.value("--needs"), ended.value_back("--needs")),
-            (None, None)
-        );
         assert!(!ended.given("--tier"));
     }
 
@@ -334,8 +482,18 @@ mod tests {
         assert_eq!(task_number(Some("7")).ok(), Some(7));
         assert_eq!(message_id(Some("m-12")).ok(), Some(12));
         assert_eq!(message_id(Some("M-4")).ok(), Some(4));
-        assert_eq!(task_numbers(Some("T-3, T-4")).ok(), Some(Some(vec![3, 4])));
-        assert_eq!(task_numbers(None).ok(), Some(None));
+        assert_eq!(
+            task_numbers(["T-3, T-4"].into_iter()).ok().flatten(),
+            Some(vec![3, 4])
+        );
+        assert_eq!(
+            task_numbers(["T-41,T-42", "T-43", "T-42,T-44"].into_iter())
+                .ok()
+                .flatten(),
+            Some(vec![41, 42, 43, 44]),
+            "lists and repeats mix, each task once in the order it was named"
+        );
+        assert_eq!(task_numbers([].into_iter()).ok().flatten(), None);
     }
 
     #[test]
@@ -361,7 +519,10 @@ mod tests {
             usage(message_id(Some("T-3"))),
             r#"not a message: "T-3" (write m-12)"#
         );
-        assert!(matches!(task_numbers(Some("T-3,")), Err(Failure::Usage(_))));
+        assert!(matches!(
+            task_numbers(["T-3,"].into_iter()),
+            Err(Failure::Usage(_))
+        ));
     }
 
     #[test]

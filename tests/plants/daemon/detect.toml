@@ -64,9 +64,11 @@ runs = ["detect-unit"]
 file = "crates/cf-harness/src/detect.rs"
 find = '''
         let folders = homed(harness, env).into_iter().chain(npm_global(env));
+        let folders = folders.chain(windows_programs(harness, env));
         let folders = folders.chain(env.tool_folders().iter().cloned());'''
 replace = '''
-        let folders = env.tool_folders().iter().cloned().chain(homed(harness, env)).chain(npm_global(env));'''
+        let folders = env.tool_folders().iter().cloned().chain(homed(harness, env)).chain(npm_global(env));
+        let folders = folders.chain(windows_programs(harness, env));'''
 
 # Which they are: the named, the machine's, or none.
 [[plant]]

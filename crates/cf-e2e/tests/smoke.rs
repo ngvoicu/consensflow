@@ -25,7 +25,8 @@
 //! wait is given: 180000; the page's step at each of its own, a quarter of it,
 //! and the app's deadline for the whole run, a minute over it, follow it) and
 //! `CONSENSFLOW_SMOKE_KEEP=1` (keep the machine of a run that passed: a failed
-//! one is always kept).
+//! one is always kept) and `CONSENSFLOW_SMOKE_TEST_SUPPORT=1` (the app was built
+//! with the feature `test-support`, and has the command that panics: `command_panic`).
 //!
 //! It is a macOS bundle's: `Contents/`, `Info.plist`. The Windows app is held by
 //! `app/scripts/windows-smoke.mjs`.
@@ -37,6 +38,8 @@
 mod app;
 #[path = "smoke/bundle.rs"]
 mod bundle;
+#[path = "smoke/command_panic.rs"]
+mod command_panic;
 #[path = "smoke/extension.rs"]
 mod extension;
 #[path = "smoke/hidden.rs"]
@@ -51,7 +54,7 @@ use std::time::Duration;
 
 use cf_e2e::agents_proof::{self, Daemon as Target};
 use cf_e2e::daemon_log::{self, Kind};
-use cf_e2e::process::{is_alive, own_var, Run};
+use cf_e2e::process::{is_alive, own_var};
 use cf_e2e::{files, http};
 use regex::Regex;
 use serde_json::{json, Value};
@@ -125,10 +128,15 @@ fn the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean()
     // rebuilding to look at them again costs minutes. A passing one tidies up
     // (`CONSENSFLOW_SMOKE_KEEP=1` has it keep the machine too).
     let machine = Machine::new(Path::new(PASTE_READER), patience)?;
+    // The app built is of the live app's identity: what is started is a copy of the smoke's,
+    // but on GitHub's runner where the release run asks for the bundle as it ships.
+    let bundle = bundle::to_start(&bundle, &machine.root)?;
     let outcome = drive(&bundle, &machine, patience, &mut std::io::stdout());
     let keep = own_var("CONSENSFLOW_SMOKE_KEEP").as_deref() == Some("1");
     machine.say_where_kept(&mut std::io::stderr(), outcome.is_err() || keep);
     outcome?;
+    // Its seal holds after it ran: nothing it did wrote into the bundle.
+    bundle::assert_sealed(&bundle.app)?;
     if !keep {
         machine.cleanup()?;
     }
@@ -146,7 +154,7 @@ fn drive(
     said: &mut impl Write,
 ) -> Outcome {
     let mut app = App::start(
-        Run::new(&bundle.binary)
+        bundle::run_of(bundle)
             .vars(machine.vars())
             .cwd(&machine.root),
         &machine.root,
@@ -237,6 +245,24 @@ fn drive(
         echoed["data"]["hex"].as_str().unwrap_or_default(),
         to_hex(typed.as_bytes()),
         "the child echoed something other than what was typed"
+    );
+
+    // A meeting with the chief, from the button on its card: the worker's result
+    // came while it was on, was held and counted, and nothing of it was typed in
+    // until the Stop.
+    let meeting = app.wait_for("meeting")?;
+    assert!(
+        meeting["data"]["started"].is_string(),
+        "the meeting never started: {meeting}"
+    );
+    assert_eq!(
+        meeting["data"]["held"],
+        json!([meeting["data"]["result"]]),
+        "the meeting did not hold the worker's result alone: {meeting}"
+    );
+    assert_eq!(
+        meeting["data"]["typedDuring"], false,
+        "the result was typed into the chief's window during the meeting"
     );
 
     // The board both ways: the chief's task reached a worker window, and the

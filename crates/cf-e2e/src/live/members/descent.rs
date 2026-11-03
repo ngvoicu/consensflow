@@ -266,6 +266,49 @@ pub fn holding(all: &[Running], window: Identity, text: &str) -> Vec<Running> {
     chosen
 }
 
+/// The folder the process `pid` runs in, as the system says it now (the real path, with
+/// no link in it): none where it cannot be read, where no process has the number, and on
+/// any machine but a Mac's (the one place a check needs it, [`orphans_in_folder`]).
+pub fn working_folder(pid: u32) -> Option<std::path::PathBuf> {
+    native::working_folder(pid)
+}
+
+/// The processes of `all` that a check can call its own although no window holds them any
+/// longer, and what descends from them: each holds `text` in its command line, is an orphan
+/// (its parent is the system's init, 1), began no earlier than `since` (when the check's window
+/// began), and runs in `folder`, which is the check's own (a folder made for the run, whose real
+/// path is compared), as `folder_of` says it. A process that began before the window, that has
+/// a parent, whose folder is another or cannot be read, or whose command does not hold `text`
+/// is none of them, whatever else it says: it is the parent, the start and the folder
+/// together that make a process the run's, never the command line alone.
+///
+/// A job the agent detaches from a tool shell that leads a session of its own (`nohup sleep
+/// 4711 &`) is one: the shell has ended, so the job's parent is init's; the session is the
+/// shell's, not the window's; and a system binary shows no marker. What it keeps is the
+/// folder it was started in, which is the worker's own, and when it began.
+pub fn orphans_in_folder(
+    all: &[Running],
+    text: &str,
+    folder: &std::path::Path,
+    since: u64,
+    folder_of: impl Fn(u32) -> Option<std::path::PathBuf>,
+) -> Vec<Running> {
+    let folder = folder.canonicalize().unwrap_or_else(|_| folder.to_owned());
+    // An orphan has no parent among the processes, so nothing that descends from one orphan is
+    // another orphan, and no process is found twice.
+    all.iter()
+        .filter(|process| {
+            process.ppid == 1
+                && process.identity.started >= since
+                && process.command.contains(text)
+                && folder_of(process.identity.pid).is_some_and(|there| there == folder)
+        })
+        .flat_map(|orphan| {
+            std::iter::once(orphan.clone()).chain(descending_from(all, orphan.identity))
+        })
+        .collect()
+}
+
 /// What macOS says of a process, read where it is held (`proc_pidinfo`): the process that
 /// started it, and when it began, in microseconds since 1970.
 #[cfg(any(target_os = "macos", test))]
@@ -508,13 +551,22 @@ fn table_script(which: &str) -> String {
     )
 }
 
+/// The PowerShell that lists Windows' process table, given what one takes to start on a
+/// loaded machine ([`crate::process::POWERSHELL_LIMIT`]): ended at a verb of `cf`'s 30 s
+/// under the load of a whole test program, it left a check unable to say what its window
+/// ran (T-1161).
+#[cfg(any(windows, test))]
+fn table_run() -> Run {
+    Run::new("powershell")
+        .args(["-NoProfile", "-Command", &table_script("")])
+        .inheriting_env()
+        .limit(crate::process::POWERSHELL_LIMIT)
+}
+
 /// What Windows' process table says of every process.
 #[cfg(windows)]
 fn table() -> Result<Vec<Running>> {
-    let ran = Run::new("powershell")
-        .args(["-NoProfile", "-Command", &table_script("")])
-        .inheriting_env()
-        .run()?;
+    let ran = table_run().run()?;
     if ran.code != Some(0) {
         return Err(Error::Program {
             action: "list the processes with",

@@ -4,6 +4,7 @@ use std::path::Path;
 use super::*;
 
 mod managed_pi;
+mod muse;
 mod npm_global;
 mod tool_folders;
 
@@ -65,8 +66,8 @@ fn every_harness_is_known_in_the_order_harnesses_js_lists_them_not_the_rosters()
             Harness::Devin,
             Harness::Claude,
             Harness::Codex,
-            Harness::Opencode,
-            Harness::Pi
+            Harness::Pi,
+            Harness::Muse
         ]
     );
     let mut sorted = known_harnesses().map(Harness::as_str);
@@ -97,10 +98,7 @@ fn the_installed_and_the_missing_are_told_apart_each_in_the_order_of_the_list() 
     startable(&home.join(".pi").join("bin").join(name("pi")));
     startable(&bin.join(name("codex")));
     startable(&bin.join(name("devin")));
-    assert_eq!(
-        missing_harnesses(&env),
-        [Harness::Claude, Harness::Opencode]
-    );
+    assert_eq!(missing_harnesses(&env), [Harness::Claude, Harness::Muse]);
     let detected = detect_harnesses(&env);
     assert_eq!(
         detected.iter().map(|each| each.id).collect::<Vec<_>>(),

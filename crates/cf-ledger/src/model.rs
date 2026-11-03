@@ -209,6 +209,16 @@ pub fn parse_gate(value: Option<&Value>) -> Result<bool, LedgerError> {
     })
 }
 
+/// Whether a meeting with the chief is on: a flag, as the page sends it.
+pub fn parse_meeting(value: Option<&Value>) -> Result<bool, LedgerError> {
+    value.and_then(Value::as_bool).ok_or_else(|| {
+        LedgerError::refused(
+            "invalid-meeting",
+            "a meeting with the chief is on (true) or off (false)",
+        )
+    })
+}
+
 /// A member's roles: one or more of worker, advisor, reviewer, tester and
 /// designer, distinct, the first one leading; `offender` is how the
 /// refusal prints what was given.
@@ -325,6 +335,13 @@ pub fn title_of(body: &str) -> String {
     } else {
         format!("{}…", utf16_prefix(line, MAX_TITLE - 1))
     }
+}
+
+/// A title the chief gives a task: read as a brief's first line is ([`title_of`]), and
+/// it must say something.
+pub fn checked_title(title: &str) -> Result<String, LedgerError> {
+    require_text(title, "title", MAX_BODY)?;
+    Ok(title_of(title))
 }
 
 /// `text` cut at `max` characters, then a line saying how long it was (at 0,

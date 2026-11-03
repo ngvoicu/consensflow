@@ -20,12 +20,12 @@ use crate::store::Store;
 use crate::tasks::tell_stranded_waiters;
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
-pub(crate) use pools::{candidates, has_members_of_tier, members, nearest_tier};
+pub(crate) use pools::{candidates, has_members_of_tier, holders_of_tier, members, nearest_tier};
 pub(crate) use quota::{mark_back, mark_out};
 use sessions::close_session;
 pub(crate) use sessions::{
     bring_back, can_continue, end_session, follow_up_session, has_task_in_hand, require_free,
-    start_session, Giving,
+    start_session, undecided_results, Giving,
 };
 
 /// A participant joining a project: its handle, its role or its roles (the
@@ -319,9 +319,6 @@ pub(crate) fn remove_member(
             drop_queued(store, task.id)?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
         }
-        for (task, _) in &open {
-            tell_stranded_waiters(store, project_id, task)?;
-        }
         for id in &windows {
             let kept = kept_through_leaving(store, *id, &reason)?;
             store.db.execute(
@@ -371,6 +368,12 @@ pub(crate) fn remove_member(
         for ((task, _), dropped) in open.iter().zip(&dropped) {
             let lead = format!("T-{} was cancelled: {reason}.", task.number);
             dropped.tell_the_others(store, task, &lead, &leaving)?;
+        }
+        // Last: what waited on the work that went is told after the word of its going, which the
+        // chief is given first (it is given its notes one at a time, the oldest first; a wait told
+        // before its cause reached it as news with the cause unknown).
+        for (task, _) in &open {
+            tell_stranded_waiters(store, project_id, task)?;
         }
         Ok(RemovedMember {
             member: participant_view(&store.participant_row(member.id)?)?,

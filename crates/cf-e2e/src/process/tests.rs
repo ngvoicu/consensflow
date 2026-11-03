@@ -249,6 +249,38 @@ mod shell {
     }
 
     #[test]
+    fn a_program_is_run_without_a_variable_it_is_told_to_do_without_of_the_tests_own() {
+        let probe = r#"printf '%s|%s' "${CF_E2E_A-unset}" "${CARGO_MANIFEST_DIR-unset}""#;
+        let ran = sh(probe)
+            .var("CF_E2E_A", "1")
+            .inheriting_env()
+            .without("CARGO_MANIFEST_DIR")
+            .run()
+            .unwrap();
+        assert_eq!(ran.stdout, "1|unset");
+    }
+
+    #[test]
+    fn the_cargo_a_test_starts_is_without_what_cargo_gave_the_test_and_with_the_rest() {
+        let command = Run::cargo().command();
+        let taken: Vec<String> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name.to_string_lossy().into_owned())
+            .collect();
+        // Cargo sets these for the test that runs this (CARGO_CRATE_NAME is for the compiler's).
+        for given in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME"] {
+            assert!(taken.iter().any(|name| name == given), "{given}: {taken:?}");
+        }
+        // What is the user's or the system's stays: the build the test is part of has it too.
+        for kept in ["CARGO", "CARGO_HOME", "CARGO_TARGET_DIR", "RUSTC_BOOTSTRAP"] {
+            assert!(!taken.iter().any(|name| name == kept), "{kept}: {taken:?}");
+        }
+        assert!(taken.iter().all(|name| nested_cargo::given_to_a_test(name)));
+        assert_eq!(command.get_program(), nested_cargo::CARGO);
+    }
+
+    #[test]
     fn a_variable_told_twice_has_the_later_value_and_a_told_one_beats_the_tests() {
         let ran = sh(r#"printf '%s|%s' "$A" "$CARGO_MANIFEST_DIR""#)
             .vars([("A", "1"), ("A", "2")])
@@ -592,4 +624,123 @@ mod shell {
         assert_eq!(group_of(own.id()), Some(own.id()));
         assert_eq!(group_of(shared.id()), group_of(std::process::id()));
     }
+}
+
+/// An app of the live app's identity, in a bundle of `identity` under `root`, whose program
+/// leaves a file when it runs: the program, and the file.
+#[cfg(unix)]
+fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let app = root.join(identity).join("ConsensFlow.app");
+    let macos = app.join("Contents").join("MacOS");
+    std::fs::create_dir_all(&macos).unwrap();
+    std::fs::write(
+        app.join("Contents").join("Info.plist"),
+        format!(
+            "<plist><dict><key>CFBundleIdentifier</key><string>{identity}</string></dict></plist>"
+        ),
+    )
+    .unwrap();
+    let ran = root.join(format!("{identity}.ran"));
+    let program = macos.join("app");
+    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (program, ran)
+}
+
+/// No case starts the program of an app of the live app's identity, either way it starts one,
+/// and one of the smoke's is started as any program is (2026-10-28: a copy of the app of that
+/// identity came to the front over the live app).
+#[cfg(unix)]
+#[test]
+fn no_case_starts_an_app_of_the_live_apps_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
+    let refused = Run::new(&live).run().unwrap_err().to_string();
+    assert!(refused.contains("the live app's identity"), "{refused}");
+    let refused = Run::new(&live)
+        .spawn()
+        .err()
+        .map(|it| it.to_string())
+        .unwrap_or_default();
+    assert!(refused.contains("the live app's identity"), "{refused}");
+    assert!(!ran.exists(), "the live app's program ran");
+    let (smoke, ran) = app_of(root.path(), "dev.ngvoicu.consensflow.smoke");
+    assert_eq!(Run::new(&smoke).run().unwrap().code, Some(0));
+    assert!(ran.exists(), "the smoke's program did not run");
+    // A program that reaches apps by its words, told to reach the live app: never started.
+    let (osascript, ran) = reaching_stand_in(root.path(), "osascript");
+    for refused in [
+        Run::new(&osascript)
+            .args([
+                "-e",
+                "tell application id \"dev.ngvoicu.consensflow\" to quit",
+            ])
+            .run()
+            .err(),
+        Run::new(&osascript)
+            .args([
+                "-e",
+                "tell application id \"dev.ngvoicu.consensflow\" to quit",
+            ])
+            .spawn()
+            .err(),
+    ] {
+        let refused = refused.map(|it| it.to_string()).unwrap_or_default();
+        assert!(
+            refused.contains("a test reaches no app but the smoke's"),
+            "{refused}"
+        );
+    }
+    assert!(!ran.exists(), "the stand-in for osascript ran");
+}
+
+/// A stand-in named `name` in `folder`, which leaves `ran` when it runs: what a program that
+/// reaches apps by its words would do, done harmlessly, should a refusal fail to come.
+#[cfg(unix)]
+fn reaching_stand_in(
+    folder: &std::path::Path,
+    name: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ran = folder.join(format!("{name}.ran"));
+    let program = folder.join(name);
+    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (program, ran)
+}
+
+/// The bundle the release ships is started only with leave for it ([`crate::shipped`]), and
+/// leave for one bundle is none for another.
+#[cfg(unix)]
+#[test]
+fn the_shipped_bundle_is_started_only_with_leave_for_it() {
+    let root = tempfile::tempdir().unwrap();
+    let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
+    let app = cf_base::bundle::bundle_of(&live).unwrap();
+    let elsewhere = crate::shipped::Shipped::for_a_test(&root.path().join("Other.app"));
+    let refused = Run::new(&live)
+        .shipped(&elsewhere)
+        .run()
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("the live app's identity"), "{refused}");
+    assert!(!ran.exists());
+    let leave = crate::shipped::Shipped::for_a_test(&app);
+    assert_eq!(Run::new(&live).shipped(&leave).run().unwrap().code, Some(0));
+    assert!(
+        ran.exists(),
+        "the shipped bundle was not started with leave for it"
+    );
+}
+
+/// The PowerShell that says when a process began is given what one takes to start on a loaded
+/// Windows machine, not the 30 s of a verb of `cf`: ended there, it said a process that ran was
+/// none (GitHub's Windows runner, 2026-10-15). Built here as on Windows, where it runs.
+#[test]
+fn the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded_machine() {
+    assert_eq!(pid::when_started(1).limit_given(), Some(POWERSHELL_LIMIT));
+    assert!(POWERSHELL_LIMIT > LIMIT);
 }

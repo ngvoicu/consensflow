@@ -18,6 +18,7 @@ use cf_harness::testing::ManualTime;
 use cf_ledger::{
     open_ledger, Ledger, NewProject, NewTask, Options, ProjectView, TaskCreated, TaskThread,
 };
+use cf_proto::cf_word::CfWord;
 use cf_proto::specs::AppSpecs;
 use serde_json::{json, Value};
 
@@ -97,8 +98,8 @@ pub struct Made {
 impl Default for Made {
     fn default() -> Self {
         Self {
-            // The fake answers for any harness; OpenCode is here for a mixed staff.
-            harnesses: vec!["claude-code", "opencode"],
+            // The fake answers for any harness; Pi is here for a mixed staff.
+            harnesses: vec!["claude-code", "pi"],
             codex: false,
             settle_ms: 0,
         }
@@ -191,6 +192,7 @@ impl Context {
         let roles = Rc::new(FakeRoles {
             recorder: recorder.clone(),
             rewritten: RefCell::new(String::new()),
+            cf: RefCell::new(CfWord::bare()),
         });
         let trace = Rc::new(FakeTrace {
             recorder: recorder.clone(),

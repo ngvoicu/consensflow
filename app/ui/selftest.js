@@ -49,6 +49,27 @@ function toHex(text) {
     .join('')
 }
 
+/**
+ * The packaged smoke's case of a command's panic (T-1050): the page asks the
+ * app's commands that panic, a synchronous one and an asynchronous one, says
+ * what it was answered of each, and asks a command after them, which an app
+ * that ran on answers as ever. An app built without them (a release) refuses
+ * each as a command it does not have.
+ */
+export async function runPanicProbe({ invoke }) {
+  const report = (event, data) => invoke('selftest_report', { event, data })
+  const asked = async (command) => {
+    try {
+      return await invoke(command)
+    } catch (cause) {
+      return { rejected: String(cause) }
+    }
+  }
+  await report('panic-answered', await asked('selftest_panic'))
+  await report('async-panic-answered', await asked('selftest_panic_async'))
+  await report('after-panic', await asked('update_status'))
+}
+
 export async function runSelftest({
   config,
   invoke,
@@ -59,6 +80,10 @@ export async function runSelftest({
   onAck,
   onOutput,
 }) {
+  if (config?.panicProbe === true) {
+    await runPanicProbe({ invoke })
+    return
+  }
   if (
     typeof config?.updaterExpectedVersion === 'string' &&
     config.updaterExpectedVersion.length > 0
@@ -200,6 +225,20 @@ export async function runSelftest({
     // header line is the proof that the board reaches a window; the daemon's own
     // confirmation, read back from the record the fake harness keeps, is the
     // proof that it knows it did.
+    //
+    // The result comes while the human meets the chief, started from the button on the
+    // chief's card as a human starts one: it waits, the button counts it, nothing of it is
+    // typed in, and the Stop lets it go.
+    const meetingButton = (label) =>
+      [
+        ...document.querySelectorAll('.terminal-card[data-role="chief"] .terminal-head button'),
+      ].find((button) => button.textContent === label) ?? null
+    const meeting = async () =>
+      (await daemon('board.get', { project: opened.project.id })).board?.project?.meeting ?? null
+    ;(
+      await until('the chief card offers Start meeting', () => meetingButton('Start meeting'))
+    ).click()
+    const started = await until('the meeting started', meeting)
     await sendInput(pane, 'HANDOFF\r')
     const result = await until("the worker's result is on its way to the chief", async () => {
       const { messages } = await daemon('inbox.get', {
@@ -209,6 +248,20 @@ export async function runSelftest({
       return messages.find((message) => message.kind === 'result') ?? null
     })
     const header = `[ConsensFlow m-${result.id} ·`
+    const stop = await until('the button counts the result the meeting holds', () =>
+      meetingButton('Stop meeting (1)'),
+    )
+    const { board: during } = await daemon('board.get', { project: opened.project.id })
+    const typedDuring = screen(emulator).some((row) => HEX.exec(row)?.[1].startsWith(toHex(header)))
+    stop.click()
+    await until('the meeting stopped', async () => (await meeting()) === null)
+    await until('the chief card offers Start meeting again', () => meetingButton('Start meeting'))
+    await report('meeting', {
+      started,
+      held: (during.held ?? []).map((message) => message.id),
+      result: result.id,
+      typedDuring,
+    })
     const delivered = await until(
       'the result reached the chief window',
       () => {

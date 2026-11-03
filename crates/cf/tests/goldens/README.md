@@ -134,6 +134,40 @@ script from the binary's own output, and nothing else in them moved. The daemon'
 hold no `cf task finish` line (`cf-board-028` and `-029` are departed for that, and are not
 played), so none was changed.
 
+T-1119 (3.0.7-alpha.2): a waiting task too, the one whose window asked a question and ended its
+turn, or whose last words ConsensFlow raised as a question (`turn_end::asks` of the engine): the
+usage's entry now reads `take what a working, waiting or paused task's worker said last as its
+result`, and the same six prints of `board.json` hold it.
+
+## `cf task accept` of a failed task
+
+Board task T-1111 (3.0.7-alpha.2): the chief accepts a failed task whose work it checked,
+with the words of what it checked, which are the task's result (a designer's session had
+died after it saved both final files, and `cf task accept` was refused). The usage has a
+line for it after `accept|cancel`, `cf task accept T-3 "…"  accept a failed task you
+checked; your words are its result`, in the six prints of `board.json` that hold it (`cf`,
+`cf help`, `cf --help`, `cf -h --json`, `cf task --help`, `cf task help`): each is what the
+built `cf` prints from `crates/cf/src/board/usage.txt`, changed by hand in those words
+alone, and nothing else in them moved.
+
+## The usage after `cf task edit` took a tier, needs and before
+
+The entry of `cf task edit` in the usage (the six prints of `board.json` that hold it, `cf
+task --help` among them) is three lines: `cf task edit T-3 "…" [--tier <tier>] [--needs
+T-4,T-5|+T-5|-T-5] [--before …]`, and what it changes, the brief, the tier, the tasks the
+task needs and the tasks that wait for it, of a task no window has yet (T-1108): a list
+replaces, `+T-5` adds, `-T-5` removes. Changed by hand, in those words alone, as
+`crates/cf/src/board/usage.txt` has it.
+
+## The usage after a task took a new title
+
+Board tasks T-1118 and T-1128 (3.0.7-alpha.2): `cf task edit`, `reopen` and `resume` take
+`--title "…"`, and an edit takes it alone, in any state. The usage has two lines for it after
+`cf task resume`, `cf task edit|reopen|resume T-3 … --title "…"` and `a new title, in any state
+(else the brief's first line); edit takes it alone`, in the six prints of `board.json` that
+hold the usage: each is what the built `cf` prints from `crates/cf/src/board/usage.txt`,
+changed by hand in those words alone.
+
 ## The last line of a reply names its task
 
 Board task T-957 (3.0.7, from T-689): the line that ends the reply of `cf task add`, `reopen`,

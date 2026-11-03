@@ -22,6 +22,9 @@ pub use send::Answer;
 /// How long the broker has to say what the window shows, over the request and
 /// its body.
 const SESSION_TIMEOUT_MS: u64 = 1_000;
+/// How long the broker's word on what Codex keeps running is waited for: the broker gives
+/// Codex's server three seconds to answer it.
+const TERMINALS_TIMEOUT_MS: u64 = 4_000;
 
 /// The most a reply of the broker's may say: a few hundred bytes, in practice.
 /// Node read a reply of any size.
@@ -131,6 +134,31 @@ impl Channel {
     /// thread busy (`GET /session?refresh`).
     pub async fn shown_refreshed(&self, time: &dyn Time, loopback: &dyn Loopback) -> Option<Shown> {
         self.shown_at("/session?refresh", time, loopback).await
+    }
+
+    /// The commands the broker says Codex keeps running for the window's thread (`GET
+    /// /terminals`: its background terminals), each by its command line; none where it does
+    /// not answer for this launch with a list of them.
+    pub(crate) async fn terminals(
+        &self,
+        time: &dyn Time,
+        loopback: &dyn Loopback,
+    ) -> Option<Vec<String>> {
+        let request = self.request("/terminals", None)?;
+        let attempt = arm(time, TERMINALS_TIMEOUT_MS);
+        let mut reply = attempt.bound(loopback.send(request)).await?.ok()?;
+        let status = reply.status();
+        let body = attempt.bound(reply.body(BODY_LIMIT)).await?.ok()?;
+        let said = parse(&body)?;
+        let ours = said.get("launchId").and_then(Value::as_str) == Some(&self.launch_id);
+        if !(200..300).contains(&status) || !ours {
+            return None;
+        }
+        said.get("commands")?
+            .as_array()?
+            .iter()
+            .map(|command| command.as_str().map(str::to_owned))
+            .collect()
     }
 
     async fn shown_at(

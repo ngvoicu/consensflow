@@ -21,7 +21,7 @@
 mod pages;
 
 use cf_base::js;
-use cf_ledger::{NewQuestion, TaskThread, TaskView};
+use cf_ledger::{LedgerError, Links, NewQuestion, TaskEdit, TaskThread, TaskView};
 use hyper::Method;
 use serde_json::{json, Map, Value};
 
@@ -82,12 +82,17 @@ pub(super) async fn handle(
         // unseen, and so does the brief while it is one of them, but for those
         // who wrote it. While the project is closed, so does a message no window
         // was handed yet, and the brief while it is one, but for those who wrote
-        // it: `cf` would take an answer it printed for received, so one whose text
-        // waits is not in the thread at all.
+        // it; so does one the chief's meeting holds, for the chief. A message
+        // whose text waits is in the thread as a line that says so, never its
+        // text, but for an answer, which `cf` would take for received, and a brief
+        // ([`Waits::in_thread`]).
         let waits = Waits::now(context, caller)?;
         let held_back = brief_waits(&task, &waits);
-        task.messages
-            .retain(|message| message.state != "gated" && !waits.holds(message));
+        task.messages = std::mem::take(&mut task.messages)
+            .into_iter()
+            .filter(|message| message.state != "gated")
+            .filter_map(|message| waits.in_thread(message))
+            .collect();
         if let Some(held) = held_back.filter(|_| !may_move(caller, &task.task.requester)) {
             task.task.body.clear();
             task.task.title = held.to_owned();
@@ -106,6 +111,7 @@ pub(super) async fn handle(
     };
     let body = request.json().await?;
     let words = body.get("body").and_then(Value::as_str);
+    let title = asked_title(body.get("title"))?;
     match action {
         TaskAction::Done => done(context, caller, &task, words.unwrap_or_default()),
         _ if !may_move(caller, &task.task.requester) => Err(Failure::refuse(
@@ -120,7 +126,30 @@ pub(super) async fn handle(
         )),
         TaskAction::Tell => tell(context, caller, &task, words),
         TaskAction::Finish => finish(context, caller, &task).await,
-        _ => moved(context, caller, &task, action, words.unwrap_or_default()),
+        TaskAction::Edit => edit(context, caller, &task, &body, title.as_deref()),
+        _ => moved(
+            context,
+            caller,
+            &task,
+            action,
+            words.unwrap_or_default(),
+            title.as_deref(),
+        ),
+    }
+}
+
+/// The title a request gives (`title`, with `edit`, `reopen` or `resume`): the brief's first
+/// line otherwise. None when it gives none; a title that is no text, or says nothing, is
+/// refused before anything is moved, so a refused title leaves the task as it was.
+fn asked_title(given: Option<&Value>) -> Result<Option<String>, Failure> {
+    match given {
+        None => Ok(None),
+        Some(Value::String(title)) => Ok(Some(cf_ledger::model::checked_title(title)?)),
+        Some(_) => Err(LedgerError::refused(
+            "invalid-text",
+            "title must be text, not empty, at most 1000000 characters",
+        )
+        .into()),
     }
 }
 
@@ -289,7 +318,16 @@ fn tell(
             ))
         }
     };
-    let told = if state == QUEUED {
+    // Queued for its window, or at work (or waiting for an answer) on the turn before the
+    // words that resumed it, which have not gone in: the tell is kept for the window and
+    // goes in with them. A pause here would withdraw those words (T-1153's F5).
+    let behind_words = state == QUEUED
+        || context
+            .ledger
+            .borrow()
+            .resume_words_not_in(caller.project.id, number)?
+            .is_some();
+    let told = if behind_words {
         // Whatever is no text is no words: the ledger refuses it as it refuses
         // a blank one.
         context.ledger.borrow_mut().tell_queued(
@@ -373,13 +411,24 @@ fn moved(
     task: &TaskThread,
     action: TaskAction,
     words: &str,
+    title: Option<&str>,
 ) -> Result<Answer, Failure> {
     let (project, number) = (caller.project.id, task.task.number);
     let by = caller.participant.handle.as_str();
     let mut ledger = context.ledger.borrow_mut();
     let mut dropped = Vec::new();
     let moved = match action {
-        TaskAction::Accept => ledger.accept_task(project, number, by)?,
+        TaskAction::Accept => {
+            // Read in the same borrow as the accept: nothing moves between.
+            let failed = ledger
+                .task(project, number)?
+                .is_some_and(|thread| thread.task.state == "failed");
+            if failed {
+                ledger.accept_failed_task(project, number, by, words)?
+            } else {
+                ledger.accept_task(project, number, by)?
+            }
+        }
         TaskAction::Cancel => {
             // Read in the same borrow as the cancel: nothing is pasted between.
             dropped = ledger
@@ -390,12 +439,18 @@ fn moved(
                 .collect();
             ledger.cancel_task(project, number, by)?
         }
-        TaskAction::Edit => ledger.edit_task(project, number, by, words)?,
         TaskAction::Pause => ledger.pause_task(project, number, Some(by), None)?,
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
         // `reopen`; and what Node's last branch took any other word for, which
         // only `transcript` is, and only when it is posted.
         _ => ledger.reopen_task(project, number, by, words)?.task,
+    };
+    // The title is given once the move is made, and the move is refused before it.
+    let moved = match title {
+        Some(title) if !matches!(action, TaskAction::Edit) || !js::trim(words).is_empty() => {
+            ledger.retitle_task(project, number, by, title)?
+        }
+        _ => moved,
     };
     drop(ledger);
     (context.kick)();
@@ -405,6 +460,100 @@ fn moved(
         answer.insert("dropped".to_owned(), json!(dropped));
     }
     Ok(Answer::ok(Value::Object(answer)))
+}
+
+/// `edit`: the brief, the tier, or both of a task no window has yet, in one step. A
+/// tier is read as `cf task add` reads one, and a task whose tier nobody holds goes to
+/// the nearest, which is said (`asked`, and `heldBy`, the members of the tier it went
+/// to). Whatever is no text is no words and no tier: the ledger refuses it in its own
+/// words.
+fn edit(
+    context: &Context,
+    caller: &Caller,
+    task: &TaskThread,
+    request: &Map<String, Value>,
+    title: Option<&str>,
+) -> Result<Answer, Failure> {
+    // A brief that is no text is no words: the ledger refuses it as it refuses an empty one.
+    let words = match request.get("body") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(words)) => Some(words.clone()),
+        Some(_) => Some(String::new()),
+    };
+    let tier = match request.get("tier") {
+        None | Some(Value::Null) => None,
+        Some(tier) => Some(cf_ledger::model::parse_tier(Some(tier))?.to_owned()),
+    };
+    let edit = TaskEdit {
+        body: words,
+        tier,
+        needs: links(request.get("needs"), "needs")?,
+        before: links(request.get("before"), "before")?,
+    };
+    let (project, number) = (caller.project.id, task.task.number);
+    let by = caller.participant.handle.as_str();
+    let mut ledger = context.ledger.borrow_mut();
+    // A title alone changes the title of a task in any state, and nothing else.
+    let no_words = edit
+        .body
+        .as_deref()
+        .is_none_or(|words| js::trim(words).is_empty());
+    if let Some(title) = title.filter(|_| {
+        no_words && edit.tier.is_none() && edit.needs.is_none() && edit.before.is_none()
+    }) {
+        let retitled = ledger.retitle_task(project, number, by, title)?;
+        drop(ledger);
+        (context.kick)();
+        return Ok(Answer::ok(
+            json!({ "task": value(&TaskSummary::from(&retitled))? }),
+        ));
+    }
+    let edited = ledger.edit_task_with(project, number, by, &edit)?;
+    // The title is given once the edit is made, and the edit is refused before it.
+    let now = match title {
+        Some(title) => ledger.retitle_task(project, number, by, title)?,
+        None => edited.task.clone(),
+    };
+    drop(ledger);
+    (context.kick)();
+    let mut answer = Map::new();
+    answer.insert("task".to_owned(), value(&TaskSummary::from(&now))?);
+    if let Some(asked) = &edited.asked {
+        answer.insert("asked".to_owned(), json!(asked));
+        answer.insert("heldBy".to_owned(), json!(edited.holders));
+    }
+    if let Some(waiting) = &edited.waiting {
+        answer.insert("waiting".to_owned(), json!(waiting));
+    }
+    Ok(Answer::ok(Value::Object(answer)))
+}
+
+/// A list of task numbers to change as `cf task edit` asks: the list itself replaces
+/// the one the task has, `{"add": [5], "remove": [6]}` changes it. Whatever else is no
+/// list of task numbers, and the ledger's words for it are `invalid-needs`.
+fn links(asked: Option<&Value>, field: &str) -> Result<Option<Links>, Failure> {
+    let numbers = |list: Option<&Value>, field: &str| -> Result<Vec<i64>, Failure> {
+        Ok(
+            cf_ledger::model::parse_numbers(list.or(Some(&Value::Null)), field)?
+                .into_iter()
+                .filter_map(|number| i64::try_from(number).ok())
+                .collect(),
+        )
+    };
+    Ok(match asked {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(change)) => Some(Links::Change {
+            add: match change.get("add") {
+                None => Vec::new(),
+                add => numbers(add, field)?,
+            },
+            remove: match change.get("remove") {
+                None => Vec::new(),
+                remove => numbers(remove, field)?,
+            },
+        }),
+        Some(list) => Some(Links::Set(numbers(Some(list), field)?)),
+    })
 }
 
 /// Whether the window may do what only the chief or the one who gave the task

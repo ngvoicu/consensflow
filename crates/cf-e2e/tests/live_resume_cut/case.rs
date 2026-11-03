@@ -20,7 +20,7 @@ use cf_e2e::rig::Rig;
 use cf_e2e::{files, Result};
 use serde_json::Value;
 
-use crate::read::{change, reading, tail, unanswered};
+use crate::read::{answer_to, before_answer, change, ended, reading, tail, unanswered};
 use crate::{Case, FOLDER, LONG, SECOND, WATCH, WORK};
 
 /// What a case needs of the check that runs it.
@@ -169,7 +169,16 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         said_ended(said, "the cut window", left.map(|left| end_chosen(&left)));
     }
     sleep(Duration::from_secs(1));
-    said.say(format!("cut: {}", tail(&cut.recorded(), 3)));
+    let left_by_the_cut = cut.recorded();
+    said.say(format!("cut: {}", tail(&left_by_the_cut, 3)));
+    if ended(&left_by_the_cut, &case.message(), case.last()) {
+        said.fail(format!(
+            "the turn was over before the cut (its answer, ending in {}, is in the record): \
+             nothing was cut",
+            case.last()
+        ));
+        return Ok(());
+    }
     said.say(reading(run.read(&session).as_ref()));
     if claude {
         keep(run, &cut, (case, "cut"), &session)?;
@@ -231,32 +240,48 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
                 .find(|item| item.role == "user" && item.text.contains("AFTER")))
         },
     )?;
+    // Its answer is a reply after it that ends in AFTER, whatever else it said first (T-813).
     let answered = find(
         run.log,
         "the second message to be answered",
         ANSWER,
         Duration::from_millis(500),
-        || {
-            Ok(again
-                .recorded()
-                .into_iter()
-                .find(|item| item.role == "assistant" && item.text.trim() == "AFTER"))
-        },
+        || Ok(answer_to(&again.recorded(), "AFTER", "AFTER").cloned()),
     )?;
     said.say(format!(
         "a second message pasted: {}{}",
-        arrived.map_or_else(
+        arrived.as_ref().map_or_else(
             || "it never arrived".to_owned(),
             |item| format!(
                 "it arrived as {}",
                 Value::String(item.text.chars().take(120).collect())
             )
         ),
-        answered.map_or_else(
+        answered.as_ref().map_or_else(
             || ", and was not answered".to_owned(),
-            |_| format!(", and was answered in {} s", seconds(millis(pasted)))
+            |reply| format!(
+                ", and was answered in {} s{}",
+                seconds(millis(pasted)),
+                before_answer(reply).map_or_else(String::new, |before| format!(
+                    ", its reply saying first {}",
+                    Value::String(before)
+                ))
+            )
         )
     ));
+    // A message the resumed window took is answered by a turn of its own, and the message
+    // pasted after an early cut is taken: a window that leaves it unanswered, or answers the
+    // cut turn alone, would have a worker's message lost, or the cut turn's words taken for
+    // its answer (T-813).
+    match (&arrived, &answered) {
+        (Some(_), None) => {
+            said.fail("the second message reached the record and was never answered")
+        }
+        (None, _) if case == Case::Early => {
+            said.fail("the second message, pasted into the window resumed after an early cut, never reached the record");
+        }
+        _ => {}
+    }
     // The turn that message began ended as any does: the record is at rest.
     sleep(Duration::from_secs(3));
     said.say(reading(run.read(&session).as_ref()));

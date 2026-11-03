@@ -64,12 +64,7 @@ fn a_window_without_its_role_text_is_refused() {
 #[test]
 fn each_launch_has_a_role_file_of_its_own_one_chief_never_reads_another_projects_staff() {
     let (_dir, env) = fixture();
-    for harness in [
-        Harness::Claude,
-        Harness::Opencode,
-        Harness::Pi,
-        Harness::Devin,
-    ] {
+    for harness in [Harness::Claude, Harness::Pi, Harness::Devin] {
         let folder = harness_folder(harness).unwrap();
         let mut files = Vec::new();
         for (id, staff) in [(ONE, "| saved-worker | worker |"), (TWO, "no staff")] {

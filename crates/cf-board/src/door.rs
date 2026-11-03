@@ -15,15 +15,14 @@
 //! that stays out of reach. The receipt is said again as a poll is: an answer
 //! handed over and never received would be pasted a second time. A door that
 //! was shut by a pause is refused, and what the board says it is passed on
-//! as it is. OpenCode's extension keeps
-//! its own copy, `hosts/lib/question-door.js`: the harness loads it into its
-//! own runtime.
+//! as it is.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
+use cf_proto::cf_word::CfWord;
 use cf_proto::questions::{Answer, Question, Reply};
 use serde_json::{json, Value};
 
@@ -38,19 +37,19 @@ use crate::{Board, BoardError};
 pub fn board_of(env: &Env) -> Option<Board> {
     let url = env.text("CONSENSFLOW_URL")?;
     let token = env.os("CONSENSFLOW_TOKEN")?;
-    Some(Board::new(Some(url), &token.to_string_lossy()))
+    Some(Board::new(Some(url), &token.to_string_lossy()).with_cf(crate::cf_in(env)))
 }
 
 /// Puts `questions` on the board and waits up to `wait` for the chief's
 /// answer, or until `stop` is raised: what came of it. A door the board
 /// shut (the task was stopped) is told so in the board's own words, which
 /// the window hands to its model as they are; any other refusal is wrapped in
-/// what points the model to `cf ask`.
+/// what points the model to `ask`, started by the window's own `cf` ([`Board::cf`]).
 pub fn ask(board: &Board, questions: &[Question], wait: Duration, stop: &AtomicBool) -> Reply {
     match ask_the_board_until(board, questions, wait, stop) {
         Ok(Some(answer)) => Reply::Answered(answer),
         Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(cause.to_string()),
-        Err(cause) if cause.is_refusal() => Reply::Refused(refusal_reason(&cause)),
+        Err(cause) if cause.is_refusal() => Reply::Refused(refusal_reason(&cause, board.cf())),
         Ok(None) | Err(_) => Reply::Unanswered,
     }
 }
@@ -111,9 +110,9 @@ const POLL_RETRIES: [Duration; 4] = [
 /// What a member's window tells its model when the board refuses its
 /// question: nobody watches a member's window, so its own dialog would hold
 /// the task for good.
-fn refusal_reason(cause: &BoardError) -> String {
+fn refusal_reason(cause: &BoardError, cf: &CfWord) -> String {
     format!(
-        "ConsensFlow could not put this question to the chief ({cause}). Ask with cf ask \"…\" instead."
+        "ConsensFlow could not put this question to the chief ({cause}). Ask with {cf} ask \"…\" instead."
     )
 }
 

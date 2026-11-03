@@ -13,7 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::Observed;
 use cf_harness::records::Role;
 use cf_ledger::{
-    ChiefSwitch, ConversationView, MessageView, NewNote, ParticipantView, ProjectView,
+    ChiefSwitch, ConversationView, MessageView, NewNote, ParticipantView, ProjectView, SWITCH_ASKED,
 };
 use serde_json::Value;
 
@@ -106,7 +106,8 @@ impl Dispatcher {
             Ok(found.filter(|found| found.project_id == project.id))
         };
         let last = last_words(&history);
-        let pages = history_pages(&history, &message)?;
+        // The pages are as long as the chief's own `cf` makes the commands they name.
+        let pages = history_pages(&history, &message, &self.seams.roles.cf(chief))?;
         let body = handoff_text(&Handoff {
             from: &from,
             to: chief,
@@ -203,8 +204,9 @@ impl Dispatcher {
         project: i64,
         to: &SwitchTo,
     ) -> Result<MessageView, EngineError> {
+        // Opened with the ledger's words, as a meeting with the chief holds no such note.
         let body = format!(
-            "The human is moving this project's chief to {} ({}) once you answer. Write down where things stand, for the chief after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.",
+            "{SWITCH_ASKED} {} ({}) once you answer. Write down where things stand, for the chief after you: what you and the human decided, what you promised, what you were about to do, and what is unresolved. Do not start anything new.",
             to.harness, to.agent
         );
         Ok(self.seams.ledger.borrow_mut().note(

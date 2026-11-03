@@ -17,6 +17,7 @@
 
 mod conversations;
 mod ledger;
+mod meeting;
 mod messages;
 /// The ledger's vocabulary: the words its records hold, their limits, and
 /// the parsers a caller reading JSON (the API, the page) checks a request with.
@@ -42,10 +43,11 @@ pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationEnd,
     ConversationView, Cut, DeletedProject, EventView, HeldTask, HistoryEntry, HistoryFrom,
     HistoryItem, HistoryKey, HistoryRead, HistoryRow, Lane, LastSwitch, LatestMessages,
-    LatestTranscript, MemberView, MessageOpening, MessageView, ParticipantConversation,
+    LatestTranscript, Links, MemberView, MessageOpening, MessageView, ParticipantConversation,
     ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume, Scanned,
-    StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
-    TaskTranscript, TaskView, TextCut, TextPart, TierChange,
+    StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskReleased,
+    TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
+    TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
@@ -56,15 +58,21 @@ pub use conversations::{
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
+pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
-    continuation, continuation_in, continuation_tasks, cut_turn, is_told, waiting_for_the_reopen,
-    GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN, WITHDRAWN_AFTER_HANDED,
+    continuation, continuation_in, continuation_tasks, cut_turn, is_busy_note, is_told,
+    waiting_for_the_reopen, GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN,
+    WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
-pub use projects::{parse_description, parse_name, NewChief, NewMember, NewProject};
+pub use projects::{
+    parse_claude_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
+    NewProject, CLAUDE_COMPACTION_MAX, CLAUDE_COMPACTION_MIN, STAFF_RULES_MAX_BYTES,
+    STAFF_RULES_MAX_LINES,
+};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use tasks::resumed_in_vain;
-pub use tasks::{NewTask, RESUME_WORDS};
+pub use tasks::{reopen_or_accept, NewTask, RESUME_WORDS};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

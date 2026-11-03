@@ -109,7 +109,7 @@ fn creates_the_schema_at_the_current_version_and_keeps_its_data_across_a_reopen(
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
     let mut first = open_ledger(&file, options()).unwrap();
-    let created = first.create_project(&project("app", "opencode")).unwrap();
+    let created = first.create_project(&project("app", "pi")).unwrap();
     first.close().unwrap();
 
     let raw = Connection::open_with_flags(&file, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();

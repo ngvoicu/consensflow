@@ -199,7 +199,12 @@ async fn a_first_message_devin_stored_behind_bypass_is_settled_as_received_thoug
             ledger.close().unwrap();
             let stored = format!(
                 "/bypass {}",
-                cf_engine::delivery_text::delivery_text(&begun.message, &begun.carried)
+                // A human's note has no command in it: the word is of no matter.
+                cf_engine::delivery_text::delivery_text(
+                    &begun.message,
+                    &begun.carried,
+                    &cf_proto::cf_word::CfWord::bare()
+                )
             );
             // Devin's store, the message in it as Devin stored it.
             drop(devin_store(root.path(), std::slice::from_ref(&stored)));
@@ -528,9 +533,13 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
                 .map(String::as_str)
                 .collect();
             assert_eq!(keys, ["id", "generation", "cwd", "argv", "env", "dropEnv"]);
+            // The project's folder as the system names it: a temporary folder on a Mac is
+            // reached through `/var`, a link to `/private/var` (T-783).
             assert_eq!(
                 open["cwd"],
-                root.path().join("workspace").to_string_lossy().as_ref()
+                cf_base::file::real_path(&root.path().join("workspace"))
+                    .to_string_lossy()
+                    .as_ref()
             );
             // The chief's role text names the cf of this window.
             let argv: Vec<&str> = open["argv"]
@@ -546,7 +555,12 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
             let role = std::fs::read_to_string(argv[at + 1]).unwrap();
             // As the daemon names it: `cf.exe`, spelled with `/`, on Windows.
             let cf = machine::bundle_of(&bin.join("cf")).pane_cf;
-            assert!(role.contains(&format!("Here `cf` is {cf}")), "{role}");
+            assert!(
+                role.contains(&format!("\n    {cf} task add --tier ")),
+                "{role}"
+            );
+            // Every `cf` the window runs is told it, to say its hints with.
+            assert_eq!(env["CONSENSFLOW_CF"], cf.as_str(), "{env}");
 
             // The page is told the board changed, once for what came together.
             wait_for(root.path(), || !events.borrow().is_empty()).await;

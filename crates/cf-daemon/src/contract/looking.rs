@@ -110,8 +110,8 @@ impl Adapter for LookingAdapter {
         self.adapter.first_message()
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
-        self.adapter.specmint(variant)
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
+        self.adapter.specmint(variant, folder)
     }
 }
 
@@ -130,8 +130,16 @@ impl Window for LookingWindow {
         self.window.follow(session);
     }
 
-    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
-        self.window.started(host)
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        self.window.box_read_empty(snapshot)
+    }
+
+    fn greeted(&self, session: &str) -> bool {
+        self.window.greeted(session)
+    }
+
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
+        self.window.started()
     }
 
     fn ready<'a>(

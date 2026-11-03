@@ -7,10 +7,9 @@
 //!                  [--effort high] [--staff-effort medium]
 //! ```
 //!
-//! `--model` is the chief's: Opus for Claude Code and the cheap model for OpenCode
-//! unless given; Codex, Pi and Devin run their own default and ignore it. `--effort`
-//! is the chief's reasoning level (Claude, Codex, Pi; OpenCode's window and Devin
-//! have no switch for it), `--staff-effort` every member's.
+//! `--model` is the chief's: Opus for Claude Code unless given; Codex, Pi and Devin
+//! run their own default and ignore it. `--effort` is the chief's reasoning level
+//! (Claude, Codex, Pi; Devin has no switch for it), `--staff-effort` every member's.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -140,6 +139,21 @@ impl Options {
         if arm == Arm::Bare && scenario.switches_the_chief() {
             return Err(Error::Usage(format!(
                 "{} switches the chief from its card, which a bare chief has none of",
+                scenario.id
+            )));
+        }
+        if arm == Arm::Bare && scenario.has_a_stand_in() {
+            return Err(Error::Usage(format!(
+                "{} holds the chief to what it does with a review on the board, which a bare chief has none of",
+                scenario.id
+            )));
+        }
+        if scenario.has_a_stand_in()
+            && chief != "claude"
+            && !staff.iter().any(|name| name == "claude")
+        {
+            return Err(Error::Usage(format!(
+                "{} has stand-in members, Claude Code windows: claude must be the chief or on --staff",
                 scenario.id
             )));
         }

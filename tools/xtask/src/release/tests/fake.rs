@@ -1,11 +1,15 @@
 //! What the release's tests run on: a checkout in a temporary tree with two
 //! bare repositories for its remotes, `origin` and `upstream`, which `git`
 //! really pushes to; and a GitHub that is a script. `gh` lists, shows and
-//! starts runs the test sets up, and answers `gh api` for CI's runs of a commit
+//! starts runs the test sets up (`gh workflow run` starts a hand run of the
+//! Release workflow, the trial, which publishes nothing and may end red at a
+//! step the test names), and answers `gh api` for CI's runs of a commit
 //! and a run's jobs as the Actions API does; a push of `main` or of a `release/` branch to
 //! upstream starts CI, a push of a tag starts the Release run, which (when it
 //! ends green) puts the version
-//! on the feeds a release of its channel moves; `curl` reads those feeds; and
+//! on the feeds a release of its channel moves and hosts the release itself (the
+//! files `gh release download` and `curl -o` give, signed by a key the checkout
+//! pins); `curl` reads those feeds; and
 //! `cargo update` writes the lockfile's version as cargo does. Nothing here
 //! reaches GitHub or moves a feed.
 
@@ -17,9 +21,72 @@ use std::time::Duration;
 use cf_base::env::Env;
 use serde_json::json;
 
+use sha2::{Digest, Sha256};
+
 use crate::process::{self, Captured, Invocation};
 use crate::release::system::System;
-use crate::release::{Error, Pace, Release};
+use crate::release::{Error, Pace, Release, DOWNLOADS};
+
+/// The key the stand-in checkout pins in `tauri.conf.json`, as that file writes it
+/// (the base64 of the key's two lines); the archive below is signed with it, by
+/// Tauri's own signer. A second key, signing nothing, for a checkout that pins the
+/// wrong one. No secret key is kept.
+pub const SIGNING_KEY: &str = include_str!("fixtures/signing.pub");
+pub const OTHER_KEY: &str = include_str!("fixtures/other.pub");
+/// The update archive of every stand-in release, and its `.sig` as the signer wrote it.
+pub const ARCHIVE: &[u8] = include_bytes!("fixtures/archive.bin");
+pub const ARCHIVE_SIG: &str = include_str!("fixtures/archive.bin.sig");
+
+/// The files of a stand-in release by their names, as a published one holds them.
+pub type Files = BTreeMap<String, Vec<u8>>;
+
+/// The name of the update archive of `version`'s release.
+pub fn archive_name(version: &str) -> String {
+    format!("ConsensFlow_{version}_aarch64.app.tar.gz")
+}
+
+/// Where the feed of `version` says to fetch its archive.
+pub fn archive_url(version: &str) -> String {
+    format!("{DOWNLOADS}/v{version}/{}", archive_name(version))
+}
+
+/// SHA-256 of `bytes`, as `sha256sum` writes it.
+pub fn sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The files `version`'s release publishes when nothing is wrong with it: the
+/// update archive and its signature, the feed's entry, an installer or two, and
+/// a SHA256SUMS over every one but itself.
+pub fn good_release(version: &str) -> Files {
+    let mut files = Files::new();
+    let archive = archive_name(version);
+    files.insert(archive.clone(), ARCHIVE.to_vec());
+    files.insert(format!("{archive}.sig"), ARCHIVE_SIG.as_bytes().to_vec());
+    files.insert(
+        format!("ConsensFlow_{version}_aarch64.dmg"),
+        format!("the DMG of {version}\n").into_bytes(),
+    );
+    files.insert(
+        format!("ConsensFlow_{version}_x64-setup.exe"),
+        format!("the installer of {version}\n").into_bytes(),
+    );
+    files.insert("latest.json".to_owned(), latest(version).into_bytes());
+    files.insert("SHA256SUMS".to_owned(), sums_of(&files).into_bytes());
+    files
+}
+
+/// A SHA256SUMS over `files`, as `sha256sum` writes it.
+pub fn sums_of(files: &Files) -> String {
+    files
+        .iter()
+        .filter(|(name, _)| *name != "SHA256SUMS")
+        .map(|(name, bytes)| format!("{}  {name}\n", sha256(bytes)))
+        .collect()
+}
 
 /// Writes `text` to `path`, in folders made for it.
 pub fn write(path: &Path, text: &str) {
@@ -86,9 +153,17 @@ pub fn version_files(version: &str) -> Vec<(&'static str, String)> {
         ),
         (
             "app/src-tauri/tauri.conf.json",
-            format!("{{\n  \"productName\": \"ConsensFlow\",\n  \"version\": \"{version}\"\n}}\n"),
+            conf(version, SIGNING_KEY.trim()),
         ),
     ]
+}
+
+/// `tauri.conf.json` at `version`, pinning `key` for the updater.
+pub fn conf(version: &str, key: &str) -> String {
+    format!(
+        "{{\n  \"productName\": \"ConsensFlow\",\n  \"version\": \"{version}\",\n  \
+         \"plugins\": {{\n    \"updater\": {{\n      \"pubkey\": \"{key}\"\n    }}\n  }}\n}}\n"
+    )
 }
 
 /// A checkout and its two remotes, in a temporary tree, and the notes of a release.
@@ -168,6 +243,15 @@ impl World {
         git(&self.root, &["commit", "-q", "-m", message]);
     }
 
+    /// Makes the checkout pin `key` for the updater, and commits it.
+    pub fn pin(&self, version: &str, key: &str) {
+        write(
+            &self.root.join("app/src-tauri/tauri.conf.json"),
+            &conf(version, key),
+        );
+        self.commit("pin another key");
+    }
+
     pub fn push_main(&self) {
         for remote in ["origin", "upstream"] {
             git(&self.root, &["push", "-q", remote, "main"]);
@@ -237,11 +321,17 @@ pub struct FakeRun {
     pub event: String,
     pub conclusion: String,
     pub jobs: Vec<(String, String)>,
+    /// The steps a job of it has that matter to what is said: the job, the
+    /// step, how it ended. A job with none lists none, as one cancelled whole does.
+    pub steps: Vec<(String, String, String)>,
     /// The looks at it before it has ended.
     pub running_for: u32,
     /// The lists of runs it is not yet in.
     pub unlisted_for: u32,
 }
+
+/// What happens once GitHub has started the run a hand run asked for.
+pub type AfterDispatch = Box<dyn FnOnce(&mut Fake)>;
 
 /// The machine a release test runs on: real `git`, and the rest a script.
 pub struct Fake {
@@ -249,12 +339,25 @@ pub struct Fake {
     pub runs: Vec<FakeRun>,
     /// What each feed serves, by its name.
     pub feeds: BTreeMap<String, String>,
+    /// The releases published, by tag: their files, as `gh release download` gives them.
+    pub releases: BTreeMap<String, Files>,
+    /// What a download from an address gives instead of the release's file there.
+    pub downloads: BTreeMap<String, Vec<u8>>,
+    /// What is done to the files a release run publishes, by its version, once they
+    /// are made: a byte changed after SHA256SUMS was written, say.
+    pub published_with: Option<fn(&str, &mut Files)>,
+    /// Whether a green Release run that publishes puts the release's files up, as it
+    /// does the feeds' entries; not, and `gh release download` finds none.
+    pub publishes_files: bool,
     /// What a finished Release run puts on a feed, and the reads of it before it shows.
     waiting: Vec<(String, String, u32)>,
     /// The reads of a feed before a publish shows on it.
     pub feed_lag: u32,
     /// How each run of a workflow by an event ends; `success` where none is named.
     pub conclusions: BTreeMap<(&'static str, &'static str), &'static str>,
+    /// The job and the step that fail a run of a workflow by an event that does
+    /// not end `success`, which the other job of a Release run then does not share.
+    pub failed_steps: BTreeMap<(&'static str, &'static str), (&'static str, &'static str)>,
     /// The jobs of a CI run.
     pub ci_jobs: Vec<(&'static str, &'static str)>,
     /// The looks at a new run before it ends, and the lists it is not yet in.
@@ -281,6 +384,22 @@ pub struct Fake {
     pub tag_fetch_fails: bool,
     /// Whether a tag pushed to upstream starts its Release run.
     pub tags_start_runs: bool,
+    /// Whether a hand run `gh workflow run` asks for starts, and whether
+    /// `gh` refuses to ask for it (a token that may not dispatch).
+    pub hand_runs_start: bool,
+    pub dispatch_fails: bool,
+    /// What happens once CI's run of the commit has been watched: main moves on, say.
+    pub after_ci: Option<Box<dyn FnOnce()>>,
+    /// What happens when a hand run is asked for, before GitHub takes `--ref`'s head
+    /// (main moves on, say), and once its run is started (someone else's hand run
+    /// of another commit follows it, say).
+    pub before_dispatch: Option<Box<dyn FnOnce()>>,
+    pub after_dispatch: Option<AfterDispatch>,
+    /// The runs, by id, that `gh run view` cannot answer for (a 502, say).
+    pub view_fails: Vec<u64>,
+    /// Whether `gh run list` takes no notice of `--commit`, as it would if GitHub's
+    /// filter did not hold.
+    pub ignores_commit_filter: bool,
     /// Whether a `release/` branch pushed to upstream starts CI on it, and
     /// whether someone runs CI on it by hand as well, beside the push's run.
     pub branches_start_ci: bool,
@@ -304,9 +423,14 @@ impl Fake {
             upstream: world.upstream.clone(),
             runs: Vec::new(),
             feeds,
+            releases: BTreeMap::new(),
+            downloads: BTreeMap::new(),
+            published_with: None,
+            publishes_files: true,
             waiting: Vec::new(),
             feed_lag: 0,
             conclusions: BTreeMap::new(),
+            failed_steps: BTreeMap::new(),
             ci_jobs: vec![
                 ("gate (macos-latest)", "success"),
                 ("gate (windows-latest)", "success"),
@@ -323,6 +447,13 @@ impl Fake {
             failing_after_the_tag: Vec::new(),
             tag_fetch_fails: false,
             tags_start_runs: true,
+            hand_runs_start: true,
+            dispatch_fails: false,
+            after_ci: None,
+            before_dispatch: None,
+            after_dispatch: None,
+            view_fails: Vec::new(),
+            ignores_commit_filter: false,
             branches_start_ci: true,
             branch_ci_by_hand: false,
             gh_fails: false,
@@ -373,17 +504,40 @@ impl Fake {
         let conclusion = key
             .and_then(|key| self.conclusions.get(&key).copied())
             .unwrap_or("success");
+        // The job a named step fails is the only one that does; with none named, every job shares the run's end.
+        let failed = key
+            .and_then(|key| self.failed_steps.get(&key).copied())
+            .filter(|_| conclusion != "success");
         let jobs = if workflow == "ci.yml" {
             self.ci_jobs
                 .iter()
                 .map(|(job, ended)| ((*job).to_owned(), (*ended).to_owned()))
                 .collect()
         } else {
-            vec![
-                ("mac".to_owned(), conclusion.to_owned()),
-                ("windows / build".to_owned(), conclusion.to_owned()),
-            ]
+            ["mac", "windows / build"]
+                .into_iter()
+                .map(|job| {
+                    let ended = match failed {
+                        Some((named, _)) if named != job => "success",
+                        _ => conclusion,
+                    };
+                    (job.to_owned(), ended.to_owned())
+                })
+                .collect()
         };
+        // The step that failed, with the one before it that passed and the one after it that did not run.
+        let steps = failed
+            .map(|(job, step)| {
+                [
+                    ("Build the release tool", "success"),
+                    (step, conclusion),
+                    ("Sign the update bundle", "skipped"),
+                ]
+                .into_iter()
+                .map(|(name, ended)| (job.to_owned(), name.to_owned(), ended.to_owned()))
+                .collect()
+            })
+            .unwrap_or_default();
         let id = 1000 + self.runs.len() as u64;
         self.runs.push(FakeRun {
             id,
@@ -392,6 +546,7 @@ impl Fake {
             event: event.to_owned(),
             conclusion: conclusion.to_owned(),
             jobs,
+            steps,
             running_for: self.running_for,
             unlisted_for: self.unlisted_for,
         });
@@ -421,6 +576,13 @@ impl Fake {
                 .iter()
                 .any(|run| run.id == id && run.conclusion == "success");
             if green && self.publishes {
+                let mut files = good_release(version);
+                if let Some(then) = self.published_with {
+                    then(version, &mut files);
+                }
+                if self.publishes_files {
+                    self.releases.insert(target.to_owned(), files);
+                }
                 let mut feeds = vec!["feed-alpha"];
                 if !version.contains('-') || self.alpha_moves_stable {
                     feeds.push("feed-stable");
@@ -465,13 +627,57 @@ impl Fake {
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         match words.as_slice() {
             ["api", path] => said(&self.api(path)),
+            ["release", "download", tag, ..] => {
+                let Some(files) = self.releases.get(*tag) else {
+                    return Captured {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: "release not found".to_owned(),
+                    };
+                };
+                let dir =
+                    PathBuf::from(flag("--dir").expect("a release is downloaded into a folder"));
+                for (name, bytes) in files {
+                    fs::write(dir.join(name), bytes).unwrap();
+                }
+                said("")
+            }
+            ["workflow", "run", workflow, ..] => {
+                assert_eq!(
+                    *workflow, "release.yml",
+                    "only the Release workflow is run by hand"
+                );
+                if self.dispatch_fails {
+                    return Captured {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: "HTTP 403: Resource not accessible by personal access token"
+                            .to_owned(),
+                    };
+                }
+                if let Some(then) = self.before_dispatch.take() {
+                    then();
+                }
+                if self.hand_runs_start {
+                    let commit =
+                        self.upstream_commit(&flag("--ref").expect("a hand run is on a branch"));
+                    self.start("release.yml", &commit, "workflow_dispatch");
+                }
+                if let Some(then) = self.after_dispatch.take() {
+                    then(self);
+                }
+                said("")
+            }
             ["run", "list", ..] => {
                 let workflow = flag("--workflow").unwrap();
                 let (commit, event) = (flag("--commit"), flag("--event"));
-                let mut newest = None;
+                let by_commit = !self.ignores_commit_filter;
+                let mut newest: Option<(u64, String)> = None;
                 for run in &mut self.runs {
                     let fits = run.workflow == workflow
-                        && commit.as_ref().is_none_or(|commit| run.commit == *commit)
+                        && commit
+                            .as_ref()
+                            .is_none_or(|commit| !by_commit || run.commit == *commit)
                         && event.as_ref().is_none_or(|event| run.event == *event);
                     if !fits {
                         continue;
@@ -480,16 +686,25 @@ impl Fake {
                         run.unlisted_for -= 1;
                         continue;
                     }
-                    newest = newest.max(Some(run.id));
+                    if newest.as_ref().is_none_or(|(id, _)| run.id > *id) {
+                        newest = Some((run.id, run.commit.clone()));
+                    }
                 }
                 let listed: Vec<_> = newest
-                    .map(|id| json!({ "databaseId": id }))
+                    .map(|(id, commit)| json!({ "databaseId": id, "headSha": commit }))
                     .into_iter()
                     .collect();
                 said(&json!(listed).to_string())
             }
             ["run", "view", id, ..] => {
                 let id: u64 = id.parse().unwrap();
+                if self.view_fails.contains(&id) {
+                    return Captured {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: "HTTP 502: Bad Gateway".to_owned(),
+                    };
+                }
                 let run = self.runs.iter_mut().find(|run| run.id == id).unwrap();
                 let (status, conclusion) = if run.running_for > 0 {
                     run.running_for -= 1;
@@ -500,11 +715,22 @@ impl Fake {
                 let jobs: Vec<_> = run
                     .jobs
                     .iter()
-                    .map(|(name, ended)| json!({ "name": name, "conclusion": ended }))
+                    .map(|(name, ended)| {
+                        let steps: Vec<_> = run
+                            .steps
+                            .iter()
+                            .filter(|(job, ..)| job == name)
+                            .map(|(_, step, ended)| json!({ "name": step, "conclusion": ended }))
+                            .collect();
+                        json!({ "name": name, "conclusion": ended, "steps": steps })
+                    })
                     .collect();
                 said(
-                    &json!({ "status": status, "conclusion": conclusion, "jobs": jobs })
-                        .to_string(),
+                    &json!({
+                        "status": status, "conclusion": conclusion,
+                        "headSha": run.commit, "jobs": jobs,
+                    })
+                    .to_string(),
                 )
             }
             _ => panic!("gh was asked what GitHub's script does not answer: {args:?}"),
@@ -568,7 +794,33 @@ impl Fake {
             .filter(|_| page == 1)
             .map(|(name, ended)| json!({ "name": name, "conclusion": ended }))
             .collect();
-        json!({ "total_count": jobs.len(), "jobs": jobs }).to_string()
+        let answer = json!({ "total_count": jobs.len(), "jobs": jobs }).to_string();
+        // The jobs are the last thing the verdict on CI asks.
+        if let Some(then) = self.after_ci.take() {
+            then();
+        }
+        answer
+    }
+
+    /// `curl -o path address`: the file a release holds at `address`, or what
+    /// `downloads` says is there, written to `path`; 404 where there is none.
+    fn download(&self, path: &str, address: &str) -> Captured {
+        let held = address
+            .strip_prefix(DOWNLOADS)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .and_then(|rest| rest.split_once('/'))
+            .and_then(|(tag, name)| self.releases.get(tag)?.get(name));
+        match self.downloads.get(address).or(held) {
+            Some(bytes) => {
+                fs::write(path, bytes).unwrap();
+                said("")
+            }
+            None => Captured {
+                code: 22,
+                stdout: String::new(),
+                stderr: "curl: (22) The requested URL returned error: 404".to_owned(),
+            },
+        }
     }
 
     fn curl(&mut self, address: &str) -> Captured {
@@ -654,7 +906,17 @@ fn said(stdout: &str) -> Captured {
 
 /// A feed's latest.json, naming `version`.
 pub fn latest(version: &str) -> String {
-    json!({ "version": version, "notes": "notes", "platforms": {} }).to_string()
+    json!({
+        "version": version,
+        "notes": "notes",
+        "platforms": {
+            "darwin-aarch64": {
+                "signature": ARCHIVE_SIG.trim(),
+                "url": archive_url(version),
+            }
+        },
+    })
+    .to_string()
 }
 
 impl System for Fake {
@@ -698,7 +960,10 @@ impl System for Fake {
                 Ok(ran)
             }
             "gh" => Ok(self.gh(&args)),
-            "curl" => Ok(self.curl(args.last().unwrap())),
+            "curl" => Ok(match args.iter().position(|arg| arg == "-o") {
+                Some(at) => self.download(&args[at + 1], args.last().unwrap()),
+                None => self.curl(args.last().unwrap()),
+            }),
             "cargo" => {
                 assert_eq!(args, ["update", "--workspace", "--offline"]);
                 Ok(self.cargo(&invocation.cwd))

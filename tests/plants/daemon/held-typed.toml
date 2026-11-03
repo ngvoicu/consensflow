@@ -88,7 +88,7 @@ runs = ["held-typed-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''            Some(held) if held.reason == reason => held,'''
+find = '''            Some(held) if held.reason == reason && held.traced => held,'''
 replace = '''            Some(held) if held.reason == reason => HeldBack {
                 since_ms: self.now(),
                 ..held
@@ -235,7 +235,7 @@ replace = '''                    .is_some_and(|held| Some(held.message) != head 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''        let held = match was.filter(|held| held.message == message) {
-            Some(held) if held.reason == reason => held,'''
+            Some(held) if held.reason == reason && held.traced => held,'''
 replace = '''        let held = match was {
             Some(held) if held.reason == reason => HeldBack { message, ..held },'''
 

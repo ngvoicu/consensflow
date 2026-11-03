@@ -1,0 +1,50 @@
+# `cf task add`'s list flags take every word they are given, however the flag
+# is written (repeated, a comma list, or both mixed), each task once in the
+# order it was named; a flag of one value, given twice, is refused rather than
+# silently overwritten. One plant takes one piece out; a test of it fails.
+# The field bug these rules were made for: `--needs T-41 … --needs T-44` made
+# a task blocked by T-44 alone, the first three dropped without a word.
+
+[run]
+# The board's commands, against a scripted API, and the words parser's tests.
+board = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::"]
+
+[[plant]]
+name = "task add flags: a --needs flag given again keeps only the last one's word"
+meant = "every_needs_flag_of_a_task_add_adds_to_the_list"
+runs = ["board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    let needs = task_numbers(words.each(\"--needs\"))?;"
+replace = "    let needs = task_numbers(words.each(\"--needs\").last().into_iter())?;"
+
+[[plant]]
+name = "task add flags: a task named twice on the lists is kept twice"
+meant = "needs_flags_and_comma_lists_mix_in_the_order_given_each_task_once"
+runs = ["board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/words.rs"
+find = "            if !numbers.contains(&number) {"
+replace = "            if !numbers.contains(&u64::MAX) {"
+
+[[plant]]
+name = "task add flags: a --before flag given again keeps only the first list"
+meant = "a_before_flag_given_again_holds_every_task_that_waits"
+runs = ["board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    let before = task_numbers(words.each(\"--before\"))?;"
+replace = "    let before = task_numbers(words.each(\"--before\").take(1))?;"
+
+[[plant]]
+name = "task add flags: a flag of one value, given twice, keeps the last word"
+meant = "a_flag_of_one_value_given_twice_is_refused"
+runs = ["board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/words.rs"
+find = "            .nth(1)"
+replace = "            .nth(9)"

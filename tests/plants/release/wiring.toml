@@ -10,6 +10,8 @@
 xtask-test-scripts = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "scripts"]
 # The suites, and the gate's steps that run them (the library's tests build no program, and name no folder).
 xtask-suites = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "suites::"]
+# The gate's own steps and their CI twins (check.rs: the paced kit in the platform-free job).
+xtask-check-steps = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "check::tests::"]
 
 [[plant]]
 name = "wiring: a live script names a test of cf-e2e that is not there"
@@ -160,8 +162,8 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "    needs: [checks, workspace, daemons]\n    if: always()\n"
-replace = "    needs: [checks, workspace, daemons]\n"
+find = "    needs: [checks, platform-free, workspace, daemons]\n    if: always()\n"
+replace = "    needs: [checks, platform-free, workspace, daemons]\n"
 
 [[plant]]
 name = "wiring: the gate's check does not wait for the daemons"
@@ -170,8 +172,8 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "needs: [checks, workspace, daemons]"
-replace = "needs: [checks, workspace]"
+find = "needs: [checks, platform-free, workspace, daemons]"
+replace = "needs: [checks, platform-free, workspace]"
 
 # A shard of a suite (tools/xtask/src/suites/shard.rs): the shards between them run each
 # case once, each by its whole name, and a run is the shard its variable names.
@@ -266,3 +268,55 @@ file = ".github/workflows/ci.yml"
 find = "          CF_TEST_SHARD_LIMIT_MINUTES: 30\n"
 replace = "          CF_TEST_SHARD_LIMIT_MINUTES: 45\n"
 
+# CI runs the offline cases of every live suite on both platforms, and the platform-free checks
+# once, on Linux (T-1161).
+
+[[plant]]
+name = "wiring: CI's live suites step misses every suite whose name holds a second word"
+meant = "ci_runs_the_offline_cases_of_every_live_suite_on_both_platforms"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "sed -n 's/^\\(live_[a-z0-9_]*\\)\\.rs$/--test \\1/p'"
+replace = "sed -n 's/^\\(live_[a-z0-9]*\\)\\.rs$/--test \\1/p'"
+
+[[plant]]
+name = "wiring: CI's live suites step asks for their ignored cases"
+meant = "ci_runs_the_offline_cases_of_every_live_suite_on_both_platforms"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "cargo test -p cf-e2e --no-fail-fast $tests"
+replace = "cargo test -p cf-e2e --no-fail-fast --ignored $tests"
+
+[[plant]]
+name = "wiring: CI runs the live suites' offline cases on macOS alone"
+meant = "ci_runs_the_offline_cases_of_every_live_suite_on_both_platforms"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = """  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]"""
+replace = """  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]"""
+
+[[plant]]
+name = "wiring: CI's platform-free job takes a Mac"
+meant = "the_paced_kit_the_gate_runs_is_a_step_of_cis_platform_free_job_with_its_variable"
+runs = ["xtask-check-steps"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = """  platform-free:
+    runs-on: ubuntu-latest"""
+replace = """  platform-free:
+    runs-on: macos-latest"""

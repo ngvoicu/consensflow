@@ -124,7 +124,7 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
+find = '    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
 replace = ''
 
 [[plant]]
@@ -144,7 +144,7 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        withdraw_result(store, &task, "was accepted")?;'
+find = '    withdraw_result(store, task, "was accepted")?;'
 replace = ''
 
 [[plant]]
@@ -394,7 +394,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        withdraw_result(store, &task, "was accepted")?;'
+find = '    withdraw_result(store, task, "was accepted")?;'
 replace = ''
 
 [[plant]]
@@ -405,8 +405,9 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '            .retain(|message| message.state != "gated" && !waits.holds(message));'
-replace = '            .retain(|message| !waits.holds(message));'
+find = '''            .filter(|message| message.state != "gated")
+            .filter_map(|message| waits.in_thread(message))'''
+replace = '''            .filter_map(|message| waits.in_thread(message))'''
 
 # --- the stand-in agent: how long it waits, as its variables tell it ---
 # (the knob a case sets to have a turn cut by the app's quit, on any machine; the
@@ -422,3 +423,16 @@ runs = ["fake-agent-waits"]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
 find = '    Duration::from_millis(text.and_then(|text| text.parse().ok()).unwrap_or(0))'
 replace = '    Duration::ZERO'
+
+[[plant]]
+name = "approval: the chief cancels a done task whose result waits for the human"
+meant = "the_chief_cannot_cancel_a_done_task_whose_result_waits_at_the_gate_and_the_human_can"
+runs = ["ledger-approval"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''    if decided {
+        require_result_received(store, &task, by)?;
+    }
+'''
+replace = ""

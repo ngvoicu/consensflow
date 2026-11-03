@@ -7,6 +7,7 @@
 mod alpha;
 mod fake;
 mod promote;
+mod verify;
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -27,6 +28,23 @@ fn refusal(outcome: Result<String, Error>) -> String {
         Err(other) => panic!("not a refusal: {other}"),
     }
 }
+
+/// What a refusal says of a watched run `run` (a `label`: `trial`, `release`) that
+/// ended `ended`: what failed in it and where to read it, then what to do about
+/// what was left (`then`).
+fn red_run(label: &str, run: u64, ended: &str, failed: &str, then: &str) -> String {
+    format!(
+        "{label} run {run} ended {ended} ({failed}; https://github.com/ngvoicu/consensflow/actions/runs/{run}): {then}"
+    )
+}
+
+/// What the trial's refusal says is next when it names a run to read, and when it can
+/// name none (the run may go on at GitHub).
+const TRIAL_NEXT: &str = "nothing was tagged. Read the failed step at the address; for a flake run the command \
+    again, which starts a new trial; for a real failure fix it on main so that CI runs again, then run the command again";
+const TRIAL_NEXT_WITHOUT_A_RUN: &str = "nothing was tagged. A hand run may still be going at GitHub: find it, \
+    `gh run list --repo ngvoicu/consensflow --workflow release.yml --event workflow_dispatch`, and run the command \
+    again once it ended";
 
 /// What a refusal says to do about `tag` on upstream, whose Release run is `run`,
 /// written out as a person reads it.

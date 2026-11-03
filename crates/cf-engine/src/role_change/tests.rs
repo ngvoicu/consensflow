@@ -1,14 +1,17 @@
+use cf_proto::cf_word::{CfWord, Shell};
 use std::sync::Arc;
 
 use cf_base::env::Env;
+use cf_base::role_read::role_read_whole;
 use cf_catalog::WorkTier;
+use cf_ledger::{STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use super::*;
 use crate::deliveries::Delivering;
 use crate::delivery_text::{delivery_text, goes_whole};
-use crate::roles::{role_instructions, ProjectSpecs, StaffRow};
+use crate::roles::{role_instructions, with_staff_rules, ProjectSpecs, StaffRow};
 use crate::testing::Context;
 
 /// A note to the chief as the ledger would show it, saying `body`.
@@ -118,6 +121,32 @@ fn a_launch_writes_the_replacement_as_the_note_the_ledger_knows_and_whose_words_
 /// specs on or off: the paths of a Mac, as long as the folder its skill's copy is
 /// kept in makes its path.
 fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
+    a_chiefs_role_with(rows, specs_on, None)
+}
+
+/// The most rules for the staff the ledger takes, in what costs a text that says
+/// them the most: every byte the ledger allows and every line, the lines in
+/// characters of three bytes (a letter of a script outside the Latin ones) and
+/// the rest in one-byte ones, so that the bytes and lines of a note are as many
+/// as any rules can make them.
+fn the_most_rules() -> String {
+    let lines = STAFF_RULES_MAX_LINES;
+    let each = (STAFF_RULES_MAX_BYTES - (lines - 1)) / lines;
+    let line = format!("{}{}", "日".repeat(each / 3), "a".repeat(each % 3));
+    let mut rules = vec![line; lines].join("\n");
+    rules += &"a".repeat(STAFF_RULES_MAX_BYTES - rules.len());
+    assert_eq!(rules.len(), STAFF_RULES_MAX_BYTES);
+    assert_eq!(rules.split('\n').count(), STAFF_RULES_MAX_LINES);
+    assert_eq!(
+        cf_ledger::parse_staff_rules(Some(&Value::from(rules.clone()))).ok(),
+        Some(Some(rules.clone())),
+        "the ledger takes them"
+    );
+    rules
+}
+
+/// [`a_chiefs_role`] with the project's rules for the staff, if it has some.
+fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> String {
     let staff: Vec<StaffRow> = (0..rows)
         .map(|at| StaffRow {
             name: format!("member-{at}"),
@@ -134,45 +163,159 @@ fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
         &Env::default(),
         "chief",
         &staff,
-        Some("/Applications/ConsensFlow.app/Contents/Resources/bin/cf"),
+        &CfWord::new(
+            "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
+            Shell::Posix,
+        ),
         specs_on.then_some(&specs),
     )
+    .map(|text| with_staff_rules(text, "chief", rules))
     .unwrap()
 }
 
+/// What `cf inbox read` prints of `note` once it was delivered: its line and
+/// its words.
+fn printed_by_cf(note: &MessageView) -> String {
+    format!(
+        "m-{} [delivered] note from ConsensFlow\n\n{}\n",
+        note.id, note.body
+    )
+}
+
 /// The real text of a chief with specs on and a staff of twenty-five who each hold
-/// two roles is still under what a message goes in whole at: it is the role itself
-/// the replacement says, not its opening and a command to read the rest of it.
+/// two roles is told: it is longer than a message goes in whole at since the
+/// chief's rules for smaller contexts (T-1009), so its window is given the
+/// opening, which says to read the rest now, and the command that prints it, and
+/// what that command prints is read whole by its window, so the role is told once
+/// it is read.
 #[test]
-fn the_real_text_of_a_chief_with_specs_and_a_large_staff_goes_in_whole_as_a_replacement() {
-    let text = a_chiefs_role(25, true);
+fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
+    let most = the_most_rules();
+    for rules in [None, Some(most.as_str())] {
+        told_whole_or_told_and_read(&a_chiefs_role_with(25, true, rules));
+    }
+}
+
+/// A chief's `text`, said again in a replacement, goes in whole, or in part
+/// with the command that prints the rest, which its window reads whole.
+fn told_whole_or_told_and_read(text: &str) {
+    let text = text.to_owned();
     let replacement = note(None, "note", body_of(&text));
-    assert!(goes_whole(&replacement, &[]));
-    let said = delivery_text(&replacement, &[]);
-    assert!(said.contains(&text), "the role is cut");
+    let said = delivery_text(&replacement, &[], &CfWord::bare());
+    if goes_whole(&replacement, &[], &CfWord::bare()) {
+        assert!(said.contains(&text), "the role is cut");
+        return;
+    }
     assert!(
-        !said.contains("read all of it with"),
-        "a command stands in for its end"
+        said.contains(OPENING_IN_PART),
+        "it says to read the rest now"
+    );
+    assert!(
+        said.ends_with("read all of it with: cf inbox read m-4242)"),
+        "the command that prints the rest: {}",
+        &said[said.len() - 200..]
+    );
+    assert!(replacement.body.ends_with(&text));
+    assert!(
+        role_read_whole(&printed_by_cf(&replacement)),
+        "what cf prints of it is read whole: {} bytes",
+        printed_by_cf(&replacement).len()
     );
 }
 
-/// The staff a role holds whole in a replacement, which the docs of this module
-/// say: more rows are a role told in part.
+/// The staff a role holds whole in a replacement, and the staff it holds told in
+/// part and read whole, which the docs of this module say: more rows are a role
+/// told in part, and past the second, one `cf` does not say it read.
 #[test]
-fn the_staff_a_replacement_holds_whole_is_as_large_as_the_docs_say() {
-    let rows_whole = |specs_on| {
+fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
+    let rows_while = |specs_on, holds: &dyn Fn(&MessageView) -> bool| {
+        (1..)
+            .take_while(|&rows| holds(&note(None, "note", body_of(&a_chiefs_role(rows, specs_on)))))
+            .last()
+            .unwrap_or(0)
+    };
+    let whole = |note: &MessageView| goes_whole(note, &[], &CfWord::bare());
+    let read = |note: &MessageView| role_read_whole(&printed_by_cf(note));
+    assert_eq!(
+        rows_while(true, &whole),
+        0,
+        "docs: never whole with specs on"
+    );
+    assert_eq!(
+        rows_while(false, &whole),
+        0,
+        "docs: never whole without specs either"
+    );
+    assert_eq!(
+        rows_while(true, &read),
+        195,
+        "docs: read to 195 rows with specs on"
+    );
+    assert_eq!(
+        rows_while(false, &read),
+        223,
+        "docs: read to 223 rows without"
+    );
+    // With the most rules for the staff the ledger takes.
+    let most = the_most_rules();
+    let rows_with_the_most = |specs_on| {
         (1..)
             .take_while(|&rows| {
-                goes_whole(
-                    &note(None, "note", body_of(&a_chiefs_role(rows, specs_on))),
-                    &[],
-                )
+                read(&note(
+                    None,
+                    "note",
+                    body_of(&a_chiefs_role_with(rows, specs_on, Some(&most))),
+                ))
             })
             .last()
             .unwrap_or(0)
     };
-    assert_eq!(rows_whole(true), 37, "docs: whole to 37 rows with specs on");
-    assert_eq!(rows_whole(false), 65, "docs: whole to 65 rows without");
+    assert_eq!(
+        rows_with_the_most(true),
+        29,
+        "docs: read to 29 rows with specs on and the most rules"
+    );
+    assert_eq!(
+        rows_with_the_most(false),
+        58,
+        "docs: read to 58 rows without specs and the most rules"
+    );
+}
+
+/// The real text of every member with the most rules for the staff the ledger
+/// takes, said again in a replacement or in the note that greets a session that
+/// began without it (a Muse `/clear`), goes into its window whole, in one message:
+/// a member's role is never told in part for its rules.
+#[test]
+fn a_members_real_text_with_the_most_rules_for_the_staff_goes_in_whole() {
+    // As many units as bytes: the most units any rules can have.
+    let most = "a".repeat(STAFF_RULES_MAX_BYTES);
+    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+        let text = role_instructions(
+            &Env::default(),
+            role,
+            &[],
+            &CfWord::new(
+                "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
+                Shell::Posix,
+            ),
+            None,
+        )
+        .map(|text| with_staff_rules(text, role, Some(&most)))
+        .unwrap();
+        for (whole, in_part) in [
+            (OPENING, OPENING_IN_PART),
+            (BEGAN_WITHOUT, BEGAN_WITHOUT_IN_PART),
+        ] {
+            let said = note_of(whole, in_part, &text);
+            assert!(said.starts_with(whole), "{role}: told whole");
+            assert!(
+                goes_whole(&note(None, "note", said.clone()), &[], &CfWord::bare()),
+                "{role}: {} units",
+                cf_base::text::utf16_len(&said)
+            );
+        }
+    }
 }
 
 /// An item of a conversation's record, from `role`, saying `text`.
@@ -230,7 +373,7 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
     );
     assert_eq!(answers(&items), ["The parser is sound."]);
     // Nor does one between a replacement of the role and its word end the role's turn.
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     let mut items = vec![assistant("Parser done"), user(&replacement), summary];
     items.push(assistant("Understood."));
     assert_eq!(answers(&items), ["Parser done"]);
@@ -240,13 +383,13 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
 fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words_it_quotes() {
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     // The opening, and the whole text of the replacement, quoted in a note about
     // the task (m-7), from someone: the worker's word answers the task.
     let mut quoting = note(Some("chief"), "note", format!("Review this: {replacement}"));
     quoting.id = 7;
     quoting.task_number = Some(1);
-    let quoted = delivery_text(&quoting, &[]);
+    let quoted = delivery_text(&quoting, &[], &CfWord::bare());
     assert!(quoted.contains(OPENING), "{quoted}");
     assert_eq!(
         answers(&[user(&quoted), assistant("Parser done")]),
@@ -261,7 +404,7 @@ fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words
 
 #[test]
 fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task() {
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
 
@@ -311,7 +454,7 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
     let tool = |text: &str| said_by(Role::Tool, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
 
     // Several words after the last tool call are all of it, in order.
     assert_eq!(
@@ -373,6 +516,124 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     let answered = answers_to_the_task(&silent, &[]).expect("a last word");
     assert_eq!(answered.last.map(|last| last.text.as_ref()), Some(""));
     assert_eq!(answers(&silent), [""]);
+}
+
+/// The words of the reply of `items`: what the member wrote after its message and before its
+/// first tool call, where a tool call followed (`Answers::reply`).
+fn reply(items: &[Item], replacements: &[i64]) -> Vec<String> {
+    answers_to_the_task(items, replacements).map_or_else(Vec::new, |answers| {
+        answers
+            .reply
+            .into_iter()
+            .map(|item| item.text.to_string())
+            // A call that says nothing is an item of the record, with no words.
+            .filter(|text| !text.trim().is_empty())
+            .collect()
+    })
+}
+
+#[test]
+fn what_a_member_writes_before_its_first_tool_call_is_its_reply_and_what_it_writes_between_its_tools_is_not(
+) {
+    // Devin's turn on a tell (T-1151), and Claude Code's, Codex's and Muse's: text, a tool,
+    // another call, a tool, text.
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str, complete| said_by(Role::Assistant, text, complete);
+    let items = [
+        user("Go"),
+        assistant("Stopped", false),
+        said_by(Role::Tool, "No output produced after 10.0 seconds", true),
+        assistant("Reading on", false),
+        said_by(Role::Tool, "Exited with code 0", true),
+        assistant("The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+    assert_eq!(answers(&items), ["The last words"]);
+    // Several items before the first tool are one reply, in order.
+    let items = [
+        user("Go"),
+        assistant("Stopped", false),
+        assistant("and ready", false),
+        said_by(Role::Tool, "out", true),
+        assistant("The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped", "and ready"]);
+}
+
+#[test]
+fn a_turn_with_no_tool_call_or_with_one_before_its_words_has_no_reply() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    // No tool call: the one run is the final answer, and the reply is nothing besides it.
+    assert!(reply(&[user("Go"), assistant("Done")], &[]).is_empty());
+    // A tool call first (an empty call, a result), then words.
+    assert!(reply(
+        &[
+            user("Go"),
+            said_by(Role::Assistant, "", false),
+            said_by(Role::Tool, "out", true),
+            assistant("Done"),
+        ],
+        &[]
+    )
+    .is_empty());
+    // No answer at all.
+    assert!(answers_to_the_task(&[user("Go"), said_by(Role::Tool, "out", true)], &[]).is_none());
+}
+
+#[test]
+fn only_the_turn_after_the_latest_message_has_a_reply() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    let tool = |text: &str| said_by(Role::Tool, text, true);
+    let items = [
+        user("Go"),
+        assistant("Looking at the first"),
+        tool("out"),
+        assistant("First done"),
+        user("And now this"),
+        assistant("Stopped"),
+        tool("out"),
+        assistant("Second done"),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+    // A message to the member that is a role begins a turn of its own: its words are the role's,
+    // and neither end nor begin the reply.
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let items = [
+        user("Go"),
+        assistant("Stopped"),
+        tool("out"),
+        user(&replacement),
+        assistant("Understood."),
+        tool("out"),
+        assistant("The last words"),
+    ];
+    assert_eq!(reply(&items, &[4242]), ["Stopped"]);
+}
+
+#[test]
+fn what_a_harness_wrote_itself_is_no_reply_but_its_progress_marks_are_kept() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    // Claude Code's close of a turn it found cut: no model behind it.
+    let closed = Item {
+        synthetic: true,
+        commentary: true,
+        ..said_by(Role::Assistant, "No response requested.", true)
+    };
+    // Codex marks the text it writes beside a tool call as progress, where its phase says so.
+    let progress = Item {
+        commentary: true,
+        ..said_by(Role::Assistant, "Stopped", false)
+    };
+    let items = [
+        user("Go"),
+        closed,
+        progress,
+        said_by(Role::Tool, "out", true),
+        said_by(Role::Assistant, "The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
 }
 
 #[test]
@@ -443,6 +704,8 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         session: None,
         owed: None,
         late: false,
+        work: crate::at_work::OnWork::default(),
+        not_ready: None,
     };
     assert!(
         context
@@ -512,4 +775,30 @@ fn a_replacement_whose_recipient_has_no_conversation_any_more_is_confirmed_and_r
         "there was no conversation to have told"
     );
     context.close();
+}
+
+/// T-931 P1-1: the note that greets a session no hook greeted is no launch's prelude: a
+/// chief whose window comes up after it was told has its count of failed starts cleared,
+/// as after any launch that came up.
+#[test]
+fn a_chief_that_comes_up_after_its_greeting_was_told_has_its_failed_starts_cleared() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let record = context.dispatcher.record_of(chief);
+    record.window.borrow_mut().relaunch = Some(crate::windows::Relaunch {
+        failures: 1,
+        at: 0,
+        reopens: false,
+    });
+    context.dispatcher.came_up(&record);
+    assert!(record.window.borrow().relaunch.is_none());
 }

@@ -10,19 +10,21 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{
-    Admission, Held, HostError, Input, Observed, Pane, PaneHost, Readiness, Work,
+    Admission, Held, HostError, Input, Observed, Over, Pane, PaneHost, Readiness, Work,
 };
-use cf_harness::records::Role;
+use cf_harness::records::{Reading, Role};
+use cf_ledger::model::MAX_BODY;
 use cf_ledger::{
-    is_told, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver, MessageView, NewNote,
-    ParticipantView, ProjectView, TaskView,
+    is_told, reopen_or_accept, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver,
+    MessageView, NewNote, ParticipantView, ProjectView, TaskView,
 };
 use cf_proto::panes::HumanInput;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::arrival::ENTER_AGAIN_QUIET_MS;
-use crate::delivery_text::{delivery_text, is_paste_of, marker_of};
+use crate::at_work::OnWork;
+use crate::delivery_text::{is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::pacing::Pace;
 use crate::record::Record;
@@ -30,6 +32,11 @@ use crate::role_change::Prelude;
 use crate::runtime::returning;
 use crate::seams::EngineError;
 use crate::shown::{after_words, words_key, Paste, Shown};
+use crate::windows::pane_body_drawn;
+
+/// What ends the words of a failed message sent back to whoever sent them where they
+/// fill a note's whole room.
+const CUT_SHORT: &str = "\n… (cut short: a note holds no more)";
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +83,11 @@ pub(crate) struct Delivering {
     /// the window's own deliver: pressed Enter for once more as any paste is
     /// (`arrival`), where one its window read as it opened never is.
     pub(crate) late: bool,
+    /// What the looks found of the window's work while it waits (`at_work`).
+    pub(crate) work: OnWork,
+    /// A launch's first message not handed over yet: why its window was last not ready
+    /// for it, as the trace said, which a launch given up for that says.
+    pub(crate) not_ready: Option<String>,
 }
 
 /// The reads of a window that came to nothing while a message was on its way
@@ -105,6 +117,9 @@ pub struct HeldBack {
     /// Whether what holds it is words typed in its window and not sent ([`Held::Unsent`]):
     /// the human's note of a message held long says then what the window's box shows.
     pub unsent: bool,
+    /// Whether the trace has been told this reason: a chief's window read at work holds
+    /// its head quietly until the human is told (`held_not_at_rest`).
+    pub traced: bool,
 }
 
 /// The record's delivery part.
@@ -115,6 +130,10 @@ pub(crate) struct DeliveryPart {
     pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
+    /// A message waits for what only the human can do in the window, in the window's words
+    /// ([`Held::ForHuman`]): the board says them as the window's wait, and the window is
+    /// asked again at every look.
+    pub(crate) for_human: Option<String>,
     /// For the message on its way, pasted into a conversation the window left: how many
     /// items that conversation's record held while it read a turn at work, and since when
     /// it has held as many (`arrival`'s `watch_left`).
@@ -137,6 +156,17 @@ pub(crate) struct DeliveryPart {
     /// what an item since then is held to (`take_unproven`), with no scan of the events.
     /// A start has none, and asks the ledger's `delivery_begun_at`.
     pub(crate) begun_at: Option<(i64, String)>,
+    /// The message whose sender and the human were told it waits on the window's work
+    /// (`at_work`): once a message, however many times it is pasted.
+    pub(crate) told_work: Option<i64>,
+    /// The record of the window as it stood when the words that resumed its task were
+    /// first seen waiting, for the look that finds the window acting after them
+    /// (`resumed_at_work`).
+    pub(crate) resumed: Option<crate::resumed_at_work::ResumeWatch>,
+    /// The words whose task was sent back to queued because the window rested without them
+    /// going in, and when, on the engine's clock: it is not shown working for them again
+    /// for a while (`resumed_at_work`).
+    pub(crate) sent_back: Option<(i64, i64)>,
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it
@@ -144,6 +174,11 @@ pub(crate) struct DeliveryPart {
     /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
+    /// The note that gives the role to a session no hook greeted, the window switched to
+    /// it (`Dispatcher::greet_switched`): it goes first while it waits
+    /// ([`Dispatcher::next_in_line`]), and is no launch's prelude: nothing of a launch's
+    /// watch is on it (the time a launch has, the close of a window it never gets into).
+    pub(crate) greeting: Option<i64>,
     /// The failed turn whose note is settled: the message the window had last
     /// been given, and to whom the failure was told or found told
     /// ([`Dispatcher::untold_failure`]). The ledger says the same after a restart.
@@ -183,6 +218,10 @@ pub(crate) struct DeliveryPart {
     /// What the looks read of the window while the message on its way, or the last,
     /// was on its way (`arrival`), for its retry or failure to say.
     pub(crate) watched: Option<crate::arrival::Watched>,
+    /// The message at the head of a chief's queue while its window is not at rest, and
+    /// how many items its record held at the first such look: what it has written since
+    /// (`held_not_at_rest`).
+    pub(crate) head_items: Option<(i64, usize)>,
 }
 
 /// A paste whose Enter was withheld, left in its window's input box.
@@ -220,13 +259,12 @@ pub(crate) enum Enter {
     Arrived,
 }
 
-/// The pane host as a window is handed it for a hand-over (a delivery, or the
-/// first message a window posts once it is up): the host's own requests, and the
-/// engine's word whether the window may be handed the text now
+/// The pane host as a window is handed it for a delivery: the host's own requests,
+/// and the engine's word whether the window may be handed the text now
 /// ([`PaneHost::admits`]). Every adapter asks it at the moment of its hand-over,
 /// after every wait of its own (Claude's keys that clear its input box, the pane's
-/// claim Pi's rename waits for, OpenCode's wait for its server, the connection a
-/// send over loopback waits for): a Close that comes during any of them hands the
+/// claim Pi's rename waits for, the connection a send over loopback waits for): a
+/// Close that comes during any of them hands the
 /// window nothing (both reviews of 2026-10-16, rounds 4 and 5). Of a message
 /// begun, the ledger answers, in the write that marks it handed if it goes
 /// ([`cf_ledger::Ledger::admit`]): it goes while its project is open and nothing
@@ -237,11 +275,10 @@ pub(crate) enum Enter {
 /// ([`Admitting::again`]).
 pub(crate) struct Admitting<'a> {
     dispatcher: &'a Dispatcher,
-    /// The window's project.
-    project: i64,
-    /// The message it hands over, and the rows its paste carries, where it hands
-    /// over one begun.
-    handing: Option<(i64, Vec<i64>)>,
+    /// The message it hands over, begun.
+    message: i64,
+    /// The rows its paste carries.
+    carried: Vec<i64>,
     /// What it hands over is a paste handed over already, which an Enter sends.
     again: bool,
     /// The engine emptied the window's input box just before the hand-over.
@@ -257,12 +294,12 @@ pub(crate) struct Admitting<'a> {
 }
 
 impl<'a> Admitting<'a> {
-    /// The host for a window of `project`.
-    pub(crate) fn new(dispatcher: &'a Dispatcher, project: i64) -> Self {
+    /// The host for the hand-over of `message`, begun with the rows `carried`.
+    pub(crate) fn handing(dispatcher: &'a Dispatcher, message: i64, carried: Vec<i64>) -> Self {
         Self {
             dispatcher,
-            project,
-            handing: None,
+            message,
+            carried,
             again: false,
             cleared: false,
             received: Cell::new(None),
@@ -270,12 +307,6 @@ impl<'a> Admitting<'a> {
             withdrawn: Cell::new(false),
             failed: RefCell::new(None),
         }
-    }
-
-    /// The host for the hand-over of `message`, begun with the rows `carried`.
-    pub(crate) fn handing(mut self, message: i64, carried: Vec<i64>) -> Self {
-        self.handing = Some((message, carried));
-        self
     }
 
     /// The host for a paste handed over already, which an Enter sends: a row of it
@@ -308,16 +339,14 @@ impl<'a> Admitting<'a> {
 
     /// Whether the window may be handed the text now, as the ledger says.
     fn may(&self) -> Result<bool, EngineError> {
-        let Some((message, carried)) = &self.handing else {
-            return self.dispatcher.in_open_project(self.project);
-        };
+        let (message, carried) = (self.message, &self.carried);
         if self.again {
             let received = self
                 .dispatcher
                 .seams
                 .ledger
                 .borrow()
-                .received_of(*message, carried)?;
+                .received_of(message, carried)?;
             if received.is_some() {
                 self.received.set(received);
                 return Ok(false);
@@ -328,7 +357,7 @@ impl<'a> Admitting<'a> {
             .seams
             .ledger
             .borrow_mut()
-            .admit(*message, carried)?;
+            .admit(message, carried)?;
         self.withdrawn.set(handed == HandOver::Withdrawn);
         Ok(handed == HandOver::Admitted)
     }
@@ -451,7 +480,14 @@ impl Dispatcher {
         // the engine emptied holds the human's words now, which an interrupt of ours
         // may put back there: it is no longer known empty (Calliope's review of
         // 2026-10-21, round 12).
-        record.delivery.borrow_mut().unsent = held == Some(Held::Unsent);
+        {
+            let mut part = record.delivery.borrow_mut();
+            part.unsent = held == Some(Held::Unsent);
+            part.for_human = match &held {
+                Some(Held::ForHuman(words)) => Some(words.clone()),
+                _ => None,
+            };
+        }
         if held == Some(Held::Unsent) {
             record.delivery.borrow_mut().emptied = None;
         }
@@ -495,16 +531,13 @@ impl Dispatcher {
                     Some(found) => self.tells_a_role(found)?,
                     None => None,
                 };
-                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand(
+                self.seams.ledger.borrow_mut().confirm_sent_by_hand(
                     stale.message,
                     &stale.carried,
                     &receipt,
                     tells == Some(true),
                 )?;
                 record.delivery.borrow_mut().uncleared = None;
-                if let Some(confirmed) = confirmed.filter(|_| tells == Some(false)) {
-                    self.told_in_part(&confirmed)?;
-                }
                 self.changed();
                 return Ok(());
             }
@@ -584,7 +617,6 @@ impl Dispatcher {
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().held = None;
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
@@ -650,9 +682,7 @@ impl Dispatcher {
         // The adapter asks the ledger at its hand-over whether the project is still
         // open and nothing of the paste was withdrawn since it was begun.
         let cleared = record.delivery.borrow().emptied.as_ref() == Some(&pane);
-        let admitting = Admitting::new(self, message.project_id)
-            .handing(message.id, carried.clone())
-            .cleared(cleared);
+        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(cleared);
         let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -713,12 +743,15 @@ impl Dispatcher {
             self.changed();
             return Ok(());
         }
+        // The window took the paste: its hold ends here, and not before, as a paste it
+        // refused is no paste and keeps the hold's clock (Calliope's P3 on T-919).
+        record.delivery.borrow_mut().held = None;
         // A window that closed while its harness took the message had nothing
         // on its way to settle when it went: the message goes again, unless the
         // harness's record shows it took it (`in_flight`).
         if record.window.borrow().pane.as_ref() != Some(&pane) {
             let this = Rc::clone(self);
-            self.settle_gone(delivering, move |delivering| {
+            self.settle_gone(delivering, false, move |delivering| {
                 this.settle_failure(
                     delivering,
                     "its window closed while it was handed over",
@@ -781,6 +814,10 @@ impl Dispatcher {
                 {
                     let mut part = record.delivery.borrow_mut();
                     part.unsent = unsent;
+                    part.for_human = match &held {
+                        Held::ForHuman(words) => Some(words.clone()),
+                        _ => None,
+                    };
                     // What the human typed is theirs to send: the launch's time is not
                     // spent while it waits for them, as it is not while the window asks
                     // whether to trust its folder (`trust`), and the box holds their
@@ -797,6 +834,7 @@ impl Dispatcher {
                         }
                     }
                 }
+                self.not_ready(record, first.message, held.sentence());
                 let reason = format!(
                     "the window is not ready for its first message: {}",
                     held.sentence()
@@ -809,6 +847,7 @@ impl Dispatcher {
         // (a dialog that comes late, or one after another): its Enter would answer it, so
         // nothing goes in and the watch takes it up again (`trust`).
         if self.asks_before_its_first_message(record, &pane).await? {
+            self.not_ready(record, first.message, "it asks a question first");
             return self
                 .held_once(
                     record,
@@ -839,8 +878,7 @@ impl Dispatcher {
                 .paste_into(first.message, conversation.id)?;
         }
         let session = conversation.and_then(|conversation| conversation.native_session);
-        let admitting =
-            Admitting::new(self, message.project_id).handing(first.message, first.carried.clone());
+        let admitting = Admitting::handing(self, first.message, first.carried.clone());
         let handed = returning(window.deliver(&admitting, &pane, &text)).await;
         let outcome = match handed {
             Ok(admission) => admission,
@@ -869,7 +907,15 @@ impl Dispatcher {
             return failed.map_or(Ok(()), Err);
         }
         if let Admission::Refused { reason } = &outcome {
+            self.not_ready(record, first.message, &format!("it refused it: {reason}"));
             let reason = format!("its window refused its first message: {reason}");
+            return self.held_once(record, first.message, &reason).await;
+        }
+        // Refused for being at work (Pi's extension, D9): nothing went in, so it is owed
+        // still, and goes at a later ready look (Calliope's P3 on T-919).
+        if let Admission::Busy { reason } = &outcome {
+            let reason =
+                format!("its harness refused its first message for being at work: {reason}");
             return self.held_once(record, first.message, &reason).await;
         }
         record.delivery.borrow_mut().held = None;
@@ -891,6 +937,20 @@ impl Dispatcher {
         }
         self.changed();
         Ok(())
+    }
+
+    /// Why the window is not ready for `message`, its launch's first, which it is owed:
+    /// what a launch given up for it says (`arrival`).
+    fn not_ready(&self, record: &Record, message: i64, why: &str) {
+        if let Some(delivering) = record
+            .delivery
+            .borrow_mut()
+            .delivering
+            .as_mut()
+            .filter(|delivering| delivering.message == message)
+        {
+            delivering.not_ready = Some(why.to_owned());
+        }
     }
 
     /// The launch's first message the window is owed, and the text it goes in as.
@@ -927,10 +987,7 @@ impl Dispatcher {
             .map(|delivering| delivering.carried.clone())
             .unwrap_or_default();
         let found = self.seams.ledger.borrow().message(message)?;
-        let project = found.as_ref().map_or(0, |found| found.project_id);
-        let admitting = Admitting::new(self, project)
-            .handing(message, carried)
-            .again();
+        let admitting = Admitting::handing(self, message, carried).again();
         if admitting.admits() {
             return Ok(Enter::Go);
         }
@@ -973,6 +1030,8 @@ impl Dispatcher {
             session: None,
             owed: None,
             late: false,
+            work: OnWork::default(),
+            not_ready: None,
         }
     }
 
@@ -989,6 +1048,14 @@ impl Dispatcher {
     async fn tell_if_held_long(&self, record: &Record, held: HeldBack) -> Result<(), EngineError> {
         let waited = self.now() - held.since_ms;
         if waited < HELD_TOLD_MS {
+            return Ok(());
+        }
+        // A reason that passes by itself in seconds (the settle of a window that has just
+        // come to rest) is not what held it ten minutes: the next look tells, in the words
+        // of a lasting one, or the message goes in. Past twice the bound it is told as it
+        // is, so that a window whose rest never settles holds nothing silently (Calliope's
+        // T-987).
+        if crate::pacing::passing(&held.reason) && waited < 2 * HELD_TOLD_MS {
             return Ok(());
         }
         let Some(message) = self.seams.ledger.borrow().message(held.message)? else {
@@ -1123,13 +1190,14 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let was = record.delivery.borrow().held.clone();
         let held = match was.filter(|held| held.message == message) {
-            Some(held) if held.reason == reason => held,
+            Some(held) if held.reason == reason && held.traced => held,
             was => {
                 let held = HeldBack {
                     message,
                     reason: reason.to_owned(),
                     since_ms: was.map_or_else(|| self.now(), |was| was.since_ms),
                     unsent,
+                    traced: true,
                 };
                 record.delivery.borrow_mut().held = Some(held.clone());
                 self.trace_window(
@@ -1144,6 +1212,94 @@ impl Dispatcher {
             }
         };
         self.tell_if_held_long(record, held).await
+    }
+
+    /// A chief's window not at rest at this look, its project open: the message at the head
+    /// of its queue waits for it, on the clock every hold of that message runs on, and from
+    /// [`HELD_TOLD_MS`] the trace says why and the human is told once (`hold`), as of a
+    /// message held at a window at rest. Before then it is held quietly: a chief at work on
+    /// a turn of its own holds its queue a while every day. Its words say what holds it: a
+    /// screen not drawn, a dialog of the harness's own, or the window read at work, and then
+    /// whether the window shows what a window at work on a turn does not, so that
+    /// ConsensFlow may misread it: its record has answered since the message became the head
+    /// (a user's words, and a whole answer after them, counted from a look that read the
+    /// record: one that could not says nothing of what came since, Calliope's T-987), its
+    /// record says the turn is over while its live status keeps it at work, or its harness
+    /// says it waits at its prompt (Claude Code's status alone says so). T-958: the field's
+    /// chief read at work for 54 hours while it answered the human, seven results queued,
+    /// and nobody was told.
+    pub(crate) async fn held_not_at_rest(
+        &self,
+        record: &Record,
+        observed: &Observed,
+        drawing: bool,
+    ) -> Result<(), EngineError> {
+        let Some(next) = self.next_in_line(record)? else {
+            let mut part = record.delivery.borrow_mut();
+            part.held = None;
+            part.head_items = None;
+            return Ok(());
+        };
+        let items = observed.items();
+        let read = matches!(observed.reading.as_deref(), Some(Reading::Known(_)));
+        let from = {
+            let mut part = record.delivery.borrow_mut();
+            match part.head_items {
+                Some((message, from)) if message == next.id => Some(from),
+                _ if read => {
+                    part.head_items = Some((next.id, items.len()));
+                    Some(items.len())
+                }
+                _ => None,
+            }
+        };
+        let misread = |shows: &str| {
+            format!("its window reads at work, though {shows}: ConsensFlow may be misreading it, and the chief's inbox on the board shows what waits")
+        };
+        let reason = if drawing {
+            "its window has not drawn its screen".to_owned()
+        } else if let Some(waiting) = &observed.waiting {
+            let shows = waiting
+                .reason
+                .as_deref()
+                .map_or_else(String::new, |reason| format!(": {reason}"));
+            format!("its window shows a dialog of its own{shows}")
+        } else if from
+            .and_then(|from| items.get(from..))
+            .is_some_and(answered)
+        {
+            misread("its record has answered since this message came")
+        } else if observed.over == Over::Held {
+            misread("its record says its turn is over")
+        } else if observed.at_prompt {
+            misread("its harness says it waits at its prompt")
+        } else {
+            "its window reads at work".to_owned()
+        };
+        {
+            let mut part = record.delivery.borrow_mut();
+            let was = part.held.clone().filter(|held| held.message == next.id);
+            let since_ms = was.as_ref().map_or_else(|| self.now(), |was| was.since_ms);
+            if self.now() - since_ms < HELD_TOLD_MS {
+                part.held = Some(HeldBack {
+                    message: next.id,
+                    reason: reason.clone(),
+                    since_ms,
+                    unsent: false,
+                    traced: was.is_some_and(|was| was.traced && was.reason == reason),
+                });
+                return Ok(());
+            }
+        }
+        self.held_once(record, next.id, &reason).await
+    }
+
+    /// The message at the head of `record`'s queue held [`HELD_TOLD_MS`] or longer, whatever
+    /// holds it: what a chief's lane says while its window reads at work.
+    pub(crate) fn held_long(&self, record: &Record) -> Option<i64> {
+        let part = record.delivery.borrow();
+        let held = part.held.as_ref()?;
+        (self.now() - held.since_ms >= HELD_TOLD_MS).then_some(held.message)
     }
 
     /// Whether a key may be pressed into `pane` now: its screen says it printed
@@ -1167,14 +1323,22 @@ impl Dispatcher {
     /// ([`DeliveryPart::uncleared`]), with the keys of its harness
     /// ([`Input::Pasted`]): whether the host took them, which is when the box
     /// counts as empty, and stays so until something goes in
-    /// ([`DeliveryPart::emptied`]).
+    /// ([`DeliveryPart::emptied`]). A box its harness reads empty on the screen
+    /// (the human emptied it) is pressed nothing and counts as empty: the key does
+    /// harm there, Control-C arming the quit of Claude Code and Muse Code, which a
+    /// paste between does not disarm in Muse (T-829's probe), and stopping a turn at
+    /// work.
     pub(crate) async fn clear_box(&self, record: &Record, pane: &Pane) -> bool {
         let Input::Pasted { clear } = record.window.borrow().input else {
             return true;
         };
-        let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
-        let answer = returning(self.seams.host.request("pane.input", body)).await;
-        let taken = answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)));
+        let taken = if self.box_read_empty(record, pane).await {
+            true
+        } else {
+            let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
+            let answer = returning(self.seams.host.request("pane.input", body)).await;
+            answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)))
+        };
         if taken {
             let mut part = record.delivery.borrow_mut();
             if part
@@ -1187,6 +1351,27 @@ impl Dispatcher {
             part.emptied = Some(pane.clone());
         }
         taken
+    }
+
+    /// Whether the window of `record` in `pane` shows its input box empty now, as its
+    /// harness reads it ([`cf_harness::contract::Window::box_read_empty`]): no where the
+    /// screen cannot be read.
+    async fn box_read_empty(&self, record: &Record, pane: &Pane) -> bool {
+        let Some(window) = record.window.borrow().window.clone() else {
+            return false;
+        };
+        // The box is read from the screen's lines as drawn, which the host sends only when
+        // asked (`pane_body_drawn`): asked without them, every box read not empty, and the
+        // key went into empty ones too (T-946).
+        returning(
+            self.seams
+                .host
+                .request("pane.snapshot", pane_body_drawn(pane)),
+        )
+        .await
+        .is_ok_and(|snapshot| {
+            snapshot.get("ok") == Some(&Value::Bool(true)) && window.box_read_empty(&snapshot)
+        })
     }
 
     /// A member's turn that failed while its task was not working (waiting on an
@@ -1383,11 +1568,15 @@ impl Dispatcher {
             .borrow()
             .last_pastes(participant.id, PASTES_ON_SCREEN)?
             .into_iter()
-            .map(|begun| Paste {
-                id: begun.message.id,
-                text: delivery_text(&begun.message, &begun.carried),
+            .map(|begun| {
+                // As it was pasted: sent again, or naming a note (Calliope's T-987), its
+                // commands started by the window's own `cf` (`cf_for`).
+                Ok(Paste {
+                    id: begun.message.id,
+                    text: self.delivery_text_of(&begun.message, &begun.carried)?,
+                })
             })
-            .collect();
+            .collect::<Result<_, EngineError>>()?;
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {
             Some(pane) => self.look_at(&pane).await,
@@ -1474,13 +1663,18 @@ impl Dispatcher {
     /// What the ledger withdrew did not fail, and nobody hears of it. The words that
     /// resume a paused task paused it again: its requester hears why in the note of the
     /// pause (the ledger's), and the human, once, that they did not reach the window.
-    /// The ledger says which it did ([`GivenUp`]): no state is read for it.
+    /// The ledger says which it did ([`GivenUp`]): no state is read for it. The tasks that
+    /// wait for a task this failed are told last, after the words of the failure, and the
+    /// requester's note names the ones it asked for (T-1148).
     fn fail_delivery(
         &self,
         message: &MessageView,
         because: &str,
         look: Option<&Value>,
     ) -> Result<(), EngineError> {
+        // Whether the task was failed already, as a turn that failed fails it: the tasks that
+        // wait for it were told then, and are not told again.
+        let failed_before = self.task_failed(message)?;
         let (_, given_up) = {
             let mut ledger = self.seams.ledger.borrow_mut();
             match look {
@@ -1490,7 +1684,7 @@ impl Dispatcher {
         };
         match given_up {
             GivenUp::Failed => {}
-            GivenUp::Kept => return self.tell_kept(message, because),
+            GivenUp::Kept => return self.tell_kept(message, because, false),
             GivenUp::Withdrawn => return Ok(()),
             GivenUp::Paused => {
                 let project = self.known_project(message.project_id)?;
@@ -1505,15 +1699,67 @@ impl Dispatcher {
                     let paused_because = resumed_in_vain(message, because);
                     self.tell_stall(&project, &thread.task, &paused_because, because, None)?;
                 }
-                return Ok(());
+                return self.words_back(&project, message, because, true);
             }
         }
+        let told_the_requester = self.tell_given_up(message, because, failed_before)?;
+        // Last, what the failure left behind: the tasks that wait for the task it failed are
+        // told to their requesters after the words of the failure, which the chief is given
+        // first (it is given its notes one at a time, the oldest first), the human's
+        // included. The requester of the task has them in its note, as the ledger's give-up
+        // says them (the field board of 2026-11-02: T-303 waits for T-302, which failed,
+        // reached the chief before T-302 failed; T-1148). Not where the requester was told
+        // nothing of the failure (a message that is no brief and no told words), nor where
+        // the task had failed before.
+        if failed_before || !told_the_requester {
+            return Ok(());
+        }
+        let Some(number) = message.task_number else {
+            return Ok(());
+        };
+        let project = self.known_project(message.project_id)?;
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        if let Some(thread) = task.filter(|thread| thread.task.state == "failed") {
+            self.seams.ledger.borrow_mut().tell_waiting_for_failed(
+                project.id,
+                number,
+                &thread.task.requester,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Whether the task `message` is about has failed.
+    fn task_failed(&self, message: &MessageView) -> Result<bool, EngineError> {
+        let Some(number) = message.task_number else {
+            return Ok(false);
+        };
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(message.project_id, number)?;
+        Ok(task.is_some_and(|thread| thread.task.state == "failed"))
+    }
+
+    /// The words of a delivery that failed for good: whoever gave the task and whoever told
+    /// the words hear why, and the human, once, what it was. `failed_before` is whether the
+    /// task had failed already, whose waiters were told then. Whether the task's requester
+    /// was told of its failure.
+    fn tell_given_up(
+        &self,
+        message: &MessageView,
+        because: &str,
+        failed_before: bool,
+    ) -> Result<bool, EngineError> {
         let project = self.known_project(message.project_id)?;
         // The human's own words that wait for the reopen of the task this failed, where
         // the human is not its requester, said in the note of what did not reach the
         // window, in the ledger's words (Calliope's P3-1 of T-510: the ledger's give-up
         // told the human of them, and this note did not).
         let mut waiting = String::new();
+        let mut told_back = false;
+        let mut told_the_requester = false;
         if let Some(number) = message.task_number {
             let task = self.seams.ledger.borrow().task(project.id, number)?;
             let failed = task.filter(|thread| {
@@ -1541,20 +1787,113 @@ impl Dispatcher {
                     .borrow()
                     .told_unreceived(project.id, number)?;
                 let task = &thread.task;
-                self.tell_failed(&project, task, &task.requester, &because, &told, None)?;
-                if let Some(teller) = message.sender.as_deref().filter(|teller| {
-                    message.kind != "task" && *teller != task.requester && *teller != "human"
-                }) {
-                    self.tell_failed(&project, task, teller, &because, &told, Some(teller))?;
+                // Whoever told the words that failed has them back in its note, word for
+                // word: the reopen does not carry them (T-901).
+                let teller = message
+                    .sender
+                    .as_deref()
+                    .filter(|teller| message.kind != "task" && *teller != "human");
+                let words = teller.map_or_else(String::new, |_| words_returned(message, ""));
+                let theirs = |to: &str| {
+                    if teller == Some(to) {
+                        words.as_str()
+                    } else {
+                        ""
+                    }
+                };
+                // The tasks that wait for it and were asked for by its requester are named
+                // in the requester's note, after the words of the failure.
+                let waits = if failed_before {
+                    String::new()
+                } else {
+                    self.seams.ledger.borrow().waiting_for_it(
+                        project.id,
+                        number,
+                        &task.requester,
+                    )?
+                };
+                told_the_requester = true;
+                self.tell_failed(
+                    &project,
+                    task,
+                    &task.requester,
+                    &because,
+                    &told,
+                    None,
+                    &format!("{waits}{}", theirs(&task.requester)),
+                )?;
+                if let Some(teller) = teller.filter(|teller| *teller != task.requester) {
+                    self.tell_failed(
+                        &project,
+                        task,
+                        teller,
+                        &because,
+                        &told,
+                        Some(teller),
+                        &words,
+                    )?;
                 }
+                told_back = teller.is_some();
                 // A task the human gave: that note was theirs.
                 if thread.task.requester == "human" {
-                    return Ok(());
+                    return Ok(true);
                 }
                 waiting = waiting_for_the_reopen(&told, Some("human"));
             }
         }
-        self.tell_not_reached(&project, message, because, &waiting)
+        if !told_back {
+            self.words_back(&project, message, because, false)?;
+        }
+        self.tell_not_reached(&project, message, because, &waiting)?;
+        Ok(told_the_requester)
+    }
+
+    /// Words told to a task's window (the chief's tell, `cf tell`, or words told to it
+    /// while its task waited) that will never reach it go back to whoever told them,
+    /// word for word, so that nobody sends them again from memory (T-901: a tell into a
+    /// window that was compacting failed, and its teller heard nothing of it, only the
+    /// human did, without the words); and so do the words that `resumed` a paused task,
+    /// which paused it again (Calliope's P3-5 of T-917). What the human told is theirs on
+    /// the board already.
+    fn words_back(
+        &self,
+        project: &ProjectView,
+        message: &MessageView,
+        because: &str,
+        resumed: bool,
+    ) -> Result<(), EngineError> {
+        let (Some(sender), Some(number)) = (
+            message
+                .sender
+                .as_deref()
+                .filter(|sender| *sender != "human"),
+            message.task_number,
+        ) else {
+            return Ok(());
+        };
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        let assignee = task.and_then(|thread| thread.task.assignee);
+        let tell = message.kind == "question"
+            && message.urgent
+            && assignee.as_deref() == Some(message.recipient.as_str());
+        if !resumed && !tell && !is_told(message, assignee.as_deref()) {
+            return Ok(());
+        }
+        let lead = format!(
+            "Your m-{} on T-{number} did not reach @{}'s window: {because}.",
+            message.id, message.recipient
+        );
+        let body = words_returned(message, &lead);
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: sender.to_owned(),
+                task: message.task_number,
+                body,
+            },
+        )?;
+        Ok(())
     }
 
     /// The human hears, once, that `message` did not reach its window, and why, and
@@ -1600,12 +1939,15 @@ impl Dispatcher {
     /// Words told to a window, kept for their task's resume as their paste failed or
     /// as its window went (`because`): the human hears it once, as main told it of
     /// words that did not reach the window, which these do at the resume; words held
-    /// for the human wait for their word first. A task the human gave was told of it
+    /// for the human wait for their word first; where the task's member runs on a harness
+    /// whose windows ConsensFlow cannot open (`harness_gone`) no resume brings the window,
+    /// and the words are said to reach nothing. A task the human gave was told of it
     /// already: that note was theirs.
     pub(crate) fn tell_kept(
         &self,
         message: &MessageView,
         because: &str,
+        harness_gone: bool,
     ) -> Result<(), EngineError> {
         let Some(number) = message.task_number else {
             return Ok(());
@@ -1620,20 +1962,31 @@ impl Dispatcher {
                 from: None,
                 to: "human".to_owned(),
                 task: Some(number),
-                body: if message.state == "gated" {
-                    format!(
+                body: match (message.state == "gated", harness_gone) {
+                    (true, true) => format!(
+                        "m-{}, {}, waits for your approval, then cannot reach @{}, and goes with T-{number} if it is cancelled: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    ),
+                    (false, true) => format!(
+                        "m-{}, {}, cannot reach @{}, and goes with T-{number} if it is cancelled: {because}.",
+                        message.id,
+                        described(message),
+                        message.recipient
+                    ),
+                    (true, false) => format!(
                         "m-{}, {}, waits for your approval, then T-{number}'s resume, to reach @{}: {because}.",
                         message.id,
                         described(message),
                         message.recipient
-                    )
-                } else {
-                    format!(
+                    ),
+                    (false, false) => format!(
                         "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
                         message.id,
                         described(message),
                         message.recipient
-                    )
+                    ),
                 },
             },
         )?;
@@ -1657,7 +2010,8 @@ impl Dispatcher {
     /// `to` hears that `task` failed, `because`, which of the words `told` its window
     /// wait for the reopen, `to`'s own where `of` names it (`waiting_for_the_reopen`,
     /// the words the ledger's give-up says them in: one fate, Calliope's P3-4 of T-414
-    /// and of T-446), and how to reopen it.
+    /// and of T-446), and how to reopen it or accept it (`reopen_or_accept`).
+    #[allow(clippy::too_many_arguments)]
     fn tell_failed(
         &self,
         project: &ProjectView,
@@ -1666,6 +2020,7 @@ impl Dispatcher {
         because: &str,
         told: &[MessageView],
         of: Option<&str>,
+        words: &str,
     ) -> Result<(), EngineError> {
         let waiting = waiting_for_the_reopen(told, of);
         self.seams.ledger.borrow_mut().note(
@@ -1675,8 +2030,9 @@ impl Dispatcher {
                 to: to.to_owned(),
                 task: Some(task.number),
                 body: format!(
-                    "T-{0} failed: {because}{waiting}. Reopen it with: cf task reopen T-{0} \"…\"",
-                    task.number
+                    "T-{0} failed: {because}{waiting}.{1}{words}",
+                    task.number,
+                    reopen_or_accept(task.number)
                 ),
             },
         )?;
@@ -1716,6 +2072,18 @@ fn masked(words: &str) -> String {
     format!("\"{shown}…\" ({} characters)", words.chars().count())
 }
 
+/// Whether `items` hold a user's words and a whole answer after them: a turn taken.
+fn answered(items: &[cf_harness::records::Item]) -> bool {
+    items
+        .iter()
+        .position(|item| item.role == Role::User && !item.synthetic && !item.compaction)
+        .is_some_and(|asked| {
+            items[asked + 1..]
+                .iter()
+                .any(|item| item.role == Role::Assistant && item.complete && !item.synthetic)
+        })
+}
+
 /// How many of the messages last pasted into a window are read for what
 /// ConsensFlow typed into it: a key reads the last six lines with a word, which
 /// hold no more pastes than that.
@@ -1723,7 +2091,26 @@ const PASTES_ON_SCREEN: i64 = 5;
 
 /// What `message` is to the human: its kind, who wrote it, and its task
 /// (`an answer from @chief on T-1`).
-fn described(message: &MessageView) -> String {
+/// `lead`, then the words of `message`, which did not reach the window they were told,
+/// for whoever told them to send again: as many as a note holds.
+fn words_returned(message: &MessageView, lead: &str) -> String {
+    let lead = format!(
+        "{lead}\n\nIts words, m-{}, not delivered, so that you can send them again:\n\n",
+        message.id
+    );
+    let room = MAX_BODY.saturating_sub(lead.len() + CUT_SHORT.len());
+    let words = &message.body;
+    if words.len() <= room {
+        return format!("{lead}{words}");
+    }
+    let mut end = room;
+    while !words.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{lead}{}{CUT_SHORT}", &words[..end])
+}
+
+pub(crate) fn described(message: &MessageView) -> String {
     let kind = if message.kind == "answer" {
         "an answer".to_owned()
     } else {

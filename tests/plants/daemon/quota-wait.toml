@@ -12,9 +12,9 @@
 # account may need them. Codex's turn a limit cut (`usage_limit_exceeded`,
 # `rate_limit_exceeded`) is a refusal for quota, with the reset its rate limits
 # name before or after it (`crates/cf-harness/src/codex/record.rs`), and so is
-# Anthropic's spent extra usage, a 400, in Pi's, Claude Code's and OpenCode's
-# words (`crates/cf-harness/src/shared/quota.rs`, `claude/record/project.rs`,
-# `opencode/record/answer.rs`). The engine's cases are
+# Anthropic's spent extra usage, a 400, in Pi's and Claude Code's words
+# (`crates/cf-harness/src/shared/quota.rs`, `claude/record/project.rs`). The
+# engine's cases are
 # `crates/cf-engine/tests/dispatcher/quota_waits.rs`; the rig's are
 # `crates/cf-e2e/tests/regressions/a_quota_wait_ended_failed.rs`, whose stand-in
 # Codex is refused mid-task in Codex's shape, and
@@ -35,7 +35,6 @@
 quota-wait-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota"]
 quota-wait-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 quota-wait-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
-quota-wait-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 quota-wait-refusals = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
 quota-wait-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_quota_wait_ended_failed::"], builds = true }
 quota-wait-continues = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "claude_continues_by_itself_after_its_limit::"], builds = true }
@@ -102,12 +101,12 @@ runs = ["quota-wait-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                None => false,
+                _ => false,
             };
             self.seams.ledger.borrow_mut().hold_task(
 '''
 replace = '''
-                None => false,
+                _ => false,
             };
             let far = time::parse(until).is_some_and(|until| until - self.now() > 30 * 60_000);
             let teammate = task.pool.is_some()
@@ -138,8 +137,12 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = "                Some(at) => self.refused_its_resume(participant, &task, at)?,"
-replace = "                Some(at) => self.refused_its_resume(participant, &task, at)? && false,"
+find = '''
+                Some(at) if unwell.is_none() => self.refused_its_resume(participant, &task, at)?,
+'''
+replace = '''
+                Some(at) if unwell.is_none() => self.refused_its_resume(participant, &task, at)? && false,
+'''
 
 [[plant]]
 name = "quota wait: the human is told at every refusal of a task's resume that its account may need them"
@@ -187,8 +190,20 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''            self.give_back(delivering.message, "the harness ran out of quota")?;'''
-replace = '''            self.settle_failure(delivering, "the harness ran out of quota", true)?;'''
+find = '''
+            self.give_back(
+                delivering.message,
+                match unwell {
+                    Some(Unwell::Account(_)) => "its account is unavailable",
+                    Some(Unwell::Moved(_)) => "its model moved on its own",
+                    Some(Unwell::Busy(_)) => "its model was busy",
+                    None => "the harness ran out of quota",
+                },
+            )?;
+'''
+replace = '''
+            self.settle_failure(delivering, "the harness ran out of quota", true)?;
+'''
 
 [[plant]]
 name = "quota wait: Anthropic's spent extra usage, a 400 in Pi's words, is a failure"
@@ -213,23 +228,13 @@ runs = ["quota-wait-claude"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/project.rs"
 find = '''
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
-            || spent,
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+        || spent;
 '''
 replace = '''
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
-            || spent && false,
+        || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+        || spent && false;
 '''
-
-[[plant]]
-name = "quota wait: Anthropic's spent extra usage, a 400 in OpenCode's words, is a failure"
-meant = "opencode::record::tests::answers::anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
-runs = ["quota-wait-opencode"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/opencode/record/answer.rs"
-find = "                || refused_for_quota(&failure)"
-replace = "                || refused_for_quota(&failure) && false"
 
 [[plant]]
 name = "quota wait: the stand-in Codex answers the brief its usage limit was to cut"

@@ -61,8 +61,8 @@ pub use board::{
 };
 pub use command::{quiet_command, runs_command, shown, LongCommand};
 pub use descent::{
-    descending_from, end_chosen, holding, pause_chosen, with_cygwin_parents, Ended, Identity,
-    Machine, Pause, Running, ThisMachine,
+    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, with_cygwin_parents,
+    working_folder, Ended, Identity, Machine, Pause, Running, ThisMachine,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{
@@ -131,7 +131,13 @@ impl Members {
         let harnesses = plan.harnesses();
         let installs = harnesses
             .iter()
-            .map(|harness| log.found(*harness))
+            .map(|harness| {
+                let found = log.found(*harness)?;
+                match &plan.homes_in {
+                    Some(folder) => found.with_homes_in(folder),
+                    None => Ok(found),
+                }
+            })
             .collect::<Result<Vec<_>>>()?;
         for file in &plan.home_files {
             let isolation = installs
@@ -262,6 +268,16 @@ impl Members {
         }
     }
 
+    /// The variable `name` of the environment the rig gives its windows, where it gives it
+    /// something: a harness's folder of the run's own among them ([`super::isolation`],
+    /// Devin's `XDG_DATA_HOME`, where its sessions are).
+    pub fn var(&self, name: &str) -> Option<String> {
+        self.rig
+            .var(name)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    }
+
     /// The tier the member `agent` was given when it was added.
     pub fn tier_of(&self, agent: &str) -> Option<&str> {
         self.tiers.get(agent).map(String::as_str)
@@ -390,6 +406,14 @@ impl Members {
                     .is_some_and(|id| id.starts_with(&prefix))
             })
             .collect()
+    }
+
+    /// What the window whose pane is `pane` (its id) printed, its control sequences
+    /// taken out ([`Rig::screen`]): what was drawn over is still in it, and a word the
+    /// program repaints cell by cell is not in it in one piece. The screen as the pane
+    /// host draws it is [`Rig::snapshot`]'s.
+    pub fn screen(&self, pane: &str) -> String {
+        self.rig.screen(pane)
     }
 
     /// The end of the screen of the window whose pane is `pane` (its id), as a

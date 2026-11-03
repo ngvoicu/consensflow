@@ -97,9 +97,21 @@ mod tests {
 
     #[test]
     fn a_line_that_names_two_commands_is_the_usage_of_each() {
+        let cancel = of(&["task", "cancel"]);
+        assert_eq!(
+            cancel,
+            "  cf task accept|cancel T-3         move a task you asked for"
+        );
+        // Accept has a line of its own after it: a failed task takes the words of what was checked.
         let accept = of(&["task", "accept"]);
-        assert_eq!(accept, of(&["task", "cancel"]));
-        assert!(accept.starts_with("  cf task accept|cancel T-3"));
+        assert!(accept.starts_with(&cancel), "{accept}");
+        assert_eq!(
+            accept.lines().nth(1),
+            Some(
+                "  cf task accept T-3 \"…\"            accept a failed task you checked; your words are its result"
+            )
+        );
+        assert_eq!(accept.lines().count(), 2);
     }
 
     #[test]

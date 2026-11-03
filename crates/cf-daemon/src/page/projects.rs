@@ -1,10 +1,12 @@
 //! The projects: listed, opened, resumed, closed, deleted, gated, renamed and
-//! described.
+//! described, given the rules for their staff, and told the size their Claude
+//! members' windows compact at.
 
 use cf_base::js;
-use cf_ledger::model::parse_gate;
+use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
-    parse_description, parse_name, NewChief, NewMember, NewProject, NewWakeUp, SpecsChange,
+    parse_claude_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
+    NewProject, NewWakeUp, SpecsChange,
 };
 use serde_json::{json, Map, Value};
 
@@ -99,6 +101,19 @@ pub(super) async fn gate(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     one("project", project)
 }
 
+/// `project.meeting`: the human starts (`on`) or stops a meeting with the project's
+/// chief, the flag checked before the project is looked for. While one is on, what
+/// is queued for the chief waits; a closed project's is refused. The dispatcher is
+/// woken, so what a Stop lets go goes at once, paced.
+pub(super) async fn meeting(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let on = parse_meeting(body.get("on"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_meeting(body.whole("project")?, on)?;
+    one("project", project)
+}
+
 /// `project.rename`: the name the human gives the project, which has the rules a
 /// name has when a project is opened and is checked before the project is looked
 /// for. The folder the project is in stays as it was.
@@ -121,6 +136,37 @@ pub(super) async fn describe(page: &Page, body: Body<'_>) -> Result<Fields, Said
         .ledger
         .borrow_mut()
         .describe_project(body.whole("project")?, description.as_deref())?;
+    one("project", project)
+}
+
+/// `project.rules`: the rules the human writes for the project's staff, plain
+/// text of at most 8,000 bytes and 150 lines, checked before the project is
+/// looked for. `rules` that are left out, `null` or blank take them away. Only
+/// the page writes them: no route of the agents' API does, so no `cf` command,
+/// the chief's or a member's, changes them. Every window of the project is given
+/// them when it next starts (the engine's `roles::with_staff_rules`).
+pub(super) async fn rules(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let rules = parse_staff_rules(body.get("rules"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_staff_rules(body.whole("project")?, rules.as_deref())?;
+    one("project", project)
+}
+
+/// `project.compaction`: the size, in tokens, at which the human has the project's
+/// Claude member windows compact, from 100,000 to 1,000,000, checked before the
+/// project is looked for. `compaction` that is left out or `null` takes the
+/// choice away: Claude's own point. Only the page chooses it: no route of the
+/// agents' API does, so no `cf` command, the chief's or a member's, changes it.
+/// Each member window of the project is given it when it next starts (the
+/// harness's launch); the chief's never is.
+pub(super) async fn compaction(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let size = parse_claude_compaction(body.get("compaction"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_claude_compaction(body.whole("project")?, size)?;
     one("project", project)
 }
 

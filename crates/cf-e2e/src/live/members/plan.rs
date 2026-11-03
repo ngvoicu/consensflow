@@ -4,6 +4,8 @@
 //! stand-in agent's ([`stand_in_chief`], [`stand_in_worker`]), which is no model
 //! and only notes what it is sent.
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 
 use super::super::agents;
@@ -42,12 +44,12 @@ pub fn stand_in_worker() -> Value {
 
 /// The work tier of the member of `harness`: its own, so that a task which names
 /// the tier lands on that harness. The daemon picks a member by tier alone, and a
-/// check that needs one harness's question tool must land on that harness.
+/// check that needs one harness's question tool must land on that harness. There are
+/// four tiers for five harnesses: Devin and Codex share one, and Pi and Muse another.
 const fn tier(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "complex",
-        Harness::OpenCode => "light",
-        Harness::Pi => "standard",
+        Harness::Pi | Harness::Muse => "standard",
         Harness::Devin | Harness::Codex => "critical",
     }
 }
@@ -125,6 +127,9 @@ pub struct Plan {
     /// harness that asks of one asks in the project's own windows, and ConsensFlow
     /// answers ([`Plan::in_a_new_repository`]).
     pub repository: bool,
+    /// The folder the harnesses' homes of the run's own are made in, as it spells it,
+    /// where not the temporary folder ([`Plan::homes_made_in`]).
+    pub homes_in: Option<PathBuf>,
 }
 
 impl Plan {
@@ -141,6 +146,7 @@ impl Plan {
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
             repository: false,
+            homes_in: None,
         }
     }
 
@@ -150,6 +156,15 @@ impl Plan {
     #[must_use]
     pub fn in_a_new_repository(mut self) -> Self {
         self.repository = true;
+        self
+    }
+
+    /// With the harnesses' homes of the run's own (Devin's XDG folders, Codex's and Pi's
+    /// own) made in `folder`, as `folder` spells it: a Mac's temporary folder through its
+    /// link `/var`, or as `/private/var` (`live linked-folder`, T-1038).
+    #[must_use]
+    pub fn homes_made_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.homes_in = Some(folder.into());
         self
     }
 
@@ -260,11 +275,12 @@ mod tests {
     }
 
     #[test]
-    fn each_harness_has_a_work_tier_of_its_own_but_devin_and_codex_that_share_the_critical_one() {
+    fn each_harness_has_a_work_tier_of_its_own_but_devin_and_codex_and_pi_and_muse_that_share_one()
+    {
         let tiers: Vec<&str> = Harness::ALL.into_iter().map(tier).collect();
         assert_eq!(
             tiers,
-            ["complex", "light", "standard", "critical", "critical"]
+            ["complex", "standard", "critical", "critical", "standard"]
         );
     }
 
@@ -310,12 +326,12 @@ mod tests {
         assert!(alone.harnesses().is_empty());
         assert_eq!(alone.chief, "chief");
 
-        let bench = Plan::new("bench", member_as(Harness::OpenCode, "bench-chief"))
-            .with(member(Harness::OpenCode))
+        let bench = Plan::new("bench", member_as(Harness::Claude, "bench-chief"))
+            .with(member(Harness::Claude))
             .with(member(Harness::Pi))
             .with(member_as(Harness::Pi, "bench-reviewer"))
             .with(stand_in_worker());
-        assert_eq!(bench.harnesses(), [Harness::OpenCode, Harness::Pi]);
+        assert_eq!(bench.harnesses(), [Harness::Claude, Harness::Pi]);
         assert_eq!(bench.chief, "bench-chief");
         assert_eq!(bench.roster[0]["id"], "bench-chief");
     }
@@ -357,7 +373,6 @@ mod tests {
         assert!(claude.contains("Do not pick one yourself: ask, and wait for the answer."));
         assert!(claude.ends_with("reply with exactly one line: COLOUR=<the answer>"));
         for (harness, tool) in [
-            (Harness::OpenCode, "question tool"),
             (Harness::Codex, "request_user_input tool"),
             (Harness::Devin, "ask_user_question tool"),
         ] {

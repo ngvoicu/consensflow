@@ -45,6 +45,12 @@
 //! bind a signal to one process by its audit token (xnu's `proc_info`), which this does not
 //! use.
 //!
+//! What a close ends is [`ProcessTree::closing`]: the selection's, through the bound. The host
+//! names a job that lost the process that started it as detached work only if a close ends it
+//! (T-1145), so that it never calls a job "ended by the close" that the close leaves running; a
+//! process that only the pane's marker ties to the window is not one, and is
+//! [`ProcessTree::possibly_left`].
+//!
 //! A close ends less than the bound permits. What the bound allows is the window's by what
 //! a look saw (the process that started it, or the session its program leads), and the
 //! close attempts only what the selection names: by the parents of the tree, by the pane's
@@ -277,6 +283,32 @@ impl ProcessTree {
             }
         }
         Ok(Readable::Unsettled)
+    }
+
+    /// The processes of the tree that a close of the window ends: what the selection names and
+    /// the bound allows, which `ask_to_exit` and the force that follows attempt. A process only
+    /// the pane's marker ties to the window, or one that left the session after a look saw it
+    /// (`setsid`) with its shell gone and nothing that selects it, is not one: it is left running,
+    /// and the host names it as possibly the window's ([`ProcessTree::possibly_left`]) when it can
+    /// read its marker. Nothing is signalled or stopped.
+    pub fn closing(&self) -> io::Result<std::collections::HashSet<ProcessKey>> {
+        self.closing_by(&Native)
+    }
+
+    fn closing_by(
+        &self,
+        system: &impl System,
+    ) -> io::Result<std::collections::HashSet<ProcessKey>> {
+        let snapshot = system.processes()?;
+        let table = Table::of(&snapshot);
+        self.bound.observe(&table);
+        let chosen = self.select(&snapshot, &HashMap::new());
+        Ok(snapshot
+            .iter()
+            .filter(|p| chosen.contains_key(&p.identity.pid))
+            .filter(|p| self.bound.allows(&table, p.identity))
+            .map(|p| key_of(p.identity))
+            .collect())
     }
 
     /// Asks the tree to end as a closing terminal does: TERM, then HUP, to every process

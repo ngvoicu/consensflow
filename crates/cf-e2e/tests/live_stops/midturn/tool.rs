@@ -1,15 +1,18 @@
 //! `midtool`: a window in the middle of a shell command, on any harness. The member is
-//! asked to run one long command, a ping of the machine's own address (a reply a second
-//! for a minute, with the platform's own flags; a `sleep` where the machine has no `ping`),
-//! and the case waits until the command runs and pauses the task. It was written for the
+//! asked to run one long command, the project's [`TICKER`] (a Node script that counts the
+//! seconds it has run in a file, for a minute), and the case waits until the command runs
+//! and pauses the task. It was written for the
 //! Devin window of T-5 (2026-10-12, 3.0.1; Devin 3000.10.21 on Windows), which was running
 //! a shell command (headless Edge checks) when the pause came and went on for about 70 s
 //! through three rounds of Escape, where a Devin of 3000.11.3 stops in the middle of its
 //! answer (`midturn`): a turn that is at a tool may wait for it, whatever the keys do.
 //!
 //! What shows the command running is the host's process tree (`pane.background`: what the
-//! window's tree started after its turn began, on every platform, with no `ps`), its
-//! replies on the screen, or, for Devin, its call on the wire. The case holds when the
+//! window's tree started after its turn began, on every platform, with no `ps`), the count
+//! in its file (Codex starts a program with no shell, which the tree never lists, T-1137),
+//! its replies on the screen, or, for Devin, its call on the wire. `midbg` judges the
+//! command it started in the background by that count alone: whether it went on counting
+//! through the stop. The case holds when the
 //! daemon read the window at rest within the rounds and paid the stop there, as `midturn`
 //! does ([`super::judge`]). The command is no check but a thing to know, said at each look
 //! after a round and at the end: whether the host's tree still has it once the stop is
@@ -19,13 +22,14 @@
 //! longer than the command runs: when a turn that waits for its tool ends is told whichever
 //! way it goes.
 
+use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::ask;
+use cf_e2e::live::cut;
 use cf_e2e::live::members::{plus, quiet_command, runs_command, Account, MemberWindow, Members};
 use cf_e2e::live::tree::{self, Read};
 use cf_e2e::live::Harness;
-use cf_e2e::live::{command, cut};
 use cf_e2e::Result;
 
 use super::begin::{begin, Doing};
@@ -47,8 +51,32 @@ const IN_TREE: &str = "its process is in the host's tree";
 /// How many seconds the command runs for.
 pub const SECONDS: u64 = 60;
 
-/// The command the member is asked to run, and what tells it in a process list and on a
-/// screen.
+/// The script the project holds that the member is told to run (`node ./<it> <seconds>
+/// <file>`): it writes how many seconds it has run into the file, in the project's folder,
+/// each second, until its seconds are out. Node is one program in every harness's shell, and
+/// its file shows the command running where no process tree lists it (Codex starts a program
+/// with no shell, which the host names as no turn's work, T-1137).
+pub const TICKER: &str = "tick-cf-stops-live.cjs";
+
+/// What [`TICKER`] holds. It takes no hang-up, as a long job its agent leaves is started
+/// (`nohup`): a terminal a harness closes after the shell that started a job with `&` (Codex's,
+/// on the Mac) hangs up what it started.
+pub fn ticker_text() -> &'static str {
+    "process.on(\"SIGHUP\", () => {});\nconst [seconds, file] = process.argv.slice(2);\nlet count = 0;\nconst tick = () => require(\"fs\").writeFileSync(file, String(++count));\ntick();\nconst every = setInterval(tick, 1000);\nsetTimeout(() => clearInterval(every), Number(seconds) * 1000);\n"
+}
+
+/// How many seconds the ticking command in the project's `folder` says it has run, by its
+/// file `ticks`; none before it has written one.
+pub fn ticks(folder: &Path, ticks: &str) -> Option<u64> {
+    std::fs::read_to_string(folder.join(ticks))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// The command the member is asked to run, and what tells it in a process list, in the file
+/// it writes, and on a screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
     /// The command line, as the member is told to run it.
@@ -57,20 +85,22 @@ pub struct Command {
     mark: String,
     /// What it prints as it goes, which no other thing on the screen says.
     replies: Option<&'static str>,
+    /// The file in the project's folder it counts its seconds in, as it runs ([`TICKER`]).
+    ticks: Option<String>,
+    /// A command the member starts in the background first, and does not wait for (`midbg`).
+    background: Option<Box<Command>>,
 }
 
 impl Command {
-    /// A ping of the machine's own address, [`SECONDS`] seconds and one reply a second:
-    /// the platform's own `ping` (`-n` where `windows`, `-c` elsewhere), which Windows and
-    /// the others have, and which is a program of its own in the tree, with the line it
-    /// was started with.
-    pub fn ping(windows: bool) -> Self {
-        let flag = if windows { "-n" } else { "-c" };
-        let mark = format!("{flag} {} 127.0.0.1", SECONDS + 1);
+    /// The [`TICKER`] for `seconds`, counting them in the file `ticks`.
+    pub fn ticking(seconds: u64, ticks: &str) -> Self {
+        let mark = format!("{TICKER} {seconds} {ticks}");
         Self {
-            text: format!("ping {mark}"),
+            text: format!("node ./{mark}"),
             mark,
-            replies: Some("from 127.0.0.1"),
+            replies: None,
+            ticks: Some(ticks.to_owned()),
+            background: None,
         }
     }
 
@@ -84,27 +114,57 @@ impl Command {
             text,
             mark,
             replies: None,
+            ticks: None,
+            background: None,
         }
     }
 
-    /// The command for the machine this runs on: a ping of its own address where it has
-    /// a `ping` to run (Windows has, and elsewhere the program is looked for on the `PATH`
-    /// of the run), and else a `sleep` of the same time, which says nothing as it goes.
+    /// The command of `midtool`: the [`TICKER`] for [`SECONDS`], on every machine and in
+    /// every harness's shell. Before T-1137 it was a ping of the machine's own address, which
+    /// Codex starts with no shell, so that nothing the case read showed it running.
     pub fn here() -> Self {
-        let windows = cfg!(windows);
-        if windows || command("ping").is_ok() {
-            Self::ping(windows)
-        } else {
-            Self::quiet(SECONDS, false)
+        Self::ticking(SECONDS, "tool-ticks.txt")
+    }
+
+    /// The field's command of T-1117 (a worker's database tests in WSL, run through
+    /// `wsl.exe` from Claude's Git Bash): a quiet sleep of [`SECONDS`] in WSL's Ubuntu.
+    pub fn wsl() -> Self {
+        let mark = format!("-d Ubuntu -- sleep {SECONDS}");
+        Self {
+            text: format!("wsl {mark}"),
+            mark,
+            replies: None,
+            ticks: None,
+            background: None,
+        }
+    }
+
+    /// [`Command::here`], after a [`TICKER`] started in the background that runs on longer
+    /// than the watch, counting in a file of its own.
+    pub fn after_background() -> Self {
+        let seconds = 2 * STUCK_WATCH.as_secs() + 60;
+        Self {
+            background: Some(Box::new(Self::ticking(seconds, "background-ticks.txt"))),
+            ..Self::here()
         }
     }
 
     /// What the member is told to do: run this, and nothing else.
     pub fn brief(&self) -> String {
-        format!(
+        let foreground = format!(
             "Run exactly this one shell command, wait for it to end, then stop: {}",
             self.text
-        )
+        );
+        match self.background.as_deref() {
+            None => foreground,
+            Some(Command {
+                text: background, ..
+            }) => format!(
+                "First start this shell command in the background, with your shell tool's own \
+                 way of running a command in the background, and do not wait for it or look at \
+                 it again: {background}\nThen, in the foreground: {foreground}"
+            ),
+        }
     }
 
     /// The command line.
@@ -196,11 +256,13 @@ pub fn fate_line(
 }
 
 /// What shows the command running, in the order the case trusts it: its process in the
-/// host's tree, its replies on the screen (`on_screen`, asked only if the tree does not
-/// show it), its call on the wire (`in_wire`, asked last). None while nothing does.
+/// host's tree, the seconds its file counts (`ticked`, asked only if the tree does not show
+/// it), its replies on the screen (`on_screen`), its call on the wire (`in_wire`, asked
+/// last). None while nothing does.
 fn started(
     tree: &Read,
     command: &Command,
+    ticked: impl FnOnce() -> Option<u64>,
     on_screen: impl FnOnce() -> bool,
     in_wire: impl FnOnce() -> bool,
 ) -> Option<String> {
@@ -213,6 +275,11 @@ fn started(
             "{IN_TREE} ({} {})",
             process.pid,
             cut(&process.command, 60)
+        ));
+    }
+    if let Some(seconds) = ticked() {
+        return Some(format!(
+            "its file says it has run {seconds} s, which the host's tree does not list"
         ));
     }
     if on_screen() {
@@ -232,6 +299,12 @@ pub fn running(
         started(
             &tree,
             command,
+            || {
+                command
+                    .ticks
+                    .as_deref()
+                    .and_then(|file| ticks(members.folder(), file))
+            },
             || {
                 command.replies.is_some_and(|replies| {
                     members.rig().screen(window.id()).contains(replies)
@@ -264,14 +337,13 @@ pub fn hold(command: &Command, listed: bool) -> Hold<'_> {
 }
 
 /// The case, on the harness the member `ctx.agent` runs on.
-pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness) -> Result<()> {
+pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) -> Result<()> {
     let devin = harness == Harness::Devin;
     if devin {
         // What the daemon's reader makes of Devin's store is asked of the product's own
         // code, built before anything is spent.
         ask::prepare()?;
     }
-    let command = Command::here();
     let Some(begun) = begin(
         ctx,
         case,
@@ -287,6 +359,22 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness) -> Result<()> {
     // Where the host's tree was not what showed the command running, it may not list it
     // at all, and what it says of it after the stop says nothing.
     let listed = begun.seen.starts_with(IN_TREE);
+    let folder = ctx.members.folder();
+    let counted = |command: &Command| {
+        command
+            .ticks
+            .as_deref()
+            .and_then(|file| ticks(folder, file))
+    };
+    let background = command.background.as_deref();
+    let pane = &begun.window.pane;
+    let before = background.map(|background| {
+        (
+            holding(&tree::read(ctx.members.rig(), pane), &background.mark),
+            counted(background),
+        )
+    });
+    let at_the_pause = counted(&command);
     stop_it(
         ctx,
         case,
@@ -294,7 +382,71 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness) -> Result<()> {
         &begun.window,
         Some(harness),
         hold(&command, listed),
+    )?;
+    if command.ticks.is_some() {
+        // Whether the stop ended the command, by its own count: a harness may end it, or let
+        // go of it (Codex keeps it as a background terminal).
+        case.say(format!(
+            "the command's file: {} at the pause, {} at the end of the watch",
+            seconds_said(at_the_pause),
+            seconds_said(counted(&command))
+        ));
+    }
+    if let (Some(background), Some((listed, counted_before))) = (background, before) {
+        let after = holding(&tree::read(ctx.members.rig(), pane), &background.mark);
+        let counted_after = counted(background);
+        // Its own count says it ran on whether or not the host's tree lists it: a harness
+        // that starts a program with no shell (Codex) leaves it unlisted (T-1137). One that never
+        // wrote its file before the pause never ran, or ended at once (a job a shell started
+        // with `&` in a terminal that closed with it): there is nothing the pause could leave.
+        let said_of_it = format!(
+            "its file: {} at the pause, {} after the watch; the host's tree before the pause: {}; after the watch: {}",
+            seconds_said(counted_before),
+            seconds_said(counted_after),
+            said(&listed),
+            said(&after)
+        );
+        if counted_before.is_none() {
+            case.say(format!(
+                "the command started in the background never ran, or ended before it began, so whether the pause left it is not said: {said_of_it}"
+            ));
+        } else {
+            case.check(
+                "the pause left the work started in the background running",
+                counted_after > counted_before,
+                said_of_it,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// What a count of seconds says: so many, or that its file was never written.
+fn seconds_said(seconds: Option<u64>) -> String {
+    seconds.map_or_else(|| "no file".to_owned(), |seconds| format!("{seconds} s"))
+}
+
+/// The processes of `read` whose line holds `mark`, each its number and line; none where it
+/// could not be read.
+fn holding(read: &Read, mark: &str) -> Vec<String> {
+    read.as_ref().map_or_else(
+        |_| Vec::new(),
+        |tree| {
+            tree.holding(mark)
+                .into_iter()
+                .map(|process| format!("{} {}", process.pid, cut(&process.command, 80)))
+                .collect()
+        },
     )
+}
+
+/// What [`holding`] found, as a line says it.
+fn said(found: &[String]) -> String {
+    if found.is_empty() {
+        "the host's tree does not have it".to_owned()
+    } else {
+        format!("the host's tree has it ({})", found.join("; "))
+    }
 }
 
 #[cfg(test)]
@@ -316,31 +468,60 @@ mod tests {
     }
 
     #[test]
-    fn the_command_is_a_ping_of_the_machines_own_address_in_the_platforms_own_flags() {
-        let unix = Command::ping(false);
-        assert_eq!(unix.text(), "ping -c 61 127.0.0.1");
-        assert_eq!(unix.mark, "-c 61 127.0.0.1");
-        let windows = Command::ping(true);
-        assert_eq!(windows.text(), "ping -n 61 127.0.0.1");
-        assert_eq!(windows.mark, "-n 61 127.0.0.1");
-        // Both say a reply a second that nothing else on a screen says.
-        assert_eq!(unix.replies, windows.replies);
+    fn the_command_is_the_ticker_which_every_shell_starts_and_whose_file_counts_its_seconds() {
+        let here = Command::here();
+        assert_eq!(here, Command::ticking(SECONDS, "tool-ticks.txt"));
         assert_eq!(
-            windows.brief(),
-            "Run exactly this one shell command, wait for it to end, then stop: ping -n 61 127.0.0.1"
+            here.text(),
+            "node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"
+        );
+        assert_eq!(here.mark, "tick-cf-stops-live.cjs 60 tool-ticks.txt");
+        assert_eq!(
+            here.brief(),
+            "Run exactly this one shell command, wait for it to end, then stop: node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"
+        );
+        // As the Mac and PowerShell list it.
+        assert!(here.runs_in("node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"));
+        assert!(here.runs_in(
+            r#""C:\Program Files\nodejs\node.exe" ./tick-cf-stops-live.cjs 60 tool-ticks.txt"#
+        ));
+        assert!(ticker_text().contains("writeFileSync(file, String(++count))"));
+        // Its background one counts in a file of its own, for longer than the watch.
+        let after = Command::after_background();
+        let background = after.background.as_deref().unwrap();
+        assert_eq!(background.ticks.as_deref(), Some("background-ticks.txt"));
+        assert!(background
+            .text
+            .starts_with("node ./tick-cf-stops-live.cjs "));
+        assert!(
+            after.brief().contains("in the background"),
+            "{}",
+            after.brief()
+        );
+        assert!(after.brief().ends_with(&here.brief()), "{}", after.brief());
+    }
+
+    #[test]
+    fn a_tick_file_says_how_many_seconds_its_command_ran_and_none_before_it_is_written() {
+        let folder = tempfile::tempdir().unwrap();
+        assert_eq!(ticks(folder.path(), "tool-ticks.txt"), None);
+        std::fs::write(folder.path().join("tool-ticks.txt"), "7").unwrap();
+        assert_eq!(ticks(folder.path(), "tool-ticks.txt"), Some(7));
+        std::fs::write(folder.path().join("tool-ticks.txt"), "").unwrap();
+        assert_eq!(
+            ticks(folder.path(), "tool-ticks.txt"),
+            None,
+            "a file being written"
         );
     }
 
     #[test]
-    fn the_command_of_this_machine_is_its_own_ping_or_a_sleep_of_the_same_time() {
-        let here = Command::here();
-        let ping = Command::ping(cfg!(windows));
-        let sleep = Command::quiet(SECONDS, false);
-        assert!(here == ping || here == sleep, "{here:?}");
-        // Windows has a ping, whatever its PATH.
-        if cfg!(windows) {
-            assert_eq!(here, ping);
-        }
+    fn the_fields_command_is_a_quiet_sleep_in_wsl_found_in_a_tree_by_wsls_path() {
+        let wsl = Command::wsl();
+        assert_eq!(wsl.text(), "wsl -d Ubuntu -- sleep 60");
+        assert!(wsl.runs_in(r#""C:\WINDOWS\system32\wsl.exe" -d Ubuntu -- sleep 60"#));
+        assert!(!wsl.runs_in("sleep 60"));
+        assert_eq!(wsl.replies, None);
     }
 
     #[test]
@@ -358,36 +539,46 @@ mod tests {
     }
 
     #[test]
-    fn the_command_is_told_running_by_the_hosts_tree_then_the_screen_then_the_wire() {
-        let command = Command::ping(false);
+    fn the_command_is_told_running_by_the_hosts_tree_then_its_file_then_the_screen_then_the_wire() {
+        let command = Command::here();
         let nothing = || false;
+        let none = || None;
         let boom = || -> bool { panic!("not asked") };
+        let unasked = || -> Option<u64> { panic!("not asked") };
         // Its process, among the turn's others, which the host lists.
         let shown = tree(&[
-            (4101, "bash -c ping -c 61 127.0.0.1"),
-            (4102, "ping -c 61 127.0.0.1"),
+            (
+                4101,
+                "bash -c node ./tick-cf-stops-live.cjs 60 tool-ticks.txt",
+            ),
+            (4102, "node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"),
         ]);
         assert_eq!(
-            started(&shown, &command, boom, boom).as_deref(),
-            Some("its process is in the host's tree (4101 bash -c ping -c 61 127.0.0.1)")
+            started(&shown, &command, unasked, boom, boom).as_deref(),
+            Some("its process is in the host's tree (4101 bash -c node ./tick-cf-stops-live.cjs 60 tool-ticks.txt)")
         );
-        // None in the tree: its replies on the screen; or its call on the wire.
+        // None in the tree (Codex starts it with no shell): its file; then its replies on the
+        // screen; or its call on the wire.
         let other = tree(&[(7, "bash")]);
         assert_eq!(
-            started(&other, &command, || true, boom).as_deref(),
+            started(&other, &command, || Some(3), boom, boom).as_deref(),
+            Some("its file says it has run 3 s, which the host's tree does not list")
+        );
+        assert_eq!(
+            started(&other, &command, none, || true, boom).as_deref(),
             Some("its replies are on its screen")
         );
         assert_eq!(
-            started(&other, &command, nothing, || true).as_deref(),
+            started(&other, &command, none, nothing, || true).as_deref(),
             Some("the wire has its call")
         );
-        // Nothing yet, and a tree the host could not tell: the screen and the wire go on.
-        assert_eq!(started(&other, &command, nothing, nothing), None);
+        // Nothing yet, and a tree the host could not tell: the file, the screen and the wire go on.
+        assert_eq!(started(&other, &command, none, nothing, nothing), None);
         let unread: Read = Err("(could not be asked: timed out)".to_owned());
-        assert_eq!(started(&unread, &command, nothing, nothing), None);
+        assert_eq!(started(&unread, &command, none, nothing, nothing), None);
         assert_eq!(
-            started(&unread, &command, || true, boom).as_deref(),
-            Some("its replies are on its screen")
+            started(&unread, &command, || Some(1), boom, boom).as_deref(),
+            Some("its file says it has run 1 s, which the host's tree does not list")
         );
     }
 
@@ -498,7 +689,7 @@ mod tests {
 
     #[test]
     fn the_stop_is_watched_for_longer_than_the_command_runs_and_its_fate_is_said() {
-        let command = Command::ping(false);
+        let command = Command::here();
         let held = hold(&command, true);
         assert!(held.listed && !hold(&command, false).listed);
         assert_eq!(held.stop, STUCK_WATCH);

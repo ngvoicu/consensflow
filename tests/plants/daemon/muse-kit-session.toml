@@ -1,0 +1,32 @@
+# The live kit finds a Muse window's session (T-1056): `live resume-cut --case early muse`
+# could never read its record, the kit's `newest_session` answering Muse "opens no window
+# yet: none to find". A Muse session's log names its folder in its head
+# (`runtime.session.metadata`'s `workspace_root`): the newest begun since the window
+# opened that names the window's folder, by its real path, is the window's
+# (`crates/cf-harness/src/tooling/session.rs`, `muse_session`; its case in
+# `tooling/session/tests.rs`). Each plant takes one rule out.
+#
+# Every name holds `muse kit session`: `npm run plants:daemon -- "muse kit session"`.
+
+[run]
+muse-kit-session = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::session::tests::"]
+
+[[plant]]
+name = "muse kit session: the kit finds no Muse session"
+meant = "muses_newest_session_of_a_folder_since_a_time_is_the_one_its_log_says_was_opened_there"
+runs = ["muse-kit-session"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling/session.rs"
+find = '''        Harness::Muse => muse_session(workspace, since_ms, env),'''
+replace = '''        Harness::Muse => Err(format!("{kind} opens no window yet: none to find")),'''
+
+[[plant]]
+name = "muse kit session: a Muse session of another folder is the window's"
+meant = "muses_newest_session_of_a_folder_since_a_time_is_the_one_its_log_says_was_opened_there"
+runs = ["muse-kit-session"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling/session.rs"
+find = '''            muse_folder(log).is_some_and(|named| real_path(Path::new(&named)) == folder)'''
+replace = '''            muse_folder(log).is_some_and(|named| real_path(Path::new(&named)) == folder || !named.is_empty())'''

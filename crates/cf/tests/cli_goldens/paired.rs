@@ -27,6 +27,9 @@ const MARK: &str = "Installed by ConsensFlow";
 /// The reason of the difference `expected` holds, if it holds one, and
 /// `expected` as Rust is held to it.
 pub fn pair(case: &Value, expected: &mut Expected) -> Option<&'static str> {
+    if let Some(reason) = usage_of_ours(expected) {
+        return Some(reason);
+    }
     let verb = case["args"][0].as_str().unwrap_or_default();
     match (verb, case["name"].as_str().unwrap_or_default()) {
         ("setup", _) => launchers_of_ours(&mut expected.after).then_some(SHAPE),
@@ -36,6 +39,35 @@ pub fn pair(case: &Value, expected: &mut Expected) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+/// The last words of the usage Node printed outside a window.
+const USAGE_END: &str = "(cf help there says more).\n";
+
+/// What this build says after them: a text of many lines, and cmd.exe.
+const USAGE_LINE: &str = "A text of many lines: cmd.exe (and cf.cmd, run by it) ends an argument at its first line break; PowerShell gives it whole, and a command that takes `-` reads it from standard input.";
+
+/// What the usage says besides: the line about a text of many lines (T-969: cmd.exe cuts an
+/// argument at its first line break, which a Windows user of the terminal's command is told).
+pub const USAGE: &str = "the usage ends with a line about a text of many lines, which Node's does \
+     not: cmd.exe ends an argument at its first line break, and cf.cmd, the terminal's command on \
+     Windows, is run by it";
+
+/// Says the usage as this build says it, in whichever output `expected` holds it, and whether it
+/// held it.
+fn usage_of_ours(expected: &mut Expected) -> Option<&'static str> {
+    let said = format!("{USAGE_END}\n{USAGE_LINE}\n");
+    let mut found = false;
+    for output in [expected.stdout.as_mut(), Some(&mut expected.stderr)]
+        .into_iter()
+        .flatten()
+    {
+        if output.contains(USAGE_END) {
+            *output = output.replace(USAGE_END, &said);
+            found = true;
+        }
+    }
+    found.then_some(USAGE)
 }
 
 /// Makes each launcher of ours that `after` lists the one this build writes,

@@ -2,11 +2,11 @@ use serde_json::json;
 
 use super::*;
 
-const SECTION_TEXT: &str = "\n## This project's specs\n\nSpecs are on in this project. Plan work that is big enough for phases as a spec, with the Specmint skill `specmint-tdd`: its SKILL.md is at /home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md, and the files it names are beside it; read it before you plan. Where Specmint says `.specs`, it means `plans/specs`: your specs and their registry are there.\n";
+const SECTION_TEXT: &str = "\n## This project's specs\n\nSpecs are on in this project. Plan work that is big enough for phases as a spec, with the Specmint skill `specmint-tdd`: its SKILL.md is at /home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md, and the files it names are beside it; read it before you plan. Your specs and their registry are in `plans/specs`: use this copy of the skill and no other; its paths name it.\n";
 
 #[test]
 fn a_text_with_specs_off_says_nothing_of_them_and_one_that_says_a_word_of_them_is_refused() {
-    assert!(told_nothing_of_specs("You run this project.\n## This window's cf\n").is_ok());
+    assert!(told_nothing_of_specs("You run this project.\n## Your commands\n").is_ok());
     assert!(!has_the_section("You run this project.\n"));
     let failed = told_nothing_of_specs(SECTION_TEXT).unwrap_err();
     assert!(failed.contains("This project's specs"), "{failed}");
@@ -87,6 +87,30 @@ fn each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_fin
         )),
         Some(RoleText::Inline("the role".to_owned()))
     );
+    // Pi 1.4.0: the user's own `APPEND_SYSTEM.md` first and the role's file last, which Pi reads
+    // as text where the path is a file (T-662: the run read the path as the text and found
+    // no section of specs in it).
+    assert_eq!(
+        role_of(&frame(
+            &json!([
+                "pi",
+                "--append-system-prompt",
+                "/h/.pi/agent/APPEND_SYSTEM.md",
+                "--append-system-prompt",
+                "/r/role/SKILL.md"
+            ]),
+            &json!({})
+        )),
+        Some(RoleText::Inline("/r/role/SKILL.md".to_owned()))
+    );
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("SKILL.md");
+    std::fs::write(&file, "the role in a file").unwrap();
+    assert_eq!(
+        text_of(&file.display().to_string()).unwrap(),
+        "the role in a file"
+    );
+    assert_eq!(text_of("the role").unwrap(), "the role");
     // Codex: a file its broker reads, named in its environment.
     assert_eq!(
         role_of(&frame(
@@ -103,23 +127,8 @@ fn each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_fin
         )),
         Some(RoleText::File("/d/role".to_owned()))
     );
-    // OpenCode: the last of the instructions its configuration lists.
-    assert_eq!(
-        role_of(&frame(
-            &json!(["opencode"]),
-            &json!({ "OPENCODE_CONFIG_CONTENT": r#"{"instructions":["/user/rules.md","/o/role"]}"# })
-        )),
-        Some(RoleText::File("/o/role".to_owned()))
-    );
     // A window given its role in none of these ways is one the run cannot read.
     assert_eq!(role_of(&frame(&json!(["claude"]), &json!({}))), None);
-    assert_eq!(
-        role_of(&frame(
-            &json!(["opencode"]),
-            &json!({ "OPENCODE_CONFIG_CONTENT": "{}" })
-        )),
-        None
-    );
 }
 
 #[test]
@@ -140,14 +149,12 @@ fn a_window_of_no_specs_names_no_skill_on_its_command_line_or_in_its_environment
     );
     assert!(failed.contains("specmint-core"), "{failed}");
     let in_env = frame(
-        &json!(["opencode"]),
-        &json!({ "OPENCODE_CONFIG_CONTENT": r#"{"skills":{"paths":["/r/specmint-tdd"]}}"# }),
+        &json!(["devin"]),
+        &json!({ "CF_DEVIN_ROLE_FILE": "/r/skills/specmint-tdd/SKILL.md" }),
     );
     let failed = carries_no_skill(&in_env).unwrap_err();
     assert!(
-        failed.starts_with(
-            "the window's environment names a Specmint skill: OPENCODE_CONFIG_CONTENT="
-        ),
+        failed.starts_with("the window's environment names a Specmint skill: CF_DEVIN_ROLE_FILE="),
         "{failed}"
     );
 }
@@ -348,7 +355,7 @@ fn what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_c
     ];
     for harness in Harness::ALL {
         // Nothing installed: ConsensFlow's own copy is where its text will name it.
-        let none = ask::specmint(harness.kind(), "tdd", &env).unwrap();
+        let none = ask::specmint(harness.kind(), "tdd", ".specs", &env).unwrap();
         assert!(!none.installed, "{harness:?}: {none:?}");
         let said = which_copy(
             "tdd",
@@ -378,12 +385,30 @@ fn what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_c
             "---\nname: specmint-tdd\n---\nthe human's own\n",
         )
         .unwrap();
-        let have = ask::specmint(harness.kind(), "tdd", &env).unwrap();
+        let have = ask::specmint(harness.kind(), "tdd", ".specs", &env).unwrap();
         assert!(have.installed, "{harness:?}: {have:?}");
         assert!(
             have.skill.contains("tdd-by-the-human"),
             "{harness:?}: {have:?}"
         );
+        // The human's own calls `.specs` the folder, and is never edited for one project: a
+        // project on another folder is given ConsensFlow's copy, though the harness has this
+        // (T-662).
+        let other = ask::specmint(harness.kind(), "tdd", "docs/specs", &env).unwrap();
+        assert!(!other.installed, "{harness:?}: {other:?}");
+        let said = which_copy(
+            "tdd",
+            Some(&other.skill),
+            Some("specmint-tdd"),
+            None,
+            &consensflow,
+        )
+        .unwrap();
+        assert!(
+            said.starts_with("ConsensFlow's copy of specmint-tdd"),
+            "{harness:?}: {said}"
+        );
+        assert_ne!(other.skill, none.skill, "{harness:?}: a place of its own");
         let said = which_copy(
             "tdd",
             Some(&have.skill),
@@ -398,4 +423,51 @@ fn what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_c
         );
         std::fs::remove_dir_all(&home).unwrap();
     }
+}
+
+#[test]
+fn a_copy_of_the_skill_names_the_project_s_folder_and_no_other() {
+    let root = tempfile::tempdir().unwrap();
+    let skill = root.path().join("specmint-core");
+    std::fs::create_dir_all(skill.join("references")).unwrap();
+    // The vendored copy: the folder the skill's files call canonical.
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: specmint-core\n---\nRegistry: `.specs/registry.md`\n",
+    )
+    .unwrap();
+    std::fs::write(
+        skill.join("references/spec-format.md"),
+        "Per-spec files: `.specs/<id>/SPEC.md`\n",
+    )
+    .unwrap();
+    // For a project that keeps its specs in `.specs` there is no other to name.
+    assert!(names_the_folder_alone(&skill, ".specs").is_ok());
+    // For any other it is the field's failure: the copy sends the chief to `.specs`.
+    let failed = names_the_folder_alone(&skill, "docs/specs").unwrap_err();
+    assert!(failed.contains("still says .specs"), "{failed}");
+    // The copy ConsensFlow writes for the folder: every `.specs` is the folder.
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: specmint-core\n---\nRegistry: `docs/specs/registry.md`\n",
+    )
+    .unwrap();
+    let failed = names_the_folder_alone(&skill, "docs/specs").unwrap_err();
+    assert!(
+        failed.contains("spec-format.md") && failed.contains("still says .specs"),
+        "a file under references says it too: {failed}"
+    );
+    std::fs::write(
+        skill.join("references/spec-format.md"),
+        "Per-spec files: `docs/specs/<id>/SPEC.md`\n",
+    )
+    .unwrap();
+    let said = names_the_folder_alone(&skill, "docs/specs").unwrap();
+    assert!(
+        said.contains("2 files") && said.contains("docs/specs"),
+        "{said}"
+    );
+    // A copy that names no folder at all is no copy of the project's.
+    std::fs::write(skill.join("SKILL.md"), "---\nname: specmint-core\n---\n").unwrap();
+    assert!(names_the_folder_alone(&skill, "docs/specs").is_err());
 }

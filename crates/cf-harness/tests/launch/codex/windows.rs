@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{Held, Readiness, Work};
-use cf_harness::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
+use cf_harness::records::{Item, ModelMoved, Options, Quota, Reading, Record, Role, Settlement};
 use cf_harness::seams::Time;
-use cf_harness::testing::{finished, AnsweringHost, Driver, ScriptedHost, FIRST_MESSAGE_MS};
+use cf_harness::testing::{finished, AnsweringHost, Driver, FIRST_MESSAGE_MS};
 use cf_proto::agents::Harness;
 
 use super::*;
@@ -60,10 +60,7 @@ fn learns_the_thread_from_its_broker() {
     );
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(
-        0,
-        async move { started.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { started.started().await });
     assert!(driver.run().is_empty(), "waits to ask again");
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
@@ -72,7 +69,7 @@ fn learns_the_thread_from_its_broker() {
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
     assert_eq!(driver.run(), [(0, Ok(Some(THREAD.to_owned())))]);
     // The thread is now the window's own: it has nothing more to learn.
-    assert_eq!(finished(window.started(&ScriptedHost::default())), Ok(None));
+    assert_eq!(finished(window.started()), Ok(None));
 }
 
 /// How many milliseconds a window opened on `request` waits for its broker to
@@ -82,10 +79,7 @@ fn waits_for_the_thread(request: &Request, said: &str) -> i64 {
     let (adapter, fakes) = adapter(&home);
     let window = prepare(&adapter, request).unwrap().window;
     let mut driver = Driver::default();
-    driver.begin(
-        0,
-        async move { window.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { window.started().await });
     let began = fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -108,10 +102,7 @@ fn started_with(
 ) -> (Result<Option<String>, String>, i64) {
     fakes.loopback.serve("GET /session", served);
     let mut driver = Driver::default();
-    driver.begin(
-        0,
-        async move { window.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { window.started().await });
     let began = fakes.time.wall_ms();
     let mut settled = driver.run();
     while settled.is_empty() {
@@ -225,7 +216,7 @@ fn a_window_whose_start_was_given_up_has_come_up_if_its_broker_names_a_thread_wh
         "on the thread its launch named"
     );
     assert_eq!(
-        finished(window.started(&ScriptedHost::default())),
+        finished(window.started()),
         Ok(None),
         "nothing more to learn"
     );
@@ -289,10 +280,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
     );
     let mut driver = Driver::default();
     let started = Rc::clone(&window);
-    driver.begin(
-        0,
-        async move { started.started(&ScriptedHost::default()).await },
-    );
+    driver.begin(0, async move { started.started().await });
     assert!(driver.run().is_empty(), "the broker names none yet");
     assert_eq!(fakes.time.waits(0), [250]);
     assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
@@ -302,7 +290,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
         "named: the thread is the launch's, nothing new"
     );
     assert_eq!(
-        finished(window.started(&ScriptedHost::default())),
+        finished(window.started()),
         Ok(None),
         "nothing more to learn"
     );
@@ -314,7 +302,7 @@ fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fai
     fakes
         .loopback
         .serve("GET /session", [shows(Some(NEXT), true)]);
-    assert_eq!(finished(other.started(&ScriptedHost::default())), Ok(None));
+    assert_eq!(finished(other.started()), Ok(None));
 
     let resuming = |first_message_ms| {
         waits_for_the_thread(
@@ -357,6 +345,9 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         asking: false,
         failed: false,
         failure: None,
+        took_back: false,
+        model_moved: None,
+        model_drift: None,
         quota,
         settlement,
         pending: Default::default(),
@@ -547,4 +538,82 @@ fn passes_the_harness_s_word_on_its_quota_through() {
         (false, None, false)
     );
     assert_eq!(stand.asked.borrow().len(), 2, "no record was read");
+}
+
+#[test]
+fn says_a_move_the_record_holds_before_a_refusal_it_shows_too() {
+    // Codex's reroute and a refusal in one record (T-853): the window's look says the move, as the
+    // engine holds the member for it, whichever of the two the record names first.
+    let home = Home::new();
+    let moved = Arc::new(ModelMoved {
+        from: "gpt-6-astra".to_owned(),
+        to: "gpt-6-safe".to_owned(),
+        because: "Codex rerouted the turn".to_owned(),
+        at: None,
+    });
+    let refused = Arc::new(Quota::Unavailable {
+        at: None,
+        because: "its billing was refused".to_owned(),
+    });
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: Arc::new(Reading::Known(Record {
+            model_moved: Some(Arc::clone(&moved)),
+            ..match &*reading(Vec::new(), Settlement::Settled, Some(refused)) {
+                Reading::Known(record) => record.clone(),
+                _ => unreachable!(),
+            }
+        })),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    fakes
+        .loopback
+        .serve("GET /session", [shows(Some(THREAD), true)]);
+    let observed = finished(window.observe()).unwrap();
+    assert_eq!(observed.quota.as_deref(), Some(&moved.as_quota()));
+}
+
+/// What a Codex window keeps running is its broker's word of Codex's background terminals
+/// (`GET /terminals`), which no process tree lists (T-1137); a broker that gives no list
+/// says Codex could not tell.
+#[test]
+fn what_a_codex_window_keeps_running_is_its_brokers_list_of_codexs_background_terminals() {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("any"),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let list = json!({ "launchId": LAUNCH, "commands": ["node ./tick-cf-stops-live.cjs 360 background-ticks.txt"] });
+    fakes
+        .loopback
+        .serve("GET /terminals", [replies(&list.to_string())]);
+    assert_eq!(
+        finished(window.kept_commands()),
+        Some(vec![
+            "node ./tick-cf-stops-live.cjs 360 background-ticks.txt".to_owned()
+        ])
+    );
+    let asked: Vec<String> = fakes
+        .loopback
+        .take_asked()
+        .into_iter()
+        .map(|request| request.url)
+        .collect();
+    assert!(
+        asked.len() == 1 && asked[0].ends_with("/terminals"),
+        "{asked:?}"
+    );
+    fakes
+        .loopback
+        .serve("GET /terminals", [replies("not a list")]);
+    assert_eq!(finished(window.kept_commands()), None);
 }

@@ -1,6 +1,9 @@
 //! What the window answers a message with. Every message is one turn.
 //!
 //! - `Reply with exactly: X` answers X.
+//! - A line `SAY <words>` answers the words as they stand, with their spaces, in one
+//!   line: a worker whose last words are any words a case needs (T-1119: a question,
+//!   a wait), where `Reply with exactly` answers one word.
 //! - A line `SAVED <file>[,<file>...] <words>` is an image designer's turn: it saves a
 //!   picture under each name in the window's folder and answers the absolute path of
 //!   each, a line apiece, and then the words, as the designer's role asks its result
@@ -51,11 +54,19 @@
 //!   <words>`); with `--deaf` the job ignores the requests to end; with `--detach`
 //!   the shell that runs it detaches it (`nohup … &`) and ends, which leaves the job
 //!   with no parent, as the agents of four harnesses left theirs, and with no chain of
-//!   processes to a shell the harness started: the host leaves it running.
-//! - A line `JOB [--deaf] <seconds> <rest>` starts such a job and goes on with
-//!   `rest` as the line it was given, as an agent does whose tool runs a command
+//!   processes to a shell the harness started. On Unix that shell is in a session of its
+//!   own (Pi's, Claude's), so that the job is in a session no window has and the host cannot
+//!   see it; with `--detach-here` the shell is in the window's session instead, and the job is
+//!   there after it (T-1145: the host names it as work the window's close ends). On Windows the
+//!   two are the same: a PowerShell's `Start-Process`, and the pane's job holds the job.
+//! - A line `JOB [--deaf] [--detach|--detach-here] <seconds> <rest>` starts such a job and
+//!   goes on with `rest` as the line it was given, as an agent does whose tool runs a command
 //!   while its turn is at work (`JOB 120 SLEEP 60 words` leaves a job running for
-//!   the whole of a minute's turn, which then answers `words`).
+//!   the whole of a minute's turn, which then answers `words`). With `--detach` the job
+//!   is detached from its shell as in `BACKGROUND --detach`, and the turn goes on once the
+//!   shell has ended: a job left with no parent while the turn works (`JOB --detach-here`
+//!   keeps the shell in the window's session, as the shells of a harness that leads no
+//!   session of its own do: what the window's close ends).
 //! - A line `AGENTS <count> <seconds> <words>` starts that many background agents
 //!   (`agents`: no program, as Claude Code's run in its own process) that end
 //!   together after that long, and answers the words at once, as an agent does
@@ -66,6 +77,11 @@
 //!   starts them so and goes on with `rest` as the line it was given, as a turn does
 //!   that starts agents and works on (T-604's, 2026-10-25): an Escape or a refusal
 //!   then ends a turn whose agents still run, and whose record counts none of them.
+//! - A line `PACED <n> <seconds> <words>` is a turn that works through `n` steps, each a message
+//!   that calls a tool, with `seconds` between one and the next, as the record of a turn at
+//!   work grows (an Escape in one of them stops it there), and then answers the words. Unlike
+//!   `STEPS`, which writes its steps at once, it can follow `REPLY … THEN`: a window that
+//!   answers the chief's tell and carries on with its work, as the field's did (T-1139).
 //! - A line `STEPS <n> <words>` is a turn that writes `n` lines of progress, each a
 //!   message that calls a tool, before its answer, and `CLAUDE-JOB [--silent] <seconds>
 //!   <words> :: <report>` a turn that starts a job in the background as Claude Code does,
@@ -83,6 +99,10 @@
 //!   PreToolUse hook of the settings file this window was launched with runs on
 //!   a synthetic AskUserQuestion event, and the turn answers with what the hook
 //!   handed back.
+//! - A window started with `CF_TEST_SCRIPTED_RESULTS` set (a folder of an eval run's, the
+//!   evals' stand-in reviewer or worker) answers each task brief with the next result of the
+//!   folder, after writing the files of that result in its own folder, and nothing else of what
+//!   is written here (`scripted`).
 //! - A question whose text says `REPLY <words>` is answered with `cf answer`.
 //! - `REPLY <words> THEN <line>` answers it so and goes on, in the same turn, with `line`
 //!   as the line it was given, and ends with what that answers: a window that answers
@@ -101,13 +121,27 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::agents::Agents;
-use crate::background::{until_up, Jobs, Server, THINKING};
-use crate::steps::Tasks;
+use crate::background::{until_up, Detach, Jobs, Server, THINKING};
+use crate::scripted;
+use crate::steps::{Step, Tasks};
 use crate::stop::Stop;
 
 /// How long the shell that detaches a job may take to end: a PowerShell's
 /// `Start-Process` takes a second or two, a `/bin/sh` a moment.
 const DETACHED_SHELL: Duration = Duration::from_secs(30);
+
+/// How the flags of a `JOB` or a `BACKGROUND` line say the agent's tool detaches the command:
+/// `--detach-here` leaves the shell in the window's session, `--detach` in one of its own
+/// (on Windows both are a PowerShell's `Start-Process`), none does not detach it.
+fn detaching(flags: &str) -> Detach {
+    if flags.contains("--detach-here") {
+        Detach::Here
+    } else if flags.contains("--detach") {
+        Detach::Apart
+    } else {
+        Detach::No
+    }
+}
 
 /// The header of a result delivered to a window, with the task it is the result of.
 const RESULT: &str = r"^\[ConsensFlow m-\d+ · (T-\d+) · result from @[^\]]+\]$";
@@ -155,6 +189,10 @@ pub enum Reply {
     Refused,
     /// An Escape stopped the turn before it answered.
     Stopped,
+    /// The turn works through these steps, a pause after each (an Escape in one of them
+    /// stops it there), and then answers the text: a turn whose record grows while it
+    /// is at work (`PACED`).
+    Worked(Vec<Step>, Duration, String),
 }
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
@@ -245,15 +283,40 @@ fn shell(command: &str) -> Run {
     Run::new("/bin/sh").args(["-c", command])
 }
 
-/// A command line run by the platform's shell, as Node's `shell: true` runs
-/// one: `cmd.exe /d /s /c "<command>"`, the quotes around it and its own quotes
-/// written as they are.
+/// A hook's command line run as Claude Code runs one on Windows: by Git Bash's `bash -c`
+/// (2.1.316, read from its binary: "Defaults to bash (powershell on Windows without Git
+/// Bash)", T-1049), which takes the window's own `cf` as its hook names it, a quoted
+/// whole path (`'C:/…/cf.exe' hook claude`). Where no Git Bash is found, as Node's
+/// `shell: true` ran one: `cmd.exe /d /s /c "<command>"`, the quotes around it and its own
+/// quotes written as they are.
 #[cfg(windows)]
 fn shell(command: &str) -> Run {
+    if let Some(bash) = git_bash() {
+        return Run::new(bash).args(["-c", command]);
+    }
     let interpreter = own_var("ComSpec").unwrap_or_else(|| "cmd.exe".to_owned());
     Run::new(interpreter)
         .args(["/d", "/s", "/c"])
         .raw_arg(format!("\"{command}\""))
+}
+
+/// Git Bash, where Claude Code looks for it: the file `CLAUDE_CODE_GIT_BASH_PATH` names,
+/// then the `bin\bash.exe` of the Git whose `git.exe` is on the PATH (`…\Git\cmd` or
+/// `…\Git\bin`), then Git's own install folder.
+#[cfg(windows)]
+fn git_bash() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    if let Some(named) = own_var("CLAUDE_CODE_GIT_BASH_PATH").map(PathBuf::from) {
+        if named.is_file() {
+            return Some(named);
+        }
+    }
+    let path = own_var("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .filter(|folder| folder.join("git.exe").is_file())
+        .filter_map(|folder| folder.parent().map(|git| git.join("bin").join("bash.exe")))
+        .chain([PathBuf::from(r"C:\Program Files\Git\bin\bash.exe")])
+        .find(|bash| bash.is_file())
 }
 
 /// Prints lines of text to the window's screen until they make `bytes`.
@@ -272,6 +335,7 @@ fn print_lines(bytes: usize) -> std::io::Result<()> {
 
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
+    static PACED: OnceLock<Regex> = OnceLock::new();
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static HANG: OnceLock<Regex> = OnceLock::new();
     static PRINT: OnceLock<Regex> = OnceLock::new();
@@ -289,10 +353,17 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SAVED: OnceLock<Regex> = OnceLock::new();
     static LONG: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static SAY: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
     if spent(window) {
         return Ok(Reply::Refused);
+    }
+    if let Some(folder) = own_var(scripted::FOLDER) {
+        let here = std::env::current_dir().map_err(|failed| failed.to_string())?;
+        if let Some(result) = scripted::answer(Path::new(&folder), text, &here)? {
+            return Ok(Reply::Text(result));
+        }
     }
     let accepts = accepting(
         own_var("CF_TEST_ACCEPT_RESULTS").as_deref(),
@@ -304,6 +375,17 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         .collect();
     if !accepted.is_empty() {
         return Ok(Reply::Text(format!("accepted: {}", accepted.join(" | "))));
+    }
+    if let Some(paced) = pattern::once(&PACED, r"(?m)^PACED (\d+) (\d+) (.+)$").captures(text) {
+        let (steps, seconds): (u64, u64) = match (paced[1].parse(), paced[2].parse()) {
+            (Ok(steps), Ok(seconds)) => (steps, seconds),
+            _ => return Err(format!("PACED {} {}", &paced[1], &paced[2])),
+        };
+        return Ok(Reply::Worked(
+            (1..=steps).map(|at| Step::progress(at, steps)).collect(),
+            Duration::from_secs(seconds),
+            paced[3].to_owned(),
+        ));
     }
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds: u64 = slow[1].parse().map_err(|_| format!("SLEEP {}", &slow[1]))?;
@@ -324,19 +406,36 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         thread::sleep(Duration::from_secs(seconds));
         return reply_to(&hung[2], window);
     }
-    if let Some(job) = pattern::once(&JOB, r"(?m)^JOB ((?:--deaf )?)(\d+) (.+)$").captures(text) {
+    if let Some(job) = pattern::once(
+        &JOB,
+        r"(?m)^JOB ((?:--(?:deaf|detach-here|detach) )*)(\d+) (.+)$",
+    )
+    .captures(text)
+    {
         let seconds: u64 = job[2].parse().map_err(|_| format!("JOB {}", &job[2]))?;
+        let (deaf, detach) = (job[1].contains("--deaf"), detaching(&job[1]));
         // An agent thinks before it runs a tool (see `BACKGROUND`).
         thread::sleep(THINKING);
+        let (shell_ended, ended) = std::sync::mpsc::channel();
         let file = window
             .jobs
-            .start("job", seconds, !job[1].is_empty(), false, || {})?;
+            .start_detaching("job", seconds, deaf, detach, move || {
+                let _ = shell_ended.send(());
+            })?;
         until_up(&file)?;
+        // A tool that detached a job returns once its shell has ended, and the turn goes
+        // on from there (see `BACKGROUND`): the job has no parent from then on.
+        if detach != Detach::No && ended.recv_timeout(DETACHED_SHELL).is_err() {
+            return Err(format!(
+                "JOB --detach: the shell that detached the job did not end in {} s",
+                DETACHED_SHELL.as_secs()
+            ));
+        }
         return reply_to(&job[3], window);
     }
     if let Some(job) = pattern::once(
         &BACKGROUND,
-        r"(?m)^BACKGROUND ((?:--(?:wake|deaf|detach) )*)(\d+) (.+)$",
+        r"(?m)^BACKGROUND ((?:--(?:wake|deaf|detach-here|detach) )*)(\d+) (.+)$",
     )
     .captures(text)
     {
@@ -344,11 +443,12 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             .parse()
             .map_err(|_| format!("BACKGROUND {}", &job[2]))?;
         let words = job[3].to_owned();
-        let (wakes, deaf, detached) = (
+        let (wakes, deaf, detach) = (
             job[1].contains("--wake"),
             job[1].contains("--deaf"),
-            job[1].contains("--detach"),
+            detaching(&job[1]),
         );
+        let detached = detach != Detach::No;
         if wakes && detached {
             return Err(
                 "BACKGROUND --wake --detach: a job detached from its shell is no child to wait for"
@@ -368,12 +468,14 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         // turn's work by the chain (a PowerShell's `Start-Process` takes a second or
         // two: Windows CI and zeewin, 2026-10-14).
         let (shell_ended, ended) = std::sync::mpsc::channel();
-        let file = window.jobs.start("job", seconds, deaf, detached, move || {
-            if wakes {
-                let _ = wake.send(woken);
-            }
-            let _ = shell_ended.send(());
-        })?;
+        let file = window
+            .jobs
+            .start_detaching("job", seconds, deaf, detach, move || {
+                if wakes {
+                    let _ = wake.send(woken);
+                }
+                let _ = shell_ended.send(());
+            })?;
         until_up(&file)?;
         if detached && ended.recv_timeout(DETACHED_SHELL).is_err() {
             return Err(format!(
@@ -481,6 +583,9 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     if let Some(saved) = pattern::once(&SAVED, r"(?m)^SAVED (\S+) (.+)$").captures(text) {
         let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
         return saved_in(&folder, &saved[1], &saved[2]).map(Reply::Text);
+    }
+    if let Some(said) = pattern::once(&SAY, r"(?m)^SAY (.+)$").captures(text) {
+        return Ok(Reply::Text(said[1].trim_end().to_owned()));
     }
     if let Some(exact) = pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(text) {
         return Ok(Reply::Text(exact[1].to_owned()));
@@ -628,6 +733,15 @@ mod tests {
     }
 
     #[test]
+    fn a_line_that_says_words_is_answered_with_them_whole() {
+        let reply = reply_to(
+            "[ConsensFlow m-4 · T-1 · task from @chief]\nSAY Should I continue, or stop here?",
+            &window(),
+        );
+        assert_eq!(text(reply), "Should I continue, or stop here?");
+    }
+
+    #[test]
     fn a_designer_saves_its_pictures_and_answers_their_paths_before_its_words() {
         let folder = tempfile::tempdir().unwrap();
         let answer = saved_in(folder.path(), "desk.png,hero.png", "Warm editorial scene.").unwrap();
@@ -687,6 +801,37 @@ mod tests {
         assert!(!is_session_of("worker2-amber-pine", "worker"));
         assert!(!is_session_of("chief", "worker"));
         assert!(!is_session_of("worker", "worker-amber"));
+    }
+
+    #[test]
+    fn a_paced_turn_works_through_its_steps_a_pause_after_each_and_answers_the_words_after_them() {
+        let reply = reply_to("PACED 3 2 Reply with exactly: REPORT", &window()).unwrap();
+        let Reply::Worked(steps, gap, answer) = reply else {
+            panic!("a paced turn: {reply:?}");
+        };
+        assert_eq!(gap, Duration::from_secs(2));
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.said.as_str())
+                .collect::<Vec<_>>(),
+            ["Step 1 of 3", "Step 2 of 3", "Step 3 of 3"]
+        );
+        assert_eq!(answer, "Reply with exactly: REPORT");
+    }
+
+    #[test]
+    fn a_paced_turn_follows_the_answer_to_a_tell_in_the_same_turn() {
+        // `REPLY … THEN PACED …`: the window answers the chief's tell with `cf answer` and
+        // goes on working (T-1139), the answer to the tell failing here as no `cf` is run.
+        let reply = reply_to(
+            "[ConsensFlow m-3 \u{b7} T-1 \u{b7} question from @chief]\nStop. REPLY ok THEN PACED 2 1 Reply with exactly: END",
+            &window(),
+        )
+        .unwrap();
+        assert!(
+            matches!(reply, Reply::Worked(steps, _, answer) if steps.len() == 2 && answer.ends_with("END"))
+        );
     }
 
     #[test]

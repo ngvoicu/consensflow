@@ -1,0 +1,417 @@
+# The size a project chooses for its Claude members' windows to compact at (spec
+# smaller-contexts, SCX-24 to SCX-26, T-1017): kept in the ledger (`crates/cf-ledger/src/projects/
+# claude_compaction.rs`, migration 0026's second column), chosen on the page alone
+# (`project.compaction`, Project settings' "Compaction for Claude members"), given by the engine to
+# a Claude member's launch at launch and on resume and never to the chief's or another harness's
+# (`crates/cf-engine/src/windows.rs`), and written by Claude's adapter into the launch's own
+# settings file as `autoCompactWindow` (`crates/cf-harness/src/claude/install.rs`, T-1016's
+# route), never into the owner's. Each plant breaks one of these and the test written for it fails.
+#
+# Every name holds `claude compaction`, so `npm run plants:daemon -- "claude compaction"` runs them all.
+
+[run]
+cc-ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "projects::claude_compaction::"]
+cc-ledger-described = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described", "claude_compaction::"]
+cc-ledger-testing-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::staff_rules::"]
+cc-engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "compaction_window::"]
+cc-harness-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::compaction_window"]
+cc-harness-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::"]
+cc-daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::claude_compaction"]
+cc-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+cc-page-suite = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Compaction for Claude members|the Claude members' compaction|saves the choice of a size|holds the size to the range"]
+
+[[plant]]
+name = "claude compaction: the ledger takes a size below the range"
+meant = "a_size_below_or_above_what_claude_takes_is_refused_in_the_words_that_say_the_range"
+runs = ["cc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''    (CLAUDE_COMPACTION_MIN..=CLAUDE_COMPACTION_MAX)'''
+replace = '''    (0..=CLAUDE_COMPACTION_MAX)'''
+
+[[plant]]
+name = "claude compaction: the ledger takes a size above the range"
+meant = "a_size_below_or_above_what_claude_takes_is_refused_in_the_words_that_say_the_range"
+runs = ["cc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''    (CLAUDE_COMPACTION_MIN..=CLAUDE_COMPACTION_MAX)'''
+replace = '''    (CLAUDE_COMPACTION_MIN..=CLAUDE_COMPACTION_MAX + 1)'''
+
+[[plant]]
+name = "claude compaction: text is taken for none"
+meant = "only_a_whole_number_is_a_size"
+runs = ["cc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''        Some(_) => Err(refused()),'''
+replace = '''        Some(_) => Ok(None),'''
+
+[[plant]]
+name = "claude compaction: a fraction is taken for a whole number"
+meant = "only_a_whole_number_is_a_size"
+runs = ["cc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''let tokens = number.as_u64().ok_or_else(refused)?;'''
+replace = '''let tokens = number.as_f64().map(|float| float as u64).ok_or_else(refused)?;'''
+
+[[plant]]
+name = "claude compaction: null is refused instead of being Claude's own point"
+meant = "no_size_is_claudes_own_point_a_missing_field_null_or_nothing_else"
+runs = ["cc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''        None | Some(Value::Null) => Ok(None),'''
+replace = '''        None => Ok(None),
+        Some(Value::Null) => Err(refused()),'''
+
+[[plant]]
+name = "claude compaction: the ledger does not check the size it writes"
+meant = "a_size_outside_the_range_is_refused_and_changes_nothing"
+runs = ["cc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''    let to = window.map(size_of).transpose()?;'''
+replace = '''    let to = window;'''
+
+[[plant]]
+name = "claude compaction: the same size again is written and logged"
+meant = "the_same_size_again_or_none_where_there_is_none_log_nothing_and_touch_nothing"
+runs = ["cc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''        if from != to {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "claude compaction: a change is not logged"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["cc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''            store.log(
+                id,
+                "project.claude_compaction",
+                json!({ "from": from, "to": to }),
+            )?;'''
+replace = '''            let _ = (json!({ "from": from, "to": to }), &store);'''
+
+[[plant]]
+name = "claude compaction: the log does not say what the size was"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["cc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/claude_compaction.rs"
+find = '''json!({ "from": from, "to": to }),'''
+replace = '''json!({ "to": to }),'''
+
+[[plant]]
+name = "claude compaction: the project's view has no size"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["cc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        claude_compaction: row.claude_compaction,
+    }))'''
+replace = '''        claude_compaction: None,
+    }))'''
+
+[[plant]]
+name = "claude compaction: a project on Claude's own point has the key of it in its view"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["cc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/ledger.rs"
+find = '''    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_compaction: Option<u32>,'''
+replace = '''    pub claude_compaction: Option<u32>,'''
+
+[[plant]]
+name = "claude compaction: the migration gives every existing project a size"
+meant = "a_ledger_at_the_version_before_gains_no_size_in_every_project_and_keeps_every_row"
+runs = ["cc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0026.sql"
+find = '''  ALTER TABLE project ADD COLUMN claude_compaction INTEGER;'''
+replace = '''  ALTER TABLE project ADD COLUMN claude_compaction INTEGER DEFAULT 400000;'''
+
+[[plant]]
+name = "claude compaction: the undo for older ledgers leaves the size column"
+meant = "undoing_migration_0026_leaves_the_schema_0025_left_and_the_ledger_migrates_again"
+runs = ["cc-ledger-testing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing/staff_rules.rs"
+find = '''        "ALTER TABLE project DROP COLUMN claude_compaction;
+         ALTER TABLE project DROP COLUMN staff_rules",'''
+replace = '''        "ALTER TABLE project DROP COLUMN staff_rules",'''
+
+[[plant]]
+name = "claude compaction: the page's operation is the rules' operation"
+meant = "the_human_chooses_the_size_and_every_view_of_the_project_carries_it_until_it_is_taken_away"
+runs = ["cc-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/operations.rs"
+find = '''        PageOperation::ProjectCompaction => projects::compaction(page, body).await,'''
+replace = '''        PageOperation::ProjectCompaction => projects::rules(page, body).await,'''
+
+[[plant]]
+name = "claude compaction: the page's operation reads the size from another field"
+meant = "the_human_chooses_the_size_and_every_view_of_the_project_carries_it_until_it_is_taken_away"
+runs = ["cc-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''parse_claude_compaction(body.get("compaction"))?'''
+replace = '''parse_claude_compaction(body.get("size"))?'''
+
+[[plant]]
+name = "claude compaction: the app does not forward the page's operation"
+meant = "the_operations_are_the_ones_the_app_forwards"
+runs = ["cc-proto-page"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "project.compaction",
+];'''
+replace = '''];'''
+
+[[plant]]
+name = "claude compaction: the page's lowest size is not the ledger's"
+meant = "the_pages_range_for_the_size_is_the_ledgers"
+runs = ["cc-daemon-page"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''const LEAST = 100_000
+'''
+replace = '''const LEAST = 10_000
+'''
+
+[[plant]]
+name = "claude compaction: the page's highest size is not the ledger's"
+meant = "the_pages_range_for_the_size_is_the_ledgers"
+runs = ["cc-daemon-page"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''const MOST = 1_000_000
+'''
+replace = '''const MOST = 2_000_000
+'''
+
+[[plant]]
+name = "claude compaction: the chief's launch is given the size"
+meant = "every_members_launch_of_a_claude_project_is_given_its_size_and_the_chiefs_never_is"
+runs = ["cc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)'''
+replace = '''Harness::from_kind(harness) == Some(Harness::Claude)'''
+
+[[plant]]
+name = "claude compaction: only the chief's launch is given the size"
+meant = "every_members_launch_of_a_claude_project_is_given_its_size_and_the_chiefs_never_is"
+runs = ["cc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)'''
+replace = '''participant.role == "chief" && Harness::from_kind(harness) == Some(Harness::Claude)'''
+
+[[plant]]
+name = "claude compaction: a member of another harness is given the size"
+meant = "only_a_claude_member_is_given_the_size_whatever_the_harness_of_the_other_members"
+runs = ["cc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)'''
+replace = '''participant.role != "chief"'''
+
+[[plant]]
+name = "claude compaction: no launch is given the project's size"
+meant = "every_members_launch_of_a_claude_project_is_given_its_size_and_the_chiefs_never_is"
+runs = ["cc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''compaction: project.claude_compaction.filter(|_| {'''
+replace = '''compaction: None::<u32>.filter(|_| {'''
+
+[[plant]]
+name = "claude compaction: a conversation opened again is given no size"
+meant = "a_member_opened_again_on_its_conversation_is_given_the_size_as_the_project_has_it_by_then"
+runs = ["cc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)'''
+replace = '''participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude) && resume.is_none()'''
+
+[[plant]]
+name = "claude compaction: the settings file leaves the size out"
+meant = "every_members_launch_is_given_the_size_as_the_window_in_its_settings_file_and_nothing_else_moves"
+runs = ["cc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''        file["autoCompactWindow"] = json!(window);'''
+replace = '''        let _ = window;'''
+
+[[plant]]
+name = "claude compaction: the settings file names the window by another key"
+meant = "every_members_launch_is_given_the_size_as_the_window_in_its_settings_file_and_nothing_else_moves"
+runs = ["cc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''file["autoCompactWindow"]'''
+replace = '''file["autoCompactWindows"]'''
+
+[[plant]]
+name = "claude compaction: the settings file says none where there is no size"
+meant = "a_launch_with_no_size_writes_the_settings_file_it_always_wrote_byte_for_byte"
+runs = ["cc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''    if let Some(window) = compaction {
+        file["autoCompactWindow"] = json!(window);
+    }'''
+replace = '''    {
+        let window = compaction;
+        file["autoCompactWindow"] = json!(window);
+    }'''
+
+[[plant]]
+name = "claude compaction: the adapter is given no size"
+meant = "every_members_launch_is_given_the_size_as_the_window_in_its_settings_file_and_nothing_else_moves"
+runs = ["cc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''                launch.compaction,
+'''
+replace = '''                None,
+'''
+
+[[plant]]
+name = "claude compaction: the tooling question ignores the size"
+meant = "a_claude_member_of_a_project_that_chose_a_size_gets_it_in_the_settings_file_of_its_launch"
+runs = ["cc-harness-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling.rs"
+find = '''        .get("compaction")'''
+replace = '''        .get("size")'''
+
+[[plant]]
+name = "claude compaction: Claude's own point is saved as the size left in the field"
+meant = "saves the choice of a size by its own Save, shows what the daemon kept, and saves Claude's own point again as none"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''const compaction = this.#size.checked ? sizeOf(this.#amount.value) : null'''
+replace = '''const compaction = sizeOf(this.#amount.value)'''
+
+[[plant]]
+name = "claude compaction: Save does not wait for a size in the range"
+meant = "holds the size to the range Claude takes, and Save back while it is not a whole number in it"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''    this.#save.disabled = bad'''
+replace = '''    this.#save.disabled = false'''
+
+[[plant]]
+name = "claude compaction: the page takes a size above the range"
+meant = "holds the size to the range Claude takes, and Save back while it is not a whole number in it"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''return size >= LEAST && size <= MOST ? size : null'''
+replace = '''return size >= LEAST ? size : null'''
+
+[[plant]]
+name = "claude compaction: the page takes a fraction"
+meant = "holds the size to the range Claude takes, and Save back while it is not a whole number in it"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''if (!/^\d+$/.test(trimmed)) return null'''
+replace = '''if (!/^\d+\.?\d*$/.test(trimmed)) return null'''
+
+[[plant]]
+name = "claude compaction: the dialog does not show the size the board has"
+meant = "Project settings shows the size the board has for the Claude members' compaction"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#compaction.show(board.project)
+'''
+replace = ''''''
+
+[[plant]]
+name = "claude compaction: the section does not say the chief is left alone"
+meant = "Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ''' The chief is not affected.</p>'''
+replace = '''</p>'''
+
+[[plant]]
+name = "claude compaction: the section does not say Claude compacts a little before the size"
+meant = "Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''        <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
+'''
+replace = ''''''
+
+# The page line says what an exported variable and the model's own window do to the size
+# (T-1074, the critical review's note 7).
+
+[[plant]]
+name = "claude compaction: the section does not say an exported variable comes first"
+meant = "Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ''' (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first)'''
+replace = ''''''
+
+[[plant]]
+name = "claude compaction: the section does not say the model's own window is the most"
+meant = "Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does"
+runs = ["cc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ''', and never above the model's own window'''
+replace = ''''''

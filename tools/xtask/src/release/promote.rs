@@ -27,13 +27,17 @@
 //!    until it did, by the tag's gate's own rule (a run by the push or by hand),
 //!    before any tag. A CI run that fails leaves the branch and no tag,
 //!    and says how to rerun it and finish by hand, or start over. There is no
-//!    Release dry run (the `release` environment admits `main` and `v*` tags
-//!    alone): the tag's own Release run builds, signs and smoke-tests both
-//!    platforms' packages before it publishes.
+//!    hand run of the Release workflow before the tag, as `release alpha` has
+//!    (the `release` environment, which holds the signing keys, admits `main` and
+//!    `v*` tags alone, not `release/*`): the tag's own Release run builds, signs
+//!    and smoke-tests both platforms' packages before it publishes, and the
+//!    commit is the alpha's with the version alone changed, the alpha having
+//!    had its hand run and its tag's run.
 //! 6. The tag `vX.Y.Z` on the version commit, with the notes, pushed to origin
 //!    and upstream; its Release run checks CI's green gate of that commit (its
 //!    `gate` job), and is watched to its end; both feeds read until they serve
 //!    `X.Y.Z`. A Release run that fails on a flake is finished with `gh run rerun`.
+//! 7. The published release verified, as `release alpha` ends with (`release verify`).
 //!
 //! Nothing goes back to `main`: the branch's one commit is the version, and
 //! `main`'s next alpha needs a version after `X.Y.Z` (`X.Y.(Z+1)-alpha.1` or
@@ -155,9 +159,11 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         event: Some("push"),
         before,
         left: Left::Tag(&tag),
+        head: None,
     })?;
     release.wait_for_feed(ALPHA_FEED, &plain, run)?;
     release.wait_for_feed(STABLE_FEED, &plain, run)?;
+    release.verify_published(&plain, run)?;
     Ok(format!(
         "released {plain} from {alpha}'s commit {} as {} on {branch}: {ALPHA_FEED} and {STABLE_FEED} serve it\n\
          nothing goes back to main: its next alpha needs a version after {plain} ({}-alpha.1 or later)\n",

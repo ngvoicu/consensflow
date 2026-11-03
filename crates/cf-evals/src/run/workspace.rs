@@ -10,6 +10,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use cf_e2e::live;
 use cf_e2e::process::Run;
@@ -34,10 +35,31 @@ fn claude_memory(config: &Path, workspace: &Path) -> PathBuf {
         .join("memory")
 }
 
-/// The workspace of a run, made fresh from the fixture of `scenario`, with the
-/// owner's uncommitted change if it has one.
+/// A name for the workspace of one play, which no other play of any run has.
+fn unique_name(scenario: &Scenario) -> String {
+    name_at(jiff::Timestamp::now(), scenario)
+}
+
+/// The name of a play made at `at`: the instant, the process, and a count of the plays of this
+/// process. Two plays of one process in one instant are told apart by the count, and two processes
+/// whose counts began alike (each at none) by their numbers.
+fn name_at(at: jiff::Timestamp, scenario: &Scenario) -> String {
+    static PLAYS: AtomicU32 = AtomicU32::new(0);
+    format!(
+        "{}-{}-{}-{}",
+        crate::clock::stamp(at),
+        std::process::id(),
+        PLAYS.fetch_add(1, Ordering::Relaxed),
+        scenario.id
+    )
+}
+
+/// The workspace of a play, made fresh from the fixture of `scenario` in a folder of its own
+/// ([`Machine::workspaces`]), with the owner's uncommitted change if it has one. Two plays, in
+/// one run or in two that go at once, never share a folder: what one writes (a stray file of
+/// another scenario's, a page half made) is not in the other's.
 pub fn fresh(machine: &Machine, scenario: &Scenario) -> Result<PathBuf> {
-    let workspace = machine.workspace();
+    let workspace = machine.workspaces().join(unique_name(scenario));
     renew(
         machine.claude_config()?.as_deref(),
         &workspace,
@@ -48,6 +70,19 @@ pub fn fresh(machine: &Machine, scenario: &Scenario) -> Result<PathBuf> {
         uncommitted(&git, &workspace, change)?;
     }
     Ok(workspace)
+}
+
+/// The workspace of a play, taken away once the play is measured. Only a folder made by
+/// [`fresh`] goes (one that is directly below a folder called `workspaces`); a path that is
+/// none is left alone. A folder that is not there is already gone.
+pub fn retire(workspace: &Path) {
+    let made = workspace
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|parent| parent == "workspaces");
+    if made {
+        let _ = fs::remove_dir_all(workspace);
+    }
 }
 
 /// `workspace` made a git repository of what it holds, committed, and then `change`
@@ -222,36 +257,112 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_fresh_workspace_clears_the_memory_in_the_runs_throwaway_and_nothing_in_the_users_claude() {
-        let root = tempfile::tempdir().unwrap();
-        let (home, throwaway) = (root.path().join("home"), root.path().join("throwaway"));
-        let machine = Machine {
-            home: home.clone(),
+    /// A machine of a user whose home is `home`, with a Claude Code whose throwaway is `throwaway`.
+    fn machine_with_a_throwaway(home: &Path, throwaway: &Path) -> Machine {
+        Machine {
+            home: home.to_path_buf(),
             installs: vec![cf_e2e::live::Installed::at(
                 live::Harness::Claude,
                 "/bin/claude",
-                &home,
+                home,
             )],
             node: None,
             login: Some(std::sync::Arc::new(super::super::login::Throwaway::over(
-                At(throwaway.clone()),
+                At(throwaway.to_path_buf()),
             ))),
-        };
+        }
+    }
+
+    #[test]
+    fn every_play_has_a_folder_of_its_own_below_the_workspaces_and_what_one_holds_is_not_in_another(
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let (home, throwaway) = (root.path().join("home"), root.path().join("throwaway"));
+        let machine = machine_with_a_throwaway(&home, &throwaway);
         let scenario = crate::scenarios::by_id("six-decisions").unwrap();
-        let workspace = machine.workspace();
-        // What the run's Claude remembered of the workspace in a play before, and what the user's
-        // own Claude remembers of it from the evals that ran on it.
-        let theirs = claude_memory(&home.join(".claude"), &workspace);
+        let (one, two) = (
+            fresh(&machine, &scenario).unwrap(),
+            fresh(&machine, &scenario).unwrap(),
+        );
+        assert_ne!(one, two, "two plays of one scenario, in one process");
+        for workspace in [&one, &two] {
+            assert_eq!(workspace.parent(), Some(machine.workspaces().as_path()));
+            assert!(
+                workspace
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .ends_with("-six-decisions"),
+                "{}",
+                workspace.display()
+            );
+            // The fixture, made fresh.
+            assert!(workspace.join("site/evaluare.html").is_file());
+        }
+        // A stray file in one (another scenario's page, a page half made) never reaches the other.
+        write(&one, "site/notes.md", "albastru");
+        assert!(!two.join("site/notes.md").exists());
+        // Neither is the fixed folder of the evals before, which a play begun beside another shared.
+        assert!(!machine
+            .workspaces()
+            .parent()
+            .unwrap()
+            .join("workspace")
+            .exists());
+    }
+
+    #[test]
+    fn two_plays_of_one_process_made_in_the_same_instant_are_told_apart_by_their_count() {
+        let scenario = crate::scenarios::by_id("six-decisions").unwrap();
+        let at = jiff::Timestamp::UNIX_EPOCH;
+        assert_ne!(name_at(at, &scenario), name_at(at, &scenario));
+    }
+
+    #[test]
+    fn a_name_says_the_process_it_was_made_in_so_two_runs_at_once_never_share_one() {
+        let scenario = crate::scenarios::by_id("six-decisions").unwrap();
+        let name = name_at(jiff::Timestamp::UNIX_EPOCH, &scenario);
+        assert!(
+            name.contains(&format!("-{}-", std::process::id())),
+            "{name}"
+        );
+    }
+
+    #[test]
+    fn a_fresh_workspace_leaves_the_users_claude_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let (home, throwaway) = (root.path().join("home"), root.path().join("throwaway"));
+        let machine = machine_with_a_throwaway(&home, &throwaway);
+        let scenario = crate::scenarios::by_id("six-decisions").unwrap();
+        // What the user's own Claude remembers of a folder of the same kind, and the throwaway's.
+        let theirs = claude_memory(&home.join(".claude"), &machine.workspaces().join("x"));
         write(&theirs, "MEMORY.md", "the user's");
-        let ours = claude_memory(&throwaway, &workspace);
-        write(&ours, "MEMORY.md", "the last play's");
-        assert_eq!(fresh(&machine, &scenario).unwrap(), workspace);
-        assert!(!ours.exists(), "the play before's memory is cleared");
+        let workspace = fresh(&machine, &scenario).unwrap();
         assert!(
             theirs.join("MEMORY.md").is_file(),
             "the user's is not touched"
         );
+        assert!(!claude_memory(&throwaway, &workspace).exists());
+    }
+
+    #[test]
+    fn a_play_retires_the_folder_it_made_and_no_other() {
+        let root = tempfile::tempdir().unwrap();
+        let (home, throwaway) = (root.path().join("home"), root.path().join("throwaway"));
+        let machine = machine_with_a_throwaway(&home, &throwaway);
+        let scenario = crate::scenarios::by_id("six-decisions").unwrap();
+        let made = fresh(&machine, &scenario).unwrap();
+        let other = fresh(&machine, &scenario).unwrap();
+        retire(&made);
+        assert!(!made.exists());
+        assert!(other.join("site/evaluare.html").is_file(), "another play's");
+        // A folder that was not made by `fresh` is left where it is, whatever it holds.
+        let elsewhere = root.path().join("work");
+        write(&elsewhere, "a.txt", "a");
+        retire(&elsewhere);
+        assert!(elsewhere.join("a.txt").is_file());
+        // And one that is gone is gone.
+        retire(&made);
     }
 
     #[test]

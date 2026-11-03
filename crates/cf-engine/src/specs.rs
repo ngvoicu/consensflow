@@ -6,11 +6,13 @@
 //! at a launch, which is when a change of the setting applies (a Resume, a
 //! switch).
 //! The harness says where its window finds the Specmint skill of the project's
-//! variant ([`Adapter::specmint`]); that place is named in the chief's role
+//! variant and folder ([`Adapter::specmint`]); that place is named in the chief's role
 //! text ([`ProjectSpecs`]) and given the adapter, which has the skill there,
 //! written or its own, when it prepares the window ([`Launch::specs`]). The
-//! place is the harness's and the variant's, never a launch's, so the role text
-//! of a chief whose project's specs did not change is the same at every launch.
+//! place is the harness's, the variant's and the folder's, never a launch's, so the
+//! role text of a chief whose project's specs did not change is the same at every
+//! launch. The folder is in it because the skill's own files name `.specs`: a
+//! project's folder wins only if the chief is given a copy that names it (T-662).
 //! A project with specs off, and every member, are asked about nothing and given
 //! nothing: their launch is as it was.
 
@@ -19,7 +21,7 @@ use cf_ledger::{ParticipantView, ProjectView};
 use cf_proto::specs::{AppSpecs, SpecsSetting};
 
 use crate::dispatcher::Dispatcher;
-use crate::roles::ProjectSpecs;
+use crate::roles::{with_staff_rules, ProjectSpecs};
 use crate::seams::EngineError;
 
 /// The text a launch's window starts with, and the specs it was written for:
@@ -50,6 +52,7 @@ impl ChiefSpecs {
     pub(crate) fn launch(&self) -> Specs<'_> {
         Specs {
             variant: self.setting.variant,
+            folder: &self.setting.folder,
             skill: &self.skill,
         }
     }
@@ -57,8 +60,10 @@ impl ChiefSpecs {
 
 impl Dispatcher {
     /// The text `participant`'s window starts with in `project`, with the specs
-    /// its chief is given. Asked once for a launch, where the skill is named in
-    /// the text and is the adapter's to write.
+    /// its chief is given, and the project's rules for its staff after it. Asked
+    /// once for a launch, where the skill is named in the text and is the
+    /// adapter's to write; every launch, resume and replacement of a role, on
+    /// every harness, has its text from here.
     pub(crate) fn role_text(
         &self,
         project: &ProjectView,
@@ -72,6 +77,11 @@ impl Dispatcher {
             .roles
             .instructions(participant, project, told.as_ref())
             .map_err(|cause| EngineError::said("no-role-text", cause))?;
+        let instructions = with_staff_rules(
+            instructions,
+            &participant.role,
+            project.staff_rules.as_deref(),
+        );
         Ok(RoleText {
             specs,
             instructions,
@@ -101,7 +111,7 @@ impl Dispatcher {
             return Ok(None);
         };
         let skill = adapter
-            .specmint(setting.variant)
+            .specmint(setting.variant, &setting.folder)
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
         Ok(Some(ChiefSpecs { setting, skill }))
     }

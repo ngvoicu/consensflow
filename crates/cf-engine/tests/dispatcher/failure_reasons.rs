@@ -17,7 +17,7 @@ use cf_engine::testing::Context;
 fn failed(tiers: &Tiers<'_>, because: &str) -> String {
     let handle = tiers.assignee(1);
     let because = because.replace("@zeus", &format!("@{handle}"));
-    format!("T-1 failed: {because}. Reopen it with: cf task reopen T-1 \"…\"")
+    format!("T-1 failed: {because}. Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"")
 }
 
 /// zeus's turn on T-1 fails, its record saying `words` of why.
@@ -40,7 +40,7 @@ fn a_failed_turn_says_what_its_harness_said_of_it() {
     let tiers = working(&context);
     fails(
         &context,
-        Some("Selected model is at capacity. Please try a different model."),
+        Some("The model gpt-0-nonesuch does not exist or you do not have access to it."),
     );
     // The next look finds the failure told: it is not told again.
     context.pass().unwrap();
@@ -50,7 +50,7 @@ fn a_failed_turn_says_what_its_harness_said_of_it() {
         told(&tiers),
         [failed(
             &tiers,
-            "@zeus's harness reported a failure; it said: \"Selected model is at capacity. Please try a different model.\""
+            "@zeus's harness reported a failure; it said: \"The model gpt-0-nonesuch does not exist or you do not have access to it.\""
         )]
     );
 }
@@ -487,7 +487,7 @@ fn the_rows_a_paste_carried_are_part_of_it_on_screen_and_the_error_after_them_is
     assert_eq!(
         told,
         [format!(
-            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )]
     );
 }
@@ -525,6 +525,7 @@ fn the_rows_a_paste_carried_are_part_of_it_while_it_is_still_on_its_way() {
     let pasted = cf_engine::delivery_text::delivery_text(
         &context.message(carrier.id),
         &[context.message(answer), context.message(note)],
+        &cf_proto::cf_word::CfWord::bare(),
     );
     assert!(pasted.contains("(kept for you: "), "{pasted}");
     let error = "Error: provider unreachable";
@@ -574,7 +575,7 @@ fn a_long_brief_whose_header_scrolled_off_is_still_no_reason() {
     assert_eq!(
         told_of_t1(&context, project.id),
         [format!(
-            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )]
     );
 }
@@ -603,7 +604,7 @@ fn a_failed_turn_that_left_a_job_running_fails_its_task_with_its_reason_and_hold
         .answer_leaving_a_job("zeus", "Started the recording run");
     context.adapter.with("zeus", |agent| {
         agent.failed = true;
-        agent.failure = Some("Selected model is at capacity.".to_owned());
+        agent.failure = Some("The model gpt-0-nonesuch does not exist.".to_owned());
     });
     context.pass().unwrap();
     context.pass().unwrap();
@@ -614,7 +615,7 @@ fn a_failed_turn_that_left_a_job_running_fails_its_task_with_its_reason_and_hold
         told(&tiers),
         [failed(
             &tiers,
-            "@zeus's harness reported a failure; it said: \"Selected model is at capacity.\""
+            "@zeus's harness reported a failure; it said: \"The model gpt-0-nonesuch does not exist.\""
         )]
     );
 }
@@ -635,7 +636,7 @@ fn a_held_tasks_turn_its_job_woke_that_fails_fails_the_task_with_its_reason_once
     context.pass().unwrap();
     context.adapter.with("zeus", |agent| {
         agent.failed = true;
-        agent.failure = Some("API Error: 529 Overloaded".to_owned());
+        agent.failure = Some("API Error: 400 invalid_request_error".to_owned());
     });
     context
         .adapter
@@ -654,7 +655,7 @@ fn a_held_tasks_turn_its_job_woke_that_fails_fails_the_task_with_its_reason_once
         failures,
         [failed(
             &tiers,
-            "@zeus's harness reported a failure; it said: \"API Error: 529 Overloaded\""
+            "@zeus's harness reported a failure; it said: \"API Error: 400 invalid_request_error\""
         )]
     );
 }
@@ -718,7 +719,7 @@ fn a_held_tasks_woken_turn_that_fails_holds_it_no_more_in_the_pass_that_fails_it
     context.pass().unwrap();
     context.adapter.with("zeus", |agent| {
         agent.failed = true;
-        agent.failure = Some("API Error: 529 Overloaded".to_owned());
+        agent.failure = Some("API Error: 400 invalid_request_error".to_owned());
     });
     context
         .adapter

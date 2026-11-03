@@ -12,8 +12,11 @@
 
 use std::rc::Rc;
 
+use cf_base::time::iso;
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
+use cf_harness::records::Role;
+use cf_harness::seams::Time;
 use serde_json::{json, Value};
 
 use crate::chiefs::{to, to_human, with_codex};
@@ -74,7 +77,9 @@ fn told(context: &Context, project: i64) -> Told {
 
 /// The failure note of T-1 the chief is sent, for a failure saying `because`.
 fn failure_of_t1(because: &str) -> String {
-    format!(r#"T-1 failed: {because}. Reopen it with: cf task reopen T-1 "…""#)
+    format!(
+        r#"T-1 failed: {because}. Reopen it with: cf task reopen T-1 "…", or accept it with what you checked: cf task accept T-1 "…""#
+    )
 }
 
 #[test]
@@ -205,6 +210,118 @@ fn a_window_that_never_shows_its_first_message_fails_with_what_its_screen_was_sh
         asked.is_some() && asked < killed,
         "asked at {asked:?}, killed at {killed:?}"
     );
+}
+
+/// What Muse Code 1.4.14's record kept of the brief of 41 lines its window took (T-1000's
+/// live paste-screen): its box's placeholder, no word of the header.
+const FOLDED: &str = "[Pasted Content 2184 chars]";
+
+/// A window that never shows its brief as a paste takes words `since_open` ms after it
+/// opened (before, where negative: the conversation a window opened again on), in an item
+/// of the user's with no header, and, where `answers`, answers them; then its first
+/// message's time runs out. The project's id.
+fn takes_words_and_its_time_runs_out(context: &Context, since_open: i64, answers: bool) -> i64 {
+    let project = context.with_staff(&["zeus"]);
+    never_shows_its_brief(context);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    let opened = context.time.wall_ms();
+    context.advance(5_000);
+    let mut given = context.adapter.item(Role::User, FOLDED);
+    given.at = Some(json!(iso(opened + since_open)));
+    context.adapter.with(ZEUS, |agent| agent.items.push(given));
+    if answers {
+        context.adapter.answer(ZEUS, "3470");
+    } else {
+        // Its turn ended with no word of its agent's.
+        context.adapter.with(ZEUS, |agent| agent.settled = true);
+    }
+    context.pass().unwrap();
+    context.advance(121_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    project.id
+}
+
+/// The results T-1 gave the chief.
+fn results(context: &Context, project: i64) -> Vec<String> {
+    context
+        .inbox(context.id(project, "chief"))
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect()
+}
+
+/// T-1047: a Muse window answered its brief, and its task failed with "the window never
+/// showed its first message", its answer lost to the chief, because Muse's record kept the
+/// paste as its box's placeholder (T-1000, twice). A window whose record shows it took
+/// words and answered them since it opened took its first message, whatever its harness
+/// kept of the words: taken for arrived unproven, its answer the task's result, and the
+/// chief told once. The window is told nothing: a note pasted into it would begin a turn
+/// whose answer, not the one it gave its brief, would be the task's result.
+#[test]
+fn a_window_that_took_words_and_answered_them_since_it_opened_took_its_first_message() {
+    let context = Context::new();
+    let project = takes_words_and_its_time_runs_out(&context, 1_000, true);
+
+    let thread = context.task(project, 1);
+    assert_eq!(thread.task.state, "done", "never failed as never shown");
+    assert_eq!(results(&context, project), ["3470"]);
+    let brief = &thread.messages[0];
+    assert_eq!(brief.state, "delivered");
+    assert_eq!(brief.receipt["unproven"], json!(true));
+    let unproven: Vec<Value> = context
+        .recorder
+        .events()
+        .into_iter()
+        .filter(|event| event["seam"] == "event" && event["event"]["kind"] == "delivery.unproven")
+        .map(|event| event["event"]["data"].clone())
+        .collect();
+    assert_eq!(unproven.len(), 1, "{unproven:?}");
+    assert_eq!(unproven[0]["shape"]["markers"], json!(0));
+    let to_chief = told(&context, project).to_chief;
+    assert!(
+        to_chief.iter().any(|note| note.starts_with(&format!(
+            "m-{}'s arrival couldn't be proven from the record; it was not pasted again.",
+            brief.id
+        ))),
+        "{to_chief:?}"
+    );
+    assert!(
+        !to_chief.iter().any(|note| note.contains("never showed")),
+        "{to_chief:?}"
+    );
+    let member = context.id(project, &brief.recipient);
+    assert_eq!(
+        notes(&context, member),
+        Vec::<String>::new(),
+        "the window is told nothing"
+    );
+}
+
+/// What does not prove the window took its first message: words it took with no answer
+/// after them, and an item of the user's written before the window opened (the
+/// conversation a window opened again on), answered or not.
+#[test]
+fn words_never_answered_or_older_than_the_window_take_no_first_message() {
+    for (since_open, answers) in [(1_000, false), (-60_000, true)] {
+        let context = Context::new();
+        let project = takes_words_and_its_time_runs_out(&context, since_open, answers);
+        let thread = context.task(project, 1);
+        assert_eq!(
+            thread.task.state, "failed",
+            "{since_open} ms after the open, answered {answers}"
+        );
+        assert_eq!(thread.messages[0].receipt["unproven"], Value::Null);
+        assert!(
+            told(&context, project)
+                .to_chief
+                .iter()
+                .any(|note| note.contains("the window never showed its first message")),
+            "{since_open}, {answers}"
+        );
+    }
 }
 
 #[test]

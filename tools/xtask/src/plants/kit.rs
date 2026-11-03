@@ -30,6 +30,7 @@
 //! prepare = [["cargo", "xtask", "smoke-updater", "--export-bridge", "--cache", "app/src-tauri/target/updater-smoke"]]   # optional: must succeed first
 //! requires = ["app/src-tauri/target/…"]   # optional: files its runs take as given
 //! platforms = ["macos"]     # optional: the systems it is run on ("macos", "windows", "linux")
+//! harnesses = ["muse"]      # optional: the harnesses its runs need on the machine ("muse")
 //!
 //! [[plant.edit]]            # one or more, each in one file where `find` is found exactly once
 //! file = "crates/cf-base/src/args.rs"
@@ -52,6 +53,12 @@
 //! A plant of code that one system alone has (a Mac's) says so in `platforms`: on
 //! any other it is not run, and is said SKIPPED (platform), neither caught nor
 //! missed. A name there that is no system, or none at all, is an error of the table.
+//!
+//! A plant whose runs need a harness on the machine (the rig's cases on the machine's
+//! own Muse, which pass saying why where it has none) says so in `harnesses`: on a
+//! machine without one it is not run, and is said SKIPPED (absent) with why, neither
+//! caught nor missed. A name there that is no harness the runner knows is an error of
+//! the table.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -96,11 +103,36 @@ pub struct Plant {
     /// The systems it is run on, as Rust names them (`std::env::consts::OS`): none
     /// for every one.
     pub platforms: Vec<String>,
+    /// The harnesses its runs need on the machine ([`HARNESSES`]): none for none.
+    pub harnesses: Vec<String>,
     pub edits: Vec<Edit>,
 }
 
 /// The systems a plant may be for, as Rust names them.
 const PLATFORMS: [&str; 3] = ["macos", "windows", "linux"];
+
+/// The harnesses a plant's runs may need on the machine ([`lacks`]).
+const HARNESSES: [&str; 1] = ["muse"];
+
+/// Why a machine whose user's home is `home` lacks the harness `harness` a plant's runs
+/// need, in words: Muse Code where its launcher's version file in `~/.local/bin`, or
+/// the binary it names beside it, is not there, as the rig's Muse cases find it. None
+/// where it has it.
+pub fn lacks(harness: &str, home: Option<&Path>) -> Option<String> {
+    match harness {
+        "muse" => {
+            let bin = home.map(|home| home.join(".local").join("bin"));
+            let version = bin
+                .as_ref()
+                .and_then(|bin| fs::read_to_string(bin.join(".muse-version")).ok());
+            let there = bin.zip(version).is_some_and(|(bin, version)| {
+                bin.join(format!("muse-bin-{}", version.trim())).is_file()
+            });
+            (!there).then(|| "Muse isn't installed".to_owned())
+        }
+        other => Some(format!("{other} is no harness the plant runner knows")),
+    }
+}
 
 /// A command to try a plant with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,6 +217,8 @@ struct PlantSpec {
     #[serde(default)]
     requires: Vec<String>,
     platforms: Option<Vec<String>>,
+    #[serde(default)]
+    harnesses: Vec<String>,
     edit: Vec<EditSpec>,
 }
 
@@ -470,6 +504,20 @@ fn resolve(
             ),
         ));
     }
+    if let Some(unknown) = spec
+        .harnesses
+        .iter()
+        .find(|harness| !HARNESSES.contains(&harness.as_str()))
+    {
+        return Err(Error::data(
+            path,
+            format!(
+                "the plant `{}` needs `{unknown}`, which is no harness a plant may need: {}",
+                spec.name,
+                HARNESSES.join(", ")
+            ),
+        ));
+    }
     Ok(Plant {
         table: table.to_owned(),
         name: spec.name,
@@ -479,6 +527,7 @@ fn resolve(
         prepare: spec.prepare,
         requires: spec.requires,
         platforms,
+        harnesses: spec.harnesses,
         edits: spec
             .edit
             .into_iter()

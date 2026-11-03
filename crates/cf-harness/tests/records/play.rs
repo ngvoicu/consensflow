@@ -15,7 +15,7 @@
 //! connection of the player's, kept open across looks as a harness keeps its
 //! own.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File, FileTimes};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -57,6 +57,9 @@ pub struct Played {
     pub answered: usize,
     /// Each look Node failed at a torn line, by its name, with what it read here.
     pub departed: Vec<(String, String)>,
+    /// The words of each refusal for a moment (`Quota::Busy`) a look read where Node read
+    /// another quota or none: a server's error that Node took for the turn's failure (T-1112).
+    pub busy: BTreeSet<String>,
 }
 
 /// Plays `scenario`, holding each look to Node's: how many it held, and the
@@ -80,6 +83,7 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
         quotas: Vec::new(),
         answered: 0,
         departed: Vec::new(),
+        busy: BTreeSet::new(),
     };
     for (index, step) in scenario.steps.iter().enumerate() {
         stage.step(step, index);
@@ -87,6 +91,7 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
     Played {
         answered: stage.answered,
         departed: stage.departed,
+        busy: stage.busy,
     }
 }
 
@@ -109,6 +114,8 @@ struct Stage<'a> {
     answered: usize,
     /// The looks Node failed at a torn line, and what they read here.
     departed: Vec<(String, String)>,
+    /// The words of the refusals for a moment read where Node read none (T-1112).
+    busy: BTreeSet<String>,
 }
 
 impl Stage<'_> {
@@ -195,13 +202,6 @@ impl Stage<'_> {
             let at = look.fresh.or(look.read).unwrap();
             self.hold(&reading, at, &format!("{name}, fresh"));
         }
-        // Node played these between OpenCode's two snapshot reads, which read
-        // the store as it was before them: so is it read here, before them.
-        // That the reads are one snapshot, a writer between them unseen, is
-        // OpenCode's reader's own test.
-        for step in look.between.iter().flatten() {
-            self.step(step, index);
-        }
         self.answered += 1;
     }
 
@@ -261,6 +261,15 @@ impl Stage<'_> {
             }
             reading => serde_json::to_value(reading).unwrap(),
         };
+        let mut read = read;
+        let node_quota = node.get("quota").cloned().unwrap_or(Value::Null);
+        // A server's refusal for a moment is read as one (T-1112), where Node read the quota
+        // the record said before it, or none: the rest of the look is held to Node's.
+        if read["quota"]["state"] == "busy" && node_quota["state"] != "busy" {
+            self.busy
+                .insert(read["quota"]["because"].as_str().unwrap().to_owned());
+            read["quota"] = node_quota;
+        }
         // Text is compared below, where every number is written as
         // JavaScript writes it: first, every number of the reading itself is
         // one JavaScript holds, an integer past 2^53 a double.
@@ -308,6 +317,11 @@ impl Stage<'_> {
             assert_eq!(look.quota_same_as, None, "{name}");
             return;
         };
+        // A refusal for a moment is ours alone (T-1112): one object while the record holds the
+        // same refusal, whatever Node handed out in its place.
+        if quota.busy() {
+            return;
+        }
         let held = self
             .quotas
             .iter()

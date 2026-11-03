@@ -19,6 +19,7 @@ mod delivery;
 mod http;
 mod pair;
 mod selection;
+mod terminals;
 mod transport;
 
 #[cfg(test)]

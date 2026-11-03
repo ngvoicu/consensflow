@@ -51,7 +51,7 @@ const KIT: [&str; 4] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 6] = [
+const BY_HAND: [(&str, &str, &str); 13] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -84,6 +84,45 @@ const BY_HAND: [(&str, &str, &str); 6] = [
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "APPDATA",
         "the same read of the machine's Devin config, as Windows names its folder",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_background.rs",
+        "HOME",
+        "it runs Muse alone, in no window of the kit's: the owner's home for the keychain, which \
+         holds the login, and nothing else of it (Muse finds its keychain by HOME, T-705)",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_background.rs",
+        "XDG_CONFIG_HOME",
+        "the same run's config folder, a throwaway of its own: nothing of the owner's is read there",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_background.rs",
+        "XDG_DATA_HOME",
+        "the same run's data folder, a throwaway of its own, where Muse writes its sessions",
+    ),
+    (
+        "crates/cf-e2e/tests/live_own_cf.rs",
+        "HOME",
+        "its windows' shells read the profiles of a home of the run's own, which put decoy `cf`s \
+         first on the PATH (T-972); every login stays the kit's home of the run's own, which no \
+         HOME reaches",
+    ),
+    (
+        "crates/cf-e2e/tests/live_own_cf.rs",
+        "USERPROFILE",
+        "the same home, as Windows names it",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_reads.rs",
+        "XDG_CONFIG_HOME",
+        "its reads run `muse` alone on a throwaway copy of `auth.json` (T-841), and prove the owner's \
+         folder untouched",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_reads.rs",
+        "XDG_DATA_HOME",
+        "the same reads' data folder, a throwaway holding a copy of the model catalog alone",
     ),
 ];
 
@@ -179,6 +218,27 @@ fn a_home_is_set_by_an_entry_of_code_and_a_name_in_a_comment_or_a_test_is_none()
         "CodexHome"
     ));
     assert!(!copies("// a CodexHome of the run's own", "CodexHome"));
+}
+
+/// A harness's server a live case starts itself, outside a rig (`AppServer::start`, Codex's
+/// app-server), is given the run's own home by the kit (`Installed::home_outside_a_rig`), as a
+/// rig gives its windows theirs: on the case's own environment it ran on the person's `~/.codex`
+/// (T-1039, `live_codex_interrupt`).
+#[test]
+fn a_harness_server_a_live_case_starts_itself_runs_on_the_runs_own_home() -> Outcome {
+    let mut on_the_persons = Vec::new();
+    for file in &sources()? {
+        let own = code(&text(file));
+        if own.contains("AppServer::start(") && !own.contains("home_outside_a_rig()") {
+            on_the_persons.push(file.clone());
+        }
+    }
+    assert!(
+        on_the_persons.is_empty(),
+        "these start a harness's server on the case's own environment, the person's home: give \
+         it `install.home_outside_a_rig()?`: {on_the_persons:?}"
+    );
+    Ok(())
 }
 
 #[test]

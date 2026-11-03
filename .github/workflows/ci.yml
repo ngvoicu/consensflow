@@ -1,9 +1,10 @@
 # The gate on both platforms the app ships for: lint and the Node tests (the
 # page's units and the extensions'), the black-box suites of crates/cf-e2e
 # (the daemon, and the rig on a real pane host, with stand-in agents in real
-# terminals, and the regressions on it; the CLI), the page's Playwright suite
-# (on macOS: it needs no app, and once is enough), and the Rust host's tests,
-# headless ones included, and clippy. The packaged smoke needs a built app and
+# terminals, and the regressions on it; the CLI; the offline cases of the live
+# suites), the page's Playwright suite (on Linux: it needs no app, and once is
+# enough), and the Rust host's tests, headless ones included, and clippy. The
+# packaged smoke needs a built app and
 # stays with the release build. Rust comes from the runner's own rustup; the
 # third-party actions are pinned to a commit. A release publishes only a
 # commit this gate passed on both platforms (release.yml's `gate` job, cf-release
@@ -21,12 +22,16 @@
 # 41 to 55 (their cases take turns, a rig at a time: `cf_e2e::serial`), the
 # workspace's tests 10 to 11 on macOS and 16 to 18 on Windows, Playwright 4 on
 # macOS, the setup and the staging 2 to 4, and the rest 3. Now:
-#   checks     the lint, the Node tests, Playwright, the CLI's and the app's
-#              tests, cf-e2e's own, clippy, and cf-bridge's;
-#   workspace  the workspace's tests, whole (its limit below says why);
-#   daemons    the daemons' suites in three shards, a third of their cases
-#              each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs).
-# Five jobs a platform: GitHub runs five macOS jobs of an account at once.
+#   checks         the Node tests, the CLI's and the app's tests, cf-e2e's own and
+#                  its live suites' offline cases, clippy, and cf-bridge's;
+#   workspace      the workspace's tests, whole (its limit below says why);
+#   daemons        the daemons' suites in six shards, a sixth of their cases
+#                  each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs);
+#   platform-free  on Linux, once: the layout of the Rust, the linter, the page's
+#                  Playwright suite and the engine's paced kit, which read no code
+#                  of one system's (T-1161).
+# GitHub runs five macOS jobs of an account at once, so what needs no Mac is not
+# on one.
 name: CI
 
 on:
@@ -50,17 +55,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      # The Rust laid out as rustfmt lays it out, every crate of the
-      # workspace, checked before anything builds.
-      - run: cargo fmt --all --check
-      # The page, and the native cf a window runs, built into bin/ for the
-      # page's Playwright suite and staged as the resource the Rust build expects.
+      # The page, and the native cf a window runs, built into bin/ and staged as
+      # the resource the Rust build expects.
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
-      - run: npm run check
-      - if: runner.os == 'macOS'
-        working-directory: app
-        run: npx playwright install chromium && npm run test:ui
+      # The Node tests (the linter is platform-free's).
+      - run: npm test
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
@@ -76,19 +76,25 @@ jobs:
       # agents' own tests.
       - run: cargo test -p cf-e2e --lib --bins
         timeout-minutes: 10
-      # The engine's kit again, with the gate's pacing on in every case (the
-      # plain kit is the workspace job's): what a case that asks for no settle
-      # would hide (T-842's P1). As `cargo xtask check` runs it, a test holds
-      # the two alike (tools/xtask/src/check.rs).
-      - run: cargo test --package cf-engine --test dispatcher
-        env:
-          CF_KIT_PACED: 1
-        timeout-minutes: 15
+      # The cases of every live suite of crates/cf-e2e (tests/live_*.rs) that need no
+      # harness, which cargo test runs without --ignored: each suite's own oracle, its
+      # readers of a harness's records and its rules. Their cases on the real harnesses
+      # are `cargo xtask live`'s alone, before a release. The programs are the files
+      # there, whichever there are; until T-1161 no job ran them, and the local gate
+      # that did no longer lands the integrations (suites.rs holds this step).
+      - name: The offline cases of every live suite
+        run: |
+          tests=$(ls crates/cf-e2e/tests | sed -n 's/^\(live_[a-z0-9_]*\)\.rs$/--test \1/p' | tr '\n' ' ')
+          cargo test -p cf-e2e --no-fail-fast $tests
+        timeout-minutes: 30
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The harnesses' crate as the daemon builds it, without the test kit
       # the workspace's tests turn on for it.
       - run: cargo clippy -p cf-harness --lib -- -D warnings
+      # That crate's `pub` items its crate does not export may not be more than the ceiling
+      # holds (tools/xtask/src/unreachable_pub.rs): 17 on macOS and on Windows alike.
+      - run: cargo xtask unreachable-pub
       # The daemon's end of the bridge, behind a feature nothing in the
       # workspace turns on yet: tested and linted here until the daemon does.
       - run: cargo test -p cf-bridge --features local
@@ -239,13 +245,42 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # What reads no code of one system's runs once, on Linux, where runners are many
+  # (T-1161): the steps it took on each of macOS's and Windows' checks were 7 and 3
+  # minutes. The page tells a Mac and Windows by the browser's user agent, and the
+  # cases of either set it.
+  platform-free:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # The Rust laid out as rustfmt lays it out, every crate of the
+      # workspace, checked before anything builds.
+      - run: cargo fmt --all --check
+      - run: npm run lint
+      # The page, and the native cf for the page's Playwright suite, built into bin/.
+      - run: npm --prefix app run bundle:ui
+      - run: npm --prefix app run prepare-sidecar
+      - working-directory: app
+        run: npx playwright install --with-deps chromium && npm run test:ui
+      # The engine's kit again, with the gate's pacing on in every case (the
+      # plain kit is the workspace job's): what a case that asks for no settle
+      # would hide (T-842's P1). cf-engine holds no code of one system's (T-1132's
+      # coverage read the same lines on both). As `cargo xtask check` runs it, a test
+      # holds the two alike (tools/xtask/src/check.rs).
+      - run: cargo test --package cf-engine --test dispatcher
+        env:
+          CF_KIT_PACED: 1
+        timeout-minutes: 15
+
   # The checks a release and a branch rule read, one a platform, named as the
   # one job a platform was: green only when every job above passed. They run
   # whatever the jobs above did (`always()`), so that a job that failed, was
   # cancelled or was skipped makes them red and not skipped, which a rule would
   # take for passed.
   gate:
-    needs: [checks, workspace, daemons]
+    needs: [checks, platform-free, workspace, daemons]
     if: always()
     strategy:
       fail-fast: false

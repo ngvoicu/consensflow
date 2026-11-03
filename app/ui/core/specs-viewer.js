@@ -12,7 +12,7 @@ import {
   measure,
   REGISTRY,
   readRegistry,
-  specFile,
+  rowFile,
 } from './specs-folder.js'
 
 /**
@@ -79,8 +79,10 @@ export class SpecsViewer {
     dialog.querySelector('[name="specs-refresh"]').addEventListener('click', () => {
       void this.refresh()
     })
-    // Shut, it holds nothing, and what is still on its way is not shown.
+    // Shut, it holds nothing, and what is still on its way is not shown. The event comes a task
+    // after `close()`: a viewer opened again in that task is open by then, and keeps what it holds.
     dialog.addEventListener('close', () => {
+      if (dialog.open) return
       this.#reads += 1
       this.#stopDrawing()
       this.#project = null
@@ -209,7 +211,7 @@ export class SpecsViewer {
   #registry(text) {
     const registry = readRegistry(text)
     if (registry === null) return null
-    const { arranged } = this.#shown
+    const { arranged, specs, files } = this.#shown
     const view = element('section', 'spec-registry')
     view.append(element('h1', 'registry-heading', registry.heading ?? 'Spec Registry'))
     const head = element('div', 'registry-row registry-head')
@@ -220,7 +222,7 @@ export class SpecsViewer {
     const list = element('ol', 'registry-rows')
     list.setAttribute('aria-label', 'Specs')
     for (const row of registry.rows.slice(0, MAX_ROWS)) {
-      const opens = specFile(arranged, row.id)
+      const opens = rowFile(row, arranged, specs.folder, files)
       const item = element('li')
       const line = button('', 'registry-row', () => {
         if (opens !== null) void this.#choose(opens)
@@ -229,7 +231,9 @@ export class SpecsViewer {
       line.disabled = opens === null
       if (opens === null) line.title = `${row.id} has no folder here`
       const named = element('span', 'registry-title')
-      named.append(element('strong', null, row.title || row.id), element('small', null, row.id))
+      // An id the registry gives as a link is drawn as one (the row is what is pressed).
+      const id = element('small', row.href === null ? null : 'registry-link', row.id)
+      named.append(element('strong', null, row.title || row.id), id)
       const status = row.status.toLowerCase()
       const chip = element('span', 'status-chip', row.status)
       chip.dataset.status = STATUSES.includes(status) ? status : 'other'

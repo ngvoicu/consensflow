@@ -27,20 +27,32 @@
 //! is not mistaken for it; everything the host does to a process it does to the one
 //! it chose, by that, never to the number a later look finds.
 //!
-//! **When in doubt the host names less.** Of what began after the mark it calls the
-//! turn's only what a chain of processes that run proves it: a shell the harness
-//! started, and what descends from it ([`work`]). A process whose chain is broken (a
-//! job an agent detached with `nohup … &` or `Start-Process` from a shell that then
-//! ended) has no chain to look at, and its being a shell, or having no parent, is no
-//! proof of whose it is: it is left running, not ended and not named, until its window
-//! closes, which ends it where the tree finds it the window's (always on Windows; on
-//! the Mac not a command left by a shell that leads a session of its own, Pi's, which
-//! runs on after the close too). Nor is anything the host can tell the harness's own
-//! ever the turn's, by where the harness keeps its servers or by the programs it is
-//! named for ([`harness`] says how); and what it has seen to be the harness's it keeps
-//! for its own as long as it runs ([`Baseline::turn_work`] remembers it), whatever
-//! becomes of the process that started it. So what is listed and named is the turn's
-//! work and nothing of the rest, and a process that cannot be told is not named.
+//! **When in doubt the host names less, and says what it names.** Of what began after the
+//! mark it calls the turn's only what a chain of processes that run proves it: a shell the
+//! harness started, and what descends from it ([`work`]). A process whose chain is broken (a
+//! job an agent detached with `nohup … &` or `Start-Process` from a shell that then ended)
+//! has no chain to look at, and its being a shell, or having no parent, is no proof of
+//! whose it is. It is not the turn's, and the host does not end it. It is the **window's**
+//! where the tree holds it (on Windows the pane's job holds what any process starts; on the
+//! Mac what is under the window's program or in the session it leads), and the window's close
+//! ends it: so a pause that kept the window for the work it would end, and a close that named
+//! what it ended, left it out, and the chief heard of it never (T-1145). [`Baseline::detached`]
+//! names it, apart from the turn's work: a process of the tree that began after the mark, is
+//! none of the harness's own and has lost the process that started it, with what descends from
+//! it; and only what the platform can prove the agent's ([`Baseline::named`]): on the Mac, what
+//! a close ends, for a daemon makes a session of its own; on Windows, what a shell started, as
+//! the job's port told when it began ([`births`]), for the job holds a build's daemon as it
+//! holds a `Start-Process` job, and the owner does not want the chief told of the daemon. Nor
+//! is anything the host can tell the harness's own ever named, by where the harness keeps its
+//! servers or by the programs it is named for ([`harness`] says how); and what it has seen to
+//! be the harness's it keeps for its own as long as it runs ([`Baseline::turn_work`]
+//! remembers it), whatever becomes of the process that started it. So what is listed and named
+//! is the turn's work, the detached work of the window that is proved, and nothing of the
+//! rest, and a process that cannot be told is not named. Every paste marks a turn (a tell, the
+//! words of a resume), and a mark takes the tree as what came before: the detached work the
+//! look at the mark names is carried over it ([`Baseline::mark`]), so that a job detached in
+//! an earlier turn is named at the pause of a later one, and is proved again each time
+//! (T-1153's D1). The turn's own work is not carried, as before.
 //!
 //! **A moment later.** A harness runs short commands of its own at any time, and the
 //! host cannot tell one from the agent's by anything it is. Claude Code runs its status
@@ -66,6 +78,8 @@
 //! parent each process names, which is the process that started it only while that
 //! one is there); the rest is here.
 
+#[cfg(any(windows, test))]
+mod births;
 #[cfg(any(target_os = "macos", test))]
 mod clock;
 mod harness;
@@ -79,6 +93,8 @@ use cf_proto::panes::{
     Background, BackgroundProcess, Servers, BACKGROUND_PROCESSES, COMMAND_CHARS,
 };
 
+#[cfg(windows)]
+pub(crate) use births::Births;
 #[cfg(test)]
 pub(crate) use clock::Reading;
 #[cfg(any(target_os = "macos", test))]
@@ -148,6 +164,11 @@ pub(crate) struct Baseline {
     rests: VecDeque<(u64, HashSet<ProcessKey>)>,
     /// The number the next rest is given.
     next_rest: u64,
+    /// The detached work the tree had when the latest turn was marked, as the look at the mark
+    /// named it: the turns after the one it was detached in do not forget it, and the host proves
+    /// it again whenever it names it ([`Baseline::detached`], [`Baseline::named`]). Only what runs
+    /// at a mark is kept, so it is bounded by the tree.
+    carried: HashSet<ProcessKey>,
     /// What was seen to descend from a process of the harness's own at the latest
     /// look, and runs still: kept for the day the process that started it has gone. It
     /// is shared by the copies a look is made with: whatever one sees, the next knows.
@@ -159,26 +180,42 @@ impl Baseline {
     /// the window's harness keeps its servers ([`Kept::of`]) and `harness` which
     /// harness it is.
     pub fn mark(&mut self, tree: &[Member], kept: Option<Kept>, harness: Option<String>) {
+        // What the turn that ends here left detached is carried into the next one: every paste
+        // marks a turn (a tell, the words of a resume), and a job the agent detached before it
+        // is the window's still (T-1153's D1). What ended is let go of by this, and a process
+        // that took its number is another's.
+        let carried: HashSet<ProcessKey> = self
+            .detached(tree)
+            .iter()
+            .map(|member| member.key)
+            .collect();
         let now: HashSet<ProcessKey> = tree.iter().map(|member| member.key).collect();
         if self.before.is_none() {
             self.launch.clone_from(&now);
         }
         self.before = Some(now);
+        self.carried = carried;
         self.kept = kept;
         self.harness = harness;
         // What the harness has now is its own, whatever becomes of what started it.
         self.protected(tree);
     }
 
-    /// Whether the host can tell the commands of the window's harness: a window whose
-    /// harness keeps its servers in the window's group, as the daemon said at a mark, on a
-    /// platform with groups. Asked before the tree is walked (Calliope on 472b1d96).
+    /// Whether the host can tell the commands of the window's harness, as the daemon said at
+    /// a mark how it keeps its servers: in the window's group, on a platform with groups,
+    /// by their groups; in no group, its commands each in a shell of its own
+    /// ([`Servers::ByShell`]), by their chains ([`Baseline::commands`]). Asked before the
+    /// tree is walked (Calliope on 472b1d96).
     pub fn tells_commands(&self) -> bool {
         self.commands_kept().is_some()
     }
 
     fn commands_kept(&self) -> Option<Kept> {
-        self.kept.filter(|kept| kept.servers == Servers::InGroup)
+        // A window in the window's group where there are no groups claims what cannot be.
+        self.kept
+            .filter(|kept| kept.servers == Servers::InGroup)
+            .filter(|kept| kept.group.is_some())
+            .or(self.kept.filter(|kept| kept.servers == Servers::ByShell))
     }
 
     /// The window is at rest, its tree `tree`: kept, under the number answered, for a
@@ -206,6 +243,10 @@ impl Baseline {
     /// before the monitors were called (the pane's clock: [`clock`]): none where the host
     /// cannot tell them (`cf_proto::panes::Commands`). A rest no longer kept, or never kept,
     /// leaves nothing out.
+    ///
+    /// **Where the platform has no groups** (a Windows job object, T-906) no process is a
+    /// command by its group: a harness that runs each command in a shell of its own
+    /// ([`Servers::ByShell`]) has them told by their chain instead ([`Baseline::chained`]).
     pub fn commands(
         &self,
         tree: &[Member],
@@ -213,11 +254,57 @@ impl Baseline {
         before: &dyn Fn(&Member) -> bool,
     ) -> Option<Background> {
         let kept = self.commands_kept()?;
+        let Some(group) = kept.group.filter(|_| kept.servers == Servers::InGroup) else {
+            return Some(listed(self.chained(tree, since)));
+        };
         let empty = HashSet::new();
         let rest = since
             .and_then(|since| self.rests.iter().find(|(number, _)| *number == since))
             .map_or(&empty, |(_, rest)| rest);
-        Some(listed(harness::commands(kept, tree, rest, before)))
+        Some(listed(harness::commands(group, tree, rest, before)))
+    }
+
+    /// The commands of a window whose harness runs each in a shell of its own, on a platform
+    /// with no groups (a Windows job object, [`Servers::ByShell`]): what
+    /// began after the rest `since`, where it is one kept, else after the window's launch,
+    /// that is the work a turn's is proved by ([`work`]: a shell the harness started, and a
+    /// chain of processes that run down from it while it runs); never what is the harness's
+    /// own ([`Baseline::protected`]). Claude Code runs every command so (Git Bash's
+    /// `bash.exe` for a Bash call's, a Monitor's and a background job's), and its servers as
+    /// the programs they are (`node`, `uvx`, or behind a `cmd.exe /c`, which is no shell
+    /// here): the processes it started for its own are none of them, whenever they began. No
+    /// start is read against a monitor's call: where no rest proves them, the window's
+    /// launch, before any command of it, is what is left out, and nothing later is.
+    ///
+    /// **The shell is the command** (T-906's live `tell` on zeewin2). Claude Code 2.1.312
+    /// ends a command on Windows by its shell's number alone: its tree kill asks `ps` for the
+    /// children and signals the group (`process.kill(-pid)`), neither of which native
+    /// Windows has, and falls back to the shell. A Monitor's `exec sleep 611` in Git Bash is
+    /// a `sleep.exe` of its own, under the shell, which runs on with no parent once the shell
+    /// is ended; so does what a Bash call the human interrupted was running. What runs on so
+    /// is left running, as a job a command detached is ([`work`]), and the window's close
+    /// ends it; it is no command, or a monitor whose notice was Claude Code's would be held
+    /// for as long as it runs. A command that printed such a notice runs still, its shell
+    /// with it (Git Bash keeps the shell while what it `exec`s runs).
+    ///
+    /// Limits: a server the user wraps in `bash` or `powershell` and the harness starts after
+    /// the rest, and a shell a server started for its own while it runs, are counted, which
+    /// holds a monitor until a later look or Finish; a command that printed a notice and then
+    /// ended its shell, leaving what it started to run on, is not.
+    fn chained(&self, tree: &[Member], since: Option<u64>) -> Vec<Member> {
+        let rest = since.and_then(|number| self.rests.iter().find(|(kept, _)| *kept == number));
+        let left_out = rest.map_or(&self.launch, |(_, rest)| rest);
+        let protected = self.protected(tree);
+        let started: Vec<&Member> = tree
+            .iter()
+            .filter(|member| !left_out.contains(&member.key))
+            .collect();
+        let shells = work::turns(&started, &protected);
+        started
+            .into_iter()
+            .filter(|member| shells.contains(&member.key))
+            .cloned()
+            .collect()
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is
@@ -226,10 +313,67 @@ impl Baseline {
         self.before.is_some()
     }
 
-    /// What `tree`, the pane's tree now, has that its turn started, as the daemon is
-    /// told of it.
+    /// What `tree`, the pane's tree now, has that its turn started, and the work the window
+    /// would end that was detached from it, as the daemon is told of it
+    /// ([`Baseline::named`], where every process of the tree is one a close ends).
+    #[cfg(test)]
     pub fn left_running(&self, tree: &[Member]) -> Background {
-        listed(self.turn_work(tree))
+        let named = self
+            .named(tree, |_| Ok(None))
+            .expect("a look that cannot fail");
+        listed(named)
+    }
+
+    /// What the host names of `tree`, oldest first: the turn's work ([`Baseline::turn_work`])
+    /// and the work detached from it ([`Baseline::detached`]) that a close of the window ends.
+    /// `proved` says which of the detached work it is asked of (when there is any) the host may
+    /// name, by what its platform can prove of it: none where every one may be. On the Mac, those
+    /// a close ends (what the tree selects and the bound allows: a process that only the window's
+    /// marker ties to it is not one, and is `possibly_left`, which no close ends); on Windows,
+    /// those whose starter was a shell, read as they began ([`proved_by_birth`]).
+    pub fn named(
+        &self,
+        tree: &[Member],
+        proved: impl FnOnce(&[Member]) -> std::io::Result<Option<HashSet<ProcessKey>>>,
+    ) -> std::io::Result<Vec<Member>> {
+        let mut named = self.turn_work(tree);
+        let detached = self.detached(tree);
+        if !detached.is_empty() {
+            let proved = proved(&detached)?;
+            named.extend(detached.into_iter().filter(|member| {
+                proved
+                    .as_ref()
+                    .is_none_or(|named| named.contains(&member.key))
+            }));
+            named.sort_by_key(|member| (member.key.began, member.key.pid));
+        }
+        Ok(named)
+    }
+
+    /// The work of `tree` that was detached from the turn, oldest first: a process that began
+    /// after the mark (or was detached work at the mark before it: [`Baseline::mark`] carries it),
+    /// is none of the harness's own and has lost the process that started it, with what descends
+    /// from it ([`work::detached`], which says what it cannot tell). It is the window's where the
+    /// tree holds it and not the turn's by a chain; nothing ends it but the window's close. The
+    /// host names none where no turn was marked.
+    pub fn detached(&self, tree: &[Member]) -> Vec<Member> {
+        let Some(before) = &self.before else {
+            return Vec::new();
+        };
+        let protected = self.protected(tree);
+        // What the tree had when the turn began and was not carried from the turn before, and
+        // the rest: what began after, and the work the turns before left detached.
+        let (_, started): (Vec<&Member>, Vec<&Member>) = tree.iter().partition(|member| {
+            before.contains(&member.key) && !self.carried.contains(&member.key)
+        });
+        let detached = work::detached(&started, &protected);
+        let mut jobs: Vec<Member> = started
+            .into_iter()
+            .filter(|member| detached.contains(&member.key))
+            .cloned()
+            .collect();
+        jobs.sort_by_key(|member| (member.key.began, member.key.pid));
+        jobs
     }
 
     /// The members of `tree` that are the turn's work, all of them, oldest first:
@@ -288,6 +432,45 @@ impl Baseline {
         *own = kept;
         protected
     }
+}
+
+/// Of `detached`, the detached work of a Windows job, those the host proves the agent's: a job
+/// whose starter was a shell as the job began (`born_of_a_shell`, which [`Births`] answers), with
+/// whatever descends from it. A job a build tool left (Gradle's daemon: its starter is the build
+/// tool, no shell), or one whose birth was not read, is not proved.
+#[cfg(any(windows, test))]
+pub(crate) fn proved_by_birth(
+    detached: &[Member],
+    born_of_a_shell: impl Fn(ProcessKey) -> bool,
+) -> HashSet<ProcessKey> {
+    let by_key: HashMap<ProcessKey, &Member> =
+        detached.iter().map(|member| (member.key, member)).collect();
+    detached
+        .iter()
+        .filter(|member| {
+            let mut at = *member;
+            // A tree names no process twice among a process's ancestors: the bound is
+            // only for a list that is no tree.
+            for _ in 0..=by_key.len() {
+                match at.parent {
+                    None => return born_of_a_shell(at.key),
+                    Some(parent) => match by_key.get(&parent) {
+                        Some(parent) => at = parent,
+                        None => return false,
+                    },
+                }
+            }
+            false
+        })
+        .map(|member| member.key)
+        .collect()
+}
+
+/// Whether the file `file` (a program's name, with or without its `.exe`) is a shell, as the
+/// host tells one: what the agent's commands run in ([`work`]).
+#[cfg(any(windows, test))]
+pub(crate) fn is_a_shell(file: &str) -> bool {
+    work::is_shell(file)
 }
 
 /// What `tree` has that is in `roots` or descends from a process in it, by the

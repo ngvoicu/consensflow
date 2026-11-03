@@ -21,6 +21,26 @@ print("started " + json.dumps({"program": os.getpid(), "job": job}), flush=True)
 time.sleep(60)
 "#;
 
+/// A job the agent's command left in a session of its own, with its shell gone: a Python, which
+/// shows the environment it was started with, so the pane's marker is how the tree finds it
+/// (`LEFT`'s `sleep` is a system binary, which shows none). It is in the tree by the marker,
+/// and no close of the window ends it.
+pub(super) const LEFT_MARKED: &str = r#"
+import json, os, subprocess, time
+
+LEAVER = (
+    "import subprocess, sys; print(subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(39)'], "
+    "start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid)"
+)
+print("ready", flush=True)
+input()
+shell = subprocess.run(["/bin/sh", "-c", '/usr/bin/python3 -c "$LEAVER"'], capture_output=True,
+                       text=True, env={**os.environ, "LEAVER": LEAVER})
+job = int(shell.stdout.strip())
+print("started " + json.dumps({"program": os.getpid(), "job": job}), flush=True)
+time.sleep(60)
+"#;
+
 /// A window of a harness named `codex`, whose binary and the helper it keeps for
 /// the session (a program named for it beside it, which runs a shell with a job)
 /// are in `BINS`, a folder with a space in its name. After the mark the helper

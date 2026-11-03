@@ -140,6 +140,141 @@ fn the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_
 }
 
 #[test]
+fn a_task_done_takes_its_result_from_a_file_as_the_report_ran_it() {
+    // The command the report ran (2026-11-02): `cf task done T-1110 --file
+    // /tmp/t1110-result.md` stored "--file /tmp/t1110-result.md" as the result.
+    let folder = tempfile::tempdir().expect("a folder");
+    let path = file(
+        folder.path(),
+        "result.md",
+        "Done: the flags of a command hold.\n",
+    );
+    let api = scripted(vec![reply(200, json!({ "task": task("working") }))]);
+    let (code, _, said) = window(&api, &["task", "done", "T-3", "--file", &path]);
+    assert_eq!((code, said.as_str()), (Some(0), ""));
+    assert_eq!(
+        posted(&api),
+        [(
+            "/api/tasks/3/done".to_owned(),
+            Some(json!({ "body": "Done: the flags of a command hold." }))
+        )],
+        "the file's words, not the flag's"
+    );
+}
+
+#[test]
+fn every_command_that_takes_words_takes_a_file_of_them() {
+    let folder = tempfile::tempdir().expect("a folder");
+    let path = file(folder.path(), "words.md", "The words of the file.\n");
+    let moved = || json!({ "task": task("working") });
+    let answered = |id: u64| json!({ "message": { "id": id, "recipient": "zeus" } });
+    for (args, asked, answer, body) in [
+        (
+            vec!["task", "done", "T-3", "--file", &path],
+            "/api/tasks/3/done",
+            moved(),
+            json!({ "body": "The words of the file." }),
+        ),
+        (
+            vec!["task", "accept", "T-3", "--file", &path],
+            "/api/tasks/3/accept",
+            moved(),
+            json!({ "body": "The words of the file." }),
+        ),
+        (
+            vec!["task", "cancel", "T-3", "--file", &path],
+            "/api/tasks/3/cancel",
+            moved(),
+            json!({ "body": "The words of the file." }),
+        ),
+        (
+            vec!["task", "pause", "T-3", "--file", &path],
+            "/api/tasks/3/pause",
+            moved(),
+            json!({ "body": "The words of the file." }),
+        ),
+        (
+            vec!["task", "finish", "T-3", "--file", &path],
+            "/api/tasks/3/finish",
+            moved(),
+            json!({ "body": "The words of the file." }),
+        ),
+        (
+            vec!["note", "--file", &path],
+            "/api/notes",
+            answered(7),
+            json!({ "body": "The words of the file." }),
+        ),
+        (
+            vec!["note", "--human", "--file", &path],
+            "/api/notes",
+            json!({ "message": { "id": 7, "recipient": "human" } }),
+            json!({ "body": "The words of the file.", "to": "human" }),
+        ),
+        (
+            vec!["ask", "--file", &path],
+            "/api/questions",
+            json!({ "message": { "id": 7, "recipient": "chief" } }),
+            json!({ "body": "The words of the file." }),
+        ),
+        (
+            vec!["answer", "m-9", "--file", &path],
+            "/api/answers",
+            answered(7),
+            json!({ "question": 9, "body": "The words of the file." }),
+        ),
+    ] {
+        let api = scripted(vec![reply(200, answer)]);
+        let (code, _, said) = window(&api, &args);
+        assert_eq!((code, said.as_str()), (Some(0), ""), "{args:?}");
+        assert_eq!(posted(&api), [(asked.to_owned(), Some(body))], "{args:?}");
+    }
+}
+
+#[test]
+fn a_flag_the_command_does_not_know_in_front_of_the_words_is_refused_not_kept() {
+    for args in [
+        vec!["task", "done", "T-3", "--bogus", "hi"],
+        vec!["task", "add", "--tier", "light", "--bogus", "hi"],
+        vec!["tell", "T-3", "--bogus", "hi"],
+        vec!["task", "resume", "T-3", "--bogus", "hi"],
+        vec!["note", "--bogus", "hi"],
+        vec!["ask", "--bogus", "hi"],
+        vec!["answer", "m-9", "--bogus", "hi"],
+    ] {
+        let api = scripted(Vec::new());
+        let (code, printed, said) = window(&api, &args);
+        assert_eq!(
+            (code, printed.as_str(), said),
+            (
+                Some(2),
+                "",
+                "cf: unknown flag \"--bogus\": write it after -- to keep it as words\n".to_owned()
+            ),
+            "{args:?}"
+        );
+        assert!(api.received().is_empty(), "{args:?}");
+    }
+    // A flag inside the words is text; one the words begin with is kept by `--`.
+    for (args, body) in [
+        (vec!["note", "hi", "--bogus"], "hi --bogus"),
+        (vec!["note", "--", "--bogus"], "--bogus"),
+    ] {
+        let api = scripted(vec![reply(
+            200,
+            json!({ "message": { "id": 7, "recipient": "zeus" } }),
+        )]);
+        let (code, _, said) = window(&api, &args);
+        assert_eq!((code, said.as_str()), (Some(0), ""), "{args:?}");
+        assert_eq!(
+            posted(&api),
+            [("/api/notes".to_owned(), Some(json!({ "body": body })))],
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
 fn a_file_beside_words_of_their_own_is_written_wrong_and_one_that_cannot_be_read_fails() {
     let folder = tempfile::tempdir().expect("a folder");
     let path = file(folder.path(), "brief.md", "Write the parser.");

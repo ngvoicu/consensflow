@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
@@ -54,7 +54,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::resumable::transcript_kept;
-use crate::shared::{specmint, window_args};
+use crate::shared::{compacting, specmint, window_args};
 
 /// Codex's question tool (`request_user_input`) is behind a feature still
 /// marked under development; the broker answers a member's from the board.
@@ -122,6 +122,17 @@ impl CodexAdapter {
     }
 }
 
+/// How Codex on Windows reads a paste ([`CodexAdapter::silent_paste`]): about 0.6 ms a
+/// character; its own draw of the paste comes 50 ms or more after it; then 120 ms of quiet;
+/// and at the most a second and a millisecond a character.
+const CODEX_ON_WINDOWS: SilentPaste = SilentPaste {
+    pace_us_per_character: 600,
+    drawn_after_ms: 50,
+    quiet_ms: 120,
+    most_ms: 1_000,
+    most_us_per_character: 1_000,
+};
+
 impl Adapter for CodexAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
@@ -129,7 +140,7 @@ impl Adapter for CodexAdapter {
             let executable = executable(Harness::Codex, &services.env)?;
             let launched =
                 launch::configuration(services, launch.id, launch.directory, &executable).await?;
-            let role = role::text(
+            let texts = role::text(
                 services,
                 launch.role,
                 &executable,
@@ -169,8 +180,11 @@ impl Adapter for CodexAdapter {
                 }
                 None => None,
             };
-            // The role goes by a file the window's broker reads, never its command line.
-            let role = role::write(&services.env, launch.id, &role)?;
+            // The role goes by a file the window's broker reads, never its command line;
+            // what the window's sub-agents start with in its place, by a file the
+            // supervisor names to the app-server.
+            let role = role::write(&services.env, launch.id, &texts.role)?;
+            let children = role::write_children(&services.env, launch.id, &texts)?;
             let mut args = Vec::new();
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
@@ -179,7 +193,12 @@ impl Adapter for CodexAdapter {
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
-                env: launched.env.into_iter().chain([role]).collect(),
+                env: launched
+                    .env
+                    .into_iter()
+                    .chain([role])
+                    .chain(children)
+                    .collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()
@@ -224,6 +243,18 @@ impl Adapter for CodexAdapter {
         }
     }
 
+    /// On Windows Codex reads a paste's key presses without drawing anything, and takes an
+    /// Enter that comes while they are still coming, or within 120 ms of them, for a line break
+    /// in the paste (its `paste_burst`). A measured heuristic (T-1048, Codex 0.166.0 on zeewin2,
+    /// 2026-11-01): a few lines were drawn 150 to 205 ms after the paste; a paste of 7,775
+    /// characters was answered at once by a print at about 10 ms (its reaction to the first
+    /// key) and drawn as `[Pasted Content … chars]` only at about 4.5 s, about 0.6 ms a
+    /// character, and an Enter before that stayed in it. Elsewhere the terminal hands Codex a
+    /// paste whole, and it takes its Enter as it comes.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.services.env.on_windows().then_some(CODEX_ON_WINDOWS)
+    }
+
     /// A resumed thread keeps the developer message its first turn began with:
     /// the role text a launch gives it (the developer instructions of a main
     /// start, see the module `role`) is not given to a resume, and would not be used. Found live on Codex 0.162.1,
@@ -247,12 +278,13 @@ impl Adapter for CodexAdapter {
         FirstMessage::Delivered
     }
 
-    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant, folder: &str) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Codex,
             env,
             variant,
+            folder,
             paths::global_specmint(env, variant),
         )
     }
@@ -311,6 +343,13 @@ impl Window for CodexWindow {
     /// The thread is named by the broker, never by the window's process.
     fn opened(&self, _pid: Option<u32>) {}
 
+    /// Codex compacts a long thread at the start of a turn, its record an open turn
+    /// and nothing more until it is done, the message that began it written after:
+    /// its status line says it.
+    fn compacting(&self, screen: &[String]) -> bool {
+        compacting::drawn(screen, &compacting::CODEX)
+    }
+
     fn follow(&self, session: &str) {
         *self.thread.borrow_mut() = Some(session.to_owned());
         // The turn the record had open was a thread's the window left.
@@ -322,7 +361,7 @@ impl Window for CodexWindow {
     /// waits for it too: one whose broker never names it reads as starting, and
     /// has nothing delivered, for good (a Codex chief opened again after the app's
     /// restart on zeewin, 2026-10-19, read "starting" for 78 minutes).
-    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
+    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async move {
             if self.named.get() {
                 return Ok(None);
@@ -420,6 +459,13 @@ impl Window for CodexWindow {
                 self.at_work.set(shown.idle == Some(false));
             }
         })
+    }
+
+    /// Codex's background terminals, as its broker asks its server for them: a command it
+    /// started with no shell, or kept when a pause interrupted it, is no process the host
+    /// names as the turn's work (T-1137). None where the broker gave no list.
+    fn kept_commands(&self) -> Work<'_, Option<Vec<String>>> {
+        Box::pin(async move { self.channel.terminals(&*self.time, &*self.loopback).await })
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

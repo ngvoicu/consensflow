@@ -144,7 +144,6 @@ fn a_pi_presets_effort_is_kept_under_thinking_and_every_other_kinds_under_effort
         ("pi", "thinking"),
         ("claude-code", "effort"),
         ("codex", "effort"),
-        ("opencode", "effort"),
         ("devin", "effort"),
     ] {
         let mut with_effort = preset("a", kind, "m");
@@ -198,7 +197,7 @@ fn with_no_stored_rows_the_roster_is_the_catalog_in_the_presets_order() {
         .map(|preset| preset.id.as_str())
         .collect();
     assert_eq!(ids(&rows), listed);
-    assert_eq!(rows.len(), 251);
+    assert_eq!(rows.len(), 217);
     assert!(rows.iter().all(|row| row.get("custom").is_none()));
 }
 
@@ -206,33 +205,27 @@ fn with_no_stored_rows_the_roster_is_the_catalog_in_the_presets_order() {
 fn a_stored_copy_of_a_catalog_entry_is_ignored_edited_or_not() {
     let catalog = Catalog::bundled().unwrap();
     let document = document_of(
-        r#"{"id":"gefjon","name":"Edited","kind":"codex","model":"gpt-x","effort":"low","preset":"gefjon"},
+        r#"{"id":"eos","name":"Edited","kind":"codex","model":"gpt-x","effort":"low","preset":"eos"},
            {"id":"zeus","kind":"claude-code","model":"claude-opus-5","preset":"zeus"}"#,
     );
     let rows = catalog.rows(&document);
-    assert_eq!(rows.len(), 251);
-    let gefjon: Vec<&AgentRow> = rows
-        .iter()
-        .filter(|row| row.id() == Some("gefjon"))
-        .collect();
-    assert_eq!(gefjon.len(), 1);
-    assert_eq!(
-        gefjon[0].model(),
-        Some("opencode/muse-spark-1.3-contributor-free")
-    );
-    assert_eq!(gefjon[0].get("custom"), None);
+    assert_eq!(rows.len(), 217);
+    let eos: Vec<&AgentRow> = rows.iter().filter(|row| row.id() == Some("eos")).collect();
+    assert_eq!(eos.len(), 1);
+    assert_eq!(eos[0].model(), Some("openrouter/meta/muse-spark-1.3"));
+    assert_eq!(eos[0].get("custom"), None);
 }
 
 #[test]
 fn a_custom_row_that_took_a_catalog_name_hides_that_entry_and_comes_after_the_catalog() {
     let catalog = Catalog::bundled().unwrap();
     let rows = catalog.rows(&document_of(
-        r#"{"id":"zeus","name":"Zeus","kind":"opencode","model":"opencode/muse-spark-1.3"}"#,
+        r#"{"id":"zeus","name":"Zeus","kind":"pi","model":"openrouter/meta/muse-spark-1.3"}"#,
     ));
-    assert_eq!(rows.len(), 251, "one entry out, one row of the human's in");
+    assert_eq!(rows.len(), 217, "one entry out, one row of the human's in");
     let zeus: Vec<&AgentRow> = rows.iter().filter(|row| row.id() == Some("zeus")).collect();
     assert_eq!(zeus.len(), 1);
-    assert_eq!(zeus[0].kind(), Some("opencode"));
+    assert_eq!(zeus[0].kind(), Some("pi"));
     assert_eq!(zeus[0].get("custom"), Some(&Value::Bool(true)));
     assert_eq!(rows.last().and_then(AgentRow::id), Some("zeus"));
 }

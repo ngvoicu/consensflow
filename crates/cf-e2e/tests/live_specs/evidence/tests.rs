@@ -117,3 +117,28 @@ fn the_git_folder_is_not_looked_into_and_a_trailing_slash_names_the_same_folder(
     assert!(seen.elsewhere.is_empty());
     assert_eq!(seen.specs.len(), 1);
 }
+
+#[test]
+fn a_registry_or_a_spec_outside_the_specs_folder_is_said_though_the_folder_holds_a_spec() {
+    // A chief that kept the folder it was told and also followed the skill's `.specs`.
+    let folder = project(&[
+        ("docs/specs/registry.md", REGISTRY),
+        ("docs/specs/hello/SPEC.md", SPEC),
+        (".specs/registry.md", REGISTRY),
+    ]);
+    let seen = look(folder.path(), "docs/specs").unwrap();
+    assert!(seen.the_spec("docs/specs").is_ok());
+    assert_eq!(
+        seen.none_outside("docs/specs").unwrap_err(),
+        "the chief also wrote outside docs/specs: .specs/registry.md"
+    );
+    // The folder alone is nothing outside it.
+    let alone = project(&[
+        ("docs/specs/registry.md", REGISTRY),
+        ("docs/specs/hello/SPEC.md", SPEC),
+    ]);
+    assert!(look(alone.path(), "docs/specs")
+        .unwrap()
+        .none_outside("docs/specs")
+        .is_ok());
+}

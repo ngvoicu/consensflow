@@ -132,7 +132,7 @@ fn a_job_its_record_holds_or_its_turn_left_running_holds_the_first() {
         1
     );
     // A harness whose record says nothing of jobs: what the pane host lists.
-    let (scene, _) = rested("opencode");
+    let (scene, _) = rested("pi");
     let mut look = scene.look(ms(60, 0));
     look.windows.open.push(OpenWindow {
         handle: "long-worker".to_owned(),

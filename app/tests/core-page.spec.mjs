@@ -125,7 +125,7 @@ function model() {
       },
       {
         name: 'athena',
-        harness: 'opencode',
+        harness: 'pi',
         model: 'muse-spark',
         profile: { workTier: 'light' },
       },
@@ -386,6 +386,17 @@ async function open(page, data = model()) {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
       },
+      // A meeting with the chief, as the daemon has it: the time it began, or none, and what it
+      // held is let go at its Stop.
+      'project.meeting': ({ project, on }) => {
+        const board = data.boards[project]
+        if (on) board.project.meeting = board.project.meeting ?? new Date().toISOString()
+        else {
+          delete board.project.meeting
+          delete board.held
+        }
+        return answer({ project: board.project })
+      },
       // A project renamed, and a line written under its name, as the daemon does it: checked,
       // kept on the project of the list and on the one of its board, and refused in its words.
       'project.rename': ({ project, name }) => {
@@ -405,6 +416,53 @@ async function open(page, data = model()) {
         for (const shown of shownProject(project)) {
           if (line === '') delete shown.description
           else shown.description = line
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
+      // The rules for a project's staff, as the daemon keeps them: trimmed, none where blank,
+      // refused over 8,000 bytes or 150 lines or with a control character, in its words.
+      'project.rules': ({ project, rules }) => {
+        const kept = (rules ?? '').trim()
+        const refused = (why) => ({
+          ok: false,
+          error: `the rules for the staff are plain text: ${why}`,
+        })
+        const bytes = new TextEncoder().encode(kept).length
+        const lines = kept === '' ? 0 : kept.split('\n').length
+        const control = (character) => {
+          const code = character.codePointAt(0)
+          return (
+            character !== '\n' &&
+            character !== '\t' &&
+            (code < 0x20 || (code >= 0x7f && code <= 0x9f))
+          )
+        }
+        if ([...kept].some(control)) {
+          return refused('they have no control characters but line breaks and tabs')
+        }
+        if (bytes > 8000) return refused(`they are at most 8000 bytes, and these are ${bytes}`)
+        if (lines > 150) return refused(`they are at most 150 lines, and these are ${lines}`)
+        for (const shown of shownProject(project)) {
+          if (kept === '') delete shown.staffRules
+          else shown.staffRules = kept
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
+      // The size the Claude members' windows compact at, as the daemon keeps it: a whole number
+      // of tokens from 100,000 to 1,000,000, or none (null or left out) for Claude's own point,
+      // refused in its words otherwise.
+      'project.compaction': ({ project, compaction }) => {
+        const size = compaction ?? null
+        if (size !== null && !(Number.isInteger(size) && size >= 100000 && size <= 1000000)) {
+          return {
+            ok: false,
+            error:
+              "the compaction window for Claude members is a whole number of tokens from 100000 to 1000000, or none for Claude's own point",
+          }
+        }
+        for (const shown of shownProject(project)) {
+          if (size === null) delete shown.claudeCompaction
+          else shown.claudeCompaction = size
         }
         return answer({ project: shownProject(project)[0] })
       },
@@ -548,6 +606,13 @@ async function open(page, data = model()) {
       // An agents screen's address, as Rust hands it: the daemon's page with
       // the UI token, or why there is none.
       if (command === 'agents_screen') {
+        // Held by a test (`hold(page, 'agents_screen')`), as the app holds it while the
+        // daemon starts.
+        const held = window.__hold.agents_screen
+        if (held !== undefined) {
+          delete window.__hold.agents_screen
+          await held
+        }
         return data.screens
           ? { ok: true, url: `${data.screens.url}/${args.page}?token=${data.screens.token}` }
           : { ok: false, error: 'the agents screens are not available: the daemon is not up' }
@@ -1142,7 +1207,7 @@ test("says the effort an agent runs at, after its model: on a member's row, a se
       pane: { id: 'p1-zeus-amber-pine', generation: 1 },
     },
     {
-      participant: participant(7, 'athena', 'advisor', { harness: 'opencode', tier: 'light' }),
+      participant: participant(7, 'athena', 'advisor', { harness: 'pi', tier: 'light' }),
       tasks: [],
       activity: { state: 'closed' },
       pane: null,
@@ -1159,7 +1224,7 @@ test("says the effort an agent runs at, after its model: on a member's row, a se
     'worker session of @zeus · claude-code · claude-sonnet-5 · high',
   )
   // An agent with no effort shows none.
-  await expect(meta('athena')).toHaveText('advisor · light · opencode · muse-spark')
+  await expect(meta('athena')).toHaveText('advisor · light · pi · muse-spark')
 })
 
 test('shows what a task on the board waits for, on its card and in its drawer', async ({
@@ -1242,6 +1307,60 @@ test("shows a tester's test tasks as cards on its row like any task, and a test 
   await expect(waiting.locator('.card-route')).toHaveText('for a standard tester')
 })
 
+test('says an account that refused for its billing or login is unavailable, with no time, and tries it again on the human’s word', async ({
+  page,
+}) => {
+  // MUS-23: nothing resets such an account, so no time is shown and nothing is said to wait for a reset.
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana').participant.outUntil =
+    '9999-12-31T23:59:59.998Z'
+  await open(page, data)
+  const diana = page.locator('tr[data-handle="diana"]')
+  await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(diana.locator('.row-status')).toHaveText(
+    'Unavailable: its account was refused for billing or login. Press Try again now once it works',
+  )
+  await diana.getByRole('button', { name: 'Try @diana again now, once its account works' }).click()
+  expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
+})
+
+test('says a member whose harness moved its model on its own is held, why in the words the engine gave, and what to do', async ({
+  page,
+}) => {
+  // MUS-24: the move holds the member as a refused account does, and the row says what moved,
+  // and that only the human's word for that member lets it go on.
+  const data = model()
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  diana.activity = {
+    state: 'out',
+    reason:
+      'moved: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose',
+  }
+  await open(page, data)
+  await expect(page.locator('tr[data-handle="diana"] .row-status')).toHaveText(
+    'Held: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose. Press Try again now once it is on the model you chose',
+  )
+  await expect(
+    page.getByRole('button', {
+      name: 'Try @diana again now, once it is on the model you chose',
+    }),
+  ).toBeVisible()
+})
+
+test('says a held member whose engine lost its words after a restart is held for its model, not for a billing', async ({
+  page,
+}) => {
+  const data = model()
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  diana.activity = null
+  await open(page, data)
+  const status = page.locator('tr[data-handle="diana"] .row-status')
+  await expect(status).toHaveText(/^Held: its model moved on its own\. Press Try again now/)
+  await expect(status).not.toContainText('billing')
+})
+
 test('names the day of a reset that is not today, and tries a member or the chief out of quota again', async ({
   page,
 }) => {
@@ -1283,6 +1402,30 @@ test('a task held while its member is out of quota says when it goes on', async 
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
     /^out of quota until (\S+ )?\d\d:\d\d · from /,
+  )
+})
+
+test('a task held for an account no time resets says it waits for the human, not for a time', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  lane.tasks.push(
+    task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, {
+      heldUntil: '9999-12-31T23:59:59.998Z',
+    }),
+  )
+  lane.tasks.push(
+    task(10, 'Write the notes', 'paused', 'chief', 'zeus', 5, {
+      heldUntil: '9999-12-31T23:59:59.999Z',
+    }),
+  )
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
+    /^unavailable until you say it works again · from /,
+  )
+  await expect(page.locator('button.card[data-task="10"] .card-route')).toHaveText(
+    /^held until you say its model may go on · from /,
   )
 })
 
@@ -1863,6 +2006,24 @@ test('offers Finish for any working task of a member, held or not, and for none 
   await page.locator('button.card[data-task="2"]').click()
   await expect(page.getByRole('complementary', { name: 'Task T-2' })).toBeVisible()
   await expect(finishOf(page, 'Task T-2')).toHaveCount(0)
+})
+
+test("offers Finish for a task that waits on a question, which the chief or the human may take as the result of its worker's last words", async ({
+  page,
+}) => {
+  // The words a turn ended on may be raised as a question that nobody meant (T-1119): the
+  // task waits, and Finish is the way to take them as the result.
+  const data = heldModel()
+  data.finishLeaves = { jobs: 0, agents: 0 }
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(14, 'Install the toolchain', 'waiting', 'chief', 'zeus', 4))
+  data.tasks['1:14'] = { ...lane.tasks.at(-1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="14"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-14' })).toBeVisible()
+  await expect(finishOf(page, 'Task T-14')).toHaveCount(1)
+  await finishOf(page, 'Task T-14').click()
+  await expect.poll(() => calls(page, 'task.finish')).toEqual([{ project: 1, task: 14 }])
 })
 
 test('says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last', async ({
@@ -3003,23 +3164,31 @@ async function selecting(page, line) {
 }
 
 // On a Mac, Cmd+C copies and Ctrl+C stays the program's interrupt, selection
-// or not; Ctrl+Shift+C copies on every system.
-test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
-  page,
-}) => {
-  const { copied, sent } = await selecting(page, 'copy this line')
-  await page.keyboard.press('Control+Shift+C')
-  expect(await copied()).toEqual(['copy'])
-  expect(await sent()).toEqual([])
-  await page.mouse.dblclick(
-    ...(await page
-      .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
-      .boundingBox()
-      .then((box) => [box.x + 6, box.y + 6])),
-  )
-  await page.keyboard.press('Control+C')
-  await expect.poll(sent).toEqual([[3]])
-  expect(await copied()).toEqual(['copy'])
+// or not; Ctrl+Shift+C copies on every system. The page tells a Mac by the
+// browser's user agent, which this sets, as the cases on Windows set theirs: the
+// suite runs on Linux (T-1161).
+test.describe('on a Mac', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  })
+  test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
+    page,
+  }) => {
+    const { copied, sent } = await selecting(page, 'copy this line')
+    await page.keyboard.press('Control+Shift+C')
+    expect(await copied()).toEqual(['copy'])
+    expect(await sent()).toEqual([])
+    await page.mouse.dblclick(
+      ...(await page
+        .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+        .boundingBox()
+        .then((box) => [box.x + 6, box.y + 6])),
+    )
+    await page.keyboard.press('Control+C')
+    await expect.poll(sent).toEqual([[3]])
+    expect(await copied()).toEqual(['copy'])
+  })
 })
 
 test.describe('on Windows', () => {
@@ -3227,7 +3396,7 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
   // A worker: every agent that does not hold the role yet, grouped by work tier, the most critical first.
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'hera · gpt-6-astra · codex · max',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(2)
   // An advisor: every agent but the image agent, which only draws.
@@ -3236,7 +3405,7 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
     'hera · gpt-6-astra · codex · max',
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   expect(
     await dialog
@@ -3256,7 +3425,7 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
   await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await dialog.getByLabel('Agent').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
@@ -3303,7 +3472,7 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
     'hera · gpt-6-astra · codex · max',
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await dialog.getByLabel('Agent').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
@@ -3597,8 +3766,13 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   const markup = (id) =>
     page.evaluate(
       (id) =>
-        // The shared sections only: Computer use is Project settings' own.
-        [...document.querySelectorAll(`#${id} .project-section:not(.computer-use)`)]
+        // The shared sections only: Computer use, the rules for the staff and the Claude members'
+        // compaction are Project settings' own.
+        [
+          ...document.querySelectorAll(
+            `#${id} .project-section:not(.computer-use):not(.staff-rules):not(.claude-compaction)`,
+          ),
+        ]
           .slice(1)
           .map((section) => {
             const copy = section.cloneNode(true)
@@ -3904,7 +4078,7 @@ test('refuses a new project when no harness is installed here, and says where to
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin']
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   await expect(page.locator('#status')).toHaveText(
@@ -3990,7 +4164,7 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
@@ -4004,12 +4178,21 @@ test("names the board's button and its dialog Project settings, with Staff, Huma
   // Computer use is last, and there since the project has Claude Code members.
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
+    'Rules for the staff',
+    'Compaction for Claude members',
     'Human approval',
     'Wake-up calls',
     'Specs',
     'Computer use',
   ])
-  for (const name of ['Staff', 'Human approval', 'Wake-up calls', 'Specs']) {
+  for (const name of [
+    'Staff',
+    'Rules for the staff',
+    'Compaction for Claude members',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+  ]) {
     await expect(dialog.getByRole('group', { name, exact: true })).toBeVisible()
   }
   // The old title is nowhere in the page, hidden or not.
@@ -4330,6 +4513,282 @@ test('a board drawn again while the dialog is open leaves what the human is typi
   await expect(specs.variant).toHaveValue('core-html')
 })
 
+/** Project settings open on project 1, and its section of the rules for the staff. */
+async function rulesGroup(page) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const group = dialog.getByRole('group', { name: 'Rules for the staff' })
+  return {
+    dialog,
+    group,
+    rules: group.getByLabel('The rules'),
+    count: group.locator('.staff-rules-count'),
+    hint: group.locator('.staff-rules-hint'),
+    save: group.getByRole('button', { name: 'Save rules' }),
+  }
+}
+
+const STAFF_RULES = '- Push to origin only, never to upstream.\n- Tests use the .smoke bundle id.'
+
+test('Project settings shows the rules for the staff the board has, counted against the bounds, and says they hold no secrets', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.staffRules = STAFF_RULES
+  await open(page, data)
+  const section = await rulesGroup(page)
+  await expect(section.rules).toHaveValue(STAFF_RULES)
+  await expect(section.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
+  await expect(section.count).not.toHaveClass(/over/)
+  await expect(section.save).toBeEnabled()
+  await expect(section.group).toContainText('No secrets: no passwords, tokens or keys')
+  await expect(section.group).toContainText(
+    'Every member of the staff is given these rules after its role',
+  )
+  await expect(section.hint).toBeHidden()
+  // Opening sends nothing.
+  expect(await calls(page, 'project.rules')).toEqual([])
+})
+
+test('a project with no rules for its staff shows an empty field and a count of nothing', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  await expect(section.rules).toHaveValue('')
+  await expect(section.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
+  await expect(section.save).toBeEnabled()
+})
+
+test('saves the rules for the staff as written, by their own Save, shows what the daemon kept, and shows them when the dialog opens again', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  await section.rules.fill(`  ${STAFF_RULES}\n\n`)
+  // Counted as the ledger keeps them: trimmed.
+  await expect(section.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
+  expect(await calls(page, 'project.rules')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.rules'))
+    .toEqual([{ project: 1, rules: `  ${STAFF_RULES}\n\n` }])
+  await expect(section.rules).toHaveValue(STAFF_RULES)
+  await expect(page.locator('#status')).toHaveText(
+    'The rules for the staff are saved: each window of the project is given them when it next starts.',
+  )
+  // No other section saved with them.
+  for (const operation of ['wakeup.set', 'project.specs', 'project.gate']) {
+    expect(await calls(page, operation)).toEqual([])
+  }
+  await section.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await rulesGroup(page)
+  await expect(again.rules).toHaveValue(STAFF_RULES)
+  // Taken away: an empty field saved.
+  await again.rules.fill('')
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.rules')).toHaveLength(2)
+  expect((await calls(page, 'project.rules'))[1]).toEqual({ project: 1, rules: '' })
+  await expect(page.locator('#status')).toHaveText(
+    'The project has no rules for the staff now: windows that start from now on are given none.',
+  )
+})
+
+test('counts the rules for the staff in bytes and lines as the ledger does, and holds Save back while they are over a bound', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  for (const [text, count, over] of [
+    ['a'.repeat(8000), '8,000 of 8,000 bytes · 1 of 150 lines', false],
+    ['a'.repeat(8001), '8,001 of 8,000 bytes · 1 of 150 lines', true],
+    // Three bytes each: fewer characters than the bound, more bytes.
+    ['日'.repeat(2667), '8,001 of 8,000 bytes · 1 of 150 lines', true],
+    [Array(150).fill('a rule').join('\n'), '1,049 of 8,000 bytes · 150 of 150 lines', false],
+    [Array(151).fill('a rule').join('\n'), '1,056 of 8,000 bytes · 151 of 150 lines', true],
+    // Spaces and line breaks at either end are not kept, and are not counted.
+    [`\n\n   ${'a'.repeat(8000)}   \n`, '8,000 of 8,000 bytes · 1 of 150 lines', false],
+  ]) {
+    await section.rules.fill(text)
+    await expect(section.count).toHaveText(count)
+    if (over) {
+      await expect(section.count).toHaveClass(/over/)
+      await expect(section.rules).toHaveAttribute('aria-invalid', 'true')
+      await expect(section.save).toBeDisabled()
+    } else {
+      await expect(section.count).not.toHaveClass(/over/)
+      await expect(section.save).toBeEnabled()
+    }
+  }
+  expect(await calls(page, 'project.rules')).toEqual([])
+})
+
+test("says a refusal of the rules for the staff in their section, in the daemon's words, and keeps what was written", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await rulesGroup(page)
+  await section.rules.fill('a\u0007b')
+  await section.save.click()
+  await expect(section.hint).toHaveText(
+    'the rules for the staff are plain text: they have no control characters but line breaks and tabs',
+  )
+  await expect(section.hint).toBeVisible()
+  await expect(section.rules).toHaveValue('a\u0007b')
+})
+
+/** Project settings open on project 1, and its section of the Claude members' compaction. */
+async function compactionGroup(page) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const group = dialog.getByRole('group', { name: 'Compaction for Claude members' })
+  return {
+    dialog,
+    group,
+    own: group.getByRole('radio', { name: "Claude's own point" }),
+    size: group.getByRole('radio', { name: 'A size' }),
+    amount: group.getByLabel('Size in tokens, 100,000 to 1,000,000'),
+    hint: group.locator('.claude-compaction-hint'),
+    save: group.getByRole('button', { name: 'Save compaction' }),
+  }
+}
+
+test("Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  await expect(section.own).toBeChecked()
+  await expect(section.size).not.toBeChecked()
+  await expect(section.amount).toBeDisabled()
+  await expect(section.amount).toHaveValue('')
+  await expect(section.save).toBeEnabled()
+  await expect(section.hint).toBeHidden()
+  // One line, in the section: what it does and who it leaves alone.
+  await expect(section.group).toContainText(
+    "From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.",
+  )
+  // And the margin Claude keeps, which is Claude's to change: said as the version we measured it on.
+  await expect(section.group).toContainText(
+    'Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.',
+  )
+  // Opening sends nothing.
+  expect(await calls(page, 'project.compaction')).toEqual([])
+})
+
+test("Project settings shows the size the board has for the Claude members' compaction", async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.claudeCompaction = 400000
+  await open(page, data)
+  const section = await compactionGroup(page)
+  await expect(section.size).toBeChecked()
+  await expect(section.own).not.toBeChecked()
+  await expect(section.amount).toBeEnabled()
+  await expect(section.amount).toHaveValue('400000')
+  await expect(section.save).toBeEnabled()
+  expect(await calls(page, 'project.compaction')).toEqual([])
+})
+
+test("saves the choice of a size by its own Save, shows what the daemon kept, and saves Claude's own point again as none", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  // A first size starts from the one the proposal measured.
+  await section.size.check()
+  await expect(section.amount).toBeEnabled()
+  await expect(section.amount).toHaveValue('400000')
+  await section.amount.fill('250000')
+  expect(await calls(page, 'project.compaction')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.compaction'))
+    .toEqual([{ project: 1, compaction: 250000 }])
+  await expect(section.amount).toHaveValue('250000')
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude members compact at about 250,000 tokens: each window is given it when it next starts.",
+  )
+  // No other section saved with it.
+  for (const operation of ['project.rules', 'wakeup.set', 'project.specs', 'project.gate']) {
+    expect(await calls(page, operation)).toEqual([])
+  }
+  await section.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await compactionGroup(page)
+  await expect(again.size).toBeChecked()
+  await expect(again.amount).toHaveValue('250000')
+  // Claude's own point again: none is saved, and the size is not kept in the field.
+  await again.own.check()
+  await expect(again.amount).toBeDisabled()
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.compaction')).toHaveLength(2)
+  expect((await calls(page, 'project.compaction'))[1]).toEqual({ project: 1, compaction: null })
+  await expect(again.own).toBeChecked()
+  await expect(again.amount).toHaveValue('')
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude members use Claude's own point again: windows that start from now on are given no size.",
+  )
+})
+
+test('holds the size to the range Claude takes, and Save back while it is not a whole number in it', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  await section.size.check()
+  for (const [text, fine] of [
+    ['100000', true],
+    ['1000000', true],
+    ['400000', true],
+    ['  400000 ', true],
+    ['99999', false],
+    ['1000001', false],
+    ['0', false],
+    ['', false],
+    ['400k', false],
+    ['4e5', false],
+    ['-400000', false],
+    ['400000.5', false],
+  ]) {
+    await section.amount.fill(text)
+    if (fine) {
+      await expect(section.save, text).toBeEnabled()
+      await expect(section.hint, text).toBeHidden()
+      await expect(section.amount, text).toHaveAttribute('aria-invalid', 'false')
+    } else {
+      await expect(section.save, text).toBeDisabled()
+      await expect(section.hint, text).toHaveText(
+        'A size is a whole number from 100,000 to 1,000,000.',
+      )
+      await expect(section.amount, text).toHaveAttribute('aria-invalid', 'true')
+    }
+  }
+  // Claude's own point is saved whatever the field holds.
+  await section.amount.fill('99999')
+  await section.own.check()
+  await expect(section.save).toBeEnabled()
+  await expect(section.hint).toBeHidden()
+  expect(await calls(page, 'project.compaction')).toEqual([])
+})
+
+test("says a refusal of the Claude members' compaction in its section and keeps what was chosen", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await compactionGroup(page)
+  await section.size.check()
+  await section.amount.fill('300000')
+  await page.evaluate(() => {
+    window.__down = 'the daemon stopped'
+  })
+  await section.save.click()
+  await expect(section.hint).toBeVisible()
+  await expect(section.hint).toContainText('the daemon stopped')
+  await expect(section.amount).toHaveValue('300000')
+  await expect(section.size).toBeChecked()
+})
+
 const DEFAULT_WAKE_UP_WORDS =
   'Do you still have work to do? If tasks are left on the board or in your plan, carry on.'
 
@@ -4571,7 +5030,7 @@ test('lists what waits for approval in For you, and approves or declines it, wri
 function withAdvisor() {
   const data = model()
   data.boards[1].lanes.push({
-    participant: participant(5, 'athena', 'advisor', { harness: 'opencode' }),
+    participant: participant(5, 'athena', 'advisor', { harness: 'pi' }),
     tasks: [task(7, 'Research the market', 'working', 'chief', 'athena', 4)],
     activity: { state: 'working' },
     pane: { id: 'p1-athena', generation: 4 },
@@ -4655,7 +5114,7 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
     await expect(agents.getByRole('button', { name: 'Close' })).toBeFocused()
     const screen = agents.frameLocator('iframe')
     await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
-    await expect(screen.locator('#agents .member .callsign', { hasText: /^gefjon$/ })).toBeVisible()
+    await expect(screen.locator('#agents .member .callsign', { hasText: /^eos$/ })).toBeVisible()
     const read = await agentsRead(page)
     await agents.getByRole('button', { name: 'Close' }).click()
     await expect(agents).toBeHidden()
@@ -4663,6 +5122,34 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
     // What the screen changed (a model, a tier) is on the board's agents too.
     await expect.poll(() => agentsRead(page)).toBe(read + 1)
     expect(await page.getByRole('dialog').count()).toBe(0)
+  } finally {
+    await daemon.close()
+  }
+})
+
+test('Agents asked for while the daemon starts says it waits, a click meanwhile asks nothing more, and it opens once the daemon is up', async ({
+  page,
+}) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    const status = page.locator('#status')
+    const asked = () =>
+      page.evaluate(() => window.__calls.filter(([c]) => c === 'agents_screen').length)
+    await hold(page, 'agents_screen')
+    const agents = await openScreen(page, 'Agents')
+    await expect(status).toHaveText("Agents opens once ConsensFlow's daemon is up.")
+    await expect(agents).toBeHidden()
+    // Clicked again, and Harnesses too: nothing more is asked while the first waits.
+    await openScreen(page, 'Agents')
+    expect(await asked()).toBe(1)
+    await openScreen(page, 'Harnesses')
+    await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeHidden()
+    expect(await asked()).toBe(1)
+    await letGo(page, 'agents_screen')
+    await expect(agents).toBeVisible()
+    await expect(status).toHaveText('')
+    expect(await page.getByRole('dialog').count()).toBe(1)
   } finally {
     await daemon.close()
   }
@@ -4703,7 +5190,7 @@ test('Escape pressed inside a screen closes its dialog, as it closes every other
   try {
     await open(page, { ...model(), screens: daemon.screens })
     const agents = await openScreen(page, 'Agents')
-    await agents.frameLocator('iframe').getByRole('searchbox').fill('gefjon')
+    await agents.frameLocator('iframe').getByRole('searchbox').fill('eos')
     await page.keyboard.press('Escape')
     await expect(agents).toBeHidden()
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
@@ -6070,7 +6557,7 @@ function twoWithStaffs() {
   const data = twoOpen()
   data.boards[2].lanes.push({
     participant: {
-      ...participant(11, 'athena', 'worker', { harness: 'opencode', tier: 'light' }),
+      ...participant(11, 'athena', 'worker', { harness: 'pi', tier: 'light' }),
       projectId: 2,
     },
     tasks: [],
@@ -6090,6 +6577,8 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
   // Computer use is last, and there since the project has Claude Code members.
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
+    'Rules for the staff',
+    'Compaction for Claude members',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6397,7 +6886,7 @@ function twoWithOwnSettings() {
   ]
   data.boards[2].lanes.push(
     member(11, 'zeus'),
-    member(12, 'athena', { harness: 'opencode', tier: 'light' }),
+    member(12, 'athena', { harness: 'pi', tier: 'light' }),
   )
   data.boards[2].project.gate = true
   data.boards[1].project.specs = { on: true, folder: 'plans', variant: 'tdd' }
@@ -7278,7 +7767,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     'hera · gpt-6-astra · codex · max',
     'zeus · claude-sonnet-5 · claude · high',
     'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · opencode',
+    'athena · muse-spark · pi',
   ])
   await dialog.locator('[name="pickAgent"]').selectOption('athena')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
@@ -7692,10 +8181,151 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
   // The chief's window opens and closes with the project: its card has no Open, only its
-  // History and Switch chief.
+  // History, Switch chief and Start meeting.
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief'])
+    .toEqual(['History', 'Switch chief', 'Start meeting'])
+})
+
+/** A message for the chief that its meeting with the human holds: queued, as the daemon lists it. */
+const heldForChief = (id, kind, sender, taskNumber, body) => ({
+  id,
+  kind,
+  state: 'queued',
+  sender,
+  recipient: 'chief',
+  taskNumber,
+  body,
+  questions: null,
+  choices: null,
+  createdAt: at(2),
+})
+
+test('meets the chief from its card: Start holds what comes for it, the button counts it, its card and For you list it, and Stop lets it go', async ({
+  page,
+}) => {
+  const data = model()
+  // An approval project: what waits for the human's approval is a list of its own.
+  data.boards[1].project.gate = true
+  data.boards[1].gated = [
+    {
+      id: 30,
+      kind: 'task',
+      state: 'gated',
+      sender: 'chief',
+      recipient: 'zeus',
+      taskNumber: 4,
+      body: 'Add the tests',
+      questions: null,
+      choices: null,
+      createdAt: at(3),
+    },
+  ]
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  const status = card.locator('.terminal-status')
+  await card.getByRole('button', { name: 'Start meeting' }).click()
+  await expect.poll(() => calls(page, 'project.meeting')).toEqual([{ project: 1, on: true }])
+  await expect
+    .poll(() => named(card.locator('button')))
+    .toEqual(['History', 'Switch chief', 'Stop meeting (0)'])
+  await expect(status).toHaveText('In a meeting · nothing held yet')
+  await expect(status).toHaveAttribute('data-state', 'meeting')
+  // What comes for the chief now waits, as the daemon's next board says: a member's question
+  // first, then the oldest.
+  await page.evaluate(
+    (held) => {
+      window.__model.boards[1].held = held
+      window.__listeners.get('state-changed')()
+    },
+    [
+      heldForChief(41, 'question', 'zeus', 3, 'Which parser?'),
+      heldForChief(40, 'result', 'zeus', 2, 'Lexer done; 14 tests pass.'),
+    ],
+  )
+  await expect
+    .poll(() => named(card.locator('button')))
+    .toEqual(['History', 'Switch chief', 'Stop meeting (2)'])
+  await expect(status).toHaveText('In a meeting · 2 messages held')
+  const held = page.getByRole('list', { name: 'Held for your meeting' })
+  await expect
+    .poll(() => held.locator('.strip').evaluateAll((all) => all.map((s) => s.dataset.message)))
+    .toEqual(['41', '40'])
+  await expect(held.locator('.strip-route')).toHaveText([
+    'Question from @zeus · T-3 · held',
+    'Result from @zeus · T-2 · held',
+  ])
+  // A held message only reads: marked read, it would never reach the chief.
+  await expect.poll(() => named(held.locator('button'))).toEqual(['Open task', 'Open task'])
+  // What waits for approval stays apart, and each is counted once.
+  const waiting = page.getByRole('list', { name: 'Waiting for you' })
+  await expect
+    .poll(() => waiting.locator('.strip').evaluateAll((all) => all.map((s) => s.dataset.message)))
+    .toEqual(['30'])
+  await expect(page.locator('.foryou-status')).toHaveText('1 waiting · 2 held · 1 note')
+
+  await card.getByRole('button', { name: 'Stop meeting (2)' }).click()
+  await expect
+    .poll(() => calls(page, 'project.meeting'))
+    .toEqual([
+      { project: 1, on: true },
+      { project: 1, on: false },
+    ])
+  await expect
+    .poll(() => named(card.locator('button')))
+    .toEqual(['History', 'Switch chief', 'Start meeting'])
+  await expect(held).toHaveCount(0)
+  await expect(status).toHaveText('Working')
+  await expect(page.locator('.foryou-status')).toHaveText('1 waiting · 1 note')
+})
+
+test("keeps the chief's head inside its card in a meeting, however narrow, and draws no meeting on a closed project", async ({
+  page,
+}) => {
+  const data = closedFoundry()
+  data.boards[1].project.meeting = at(5)
+  data.boards[1].held = [
+    heldForChief(41, 'question', 'zeus', 3, 'Which parser?'),
+    heldForChief(40, 'result', 'zeus', 2, 'Lexer done; 14 tests pass.'),
+  ]
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.getByRole('button', { name: 'Stop meeting (2)' })).toBeVisible()
+  // Every part of the head inside the card: the head wraps (name and buttons, then what the
+  // chief is doing), and nothing runs past its edge.
+  const outside = () =>
+    card.evaluate((card) => {
+      const edge = card.getBoundingClientRect()
+      return [...card.querySelectorAll('.terminal-head > *, .terminal-head button')]
+        .filter((part) => {
+          const box = part.getBoundingClientRect()
+          return box.left < edge.left || box.right > edge.right
+        })
+        .map((part) => part.textContent)
+    })
+  // The chief's buttons keep together, each line of them ending at the head's end: wrapped
+  // one by one, History stayed by the name and the other two went under it, at the left.
+  const shortLines = () =>
+    card.evaluate((card) => {
+      const ends = new Map()
+      for (const button of card.querySelectorAll('.terminal-head button')) {
+        const box = button.getBoundingClientRect()
+        const line = Math.round(box.top)
+        ends.set(line, Math.max(ends.get(line) ?? 0, box.right))
+      }
+      const end = Math.max(...ends.values())
+      return [...ends.values()].filter((right) => right < end - 1).length
+    })
+  for (const width of [700, 880, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(outside, { message: `the head at ${width}px` }).toEqual([])
+    await expect.poll(shortLines, { message: `the buttons' lines at ${width}px` }).toBe(0)
+  }
+  // A closed project draws no card: nothing on it acts, and its Close ended any meeting.
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('main.main')).toHaveAttribute('data-suspended', 'true')
+  await expect(page.getByRole('button', { name: /meeting/ })).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'Held for your meeting' })).toHaveCount(0)
 })
 
 /**
@@ -7771,11 +8401,11 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
     reviewer.getByRole('button', { name: "Show @zeus · brisk-birch's terminal" }),
   ).toBeVisible()
   // The chief's terminal has nothing to show or hide, on its row or its card:
-  // its row has no tools, and its card reads its history and switches the chief.
+  // its row has no tools, and its card reads its history, switches the chief and meets it.
   await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief'])
+    .toEqual(['History', 'Switch chief', 'Start meeting'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
@@ -9033,7 +9663,7 @@ test('refuses Switch chief when no harness is installed here, and says where to 
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'opencode', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin']
   await open(page, data)
   await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
   await expect(page.locator('#status')).toHaveText(

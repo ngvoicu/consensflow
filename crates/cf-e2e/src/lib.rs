@@ -29,12 +29,14 @@
 //!   agents screens to what they must do; [`http`] asks a daemon's API. (The
 //!   packaged smoke uses all three, on the daemon the built app chose.)
 //! - [`live`] is what the opt-in live tests share (its own doc lists its parts):
-//!   the machine's own harnesses (Claude Code, OpenCode, Pi, Devin and Codex),
+//!   the machine's own harnesses (Claude Code, Pi, Devin and Codex),
 //!   the rig whose windows run them, a real harness's window opened as the app
 //!   opens one, a project of real members whose chief a check plays, what the
 //!   harnesses keep and say and what the daemon wrote as it went, what the
 //!   pane host says a worker's turn left running, what a run says and how it
 //!   waits, and the variables `cargo xtask live` sets from its flags.
+//! - [`muse`] is the machine's own Muse, which the rig's Muse windows run on its fake
+//!   model, and the session logs Muse writes.
 //! - [`rollout`] reads a Codex thread's rollout, what it began with and was told,
 //!   in the rig's Codex home and the machine's.
 //! - [`ports`] names a port on loopback for a program to listen on, one that no
@@ -68,7 +70,7 @@
 //! turn was closed on at once, `live_reopened` a worker's window opened again
 //! with no task, which reads at rest until it has a turn of its own, `live_bench` the
 //! board between a real chief and real workers, `live_designer` a real Codex
-//! drawing an image, `live_approval` real harnesses in every seat of five
+//! drawing an image, `live_approval` real harnesses in every seat of four
 //! projects sending what the human approves, behind the approval gate, and
 //! `live_mcp` a real Claude Code worker that has an MCP server finishing its
 //! task, `live_finish` a real worker of any harness running a shell
@@ -81,7 +83,8 @@
 //! words the chief gets before any resume, and finishes the paused task with,
 //! `live_pi_parity` a Pi member's window holding all that bare Pi holds in the same
 //! folder, and `live_task_working` a real worker's task working before its window runs
-//! its command). Run them with
+//! its command, `live_task_resumed` a real worker's task, paused, cut or closed with its
+//! project and then resumed, reading working again). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with
@@ -89,8 +92,8 @@
 //!
 //! The stand-ins the suites run in place of what ConsensFlow runs are
 //! binaries of this crate, behind the `test-support` feature the crate's own
-//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-opencode-2`,
-//! `fake-cf`, `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
+//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-cf`,
+//! `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
 
 // The two modules that call the system themselves allow it, block by block: the live checks'
 // hold on a process they end (`live::members::descent`'s native calls), and the count a
@@ -108,6 +111,7 @@ mod error;
 pub mod files;
 pub mod http;
 pub mod live;
+pub mod muse;
 mod outcome;
 pub mod pattern;
 pub mod png;
@@ -117,6 +121,7 @@ pub mod rig;
 pub mod rollout;
 pub mod scratch_home;
 pub mod serial;
+pub mod shipped;
 pub mod smoke_harness;
 mod stand_in;
 pub mod terminal;

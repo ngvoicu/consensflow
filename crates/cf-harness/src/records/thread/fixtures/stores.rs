@@ -1,144 +1,14 @@
-//! The harnesses that keep a SQLite store (OpenCode, Devin): each fixture's
-//! rows written a few at a time into a store of the shape its harness has.
+//! The harness that keeps a SQLite store (Devin): each fixture's rows written a
+//! few at a time into a store of the shape it has.
 
-use std::collections::HashMap;
 use std::fs;
 
 use cf_proto::agents::Harness;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
-use super::rig::{append, fixture_json, half, pieces, upsert, Rig, LATE_MS, STEP_MS};
+use super::rig::{append, fixture_json, half, pieces, upsert, Rig, STEP_MS};
 use crate::records::Options;
-
-/// What OpenCode's growth writes with an event: the row it names, and its table.
-type Write = Option<(&'static str, Value)>;
-
-/// OpenCode's events in order, each with the row it names as that event leaves
-/// it: the fixture's own row at the row's last event, the event's own account
-/// of it before (`opencodeGrowth`).
-fn opencode_growth(fixture: &Value, events: &[Value]) -> Vec<(Value, Write)> {
-    let session = fixture["session"][0]["id"].as_str().unwrap();
-    let mut rows = HashMap::new();
-    for table in ["message", "part"] {
-        for row in fixture[table].as_array().unwrap() {
-            rows.insert(row["id"].as_str().unwrap().to_owned(), (table, row.clone()));
-        }
-    }
-    let mut ordered: Vec<Value> = Vec::new();
-    for event in events
-        .iter()
-        .filter(|event| event["aggregate_id"] == session)
-    {
-        match ordered.iter().position(|seen| seen["id"] == event["id"]) {
-            Some(at) => ordered[at] = event.clone(),
-            None => ordered.push(event.clone()),
-        }
-    }
-    ordered.sort_by(|left, right| {
-        left["seq"]
-            .as_f64()
-            .partial_cmp(&right["seq"].as_f64())
-            .unwrap()
-    });
-    // What an event is about: its message's or its part's own account.
-    let account = |event: &Value| -> Value {
-        let data: Value = serde_json::from_str(event["data"].as_str().unwrap()).unwrap();
-        if data["info"].is_object() {
-            data["info"].clone()
-        } else {
-            data["part"].clone()
-        }
-    };
-    let named = |event: &Value| account(event)["id"].as_str().map(str::to_owned);
-    let last: HashMap<String, Value> = ordered
-        .iter()
-        .filter_map(|event| named(event).map(|id| (id, event["id"].clone())))
-        .collect();
-    ordered
-        .into_iter()
-        .map(|event| {
-            let write = named(&event).and_then(|id| {
-                let (table, row) = rows.get(&id)?;
-                if last[&id] == event["id"] {
-                    return Some((*table, row.clone()));
-                }
-                let mut told = account(&event);
-                let told = told.as_object_mut().unwrap();
-                for column in ["id", "sessionID", "messageID"] {
-                    told.shift_remove(column);
-                }
-                let mut earlier = row.clone();
-                earlier["data"] = Value::String(Value::Object(told.clone()).to_string());
-                Some((*table, earlier))
-            });
-            (event, write)
-        })
-        .collect()
-}
-
-/// OpenCode's store with a fixture's conversation, and a look after each of
-/// its events: how many looks.
-pub(super) async fn opencode(name: &str) -> usize {
-    let fixture = fixture_json(&format!("opencode/{name}.json"));
-    let native = fixture_json("opencode/native-events.json");
-    let mut events: Vec<Value> = fixture["event"].as_array().cloned().unwrap_or_default();
-    events.extend(native["event"].as_array().unwrap().iter().cloned());
-    let session = fixture["session"][0].clone();
-    let session_id = session["id"].as_str().unwrap().to_owned();
-    let mut rig = Rig::new(name, |root| vec![("XDG_DATA_HOME", root.to_path_buf())]);
-    let folder = rig.path(&["opencode"]);
-    fs::create_dir_all(&folder).unwrap();
-    let writer = Connection::open(folder.join("opencode.db")).unwrap();
-    let columns: Vec<String> = session
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(|column| {
-            format!(
-                "\"{column}\" {}",
-                if column == "id" {
-                    "text primary key"
-                } else {
-                    ""
-                }
-            )
-        })
-        .collect();
-    writer
-        .execute_batch(&format!(
-            "pragma journal_mode = WAL;
-            create table session ({});
-            create table message (id text primary key, session_id text not null,
-              time_created integer not null, time_updated integer not null, data text not null);
-            create index message_session_idx on message (session_id, time_created, id);
-            create table part (id text primary key, message_id text not null, session_id text not null,
-              time_created integer not null, time_updated integer not null, data text not null);
-            create index part_session_idx on part (session_id);
-            create table event (id text primary key, aggregate_id text not null,
-              seq integer not null, type text not null, data text not null);
-            create unique index event_aggregate_seq_idx on event (aggregate_id, seq);",
-            columns.join(", ")
-        ))
-        .unwrap();
-    upsert(&writer, "session", &session);
-    for (event, write) in opencode_growth(&fixture, &events) {
-        writer.execute_batch("begin immediate").unwrap();
-        if let Some((table, row)) = write {
-            upsert(&writer, table, &row);
-        }
-        upsert(&writer, "event", &event);
-        writer.execute_batch("commit").unwrap();
-        rig.tick(STEP_MS);
-        rig.look(Harness::Opencode, &session_id, &Options::default())
-            .await;
-    }
-    rig.tick(LATE_MS);
-    rig.look(Harness::Opencode, &session_id, &Options::default())
-        .await;
-    writer.close().unwrap();
-    rig.finish()
-}
 
 /// Devin's store, one row at a time with its main chain following, beside its
 /// wire log in line pieces, a look after each, and last the fixture's own

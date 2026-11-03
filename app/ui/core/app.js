@@ -48,9 +48,9 @@ const state = {
   selected: null,
   board: null,
   inbox: NO_NOTES,
-  // Whether a project's specs folder holds a file (`{ project, present }`), read after its board
-  // and never waited for: whether Specs shows. The daemon stops at the first file, and remembers
-  // it for a moment.
+  // Whether Specs shows for a project (`{ project, on, present }`): specs on for it, or its
+  // specs folder holding a file, read after its board and never waited for. The daemon stops at
+  // the first file, and remembers it for a moment.
   specsPresent: null,
   agents: [],
   /** What the app says of specs for every project and the Specmint it bundles, as last read. */
@@ -112,10 +112,34 @@ async function readSpecs() {
 // The daemon down: the banner says why and what comes next, and stays until
 // the daemon is back, when everything is read again.
 const daemonDown = $('#daemon-down')
+
+/**
+ * Where the banner is drawn. It is the page's line under the command bar, which an open modal
+ * and its backdrop cover: so while one is open it is shown in the top layer, over the dialog,
+ * where the human sees it; and shown again whenever another modal opens, to stay over that one.
+ * It takes no clicks, so the dialog it is over is as it was.
+ */
+function placeDaemonDown() {
+  const over = !daemonDown.hidden && document.querySelector('dialog[open]') !== null
+  if (daemonDown.matches(':popover-open')) daemonDown.hidePopover()
+  if (over) {
+    daemonDown.popover = 'manual'
+    daemonDown.showPopover()
+  } else {
+    daemonDown.removeAttribute('popover')
+  }
+}
+new MutationObserver(placeDaemonDown).observe(document.body, {
+  attributes: true,
+  attributeFilter: ['open'],
+  subtree: true,
+})
+
 function daemonStatus({ available, cause, retrying }) {
   const wasDown = !daemonDown.hidden
   daemonDown.hidden = available
   if (available) {
+    placeDaemonDown()
     if (wasDown) void act(readAgents)
     return
   }
@@ -124,6 +148,7 @@ function daemonStatus({ available, cause, retrying }) {
     ...(cause ? [` ${sentence(cause)}`] : []),
     retrying ? ' Starting it again…' : ' Quit ConsensFlow and open it again.',
   )
+  placeDaemonDown()
 }
 
 /** "It stopped." for "it stopped": a cause read as a sentence of its own. */
@@ -315,6 +340,8 @@ const terminals = new TerminalsView(stage, {
   onSwitchChief: (chief) => act(() => switchChief.open(chief)),
   // Every card reads its participant's whole history.
   onHistory: (participant) => void historyViewer.open(participant),
+  // The human meets the chief from its card: what comes for it waits until the Stop.
+  onMeeting: (chief, on) => act(() => daemon('project.meeting', { project: chief.projectId, on })),
   onTryAgain: (chief) => tryAgain(chief),
   // A session's terminal is hidden from its card as from its lane.
   onHideTerminal: (participant) => hideSession(participant),
@@ -477,21 +504,22 @@ let presenceReads = 0
 let presenceAgain = null
 
 /**
- * Whether the specs folder of project `project` holds a file, which shows the Specs button: read
- * apart from the board, which never waits for it (a folder on a drive that does not answer would
- * hold the board, its inbox and its windows until the daemon gave up on it), and shown when it
- * comes, for the project the board still shows. A folder that cannot be read shows no button. An
- * answer the daemon gave from memory says when it reads the folder again: it is asked once more
- * then, so the button never keeps what the folder said before a spec was written.
+ * Whether the Specs button shows for project `project`: specs on for it, or its specs folder
+ * holding a file — read apart from the board, which never waits for it (a folder on a drive
+ * that does not answer would hold the board, its inbox and its windows until the daemon gave
+ * up on it), and shown when it comes, for the project the board still shows. A folder that
+ * cannot be read holds no file, and a daemon that cannot answer says neither. An answer the
+ * daemon gave from memory says when it reads the folder again: it is asked once more then, so
+ * the button never keeps what the folder said before a spec was written.
  */
 async function readPresence(project) {
   const read = ++presenceReads
   clearTimeout(presenceAgain)
   presenceAgain = null
-  const said = await daemon('specs.present', { project }).catch(() => ({ present: false }))
+  const said = await daemon('specs.present', { project }).catch(() => ({}))
   if (read !== presenceReads || state.board?.project.id !== project) return
-  state.specsPresent = { project, present: said.present === true }
-  specsButton.hidden = !state.specsPresent.present
+  state.specsPresent = { project, on: said.on === true, present: said.present === true }
+  specsButton.hidden = !(state.specsPresent.on || state.specsPresent.present)
   if (typeof said.readAgainIn === 'number') {
     presenceAgain = setTimeout(() => void readPresence(project), said.readAgainIn + 50)
   }
@@ -513,12 +541,13 @@ function render() {
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
   projectSettingsButton.disabled = project === null
-  // Specs shows while the project's specs folder holds a file: from the board's first read after
-  // the chief writes its first spec, open or closed, specs on or off (`readPresence`).
+  // Specs shows while specs are on for the project or its specs folder holds a file: from the
+  // setting being saved, before anything is written, and from the board's first read after the
+  // chief writes its first spec, open or closed (`readPresence`).
   specsButton.hidden = !(
     project !== null &&
     state.specsPresent?.project === project.id &&
-    state.specsPresent.present
+    (state.specsPresent.on || state.specsPresent.present)
   )
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
@@ -836,31 +865,49 @@ const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
 // frame never reaches the dialog around it, so a screen hands Escape up.
 // Closing one gives the focus back to the Settings button (its dialog closed
 // as the screen opened) and reads the agents again: a model or a tier may
-// have changed on it.
+// have changed on it. Asked as the app starts, a screen's address waits for the
+// daemon's start: the status line says so, and one screen is asked for at a
+// time, so clicks meanwhile queue nothing (T-978).
 const settingsButton = $('#settings-button')
 const settingsDialog = $('#settings-dialog')
 settingsButton.addEventListener('click', () => settingsDialog.showModal())
+/** How long a screen's address is waited for before the status line says why. */
+const SCREEN_WAIT_SAID_MS = 300
+let screenAsked = false
 for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
   const page = entry.dataset.agentsPage
   const dialog = document.getElementById(entry.getAttribute('aria-controls'))
   const frame = dialog.querySelector('iframe')
-  entry.addEventListener('click', () =>
-    act(async () => {
-      settingsDialog.close()
-      const screen = await invoke('agents_screen', { page })
-      if (screen?.ok !== true) {
-        throw new Error(screen?.error ?? 'The agents screens are not available.')
+  entry.addEventListener('click', () => {
+    settingsDialog.close()
+    if (screenAsked) return
+    screenAsked = true
+    const waiting = `${entry.textContent.trim()} opens once ConsensFlow's daemon is up.`
+    const saying = setTimeout(() => note(waiting), SCREEN_WAIT_SAID_MS)
+    void act(async () => {
+      try {
+        const screen = await invoke('agents_screen', { page })
+        if (screen?.ok !== true) {
+          throw new Error(screen?.error ?? 'The agents screens are not available.')
+        }
+        // A screen opened before keeps what the human left on it, its filters
+        // and drafts, and is told the agents may have changed since.
+        if (frame.src === screen.url) {
+          frame.contentWindow.postMessage('consensflow:refresh-agents', new URL(screen.url).origin)
+        } else {
+          frame.src = screen.url
+        }
+        dialog.showModal()
+      } finally {
+        clearTimeout(saying)
+        if (status.textContent === waiting) {
+          status.textContent = ''
+          delete status.dataset.tone
+        }
+        screenAsked = false
       }
-      // A screen opened before keeps what the human left on it, its filters
-      // and drafts, and is told the agents may have changed since.
-      if (frame.src === screen.url) {
-        frame.contentWindow.postMessage('consensflow:refresh-agents', new URL(screen.url).origin)
-      } else {
-        frame.src = screen.url
-      }
-      dialog.showModal()
-    }),
-  )
+    })
+  })
   window.addEventListener('message', (event) => {
     if (event.source === frame.contentWindow && event.data === 'consensflow:close') dialog.close()
   })
@@ -881,6 +928,10 @@ const specsSettings = new SpecsSettings($('#specs-dialog'), {
   readSpecs,
   setSpecs: (specs) => {
     state.specs = specs
+    // What the app says of specs may turn them on for the project shown, or name it another
+    // folder: whether Specs shows is read again at once.
+    const project = state.board?.project.id
+    if (project !== undefined) void readPresence(project)
   },
 })
 $('#specs-settings-button').addEventListener('click', () =>

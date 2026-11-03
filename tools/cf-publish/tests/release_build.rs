@@ -9,17 +9,22 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use cf_publish::testing::signing::test_key;
 use cf_publish::testing::{built_files, folder_of, run_binary, LATER};
 
+/// The cargo a test starts: one file for every crate that starts one
+/// (`crates/cf-process/src/nested_cargo.rs`), which this crate includes because it takes no
+/// dependency (`tests/closure.rs`).
+#[path = "../../../crates/cf-process/src/nested_cargo.rs"]
+mod nested_cargo;
+
 /// cf-publish built as the release builds it, with no feature, in a target folder
-/// of its own.
-#[allow(clippy::disallowed_methods)] // The test builds what it tests.
+/// of its own, by a cargo that has none of the variables cargo gave this test: with them
+/// it would build over files of the build that runs it.
 fn release_build() -> PathBuf {
     let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("release-build");
-    let built = Command::new(env!("CARGO"))
+    let built = nested_cargo::cargo()
         .args([
             "build",
             "--offline",

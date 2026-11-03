@@ -28,7 +28,7 @@ pub enum InputBox {
 /// from the cursor on are drawn plain, not styled: a harness draws the hint in an
 /// empty box in a colour or faint, and words typed there plain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Cursor {
+pub(crate) struct Cursor {
     pub line: usize,
     pub col: usize,
     pub shown: bool,
@@ -37,7 +37,7 @@ pub struct Cursor {
 
 impl Cursor {
     /// The cursor a snapshot's `cursor` says, where it says one.
-    pub fn of(value: Option<&Value>) -> Option<Self> {
+    pub(crate) fn of(value: Option<&Value>) -> Option<Self> {
         let value = value?;
         let number = |name: &str| {
             value
@@ -57,13 +57,18 @@ impl Cursor {
 /// What the input box of a `harness` window holds, where `screen` (its last lines
 /// as drawn, the pane host's `bottom`) shows it, the cursor where `cursor` says;
 /// none where it shows no box the harness's reader knows, or the harness has no
-/// reader (Codex, Pi and OpenCode take their messages through their own channels,
+/// reader (Codex and Pi take their messages through their own channels,
 /// which no typing holds back).
-pub fn read(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<InputBox> {
+pub(crate) fn read(
+    harness: Harness,
+    screen: &[String],
+    cursor: Option<Cursor>,
+) -> Option<InputBox> {
     match harness {
         Harness::Claude => crate::claude::input_box::read(screen, cursor),
         Harness::Devin => crate::devin::input_box::read(screen, cursor),
-        Harness::Codex | Harness::Pi | Harness::Opencode => None,
+        Harness::Muse => crate::muse::read_input_box(screen, cursor),
+        Harness::Codex | Harness::Pi => None,
     }
 }
 
@@ -71,16 +76,26 @@ pub fn read(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Opti
 /// `cursor` says, for the human told of a delivery held for it: empty where its reader
 /// reads it so (a hint is no words), its words where it reads them, none where it reads
 /// no box.
-pub fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<String> {
+pub(crate) fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>) -> Option<String> {
     let mark = match harness {
         Harness::Claude => crate::claude::input_box::MARK,
         Harness::Devin => crate::devin::input_box::MARK,
-        Harness::Codex | Harness::Pi | Harness::Opencode => return None,
+        // Muse's rules are drawn shorter than Claude's and Devin's: its own reader.
+        Harness::Muse => return crate::muse::input_box_words(screen),
+        Harness::Codex | Harness::Pi => return None,
     };
     match read(harness, screen, cursor)? {
         InputBox::Empty => Some(String::new()),
         InputBox::Holds => boxed(screen, mark).map(|boxed| boxed.words),
     }
+}
+
+/// Whether `snapshot` (the pane host's of a `harness` window) shows its input box
+/// empty, as the harness's reader reads it ([`read`]): no where it shows no box.
+pub(crate) fn read_empty(harness: Harness, snapshot: &Value) -> bool {
+    bottom(snapshot).is_some_and(|screen| {
+        read(harness, &screen, Cursor::of(snapshot.get("cursor"))) == Some(InputBox::Empty)
+    })
 }
 
 /// [`shown`], of a `harness` window's screen as drawn now.

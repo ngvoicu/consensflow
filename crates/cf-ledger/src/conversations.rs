@@ -28,7 +28,7 @@ pub use history::{
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
 pub(crate) use transcripts::{
     copied_item_with, copied_items_since, copied_items_with, copy_transcript, head_copied,
-    split_copied, transcript, typed_since,
+    split_copied, transcript, typed_at, typed_since,
 };
 
 /// The most bytes a name the history reads holds: a conversation's harness, a

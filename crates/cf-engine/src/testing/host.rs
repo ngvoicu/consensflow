@@ -55,6 +55,9 @@ pub struct FakeHost {
     pub hold_exits: Cell<bool>,
     /// What `pane.snapshot` answers besides `ok` ([`FakeHost::set_snapshot`]).
     snapshot: RefCell<Map<String, Value>>,
+    /// The panes the engine looked at for how long they had printed nothing
+    /// ([`EngineHost::quiet`]), in order.
+    quiet_looks: RefCell<Vec<Pane>>,
     /// What every exit says besides which pane ended
     /// ([`FakeHost::exits_showing`]): the program's code and signal, and the
     /// lines its screen ended with.
@@ -206,6 +209,14 @@ impl FakeHost {
             .count()
     }
 
+    /// The panes the engine looked at for how long they had printed nothing, in order: the
+    /// looks before it closes the window of a task that is done. The look is no call of
+    /// Node's host, so it is not among the requests ([`FakeHost::snapshots`]) nor in the
+    /// trace.
+    pub fn quiet_looks(&self) -> Vec<Pane> {
+        self.quiet_looks.borrow().clone()
+    }
+
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
     pub fn last(&self, handle: &str) -> Option<OpenPane> {
         self.opened
@@ -259,12 +270,19 @@ impl FakeHost {
         if let Some(own) = own {
             own(op, &body);
         }
+        let drawn_asked = body.get("bottom").is_some();
         self.requests.borrow_mut().push((op.to_owned(), body));
         let mut answer = Map::new();
         let refused = op == "pane.input" && self.refuse_keys.get();
         answer.insert("ok".to_owned(), json!(!refused));
         if op == "pane.snapshot" {
             answer.extend(self.snapshot.borrow().clone());
+            // The screen's last lines as drawn go only to a request that asks for them, as the
+            // pane host sends them (cf-panes' `pane.snapshot`): an engine that reads them from
+            // a snapshot it asked none of reads none (T-946).
+            if !drawn_asked {
+                answer.remove("bottom");
+            }
         }
         Value::Object(answer)
     }
@@ -344,14 +362,19 @@ fn open_json(open: &OpenPane) -> Value {
         .iter()
         .map(|(name, value)| (name.clone(), json!(value)))
         .collect();
-    json!({
+    let mut body = json!({
         "id": open.pane.id,
         "generation": open.pane.generation,
         "cwd": open.cwd,
         "argv": open.argv,
         "env": env,
         "dropEnv": open.drop_env,
-    })
+    });
+    // As the daemon sends it: only for a harness that reads a paste silently.
+    if let Some(silent) = open.silent_paste {
+        body["silentPaste"] = json!(silent);
+    }
+    body
 }
 
 impl PaneHost for FakeHost {
@@ -435,6 +458,20 @@ impl EngineHost for FakeHost {
             self.recorder.answered(at, json!({ "ok": true }));
             Ok(Killed::Killed)
         })
+    }
+
+    /// The `outputQuietMs` the test set ([`FakeHost::set_snapshot`]), none where it set
+    /// none or null, which is a host that does not say. Answered at once, in no turn of its
+    /// own, and written down nowhere: Node's host had no such look, and the traces hold
+    /// every call the engine makes of it.
+    fn quiet<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Option<f64>, HostError>> {
+        self.quiet_looks.borrow_mut().push(pane.clone());
+        let quiet = self
+            .snapshot
+            .borrow()
+            .get("outputQuietMs")
+            .and_then(Value::as_f64);
+        Box::pin(async move { Ok(quiet) })
     }
 }
 

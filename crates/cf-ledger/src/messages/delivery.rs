@@ -13,10 +13,14 @@ use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
 use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
-use super::receipt::reconcile;
+use super::receipt::{
+    kept_read, reconcile, settle_when_given_back, settle_when_given_up, told_when_confirmed,
+    with_kept_read,
+};
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
 use super::{known_message, message_task, messages, require_message, settle_answered, NewNote};
 use crate::conversations::{current_conversation, set_conversation_role_text};
+use crate::meeting::held_by_meeting;
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
 use crate::tasks::{pause_again, release_ready, withdrawn_late};
@@ -49,12 +53,14 @@ pub(crate) fn with_work(store: &Store, project_id: i64) -> Result<Vec<i64>, Ledg
 /// The head of a participant's queue that may go now, or none. A member's
 /// session is its task's: a row of its goes only for a task it holds (queued,
 /// working or waiting), a tell for the window goes whatever its task, and a
-/// task message waits while it holds one at work. A row that rides in another
+/// task message waits while it holds another task at work: not its own, whose resume's
+/// words wait for the window's rest while it reads working (`work_while_resumed`). A row that rides in another
 /// message's paste, or that a door took for its harness, is not the head; and
 /// while a task message for the window waits for the human's approval, nothing
 /// else about its task goes, whoever wrote it and in whatever order they are
 /// approved: the words that came first are not passed over. Nor are older words
-/// told to the window (`told`) that the human still holds.
+/// told to the window (`told`) that the human still holds, nor what a meeting
+/// with the chief holds (`meeting`): a closed chief window opens for none of it.
 pub(crate) fn next_delivery(
     store: &Store,
     participant_id: i64,
@@ -104,6 +110,7 @@ fn next_delivery_among(
          AND m.carried_by IS NULL AND m.claimed_at IS NULL
          AND (m.kind != 'task' OR ?2 = 0 OR NOT EXISTS (
            SELECT 1 FROM task WHERE assignee_id = ?1 AND state IN ('working', 'waiting')
+             AND id IS NOT m.task_id
          ))
          AND (?2 = 0 OR m.urgent = 1 OR m.task_id IN (
            SELECT id FROM task WHERE assignee_id = ?1 AND state IN ({})
@@ -114,10 +121,12 @@ fn next_delivery_among(
              AND words.state = 'gated'
          ))
          AND NOT {}
+         AND NOT {}
          AND (?3 IS NULL OR m.id = ?3)
        ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1",
             sql_list(&HELD_TASK_STATES),
-            behind_held_words("m")
+            behind_held_words("m"),
+            held_by_meeting("m")
         ))?
         .query_map(params![participant_id, serial, only], |row| {
             row.get::<_, i64>(0)
@@ -293,14 +302,17 @@ pub(crate) fn begin_delivery(
             .db
             .prepare("SELECT id FROM message WHERE recipient_id = ? AND state = 'delivering'")?
             .exists([message.recipient_id])?;
+        // At work on another task: the words that resume a task its window is at work on
+        // (`work_while_resumed`) are its own.
         let working = message.kind == "task"
             && MEMBER_ROLES.contains(&message.recipient_role.as_str())
             && store
                 .db
                 .prepare(
-                    "SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')",
+                    "SELECT 1 FROM task WHERE assignee_id = ? AND state IN ('working', 'waiting')
+                       AND id IS NOT (SELECT task_id FROM message WHERE id = ?)",
                 )?
-                .exists([message.recipient_id])?;
+                .exists(params![message.recipient_id, message.id])?;
         if busy || working {
             return Err(LedgerError::refused_with(
                 "recipient-busy",
@@ -596,7 +608,9 @@ pub(crate) fn handed_over(store: &Store, project_id: i64) -> Result<Vec<i64>, Le
 
 /// The harness's own record proves the message arrived: `receipt` is what it
 /// showed. What its paste carried arrived with it, in the same step; then
-/// the task it is about is reconciled once.
+/// the task it is about is reconciled once. A read its recipient made while the
+/// paste was on its way (`keep_read`) is kept in the receipt beside the proof, and
+/// is told now, in this write: a role is read and recorded (`told_when_confirmed`).
 pub(crate) fn confirm_delivery(
     store: &mut Store,
     message_id: i64,
@@ -605,7 +619,12 @@ pub(crate) fn confirm_delivery(
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
         let at = store.at();
-        let receipt = js_order(receipt.cloned().unwrap_or(Value::Null)).to_string();
+        let early = kept_read(&message);
+        let receipt = js_order(with_kept_read(
+            receipt.cloned().unwrap_or(Value::Null),
+            early,
+        ))
+        .to_string();
         store.db.execute(
             "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ? WHERE id = ?",
             params![at, receipt, message_id],
@@ -656,6 +675,9 @@ pub(crate) fn confirm_delivery(
             data["withdrawnAfterHanded"] = json!(late);
         }
         store.log(message.project_id, "delivery.confirmed", data)?;
+        if let Some(read) = early {
+            told_when_confirmed(store, message_id, read)?;
+        }
         if let Some(task) = message_task(store, message_id)? {
             reconcile(store, task.id)?;
         }
@@ -741,7 +763,11 @@ pub(crate) fn cancel_message(
 /// continuation whose task is no longer at work in its window is withdrawn
 /// instead, and so is one that rides in it (`continuations`). A brief of the
 /// chief's own step done while it was on its way is not queued again
-/// (`withdrawn_late`), nor the brief of a task that failed meanwhile.
+/// (`withdrawn_late`), nor the brief of a task that failed meanwhile. A message its
+/// recipient served itself whole while it was on its way is read and not queued
+/// again, as a queued one so served is (`settle_when_given_back`), unless it is a note
+/// that says a role, which a read does not receive: it waits for its paste, and the
+/// read it kept tells the role when that is confirmed.
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -803,6 +829,11 @@ pub(crate) fn retry_delivery(
                AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
             [message_id],
         )?;
+        // Served whole to its recipient while it was on its way, it is read, as a queued
+        // one served so is: not pasted again after the reader had it.
+        if settle_when_given_back(store, message_id)? {
+            return known_message(store, message_id);
+        }
         adopt(store, message_id)?;
         settle_answered(store, message_id)?;
         known_message(store, message_id)
@@ -819,7 +850,8 @@ pub(crate) fn retry_delivery(
 /// and says its warning again in a note of its own, which has its own attempts
 /// (`withdrawn_on_its_way`). A continuation whose task is no longer at work in
 /// its window is withdrawn instead too: nothing failed that was still to go
-/// (`continuations`).
+/// (`continuations`). So is a message its recipient read whole while it was on its way: it
+/// is `read` and did not fail (`settle_when_given_up`), but for a note that says a role.
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
@@ -841,7 +873,9 @@ pub enum GivenUp {
     /// done while it was on its way (`withdrawn_late`), a pause note whose task
     /// moved on meanwhile, which says its warning again in a note of its own
     /// (`withdrawn_on_its_way`), or a continuation whose task is no longer at
-    /// work in its window (`continuations`).
+    /// work in its window (`continuations`). Or `read`, and no failure: a message
+    /// its recipient served itself whole while it was on its way
+    /// (`settle_when_given_up`).
     Withdrawn,
     /// The words that resume a paused task, which never reached its window
     /// (`pause_again`): they failed, and the task is paused again, its requester
@@ -871,6 +905,10 @@ pub(crate) fn give_up_delivery(
             }
         }
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
+            return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        // Served whole to its recipient while it was on its way, it was received: it did not fail.
+        if settle_when_given_up(store, message_id)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
         store.db.execute(

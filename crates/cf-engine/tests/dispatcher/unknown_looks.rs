@@ -15,6 +15,7 @@
 //! chief's transcript, offsets 36845750 and 36866108). None of these is held to a
 //! Node trace: Node's dispatcher read no window once more and waited for every step.
 
+use cf_proto::cf_word::CfWord;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -54,7 +55,7 @@ fn counting(context: &Context) -> Rc<Cell<usize>> {
 fn shows(context: &Context, handle: &str, message: &MessageView) {
     let item = context
         .adapter
-        .item(Role::User, &delivery_text(message, &[]));
+        .item(Role::User, &delivery_text(message, &[], &CfWord::bare()));
     context.adapter.with(handle, |agent| agent.items.push(item));
 }
 
@@ -208,7 +209,7 @@ fn confirms_a_paste_its_record_shows_when_it_is_read_once_more_before_it_would_g
     // answer comes as the harness writes it.
     let (adapter, header) = (
         Rc::downgrade(&context.adapter),
-        delivery_text(&context.message(note.id), &[]),
+        delivery_text(&context.message(note.id), &[], &CfWord::bare()),
     );
     *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, _: &Value| {
         if let (true, Some(adapter)) = (op == "pane.snapshot", adapter.upgrade()) {
@@ -742,7 +743,7 @@ fn an_answer_its_record_shows_as_the_window_is_read_once_more_is_what_the_result
     context.advance(ARRIVAL_MS + 1_000);
     let (adapter, header) = (
         Rc::downgrade(&context.adapter),
-        delivery_text(&context.message(answer.id), &[]),
+        delivery_text(&context.message(answer.id), &[], &CfWord::bare()),
     );
     *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, _: &Value| {
         if let (true, Some(adapter)) = (op == "pane.snapshot", adapter.upgrade()) {

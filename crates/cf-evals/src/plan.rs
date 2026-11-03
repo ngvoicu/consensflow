@@ -21,8 +21,7 @@ use crate::{Error, Result};
 
 /// A harness an eval can run: the name it goes by on a command line, the kind its
 /// roster agent is, and the cheap model (brain: operations/test-models.md) it runs
-/// the staff on and, on OpenCode, the chief. OpenCode's free Muse Spark died
-/// mid-run twice out of two (a dead turn), so OpenCode runs a paid Go model.
+/// the staff on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Harness {
     pub name: &'static str,
@@ -31,7 +30,7 @@ pub struct Harness {
 }
 
 /// The harnesses of the evals, in the order they are listed.
-pub const HARNESSES: [Harness; 5] = [
+pub const HARNESSES: [Harness; 4] = [
     Harness {
         name: "claude",
         kind: "claude-code",
@@ -42,15 +41,10 @@ pub const HARNESSES: [Harness; 5] = [
         kind: "codex",
         model: "gpt-5.6-luna",
     },
-    // OpenRouter only since 2026-09-28: OpenCode Go is out of ConsensFlow.
+    // OpenRouter only since 2026-09-28.
     Harness {
         name: "pi",
         kind: "pi",
-        model: "openrouter/deepseek/deepseek-v4.1-flash",
-    },
-    Harness {
-        name: "opencode",
-        kind: "opencode",
         model: "openrouter/deepseek/deepseek-v4.1-flash",
     },
     // SWE-1.6 Slow, the free plan's, is not on Devin Pro (2026-10-03); SWE-2 is free there.
@@ -68,6 +62,21 @@ pub fn harness(name: &str) -> Result<Harness> {
         .find(|harness| harness.name == name)
         .ok_or_else(|| Error::Refused(format!("no such eval harness: {name}")))
 }
+
+/// The model of the stand-in reviewer of a scenario that scripts one
+/// ([`crate::scenarios::Scenario::stand_in_reviews`]): the eval's `claude` wrapper starts a window
+/// on it as the stand-in agent, and refuses it outside an eval run.
+pub const STAND_IN_MODEL: &str = "scripted-reviewer";
+
+/// The roster id of the stand-in reviewer.
+pub const STAND_IN_AGENT: &str = "eval-scripted-reviewer";
+
+/// The model of the stand-in worker of a scenario that scripts one
+/// ([`crate::scenarios::Scenario::stand_in_work`]), and its roster id: the wrapper starts a window on
+/// the model as the stand-in agent, with the folder of the work's answers, and refuses it outside an
+/// eval run.
+pub const STAND_IN_WORKER_MODEL: &str = "scripted-worker";
+pub const STAND_IN_WORKER: &str = "eval-scripted-worker";
 
 /// The roles a staff harness fills: two workers, so parallel work has somewhere to run.
 const ROLES: [(&str, &str); 4] = [
@@ -193,9 +202,59 @@ pub fn staff_for<S: AsRef<str>>(
     Ok(staff)
 }
 
-/// A Pi or OpenCode chief's model: a step above the staff's DeepSeek Flash and
-/// well below sol's price (2026-09-28, the owner's choice), the same for both so the
-/// two harnesses compare as harnesses.
+/// `staff` with its reviewers taken out and one stand-in reviewer (a Claude Code agent on
+/// [`STAND_IN_MODEL`], standard tier) in their place: the workers and the advisors stay what
+/// they were, and a review can only go to the stand-in.
+pub fn with_stand_in_reviewer(mut staff: Staff, effort: Option<&str>) -> Result<Staff> {
+    let reviewers: Vec<String> = staff
+        .members
+        .iter()
+        .filter(|member| member.role == "reviewer")
+        .map(|member| member.agent.clone())
+        .collect();
+    staff.members.retain(|member| member.role != "reviewer");
+    staff.agents.retain(|agent| !reviewers.contains(&agent.id));
+    staff.members.push(Member {
+        agent: STAND_IN_AGENT.to_owned(),
+        role: "reviewer",
+    });
+    staff.agents.push(Agent::new(
+        STAND_IN_AGENT.to_owned(),
+        harness("claude")?,
+        STAND_IN_MODEL,
+        effort,
+    ));
+    Ok(staff)
+}
+
+/// `staff` with its workers taken out and one stand-in worker (a Claude Code agent on
+/// [`STAND_IN_WORKER_MODEL`], standard tier) in their place: the advisors and the reviewers stay what
+/// they were, and a task for a worker can only go to the stand-in. (One worker runs as many tasks at
+/// once as the chief gives it, each in a window of its own.)
+pub fn with_stand_in_worker(mut staff: Staff, effort: Option<&str>) -> Result<Staff> {
+    let workers: Vec<String> = staff
+        .members
+        .iter()
+        .filter(|member| member.role == "worker")
+        .map(|member| member.agent.clone())
+        .collect();
+    staff.members.retain(|member| member.role != "worker");
+    staff.agents.retain(|agent| !workers.contains(&agent.id));
+    staff.members.push(Member {
+        agent: STAND_IN_WORKER.to_owned(),
+        role: "worker",
+    });
+    staff.agents.push(Agent::new(
+        STAND_IN_WORKER.to_owned(),
+        harness("claude")?,
+        STAND_IN_WORKER_MODEL,
+        effort,
+    ));
+    Ok(staff)
+}
+
+/// A Pi chief's model: a step above the staff's DeepSeek Flash and well below sol's
+/// price (2026-09-28, the owner's choice).
 pub const CHIEF_MODEL: &str = "openrouter/deepseek/deepseek-v4-pro-0813";
 
 /// The model a Claude Code chief runs on unless it is told another.
@@ -210,8 +269,8 @@ pub struct ChiefSetup {
 }
 
 /// The chief has no model of its own in the roster: it runs its harness's default.
-/// Claude Code and OpenCode take one from the environment (Opus, and DeepSeek V4
-/// Pro, unless `model` says otherwise), Codex and Pi from the eval's wrappers
+/// Claude Code takes one from the environment (Opus, unless `model` says
+/// otherwise), Codex and Pi from the eval's wrappers
 /// (Codex's cheap model, DeepSeek V4 Pro); Devin runs the model its own
 /// configuration names, so `model` is ignored there.
 pub fn chief_environment(chief: &str, model: Option<&str>) -> Result<ChiefSetup> {
@@ -221,16 +280,6 @@ pub fn chief_environment(chief: &str, model: Option<&str>) -> Result<ChiefSetup>
             let chosen = model.unwrap_or(CLAUDE_CHIEF_MODEL);
             ChiefSetup {
                 env: vec![("ANTHROPIC_MODEL".to_owned(), chosen.to_owned())],
-                model: chosen.to_owned(),
-            }
-        }
-        "opencode" => {
-            let chosen = model.unwrap_or(CHIEF_MODEL);
-            ChiefSetup {
-                env: vec![(
-                    "OPENCODE_CONFIG_CONTENT".to_owned(),
-                    json!({ "model": chosen }).to_string(),
-                )],
                 model: chosen.to_owned(),
             }
         }

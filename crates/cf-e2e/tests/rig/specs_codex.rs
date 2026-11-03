@@ -156,15 +156,17 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     let line = next["argv"].to_string();
     assert!(!line.contains(REPLACES), "no message of a role: {line}");
 
-    // The chief's thread is told the section, by the role, whole, said to replace the
-    // one it began with, and keeps the instructions it began with.
+    // The chief's thread is told its role again, said to replace the one it began with,
+    // and keeps the instructions it began with. The section is past the opening that goes
+    // in by paste once every command names the window's `cf` by its whole path (T-1049):
+    // the window reads it where it reads all of the role, below.
     rig.wait_for(
-        "the chief's thread to be told of the specs",
+        "the chief's thread to be told its role again",
         secs(60),
         || {
             Ok(rollout::said_by(&thread_text()?, "user")
                 .iter()
-                .any(|said| said.contains(SECTION)))
+                .any(|said| said.contains(REPLACES)))
         },
     )?;
     let record = thread_text()?;
@@ -175,16 +177,56 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     );
     let told: Vec<String> = rollout::said_by(&record, "user")
         .into_iter()
-        .filter(|said| said.contains(SECTION))
+        .filter(|said| said.contains(REPLACES))
         .collect();
     assert_eq!(told.len(), 1, "told once: {told:?}");
     let message = &told[0];
     assert!(message.contains(REPLACES), "{message}");
-    assert!(message.contains("it means `plans`"), "{message}");
+    // The daemon has seen it arrive. The role with specs on is longer than one
+    // message even with one member on the staff (T-1009), so the note went in cut
+    // to its opening and `cf inbox read m-N`; the window reads it, as its opening
+    // says to, and the role is then recorded as told: the Resume after has nothing
+    // to say.
+    let mut delivered = None;
+    rig.wait_for("the note to be delivered", secs(60), || {
+        delivered = project.inbox("chief")?.into_iter().find(|note| {
+            note["state"] == "delivered" && note["body"].to_string().contains(REPLACES)
+        });
+        Ok(delivered.is_some())
+    })?;
+    let note = delivered.expect("the note")["id"].as_i64().expect("its id");
+    assert!(
+        message.contains(&format!("cf inbox read m-{note}")),
+        "told in part, with the command that prints the rest"
+    );
+    let read = rig.cf_in_window(&next, ["inbox", "read", &format!("m-{note}")])?;
+    assert_eq!(read.code, Some(0), "{read}");
+    assert!(
+        read.stdout.contains("## Reviews"),
+        "the rest of the role: {read}"
+    );
+    rig.wait_for("the note to be read", secs(60), || {
+        Ok(project
+            .inbox("chief")?
+            .iter()
+            .any(|said| said["id"] == note && said["state"] == "read"))
+    })?;
+
+    // What it says is read where the window reads all of it, what `cf inbox read`
+    // printed, and not the opening, where a longer role has less of it.
+    let whole = &read.stdout;
+    assert!(
+        whole.contains(SECTION),
+        "the section, in all of the role: {whole}"
+    );
+    assert!(
+        whole.contains("Your specs and their registry are in `plans`"),
+        "{whole}"
+    );
     // It names ConsensFlow's copy of the skill, in the folder that is kept for the
     // harness and the variant, and that file is there: the one the window's role
     // names too.
-    let skill = skill_named_in(message).expect("the section names the skill's file");
+    let skill = skill_named_in(whole).expect("the section names the skill's file");
     assert_eq!(
         skill_named_in(&next_role).as_deref(),
         Some(skill.as_str()),
@@ -203,14 +245,6 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         skill.display()
     );
     assert!(skill.with_file_name("references").is_dir());
-    // The daemon has seen it arrive, and what it was told is recorded: the
-    // Resume after has nothing to say.
-    rig.wait_for("the note to be delivered", secs(60), || {
-        Ok(project.inbox("chief")?.iter().any(|note| {
-            note["state"] == "delivered" && note["body"].to_string().contains(REPLACES)
-        }))
-    })?;
-
     // The next Resume has nothing to tell: the role is what it was told, and names
     // the same copy of the skill, which the window before it left where it was.
     rig.wait_for("the chief to be idle", secs(60), || chief_is_idle(&project))?;
@@ -241,7 +275,7 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     assert_eq!(
         rollout::said_by(&record, "user")
             .iter()
-            .filter(|said| said.contains(SECTION))
+            .filter(|said| said.contains(REPLACES))
             .count(),
         1,
         "given once, not at every launch"

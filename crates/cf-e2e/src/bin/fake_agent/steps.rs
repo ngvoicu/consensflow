@@ -11,6 +11,11 @@
 //! - A line `STEPS <n> <words>` is a turn that works through `n` steps, each saying `Step
 //!   <i> of <n>` and calling a tool, and then answers the words: the progress a worker
 //!   writes before its report, and the report.
+//! - A line `SAID <words> THEN <line>` is a turn that writes `words`, calls a tool, and goes on
+//!   with `line` as the line it was given: the first words a window writes in answer to a
+//!   question before it works, then its work, then what that answers (T-1151: Devin, Claude
+//!   Code, Codex and Muse all write the answer to a tell first and run a tool after it).
+//!   `line` may itself be a `REPLY <words> THEN …`, so the window also answers with `cf answer`.
 //! - A line `CLAUDE-JOB [--silent] [--exec] [--at-once] [--asks] [--stopped] <seconds> <words>
 //!   :: <report>` is a turn that starts a job as Claude Code's Bash tool does with
 //!   `run_in_background` (a process of the window's tree that runs that long, as `BACKGROUND`
@@ -36,6 +41,13 @@
 //!   notification of its task `completed`, wakes the turn that answers the report. The
 //!   monitor ends once the case lets it ([`MONITOR_MAY_END`]), so the case sees what the turn
 //!   the job's end woke led to before the monitor's end wakes another.
+//! - A line `CLAUDE-MONITOR-ENDS <seconds> <words>` is T-906 (2026-10-29): a turn
+//!   that arms a Monitor on a command (its call names it, so the monitor is a command's), the
+//!   command a shell runs, answers the words at once, and ends. `seconds` later the monitor
+//!   expires as Claude Code 2.1.312 ends one on Windows: the shell alone, by its number (its
+//!   tree kill falls back to that there), which leaves what the shell ran running with no
+//!   parent, and then Claude Code's own notice of the expiry, which has no status and wakes
+//!   a turn that answers `Saw <the notice>`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -50,7 +62,7 @@ use serde_json::{json, Value};
 
 use crate::background::{until_up, THINKING};
 use crate::records::Records;
-use crate::reply::{Reply, Window};
+use crate::reply::{reply_to, Reply, Window};
 
 /// What opens the text of a notification, which is how a message that is one is told.
 const NOTIFICATION: &str = "<task-notification>";
@@ -63,6 +75,8 @@ pub struct Step {
     pub said: String,
     pub job: Option<String>,
     pub monitor: Option<(String, u64)>,
+    /// The command the monitor's call names, where it names one.
+    pub watches: Option<String>,
 }
 
 impl Step {
@@ -72,6 +86,17 @@ impl Step {
             said: format!("Step {number} of {of}"),
             job: None,
             monitor: None,
+            watches: None,
+        }
+    }
+
+    /// The words a turn writes before it calls its first tool.
+    pub fn saying(words: &str) -> Self {
+        Self {
+            said: words.to_owned(),
+            job: None,
+            monitor: None,
+            watches: None,
         }
     }
 
@@ -81,6 +106,7 @@ impl Step {
             said: "Running it in the background".to_owned(),
             job: Some(id.to_owned()),
             monitor: None,
+            watches: None,
         }
     }
 
@@ -90,6 +116,15 @@ impl Step {
             said: "Watching it with Monitor".to_owned(),
             job: None,
             monitor: Some((id.to_owned(), timeout_ms)),
+            watches: None,
+        }
+    }
+
+    /// [`Step::arming`] of a monitor whose call names the command it watches.
+    pub fn arming_on(id: &str, timeout_ms: u64, command: &str) -> Self {
+        Self {
+            watches: Some(command.to_owned()),
+            ..Self::arming(id, timeout_ms)
         }
     }
 }
@@ -164,6 +199,16 @@ pub fn monitor_event(id: &str, event: &str) -> String {
 pub fn monitor_ended(id: &str, report: &str) -> String {
     format!(
         "{NOTIFICATION}\n<task-id>{id}</task-id>\n<tool-use-id>toolu-{id}</tool-use-id>\n<status>completed</status>\n<summary>Monitor \"ticks\" stream ended</summary>\n<result>{report}</result>\n</task-notification>"
+    )
+}
+
+/// What Claude Code queues as it ends the monitor `id` whose time ran out (2.1.312's
+/// words of one that saw no event): a notification with no status, its notice the
+/// `<event>`, which a line of the command's could say too, and nothing after its close.
+/// The turn it wakes answers `Saw <notice>`, as any event's does.
+pub fn expired(id: &str, seconds: u64) -> String {
+    format!(
+        "{NOTIFICATION}\n<task-id>{id}</task-id>\n<summary>Monitor event: \"watched\"</summary>\n<event>[Monitor expired after {seconds}s with no events delivered. Re-arm it if you still need the watch \u{2014} and widen the filter if silence was unexpected.]</event>\n</task-notification>"
     )
 }
 
@@ -242,8 +287,10 @@ pub type Worked = (Vec<Step>, Reply);
 /// report it carries, or a line of this module's.
 pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
     static STEPS: OnceLock<Regex> = OnceLock::new();
+    static SAID: OnceLock<Regex> = OnceLock::new();
     static JOB: OnceLock<Regex> = OnceLock::new();
     static MONITOR: OnceLock<Regex> = OnceLock::new();
+    static ENDS: OnceLock<Regex> = OnceLock::new();
     if let Some(report) = report_of(text) {
         return Some(Ok((Vec::new(), Reply::Text(report))));
     }
@@ -252,6 +299,14 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
     }
     if is_notification(text) {
         return Some(Ok((Vec::new(), Reply::Text(STILL_WAITING.to_owned()))));
+    }
+    if let Some(said) = pattern::once(&SAID, r"(?m)\bSAID (.+?) THEN (.+)$").captures(text) {
+        // The rest of the line begins a line of its own, as `REPLY … THEN …` hands it on, so
+        // its verb is found whatever words came before `SAID`; the lines around it stay.
+        let (whole, words, rest) = (said.get(0)?, said[1].to_owned(), said[2].to_owned());
+        let line = text[..whole.start()].rfind('\n').map_or(0, |at| at + 1);
+        let on = format!("{}{rest}{}", &text[..line], &text[whole.end()..]);
+        return Some(reply_to(&on, window).map(|answer| (vec![Step::saying(&words)], answer)));
     }
     if let Some(steps) = pattern::once(&STEPS, r"(?m)^STEPS (\d+) (.+)$").captures(text) {
         let Ok(count) = steps[1].parse::<u64>() else {
@@ -279,6 +334,19 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
                 )
             }),
         );
+    }
+    if let Some(ends) = pattern::once(&ENDS, r"(?m)^CLAUDE-MONITOR-ENDS (\d+) (.+)$").captures(text)
+    {
+        let Ok(seconds) = ends[1].parse::<u64>() else {
+            return Some(Err(format!("CLAUDE-MONITOR-ENDS {}", &ends[1])));
+        };
+        let words = ends[2].to_owned();
+        return Some(watch_a_command(window, seconds).map(|watching| {
+            (
+                vec![Step::arming_on(&watching, seconds * 1_000, WATCHED)],
+                Reply::Text(words),
+            )
+        }));
     }
     let job = pattern::once(
         &JOB,
@@ -398,6 +466,34 @@ fn watch_a_job(
     Ok((job, watching))
 }
 
+/// The command a `CLAUDE-MONITOR-ENDS`'s monitor watches, as its call names it.
+const WATCHED: &str = "exec sleep 611";
+
+/// How long the command a `CLAUDE-MONITOR-ENDS`'s monitor watches runs: past any case, so
+/// that what its shell ran is still there when the case looks.
+const WATCHED_SECONDS: u64 = 300;
+
+/// Arms the monitor of a `CLAUDE-MONITOR-ENDS` on a command a shell runs, and the id Claude
+/// Code gives it: `seconds` later its shell alone is ended, by its number, and Claude Code's
+/// notice of its expiry wakes the window.
+fn watch_a_command(window: &Window, seconds: u64) -> Result<String, String> {
+    thread::sleep(THINKING);
+    let watching = window.tasks.begin();
+    let (file, shell) = window
+        .jobs
+        .start_ended_by_its_shell("watched", WATCHED_SECONDS)?;
+    until_up(&file)?;
+    let (tasks, wake) = (window.tasks.clone(), window.wake.clone());
+    let notice = expired(&watching, seconds);
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(seconds));
+        shell.end();
+        tasks.ended();
+        let _ = wake.send(notice);
+    });
+    Ok(watching)
+}
+
 /// Waits for the case to let the monitor that watches the job `file` end, or for
 /// [`MONITOR_HELD`].
 fn until_let_end(file: &Path) {
@@ -425,6 +521,9 @@ pub fn write(records: &mut Records, pid: u32, session: &str, steps: &[Step]) -> 
             pid,
             json!({
                 "type": "assistant",
+                // As Claude Code writes every record of the main conversation: a call of a
+                // record that says no sidechain is no call of the main one to its reader.
+                "isSidechain": false,
                 "message": {
                     "id": message,
                     "role": "assistant",
@@ -433,7 +532,10 @@ pub fn write(records: &mut Records, pid: u32, session: &str, steps: &[Step]) -> 
                         {
                             "type": "tool_use", "id": call,
                             "name": if step.monitor.is_some() { "Monitor" } else { "Bash" },
-                            "input": {},
+                            "input": step.watches.as_ref().map_or_else(
+                                || json!({}),
+                                |command| json!({ "command": command, "description": "watched" }),
+                            ),
                         },
                     ],
                     "stop_reason": "tool_use",
@@ -553,6 +655,21 @@ mod tests {
             seeded: false,
             put_back: Arc::default(),
         }
+    }
+
+    #[test]
+    fn a_said_line_writes_its_words_in_a_step_and_goes_on_with_the_rest_of_its_line() {
+        // A tell as the window is pasted it: the header, the chief's words on one line, the
+        // trailer. The verb is found after other words; its rest is a line of its own.
+        let tell = "[ConsensFlow m-2 · T-1 · question from @chief]\nStop now. SAID First words THEN SLEEP 0 Reply with exactly: LAST\n\nT-1 is paused for this.";
+        let (worked, answer) = reply(tell, &window())
+            .expect("a said line")
+            .expect("it is made");
+        let said: Vec<&str> = worked.iter().map(|step| step.said.as_str()).collect();
+        assert_eq!(said, ["First words"], "one step, its words, a tool after");
+        assert_eq!(answer, Reply::Text("LAST".to_owned()));
+        // No such line, no such step.
+        assert!(reply("Stop now. First words", &window()).is_none());
     }
 
     #[test]

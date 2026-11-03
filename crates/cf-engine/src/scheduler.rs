@@ -16,7 +16,7 @@ use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
     Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard, TaskThread,
-    RESUME_WORDS,
+    TaskView, RESUME_WORDS,
 };
 use serde_json::Value;
 
@@ -36,6 +36,101 @@ const AGAIN_MS: i64 = 5 * 60_000;
 
 /// How long a quota lasts when its harness names no reset.
 const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
+
+/// What a member is marked out until when its account is unavailable (MUS-23): no
+/// reset exists, so nothing resets it, and its held tasks are due at no time of their
+/// own. Only the human's Try again now, or a count of its allowance that is not used up
+/// (Muse's `usage`), or a turn of its account that got through, ends it.
+const NEVER: &str = "9999-12-31T23:59:59.998Z";
+
+/// What a member is marked out until when its harness moved its window's model on its own
+/// (MUS-24): the same no time, and later than [`NEVER`], so a member held for both is held
+/// for the move. Only the human's Try again now for that member ends it: no teammate's turn,
+/// no allowance and no other window's answer does, or the engine would paste into a window
+/// on a model nobody chose (T-816). It is the ledger's one record of the kind of hold, which
+/// holds across a restart of the daemon (its schema takes no column for it).
+const MOVED: &str = "9999-12-31T23:59:59.999Z";
+
+/// How long a task whose model was busy waits before it is tried again (T-1112), by how many
+/// times in a row its window was refused so: a minute, then two, then four. The harness has
+/// already retried for seconds before it gave up (Claude Code and Codex do, with backoffs of
+/// their own), so a provider at capacity is past its seconds and into its minutes: these try
+/// again within the few minutes such a spell lasts, and three tries take seven minutes.
+const BUSY_BACKOFF_MS: [i64; 3] = [60_000, 120_000, 240_000];
+
+/// How long a task whose model was busy at every try waits between tries once they are spent,
+/// held with its window because no other member of its tier is free (T-1112).
+const BUSY_HOLD_MS: i64 = 5 * 60_000;
+
+/// What the ledger keeps of a member out, and of a task held, while its model is busy.
+pub(crate) const BUSY_HOLD: &str = "model busy";
+
+/// Whether `until`, a member's time out, is a hold no time ends: [`NEVER`] or [`MOVED`].
+pub(crate) fn never(until: &str) -> bool {
+    until.starts_with("9999-")
+}
+
+/// Whether `until` is the hold of a member whose model was moved ([`MOVED`]).
+pub(crate) fn moved_hold(until: &str) -> bool {
+    until == MOVED
+}
+
+/// Why a member is held other than for a quota that resets: for no time, its account
+/// refused for what only its human cures (MUS-23), or its harness moved its window's model on
+/// its own (MUS-24); or for a moment, its model busy (T-1112), tried again after a backoff of
+/// the engine's. The words are the reader's.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Unwell<'a> {
+    Account(&'a str),
+    Moved(&'a str),
+    Busy(&'a str),
+}
+
+impl<'a> Unwell<'a> {
+    /// What a quota held for no time says, where it says one.
+    pub(crate) fn of(quota: Option<&'a Quota>) -> Option<Self> {
+        match quota {
+            Some(Quota::Unavailable { because, .. }) => Some(Unwell::Account(because)),
+            Some(Quota::Moved { because, .. }) => Some(Unwell::Moved(because)),
+            Some(Quota::Busy { because, .. }) => Some(Unwell::Busy(because)),
+            _ => None,
+        }
+    }
+
+    fn because(self) -> &'a str {
+        match self {
+            Unwell::Account(because) | Unwell::Moved(because) | Unwell::Busy(because) => because,
+        }
+    }
+
+    /// The reason the ledger keeps of the member's hold.
+    pub(crate) fn hold(self) -> &'static str {
+        match self {
+            Unwell::Account(_) => "account unavailable",
+            Unwell::Moved(_) => "model moved",
+            Unwell::Busy(_) => BUSY_HOLD,
+        }
+    }
+}
+
+/// Whether a window's last turn failed on a refusal of its busy model (T-1112): a server
+/// error, its model overloaded or at capacity, which waiting cures.
+pub(crate) fn busy_turn(observed: &Observed) -> bool {
+    observed.failed && observed.quota.as_deref().is_some_and(Quota::busy)
+}
+
+/// What a window of a member out says it is doing: out of quota until the reset, or, where
+/// the member is held for no time, why: its account (MUS-23) or its model's move (MUS-24).
+pub(crate) fn out_words(until: &str, unwell: Option<Unwell<'_>>) -> String {
+    match unwell {
+        Some(Unwell::Account(because)) => format!("unavailable: {because}"),
+        Some(Unwell::Moved(because)) => format!("moved: {because}"),
+        Some(Unwell::Busy(because)) => format!("model busy, tried again at {until}: {because}"),
+        None if moved_hold(until) => "model moved on its own".to_owned(),
+        None if never(until) => "unavailable".to_owned(),
+        None => format!("out of quota until {until}"),
+    }
+}
 
 /// How much later one reset must be than another to be a limit of its own: a
 /// harness names a reset to the hour (Claude Code's "resets 3pm"), or none, and
@@ -57,6 +152,10 @@ pub(crate) struct QuotaPart {
     /// The time of the window's last answer that was looked at as news of its
     /// account's quota: each answer is news once.
     pub(crate) answered: Option<String>,
+    /// The changes of model the human was told of in this window, each way by the two models:
+    /// a flip back and forth (`opusplan`) is told once for each way. Cleared as a window opens,
+    /// whose harness starts its own baseline (T-841).
+    pub(crate) drifts_told: HashSet<String>,
 }
 
 /// News that an account has quota again.
@@ -81,17 +180,34 @@ pub(crate) enum News<'a> {
 pub(crate) struct SchedulerState {
     waiting_noted: RefCell<HashMap<i64, i64>>,
     out_noted: RefCell<HashSet<(i64, String)>>,
+    /// The members held for no time whose human was told why, each with the time it was
+    /// marked out: apart from `out_noted`, whose mark a member out for a 429 with a message
+    /// waiting already has when a billing refusal arrives (T-816).
+    unwell_noted: RefCell<HashSet<(i64, String)>>,
     /// The participants a window's turn brought back, or left out for a later
     /// limit, each with the reset it was out until: the same limit again is no
     /// news a teammate's turn can undo. In memory, so a restart may bring a chief
     /// on a weekly limit back once more (one refused turn, one note).
     tried: RefCell<HashMap<i64, String>>,
+    /// The tasks whose window's model was busy (T-1112), each with how many times in a row it
+    /// was refused so: the backoff grows with it, and once the tries are spent the task goes
+    /// to another free member of its tier. A turn of the task that gets through clears it. In
+    /// memory: a restart of the daemon counts again from none, at most three tries more.
+    busy: RefCell<HashMap<i64, usize>>,
+    /// The members out because their model was busy, each with the time it was marked out
+    /// until: their lane and the board say so, not that they are out of quota. In memory, as
+    /// the ledger keeps no kind of a member's time out; after a restart they read as out.
+    busy_out: RefCell<HashMap<i64, String>>,
 }
 
 /// The same refusal: the one a record's reading gave, or one of the same time.
 fn same_refusal(handled: Option<&Arc<Quota>>, quota: &Arc<Quota>) -> bool {
     handled.is_some_and(|handled| {
-        Arc::ptr_eq(handled, quota) || quota.at().is_some_and(|at| handled.at() == Some(at))
+        Arc::ptr_eq(handled, quota)
+            || quota.at().is_some_and(|at| handled.at() == Some(at))
+            // A member held for no time says its words and time again as a new object at every
+            // look (a move of the model, MUS-24): equal, it is the one refusal.
+            || (quota.held_for_the_human() && handled == quota)
     })
 }
 
@@ -131,11 +247,11 @@ fn same_limit(one: &str, other: &str) -> bool {
 }
 
 /// When a window's last turn that got through answered, as its record names the
-/// time (its text, or the milliseconds OpenCode dates a message in): none for a turn
+/// time (its text, or the milliseconds a record may date a message in): none for a turn
 /// that failed or was refused. An assistant's item with nothing of the model's in it
 /// is no answer (`synthetic`, T-530): Claude Code's close of a turn it found cut,
-/// written when the next message comes, a step Pi wrote of a run that failed or was
-/// aborted before the model's first token, a message OpenCode made before the reply.
+/// written when the next message comes, and a step Pi wrote of a run that failed or was
+/// aborted before the model's first token.
 fn last_answer(observed: &Observed) -> Option<String> {
     if observed.failed
         || observed
@@ -177,6 +293,19 @@ impl Dispatcher {
             if !task.blocked_by.is_empty() {
                 continue;
             }
+            // A tier nobody on the staff holds any more (its last member left, or its
+            // model moved to another tier) goes to the nearest one somebody does, as at
+            // `cf task add`: its requester is told once which.
+            let retiered = self
+                .seams
+                .ledger
+                .borrow_mut()
+                .retier_open_task(project.id, task.number)?;
+            let mut task = task;
+            if let Some(moved) = retiered {
+                self.tell_retiered(project, &task, &moved.from, &moved.to, &moved.holders)?;
+                task.tier = Some(moved.to);
+            }
             let candidates = self
                 .seams
                 .ledger
@@ -200,10 +329,6 @@ impl Dispatcher {
                     .waiting_noted
                     .borrow_mut()
                     .insert(task.id, project.id);
-                let why: Vec<String> = candidates
-                    .iter()
-                    .filter_map(|member| self.why_not_free(member))
-                    .collect();
                 let pool = if task.pool.as_deref() == Some("designer") {
                     "image designer".to_owned()
                 } else {
@@ -213,6 +338,25 @@ impl Dispatcher {
                         task.pool.as_deref().unwrap_or("null")
                     )
                 };
+                let mut why: Vec<String> = candidates
+                    .iter()
+                    .filter_map(|member| self.why_not_free(member))
+                    .collect();
+                // A wait always says why: nobody holds the role (the last member of it left
+                // after the task was given), or, if it ever came to it, that no member is free.
+                if why.is_empty() {
+                    why.push(match candidates.is_empty() {
+                        true => format!(
+                            "no {} is on the staff (ask the human for one, in your terminal)",
+                            if task.pool.as_deref() == Some("designer") {
+                                "image designer"
+                            } else {
+                                task.pool.as_deref().unwrap_or("member")
+                            }
+                        ),
+                        false => "none of them is free".to_owned(),
+                    });
+                }
                 self.seams.ledger.borrow_mut().note(
                     project.id,
                     &NewNote {
@@ -232,6 +376,35 @@ impl Dispatcher {
         Ok(assigned)
     }
 
+    /// Tells a task's requester, once, that the tier it asked went to the nearest
+    /// one somebody holds, and whose it is.
+    fn tell_retiered(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        from: &str,
+        to: &str,
+        holders: &[String],
+    ) -> Result<(), EngineError> {
+        let pool = task.pool.as_deref().unwrap_or("member");
+        let members: Vec<String> = holders.iter().map(|handle| format!("@{handle}")).collect();
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: task.requester.clone(),
+                task: Some(task.number),
+                body: format!(
+                    "T-{} asked for a {from} {pool}; none is on the staff, so it goes to the {to} tier: {}.",
+                    task.number,
+                    members.join(", ")
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
     /// Why a member is not free, the first reason that holds for it: on a
     /// harness whose windows open, its agent saved, not out of quota, not
     /// low on it; none when it is free.
@@ -240,8 +413,8 @@ impl Dispatcher {
         let harness = member.harness.as_deref().unwrap_or("null");
         if self.seams.adapters.adapter(harness).is_none() {
             return Some(format!(
-                "@{} runs on {harness}, whose windows ConsensFlow cannot open",
-                member.handle
+                "@{} runs on {harness}, whose windows ConsensFlow cannot open (remove @{} from the staff and add a member on another harness)",
+                member.handle, member.handle
             ));
         }
         let agent = member.agent.as_deref();
@@ -268,11 +441,25 @@ impl Dispatcher {
             Some(Some(_)) => {}
         }
         if self.out(member.out_until.as_deref()) {
-            return Some(format!(
-                "@{} is out of quota until {}",
-                member.handle,
-                member.out_until.as_deref().unwrap_or_default()
-            ));
+            let until = member.out_until.as_deref().unwrap_or_default();
+            return Some(if moved_hold(until) {
+                format!(
+                    "@{}'s model moved on its own (it waits for the human's word)",
+                    member.handle
+                )
+            } else if never(until) {
+                format!(
+                    "@{}'s account is unavailable (its billing or login was refused)",
+                    member.handle
+                )
+            } else if self.busy_until(member.id).as_deref() == Some(until) {
+                format!(
+                    "@{}'s model is busy (ConsensFlow tries it again at {until})",
+                    member.handle
+                )
+            } else {
+                format!("@{} is out of quota until {until}", member.handle)
+            });
         }
         if self.is_low(member.id) {
             return Some(format!("@{} is low on quota", member.handle));
@@ -334,7 +521,7 @@ impl Dispatcher {
         {
             return false;
         }
-        if same_refusal(handled.as_ref(), &quota) {
+        if same_refusal(handled.as_ref(), &quota) || self.older_than_the_window(record, &quota) {
             return false;
         }
         match (
@@ -363,7 +550,18 @@ impl Dispatcher {
             .resets_at()
             .and_then(time::parse)
             .is_some_and(|reset| reset <= self.now());
-        !passed && !same_refusal(handled.as_ref(), &quota)
+        !passed
+            && !same_refusal(handled.as_ref(), &quota)
+            && !self.older_than_the_window(record, &quota)
+    }
+
+    /// Whether `quota` holds a member for no time (an account only its human cures, a model its
+    /// harness moved) and is dated before the window of `record` opened: the human's Resume and
+    /// Try again now came after it, so it holds nothing. The reading keeps it all the same: it is
+    /// how the engine knows the last turn that failed was the refusal's and not the task's
+    /// (`cut_short`), which a window reopened on the conversation reads as it was left (T-841).
+    fn older_than_the_window(&self, record: &Record, quota: &Quota) -> bool {
+        quota.held_for_the_human() && self.before_open(record, quota.at())
     }
 
     /// Marks the refusal a window shows as acted on, so the window acts on it once.
@@ -383,6 +581,25 @@ impl Dispatcher {
         last_answer(observed).is_some_and(|at| after(&at, since))
     }
 
+    /// Whether a window of a member whose account is unavailable shows the harness's own
+    /// count of an allowance, not used up: the refusal that made it unavailable is over, with
+    /// no human to say so (Muse's `usage`, MUS-23). A member out for a quota that resets
+    /// waits for its reset, whatever a count in an old record says, and one held for its
+    /// model's move waits for the human, whatever its account has (T-816).
+    pub(crate) fn shows_an_allowance(&self, owner: &ParticipantView, observed: &Observed) -> bool {
+        owner
+            .out_until
+            .as_deref()
+            .is_some_and(|until| never(until) && !moved_hold(until))
+            && matches!(
+                observed.quota.as_deref(),
+                Some(Quota::Usage {
+                    level: Level::Ok | Level::Low,
+                    ..
+                })
+            )
+    }
+
     /// Whether a window's last turn ended in a refusal its member is past
     /// now: the turn was cut short, and failed nothing.
     pub(crate) fn cut_short(&self, observed: &Observed) -> bool {
@@ -391,6 +608,40 @@ impl Dispatcher {
                 .quota
                 .as_deref()
                 .is_some_and(|quota| quota.level() == Level::Exhausted)
+    }
+
+    /// Whether words were given to a window after the turn its record ends in: the failure
+    /// its look still reads is that turn's, and the words begin another, so the task does not
+    /// go on in place over them (the Resume's or Try again's paste into a window opened on a
+    /// conversation a refusal ended, whose reader clears the failure only once the paste lands
+    /// in the record: T-841). Decided on the words and not on the refusal's date: a window
+    /// nothing was given after the cut (a Resume that wrote no note, a window kept open) goes
+    /// on, and a refusal that comes of it is dated after the open (T-853).
+    ///
+    /// The task's last paste is found in the record (a message is `delivered` only once the
+    /// record shows it), and no turn of the window's own follows it. Words still on their way
+    /// leave the task queued, which `go_on` passes over.
+    pub(crate) fn words_since_the_cut(
+        &self,
+        participant: &ParticipantView,
+        observed: &Observed,
+    ) -> Result<bool, EngineError> {
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, false)?;
+        let Some(thread) = task else {
+            return Ok(false);
+        };
+        let items = observed.items();
+        Ok(self
+            .delivered_at(participant.id, &thread, items)?
+            .is_some_and(|pasted| {
+                !items[pasted + 1..]
+                    .iter()
+                    .any(|item| item.role == Role::Assistant)
+            }))
     }
 
     /// What a window's harness says of its quota, as of this look. Low is
@@ -421,9 +672,108 @@ impl Dispatcher {
 
     /// When a quota resets: the time its harness names, or an hour from now.
     pub(crate) fn reset_of(&self, quota: Option<&Quota>) -> String {
+        if quota.is_some_and(Quota::moved) {
+            return MOVED.to_owned();
+        }
+        if quota.is_some_and(Quota::unavailable) {
+            return NEVER.to_owned();
+        }
         quota
             .and_then(Quota::resets_at)
             .map_or_else(|| time::iso(self.now() + UNKNOWN_RESET_MS), str::to_owned)
+    }
+
+    /// The human is told why a member is held for no time, once for each time it is marked
+    /// out, whatever waits for it: its account is unavailable (MUS-23) or its model moved
+    /// on its own (MUS-24). Nothing is sent to it until their word, so they hear it and what
+    /// to do.
+    pub(crate) fn tell_unwell(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        owner: &ParticipantView,
+        unwell: Unwell<'_>,
+    ) -> Result<(), EngineError> {
+        // A busy model is the requester's to hear, once, and nothing for the human to do (T-1112).
+        if let Unwell::Busy(_) = unwell {
+            return Ok(());
+        }
+        let mark = (owner.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.unwell_noted.borrow_mut().insert(mark) {
+            return Ok(());
+        }
+        let because = unwell.because();
+        let body = match unwell {
+            Unwell::Account(_) => format!(
+                "@{}'s account is unavailable: {because}. Nothing is sent to it until you say it works again: press Try again now on @{} once it does.",
+                participant.handle, owner.handle
+            ),
+            Unwell::Moved(_) => format!(
+                "@{}: {because}. Nothing is sent to it until you say it may go on: put it back on the model you chose, or accept this one, then press Try again now on @{}.",
+                participant.handle, owner.handle
+            ),
+            Unwell::Busy(_) => unreachable!("a busy model is told above"),
+        };
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body,
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// The human is told, once, that the model a window answers from changed in its harness's
+    /// records with no word of the harness's own for it (Claude Code's drift: an alias
+    /// repointed from under it, a restart on another model, a flip of `opusplan`). Nothing
+    /// is held: only the harness saying it switched holds a window, and a hold for every
+    /// drift would hold every Claude lane on a repoint day (T-816). A drift dated before
+    /// the window opened is history.
+    pub(crate) fn tell_drift(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let Some(drift) = observed.model_drift() else {
+            return Ok(());
+        };
+        if self.before_open(record, drift.at.as_deref()) {
+            return Ok(());
+        }
+        let way = format!("{}>{}", drift.from, drift.to);
+        if !record.quota.borrow_mut().drifts_told.insert(way) {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{}'s records name another model: {} before, {} now. Nothing is held: its harness gave no word of its own that it switched (an alias repointed, a restart, or a plan mode that flips). If this is not the model you chose, put it back.",
+                    participant.handle, drift.from, drift.to
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// Whether `at`, a time a record names, is before the window of `record` opened: what
+    /// a harness wrote before is history, as a Resume brings it back in a transcript.
+    /// A record that names no time, or a window with no open time, is read as live.
+    pub(crate) fn before_open(&self, record: &Record, at: Option<&str>) -> bool {
+        let opened = record.window.borrow().opened_at;
+        opened
+            .zip(at.and_then(time::parse))
+            .is_some_and(|(opened, at)| at < opened)
     }
 
     /// News that an account has quota again brings back the others out on it.
@@ -486,6 +836,13 @@ impl Dispatcher {
                 continue;
             }
             let until = other.out_until.clone().unwrap_or_default();
+            // A member held for its model's move comes back at the human's word for that
+            // member alone (`back_from_quota`): no teammate's turn and no Try again now on
+            // another member does, or the engine would paste into a window on a model
+            // nobody chose (T-816).
+            if moved_hold(&until) {
+                continue;
+            }
             let back = match news {
                 News::Human => true,
                 News::Turn {
@@ -493,7 +850,9 @@ impl Dispatcher {
                     returned: Some(returned),
                     ..
                 } => {
-                    if later_limit(&until, returned) {
+                    // A later reset is a limit of its own; an account unavailable has none (MUS-23),
+                    // and a turn that got through says its refusal is over.
+                    if later_limit(&until, returned) && !never(&until) {
                         // A later reset is a limit of its own, which no teammate's turn
                         // undoes: the human hears it stays out, once for the limit.
                         if self.tried_anew(other.id, &until) {
@@ -578,6 +937,10 @@ impl Dispatcher {
         record: &Record,
         owner: &ParticipantView,
     ) -> Result<(), EngineError> {
+        // An unavailable account is told once, whatever waits (`tell_unavailable`).
+        if owner.out_until.as_deref().is_some_and(never) {
+            return Ok(());
+        }
         // What a window opened while out carries as its first message waits in it too.
         let carried = record
             .delivery
@@ -633,25 +996,51 @@ impl Dispatcher {
         owner: &ParticipantView,
         until: &str,
         refused_at: Option<i64>,
+        unwell: Option<Unwell<'_>>,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
             return Ok(());
         }
         for task in self.active_work(project, participant)? {
+            if let Some(Unwell::Busy(because)) = unwell {
+                self.hold_busy(project, participant, owner, &task, until, because)?;
+                continue;
+            }
             let again = match refused_at {
-                Some(at) => self.refused_its_resume(participant, &task, at)?,
-                None => false,
+                Some(at) if unwell.is_none() => self.refused_its_resume(participant, &task, at)?,
+                _ => false,
             };
             self.seams.ledger.borrow_mut().hold_task(
                 project.id,
                 task.number,
                 until,
-                "out of quota",
+                unwell.map_or("out of quota", Unwell::hold),
             )?;
             if refused_at.is_none() {
                 continue;
             }
-            if again {
+            if let Some(unwell) = unwell {
+                // The requester is told it waits for the human's word, whatever the
+                // refusal answered: the human is told too, once (`tell_unwell`).
+                let mut ledger = self.seams.ledger.borrow_mut();
+                match unwell {
+                    Unwell::Account(because) => ledger.note_hold_unavailable(
+                        project.id,
+                        &task.requester,
+                        task.number,
+                        &participant.handle,
+                        because,
+                    )?,
+                    Unwell::Moved(because) => ledger.note_hold_moved(
+                        project.id,
+                        &task.requester,
+                        task.number,
+                        &participant.handle,
+                        because,
+                    )?,
+                    Unwell::Busy(_) => unreachable!("a busy model's task is held above"),
+                };
+            } else if again {
                 self.tell_the_human_it_may_need_them(project, participant, owner, &task)?;
             } else {
                 self.seams.ledger.borrow_mut().note_hold(
@@ -664,6 +1053,146 @@ impl Dispatcher {
             }
         }
         Ok(())
+    }
+
+    /// A task whose window's model was busy (T-1112): one more try refused. It is held until
+    /// `until`, the backoff its tries name ([`Dispatcher::busy_reset`]), and goes on in its
+    /// window then, as a task held for its quota does. Once [`BUSY_BACKOFF_MS`]'s tries were
+    /// refused too, a task given by tier goes back to the board while another member of its
+    /// tier is free: its member is out until the backoff, so the board gives it to that one,
+    /// and the release tells its requester where it went. While none is, it is held on, tried
+    /// every [`BUSY_HOLD_MS`]. Its requester is told once that it waits and why, in plain
+    /// words, at the first refusal that holds it, and of no try after: a note withdrawn
+    /// before it was given is told again.
+    fn hold_busy(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        owner: &ParticipantView,
+        task: &TaskCard,
+        until: &str,
+        because: &str,
+    ) -> Result<(), EngineError> {
+        let tries = {
+            let mut busy = self.scheduler.busy.borrow_mut();
+            let tries = busy.entry(task.id).or_insert(0);
+            *tries += 1;
+            *tries
+        };
+        // A task given by name is the ledger's to keep with its member: it releases only a
+        // task given by tier (`check_release`, in `another_is_free`).
+        if tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+            self.scheduler.busy.borrow_mut().remove(&task.id);
+            self.seams.ledger.borrow_mut().release_task(
+                project.id,
+                task.number,
+                &format!("its model was busy at {tries} tries in a row: {because}"),
+            )?;
+            return Ok(());
+        }
+        self.seams
+            .ledger
+            .borrow_mut()
+            .hold_task(project.id, task.number, until, BUSY_HOLD)?;
+        if !self.told_busy(project, task)? {
+            self.seams.ledger.borrow_mut().note_hold_busy(
+                project.id,
+                &task.requester,
+                task.number,
+                &participant.handle,
+                because,
+                task.pool.is_some(),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Whether a member of `task`'s tier other than `owner` is free to take it now, and the
+    /// ledger would let it go back to the board.
+    fn another_is_free(
+        &self,
+        project: &ProjectView,
+        owner: &ParticipantView,
+        task: &TaskCard,
+    ) -> Result<bool, EngineError> {
+        if self
+            .seams
+            .ledger
+            .borrow()
+            .check_release(project.id, task.number)
+            .is_err()
+        {
+            return Ok(false);
+        }
+        let candidates = self
+            .seams
+            .ledger
+            .borrow()
+            .candidates(project.id, task.number)?;
+        Ok(candidates
+            .iter()
+            .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none()))
+    }
+
+    /// Whether `task`'s requester was given, or is to be given, the note that its window's
+    /// model is busy: a note withdrawn before it was given told nobody.
+    fn told_busy(&self, project: &ProjectView, task: &TaskCard) -> Result<bool, EngineError> {
+        let Some(requester) = project
+            .participants
+            .iter()
+            .find(|participant| participant.handle == task.requester)
+        else {
+            return Ok(false);
+        };
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .inbox(requester.id, i64::MAX)?
+            .iter()
+            .any(|message| {
+                message.kind == "note"
+                    && message.task_number == Some(task.number)
+                    && message.state != "cancelled"
+                    && cf_ledger::is_busy_note(task.number, &message.body)
+            }))
+    }
+
+    /// When a window whose model was busy is tried again (T-1112): after the backoff the most
+    /// tries of its tasks name, [`BUSY_HOLD_MS`] once they are spent; its member is out until
+    /// then, and takes no other work.
+    pub(crate) fn busy_reset(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Result<String, EngineError> {
+        let busy = self.scheduler.busy.borrow();
+        let tries = self
+            .active_work(project, participant)?
+            .iter()
+            .filter_map(|task| busy.get(&task.id).copied())
+            .max()
+            .unwrap_or(0);
+        let wait = BUSY_BACKOFF_MS.get(tries).copied().unwrap_or(BUSY_HOLD_MS);
+        Ok(time::iso(self.now() + wait))
+    }
+
+    /// A member marked out until `until` because its model was busy: said so, not out of quota.
+    pub(crate) fn marked_busy(&self, member: i64, until: &str) {
+        self.scheduler
+            .busy_out
+            .borrow_mut()
+            .insert(member, until.to_owned());
+    }
+
+    /// Until when a member is out because its model was busy, where it is.
+    pub(crate) fn busy_until(&self, member: i64) -> Option<String> {
+        self.scheduler.busy_out.borrow().get(&member).cloned()
+    }
+
+    /// A task whose window's model was busy got a turn through: its tries begin again.
+    fn busy_over(&self, task: i64) {
+        self.scheduler.busy.borrow_mut().remove(&task);
     }
 
     /// Whether a refusal at `refused_at` (ms) answered the daemon's own words
@@ -758,6 +1287,7 @@ impl Dispatcher {
         if !last.complete && !working {
             return Ok(());
         }
+        self.busy_over(task.id);
         self.seams
             .ledger
             .borrow_mut()
@@ -819,7 +1349,10 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let now = time::iso(self.now());
         for task in self.active_work(project, participant)? {
-            if task.state == "queued" {
+            // A queued task is on its way to the window already, and so is one that reads
+            // working or waiting while the words that resumed it wait (`resumed_at_work`):
+            // held and resumed here, its window would be told to go on twice (T-1153's F3).
+            if task.state == "queued" || self.resume_words_wait(project.id, task.number)? {
                 continue;
             }
             self.seams.ledger.borrow_mut().hold_task(
@@ -1122,5 +1655,31 @@ mod tests {
         assert_eq!(what_it_is("answer", Some(3)), "an answer on T-3");
         assert_eq!(what_it_is("question", Some(3)), "a question on T-3");
         assert_eq!(what_it_is("note", None), "a note");
+    }
+
+    #[test]
+    fn an_unavailable_refusal_a_look_read_again_is_the_same_refusal_whatever_its_time() {
+        // A window's look gives the refusal as a new object each time where the harness's
+        // reading names one it did not keep (a move of the model, MUS-24): equal words and time
+        // are one refusal, and a record that names no time is one too, or it would be acted on
+        // at every look.
+        let refusal = |at: Option<&str>, because: &str| {
+            Arc::new(Quota::Unavailable {
+                at: at.map(str::to_owned),
+                because: because.to_owned(),
+            })
+        };
+        let handled = refusal(None, "moved");
+        assert!(same_refusal(Some(&handled), &refusal(None, "moved")));
+        assert!(!same_refusal(Some(&handled), &refusal(None, "moved again")));
+        let dated = refusal(Some("2026-10-27T05:00:00.000Z"), "moved");
+        assert!(same_refusal(
+            Some(&dated),
+            &refusal(Some("2026-10-27T05:00:00.000Z"), "moved")
+        ));
+        assert!(!same_refusal(
+            Some(&dated),
+            &refusal(Some("2026-10-27T06:00:00.000Z"), "moved")
+        ));
     }
 }

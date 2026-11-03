@@ -110,7 +110,7 @@ impl<P: Parser> Followed<P> {
             return Ok(None);
         };
         if let Some((stat, looked_ms, reason)) = &self.broken {
-            if *stat == current && settled(stat.mtime_ms, *looked_ms) {
+            if *stat == current && settled(stat.mtime_ms, *looked_ms, *looked_ms, now_ms) {
                 return Err(Stop::Failed(reason.clone()));
             }
         }

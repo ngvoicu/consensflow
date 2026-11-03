@@ -18,7 +18,7 @@ fn at() -> usize {
 
 /// A ledger at the version `migrations` make: two projects (one of them with
 /// work and a gap in its ids), and what the others of its tables hold.
-fn populate(db: &Connection, migrations: &[&str]) {
+pub(super) fn populate(db: &Connection, migrations: &[&str]) {
     db.execute_batch("PRAGMA foreign_keys = ON").expect("keys");
     migrate(db, migrations).expect("the version before");
     db.execute_batch(&format!(
@@ -44,7 +44,7 @@ fn populate(db: &Connection, migrations: &[&str]) {
 }
 
 /// The rows `sql` reads, one line each, every cell as SQLite holds it.
-fn rows(db: &Connection, sql: &str) -> Vec<String> {
+pub(super) fn rows(db: &Connection, sql: &str) -> Vec<String> {
     let mut statement = db.prepare(sql).expect("a query");
     let columns = statement.column_count();
     statement

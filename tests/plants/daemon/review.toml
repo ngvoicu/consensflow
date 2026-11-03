@@ -3,13 +3,7 @@
 # output a harness may cut, the one asked is told to answer again when an
 # answer did not stand, a row Node was pasting is not stranded, and a task
 # sent back to a busy session is told what it can do. One plant takes one fix
-# out, and a test of it fails. A run written `{ node: [...] }` is `node --test`
-# of those files.
-
-[run]
-# The one case of the fixture with no board: it sets the shell's variables itself, so a run of
-# the plant that takes the fix out never reaches the board of the window it is run in.
-opencode-no-board = ["node", "--test", "--test-reporter=tap", "--test-name-pattern=outside a window means no board", "tests/opencode-extension.test.mjs"]
+# out, and a test of it fails.
 
 [[plant]]
 name = "review: a row Node was pasting on its own stays under the carrier it rode in when its delivery goes again"
@@ -25,8 +19,8 @@ find = '''
                AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
             [message_id],
         )?;
-        adopt(store, message_id)?;'''
-replace = "        adopt(store, message_id)?;"
+        // Served whole'''
+replace = "        // Served whole"
 
 [[plant]]
 name = "review: a task sent back to a busy session is told it can be opened for its tier"
@@ -36,10 +30,10 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
 find = '''
-            Giving::SentBack(number) => {
-                format!(" before sending T-{number} back, or open a new task for its tier")
-            }'''
-replace = '            Giving::SentBack(_) => ", or open the task for its tier".to_owned(),'
+        Giving::SentBack(number) => {
+            format!("sending T-{number} back; or open a new task for its tier")
+        }'''
+replace = '        Giving::SentBack(_) => "giving it another task; or open the task for its tier".to_owned(),'
 
 [[plant]]
 name = "review: an answer that failed to arrive is not told to the one asked"
@@ -156,34 +150,6 @@ find = "        if !cause.is_unreachable() || lost >= retries.len() {"
 replace = "        if !cause.is_unreachable() {"
 
 [[plant]]
-name = "review: OpenCode says a receipt once whatever came of it"
-meant = "OpenCode: a receipt whose reply was lost is said again, and the answer is handed over once"
-runs = ["opencode-extension"]
-
-[[plant.edit]]
-file = "hosts/lib/question-door.js"
-find = '''
-      if (cause?.refused || lost >= retries.length) return
-      await new Promise((resolve) => setTimeout(resolve, retries[lost]))'''
-replace = '''
-      return
-      await new Promise((resolve) => setTimeout(resolve, retries[lost]))'''
-
-[[plant]]
-name = "review: OpenCode says a receipt the board refused again"
-meant = "OpenCode: a receipt is said again while the board cannot be reached, then let be; a refusal is final"
-runs = ["opencode-extension"]
-
-[[plant.edit]]
-file = "hosts/lib/question-door.js"
-find = '''
-      if (cause?.refused || lost >= retries.length) return
-      await new Promise((resolve) => setTimeout(resolve, retries[lost]))'''
-replace = '''
-      if (lost >= retries.length) return
-      await new Promise((resolve) => setTimeout(resolve, retries[lost]))'''
-
-[[plant]]
 name = "review: cf says it wrote answers whole of an output a harness may cut"
 meant = "a_thread_a_harness_may_cut_says_nothing_of_the_answers_in_it_and_they_come_as_text"
 runs = ["cf-lib-board"]
@@ -238,19 +204,5 @@ replace = '''
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "wrote.filter(|_| cut::seen_whole(&printed))"
-replace = "wrote.filter(|_| cut::seen_whole(&measured))"
-
-[[plant]]
-name = "review: OpenCode's fixture with no board reads the board of the shell it runs in"
-meant = "OpenCode: outside a window means no board in any shell: the board a member window names is not asked"
-runs = ["opencode-no-board"]
-
-[[plant.edit]]
-file = "tests/opencode-extension.test.mjs"
-find = """
-  } else {
-    delete process.env.CONSENSFLOW_URL
-    delete process.env.CONSENSFLOW_TOKEN
-  }"""
-replace = "  }"
+find = "wrote.filter(|wrote| (wrote.seen)(&printed))"
+replace = "wrote.filter(|wrote| (wrote.seen)(&measured))"

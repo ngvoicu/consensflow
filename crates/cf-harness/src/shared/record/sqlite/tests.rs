@@ -1,5 +1,4 @@
 use super::*;
-use serde_json::{json, Value};
 use std::path::PathBuf;
 
 /// A store in a folder of its own, written by a connection of the test's.
@@ -163,61 +162,4 @@ fn what_a_read_gave_is_bound_as_node_binds_the_javascript_value() {
         .unwrap();
     assert_eq!(found.get("x"), Some(&Cell::Text("a".to_owned())));
     assert_eq!(found.get("written"), Some(&Cell::Text("1.0".to_owned())));
-}
-
-#[test]
-fn javascript_s_values_are_bound_as_node_binds_them() {
-    let (_dir, file, _writer) = store_with("create table t (a integer);");
-    let store = Store::open(&file).unwrap();
-    let bound = |values: &[&Value]| {
-        store.read(|reads| {
-            let row = reads
-                .prepare_js("select ? as a, ? as b, typeof(?) as c")?
-                .get(values)?;
-            Ok(row.map(|row| {
-                row.columns
-                    .into_iter()
-                    .map(|(_, cell)| cell)
-                    .collect::<Vec<_>>()
-            }))
-        })
-    };
-    let text = |text: &str| Cell::Text(text.to_owned());
-    // Node 26: a flag is 1 or 0, a number a double; an object of no names
-    // first binds the values after it from the first place, the rest NULL.
-    assert_eq!(
-        bound(&[&json!(true), &json!(1), &json!("s")]).unwrap(),
-        Some(vec![Cell::Number(1.0), Cell::Number(1.0), text("text")])
-    );
-    assert_eq!(
-        bound(&[&json!({}), &json!("s")]).unwrap(),
-        Some(vec![text("s"), Cell::Null, text("null")])
-    );
-    assert_eq!(
-        bound(&[&json!([]), &json!("s"), &json!("t")]).unwrap(),
-        Some(vec![text("s"), text("t"), text("null")])
-    );
-    assert_eq!(
-        bound(&[&json!({ "x": 1 }), &json!("s")]).unwrap_err(),
-        "unknown named parameter 'x'"
-    );
-    assert_eq!(
-        bound(&[&json!(["m"]), &json!("s")]).unwrap_err(),
-        "unknown named parameter '0'"
-    );
-    assert!(
-        bound(&[&json!("s"), &json!({})]).is_err(),
-        "Node cannot bind it"
-    );
-}
-
-#[test]
-fn a_statement_sqlite_cannot_prepare_fails_though_it_is_never_run() {
-    let (_dir, file, _writer) = store_with("create table t (a integer);");
-    let store = Store::open(&file).unwrap();
-    let prepared = store.read(|reads| reads.prepare_js("select b from t").map(|_| ()));
-    assert_eq!(
-        prepared.unwrap_err(),
-        "no such column: b in select b from t at offset 7"
-    );
 }

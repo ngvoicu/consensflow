@@ -84,8 +84,8 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
     assert_eq!(
         counted,
         [
-            ("sequences", 46, 1131),
-            ("suite", 173, 199),
+            ("sequences", 39, 1059),
+            ("suite", 153, 173),
             ("sweep", 180, 180)
         ]
     );
@@ -95,7 +95,6 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
             ("claude-code".to_owned(), 650),
             ("codex".to_owned(), 262),
             ("devin".to_owned(), 273),
-            ("opencode".to_owned(), 98),
             ("pi".to_owned(), 227),
         ]
     );
@@ -107,15 +106,17 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
     let mut answered = 0;
     let mut played = 0;
     let mut departed = Vec::new();
+    let mut busy = std::collections::BTreeSet::new();
     for group in GROUPS {
         for scenario in scenarios(group) {
             let play = play::play(&scenario, &ours);
             answered += play.answered;
             departed.extend(play.departed);
+            busy.extend(play.busy);
             played += 1;
         }
     }
-    assert_eq!((played, answered), (399, 1510));
+    assert_eq!((played, answered), (372, 1412));
     // Node failed these looks at a torn line, which this build passes over
     // (T-223): each reads the records around it. A record of nothing but a
     // torn line reads as one with no records, and fails all the same.
@@ -150,4 +151,14 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
         "unreadable: empty codex rollout for corrupt".to_owned(),
     ));
     assert_eq!(departed, expected);
+    // Codex's model at capacity (`errored-task-complete.jsonl`) and Pi's provider's 500, which
+    // Node took for the turn's failure, are refusals for a moment (T-1112): their looks read
+    // so, and the rest as Node did.
+    assert_eq!(
+        busy.into_iter().collect::<Vec<_>>(),
+        [
+            "500: provider down",
+            "Selected model is at capacity. Please try a different model."
+        ]
+    );
 }

@@ -23,7 +23,7 @@ use crate::contract::Records;
 use crate::records::{Options, Quota, Reading};
 use jsonl::{jsonl, jsonl_file, jsonl_vars, Way};
 use rig::{append, fixture_lines, fixtures, Rig, STEP_MS};
-use stores::{devin_file_link, devin_fixture, opencode};
+use stores::{devin_file_link, devin_fixture};
 
 /// Each JSONL fixture, and the session it is the record of. Its harness is its
 /// folder's.
@@ -53,17 +53,6 @@ const JSONL: [(&str, &str); 20] = [
     ("pi/between-tool-steps.jsonl", "hazy-ridge"),
     ("pi/tool-loop.jsonl", "hazy-ridge"),
     ("pi/provider-429.jsonl", "triton-jade-fern"),
-];
-
-/// OpenCode's fixtures, each a store of rows, which `native-events.json` adds
-/// the events of its conversation to.
-const OPENCODE: [&str; 5] = [
-    "completion-window",
-    "finish-length",
-    "api-error",
-    "tool-result",
-    // A capture of OpenCode 1.18.30, whose shape 1.19.3, the newest seen, still writes.
-    "v130-tool-loop",
 ];
 
 /// Every fixture there is, by its path under the fixtures folder: the files
@@ -104,11 +93,6 @@ fn every_fixture_reads_through_the_thread_as_it_reads_beside_it() {
             for way in Way::of(harness) {
                 looks += jsonl(harness, name, session, *way).await;
             }
-        }
-        staged.insert("opencode/native-events.json".to_owned());
-        for name in OPENCODE {
-            staged.insert(format!("opencode/{name}.json"));
-            looks += opencode(name).await;
         }
         for name in ["native-tui", "worker-tui"] {
             staged.insert(format!("devin/{name}.json"));
@@ -184,4 +168,44 @@ fn a_refusal_that_has_not_changed_is_the_same_quota_look_after_look() {
             before = after;
         }
     });
+}
+
+/// The recorded refusals of a provider for a moment (T-1112), each with its session and
+/// the words its reader says of it: no failure of its turn's task, and no quota.
+#[rustfmt::skip]
+const BUSY: [(Harness, &str, &str, &str); 1] = [
+    // Codex 0.153.4: `task_complete` whose error is `server_overloaded`.
+    (
+        Harness::Codex,
+        "codex/errored-task-complete.jsonl",
+        "01a074ec-7aff-74b0-8cf6-aa00d8e451cb",
+        "Selected model is at capacity. Please try a different model.",
+    ),
+];
+
+#[test]
+fn a_recorded_refusal_of_a_busy_model_reads_as_one_for_a_moment() {
+    for (harness, name, session, words) in BUSY {
+        let rig = Rig::new(name, jsonl_vars(harness));
+        let file = rig.root.path().join(jsonl_file(harness, session));
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        for line in fixture_lines(name) {
+            append(&file, &format!("{line}\n"));
+        }
+        let options = Options::default();
+        on_engine(async {
+            let read = rig.through.look(harness, session, &options).await;
+            let Reading::Known(record) = &*read else {
+                panic!("{name}: {read:?}");
+            };
+            assert!(record.failed, "{name}");
+            match refusal(&read).as_ref() {
+                Quota::Busy { because, at } => {
+                    assert_eq!(because, words, "{name}");
+                    assert!(at.is_some(), "{name}: dated, so the next try is another");
+                }
+                other => panic!("{name}: {other:?}"),
+            }
+        });
+    }
 }

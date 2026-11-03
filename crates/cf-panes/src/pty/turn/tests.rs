@@ -165,7 +165,7 @@ time.sleep(60)
 "#;
 
         #[test]
-        fn a_job_detached_from_the_shell_that_started_it_is_the_windows_by_its_session_and_no_work_of_the_turn(
+        fn a_job_detached_from_the_shell_that_started_it_is_the_windows_by_its_session_and_is_named_as_work_a_close_ends(
         ) {
             let _serial = serial_pty_test();
             let mut outsider = Sentinel::start();
@@ -174,9 +174,14 @@ time.sleep(60)
                 let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
 
                 // The job's shell is gone, and the system names no parent of its that
-                // the tree has: it is in the window's session, which is the window's
-                // and nothing of the turn's: it is not listed, and the close ends it.
-                assert_eq!(listed(&table, &pane.key), Vec::<u32>::new(), "{servers:?}");
+                // the tree has: it is in the window's session, which is the window's, and
+                // no chain of processes that run makes it the turn's. The host names it
+                // all the same (T-1145), as what the window's close ends.
+                assert_eq!(
+                    listed(&table, &pane.key),
+                    numbers(&pid, &["job"]),
+                    "{servers:?}"
+                );
                 table.kill(&pane.key).expect("close the pane");
                 assert!(gone(pid["job"]), "{servers:?}: the close ended it");
                 assert!(outsider.runs(), "{servers:?}: a process outside the window");
@@ -332,14 +337,15 @@ time.sleep(60)
 
     /// A program that ends on its own with a job still running: reparented, the job is
     /// the window's (it carries the marker its environment has, which a system binary
-    /// such as `sleep` does not show, so the job is a Python's), but no work of the turn:
-    /// no chain of processes that run leads from it to a shell the harness started,
-    /// the program being gone. The exit lists none, and the retirement that follows
-    /// ends it. The job ignores the hangup the terminal sends the program's group as
-    /// its leader goes.
+    /// such as `sleep` does not show, so the job is a Python's), and no work of the turn
+    /// by a chain of processes that run: the program that started it is gone. It is
+    /// detached work all the same (T-1145): it began after the mark, it is none of the
+    /// harness's own and it has lost its starter, so the exit lists it, and the retirement
+    /// that follows ends it. The job ignores the hangup the terminal sends the program's
+    /// group as its leader goes.
     #[cfg(target_os = "macos")]
     #[test]
-    fn a_program_that_exits_leaving_a_job_running_lists_none_of_it_in_its_exit_and_the_retirement_ends_it(
+    fn a_program_that_exits_leaving_a_job_running_lists_it_in_its_exit_as_detached_work_and_the_retirement_ends_it(
     ) {
         let _serial = serial_pty_test();
         let mut outsider = crate::pty::Sentinel::start();
@@ -364,7 +370,15 @@ time.sleep(60)
 
         let left = table.left_running_at_exit(&pane.key, &pane.ended);
 
-        assert_eq!(left, Vec::new(), "no chain proves it the turn's");
+        assert_eq!(
+            left.len(),
+            1,
+            "no chain proves it the turn's, and it is named all the same: {left:?}"
+        );
+        assert!(
+            left[0].command.contains("time.sleep(31)"),
+            "the job, by its command line: {left:?}"
+        );
         assert!(
             table.retire_exited(&pane.key).expect("retire the pane"),
             "the retirement ends what the program left"
@@ -450,6 +464,104 @@ mod windows {
             !found(&left, "ready#"),
             "the program itself came before the turn: {left:?}"
         );
+        table.kill(&key).expect("close the pane");
+    }
+
+    /// T-906: a job has no groups, and the host told no command of a Claude-shaped
+    /// window, so a monitor whose command had ended held its task until Finish. The
+    /// commands are told by their chain: a shell the program started after the rest is
+    /// one, and goes when it ends; a server it started is none, and a shell that ran at
+    /// the rest is none where the look names the rest.
+    #[test]
+    fn a_shell_the_program_started_after_the_rest_is_a_command_and_ends_with_it() {
+        let _pty_guard = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let ping = system("PING.EXE");
+        let shell = system(r"WindowsPowerShell\v1.0\powershell.exe");
+        let (key, output) = open(
+            &table,
+            &powershell(&format!(
+                "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
+                 Start-Process -WindowStyle Hidden -FilePath '{ping}' -ArgumentList '-n','1002','127.0.0.1'; \
+                 Start-Process -WindowStyle Hidden -FilePath '{shell}' -ArgumentList '-NoProfile','-Command','Start-Sleep 601'; \
+                 Write-Output 'RESTING#'; [Console]::In.ReadLine() | Out-Null; \
+                 $watch = Start-Process -PassThru -WindowStyle Hidden -FilePath '{shell}' -ArgumentList '-NoProfile','-Command','Start-Sleep 611'; \
+                 Write-Output 'STARTED#'; [Console]::In.ReadLine() | Out-Null; \
+                 Stop-Process -Id $watch.Id; Write-Output 'STOPPED#'; Start-Sleep 1000"
+            )),
+            &HashMap::new(),
+            1 << 20,
+        );
+        read_until(&table, &key, &output, "READY#");
+        table
+            .mark(&key, Servers::ByShell, Some("claude"))
+            .expect("mark the turn");
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "RESTING#");
+        let rest = table.rest(&key, &[]).expect("a rest");
+        assert!(
+            rest.is_some(),
+            "a rest kept where the platform has no groups"
+        );
+        let look = |since: Option<u64>| {
+            table
+                .commands(&key, since, None)
+                .expect("a look at its commands")
+                .commands
+        };
+        let names = |found: &cf_proto::panes::Background, word: &str| {
+            found
+                .processes
+                .iter()
+                .any(|process| process.command.to_lowercase().contains(word))
+        };
+        let at_rest = look(rest).expect("the commands told where the platform has no groups");
+        assert!(
+            !names(&at_rest, "601") && !names(&at_rest, "1002"),
+            "{at_rest:?}"
+        );
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "STARTED#");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let running = loop {
+            let running = look(rest).expect("told");
+            if names(&running, "611") {
+                break running;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the shell started after the rest was never told: {running:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        assert!(!names(&running, "601"), "it ran at the rest: {running:?}");
+        assert!(
+            !names(&running, "1002"),
+            "the program's own ping: {running:?}"
+        );
+        // A look that names no rest leaves out only what the window had at its launch.
+        let whole = look(None).expect("told");
+        assert!(names(&whole, "601") && names(&whole, "611"), "{whole:?}");
+        assert!(!names(&whole, "1002"), "{whole:?}");
+        table.write(&key, b"\r").expect("go on");
+        read_until(&table, &key, &output, "STOPPED#");
+        // A look that cannot read a process of the window says so, and the engine looks
+        // again: one that lasts is a failure, as is a command still told.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut unread = 0;
+        loop {
+            let after = look(rest);
+            if after.as_ref().is_some_and(|after| after.total == 0) {
+                break;
+            }
+            unread += usize::from(after.is_none());
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stopped shell was still told, or the window never read ({unread} looks unread): {after:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        eprintln!("looks unread after the stop: {unread}");
         table.kill(&key).expect("close the pane");
     }
 }

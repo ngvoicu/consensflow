@@ -3,10 +3,12 @@
 //! it and stops at the first that fails, with that step's exit status as its
 //! own.
 //!
-//! The steps are rustfmt; clippy for the workspace, for the app and for
+//! The steps are rustfmt; clippy for the workspace, then the ceiling on the harnesses' crate's
+//! unreachable `pub` items (`cargo xtask unreachable-pub`), and clippy for the app and for
 //! Windows (the workspace's, then the app's); the tests of the workspace, the engine's kit
 //! again with the gate's pacing on in every case (`CF_KIT_PACED`), the tests of xtask and of
-//! the app; the plants of
+//! the app, and the app's test build again, which has to find every part fresh (`cargo xtask
+//! app fresh`: a build script that makes every build dirty, T-978); the plants of
 //! every family, each checked to still apply to the sources (`cargo xtask
 //! plants <family> --check`); then the linter, the build of the native `cf` (the
 //! `bin/cf` the page's Playwright suite runs, `npm run test:ui`, which is no part
@@ -47,6 +49,8 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
 
+use cf_base::env::WINDOW_VARIABLES;
+
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::{self, Invocation};
@@ -56,15 +60,6 @@ use crate::{app, clippy_windows, plants};
 /// workspace's build folder, not in it. The plants' runs that test xtask whole
 /// name it too (`tests/plants/release`), and a test of theirs holds them to it.
 pub(crate) const XTASK_TARGET: &str = "app/src-tauri/target/xtask-check";
-
-/// What a window gives its member to reach the board with. The tests of the
-/// gate stand on their own boards and read none from the shell they run in.
-const WINDOW_VARIABLES: [&str; 4] = [
-    "CONSENSFLOW_URL",
-    "CONSENSFLOW_TOKEN",
-    "CONSENSFLOW_PARTICIPANT",
-    "CONSENSFLOW_PROJECT",
-];
 
 pub const COMMANDS: &[Command] = &[Command {
     words: &["check"],
@@ -122,6 +117,9 @@ fn steps(
                 "warnings",
             ],
         ),
+        // The crate as the daemon builds it, where the test kit hides the `pub` items it
+        // exports: `cf-harness` may not have more of those its crate does not export.
+        at("cargo", &["xtask", "unreachable-pub"]),
         app::clippy(context, &[]),
     ];
     if !windows {
@@ -155,6 +153,7 @@ fn steps(
         at("cargo", &["test", "--package", "xtask", "--target-dir"])
             .arg(context.path(XTASK_TARGET)),
         app::test(context, &[]),
+        at("cargo", &["xtask", "app", "fresh"]),
     ]);
     // Each family's plants still apply to the sources: a plant whose text is gone, or whose
     // run is refused, fails the gate by its name (`plants::check`).
@@ -247,6 +246,7 @@ mod tests {
             [
                 "cargo fmt --all --check".to_string(),
                 "cargo clippy --workspace --exclude app --all-targets -- -D warnings".to_string(),
+                "cargo xtask unreachable-pub".to_string(),
                 "cargo clippy --offline --all-targets -- -D warnings".to_string(),
                 "cargo clippy --offline --target x86_64-pc-windows-msvc --all-targets \
                  --workspace --exclude app -- -D warnings"
@@ -256,6 +256,7 @@ mod tests {
                 "cargo test --package cf-engine --test dispatcher".to_string(),
                 format!("cargo test --package xtask --target-dir {own_target}"),
                 "cargo test --offline --".to_string(),
+                "cargo xtask app fresh".to_string(),
                 "cargo xtask plants cli --check".to_string(),
                 "cargo xtask plants daemon --check".to_string(),
                 "cargo xtask plants release --check".to_string(),
@@ -272,6 +273,7 @@ mod tests {
             [
                 root.clone(),
                 root.clone(),
+                root.clone(),
                 app.clone(),
                 root.clone(),
                 root.clone(),
@@ -279,6 +281,7 @@ mod tests {
                 root.clone(),
                 root.clone(),
                 app,
+                root.clone(),
                 root.clone(),
                 root.clone(),
                 root.clone(),
@@ -294,6 +297,7 @@ mod tests {
             [
                 vec![],
                 vec![],
+                vec![],
                 vec!["TAURI_CONFIG".to_string()],
                 vec![
                     "CC_x86_64_pc_windows_msvc".to_string(),
@@ -304,6 +308,7 @@ mod tests {
                 vec![PACED_VARIABLE.to_string()],
                 vec![],
                 vec!["TAURI_CONFIG".to_string()],
+                vec![],
                 vec![],
                 vec![],
                 vec![],
@@ -332,10 +337,10 @@ mod tests {
         let context = context();
         let archiver = Path::new("target").join("debug").join("xtask");
         let steps = steps(&context, &archiver, false, &families());
-        assert_eq!(steps[3], clippy_windows::lint(&context, &[], &archiver));
-        assert_eq!(steps[2], app::clippy(&context, &[]));
-        assert_eq!(steps[4].display(), "cargo xtask clippy-windows app");
-        assert_eq!(steps[8], app::test(&context, &[]));
+        assert_eq!(steps[4], clippy_windows::lint(&context, &[], &archiver));
+        assert_eq!(steps[3], app::clippy(&context, &[]));
+        assert_eq!(steps[5].display(), "cargo xtask clippy-windows app");
+        assert_eq!(steps[9], app::test(&context, &[]));
     }
 
     #[test]
@@ -343,23 +348,25 @@ mod tests {
         let context = context();
         let steps = steps(&context, Path::new("xtask"), true, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
-        assert_eq!(lines.len(), 13);
+        assert_eq!(lines.len(), 15);
         assert!(lines.iter().all(
             |line| !line.contains("x86_64-pc-windows-msvc") && !line.contains("clippy-windows")
         ));
         // Everything else is where it was.
         assert_eq!(
-            lines[..3],
+            lines[..4],
             [
                 "cargo fmt --all --check",
                 "cargo clippy --workspace --exclude app --all-targets -- -D warnings",
+                "cargo xtask unreachable-pub",
                 "cargo clippy --offline --all-targets -- -D warnings"
             ]
         );
         assert_eq!(
-            lines[6..],
+            lines[7..],
             [
                 "cargo test --offline --",
+                "cargo xtask app fresh",
                 "cargo xtask plants cli --check",
                 "cargo xtask plants daemon --check",
                 "cargo xtask plants release --check",
@@ -371,10 +378,11 @@ mod tests {
     }
 
     /// The kit with the gate's pacing on every case (CF_KIT_PACED, T-842: it found the P1 the
-    /// plain run hid) is a step of CI's `checks` job too, as the gate runs it, beside the
-    /// plain kit of the `workspace` job (Calliope's re-check of `a0aecd192`, T-854).
+    /// plain run hid) is a step of CI too, as the gate runs it, beside the plain kit of the
+    /// `workspace` job (Calliope's re-check of `a0aecd192`, T-854): of the `platform-free`
+    /// job, which runs once, on Linux, since cf-engine holds no code of one system's (T-1161).
     #[test]
-    fn the_paced_kit_the_gate_runs_is_a_step_of_cis_checks_job_with_its_variable() {
+    fn the_paced_kit_the_gate_runs_is_a_step_of_cis_platform_free_job_with_its_variable() {
         let context = context();
         let steps = steps(&context, Path::new("xtask"), false, &families());
         let paced: Vec<_> = steps
@@ -388,19 +396,24 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/ci.yml"),
         )
         .unwrap();
-        let checks: String = workflow
+        let job: String = workflow
             .lines()
-            .skip_while(|line| *line != "  checks:")
+            .skip_while(|line| *line != "  platform-free:")
             .skip(1)
             .take_while(|line| !(line.starts_with("  ") && !line.starts_with("   ")))
             .map(|line| format!("{line}\n"))
             .collect();
+        assert!(
+            job.lines().any(|line| line == "    runs-on: ubuntu-latest")
+                && !job.contains("matrix:"),
+            "ci.yml's platform-free job runs once, on Linux:\n{job}"
+        );
         let step = format!(
             "      - run: {run}\n        env:\n          {PACED_VARIABLE}: 1\n        timeout-minutes: "
         );
         assert!(
-            checks.contains(&step),
-            "ci.yml's checks job runs the paced kit as the gate does:\n{step}"
+            job.contains(&step),
+            "ci.yml's platform-free job runs the paced kit as the gate does:\n{step}"
         );
     }
 

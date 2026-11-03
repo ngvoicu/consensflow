@@ -3,7 +3,8 @@
 //! window itself (`windows`), what is on its way into it (`deliveries`), what
 //! its harness said of its quota (`scheduler`), what of its conversation is
 //! copied (`transcripts`), a Switch chief waiting for the chief's turn to end
-//! (`chief_switch`) and what a held task waits on (`turn_end`); each module adds
+//! (`chief_switch`), what a held task waits on (`turn_end`) and a message no turn
+//! began on (`never_began`); each module adds
 //! to its part as it is ported. Who holds the participant now is its [`Hold`].
 //! A part is borrowed for one reading or one change, never across a wait.
 
@@ -12,6 +13,7 @@ use std::rc::Rc;
 
 use crate::chief_switch::PendingSwitch;
 use crate::deliveries::DeliveryPart;
+use crate::never_began::Unbegun;
 use crate::runtime::Hold;
 use crate::scheduler::QuotaPart;
 use crate::transcripts::Copied;
@@ -31,6 +33,9 @@ pub(crate) struct Record {
     /// What its task is held for while its turn's work runs in the background
     /// (`turn_end`).
     pub(crate) held: RefCell<HeldPart>,
+    /// The latest message of its working task, where its record shows nothing after it
+    /// (`never_began`).
+    pub(crate) never_began: RefCell<Option<Unbegun>>,
 }
 
 impl Record {
@@ -45,6 +50,7 @@ impl Record {
             copied: RefCell::new(None),
             pending_switch: RefCell::new(None),
             held: RefCell::new(HeldPart::default()),
+            never_began: RefCell::new(None),
         })
     }
 }

@@ -2,7 +2,11 @@
 //! A message is received when its window's record shows its marker, when
 //! the paste that carried it was confirmed, when a door handed an answer to
 //! its harness and said so, or when `cf` served its whole body to the one it
-//! was for ([`Read::receives`]). Withdrawing a message never resolves what it obliged:
+//! was for ([`Read::receives`]). A message served whole while its paste is still
+//! on its way (`delivering`) is read all the same, but the paste is the window's
+//! to settle: the read is kept with the message ([`keep_read`], in its receipt as
+//! `readEarly`) and told when the delivery ends ([`told_when_confirmed`],
+//! [`settle_when_given_back`], [`settle_when_given_up`]). Withdrawing a message never resolves what it obliged:
 //! only receipt does. A task moves between `queued`, `working` and `waiting`
 //! in one place, [`reconcile`], after each receipt.
 //!
@@ -16,7 +20,8 @@ use cf_proto::ledger::{Claim, MessageView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
-use super::{known_message, message_task};
+use super::{known_message, message_task, role_of_note};
+use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::LedgerError;
 use crate::store::Store;
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
@@ -37,13 +42,15 @@ impl Read {
         }
     }
 
-    /// Whether a message served whole this way is received by it:
+    /// Whether a message still queued and served whole this way is received by it:
     /// - by `cf inbox read`, any message but a task's words and a note that
     ///   says a conversation its role. A question, a result, a note or an
     ///   answer read there is the reader's, and is never typed in after it
     ///   (T-260). A task's words send its window on, and only their paste
     ///   proves them; a role is ConsensFlow's word to the conversation, which
-    ///   records it told only when it is pasted (`confirm_delivery_telling`);
+    ///   is told it by its paste (`confirm_delivery_telling`), or, where the
+    ///   paste was cut, once it is delivered and then read ([`read_role`]), or was
+    ///   read while its paste was on its way ([`Read::keeps`]) and is then confirmed;
     /// - in the thread `cf task get` printed, an answer only: the thread is
     ///   the task's, and the rest of it is not the reader's to receive one by one.
     fn receives(self, message: &MessageView, says_a_role: bool) -> bool {
@@ -52,6 +59,162 @@ impl Read {
             Read::Task => message.kind == "answer",
         }
     }
+
+    /// Whether a message whose paste is still on its way (`delivering`) and served
+    /// whole this way keeps the read until its delivery ends: whatever
+    /// [`Read::receives`] says of a queued one, and a note that says a conversation its
+    /// role as well, by `cf inbox read`: it is the read of a role that tells the
+    /// conversation, once the paste is confirmed. A task's words are none: their paste
+    /// alone proves them.
+    fn keeps(self, message: &MessageView) -> bool {
+        match self {
+            Read::Inbox => message.kind != "task",
+            Read::Task => message.kind == "answer",
+        }
+    }
+
+    /// The way a kept read was made, from the word its receipt holds.
+    fn of_word(word: &str) -> Option<Read> {
+        match word {
+            "inbox" => Some(Read::Inbox),
+            "task" => Some(Read::Task),
+            _ => None,
+        }
+    }
+}
+
+/// What a message's receipt holds, while its paste is on its way, of a read made
+/// meanwhile ([`keep_read`]): the way it was read, and the conversation of its
+/// recipient it was read in, as a receipt names them.
+const KEPT: &str = "readEarly";
+const KEPT_IN: &str = "readIn";
+
+/// A read made while the paste of a message was on its way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Kept {
+    via: Read,
+    /// The recipient's conversation when it was read; none where it had none.
+    conversation: Option<i64>,
+}
+
+/// The read a message on its way was served whole by, if its receipt holds one.
+pub(crate) fn kept_read(message: &MessageView) -> Option<Kept> {
+    let via = message
+        .receipt
+        .get(KEPT)
+        .and_then(Value::as_str)
+        .and_then(Read::of_word)?;
+    Some(Kept {
+        via,
+        conversation: message.receipt.get(KEPT_IN).and_then(Value::as_i64),
+    })
+}
+
+/// `receipt`, the proof that a paste arrived, with the read a message made on its
+/// way ([`kept_read`] of it before) added, so that what the window did and what
+/// the harness showed are both in it.
+pub(crate) fn with_kept_read(receipt: Value, kept: Option<Kept>) -> Value {
+    let Some(kept) = kept else {
+        return receipt;
+    };
+    let mut receipt = match receipt {
+        Value::Object(_) => receipt,
+        _ => json!({}),
+    };
+    receipt[KEPT] = json!(kept.via.word());
+    if let Some(conversation) = kept.conversation {
+        receipt[KEPT_IN] = json!(conversation);
+    }
+    receipt
+}
+
+/// A message served whole to its recipient while its paste is on its way: the read
+/// is kept in its receipt, with the conversation it was made in, and is not a
+/// receipt of the message yet. The paste is the window's to settle (`delivering`,
+/// which `confirm_delivery`, `retry_delivery` and `give_up_delivery` leave), so the
+/// message stays as it is; what the read comes to is told when the delivery ends.
+/// A read after another keeps the later: it is the conversation that read last
+/// that has the words.
+fn keep_read(store: &mut Store, message: &MessageView, via: Read) -> Result<(), LedgerError> {
+    let conversation = current_conversation(store, message.recipient_id)?.map(|found| found.id);
+    let receipt = with_kept_read(json!({}), Some(Kept { via, conversation }));
+    store.db.execute(
+        "UPDATE message SET receipt = ? WHERE id = ? AND state = 'delivering'",
+        params![receipt.to_string(), message.id],
+    )?;
+    Ok(())
+}
+
+/// A delivery was confirmed, and the message had been served whole to its recipient
+/// while it was on its way ([`keep_read`]): a note that says its recipient a role is
+/// read now as it is when it is read after (`read_role`), `read`, and the
+/// conversation recorded as told the role. Only in the conversation the read was made
+/// in: a conversation that began since was not shown the role the read printed, and
+/// is told it again at its next Resume. Any other message is what its paste made it:
+/// the window had it from the paste, so a read adds nothing, and it stays
+/// `delivered`, with the read in its receipt.
+pub(crate) fn told_when_confirmed(
+    store: &mut Store,
+    message_id: i64,
+    kept: Kept,
+) -> Result<(), LedgerError> {
+    if kept.via != Read::Inbox || !says_a_role(store, message_id)? {
+        return Ok(());
+    }
+    // The message as the confirmation left it: `read_role` weighs when it was delivered.
+    let delivered = known_message(store, message_id)?;
+    let now = current_conversation(store, delivered.recipient_id)?.map(|found| found.id);
+    if now == kept.conversation {
+        read_role(store, &delivered)?;
+    }
+    Ok(())
+}
+
+/// A delivery was given back to the queue (`retry_delivery`), and the message had been
+/// served whole to its recipient while it was on its way: where a read in the inbox
+/// would have received it queued ([`Read::receives`]), it is `read` now, and not
+/// pasted again after the reader had it (T-260). Whether it was is whether the
+/// paste was proved, which it was not. Its task is reconciled, as for any read.
+/// A note that says a role is not received by a read: the read stays with it, and
+/// tells the role if the paste comes in after all (`confirm_delivery`), as the
+/// note's words are the same in every paste of it. Whether the message was
+/// settled.
+pub(crate) fn settle_when_given_back(
+    store: &mut Store,
+    message_id: i64,
+) -> Result<bool, LedgerError> {
+    settle_kept_read(store, message_id, "queued")
+}
+
+/// A delivery was given up (`give_up_delivery`), and the message had been served whole
+/// to its recipient while it was on its way: where a read would have received it
+/// queued, it is `read` and not failed, as it is when the paste is given back
+/// ([`settle_when_given_back`]): its recipient has it, and what a failure would tell
+/// whoever waits on it (an answer that did not arrive, a question that was not
+/// asked) is not so. A note that says a role is failed as any is: a read does not
+/// receive it. Whether the message was settled.
+pub(crate) fn settle_when_given_up(
+    store: &mut Store,
+    message_id: i64,
+) -> Result<bool, LedgerError> {
+    settle_kept_read(store, message_id, "delivering")
+}
+
+/// The read kept with message `message_id`, which is in state `now`, is told: the
+/// message is received by it where a read of its kind receives one, and its task is
+/// reconciled.
+fn settle_kept_read(store: &mut Store, message_id: i64, now: &str) -> Result<bool, LedgerError> {
+    let message = known_message(store, message_id)?;
+    let Some(Kept { via, .. }) = kept_read(&message) else {
+        return Ok(false);
+    };
+    let role = says_a_role(store, message_id)?;
+    if message.state != now || !via.receives(&message, role) {
+        return Ok(false);
+    }
+    received_as(store, &message, &json!({ "read": via.word() }))?;
+    reconcile_of(store, &message)?;
+    Ok(true)
 }
 
 /// Whether a task message for the window is still on its way: queued, held
@@ -136,7 +299,10 @@ pub(crate) fn reconcile(store: &mut Store, task_id: i64) -> Result<(), LedgerErr
 /// is an old one already, and is born with its door shut: the task is
 /// paused, or queued with the words that send it on still waiting for their
 /// paste, so the window is still on the turn that came before them. Its
-/// answer comes as a message, with those words, when the task goes on.
+/// answer comes as a message, with those words, when the task goes on. A
+/// resumed task that reads working because its window is at work on it
+/// (`work_while_resumed`), or waiting for the answer to a question it asked meanwhile,
+/// is the same: its resume's words are not in yet.
 pub(crate) fn door_born_closed(store: &Store, task: &TaskRow) -> Result<bool, LedgerError> {
     let Some(window) = task.assignee_id else {
         return Ok(false);
@@ -150,6 +316,9 @@ pub(crate) fn door_born_closed(store: &Store, task: &TaskRow) -> Result<bool, Le
                    AND state IN ('queued', 'gated')",
             )?
             .exists(params![task.id, window])?,
+        // Or at work, or waiting for the answer to a question asked meanwhile, on the turn
+        // before the words that resumed it: every door is shut until they are in.
+        "working" | "waiting" => crate::tasks::resume_words_not_in(store, task)?.is_some(),
         _ => false,
     })
 }
@@ -321,8 +490,12 @@ pub(crate) fn settle_claim(
 /// those among `ids` that are still `queued` for `recipient`, a carried or
 /// claimed one included (its claim is given up), and that the way they were
 /// served receives ([`Read::receives`]), are `read`, each with its receipt,
-/// and their tasks reconciled, once each. The rest are left as they are. How
-/// many were received.
+/// and their tasks reconciled, once each. A note that says `recipient` a role
+/// and was delivered (its paste cut, the role told in part) is read in the
+/// inbox as [`read_role`] says. One whose paste is still on its way
+/// (`delivering`) and that the way it was served keeps ([`Read::keeps`]) keeps the
+/// read for when its delivery ends ([`keep_read`]); it is not received yet, and not
+/// counted. The rest are left as they are. How many were received.
 pub(crate) fn receive_read(
     store: &mut Store,
     recipient: i64,
@@ -335,11 +508,23 @@ pub(crate) fn receive_read(
         for id in ids {
             let Some(message) = store
                 .message(*id)?
-                .filter(|message| message.recipient_id == recipient && message.state == "queued")
+                .filter(|message| message.recipient_id == recipient)
             else {
                 continue;
             };
-            if !via.receives(&message, says_a_role(store, message.id)?) {
+            let role = says_a_role(store, message.id)?;
+            if via == Read::Inbox && role && message.state == "delivered" {
+                read_role(store, &message)?;
+                received += 1;
+                continue;
+            }
+            if message.state == "delivering" {
+                if via.keeps(&message) {
+                    keep_read(store, &message, via)?;
+                }
+                continue;
+            }
+            if message.state != "queued" || !via.receives(&message, role) {
                 continue;
             }
             received_as(store, &message, &json!({ "read": via.word() }))?;
@@ -355,6 +540,43 @@ pub(crate) fn receive_read(
         }
         Ok(received)
     })
+}
+
+/// A note that says its recipient a role, delivered (its paste was cut to its
+/// opening and the command that prints the rest), and now printed whole to its
+/// recipient by `cf inbox read`: the window has the whole role. The note is
+/// `read` (its delivery's time and proof kept), and the recipient's current
+/// conversation recorded as told that role, in one write. Not where a later note
+/// says it a role, which is what it was told last, nor where its conversation
+/// began after the note was delivered: the note went into another.
+fn read_role(store: &mut Store, message: &MessageView) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET state = 'read' WHERE id = ?",
+        [message.id],
+    )?;
+    store.log(
+        message.project_id,
+        "message.read",
+        json!({ "message": message.id, "receipt": { "read": Read::Inbox.word() } }),
+    )?;
+    let last = store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND role_text IS NOT NULL",
+        [message.recipient_id],
+        |row| row.get::<_, Option<i64>>(0),
+    )?;
+    let Some(conversation) = current_conversation(store, message.recipient_id)? else {
+        return Ok(());
+    };
+    let since = message
+        .delivered_at
+        .as_deref()
+        .is_some_and(|at| at >= conversation.started_at.as_str());
+    if let Some(role) =
+        role_of_note(store, message.id)?.filter(|_| last == Some(message.id) && since)
+    {
+        set_conversation_role_text(store, conversation.id, &role)?;
+    }
+    Ok(())
 }
 
 /// Whether a message says its recipient's conversation a role: a note the

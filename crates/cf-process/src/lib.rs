@@ -3,8 +3,9 @@
 //! window's program does, where a command is on PATH, running one to its end
 //! (`execFile`) or beside this one a line at a time (`spawn`), handing one
 //! something and letting it go (`hand_over`), starting one with a command of
-//! the caller's own, its streams and its console (`start_owned`), ending one,
-//! whether one is alive, and how much memory this one holds.
+//! the caller's own, its streams and its console (`start_owned`), ending one
+//! (one it did not keep the handle of by its number and when it began:
+//! `Started`), whether one is alive, and how much memory this one holds.
 
 #![deny(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks)]
@@ -20,10 +21,17 @@ mod hand_over;
 mod job;
 mod live;
 mod memory;
+// The cargo a test starts. Every crate that starts one includes this file by its path (a crate of
+// ours may take no dependency for it); here it is held to its cases.
+#[cfg(test)]
+mod nested_cargo;
+#[cfg(test)]
+mod nested_cargo_tests;
 mod owned;
 mod runnable;
 mod search;
 mod spawning;
+mod started;
 #[cfg(unix)]
 mod table;
 mod terminate;
@@ -44,4 +52,5 @@ pub use memory::{megabytes, rss};
 pub use owned::{start_owned, Owned};
 pub use runnable::{pane_argv, runnable, Run};
 pub use search::{find_in, on_path, on_search_path};
+pub use started::Started;
 pub use terminate::{terminate, Ending};

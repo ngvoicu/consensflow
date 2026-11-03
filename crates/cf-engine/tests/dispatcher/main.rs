@@ -16,20 +16,23 @@
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
 //! the human's Resume of what a start suspended (`resume`), and of what a Close
-//! suspended, whose windows are handed nothing meanwhile (`closed_given_nothing`), the conversation its
+//! suspended, whose windows are handed nothing meanwhile (`closed_given_nothing`), and in
+//! which nothing on its way to a window fails (`close_while_delivering`), the conversation its
 //! harness holds nothing of, which a window opened again does not resume
 //! (`resumable`), and the arrival window counted in the time a window is at
 //! rest, so that a record that is late while its window is in a turn is waited
 //! for, as a message its harness says its own queue holds is (`slow_records`),
 //! and the paste a window went with, which its harness's record may show it took
-//! (`window_went_with_a_paste`), and a header quoted in a window's words, which is
+//! (`window_went_with_a_paste`), and the close of a window whose task is done, which
+//! waits for its screen to be drawn (`close_when_drawn`), and a header quoted in a window's words, which is
 //! no paste (`quoted_headers`), and the shapes a harness's record keeps a paste in
 //! (`paste_shapes`), the quota wait that keeps a member's task with its
 //! window whoever else is free (`quota_waits`), and an account's quota as every
 //! window's on it, and what waits for a window out of quota said to the human
 //! (`quota_accounts`), and a window whose turn is over, which no stop interrupts
 //! or closes (`nothing_to_stop`), and a read of a window that fails or comes too late, which is
-//! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`).
+//! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`), and
+//! the window's own `cf` every text typed into it starts its commands with (`window_cf`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -39,12 +42,19 @@ mod agent_gone;
 mod approval;
 mod assigning;
 mod background;
+mod brief_never_began;
+mod busy_models;
 mod cancelled_task;
+mod canonical_folder;
 mod carriers;
 mod chief_not_up;
 mod chiefs;
+mod close_when_drawn;
+mod close_while_delivering;
 mod closed_given_nothing;
 mod closing;
+mod compacting;
+mod compaction_window;
 mod computer_use;
 mod decided_results;
 mod deleted_sessions;
@@ -52,11 +62,13 @@ mod deliveries;
 mod exit_overdue;
 mod exit_proof;
 mod exit_unsettled;
+mod failure_first;
 mod failure_reasons;
 mod final_answer;
 mod first_delivered;
 mod fixtures;
 mod follow_ups;
+mod held_at_work;
 mod interrupts;
 mod lanes;
 mod launch_stops;
@@ -64,7 +76,9 @@ mod launch_wait;
 mod looks;
 mod looks_finished;
 mod lost_lines;
+mod meeting;
 mod meeting_main;
+mod moved_models;
 mod no_adapter;
 mod not_ready;
 mod nothing_to_stop;
@@ -78,6 +92,7 @@ mod pause_notes;
 mod paused_answers;
 mod paused_left;
 mod pending_agents;
+mod questions_not_results;
 mod queued_tells;
 mod quota;
 mod quota_accounts;
@@ -88,6 +103,8 @@ mod receipts;
 mod restart;
 mod resumable;
 mod resume;
+mod resumed_at_work;
+mod resumed_at_work_claims;
 mod retired_agents;
 mod review;
 mod role_change;
@@ -114,11 +131,14 @@ mod tasks;
 mod testers;
 mod the_dispatcher;
 mod throws_early;
+mod tier_fallback;
 mod told_once;
 mod trace_untold;
 mod traces;
+mod transcript_whole;
 mod turn_end;
 mod turns_at_seams;
+mod unavailable_accounts;
 mod undeliverable;
 mod unfit;
 mod unknown_looks;
@@ -128,6 +148,7 @@ mod unsent;
 mod unstarted;
 mod waiting_notes;
 mod wake_ups;
+mod window_cf;
 mod window_closes;
 mod window_takes_long;
 mod window_traces;
