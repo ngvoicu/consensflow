@@ -221,12 +221,24 @@ pub fn state(judged: &Judged, name: &str, nth: usize, states: &[&str]) -> Check 
         .nth(name, nth)
         .and_then(|number| Some((number, judged.snapshot.task(number)?)))
     {
-        Some((number, task)) => Check::new(
-            name,
-            &what,
-            states.iter().any(|state| task["state"] == *state),
-            format!("T-{number} is {}", task["state"]),
-        ),
+        Some((number, task)) => {
+            // Why it moved last, where the board says (a pause's `because`): what a red says.
+            let because = judged
+                .snapshot
+                .events
+                .iter()
+                .rev()
+                .find(|event| event["kind"] == "task.state" && event["data"]["task"] == number)
+                .and_then(|event| event["data"]["because"].as_str())
+                .map(|because| format!(", because {}", crate::live::cut(because, 300)))
+                .unwrap_or_default();
+            Check::new(
+                name,
+                &what,
+                states.iter().any(|state| task["state"] == *state),
+                format!("T-{number} is {}{because}", task["state"]),
+            )
+        }
         None => Check::failed(name, &what, format!("no {name} task was bound")),
     }
 }
