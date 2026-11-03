@@ -56,6 +56,25 @@ async fn the_daemon_serves_the_screens_under_its_token_over_its_own_environment(
             .await;
             assert_eq!(status, 200);
             assert!(page.contains("<title>ConsensFlow Harnesses</title>"));
+            // A check looks for the harnesses on the daemon's own PATH: `claude`, and no other.
+            let (status, checked) = call(
+                &handle.url,
+                "POST",
+                "/api/harnesses/check",
+                Some(&handle.token),
+                "{}",
+            )
+            .await;
+            assert_eq!(status, 200, "{checked}");
+            let checked: serde_json::Value = serde_json::from_str(&checked).unwrap();
+            let installed: Vec<&str> = checked["harnesses"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{checked}"))
+                .iter()
+                .filter(|row| row["installed"] == true)
+                .filter_map(|row| row["id"].as_str())
+                .collect();
+            assert_eq!(installed, ["claude"], "{checked}");
 
             // Nobody else: no token, and none of the agents' windows' (which the API checks).
             let (status, body) = call(&handle.url, "GET", "/harnesses", None, "").await;
