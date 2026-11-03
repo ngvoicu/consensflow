@@ -634,3 +634,73 @@ fn windows(members: &Members, evidence: &Evidence) -> Result {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KNOWN: &[Known] = &[
+        Known {
+            who: "D",
+            what: "it is cancelled",
+            until: "T-1122 (I-7)",
+        },
+        Known {
+            who: "F",
+            what: "it is open",
+            until: "T-1118 (I-7)",
+        },
+    ];
+
+    #[test]
+    fn a_known_red_is_said_apart_never_passed_and_a_red_of_its_own_once_it_holds_or_goes_unmade() {
+        let (kept, known) = sort_known(
+            vec![
+                Check::passed("D", "it is done", "T-1 is done"),
+                Check::failed("D", "it is cancelled", "T-1 is done"),
+                Check::failed("F", "it is open", "T-2 is done"),
+            ],
+            KNOWN,
+        );
+        assert_eq!(kept, [Check::passed("D", "it is done", "T-1 is done")]);
+        assert_eq!(known.len(), 2);
+        assert!(known.iter().all(|check| !check.ok));
+        assert!(
+            known[0]
+                .detail
+                .starts_with("known red until T-1122 (I-7): T-1 is done"),
+            "{}",
+            known[0].detail
+        );
+
+        // Once the work lands, the known red holds: its mark is to go, and it is a red until it does.
+        let (kept, known) = sort_known(
+            vec![
+                Check::passed("D", "it is cancelled", "T-1 is cancelled"),
+                Check::failed("F", "it is open", "x"),
+            ],
+            KNOWN,
+        );
+        assert_eq!(known.len(), 1);
+        assert!(
+            !kept[0].ok
+                && kept[0]
+                    .detail
+                    .starts_with("a known red now holds (T-1122 (I-7)): take its mark out"),
+            "{:?}",
+            kept[0]
+        );
+
+        // A known red no check made is a red too: a renamed check cannot hide it.
+        let (kept, known) = sort_known(vec![Check::failed("D", "it is cancelled", "x")], KNOWN);
+        assert_eq!(known.len(), 1);
+        assert_eq!(
+            kept,
+            [Check::failed(
+                "F",
+                "it is open",
+                "a known red no check made (until T-1118 (I-7))"
+            )]
+        );
+    }
+}

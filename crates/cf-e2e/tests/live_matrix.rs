@@ -11,7 +11,7 @@
 //! ```text
 //! cargo xtask live matrix --board 3 --scenario core -- --test-threads 1      one board, 0 to 4
 //! cargo xtask live matrix --seats chief=claude,worker=devin,reviewer=codex,advisor=pi,tester=muse
-//! cargo xtask live matrix --plan                                             the 50 cells, nothing run
+//! cargo xtask live matrix --plan cells                                       the 50 cells, nothing run
 //! cargo xtask live matrix --replay evals/reports/live-matrix/<run>/manifest.json
 //! ```
 //!

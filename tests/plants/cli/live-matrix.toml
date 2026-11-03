@@ -16,6 +16,10 @@ matrix-fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin"
 # The live suite's own tests, the controls among them, by name.
 matrix-control-end = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_cancelled"]
 matrix-control-question = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_chiefs"]
+matrix-control-replay = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_red_runs_again"]
+matrix-control-core = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::the_core_flow"]
+matrix-control-field6 = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field6_"]
+matrix-words = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::the_words"]
 matrix-control-smoke = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::the_matrix_passes"]
 # The daemon's API, the tooling's look at it among it.
 matrix-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::tests::"]
@@ -159,13 +163,13 @@ replace = '''                    delivered_ms < done_ms,'''
 
 [[plant]]
 name = "live matrix: the oracle reads a refusal by its status, not its code (a wrong refusal code)"
-meant = "a_refusal_is_judged_by_the_code_the_daemon_answered_and_nothing_else"
+meant = "a_refusal_is_judged_by_the_code_and_the_words_the_daemon_answered_and_nothing_else"
 runs = ["matrix-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/matrix/oracle.rs"
-find = '''        asked.iter().any(|call| call.error.as_deref() == Some(code)),'''
-replace = '''        asked.iter().any(|call| call.status >= 400),'''
+find = '''            call.error.as_deref() == Some(code)'''
+replace = '''            call.status >= 400'''
 
 [[plant]]
 name = "live matrix: the daemon writes a refusal under another code"
@@ -175,8 +179,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/calls.rs"
-find = '''        Err(Failure::Refused(refusal)) => (refusal.status, json!(refusal.code)),'''
-replace = '''        Err(Failure::Refused(refusal)) => (refusal.status, json!("refused")),'''
+find = '''            (refusal.status, json!(refusal.code), json!(refusal.message))'''
+replace = '''            (refusal.status, json!("refused"), json!(refusal.message))'''
 
 [[plant]]
 name = "live matrix: a daemon the tooling did not start writes the API's requests"
@@ -279,3 +283,106 @@ runs = ["matrix-control-question"]
 file = "crates/cf-e2e/src/matrix/human.rs"
 find = '''            && item.text.lines().any(|line| line.trim_end().ends_with('?'))'''
 replace = '''            && item.text.lines().any(|line| line.trim_end().ends_with("?!"))'''
+
+# T-1168: the Latin square (LMX-05), replay (LMX-07), the evidence, the known reds, and the
+# Phase 2 scenarios on the stand-ins (LMX-08, LMX-12).
+[[plant]]
+name = "live matrix: the Latin square seats one harness in every position of a board"
+meant = "the_five_boards_are_the_designs_table_and_each_harness_sits_in_each_position_once"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/seating.rs"
+find = '''        (role, ORDER[(usize::from(board) + at) % ORDER.len()])'''
+replace = '''        (role, ORDER[(usize::from(board) + at * 0) % ORDER.len()])'''
+
+[[plant]]
+name = "live matrix: any harness may be the image designer"
+meant = "unsupported_seats_are_refused_in_words"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/seating.rs"
+find = '''                if harness != Harness::Codex {'''
+replace = '''                if harness != Harness::Codex && false {'''
+
+[[plant]]
+name = "live matrix: a position named twice takes the second harness"
+meant = "unsupported_seats_are_refused_in_words"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/seating.rs"
+find = '''            if seats.iter().any(|(seated, _)| *seated == role) {'''
+replace = '''            if seats.iter().any(|(seated, _)| *seated == role) && false {'''
+
+[[plant]]
+name = "live matrix: a replay runs a scenario of another version"
+meant = "a_red_runs_again_alone_from_its_manifest_with_the_same_seats"
+runs = ["matrix-control-replay"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''    if version != u64::from(scenario.version) {'''
+replace = '''    if version != u64::from(scenario.version) && false {'''
+
+[[plant]]
+name = "live matrix: a known red that fails is passed"
+meant = "a_known_red_is_said_apart_never_passed_and_a_red_of_its_own_once_it_holds_or_goes_unmade"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''            Some(at) if !check.ok => {'''
+replace = '''            Some(at) if !check.ok && false => {'''
+
+[[plant]]
+name = "live matrix: a known red that no check made is let go"
+meant = "a_known_red_is_said_apart_never_passed_and_a_red_of_its_own_once_it_holds_or_goes_unmade"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''        if !seen {'''
+replace = '''        if !seen && false {'''
+
+[[plant]]
+name = "live matrix: the evidence's token check passes whatever it finds"
+meant = "the_evidence_holds_no_token_and_a_ledger_is_copied_whole_while_it_is_held"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/evidence.rs"
+find = '''        found.is_empty() && read > 0,'''
+replace = '''        read > 0,'''
+
+[[plant]]
+name = "live matrix: a refusal is judged by its code alone, not the task its words name"
+meant = "a_refusal_is_judged_by_the_code_and_the_words_the_daemon_answered_and_nothing_else"
+runs = ["matrix-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/oracle.rs"
+find = '''                    .all(|word| message.contains(&named(judged, word)))'''
+replace = '''                    .all(|word| true || message.contains(&named(judged, word)))'''
+
+[[plant]]
+name = "live matrix: a follow-up queued for its window at once is read as given no brief"
+meant = "field6_done_predecessor"
+runs = ["matrix-control-field6"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/observe.rs"
+find = '''        (["task.assigned", "task.created"].contains(&event["kind"].as_str().unwrap_or_default())'''
+replace = '''        (["task.assigned"].contains(&event["kind"].as_str().unwrap_or_default())'''
+
+[[plant]]
+name = "live matrix: the daemon's refusal words are not written"
+meant = "field6_paused_holder"
+runs = ["matrix-control-field6"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/calls.rs"
+find = '''            (refusal.status, json!(refusal.code), json!(refusal.message))'''
+replace = '''            (refusal.status, json!(refusal.code), Value::Null)'''
