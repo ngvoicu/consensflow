@@ -40,6 +40,19 @@ matrix-late-record = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "l
 matrix-recap = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_recap_not_typed"]
 matrix-image-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_image_result"]
 matrix-question-not-retyped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_question_not_retyped"]
+# The seats of Devin's and Codex's shape (T-1207): the cases by name, and the stand-ins' own tests.
+matrix-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_compaction"]
+matrix-devin-command-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_command_left"]
+matrix-devin-resumed-writes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_resumed_writes"]
+matrix-devin-reopened = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_reopened"]
+matrix-codex-slow-login = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::codex_worker_field_codex_slow_login_shell"]
+matrix-devin-quota = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_field_devin_quota"]
+matrix-devin-core = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::devin_worker_core"]
+matrix-codex-tell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::codex_worker_seat_tell"]
+matrix-codex-question = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::codex_worker_question_ask_answer"]
+matrix-fake-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-codex"]
+matrix-process-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::"]
+matrix-live-plan = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::plan::"]
 # LMX-14, window life (T-1195): the cases by name.
 matrix-restart-mid-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_restart_mid_turn"]
 matrix-tell-keeps-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_tell_keeps_work"]
@@ -672,19 +685,6 @@ replace = """
         }"""
 
 [[plant]]
-name = "live matrix: the stand-in runs the last cf on its PATH, not the first"
-meant = "cf_is_the_first_on_the_path_and_nothing_else_is_looked_at"
-runs = ["matrix-fake-agent-reply"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
-find = """    std::env::split_paths(path).find_map(|folder| {"""
-replace = """    std::env::split_paths(path).collect::<Vec<_>>().into_iter().rev().find_map(|folder| {"""
-
-# LMX-14, window life (T-1195): each field fix a window-life case replays, taken back out as the
-# field had it; its case catches it.
-
-[[plant]]
 name = "live matrix: field fix out: a build's daemon left running is taken for the turn's work and told (A1)"
 meant = "field_builds_daemon"
 runs = ["matrix-builds-daemon"]
@@ -826,3 +826,169 @@ runs = ["matrix-tell-keeps-work"]
 file = "crates/cf-e2e/src/matrix/run.rs"
 find = "        self.members.rig().keys_pressed(&id, &[27])"
 replace = "        self.members.rig().keys_pressed(&id, &[27]) * 0"
+
+# The Dv and Cx field lines (T-1207): each field fix a seat's case replays, taken back out; its
+# case catches it.
+
+[[plant]]
+name = "live matrix: field fix out: the Devin worker's answer is never given once its turn is compacted (T-602)"
+meant = "devin_worker_field_devin_compaction"
+runs = ["matrix-devin-compaction"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '''            Some("system") if summary(message) => cut = Some(None),'''
+replace = '''            Some("system") if summary(message) => cut = None,'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''        if entry.request == Key::Null {
+            Request::Native(&entry.native)'''
+replace = '''        if entry.request == Key::Null && false {
+            Request::Native(&entry.native)'''
+
+[[plant]]
+name = "live matrix: field fix out: a command that goes on reporting holds the Devin worker's task"
+meant = "devin_worker_field_devin_command_left"
+runs = ["matrix-devin-command-left"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''const WORK: [&str; 3] = ["agent_thought_chunk", "agent_message_chunk", "tool_call"];'''
+replace = '''const WORK: [&str; 4] = [
+    "agent_thought_chunk",
+    "agent_message_chunk",
+    "tool_call",
+    "tool_call_update",
+];'''
+
+[[plant]]
+name = "live matrix: field fix out: a resumed Devin worker is given the note that its turn was cut without /bypass (B1)"
+meant = "devin_worker_field_devin_resumed_writes"
+runs = ["matrix-devin-resumed-writes"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''        format!("{BYPASS} {text}")'''
+replace = "        text.clone()"
+
+[[plant]]
+name = "live matrix: field fix out: a Devin window opened on a turn its record cannot end reads at rest for good"
+meant = "devin_worker_field_devin_reopened"
+runs = ["matrix-devin-reopened"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "                .is_some_and(|open| open.unchanged(&reading))"
+replace = "                .is_some_and(|open| open.unchanged(&reading) && reading.read_failed())"
+
+[[plant]]
+name = "live matrix: field fix out: the system's folders of programs are not looked in for a harness"
+meant = "codex_worker_field_codex_slow_login_shell"
+runs = ["matrix-codex-slow-login"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '''        let folders = folders.chain(env.tool_folders().iter().cloned());
+'''
+replace = ""
+
+[[plant]]
+name = "live matrix: field fix out: Devin's turn its quota ended is not read as quota"
+meant = "devin_worker_field_devin_quota"
+runs = ["matrix-devin-quota"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''        if event.get("cause").and_then(Value::as_str) == Some("quota_exhausted") {'''
+replace = '''        if event.get("cause").and_then(Value::as_str) == Some("quota_exhausted-not") {'''
+
+# This round's rules (T-1207): the seats of Devin's and Codex's shape, and the stand-ins' new words.
+
+[[plant]]
+name = "live matrix: a Devin-shaped seat is not given the Devin stand-in"
+meant = "devin_worker_core"
+runs = ["matrix-devin-core"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members.rs"
+find = '''shaped("devin")'''
+replace = '''shaped("devin-not")'''
+
+[[plant]]
+name = "live matrix: a stand-in row of Devin's or Codex's kind is taken for a harness of the machine"
+meant = "a_fake_model_is_the_stand_ins_and_no_harness_of_the_machine"
+runs = ["matrix-live-plan"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
+replace = '''    if kind == "claude-code" && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
+
+[[plant]]
+name = "live matrix: the Codex stand-in's server takes no interrupt"
+meant = "codex_worker_seat_tell"
+runs = ["matrix-codex-tell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = '''            self.interrupted.store(true, Ordering::Relaxed);'''
+replace = '''            let _ = &self.interrupted;'''
+
+[[plant]]
+name = "live matrix: the Codex stand-in's TUI takes an Escape alone for no key"
+meant = "an_escape_alone_is_the_tuis_stop_and_a_pastes_marks_are_none"
+runs = ["matrix-fake-codex"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/typed.rs"
+find = '''            lines.push(ESCAPE.to_owned());
+            continue;'''
+replace = '''            continue;'''
+
+[[plant]]
+name = "live matrix: the Codex stand-in's TUI reads its terminal a line at a time"
+meant = "codex_worker_seat_tell"
+runs = ["matrix-codex-tell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex.rs"
+find = '''    terminal::raw_mode();
+    let typed = typed::typed();'''
+replace = '''    let typed = typed::typed();'''
+
+[[plant]]
+name = "live matrix: the Codex stand-in runs no CF line"
+meant = "codex_worker_question_ask_answer"
+runs = ["matrix-codex-question"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = '''        let said = cf_in(text).map_or(said, |words| run_cf(&words));'''
+replace = '''        let said = cf_in("").map_or(said, |words| run_cf(&words));'''
+
+[[plant]]
+name = "live matrix: the Devin stand-in never ends a turn for its quota"
+meant = "devin_worker_field_devin_quota"
+runs = ["matrix-devin-quota"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/turn.rs"
+find = '''    text.contains("QUOTA-OUT") && ours && spent'''
+replace = '''    text.contains("QUOTA-OUT-NOT") && ours && spent'''
+
+[[plant]]
+name = "live matrix: a shell's lookup takes the last cf on the PATH"
+meant = "cf_is_the_first_on_the_path_and_nothing_else_is_looked_at"
+runs = ["matrix-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''    std::env::split_paths(path).find_map(|folder| {'''
+replace = '''    std::env::split_paths(path).collect::<Vec<_>>().into_iter().rev().find_map(|folder| {'''
