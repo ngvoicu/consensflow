@@ -17,6 +17,10 @@
 //! (`cf-ledger`'s `withdraw_open_questions`). The chief's word is over the reader's here as
 //! everywhere in Finish.
 //!
+//! The words of the turns that ended with a question of the worker's own out come first in what it
+//! takes, as in a result the worker's turn end records (`while_asking`, T-1204): a Finish after the
+//! answer went in gives the write-up the turn ended with before it, and the reply to the answer.
+//!
 //! It is the way out of a wait that has no end, and of a reader that reads a turn at work
 //! that is not (T-442, dip-agentos's T-20): a job that runs for ever (a dev server, a
 //! headless browser the harness moved to the background) never wakes its agent, and its

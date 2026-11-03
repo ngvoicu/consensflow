@@ -60,6 +60,14 @@
 //! lost: whoever gave the task is told it once, with the words, and Finish takes it as the
 //! result ([`paused`]).
 //!
+//! **A turn that ended with the worker's own question out** (T-1204; the field board's T-837):
+//! a member that asks with `cf ask` and goes on has its task `waiting` until the answer is
+//! delivered, which is at rest, so its turn ended on a task that takes no result, and the
+//! turn the answer began became the result, with the write-up it followed left in the record.
+//! Nothing is completed at that end (a member that asks and stops ends on a line about it),
+//! and the result, when it is recorded, begins with the words of those turns, each labelled
+//! ([`while_asking`]); Finish gives the same.
+//!
 //! **A window has one task** (`ownership`): no other task's message goes into a window
 //! once one task's has, whatever ended that task; so no later task's turn is woken by
 //! what an earlier one left, and no later task is given an earlier task's words.

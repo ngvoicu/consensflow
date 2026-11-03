@@ -671,11 +671,15 @@ fn a_reply_that_repeats_the_write_up_is_not_given_twice() {
 }
 
 /// What a turn wrote before the words that sent the task on again was written for the round
-/// before them: the resume's turn has its own words for its result.
+/// before them: the next round's turn has its own words for its result. (The window is one the
+/// human keeps open, so the follow-up goes into the same conversation, whose record holds both
+/// rounds.)
 #[test]
 fn a_write_up_from_before_the_words_that_resumed_the_task_is_not_in_its_result() {
     let context = Context::new();
     let tiers = working(&context);
+    let session = tiers.assignee(1);
+    context.open_window(tiers.project.id, &session).unwrap();
     let question = asks(&context, &tiers, "disk notice, no answer needed");
     works_on(&context);
     answers(&context, &tiers, &question, "Noted.");
@@ -686,8 +690,12 @@ fn a_write_up_from_before_the_words_that_resumed_the_task_is_not_in_its_result()
     context.adapter.answer("zeus", REPLY);
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results(&context, &tiers),
+        [with_write_up(&question, WRITE_UP, REPLY)]
+    );
 
-    // A round more: the chief sends the task back with new words.
+    // A round more: the chief sends the task back with new words, into the same window.
     context
         .ledger
         .borrow_mut()
@@ -695,6 +703,12 @@ fn a_write_up_from_before_the_words_that_resumed_the_task_is_not_in_its_result()
         .expect("reopened");
     context.pass().unwrap();
     context.pass().unwrap();
+    assert!(
+        given(&context, "zeus")
+            .last()
+            .is_some_and(|text| text.contains("Add the Windows case.")),
+        "the follow-up went into the window whose record holds the first round"
+    );
     context.adapter.answer("zeus", "The Windows case is in.");
     context.pass().unwrap();
 
