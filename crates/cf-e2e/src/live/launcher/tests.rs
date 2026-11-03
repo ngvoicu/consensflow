@@ -364,6 +364,19 @@ fn a_keychain_that_gained_nothing_or_was_not_listed_is_no_change() {
 }
 
 #[test]
+fn a_guard_that_leaves_the_keychain_to_the_login_lists_none() {
+    let home = Home::new();
+    let command = claude_launcher(&home);
+    let guard = Guard::new(Harness::Claude, &command, home.0.path());
+    assert!(guard.watch.keychain.is_some());
+    assert!(guard
+        .leaving_the_keychain_to_the_login()
+        .watch
+        .keychain
+        .is_none());
+}
+
+#[test]
 fn only_the_guard_of_claude_code_looks_at_the_keychain() {
     let home = Home::new();
     let command = claude_launcher(&home);

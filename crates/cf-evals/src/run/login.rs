@@ -153,6 +153,10 @@ impl ClaudeConfig for Throwaway {
         self.config.keep_records(into)
     }
 
+    fn keeps_its_findings(&self) -> bool {
+        true
+    }
+
     fn finish(&self) -> Support {
         if let Err(found) = self.config.finish() {
             *self.found.lock().unwrap_or_else(PoisonError::into_inner) =

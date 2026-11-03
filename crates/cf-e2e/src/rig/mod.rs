@@ -438,6 +438,14 @@ pub trait ClaudeConfig: std::fmt::Debug + Send + Sync {
     /// when a rig that used the folder ends, the windows gone: an error says what
     /// the run did that it was not to, and fails the case that ends the rig.
     fn finish(&self) -> Result;
+
+    /// Whether what [`ClaudeConfig::finish`] finds is kept for the run's report and never ends the
+    /// rig in an error (an eval's, which must not lose hours of evidence to it). The guard of the
+    /// owner's Keychain then leaves it to this config, which names the item of its own folder
+    /// ([`crate::live::launcher::Guard::leaving_the_keychain_to_the_login`]).
+    fn keeps_its_findings(&self) -> bool {
+        false
+    }
 }
 
 /// What a rig that closed leaves: its root, kept, and the last word of the pane

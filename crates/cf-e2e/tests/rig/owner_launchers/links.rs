@@ -28,6 +28,7 @@ impl Owner {
         let owner = Self {
             home: tempfile::tempdir()?,
         };
+        fs::create_dir_all(owner.path("kit-claude"))?;
         owner.executable(
             &format!(".local/share/claude/versions/{OWNERS}"),
             "claude-code-binary",
@@ -74,12 +75,25 @@ impl Owner {
         Ok(())
     }
 
+    /// The owner's Claude Code with no config of the kit's: the guard lists the Keychain for it.
+    fn plain_claude(&self) -> Installed {
+        Installed::at(
+            Harness::Claude,
+            self.path(".local/bin/claude"),
+            self.home.path(),
+        )
+    }
+
+    /// The owner's Claude Code on a config of the kit's that keeps its findings: the guard does not
+    /// list the Keychain for it, so what other processes do to the machine's does not fail a case
+    /// about the launchers.
     fn claude(&self) -> Installed {
         Installed::at(
             Harness::Claude,
             self.path(".local/bin/claude"),
             self.home.path(),
         )
+        .with_claude_config(std::sync::Arc::new(super::Folder(self.path("kit-claude"))))
     }
 
     fn devin(&self) -> Installed {
@@ -219,10 +233,13 @@ fn a_run_that_moves_devins_current_version_fails_the_rig_that_ends_though_the_la
 #[test]
 fn a_case_that_gives_the_rig_a_claude_folder_of_its_own_is_held_to_the_launcher_all_the_same(
 ) -> Outcome {
+    // Its guard lists the Keychain (the install has no config of the kit's), so it takes turns with
+    // the case that makes an item there.
+    let _keychain = super::KeychainLock::take(false)?;
     let owner = Owner::new()?;
     let folder = tempfile::tempdir()?;
     let rig = Rig::start(live::rig_with_claude_config(
-        &[owner.claude()],
+        &[owner.plain_claude()],
         FAKE_AGENT,
         folder.path(),
     ))?;

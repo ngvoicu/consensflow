@@ -28,6 +28,60 @@ use crate::{Outcome, FAKE_AGENT};
 #[cfg(unix)]
 mod links;
 
+/// A config of the kit's that keeps its findings for the report (an eval's): a folder of the case's own,
+/// and nothing to say when the run ends. The guard leaves the Keychain to such a config, so a rig
+/// that seats a Claude Code on it does not depend on what other processes do to the machine's Keychain.
+#[derive(Debug)]
+pub(crate) struct Folder(pub(crate) PathBuf);
+
+impl cf_e2e::rig::ClaudeConfig for Folder {
+    fn folder(&self) -> cf_e2e::Result<PathBuf> {
+        Ok(self.0.clone())
+    }
+
+    fn described(&self) -> String {
+        "a folder of the case's own".to_owned()
+    }
+
+    fn finish(&self) -> cf_e2e::Result {
+        Ok(())
+    }
+
+    fn keeps_its_findings(&self) -> bool {
+        true
+    }
+}
+
+/// A lock between the cases that make an item in the machine's Keychain (exclusive) and the cases whose
+/// guard lists it (shared): nextest runs each case in a process of its own, and a rig that began before
+/// an item was made would end for it. It is a file in the temporary folder, held until this is dropped.
+#[cfg(unix)]
+pub(crate) struct KeychainLock(std::fs::File);
+
+#[cfg(unix)]
+impl KeychainLock {
+    pub(crate) fn take(exclusive: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(std::env::temp_dir().join("cf-e2e-keychain-cases.lock"))?;
+        if exclusive {
+            file.lock()?;
+        } else {
+            file.lock_shared()?;
+        }
+        Ok(Self(file))
+    }
+}
+
+#[cfg(unix)]
+impl Drop for KeychainLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// A pretend owner whose Claude Code launcher is a file (`%USERPROFILE%\.local\bin\claude.exe`).
 struct Owner {
     home: tempfile::TempDir,
@@ -38,6 +92,7 @@ impl Owner {
         let owner = Self {
             home: tempfile::tempdir()?,
         };
+        fs::create_dir_all(owner.kit())?;
         let launcher = owner.launcher();
         fs::create_dir_all(launcher.parent().ok_or("a launcher has a folder")?)?;
         fs::write(&launcher, "claude-code-binary")?;
@@ -53,7 +108,21 @@ impl Owner {
         self.home.path().join(".local").join("bin").join(name)
     }
 
+    /// The owner's Claude Code on a config of the kit's that keeps its findings: the guard does not
+    /// list the Keychain for it, so what other processes do to the machine's does not fail a case
+    /// about the launchers.
     fn claude(&self) -> Installed {
+        self.plain_claude()
+            .with_claude_config(std::sync::Arc::new(Folder(self.kit())))
+    }
+
+    /// The config folder of the kit's, below the owner's home.
+    fn kit(&self) -> PathBuf {
+        self.home.path().join("kit-claude")
+    }
+
+    /// The owner's Claude Code with no config of the kit's: the guard lists the Keychain for it.
+    fn plain_claude(&self) -> Installed {
         Installed::at(Harness::Claude, self.launcher(), self.home.path())
     }
 }
@@ -172,8 +241,9 @@ impl Drop for Item {
 #[test]
 fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_and_names_it(
 ) -> Outcome {
+    let _lock = KeychainLock::take(true)?;
     let owner = Owner::new()?;
-    let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
+    let rig = Rig::start(live::rig(&[owner.plain_claude()], FAKE_AGENT))?;
     // What a Claude Code writes in the Keychain for a throwaway config folder, after the rig began.
     let folder = tempfile::tempdir()?;
     let item = Item::make(folder.path())?;
@@ -192,5 +262,21 @@ fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_
     );
     // The launcher is as it was: only the Keychain is said.
     assert!(!failed.contains("LAUNCHER"), "{failed}");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item(
+) -> Outcome {
+    // An eval's config names the item of its own folder, and keeps what it finds for its report:
+    // a rig that failed as well, for an item some other process made (the Keychain is the whole
+    // machine's), would end an eval with `closed?` and cost it the report (T-1044, T-1102).
+    let owner = Owner::new()?;
+    let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
+    // An item made for a folder that is none of the run's.
+    let other = tempfile::tempdir()?;
+    let _item = Item::make(other.path())?;
+    rig.close()?;
     Ok(())
 }

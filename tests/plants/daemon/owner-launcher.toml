@@ -16,6 +16,7 @@ launcher-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::l
 launcher-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "owner_launchers::"]
 keychain-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::keychain"]
 login-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login"]
+evals-login-unit = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::login"]
 
 [[plant]]
 name = "owner launcher: the windows of a rig are told to update no harness"
@@ -89,12 +90,12 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''        config = config.isolated(Arc::new(Guard::new(
-            install.harness,
-            &install.command,
-            &install.home,
-        )));'''
-replace = '''        let _ = Guard::new(install.harness, &install.command, &install.home);'''
+find = '''        config = config.isolated(Arc::new(if login_watches {
+            guard.leaving_the_keychain_to_the_login()
+        } else {
+            guard
+        }));'''
+replace = '''        let _ = (login_watches, guard);'''
 
 [[plant]]
 name = "owner launcher: the guard is seated only where the kit made the harness a home of its own"
@@ -104,17 +105,17 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''        config = config.isolated(Arc::new(Guard::new(
-            install.harness,
-            &install.command,
-            &install.home,
-        )));'''
+find = '''        config = config.isolated(Arc::new(if login_watches {
+            guard.leaving_the_keychain_to_the_login()
+        } else {
+            guard
+        }));'''
 replace = '''        if install.claude_config().is_some() || install.isolation().is_some() {
-            config = config.isolated(Arc::new(Guard::new(
-                install.harness,
-                &install.command,
-                &install.home,
-            )));
+            config = config.isolated(Arc::new(if login_watches {
+                guard.leaving_the_keychain_to_the_login()
+            } else {
+                guard
+            }));
         }'''
 
 [[plant]]
@@ -299,12 +300,12 @@ runs = ["launcher-rig"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''        config = config.isolated(Arc::new(Guard::new(
-            install.harness,
-            &install.command,
-            &install.home,
-        )));'''
-replace = '''        let _ = Guard::new(install.harness, &install.command, &install.home);'''
+find = '''        config = config.isolated(Arc::new(if login_watches {
+            guard.leaving_the_keychain_to_the_login()
+        } else {
+            guard
+        }));'''
+replace = '''        let _ = (login_watches, guard);'''
 
 # The owner's Keychain (T-1102): a Claude Code that is given a config folder of its own keeps what it
 # stores in the login Keychain under a name made of the folder's path, and the folder goes with the
@@ -510,3 +511,43 @@ find = '''    if !kept.is_empty() {
         said.push_str('''
 replace = '''    if false && !kept.is_empty() {
         said.push_str('''
+
+[[plant]]
+name = "owner launcher: a Claude whose config keeps its findings is listed by the guard as well, so an eval's rig fails for another process's item"
+meant = "a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item"
+runs = ["launcher-rig"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        let login_watches = install
+            .claude_config()
+            .is_some_and(|config| config.keeps_its_findings());'''
+replace = '''        let login_watches = install
+            .claude_config()
+            .is_some_and(|config| !config.keeps_its_findings());'''
+
+[[plant]]
+name = "owner launcher: the guard told to leave the Keychain to the login lists it all the same"
+meant = "a_guard_that_leaves_the_keychain_to_the_login_lists_none"
+runs = ["launcher-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/launcher.rs"
+find = '''        self.watch.keychain = None;
+        self'''
+replace = '''        self'''
+
+[[plant]]
+name = "owner launcher: an eval's config does not keep its findings, so the guard lists the Keychain for its rig"
+meant = "an_evals_config_keeps_its_findings_so_the_guard_of_the_keychain_leaves_the_keychain_to_it"
+runs = ["evals-login-unit"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/login.rs"
+find = '''    fn keeps_its_findings(&self) -> bool {
+        true
+    }'''
+replace = '''    fn keeps_its_findings(&self) -> bool {
+        false
+    }'''

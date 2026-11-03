@@ -34,7 +34,10 @@
 //!
 //! **The Keychain** is the owner's too (T-1102): the guard of Claude Code also lists the names of
 //! the login Keychain's items of `Claude Code-credentials` around the run, and an item gained fails
-//! the rig that ends ([`super::keychain`] says what writes one, and what keeps a run from it).
+//! the rig that ends ([`super::keychain`] says what writes one, and what keeps a run from it). Where
+//! an eval's Claude Code runs on the folder of a kit login, the [`super::login::Login`] is what looks
+//! ([`Guard::leaving_the_keychain_to_the_login`]): it knows the folder, so it fails for the item of
+//! its own and writes another process's as a note, which the eval keeps for its report.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -426,6 +429,19 @@ impl Guard {
             },
             before: Mutex::new(None),
         }
+    }
+}
+
+impl Guard {
+    /// This guard, which does not list the Keychain: for a Claude Code whose config keeps its
+    /// findings for the run's report ([`ClaudeConfig::keeps_its_findings`](crate::rig::ClaudeConfig),
+    /// an eval's), which names the item of its own folder and no other process's. A rig that failed
+    /// as well for the machine's items would end an eval with its rig's error and cost it the
+    /// report (the scenario evals close the rig with `?`).
+    #[must_use]
+    pub fn leaving_the_keychain_to_the_login(mut self) -> Self {
+        self.watch.keychain = None;
+        self
     }
 }
 

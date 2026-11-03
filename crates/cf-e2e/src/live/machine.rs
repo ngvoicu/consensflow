@@ -511,11 +511,19 @@ fn rig_keeping_claude_in(
         }
         // The owner's launcher of every harness the rig seats is looked at when the rig starts
         // and when it ends, whatever home the harness runs on (T-1082).
-        config = config.isolated(Arc::new(Guard::new(
-            install.harness,
-            &install.command,
-            &install.home,
-        )));
+        let guard = Guard::new(install.harness, &install.command, &install.home);
+        // A Claude Code whose config keeps its findings for the run's report (an eval's) is watched
+        // there, which names the item of its own folder: a guard that failed the rig for the
+        // machine's other items too would end an eval with its rig's error and cost it its report
+        // (T-1102).
+        let login_watches = install
+            .claude_config()
+            .is_some_and(|config| config.keeps_its_findings());
+        config = config.isolated(Arc::new(if login_watches {
+            guard.leaving_the_keychain_to_the_login()
+        } else {
+            guard
+        }));
         if install.harness == Harness::Muse {
             config = config.muse_live(muse_of(install), &install.home);
         }
