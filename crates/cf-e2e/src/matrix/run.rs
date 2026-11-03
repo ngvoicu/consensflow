@@ -592,7 +592,13 @@ fn steps(
                 elapsed: driver.bounds.elapsed(),
                 turns: snapshot.total_turns(driver.asks_in()),
                 reached: (step.reached)(&snapshot, &bindings),
-                ended: ended(&snapshot, &bindings, scenario.ends),
+                ended: ended(&snapshot, &bindings, scenario.ends).map(|(name, number, state)| {
+                    let state = match failed_saying(&snapshot, number) {
+                        Some(why) => format!("{state}: {why}"),
+                        None => state,
+                    };
+                    (name, number, state)
+                }),
                 question: question.clone(),
                 settled: settled(&snapshot),
                 progress: progress(&snapshot),
@@ -650,6 +656,18 @@ pub fn ended(
                     .then(|| ((*name).to_owned(), *number, state.to_owned()))
             })
         })
+}
+
+/// What the chief was told of the task `number`'s failure, where it was ("T-n failed: …"): why a
+/// run that ended at a failed task ended, for the evidence (T-1207: the Devin seats on Windows).
+fn failed_saying(snapshot: &Snapshot, number: i64) -> Option<String> {
+    let opening = format!("T-{number} failed");
+    snapshot
+        .chief_inbox
+        .iter()
+        .filter_map(|message| message["body"].as_str())
+        .find(|body| body.starts_with(&opening))
+        .map(|body| crate::live::cut(body, 400))
 }
 
 /// Whether the board is at rest: the chief idle, no window at work or starting, and nothing
