@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 use cf_e2e::live::members::{member, stand_in_chief, Account, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, text, Harness, Log};
+use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
@@ -62,7 +63,7 @@ const BRIEF: &str = "Use your file-writing tool (not the shell) to create the fi
 /// Gives the run's Claude config folder `config` the marketplace the person's Claude Code
 /// knows, copied, and names it there as Claude Code names a marketplace it added.
 fn seed_marketplace(config: &Path) -> Result {
-    let home = std::env::var_os("HOME")
+    let home = own_var("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
     let from = home.join(".claude/plugins/marketplaces").join(MARKETPLACE);
