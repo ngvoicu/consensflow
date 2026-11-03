@@ -87,7 +87,12 @@
 //! in several messages. Delivered so, it is a role told in part, and not recorded
 //! as told; it is told once the window has read it: `cf inbox read` printed the
 //! note whole and said so, and the ledger then records the role told, in the
-//! write that marks the note read (`receive_read`). `cf` says so of a role up to a
+//! write that marks the note read (`receive_read`). A window runs that command the
+//! moment it has the note, as the note tells it to, which is often before the
+//! daemon has seen the paste arrive: a read that comes while the note is still
+//! `delivering` is kept with it (`cf_ledger`'s `keep_read`, in its receipt) and told
+//! by the write that confirms the delivery (`confirm_delivery`), in the conversation
+//! it was made in. `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
 //! on Codex and Muse, the harnesses a role goes to by a note): a staff of 195
 //! rows with specs on, 223 without, on the same text (its bytes are the bound).
@@ -146,12 +151,20 @@
 //!   goes back to that one, the launch says nothing, though the thread holds the
 //!   cut words after it. A staff that shrinks, or a role that changes again, tells
 //!   the thread a whole one.
-//! - A role told in part is told once `cf inbox read` printed its note after the
-//!   note was confirmed: one the window read while its delivery was still being
-//!   confirmed (it ran the command before the daemon saw the paste arrive) is
-//!   not recorded by that read, and is said again at the next Resume, with the
-//!   line, as one never read. A note printed past `cf`'s bound for a role is not
-//!   said read either: a role that long is said again at every Resume.
+//! - A note printed past `cf`'s bound for a role is not said read: a role that long
+//!   is said again at every Resume, with the line to the human.
+//! - A read kept while the note was on its way tells the role only in the conversation
+//!   it was made in. One that began between the read and the confirmation (a `/clear`
+//!   while the paste was on its way) was not shown what the read printed: it is told
+//!   nothing by it, and the role is said again at its next Resume, with the line.
+//! - A role note read while its paste was on its way and then given up (failed) is
+//!   failed as any is: the read is not looked for, as the thread is not (the bullet
+//!   above on a delivery given up). Any other message so read is `read`, not failed.
+//! - A note whose paste is given back to the queue after the window read it (the
+//!   window went before the daemon saw the paste arrive) keeps the read: a read does
+//!   not receive a role, so the note waits for its paste, and the read tells the role
+//!   if it comes in after all (`settle_replacements`, or the next paste of it). A
+//!   launch withdraws a note that still waits, with the read.
 //! - A resumed Codex window that is given no first message has the turn its
 //!   record ended in read as the old process's, not as its own, until it begins
 //!   one (`LeftOpen`), whether or not a replacement is due. That is a different

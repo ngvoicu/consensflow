@@ -16,7 +16,11 @@
 //! `cf inbox read` printed, whatever its kind. The ones among them that are
 //! for the caller, still queued, and received by the way they were read (the
 //! ledger's `Read`) are received: a message read in the inbox is never typed
-//! in after it, nor is a result, which the board then shows read. A read
+//! in after it, nor is a result, which the board then shows read. A message
+//! whose paste is still on its way (`delivering`) is read all the same, as a
+//! window reads a message the moment it has it: the read is kept with it, and told
+//! when the delivery is confirmed (a note that says a role) or given back
+//! (the ledger's `keep_read`); it is not received yet, and counts for none. A read
 //! never receives anything by itself: a response that did not reach its
 //! reader, or an output that was cut off, says nothing.
 

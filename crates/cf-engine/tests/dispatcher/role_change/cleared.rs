@@ -130,6 +130,62 @@ fn a_session_no_hook_greeted_is_given_a_long_role_in_part_and_told_it_once_it_is
     );
 }
 
+/// The same note, read the moment the window has it, before the daemon has seen the
+/// paste arrive (a harness other than Codex: the note is given to a session no hook
+/// greeted, and is told by the write that confirms its delivery all the same).
+#[test]
+fn a_cleared_session_that_reads_its_long_role_while_the_note_is_still_being_delivered_is_told_it_once_the_delivery_is_confirmed(
+) {
+    let context = Context::new();
+    context
+        .roles
+        .rewritten
+        .replace(format!(" {}", "x".repeat(17_000)));
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    let mut on_its_way = None;
+    for _ in 0..3 {
+        context.pass().unwrap();
+        on_its_way = greetings(&context, chief)
+            .into_iter()
+            .map(|note| context.message(note.id))
+            .find(|note| note.state == "delivering");
+        if on_its_way.is_some() {
+            break;
+        }
+    }
+    let note = on_its_way.expect("the note is on its way at some pass");
+    assert_eq!(
+        context
+            .ledger
+            .borrow_mut()
+            .receive_read(chief, &[note.id], cf_ledger::Read::Inbox)
+            .unwrap(),
+        0,
+        "kept: the paste is not proved yet"
+    );
+    assert_eq!(context.message(note.id).state, "delivering");
+    assert!(recorded(&context, chief).is_none_or(|told| !told.ends_with('x')));
+
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).state, "read");
+    assert!(
+        recorded(&context, chief).is_some_and(|told| told.ends_with('x')),
+        "the role it read is what it was told"
+    );
+    assert!(
+        to_human(&context, project.id).is_empty(),
+        "nothing is said to the human"
+    );
+}
+
 #[test]
 fn a_harness_that_keeps_its_first_instructions_is_given_nothing_at_a_switch() {
     let context = Context::new();
