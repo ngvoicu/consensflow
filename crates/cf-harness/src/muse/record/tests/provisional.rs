@@ -243,7 +243,10 @@ fn the_last_call_is_the_last_of_the_calls_a_turn_committed_as_a_line() {
             json!([{ "name": "bash", "args": "{\"command\":\"make build\"}", "call_id": "c1" }]),
         ),
     ];
-    assert_eq!(record_of(&records).last_call.as_deref(), Some("make build"));
+    assert_eq!(
+        record_of(&records).last_call,
+        Some(crate::records::LastCall::shell("bash", "make build"))
+    );
     let mut later = records.clone();
     later.push(committed(
         4,
@@ -253,8 +256,8 @@ fn the_last_call_is_the_last_of_the_calls_a_turn_committed_as_a_line() {
         ]),
     ));
     assert_eq!(
-        record_of(&later).last_call.as_deref(),
-        Some("read_file src/lib.rs")
+        record_of(&later).last_call,
+        Some(crate::records::LastCall::on("read_file", "src/lib.rs"))
     );
     assert_eq!(
         record_of(&[

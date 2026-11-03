@@ -4,9 +4,11 @@
 //! the command, and the note did not).
 
 use super::*;
+use crate::records::LastCall;
+use std::sync::Arc;
 
 /// The last call the transcript of `records` shows.
-fn last_call_of(records: &[Value]) -> Option<String> {
+fn last_call_of(records: &[Value]) -> Option<Arc<LastCall>> {
     let mut stage = Stage::new();
     stage.write(records);
     match &*stage.reader.look(&Options::default(), 0) {
@@ -36,8 +38,8 @@ fn the_command_a_turn_ran_last_is_the_last_call_whether_or_not_its_result_came()
     );
     // Open: it runs still.
     assert_eq!(
-        last_call_of(&[hello(), ran.clone()]).as_deref(),
-        Some(command)
+        last_call_of(&[hello(), ran.clone()]),
+        Some(LastCall::shell("Bash", command))
     );
     // Answered: the result came ("Exit code 137"), and the window went three seconds later.
     let result = user(
@@ -46,8 +48,8 @@ fn the_command_a_turn_ran_last_is_the_last_call_whether_or_not_its_result_came()
         json!([tool_result(json!("t1"), json!("Exit code 137"))]),
     );
     assert_eq!(
-        last_call_of(&[hello(), ran, result]).as_deref(),
-        Some(command)
+        last_call_of(&[hello(), ran, result]),
+        Some(LastCall::shell("Bash", command))
     );
 }
 
@@ -64,8 +66,8 @@ fn the_latest_call_wins_a_tool_that_is_no_shell_is_its_name_and_main_argument_an
         Value::Null,
     );
     assert_eq!(
-        last_call_of(&[hello(), first.clone()]).as_deref(),
-        Some("Read src/lib.rs"),
+        last_call_of(&[hello(), first.clone()]),
+        Some(LastCall::on("Read", "src/lib.rs")),
         "the last block of a message"
     );
     let later = assistant(
@@ -76,8 +78,8 @@ fn the_latest_call_wins_a_tool_that_is_no_shell_is_its_name_and_main_argument_an
         Value::Null,
     );
     assert_eq!(
-        last_call_of(&[hello(), first, later]).as_deref(),
-        Some("git status"),
+        last_call_of(&[hello(), first, later]),
+        Some(LastCall::shell("Bash", "git status")),
         "the message after"
     );
     assert_eq!(
@@ -107,7 +109,7 @@ fn a_subagents_call_is_no_call_of_the_window() {
         json!({ "isSidechain": true }),
     );
     assert_eq!(
-        last_call_of(&[hello(), main, sidechain]).as_deref(),
-        Some("cargo build")
+        last_call_of(&[hello(), main, sidechain]),
+        Some(LastCall::shell("Bash", "cargo build"))
     );
 }

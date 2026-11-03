@@ -249,6 +249,13 @@ pub(crate) struct WindowPart {
     pub(crate) own_exit: Option<OwnExit>,
     /// The engine's own kills of its windows that wait for the host's answer.
     pub(crate) killing: Vec<Killing>,
+    /// The panes the engine sent a kill to: by id and generation, from the moment it asked
+    /// (before the host's answer), until the window's exit is settled (`closed`). What ends a
+    /// program with a signal is not told apart by its exit code, so whether the engine had a
+    /// hand in it is told by this, not by the engine's own close alone: `retire` kills without
+    /// one (the review of `a26e0848e`, P2). A stop's keys are Escape: they send no signal, and
+    /// a stop that ends in a close ends in `retire`'s kill.
+    pub(crate) sent_to: Vec<Pane>,
     /// Why the engine closes it, where the pause note of the task it was working
     /// on is to say more than that it closed: with its project, when the chief's
     /// window closed by itself.
@@ -359,6 +366,7 @@ impl Default for WindowPart {
             opened_at: None,
             own_exit: None,
             killing: Vec::new(),
+            sent_to: Vec::new(),
             closed_with: None,
             pinned: false,
             hidden: false,
@@ -519,6 +527,7 @@ impl Dispatcher {
             window.pane = None;
             window.retiring = false;
             window.kill_taken = None;
+            window.sent_to.clear();
             window.hidden = false;
             window.settled = false;
             window.stopped = None;
@@ -1632,6 +1641,8 @@ impl Dispatcher {
     /// Kills a window: whether the pane host took the kill; the trace says
     /// why not, and a trace that cannot be told fails the kill.
     async fn kill(self: &Rc<Self>, record: &Rc<Record>, pane: &Pane) -> Result<bool, EngineError> {
+        // Told before the host is asked: its exit can come before its answer.
+        record.window.borrow_mut().sent_to.push(pane.clone());
         // `.catch(...)` made a promise of its own to wait on, a turn after
         // the host's answer.
         let killed = returning(self.seams.host.kill(pane)).await;

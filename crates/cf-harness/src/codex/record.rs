@@ -44,7 +44,7 @@ use super::paths::transcript;
 use super::quota::codex_quota;
 use crate::shared::quota::{busy_refusal, Level, Quota};
 use crate::shared::record::cache::Look;
-use crate::shared::record::calls::describe;
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -152,7 +152,7 @@ struct Rollout {
     /// The latest model Codex rerouted a turn to on its own (MUS-24).
     rerouted: Option<Arc<ModelMoved>>,
     /// The last tool call the rollout shows, as a line (`calls::describe`).
-    last_call: Option<String>,
+    last_call: Option<Arc<LastCall>>,
     records: usize,
     /// The place among the records of the one being read.
     reading: usize,

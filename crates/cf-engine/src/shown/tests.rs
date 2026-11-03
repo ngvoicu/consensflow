@@ -24,7 +24,7 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         possibly_left: Vec::new(),
         survivor: None,
         pasted: false,
-        outside: false,
+        part: Part::Unknown,
         last_call: None,
     }
 }
@@ -569,17 +569,18 @@ fn a_footers_counters_are_folded_and_keep_one_failure_one() {
 
 /// T-823, kluris T-153: a Claude Code worker's window closed with exit code 143 three seconds
 /// after the project's own tests killed its `cargo test`, and the note said only "exit code
-/// 143". A shell's status above 128 is 128 and the signal that ended the program; a close
-/// ConsensFlow had no part in says that it was not ConsensFlow's.
+/// 143". A shell's status above 128 is 128 and a signal; it is only consistent with it (a
+/// program can exit with 143, `sh -c 'exit 143'` does), and who sent the signal is said only
+/// where the engine knows what it sent (the review of `a26e0848e`, P2).
 #[cfg(unix)]
 #[test]
-fn an_exit_above_128_names_its_signal_and_a_close_not_ours_says_so() {
-    let ours_not = |code: u32| {
+fn an_exit_above_128_is_consistent_with_a_signal_and_what_consensflow_sent_is_said_when_known() {
+    let quote = "its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\"";
+    let with = |code: u32, part: Part| {
         shown(Some(code), None, Some(&PI))
-            .outside()
+            .with_part(part)
             .after("@zeus's window closed")
     };
-    let quote = "its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\"";
     for (code, name) in [
         (129, "SIGHUP"),
         (130, "SIGINT"),
@@ -591,38 +592,51 @@ fn an_exit_above_128_names_its_signal_and_a_close_not_ours_says_so() {
         (143, "SIGTERM"),
     ] {
         assert_eq!(
-            ours_not(code),
-            format!(
-                "@zeus's window closed (exit code {code}, the status of a program ended by {name}, which ConsensFlow did not send: it had no stop or close of its own under way); {quote}"
-            ),
+            with(code, Part::NotSent),
+            format!("@zeus's window closed (exit code {code}, consistent with {name}; ConsensFlow had sent it no kill); {quote}"),
+            "{code}"
+        );
+        assert_eq!(
+            with(code, Part::Sent),
+            format!("@zeus's window closed (exit code {code}, consistent with {name}; ConsensFlow had sent it a kill before it closed); {quote}"),
+            "{code}"
+        );
+        // Not known: nothing is claimed of who sent it, and nothing that it was sent.
+        assert_eq!(
+            with(code, Part::Unknown),
+            format!("@zeus's window closed (exit code {code}, consistent with {name}); {quote}"),
             "{code}"
         );
     }
     // A signal whose number differs between systems is a number, not a name.
-    assert!(ours_not(138).contains("(exit code 138, the status of a program ended by signal 10,"));
+    assert!(with(138, Part::Unknown).contains("(exit code 138, consistent with signal 10)"));
     // A program's own code is no signal's, whatever it is: 128 is none, nor is 160 and above.
     for code in [0, 1, 2, 127, 128, 160, 255] {
-        assert_eq!(
-            ours_not(code),
-            format!("@zeus's window closed (exit code {code}); {quote}"),
-            "{code}"
-        );
+        for part in [Part::Unknown, Part::NotSent, Part::Sent] {
+            assert_eq!(
+                with(code, part),
+                format!("@zeus's window closed (exit code {code}); {quote}"),
+                "{code}"
+            );
+        }
     }
-    // The host's own word of a signal is kept, and said not to be ConsensFlow's as well.
-    assert_eq!(
+    // A signal the host reported is a fact, and is told as one.
+    let reported = |part: Part| {
         shown(Some(1), Some("Terminated"), Some(&PI))
-            .outside()
-            .after("@zeus's window closed"),
-        format!(
-            "@zeus's window closed (ended by signal Terminated, which ConsensFlow did not send: it had no stop or close of its own under way); {quote}"
-        )
-    );
-    // A close that is not said to be outside says what the status is and no more.
+            .with_part(part)
+            .after("@zeus's window closed")
+    };
     assert_eq!(
-        shown(Some(143), None, Some(&PI)).after("@zeus's window closed"),
-        format!(
-            "@zeus's window closed (exit code 143, the status of a program ended by SIGTERM); {quote}"
-        )
+        reported(Part::NotSent),
+        format!("@zeus's window closed (ended by signal Terminated, which ConsensFlow did not send: it had sent no kill); {quote}")
+    );
+    assert_eq!(
+        reported(Part::Sent),
+        format!("@zeus's window closed (ended by signal Terminated, after ConsensFlow had sent it a kill); {quote}")
+    );
+    assert_eq!(
+        reported(Part::Unknown),
+        format!("@zeus's window closed (ended by signal Terminated); {quote}")
     );
 }
 
@@ -639,7 +653,7 @@ fn a_status_is_a_signals_only_where_there_are_signals() {
 fn an_exit_above_128_is_a_number_on_windows() {
     assert_eq!(
         shown(Some(143), None, Some(&PI))
-            .outside()
+            .with_part(Part::NotSent)
             .after("@zeus's window closed"),
         "@zeus's window closed (exit code 143); its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\""
     );
@@ -698,10 +712,10 @@ fn a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quote
 }
 
 /// What a name's value does over more than the next row: a quote it opens and does not close,
-/// a line it continues with `\`, a block it opens. Nothing says where it ends, so the lines
-/// from the name to the end of the screen are left out, and the lines above it are quoted.
+/// a line it continues with `\`, a block it opens. Nothing says where it ends, so the whole
+/// screen is withheld (the review of `a26e0848e`; `screen.rs` has the rest of the shapes).
 #[test]
-fn a_secret_whose_value_goes_on_over_rows_leaves_out_the_rest_of_the_screen() {
+fn a_secret_whose_value_goes_on_over_rows_withholds_the_whole_screen() {
     for opening in [
         r#"export API_KEY="abc"#,
         "export API_KEY='abc",
@@ -712,10 +726,7 @@ fn a_secret_whose_value_goes_on_over_rows_leaves_out_the_rest_of_the_screen() {
         let screen = ["start", "ok", opening, "def", "ghi"];
         assert_eq!(
             shown(Some(1), None, Some(&screen)).after("gone"),
-            format!(
-                "gone (exit code 1); its screen ended with: \"start\"{}",
-                beside(4)
-            ),
+            format!("gone (exit code 1); {LEFT_OUT}"),
             "{opening}"
         );
     }
@@ -734,10 +745,10 @@ fn a_secret_whose_value_goes_on_over_rows_leaves_out_the_rest_of_the_screen() {
 }
 
 /// A private key's block is left out whole, its base64 rows among it, which name nothing on
-/// their own; so are the rows beside it. A block whose first row is above the screen ends at
-/// its last row in view.
+/// their own; so are the rows beside it. A block with a delimiter missing, or cut at both ends,
+/// withholds the screen: nothing says where its body ends.
 #[test]
-fn a_private_keys_block_is_left_out_whole() {
+fn a_private_keys_block_is_left_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen() {
     let screen = [
         "building",
         "ok",
@@ -755,7 +766,7 @@ fn a_private_keys_block_is_left_out_whole() {
             beside(5)
         )
     );
-    // The first row of a block above the screen: everything to the end row goes.
+    // The first row of a block above the screen.
     let below = [
         "ZmFrZSBrZXkgYm9keSBvbmUgdHdvIHRocmVl",
         "AAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACD",
@@ -763,14 +774,7 @@ fn a_private_keys_block_is_left_out_whole() {
         "next",
         "then",
     ];
-    assert_eq!(
-        shown(Some(1), None, Some(&below)).after("gone"),
-        format!(
-            "gone (exit code 1); its screen ended with: \"then\"{}",
-            beside(4)
-        )
-    );
-    // A block that never ends in view takes the rest.
+    // A block that never ends in view.
     let open = [
         "fine",
         "ok",
@@ -778,13 +782,13 @@ fn a_private_keys_block_is_left_out_whole() {
         "bGluZSBvbmU=",
         "bGluZSB0d28=",
     ];
-    assert_eq!(
-        shown(Some(1), None, Some(&open)).after("gone"),
-        format!(
-            "gone (exit code 1); its screen ended with: \"fine\"{}",
-            beside(4)
-        )
-    );
+    for screen in [&below[..], &open[..]] {
+        assert_eq!(
+            shown(Some(1), None, Some(screen)).after("gone"),
+            format!("gone (exit code 1); {LEFT_OUT}"),
+            "{screen:?}"
+        );
+    }
 }
 
 /// Where every row of the quote is left out, the note says the lines were: the sentence the
@@ -797,43 +801,18 @@ fn a_screen_of_nothing_but_secrets_says_its_lines_were_left_out() {
     );
 }
 
-/// T-823: the last tool call the record shows is what the window was doing when it closed.
+/// T-823: the last tool call the record shows is what the window was doing when it closed. What
+/// may be said of it is `call`'s; here it is where the note says it.
 #[test]
-fn the_last_tool_call_is_said_before_the_screen_masked_and_cut_short() {
-    let call = |line: &str| {
-        shown(Some(2), None, Some(&PI))
-            .with_last_call(Some(line.to_owned()))
-            .after("@zeus's window closed")
-    };
+fn the_last_tool_call_is_said_before_the_screen_and_a_host_that_sent_no_screen_has_it_too() {
     let screen = "its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\"";
     assert_eq!(
-        call("cargo fmt --check && cargo test --workspace"),
+        shown(Some(2), None, Some(&PI))
+            .with_last_call(Some(LastCall::shell("Bash", "cargo fmt --check && cargo test --workspace")))
+            .after("@zeus's window closed"),
         format!("@zeus's window closed (exit code 2); its last tool call was: \"cargo fmt --check && cargo test --workspace\"; {screen}")
     );
-    // A key-like string in it is masked and counted, as in a screen's line.
-    assert!(
-        call("echo ghp_abcdefghijklmnopqrstuvwxyz0123456789").contains(
-            "its last tool call was: \"echo [masked]\" (1 key- or token-like string masked); "
-        )
-    );
-    // A command that names a secret is left out whole, and said so.
-    assert!(
-        call("curl -H 'Authorization: Bearer abc' https://example.test")
-            .contains("; its last tool call named a secret, so it is left out; ")
-    );
-    // Cut short with a mark, a quotation mark made an apostrophe.
-    let long = format!("echo \"{}\"", "word ".repeat(100));
-    let said = call(&long);
-    let quoted = said
-        .split("its last tool call was: \"")
-        .nth(1)
-        .and_then(|rest| rest.split("\"; ").next())
-        .unwrap();
-    assert!(quoted.starts_with("echo 'word word"), "{quoted}");
-    assert!(quoted.ends_with('…'), "{quoted}");
-    assert_eq!(quoted.chars().count(), 200);
-    // Nothing of a call where the record shows none, and a host that sent no screen still
-    // has the call said.
+    // Nothing of a call where the record shows none, and the call still said with no screen.
     assert_eq!(
         shown(Some(2), None, None)
             .with_last_call(None)
@@ -842,8 +821,15 @@ fn the_last_tool_call_is_said_before_the_screen_masked_and_cut_short() {
     );
     assert_eq!(
         shown(Some(2), None, None)
-            .with_last_call(Some("make test".to_owned()))
+            .with_last_call(Some(LastCall::shell("Bash", "make test")))
             .after("gone"),
         "gone (exit code 2); its last tool call was: \"make test\""
+    );
+    // What a call names that a note must not say is left out where the note says it.
+    assert_eq!(
+        shown(Some(2), None, None)
+            .with_last_call(Some(LastCall::shell("Bash", "curl -u alice:swordfish https://example.test/")))
+            .after("gone"),
+        "gone (exit code 2); its last tool call was Bash; what it was given may name a secret, so it is left out"
     );
 }

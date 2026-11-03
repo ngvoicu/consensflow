@@ -19,7 +19,7 @@ use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use crate::records::{
-    Boundary, Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
+    Boundary, Item, LastCall, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
 };
 /// What an input box on the screen holds ([`Window::input_box`]).
 pub use crate::shared::input_box::InputBox;
@@ -927,7 +927,11 @@ pub trait Records {
     /// ([`Record::last_call`]): what the window was doing when it closed under its task
     /// (T-823). None where the record shows none or cannot be read. Asked where Node's
     /// dispatcher asked nothing, so a seam that records its calls need not record this one.
-    fn last_call<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<String>> {
+    fn last_call<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Option<Arc<LastCall>>> {
         Box::pin(async move {
             match &*self.look(harness, session, &Options::default()).await {
                 Reading::Known(record) => record.last_call.clone(),

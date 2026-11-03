@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{Adapter, Records, TurnLeft, Work};
-use cf_harness::records::{Options, Reading, Record, Settlement};
+use cf_harness::records::{LastCall, Options, Reading, Record, Settlement};
 use cf_proto::agents::Harness;
 use serde_json::json;
 
@@ -144,12 +144,23 @@ impl Records for FakeRecords {
     /// The last tool call the fake's record of `session` shows (`FakeAgent::last_call`).
     /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter in a
     /// trace.
-    fn last_call<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<String>> {
-        let call = self
-            .adapters
-            .fake(harness.kind())
-            .and_then(|fake| fake.last_call_of(session));
-        Box::pin(async move { call })
+    fn last_call<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Option<Arc<LastCall>>> {
+        let Some(fake) = self.adapters.fake(harness.kind()) else {
+            return Box::pin(async { None });
+        };
+        let wrapped = fake.last_call_holds.wrap(&json!([session]));
+        // Read when asked, or once the test lets a held ask go.
+        let early = (!matches!(wrapped, Wrapped::Held { .. })).then(|| fake.last_call_of(session));
+        Box::pin(async move {
+            wrapped.before().await;
+            let call = early.unwrap_or_else(|| fake.last_call_of(session));
+            wrapped.after().await;
+            call
+        })
     }
 
     /// Whether the agent of `session` was never answered, and none where the

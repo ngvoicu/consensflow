@@ -15,7 +15,7 @@
 //! [`FakeAdapter::observe_holds`], [`FakeAdapter::start_holds`],
 //! [`FakeAdapter::ready_holds`], [`FakeAdapter::deliver_holds`],
 //! [`FakeAdapter::resumable_holds`], [`FakeAdapter::record_holds`],
-//! [`FakeAdapter::cut_holds`]).
+//! [`FakeAdapter::cut_holds`], [`FakeAdapter::last_call_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ use cf_harness::contract::{
     Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
     Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
-use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_harness::records::{Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
@@ -76,7 +76,7 @@ pub struct FakeAgent {
     /// What kind of failure it was, in the harness's plain words, where its record names one.
     pub failure_kind: Option<String>,
     /// The last tool call the record shows, as a command line.
-    pub last_call: Option<String>,
+    pub last_call: Option<Arc<LastCall>>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
     /// The conversations the window was switched to that no hook of its harness greeted
@@ -283,6 +283,11 @@ pub struct FakeAdapter {
     /// let go reads the record as it is then. Node's dispatcher asked nothing of the
     /// kind.
     pub cut_holds: Holds,
+    /// Asks of the last tool call a conversation's record shows, with no window open, that the
+    /// test holds, told the conversation as `[session]`: one let go reads the call as it is
+    /// then. Node's dispatcher asked nothing of the kind, and `look` is not held by it, so no
+    /// recorded trace moves (T-823).
+    pub last_call_holds: Holds,
     /// Its windows' record holds a paste in the wrapper Claude Code 2.1.296 puts it
     /// in (`<pasted_content id="…">`), and a launch's first message as it was
     /// given: not, as the fake of Node's suite, which recorded both as given.
@@ -399,6 +404,7 @@ impl FakeAdapter {
             cleared: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
+            last_call_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
             splits_pastes: Cell::new(false),
             attaches_images: Cell::new(false),
@@ -847,7 +853,7 @@ impl FakeAdapter {
     }
 
     /// The last tool call the record of `session` shows, as the latest window on it set it.
-    pub(super) fn last_call_of(&self, session: &str) -> Option<String> {
+    pub(super) fn last_call_of(&self, session: &str) -> Option<Arc<LastCall>> {
         self.agents
             .borrow()
             .iter()

@@ -82,6 +82,7 @@
 [run]
 engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
 engine-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
+engine-assigning = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "assigning::"]
 engine-closing = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closing::"]
 engine-unstarted = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unstarted::"]
 engine-window-closes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_closes::"]
@@ -115,16 +116,6 @@ builds = true
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "                    shown.after_with(&closed, &besides)"
 replace = '                    format!("{closed}{besides}")'
-
-[[plant]]
-name = "windows close: a line that names a secret is quoted"
-meant = "a_screen_that_names_a_secret_is_quoted_not_at_all_and_its_code_is_said"
-runs = ["engine-shown", "engine-windows", "engine-unstarted"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = "        if names_a_secret(line) {"
-replace = "        if false && names_a_secret(line) {"
 
 [[plant]]
 name = "windows close: a secret's name is found as a piece of a word"
@@ -592,108 +583,6 @@ find = '''
 replace = "    thread::sleep(Duration::from_secs(seconds));"
 
 [[plant]]
-name = "windows close: a line that names a secret leaves out only itself, not the rows beside it"
-meant = "a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''            out[at.saturating_sub(1)..=(at + 1).min(tail.len() - 1)].fill(true);'''
-replace = '''            out[at] = true;'''
-
-[[plant]]
-name = "windows close: a secret's value is left to the next row, whatever it opens"
-meant = "a_secret_whose_value_goes_on_over_rows_leaves_out_the_rest_of_the_screen"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''            if runs_on(line) {'''
-replace = '''            if false && runs_on(line) {'''
-
-[[plant]]
-name = "windows close: a double quote left open does not run on"
-meant = "a_secret_whose_value_goes_on_over_rows_leaves_out_the_rest_of_the_screen"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    unescaped('"') % 2 == 1
-'''
-replace = '''    false
-'''
-
-[[plant]]
-name = "windows close: a single quote left open does not run on"
-meant = "a_secret_whose_value_goes_on_over_rows_leaves_out_the_rest_of_the_screen"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''        || unescaped('\'') % 2 == 1
-'''
-replace = '''        || false
-'''
-
-[[plant]]
-name = "windows close: a continued row or an opened block does not run on"
-meant = "a_secret_whose_value_goes_on_over_rows_leaves_out_the_rest_of_the_screen"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''.ends_with(['\\', '{', '[', '(', '|', '>'])'''
-replace = '''.ends_with(['\\'])'''
-
-[[plant]]
-name = "windows close: a private key's begin row opens no block"
-meant = "a_private_keys_block_is_left_out_whole"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''        if key && upper.contains("BEGIN") {
-            block = true;
-        }
-'''
-replace = ''''''
-
-[[plant]]
-name = "windows close: a private key's block whose first row is above the screen is not left out"
-meant = "a_private_keys_block_is_left_out_whole"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''                out[..=at].fill(true);'''
-replace = '''                let _ = at;'''
-
-[[plant]]
-name = "windows close: the rows left out of a quote are not counted"
-meant = "a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    let left_out = shown.iter().filter(|&&at| out[at]).count();'''
-replace = '''    let left_out = 0;'''
-
-[[plant]]
-name = "windows close: the rows counted are those of the whole screen, not the quote's"
-meant = "a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''        .rev()
-        .take(QUOTE_LINES)
-        .collect();
-    let left_out'''
-replace = '''        .rev()
-        .collect();
-    let left_out'''
-
-[[plant]]
 name = "windows close: one row left out is said in the plural"
 meant = "a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted"
 runs = ["engine-shown"]
@@ -724,28 +613,6 @@ find = '''        15 => "SIGTERM",'''
 replace = '''        15 => "SIGKILL",'''
 
 [[plant]]
-name = "windows close: a signal is not said to be none of ConsensFlow's"
-meant = "an_exit_above_128_names_its_signal_and_a_close_not_ours_says_so"
-runs = ["engine-shown"]
-platforms = ["macos", "linux"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''        Some(if signal && self.outside {'''
-replace = '''        Some(if false && self.outside {'''
-
-[[plant]]
-name = "windows close: a pause note does not say the signal was not ConsensFlow's"
-meant = "a_worker_window_a_signal_ended_says_the_signal_and_that_consensflow_did_not_send_it"
-runs = ["engine-windows"]
-platforms = ["macos", "linux"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''                shown.outside().with_last_call(last_call)'''
-replace = '''                shown.with_last_call(last_call)'''
-
-[[plant]]
 name = "windows close: a pause note does not read the last tool call of the record"
 meant = "a_worker_window_that_closed_says_what_it_was_running_and_leaves_out_only_the_lines_that_name_a_secret"
 runs = ["engine-windows"]
@@ -754,61 +621,6 @@ runs = ["engine-windows"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''                let call = self.last_call_of(participant.id).await;'''
 replace = '''                let call = None::<String>;'''
-
-[[plant]]
-name = "windows close: the last tool call is not said"
-meant = "the_last_tool_call_is_said_before_the_screen_masked_and_cut_short"
-runs = ["engine-shown", "engine-windows"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''        if let Some(call) = &self.last_call {
-            said.push_str(&last_call_words(call));
-        }
-'''
-replace = ''''''
-
-[[plant]]
-name = "windows close: a last tool call that names a secret is quoted"
-meant = "the_last_tool_call_is_said_before_the_screen_masked_and_cut_short"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    if names_a_secret(&one) {'''
-replace = '''    if false && names_a_secret(&one) {'''
-
-[[plant]]
-name = "windows close: a last tool call is not masked"
-meant = "the_last_tool_call_is_said_before_the_screen_masked_and_cut_short"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    let hidden = mask(&one);
-    let text = hidden.text.replace('"', "'");'''
-replace = '''    let hidden = mask(&one);
-    let text = one.replace('"', "'");'''
-
-[[plant]]
-name = "windows close: a last tool call is not cut short"
-meant = "the_last_tool_call_is_said_before_the_screen_masked_and_cut_short"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    if text.chars().count() > limit {'''
-replace = '''    if false {'''
-
-[[plant]]
-name = "windows close: a last tool call is cut at the screen's bound"
-meant = "the_last_tool_call_is_said_before_the_screen_masked_and_cut_short"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''const CALL_CHARS: usize = 200;'''
-replace = '''const CALL_CHARS: usize = 2000;'''
 
 [[plant]]
 name = "windows close: a status above 128 names a signal on Windows"
@@ -820,3 +632,559 @@ platforms = ["windows"]
 file = "crates/cf-engine/src/shown.rs"
 find = '''signalled(code, cfg!(unix))'''
 replace = '''signalled(code, true)'''
+
+[[plant]]
+name = "windows close: a line that names a secret is quoted"
+meant = "a_screen_that_names_a_secret_is_quoted_not_at_all_and_its_code_is_said"
+runs = ["engine-shown", "engine-windows", "engine-unstarted"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if in_block[at] || !names_a_secret(row) {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "windows close: a line that names a secret leaves out only itself, not the rows beside it"
+meant = "a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let from = at.saturating_sub(by);
+    let to = (at + by).min(out.len() - 1);'''
+replace = '''    let (from, to) = (at, at);'''
+
+[[plant]]
+name = "windows close: a block scalar's mark is taken for a value"
+meant = "every_block_scalar_and_every_opener_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    if "|>&*!{[(<\\".contains(first) || value.ends_with('\\') {'''
+replace = '''    if value.ends_with('\\') {'''
+
+[[plant]]
+name = "windows close: a backslash that ends a value is taken for its end"
+meant = "every_block_scalar_and_every_opener_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    if "|>&*!{[(<\\".contains(first) || value.ends_with('\\') {'''
+replace = '''    if "|>&*!{[(<\\".contains(first) {'''
+
+[[plant]]
+name = "windows close: a quote that does not close is taken for a value that does"
+meant = "a_value_that_goes_on_over_rows_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            None => false,
+        };'''
+replace = '''            None => true,
+        };'''
+
+[[plant]]
+name = "windows close: what follows a quote's end is not looked at"
+meant = "a_value_that_goes_on_over_rows_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                .all(|c| c.is_whitespace() || ",;)]}".contains(c)),'''
+replace = '''                .all(|_| true),'''
+
+[[plant]]
+name = "windows close: an unquoted value of several words is one value"
+meant = "a_value_that_goes_on_over_rows_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        .count()
+        == 1
+}'''
+replace = '''        .count()
+        >= 1
+}'''
+
+[[plant]]
+name = "windows close: a value the next row goes on with, deeper, is whole"
+meant = "a_value_that_goes_on_over_rows_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            return if closed_value(value) && !next_deeper {'''
+replace = '''            return if closed_value(value) {'''
+
+[[plant]]
+name = "windows close: a row that ends at the name is prose that is whole"
+meant = "a_row_that_is_a_label_or_ends_at_the_name_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    if opens_something(trimmed) || ends_at_the_name(trimmed) || trails_off(trimmed) {'''
+replace = '''    if opens_something(trimmed) || trails_off(trimmed) {'''
+
+[[plant]]
+name = "windows close: a row that trails off is prose that is whole"
+meant = "a_row_that_is_a_label_or_ends_at_the_name_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    if opens_something(trimmed) || ends_at_the_name(trimmed) || trails_off(trimmed) {'''
+replace = '''    if opens_something(trimmed) || ends_at_the_name(trimmed) {'''
+
+[[plant]]
+name = "windows close: a row that ends on a mark that opens is prose that is whole"
+meant = "a_row_that_is_a_label_or_ends_at_the_name_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    if opens_something(trimmed) || ends_at_the_name(trimmed) || trails_off(trimmed) {'''
+replace = '''    if ends_at_the_name(trimmed) || trails_off(trimmed) {'''
+
+[[plant]]
+name = "windows close: a quote that opens on a row and does not close is nothing"
+meant = "a_value_that_goes_on_over_rows_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            if !closes {
+                return true;
+            }'''
+replace = '''            if !closes {}'''
+
+[[plant]]
+name = "windows close: a private key's begin row opens no block"
+meant = "a_private_keys_block_is_left_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            open = Some(at);'''
+replace = '''            let _ = at;'''
+
+[[plant]]
+name = "windows close: a private key's end with no begin in view is taken for a whole block"
+meant = "a_private_keys_block_is_left_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            let begin = open.take()?;'''
+replace = '''            let begin = open.take().unwrap_or(0);'''
+
+[[plant]]
+name = "windows close: a private key's begin with no end in view is taken for a whole block"
+meant = "a_private_keys_block_is_left_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    if open.is_some() {
+        return None;
+    }
+    Some(in_block)'''
+replace = '''    Some(in_block)'''
+
+[[plant]]
+name = "windows close: a second begin before an end is taken for the first's block"
+meant = "a_private_keys_block_is_taken_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            if open.is_some() {
+                return None;
+            }
+            open = Some(at);'''
+replace = '''            open = Some(at);'''
+
+[[plant]]
+name = "windows close: rows of base64 and nothing else are no key's body"
+meant = "a_private_keys_block_is_taken_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    (1..tail.len()).any(|at| body(at - 1) && body(at))'''
+replace = '''    (1..tail.len()).any(|at| body(at - 1) && !body(at) && body(at))'''
+
+[[plant]]
+name = "windows close: prose that names a secret reaches one row each way"
+meant = "prose_that_is_whole_on_its_row_leaves_out_the_row_and_two_each_way"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''const PROSE_REACH: usize = 2;'''
+replace = '''const PROSE_REACH: usize = 1;'''
+
+[[plant]]
+name = "windows close: the rows of a token wrapped by hand are quoted"
+meant = "the_rows_of_a_token_wrapped_by_hand_are_left_out_as_long_as_they_are_one_word"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                while tail.get(after).is_some_and(|row| is_a_fragment(row)) {'''
+replace = '''                while false && tail.get(after).is_some_and(|row| is_a_fragment(row)) {'''
+
+[[plant]]
+name = "windows close: the rows left out of a quote are not counted"
+meant = "a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let left_out = shown.iter().filter(|&&at| out[at]).count();'''
+replace = '''    let left_out = 0;'''
+
+[[plant]]
+name = "windows close: the rows counted are those of the whole screen, not the quote's"
+meant = "a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        .rev()
+        .take(QUOTE_LINES)
+        .collect();
+    let left_out'''
+replace = '''        .rev()
+        .collect();
+    let left_out'''
+
+[[plant]]
+name = "windows close: a screen is quoted whatever its rows name"
+meant = "a_label_with_its_value_below_a_yaml_block_and_a_hard_wrapped_value_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        let Some((kept, left_out)) = screen::without_secrets(tail) else {'''
+replace = '''        let Some((kept, left_out)) = Some((tail.to_vec(), 0usize)) else {'''
+
+[[plant]]
+name = "windows close: a status above 128 is told as a signal that ended the program"
+meant = "an_exit_above_128_is_consistent_with_a_signal_and_what_consensflow_sent_is_said_when_known"
+runs = ["engine-shown"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''                Some(name) => (format!("exit code {code}, consistent with {name}"), false),'''
+replace = '''                Some(name) => (format!("exit code {code}, ended by {name}"), false),'''
+
+[[plant]]
+name = "windows close: a kill that was not sent is not told"
+meant = "an_exit_above_128_is_consistent_with_a_signal_and_what_consensflow_sent_is_said_when_known"
+runs = ["engine-shown"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            (Part::NotSent, false) => format!("{said}; ConsensFlow had sent it no kill"),'''
+replace = '''            (Part::NotSent, false) => said,'''
+
+[[plant]]
+name = "windows close: a kill that was sent is not told"
+meant = "an_exit_above_128_is_consistent_with_a_signal_and_what_consensflow_sent_is_said_when_known"
+runs = ["engine-shown"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            (Part::Sent, false) => {
+                format!("{said}; ConsensFlow had sent it a kill before it closed")
+            }'''
+replace = '''            (Part::Sent, false) => said,'''
+
+[[plant]]
+name = "windows close: a signal the host reported is told as an inference"
+meant = "an_exit_above_128_is_consistent_with_a_signal_and_what_consensflow_sent_is_said_when_known"
+runs = ["engine-shown"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            (Some(signal), _) => (format!("ended by signal {signal}"), true),'''
+replace = '''            (Some(signal), _) => (format!("ended by signal {signal}"), false),'''
+
+[[plant]]
+name = "windows close: a pause note does not say what ConsensFlow had sent"
+meant = "a_worker_window_that_exited_with_a_signals_status_says_so_and_that_consensflow_sent_it_no_kill"
+runs = ["engine-windows"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                shown.with_part(part).with_last_call(last_call)'''
+replace = '''                shown.with_last_call(last_call)'''
+
+[[plant]]
+name = "windows close: a window the engine sent nothing is told it was sent a kill"
+meant = "a_worker_window_that_exited_with_a_signals_status_says_so_and_that_consensflow_sent_it_no_kill"
+runs = ["engine-windows"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                let part = if sent { Part::Sent } else { Part::NotSent };'''
+replace = '''                let part = Part::Sent;'''
+
+[[plant]]
+name = "windows close: a kill the engine sent is not recorded"
+meant = "a_window_the_engine_killed_to_reassign_its_task_does_not_say_the_signal_was_not_its_own"
+runs = ["engine-assigning"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        record.window.borrow_mut().sent_to.push(pane.clone());
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: what the engine sent is read after the window's state is cleared"
+meant = "a_window_the_engine_killed_to_reassign_its_task_does_not_say_the_signal_was_not_its_own"
+runs = ["engine-assigning"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let sent = record.window.borrow().sent_to.contains(pane);
+        self.closed(&record);'''
+replace = '''        self.closed(&record);
+        let sent = record.window.borrow().sent_to.contains(pane);'''
+
+[[plant]]
+name = "windows close: the guard of a read that a replacement window outlived is gone"
+meant = "a_window_that_exits_while_its_record_is_read_and_is_replaced_before_the_read_ends_pauses_nothing"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''                if !self.still_as_it_went(&record, launches) {
+                    self.changed();
+                    return Ok(());
+                }
+                call'''
+replace = '''                call'''
+
+[[plant]]
+name = "windows close: the last tool call is not said"
+meant = "the_last_tool_call_is_said_before_the_screen_and_a_host_that_sent_no_screen_has_it_too"
+runs = ["engine-shown", "engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        if let Some(call) = &self.last_call {
+            said.push_str(&call::words(call));
+        }
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: a command is said though its tool is not on the list"
+meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''    if !SAFE_TOOLS.contains(&tool) {
+        return false;
+    }'''
+replace = '''    if false {
+        return false;
+    }'''
+
+[[plant]]
+name = "windows close: a URL's user in a command is no credential"
+meant = "a_command_that_carries_a_credential_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        || USER_IN_URL.is_match(command)
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quotes in a command are plain"
+meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''    if !plain
+        ||'''
+replace = '''    if false
+        ||'''
+
+[[plant]]
+name = "windows close: a heredoc in a command is plain"
+meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        || command.contains("<<")
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: a substitution in a command is plain"
+meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        || command.contains("$(")
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: a secret's name in a command is plain"
+meant = "a_command_that_carries_a_credential_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        || names_a_secret(command)
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: a token-shaped word in a command is plain"
+meant = "a_command_with_a_token_shaped_word_or_a_secret_past_the_bound_is_left_out"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        || mask(command).count > 0
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: a variable on a command's line may hold anything"
+meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        if !SAFE_VARIABLES.contains(&name) || !setting {'''
+replace = '''        if !setting {'''
+
+[[plant]]
+name = "windows close: an interpreter's code on the line is plain"
+meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''    if INTERPRETERS.contains(&tool) && rest.iter().any(|word| CODE_FLAGS.contains(word)) {'''
+replace = '''    if false && rest.iter().any(|word| CODE_FLAGS.contains(word)) {'''
+
+[[plant]]
+name = "windows close: git's -c on the line is plain"
+meant = "a_command_that_carries_a_credential_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''    if tool == "git" && rest.contains(&"-c") {'''
+replace = '''    if false && rest.contains(&"-c") {'''
+
+[[plant]]
+name = "windows close: a subcommand that takes a credential is plain"
+meant = "a_command_that_carries_a_credential_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        .all(|(_, denied)| subcommand.is_none_or(|word| !denied.contains(word)))'''
+replace = '''        .all(|_| true)'''
+
+[[plant]]
+name = "windows close: only a semicolon ends a command"
+meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''Regex::new(r"&&|\|\||[;|&\n]")'''
+replace = '''Regex::new(r";")'''
+
+[[plant]]
+name = "windows close: a file that names a secret is quoted"
+meant = "a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_secret"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        && !names_a_secret(target)
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: a token-shaped file is quoted"
+meant = "a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_secret"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        && mask(target).count == 0
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: a file under a URL's user is quoted"
+meant = "a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_secret"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''        && mask(target).count == 0
+        && !USER_IN_URL.is_match(target)
+'''
+replace = '''        && mask(target).count == 0
+'''
+
+[[plant]]
+name = "windows close: a tool's name is not masked"
+meant = "a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_secret"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''    cut_to(&mask(&one_line).text.replace('"', "'"), TOOL_CHARS)'''
+replace = '''    cut_to(&one_line.replace('"', "'"), TOOL_CHARS)'''
+
+[[plant]]
+name = "windows close: a last tool call is cut at the screen's bound"
+meant = "a_command_with_a_token_shaped_word_or_a_secret_past_the_bound_is_left_out"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''const CALL_CHARS: usize = 200;'''
+replace = '''const CALL_CHARS: usize = 2000;'''
+
+[[plant]]
+name = "windows close: a last tool call is not cut short"
+meant = "a_command_with_a_token_shaped_word_or_a_secret_past_the_bound_is_left_out"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''    if text.chars().count() > limit {'''
+replace = '''    if false {'''

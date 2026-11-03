@@ -8,6 +8,8 @@
 //! What is hidden, each by `[masked]` in its place:
 //! - the user and password of a URL (`https://user:password@host`);
 //! - an email address (`ci-bot@example.com`), whose account it names;
+//! - the user and password of a command's `-u user:password` (curl's `-u`, `--user`,
+//!   `--proxy-user`);
 //! - what follows `Bearer`, eight characters or more of a token; and what
 //!   follows `Basic` when it is base64's (a digit in it, a capital that does
 //!   not begin it, or ending in `=`), for `basic setup` is no credential;
@@ -22,11 +24,17 @@
 //!   `ya29.`, `SG.`, a JWT's `eyJ…`);
 //! - any run of 24 letters, digits, `_` and `-` with at least one letter and one
 //!   digit in it (a hex or base64url token), and any run of 40 characters of
-//!   base64's own (letters, digits, `+`, `/`, `=`) with the same.
+//!   base64's own (letters, digits, `+`, `/`, `=`) with the same; and a base64 value with
+//!   no digit: forty letters and digits or more with a capital in them, or a run of that
+//!   length with a `+` in it or `=` at its end.
+//!
+//! **The spans of every rule are found in the text as it was**, joined where they overlap
+//! or touch, and replaced once (T-823): no part of a value is left to a rule that comes
+//! after the one that took the first part of it.
 
 use std::sync::LazyLock;
 
-use regex::{Captures, Regex};
+use regex::Regex;
 
 /// What a hidden secret is replaced with.
 pub const MASK: &str = "[masked]";
@@ -37,6 +45,9 @@ struct Rule {
     pattern: Regex,
     secret: usize,
     is_secret: fn(&str) -> bool,
+    /// The rule gives way where a URL's user and password hold its match: an address that
+    /// begins inside them (`user:name@host`) is the URL's, and its host stays.
+    yields_to_url: bool,
 }
 
 /// The patterns are constants of this file, and a test builds each: a mistake
@@ -47,6 +58,7 @@ fn rule(pattern: &str, secret: usize, is_secret: fn(&str) -> bool) -> Rule {
         pattern: Regex::new(pattern).expect("a pattern of the masker"),
         secret,
         is_secret,
+        yields_to_url: false,
     }
 }
 
@@ -92,9 +104,18 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             always,
         ),
         // An email address: whose account it is.
+        Rule {
+            yields_to_url: true,
+            ..rule(
+                r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",
+                0,
+                always,
+            )
+        },
+        // curl's `-u user:password`, `--user`, `--proxy-user` (and `-U`), on a command a screen echoes.
         rule(
-            r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",
-            0,
+            r"(?:^|\s)(?:-[uU]|--user|--proxy-user)(?:\s+|=)?([^\s:]+:\S+)",
+            1,
             always,
         ),
         // Authorization: Bearer <token>, Authorization: Basic <credentials>
@@ -138,8 +159,27 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         rule(r"[A-Za-z0-9_-]{24,}", 0, has_a_letter_and_a_digit),
         // A base64 token, whose own characters include the path's.
         rule(r"[A-Za-z0-9+/=]{40,}", 0, has_a_letter_and_a_digit),
+        // A base64 value with no digit in it (`YWJj` twelve times): forty letters or more in a
+        // run, in both cases or in capitals alone, is no word, and a long name in a case of
+        // its own or a number is left (T-823, the review of `a26e0848e`).
+        rule(r"[A-Za-z0-9]{40,}={0,2}", 0, is_base64_letters),
+        // One with a `+`, or padded: no path and no word has them.
+        rule(r"[A-Za-z0-9+/]{39,}={0,2}", 0, is_base64_marked),
     ]
 });
+
+/// A run of forty letters and digits or more that is no word: it has a capital in it.
+/// All small letters is a word, and digits alone a number.
+fn is_base64_letters(found: &str) -> bool {
+    let run = found.trim_end_matches('=');
+    run.chars().any(|c| c.is_ascii_uppercase())
+        && (run.chars().any(|c| c.is_ascii_lowercase()) || run.len() >= 40)
+}
+
+/// A base64 run that says what it is by its characters: a `+` in it, or `=` at its end.
+fn is_base64_marked(found: &str) -> bool {
+    found.contains('+') || found.ends_with('=')
+}
 
 /// A text, and how many secrets were hidden in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,33 +188,60 @@ pub struct Masked {
     pub count: usize,
 }
 
-/// `text` with what looks like a key or a token hidden.
+/// `text` with what looks like a key or a token hidden. Every rule looks at the text as it
+/// was, and the spans they find are joined where they overlap or touch before any is
+/// replaced: a rule that took a piece of a value first left the rest to a rule that saw
+/// a shorter run (`[masked]+/abcdefghijklmnopqr/AA==`, the review of `a26e0848e`). A secret
+/// found by two rules is one.
 pub fn mask(text: &str) -> Masked {
-    let mut count = 0;
-    let mut text = text.to_owned();
-    for rule in RULES.iter() {
-        text = rule
-            .pattern
-            .replace_all(&text, |found: &Captures<'_>| hide(rule, found, &mut count))
-            .into_owned();
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut users: Vec<(usize, usize)> = Vec::new();
+    for (at, rule) in RULES.iter().enumerate() {
+        for found in rule.pattern.captures_iter(text) {
+            let Some(secret) = found.get(rule.secret) else {
+                continue;
+            };
+            let span = (secret.start(), secret.end());
+            if !(rule.is_secret)(secret.as_str()) {
+                continue;
+            }
+            // The first rule is the URL's user and password.
+            if at == 0 {
+                users.push(span);
+            }
+            let whole = found
+                .get(0)
+                .map_or(span, |whole| (whole.start(), whole.end()));
+            if rule.yields_to_url
+                && users
+                    .iter()
+                    .any(|user| whole.0 < user.1 && user.0 < whole.1)
+            {
+                continue;
+            }
+            spans.push(span);
+        }
     }
-    Masked { text, count }
-}
-
-/// What replaces a match of `rule`: the match with its secret hidden, or the
-/// match as it was where it holds none.
-fn hide(rule: &Rule, found: &Captures<'_>, count: &mut usize) -> String {
-    let whole = &found[0];
-    let (Some(all), Some(secret)) = (found.get(0), found.get(rule.secret)) else {
-        return whole.to_owned();
-    };
-    if !(rule.is_secret)(secret.as_str()) {
-        return whole.to_owned();
+    spans.sort_unstable();
+    let mut joined: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in spans {
+        match joined.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => joined.push((start, end)),
+        }
     }
-    *count += 1;
-    // The group lies inside the match.
-    let (before, after) = (secret.start() - all.start(), secret.end() - all.start());
-    format!("{}{MASK}{}", &whole[..before], &whole[after..])
+    let mut hidden = String::with_capacity(text.len());
+    let mut at = 0;
+    for &(start, end) in &joined {
+        hidden.push_str(&text[at..start]);
+        hidden.push_str(MASK);
+        at = end;
+    }
+    hidden.push_str(&text[at..]);
+    Masked {
+        text: hidden,
+        count: joined.len(),
+    }
 }
 
 #[cfg(test)]

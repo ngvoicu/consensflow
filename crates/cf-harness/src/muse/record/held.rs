@@ -19,7 +19,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::field;
-use crate::shared::record::calls::describe;
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::reading::{native_id, Role};
 
@@ -34,7 +34,7 @@ pub(super) struct Held {
     /// The questions and approvals each run asked that are not settled.
     asked: HashMap<Arc<str>, HashSet<Arc<str>>>,
     /// The last tool call any run committed, as a line (`calls::describe`).
-    last_call: Option<String>,
+    last_call: Option<Arc<LastCall>>,
 }
 
 impl Held {
@@ -132,8 +132,8 @@ impl Held {
     }
 
     /// The last tool call any run committed, as a line.
-    pub(super) fn last_call(&self) -> Option<&str> {
-        self.last_call.as_deref()
+    pub(super) fn last_call(&self) -> Option<&Arc<LastCall>> {
+        self.last_call.as_ref()
     }
 
     /// Whether the run `run` holds a tool call or a question open.

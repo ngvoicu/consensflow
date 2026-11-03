@@ -84,6 +84,7 @@ use super::paths::transcript;
 use crate::shared::quota::Quota;
 use crate::shared::record::boundary::Boundary;
 use crate::shared::record::cache::{Look, Options};
+use crate::shared::record::calls::LastCall;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -226,7 +227,7 @@ struct Transcript {
     /// The latest turn failed: the API refused it, in these words.
     failure: Option<String>,
     /// The last tool call the main conversation made, as a line (`calls::describe`).
-    last_call: Option<String>,
+    last_call: Option<Arc<LastCall>>,
     quota: Option<Arc<Quota>>,
     /// The model the main conversation's assistant last answered from, and the move away
     /// from it that nobody asked for (MUS-24).

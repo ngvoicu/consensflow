@@ -46,7 +46,7 @@ use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::{busy_turn, moved_hold, out_words, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
-use crate::shown::Shown;
+use crate::shown::{Part, Shown};
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
@@ -774,6 +774,8 @@ impl Dispatcher {
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
         let said_yes = trust::yes_at_exit(&record, &shown);
+        // What the engine had sent this window, told before `closed` clears it.
+        let sent = record.window.borrow().sent_to.contains(pane);
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -960,7 +962,8 @@ impl Dispatcher {
             let shown = if own_close {
                 shown
             } else {
-                shown.outside().with_last_call(last_call)
+                let part = if sent { Part::Sent } else { Part::NotSent };
+                shown.with_part(part).with_last_call(last_call)
             };
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
             // A task shown working (or waiting) for the words that resumed it, which had not

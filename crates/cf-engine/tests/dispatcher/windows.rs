@@ -8,7 +8,7 @@ use std::rc::Rc;
 use cf_engine::testing::Context;
 use serde_json::{json, Value};
 
-use crate::fixtures::assert_match;
+use crate::fixtures::{assert_match, native_of, Tiers};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["the dispatcher"];
@@ -111,7 +111,8 @@ fn a_worker_window_that_ends_mid_task_says_how_it_ended_and_what_it_showed_in_th
 /// did not come from ConsensFlow.
 #[cfg(unix)]
 #[test]
-fn a_worker_window_a_signal_ended_says_the_signal_and_that_consensflow_did_not_send_it() {
+fn a_worker_window_that_exited_with_a_signals_status_says_so_and_that_consensflow_sent_it_no_kill()
+{
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     context.give(project.id, "zeus", "Parser");
@@ -126,8 +127,8 @@ fn a_worker_window_a_signal_ended_says_the_signal_and_that_consensflow_did_not_s
     let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
     assert_eq!(
         note.body,
-        "T-1 is paused: @zeus's window closed (exit code 143, the status of a program ended by SIGTERM, \
-         which ConsensFlow did not send: it had no stop or close of its own under way); \
+        "T-1 is paused: @zeus's window closed (exit code 143, consistent with SIGTERM; \
+         ConsensFlow had sent it no kill); \
          its screen ended with: \"Running the workspace tests\". \
          Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
     );
@@ -146,8 +147,10 @@ fn a_worker_window_that_closed_says_what_it_was_running_and_leaves_out_only_the_
     context.pass().unwrap();
     context.pass().unwrap();
     context.adapter.with("zeus", |agent| {
-        agent.last_call =
-            Some("cargo fmt --check && cargo test --workspace -- --nocapture".to_owned());
+        agent.last_call = Some(cf_harness::records::LastCall::shell(
+            "Bash",
+            "cargo fmt --check && cargo test --workspace -- --nocapture",
+        ));
     });
     context.host.exits_showing(
         Some(3),
@@ -171,6 +174,132 @@ fn a_worker_window_that_closed_says_what_it_was_running_and_leaves_out_only_the_
          its screen ended with: \"Running the workspace tests / bye\" \
          (3 lines that named or lay beside a secret were left out). \
          Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// The review of `a26e0848e` put a password in a real ledger note three ways, all on rows the
+/// per-row rule quoted: a label with its value below, a YAML block scalar with a modifier, and
+/// a value hard-wrapped over rows. The note the ledger holds says none of it, and says the
+/// screen was left out; and the same for what the last tool call carries (`curl -u`), and for a
+/// base64 value that the masker once let through because it had no digit.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_password_the_screen_or_the_last_call_carried() {
+    let withheld =
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines named a \
+         secret, so they are left out. \
+         Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.";
+    for (screen, value) in [
+        (
+            vec!["Password:", "Enter the value below", "red green blue"],
+            "red green blue",
+        ),
+        (
+            vec!["PASSWORD: >-", "  correct horse", "  battery staple"],
+            "battery staple",
+        ),
+        (
+            vec!["password: correct horse", "battery staple", "alpha bravo"],
+            "battery staple",
+        ),
+    ] {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.give(project.id, "zeus", "Parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        context.host.exits_showing(Some(1), None, Some(&screen));
+        context.exit("zeus");
+        let task = context.task(project.id, 1);
+        let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+        assert_eq!(note.body, withheld, "{screen:?}");
+        assert!(!note.body.contains(value), "{screen:?}");
+    }
+
+    // A command that carries a credential is the tool's name alone; a base64 value with no
+    // digit on a row that names nothing is masked.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| {
+        agent.last_call = Some(cf_harness::records::LastCall::shell(
+            "Bash",
+            "curl -u alice:swordfish https://example.test/",
+        ));
+    });
+    context.host.exits_showing(
+        Some(1),
+        None,
+        Some(&[
+            "running",
+            "value YWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJj end",
+        ]),
+    );
+    context.exit("zeus");
+    let task = context.task(project.id, 1);
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    assert_eq!(
+        note.body,
+        "T-1 is paused: @zeus's window closed (exit code 1); its last tool call was Bash; \
+         what it was given may name a secret, so it is left out; \
+         its screen ended with: \"running / value [masked] end\" \
+         (1 key- or token-like string masked). \
+         Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+    assert!(!note.body.contains("swordfish") && !note.body.contains("alice"));
+    assert!(!note.body.contains("YWJjYWJj"));
+}
+
+/// A window's exit reads its conversation's record with no window open, to name the last tool
+/// call. A participant whose window was asked for meanwhile, up, on its way or given up, is no
+/// business of that exit: it settles nothing more (the guard of `in_flight`'s `launches`),
+/// and no pause note says a window closed under a task that another window now has (the
+/// review of `a26e0848e`, P3: the fake answered at once, and the guard had no case).
+#[test]
+fn a_window_that_exits_while_its_record_is_read_and_is_replaced_before_the_read_ends_pauses_nothing(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let session = tiers.assignee(1);
+    let first = context.host.last(&session).unwrap().pane;
+    let native = native_of(&context, tiers.id(&session)).expect("its conversation");
+    context.adapter.with("zeus", |agent| {
+        agent.last_call = Some(cf_harness::records::LastCall::shell("Bash", "cargo test"));
+    });
+    let reading = context
+        .adapter
+        .last_call_holds
+        .hold(move |asked| asked[0] == native.as_str());
+    context
+        .host
+        .exits_showing(Some(1), None, Some(&["Running the workspace tests"]));
+    // The window exits; its note waits for the record, which is held.
+    let exit = context.begin_exit(&session);
+    // The human opens the session's window again meanwhile: a replacement comes up.
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.pass().unwrap();
+    let second = context.host.last(&session).unwrap().pane;
+    assert_ne!(second, first, "a replacement window came up");
+    reading.open();
+    drop(exit);
+    context.pass().unwrap();
+
+    let task = tiers.task(1);
+    assert_ne!(
+        task.task.state, "paused",
+        "the replaced window's exit paused nothing"
+    );
+    assert!(
+        task.messages
+            .iter()
+            .all(|m| !m.body.contains("window closed")),
+        "{:?}",
+        task.messages.iter().map(|m| &m.body).collect::<Vec<_>>()
     );
 }
 

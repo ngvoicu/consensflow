@@ -42,14 +42,18 @@
 //! ended: it may still run ([`Shown::outlived`]). Nothing waits for it: a window
 //! that opens on its conversation opens beside it, which the words warn of.
 
+mod call;
 pub(crate) mod mask;
 mod ours;
+mod screen;
 mod secret;
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
 use std::sync::LazyLock;
 
+use cf_harness::records::LastCall;
 use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft, SnapshotTail};
 use regex::Regex;
@@ -60,6 +64,7 @@ use mask::mask;
 pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
+#[cfg(test)]
 use secret::names_a_secret;
 
 /// The most lines of a screen a note quotes: the last ones.
@@ -89,11 +94,10 @@ pub struct Shown {
     survivor: Option<u32>,
     /// Lines of the screen were ConsensFlow's own and are left out ([`Shown::without_pastes`]).
     pasted: bool,
-    /// ConsensFlow had no stop or close of its own under way when the window ended
-    /// ([`Shown::outside`]): a signal that ended it was not ConsensFlow's.
-    outside: bool,
+    /// What ConsensFlow itself had sent the window's program before it ended ([`Part`]).
+    part: Part,
     /// The last tool call the window's record shows ([`Shown::with_last_call`]).
-    last_call: Option<String>,
+    last_call: Option<Arc<LastCall>>,
 }
 
 impl Shown {
@@ -107,7 +111,7 @@ impl Shown {
             possibly_left: exit.possibly_left,
             survivor: exit.survivor,
             pasted: false,
-            outside: false,
+            part: Part::Unknown,
             last_call: None,
         }
     }
@@ -238,12 +242,16 @@ impl Shown {
         }
         said.push_str(besides);
         if let Some(call) = &self.last_call {
-            said.push_str(&last_call_words(call));
+            said.push_str(&call::words(call));
         }
         let Some(tail) = &self.tail else {
             return said;
         };
-        let (kept, left_out) = without_secrets(tail);
+        // None where the screen is withheld whole: the extent of a secret on it is not known.
+        let Some((kept, left_out)) = screen::without_secrets(tail) else {
+            said.push_str("; its last screen lines named a secret, so they are left out");
+            return said;
+        };
         match Quote::of(&kept, Keep::Last) {
             None if left_out > 0 => {
                 said.push_str("; its last screen lines named a secret, so they are left out");
@@ -258,19 +266,17 @@ impl Shown {
         said
     }
 
-    /// This exit as one ConsensFlow had no part in: it had no stop or close of its own under
-    /// way, so a signal that ended the program was not its own.
-    pub(crate) fn outside(&self) -> Self {
-        Self {
-            outside: true,
-            ..self.clone()
-        }
+    /// This exit with what ConsensFlow had sent the window's program before it ended: a
+    /// signal's source is told only by that, never by an exit code.
+    pub(crate) fn with_part(mut self, part: Part) -> Self {
+        self.part = part;
+        self
     }
 
     /// This exit with the last tool call the window's record shows, as a line
     /// (`Record::last_call`): what the window was doing when it closed, which the note says
     /// before its screen, masked and cut short. None where the record shows none.
-    pub(crate) fn with_last_call(mut self, call: Option<String>) -> Self {
+    pub(crate) fn with_last_call(mut self, call: Option<Arc<LastCall>>) -> Self {
         self.last_call = call;
         self
     }
@@ -280,32 +286,53 @@ impl Shown {
     /// (`0xC0000005`, an access violation; `0xC000013A`, the Ctrl+C), which is
     /// written as Windows writes it: in decimal it is ten digits nobody knows.
     ///
-    /// A status above 128 is a shell's word for a program a signal ended (143 is SIGTERM,
-    /// 137 SIGKILL), and the note says which. Where ConsensFlow had no stop or close of its
-    /// own under way ([`Shown::outside`]), it says that too: the signal came from outside it
-    /// (the project's own tests killed a Claude Code worker's `cargo test` and then the
-    /// worker, and the note said "exit code 143", T-823).
+    /// A signal the host reported is named. A status above 128 is a shell's convention for a
+    /// program a signal ended (143 is SIGTERM, 137 SIGKILL), and the note says it is
+    /// consistent with it, no more (a program can exit with 143). What ConsensFlow had sent
+    /// the program is said only where the engine knows it ([`Part`]; the project's own tests
+    /// killed a Claude Code worker's `cargo test` and then the worker, and the note said
+    /// "exit code 143", T-823).
     fn ended(&self) -> Option<String> {
-        let (said, signal) = match (&self.signal, self.code) {
+        // A signal the host reported is a fact; a status above 128 is a shell's convention
+        // for one (`/bin/sh -c 'exit 143'` ends normally and says it), so the note says only
+        // that the status is consistent with the signal (the review of `a26e0848e`, P2).
+        let (said, reported) = match (&self.signal, self.code) {
             (Some(signal), _) => (format!("ended by signal {signal}"), true),
             (None, Some(code)) if code >= STATUS_CODES => {
-                (format!("exit code {code:#010X}"), false)
+                return Some(format!("exit code {code:#010X}"));
             }
             (None, Some(code)) => match signalled(code, cfg!(unix)) {
-                Some(name) => (
-                    format!("exit code {code}, the status of a program ended by {name}"),
-                    true,
-                ),
-                None => (format!("exit code {code}"), false),
+                Some(name) => (format!("exit code {code}, consistent with {name}"), false),
+                None => return Some(format!("exit code {code}")),
             },
             (None, None) => return None,
         };
-        Some(if signal && self.outside {
-            format!("{said}, which ConsensFlow did not send: it had no stop or close of its own under way")
-        } else {
-            said
+        Some(match (self.part, reported) {
+            (Part::NotSent, true) => {
+                format!("{said}, which ConsensFlow did not send: it had sent no kill")
+            }
+            (Part::Sent, true) => format!("{said}, after ConsensFlow had sent it a kill"),
+            (Part::NotSent, false) => format!("{said}; ConsensFlow had sent it no kill"),
+            (Part::Sent, false) => {
+                format!("{said}; ConsensFlow had sent it a kill before it closed")
+            }
+            (Part::Unknown, _) => said,
         })
     }
+}
+
+/// What ConsensFlow had itself sent a window's program when it ended: a kill, by pane and
+/// generation, from the moment it asked. It says a signal was not its own
+/// only when it knows (`Part::NotSent`): every window it opened is one it records the sends of.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Part {
+    /// Not known: no claim is made.
+    #[default]
+    Unknown,
+    /// It sent a kill.
+    Sent,
+    /// It sent nothing.
+    NotSent,
 }
 
 /// `because`, and after it what a harness said of it in its own record (an
@@ -532,29 +559,6 @@ fn cut_to(text: &str, limit: usize) -> String {
     }
 }
 
-/// The most characters the line of a tool call takes in a note, between its quotation marks.
-const CALL_CHARS: usize = 200;
-
-/// What a note says of the last tool call a window's record shows: the line, masked as a
-/// screen's lines are, cut short, and its quotation marks made apostrophes; or that it named
-/// a secret and is left out, as a screen's line that does is.
-fn last_call_words(call: &str) -> String {
-    let one: String = call.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one.is_empty() {
-        return String::new();
-    }
-    if names_a_secret(&one) {
-        return "; its last tool call named a secret, so it is left out".to_owned();
-    }
-    let hidden = mask(&one);
-    let text = hidden.text.replace('"', "'");
-    let quote = Quote {
-        text: cut_to(&text, CALL_CHARS),
-        masked: hidden.count,
-    };
-    quote.after("; its last tool call was")
-}
-
 /// What a note says of the `count` lines of a screen it left out of its quote.
 fn left_out_words(count: usize) -> String {
     match count {
@@ -562,86 +566,6 @@ fn left_out_words(count: usize) -> String {
         1 => " (1 line that named or lay beside a secret was left out)".to_owned(),
         count => format!(" ({count} lines that named or lay beside a secret were left out)"),
     }
-}
-
-/// The rows of `tail` a quote of it may show, and how many of the rows it would have shown
-/// were left out. A quote shows the last [`QUOTE_LINES`] rows with a word in them
-/// ([`Quote::of`]); every row the host sent is looked at for what lies beside it, as a value
-/// that goes on over a row keeps no name on the row it ends on.
-///
-/// A row that names a secret ([`names_a_secret`]) is left out with the rows next to it: its
-/// value may go on over the next row, as the terminal wraps a long one, and its name may end
-/// the row above. Where its value may go on over more rows than that, nothing says where it
-/// ends, and the rest of the screen goes: a quote it opens and does not close, a `\` that
-/// continues the row, a block it opens (`{`, `[`, `(`, `|`, `>`). A private key's block
-/// goes whole, its base64 rows among it, which name nothing on their own: from its `BEGIN` row
-/// to its `END`, or the end of the screen; a block whose first row is above the screen, from
-/// the top to its `END`. (T-823: one row of a Claude Code worker's screen named a secret and
-/// the whole screen was left out, so the chief never learned why its window closed.)
-fn without_secrets(tail: &[String]) -> (Vec<String>, usize) {
-    let mut out = vec![false; tail.len()];
-    let mut block = false;
-    for (at, line) in tail.iter().enumerate() {
-        let upper = line.to_ascii_uppercase();
-        let key = upper.contains("PRIVATE KEY");
-        if key && upper.contains("BEGIN") {
-            block = true;
-        }
-        if block {
-            out[at] = true;
-        }
-        if key && (upper.contains("-----END") || upper.contains(" END ")) {
-            if !block {
-                // Its first row is above the screen.
-                out[..=at].fill(true);
-            }
-            block = false;
-        }
-        if names_a_secret(line) {
-            out[at.saturating_sub(1)..=(at + 1).min(tail.len() - 1)].fill(true);
-            if runs_on(line) {
-                out[at..].fill(true);
-            }
-        }
-    }
-    let shown: Vec<usize> = (0..tail.len())
-        .filter(|&at| tail[at].chars().any(char::is_alphanumeric))
-        .rev()
-        .take(QUOTE_LINES)
-        .collect();
-    let left_out = shown.iter().filter(|&&at| out[at]).count();
-    let mut kept: Vec<String> = shown
-        .into_iter()
-        .filter(|&at| !out[at])
-        .map(|at| tail[at].clone())
-        .collect();
-    kept.reverse();
-    (kept, left_out)
-}
-
-/// Whether the value of a secret named on `line` may go on over more rows than the next: a
-/// quote it opens and does not close (an odd number of `"`, or of `'`, none escaped), a `\`
-/// that continues the row, or a block it opens.
-fn runs_on(line: &str) -> bool {
-    let unescaped = |quote: char| {
-        let mut count = 0;
-        let mut escaped = false;
-        for character in line.chars() {
-            match character {
-                '\\' if !escaped => {
-                    escaped = true;
-                    continue;
-                }
-                found if found == quote && !escaped => count += 1,
-                _ => {}
-            }
-            escaped = false;
-        }
-        count
-    };
-    unescaped('"') % 2 == 1
-        || unescaped('\'') % 2 == 1
-        || line.trim_end().ends_with(['\\', '{', '[', '(', '|', '>'])
 }
 
 /// The signal a status above 128 says ended the program (a shell's `128 + signal`): its name

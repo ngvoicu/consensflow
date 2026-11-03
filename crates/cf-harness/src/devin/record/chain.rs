@@ -23,7 +23,7 @@ use cf_base::js;
 use serde_json::Value;
 
 use super::store::{Row, Store};
-use crate::shared::record::calls::describe;
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{Item, Role};
 use crate::shared::record::sqlite::{text_of, Cell};
@@ -35,7 +35,7 @@ pub(super) struct Chain {
     pub(super) asking: bool,
     /// The last tool call an assistant's message of the chain makes, as a line
     /// (`calls::describe`).
-    pub(super) last_call: Option<String>,
+    pub(super) last_call: Option<Arc<LastCall>>,
 }
 
 /// A message of the chain as its item, with what its completeness rests on.
@@ -69,8 +69,8 @@ impl Chain {
         for row in with_cut_users(store, chain)? {
             let message = row.message()?;
             follow(&mut asking, message, row, &mut keys)?;
-            if let Some(line) = last_call_of(message) {
-                last_call = Some(line);
+            if let Some(call) = last_call_of(message) {
+                last_call = Some(call);
             }
             let id = match message.get("message_id") {
                 Some(Value::String(id)) if ids.insert(id.as_str()) => id,
@@ -132,7 +132,13 @@ impl Chain {
                     text_of(row.id.as_ref())
                 ));
             }
-            follow(&mut asking, row.message()?, row, &mut keys)?;
+            let message = row.message()?;
+            follow(&mut asking, message, row, &mut keys)?;
+            // The call Devin was on when the window died hangs here, below the head, with
+            // nothing to answer it (the review of `a26e0848e`, P2).
+            if let Some(call) = last_call_of(message) {
+                last_call = Some(call);
+            }
             below = store.newest_child(&row.node);
         }
         Ok(Self {
@@ -253,7 +259,7 @@ fn ancestors(store: &Store) -> Result<Vec<&Row>, String> {
 }
 
 /// The last tool call `message` makes, as a line: none for a message that makes none.
-fn last_call_of(message: &Value) -> Option<String> {
+fn last_call_of(message: &Value) -> Option<Arc<LastCall>> {
     let Some(Value::Array(calls)) = message.get("tool_calls") else {
         return None;
     };

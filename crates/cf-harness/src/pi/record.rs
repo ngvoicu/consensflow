@@ -46,7 +46,7 @@ use crate::shared::quota::{
     unavailable_quota, Quota,
 };
 use crate::shared::record::cache::{Look, Options};
-use crate::shared::record::calls::describe;
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::followed::{Followed, Parser};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -136,7 +136,7 @@ struct Session {
     /// Why the latest turn failed, where Pi said (`errorMessage`).
     failure: Option<String>,
     /// The last tool call the session shows, as a line (`calls::describe`).
-    last_call: Option<String>,
+    last_call: Option<Arc<LastCall>>,
     quota: Option<Arc<Quota>>,
     records: usize,
     keys: Keys,

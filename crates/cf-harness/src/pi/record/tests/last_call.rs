@@ -2,6 +2,7 @@
 //! its task, which its screen does not say.
 
 use super::*;
+use crate::records::LastCall;
 
 /// An assistant's step that called `tool` with `arguments`.
 fn using(id: &str, call: &str, tool: &str, arguments: &Value) -> Value {
@@ -25,8 +26,8 @@ fn the_last_call_is_the_bash_command_or_the_tool_and_its_path_the_latest_winning
         ),
     ]);
     assert_eq!(
-        stage.at(0).last_call.as_deref(),
-        Some("cargo test --workspace"),
+        stage.at(0).last_call,
+        Some(LastCall::shell("bash", "cargo test --workspace")),
         "open"
     );
     stage.write(&[
@@ -46,7 +47,10 @@ fn the_last_call_is_the_bash_command_or_the_tool_and_its_path_the_latest_winning
             &json!({ "path": "src/lib.rs", "limit": 20 }),
         ),
     ]);
-    assert_eq!(stage.at(0).last_call.as_deref(), Some("read src/lib.rs"));
+    assert_eq!(
+        stage.at(0).last_call,
+        Some(LastCall::on("read", "src/lib.rs"))
+    );
     // No call in the session says none.
     let mut none = Stage::with(&[header(), user("u1", "Go"), assistant("a1", "stop", "Hi")]);
     assert_eq!(none.at(0).last_call, None);

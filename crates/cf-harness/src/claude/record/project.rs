@@ -22,7 +22,7 @@ use super::patterns::{BARE_COMPACT, CAVEAT, OUTPUT};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
 use crate::shared::quota::{account_refusal, busy_refusal, spent_extra_usage, Refusal};
-use crate::shared::record::calls::describe;
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -101,7 +101,7 @@ pub(super) struct Assistant {
     pub(super) blocks: Vec<Block>,
     /// The last tool call of the main conversation the content makes, as a line
     /// (`describe`): what the window was doing, for the note of a window that closed.
-    pub(super) last_call: Option<String>,
+    pub(super) last_call: Option<Arc<LastCall>>,
     /// The message stopped as `end_turn` or `stop_sequence`.
     pub(super) ended: bool,
     /// Claude Code's own close of the turn it found cut as it resumed the
@@ -552,7 +552,7 @@ fn first_call(content: Option<&Value>) -> Option<Value> {
 /// The last `tool_use` of the main conversation's content as a line: what the window ran
 /// last. A subagent's calls (`main` false) and the API's own server tools are no call of the
 /// window's.
-fn blocks_of_main_calls(content: Option<&Value>, main: bool) -> Option<String> {
+fn blocks_of_main_calls(content: Option<&Value>, main: bool) -> Option<Arc<LastCall>> {
     if !main {
         return None;
     }

@@ -11,7 +11,7 @@ fn hidden(text: &str) -> String {
 
 #[test]
 fn every_pattern_of_the_masker_builds() {
-    assert_eq!(RULES.len(), 9);
+    assert_eq!(RULES.len(), 12);
 }
 
 #[test]
@@ -168,4 +168,120 @@ fn each_secret_is_counted_once() {
         "KEY=[masked] then [masked] then https://[masked]@h/"
     );
     assert_eq!(masked.count, 3);
+}
+
+/// Whether any six characters in a row of `value` are in `text`: a part of the value that
+/// the mask let through.
+fn survives(text: &str, value: &str) -> bool {
+    let chars: Vec<char> = value.chars().collect();
+    chars
+        .windows(6)
+        .any(|piece| text.contains(&piece.iter().collect::<String>()))
+}
+
+/// T-823, the review of `a26e0848e` (P1): a base64 value with no digit in it was no token
+/// to the masker, and the rows beside a secret's label, which the note quotes, held it.
+#[test]
+fn a_long_base64_value_is_hidden_whether_or_not_a_digit_is_in_it() {
+    for value in [
+        "YWJj".repeat(12),
+        "QUJD".repeat(12),
+        "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXpBQkNERUZHSElK".to_owned(),
+        format!("{}==", "YWJj".repeat(11)),
+    ] {
+        let masked = mask(&format!("value {value} end"));
+        assert_eq!(masked.text, "value [masked] end", "{value}");
+        assert_eq!(masked.count, 1);
+    }
+    // A base64 run with a `+`, or padded, is one with no digit, whatever its slashes.
+    let with_plus = "abcdefghij+klmnopqrstuvwxyzABCDEFGHIJKLMNOP";
+    assert_eq!(hidden(&format!("x {with_plus} y")), "x [masked] y");
+}
+
+/// What is no base64 stays: a word, a camel-case name, a path, a number.
+#[test]
+fn a_long_word_a_name_a_path_and_a_number_are_not_taken_for_base64() {
+    for text in [
+        "ConsensFlowSupervisorStartupFailedError",
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+        "/Users/gabrielvoicu/Projects/ngvoicu/consensflow/crates",
+        "cf_engine_dispatcher_tests_a_very_long_name_that_goes_on",
+        "01234567890123456789012345678901234567890123456789",
+    ] {
+        assert_eq!(hidden(text), text, "{text}");
+    }
+}
+
+/// The spans of every rule are found in the text as it was, and joined, before any is
+/// replaced: a rule that took a piece of a value first left the rest of it to the next rule,
+/// which saw a shorter run (`[masked]+/abcdefghijklmnopqr/AA==`, the review's).
+#[test]
+fn no_part_of_a_value_survives_the_rules_that_overlap_on_it() {
+    let values = [
+        // A digit-bearing run, then a base64 tail with no digit.
+        "Zm9vYmFyMTIzNDU2Nzg5MGFiY2RlZg+/abcdefghijklmnopqr/AA==".to_owned(),
+        // The same, with the tail first.
+        "abcdefghijklmnopqr/AA==+Zm9vYmFyMTIzNDU2Nzg5MGFiY2RlZg".to_owned(),
+        // A long base64url run with its digits in the middle.
+        format!(
+            "{}0123456789{}",
+            "AbCdEfGhIj".repeat(3),
+            "KlMnOpQrSt".repeat(3)
+        ),
+        // Under a label, so the label's rule and the run's overlap.
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY+/abcdefghijklmnopqr/AA==".to_owned(),
+    ];
+    for value in &values {
+        for text in [
+            value.clone(),
+            format!("secret: {value}"),
+            format!("DB_PASSWORD={value} done"),
+            format!("token {value}."),
+        ] {
+            let masked = mask(&text);
+            assert!(!survives(&masked.text, value), "{text} -> {}", masked.text);
+            assert!(masked.count >= 1, "{text}");
+        }
+    }
+    // One secret is one, however many rules found it.
+    assert_eq!(mask(&format!("secret: {}", values[0])).count, 1);
+}
+
+/// A command a screen echoes: curl's user and password are a pair with a colon in it, which
+/// no name says is secret.
+#[test]
+fn the_user_and_password_of_a_commands_dash_u_are_hidden() {
+    for (text, value) in [
+        (
+            "$ curl -u alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        (
+            "curl --user alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        (
+            "curl --user=alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        (
+            "curl --proxy-user alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        ("curl -ualice:swordfish https://example.test/", "swordfish"),
+        ("curl https://example.test/ -U proxy:swordfish", "swordfish"),
+    ] {
+        let masked = mask(text);
+        assert!(!masked.text.contains(value), "{text}: {}", masked.text);
+        assert_eq!(masked.count, 1, "{text}");
+    }
+    // A flag that is no user's, and a user alone, stay.
+    for text in [
+        "sort -u file.txt",
+        "git push -u origin main",
+        "curl -u alice https://x.test",
+        "ls -U",
+    ] {
+        assert_eq!(hidden(text), text, "{text}");
+    }
 }

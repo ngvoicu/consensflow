@@ -668,3 +668,44 @@ fn the_end_of_a_window_the_human_switched_is_kept_on_the_conversation_it_switche
         "the conversation it switched to"
     );
 }
+
+/// Who sent the signal a window ended with is told only where the engine knows what it
+/// sent (the review of `a26e0848e`, P2). The exit that comes late is told of nothing: of a
+/// window the engine's own close settled, and of one a later window of the session replaced,
+/// the engine holds no window to pause, and so no note says that a signal was or was not its
+/// own.
+#[cfg(unix)]
+#[test]
+fn a_late_exit_of_a_window_that_was_closed_or_replaced_makes_no_note_of_who_sent_its_signal() {
+    let context = Context::new();
+    context
+        .host
+        .exits_showing(Some(143), None, Some(&["Running the workspace tests"]));
+    let (tiers, session) = session_at_work(&context);
+    let window = context.host.last(&session).unwrap().pane;
+    // A close the engine just made; the host's word on it is late.
+    context.host.hold_exits.set(true);
+    context.close_project(tiers.project.id).unwrap();
+    context.host.hold_exits.set(false);
+    let before = tiers.notes("chief");
+    let host = std::rc::Rc::clone(&context.host);
+    let gone = window.clone();
+    context.run(async move { host.exited(gone).await });
+    assert_eq!(tiers.notes("chief"), before, "a late exit tells nothing");
+    // The session's window opens again; the first window's word comes once more, late.
+    context.resume_project(tiers.project.id).unwrap();
+    passes(&context, 2);
+    let open = context.host.last(&session).unwrap().pane;
+    assert_ne!(open, window);
+    let before = tiers.notes("chief");
+    let host = std::rc::Rc::clone(&context.host);
+    context.run(async move { host.exited(window).await });
+    assert_eq!(
+        tiers.notes("chief"),
+        before,
+        "an exit of a replaced window tells nothing"
+    );
+    for note in tiers.notes("chief") {
+        assert!(!note.contains("did not send"), "{note}");
+    }
+}

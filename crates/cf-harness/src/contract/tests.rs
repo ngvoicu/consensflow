@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::records::{Item, Record, Role};
+use crate::records::{Item, LastCall, Record, Role};
 
 /// A record that says what a test says, whatever conversation it is asked of.
 struct Says(Reading);
@@ -220,11 +220,11 @@ async fn the_last_call_of_a_record_is_the_one_it_shows_on_every_harness_and_none
     // T-823: what a window was doing when it closed under its task.
     for harness in HARNESSES {
         let said = changed(settling(Settlement::Settled), |record| {
-            record.last_call = Some("cargo test --workspace".to_owned());
+            record.last_call = Some(LastCall::shell("Bash", "cargo test --workspace"));
         });
         assert_eq!(
-            said.last_call(harness, "a-session").await.as_deref(),
-            Some("cargo test --workspace"),
+            said.last_call(harness, "a-session").await,
+            Some(LastCall::shell("Bash", "cargo test --workspace")),
             "{harness:?}"
         );
         assert_eq!(

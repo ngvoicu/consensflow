@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::shared::quota::Quota;
+use crate::shared::record::calls::LastCall;
 
 /// A look's reading: what the record says, or that it could not say, with
 /// the reason (`{unknown: true, reason}`).
@@ -89,15 +90,14 @@ pub struct Record {
     /// with no plain name. No reading Node wrote has it.
     #[serde(skip)]
     pub failure_kind: Option<String>,
-    /// The last tool call the record shows, as a command line: a shell command as it was
-    /// run, any other tool's name and its main argument (a path, a pattern, a URL). It is
-    /// what a window was doing when it closed under its task, which no screen of it says
-    /// (T-823: a Claude Code worker closed with exit 143 three seconds after its
-    /// `cargo test --workspace` was killed). Whole as the record has it: the note that tells
-    /// it masks it and cuts it short. None where the record shows no call, or the reader
-    /// cannot say. No reading Node wrote has it.
+    /// The last tool call the record shows, in pieces: the tool, and its shell command or the
+    /// file it works on. It is what a window was doing when it closed under its task, which no
+    /// screen of it says (T-823: a Claude Code worker closed with exit 143 three seconds after
+    /// its `cargo test --workspace` was killed). Whole as the record has it, within its bound:
+    /// the engine decides whether a note may say it, and cuts it short. None where the record
+    /// shows no call, or the reader cannot say. No reading Node wrote has it.
     #[serde(skip)]
-    pub last_call: Option<String>,
+    pub last_call: Option<Arc<LastCall>>,
     /// The turn was stopped before a word of it, and its harness put its message back in
     /// the input box, out of the conversation it answers from, though the items still
     /// hold it, as the record says (Muse's `run_retracted`). A reader whose record

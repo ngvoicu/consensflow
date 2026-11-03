@@ -254,6 +254,31 @@ fn stops_the_window_of_a_task_the_human_reassigns_before_the_task_leaves_it_even
     );
 }
 
+/// The human gives a working task to another member: its window is stopped first, by `retire`'s
+/// kill, which sets no close of the engine's own. The exit that comes is the kill's, and the pause
+/// note says the engine had sent it, never that the signal was none of its own (the review of
+/// `a26e0848e`, P2: the note said "which ConsensFlow did not send").
+#[cfg(unix)]
+#[test]
+fn a_window_the_engine_killed_to_reassign_its_task_does_not_say_the_signal_was_not_its_own() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .host
+        .exits_showing(Some(143), None, Some(&["Running the workspace tests"]));
+    context.reassign_task(1, 1).unwrap();
+    let notes = tiers.notes("chief");
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert_match(
+        &notes[0],
+        r#"^T-1 is paused: @zeus-[a-z]+-[a-z]+'s window closed \(exit code 143, consistent with SIGTERM; ConsensFlow had sent it a kill before it closed\); its screen ended with: "Running the workspace tests"\. "#,
+    );
+    assert!(!notes[0].contains("did not send"), "{}", notes[0]);
+}
+
 #[test]
 fn keeps_a_task_with_its_window_when_the_window_would_not_stop_and_reassigns_it_once_it_does() {
     let context = Context::new();
