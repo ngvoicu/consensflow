@@ -63,14 +63,22 @@ impl Ledger {
     }
 
     /// The chief or the human takes what the worker said last as the task's result: of a
-    /// task at work, or of a paused one.
+    /// task at work, or of a paused one. `left` is how many background jobs and agents its
+    /// window was counted running ([`Ledger::left_running`]).
     pub fn record_finished(
         &mut self,
         project_id: i64,
         number: i64,
         body: &str,
+        left: (usize, usize),
     ) -> Result<TaskMoved, LedgerError> {
-        tasks::record_finished(&mut self.store, project_id, number, body)
+        tasks::record_finished(&mut self.store, project_id, number, body, left)
+    }
+
+    /// The jobs and agents the window of a task finished by the chief or the human was counted
+    /// running then, which the close after its accept ends: `(0, 0)` for any other result.
+    pub fn left_running(&self, project_id: i64, number: i64) -> Result<(i64, i64), LedgerError> {
+        tasks::left_running(&self.store, project_id, number)
     }
 
     /// A coordinator accepts a task's result.

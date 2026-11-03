@@ -22,7 +22,7 @@
 
 use cf_base::js;
 use cf_proto::ledger::{TaskMoved, TaskView};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use super::pausing::shut_doors;
@@ -65,21 +65,52 @@ pub(crate) fn record_result(
 /// of a task at work, or of a paused one, whose worker's turn ended with its
 /// answer after the tell that paused it (`turn_end`'s paused answer). The pause
 /// is the finisher's own to end: the notes it left queued for the requester go
-/// ([`leave_pause_notes`]), as a resume's do.
+/// ([`leave_pause_notes`]), as a resume's do. `left` is how many background jobs and
+/// agents its window was counted running, which finishing does not end and the close after
+/// the accept does: kept with the move to done, for the accept to say (`left_running`).
 pub(crate) fn record_finished(
     store: &mut Store,
     project_id: i64,
     number: i64,
     body: &str,
+    left: (usize, usize),
 ) -> Result<TaskMoved, LedgerError> {
-    record(
+    record_counted(
         store,
         project_id,
         number,
         body,
         &FINISHABLE_TASK_STATES,
         true,
+        left,
     )
+}
+
+/// How many background jobs and agents the window of T-`number` was counted running when the
+/// chief or the human finished the task (`record_finished`): the closing of its window after
+/// the accept ends them (T-691, the field report of 2026-10-26, where a parity run was stopped
+/// that way). None where the task was finished by its worker's own word, which waits for the
+/// work to end, or the finish counted none. What ran then may have ended since; the count is
+/// what was known when the chief decided to finish.
+pub(crate) fn left_running(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+) -> Result<(i64, i64), LedgerError> {
+    let counted: Option<(Option<i64>, Option<i64>)> = store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.jobs'), json_extract(data, '$.agents') FROM event
+              WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)
+                AND json_extract(data, '$.task') = ?2 AND json_extract(data, '$.to') = 'done'
+              ORDER BY id DESC LIMIT 1",
+            params![project_id, number],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(counted.map_or((0, 0), |(jobs, agents)| {
+        (jobs.unwrap_or(0), agents.unwrap_or(0))
+    }))
 }
 
 /// The states a task can be finished at the word of the chief or the human.
@@ -95,6 +126,28 @@ fn record(
     body: &str,
     states: &[&str],
     finished_by_word: bool,
+) -> Result<TaskMoved, LedgerError> {
+    record_counted(
+        store,
+        project_id,
+        number,
+        body,
+        states,
+        finished_by_word,
+        (0, 0),
+    )
+}
+
+/// [`record`], and where the finish was at a word, the `left` jobs and agents its window was
+/// counted running, kept with the move to done for the accept to say.
+fn record_counted(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+    states: &[&str],
+    finished_by_word: bool,
+    left: (usize, usize),
 ) -> Result<TaskMoved, LedgerError> {
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
@@ -164,7 +217,13 @@ fn record(
                 ..Queued::default()
             },
         )?;
-        store.move_task(&task, "done", json!({ "result": message_id }))?;
+        // What a finish at a word counted running is kept for the accept to say.
+        let detail = if finished_by_word {
+            json!({ "result": message_id, "jobs": left.0, "agents": left.1 })
+        } else {
+            json!({ "result": message_id })
+        };
+        store.move_task(&task, "done", detail)?;
         release_ready(store, project_id)?;
         // A question its window asked through its harness's tool, still open at its door, is
         // shut out of waiting as an acceptance does.

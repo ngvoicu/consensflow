@@ -228,6 +228,16 @@ fn finish_takes_the_last_complete_answer_of_a_held_task_once_and_ends_nothing() 
         .expect("finished");
     assert_eq!(finished.task.state, "done");
     assert_eq!((finished.jobs, finished.agents), (1, 0));
+    // The count is kept with the finish for the accept to say, as the close of the window it
+    // brings about ends the job (T-691).
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .left_running(tiers.project.id, 1)
+            .unwrap(),
+        (1, 0)
+    );
     let results = results_of(&tiers, 1);
     assert_eq!(results.len(), 1);
     assert!(results[0].starts_with(&format!("Serving the docs on 8000\n\n(ConsensFlow: Finished at @chief's word while @{session}'s harness still counted 1 background job running, which finishing ends none of")), "{results:?}");
