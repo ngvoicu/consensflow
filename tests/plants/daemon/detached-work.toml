@@ -33,7 +33,9 @@ dw-panes-leaving = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pt
 dw-panes-machine = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests::"]
 dw-panes-births = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::births::"]
 dw-panes-listener = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "job_object::listener_tests::"]
-dw-rig-regression = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_the_agent_detached_was_never_seen"], builds = true }
+dw-rig-pause = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed::a_busy_worker"], builds = true }
+dw-rig-close = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed::a_workers_close_names"], builds = true }
+dw-rig-tell = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed::a_tell_pasted"], builds = true }
 
 [[plant]]
 name = "detached work: a process whose starter has gone is not named"
@@ -157,7 +159,7 @@ replace = "        let first = baseline.turn_work(&self.members()?);"
 [[plant]]
 name = "detached work: a look names the turn's work alone, on the rig"
 meant = "a_busy_worker_that_detached_a_job_and_ignores_its_pause_keeps_its_window_and_the_job_and_the_chief_is_told"
-runs = ["dw-rig-regression"]
+runs = ["dw-rig-pause"]
 builds = true
 
 [[plant.edit]]
@@ -168,7 +170,7 @@ replace = "    Ok(listed(baseline.turn_work(&tree.members()?)))"
 [[plant]]
 name = "detached work: the look a close keeps for its exit names the turn's work alone, on the rig"
 meant = "a_workers_close_names_the_job_it_ended_that_the_agent_had_detached_before_its_turn_ended"
-runs = ["dw-rig-regression"]
+runs = ["dw-rig-close"]
 builds = true
 
 [[plant.edit]]
@@ -179,7 +181,7 @@ replace = "        let first = baseline.turn_work(&self.members()?);"
 [[plant]]
 name = "detached work: the stand-in's --detach-here leaves its shell in a session of its own"
 meant = "a_busy_worker_that_detached_a_job_and_ignores_its_pause_keeps_its_window_and_the_job_and_the_chief_is_told"
-runs = ["dw-rig-regression"]
+runs = ["dw-rig-pause"]
 platforms = ["macos"]
 builds = true
 
@@ -313,7 +315,7 @@ replace = '''        let _ = carried;
 [[plant]]
 name = "detached work: a mark forgets the job the turn before detached, on the rig"
 meant = "a_tell_pasted_after_the_agent_detached_a_job_does_not_make_the_host_forget_it_and_the_window_is_kept"
-runs = ["dw-rig-regression"]
+runs = ["dw-rig-tell"]
 builds = true
 
 [[plant.edit]]
