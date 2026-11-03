@@ -376,7 +376,11 @@ fn a_muse_found_with_no_home_of_the_kits_says_its_login_is_copied_into_the_rigs_
         format!(
             "muse is /m/muse.cmd (1.4.14); its login is copied from {} into the rig's own home, \
              with no key named refresh",
-            Path::new("/home/me/.config/muse/auth.json").display()
+            Path::new("/home/me")
+                .join(".config")
+                .join("muse")
+                .join("auth.json")
+                .display()
         )
     );
 }
