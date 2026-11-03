@@ -862,7 +862,7 @@ fn posted_needs(ran: &Ran, key: &str) -> Value {
     ran.asked[0].2.as_ref().unwrap()[key].clone()
 }
 
-/// The field bug Gabriel found (2026-11-02): `--needs` given again dropped what
+/// The field bug the owner found (2026-11-02): `--needs` given again dropped what
 /// the flags before it named, and T-45 went on the board waiting on T-44 alone.
 /// Every flag of the command adds to the list, as every comma list's parts do.
 #[test]
