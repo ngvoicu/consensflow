@@ -34,15 +34,15 @@
 //! Whatever the verdict, the run says what the host listed at the turn's end, what it
 //! said the window left when it closed, and what the chief was told.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::live::members::{
-    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, Account, Ended,
-    Identity, Machine, Members, Plan, Running, ThisMachine,
+    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, working_folder,
+    Account, Ended, Identity, Machine, Members, Plan, Running, ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
-use cf_e2e::live::{cut, secs, text, Log, Who};
+use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
 use cf_e2e::process::{is_alive, Run};
 use cf_e2e::Result as Fallible;
 
@@ -53,6 +53,33 @@ use crate::check::{
 /// How many seconds the command the worker starts runs: more than a run lasts, and a
 /// number that is in no other command line of the machine.
 pub const SECONDS: u64 = 4711;
+
+/// What the run expects of a worker that detaches the command: that the window's close ends
+/// it where the tree holds it, or the known macOS limit of two harnesses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect {
+    /// The command is gone with the window, or the harness ended it, and the chief was told:
+    /// a command that escaped fails the run.
+    Ended,
+    /// A tool shell that leads a session of its own detached it (`nohup … &`), as Pi's and
+    /// Devin's do on macOS: nothing ties it to the window, the host never lists it and the
+    /// close does not end it (the limit `process_tree` and `work.rs` write). The run holds
+    /// that to be so, and ends what it can prove its own.
+    OwnSession,
+}
+
+impl Expect {
+    /// What a worker of `who` is expected to come to: the limit for Pi and Devin on a Mac,
+    /// where Windows' job holds what they detach, and the ending for the rest.
+    pub fn of(who: Who) -> Self {
+        match who {
+            Who::Harness(Harness::Pi | Harness::Devin) if cfg!(target_os = "macos") => {
+                Self::OwnSession
+            }
+            _ => Self::Ended,
+        }
+    }
+}
 
 /// How long the run waits, once the task is done, for the chief to be told what the turn
 /// left, for the command to be gone and for the window to close: a harness's window may
@@ -170,7 +197,9 @@ pub struct Left {
 /// The task is done, its result reached the chief, the host listed the command as
 /// running, it is gone, and the chief was told the window closed with it running: or
 /// every way it was not.
-pub fn judge(left: &Left) -> Result<(), Vec<String>> {
+pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
+    // (red: the expectation is read by nothing yet)
+    let _ = expect;
     let mut problems = Vec::new();
     if left.state != "done" {
         problems.push(format!(
@@ -314,7 +343,7 @@ fn at_the_chief(left: &Left) -> String {
 /// what it came to, which holds when the task was done, the command left running was
 /// ended by the window's close and the chief told so.
 pub fn run(who: Who, plan: &Plan, stand_in: &Path, log: &Log) -> Fallible<Finished> {
-    run_asked(who, plan, stand_in, &brief(who), log)
+    run_asked(who, plan, stand_in, &brief(who), Expect::of(who), log)
 }
 
 /// [`run`], the worker given `brief` as its task: the rig's stand-in is asked to leave a
@@ -324,6 +353,7 @@ pub fn run_asked(
     plan: &Plan,
     stand_in: &Path,
     brief: &str,
+    expect: Expect,
     log: &Log,
 ) -> Fallible<Finished> {
     let log = log.scoped(who.name());
@@ -336,6 +366,7 @@ pub fn run_asked(
         &mut members,
         (&agent(who), brief, &wanted(who)),
         waits,
+        expect,
         &log,
         &mut chosen,
     );
@@ -358,6 +389,7 @@ fn observe(
     members: &mut Members,
     (agent, brief, wanted): (&str, &str, &str),
     waits: Waits,
+    expect: Expect,
     log: &Log,
     chosen: &mut Chosen,
 ) -> Fallible<Finished> {
@@ -468,8 +500,14 @@ fn observe(
     if !left.escaped.is_empty() && exit.is_some() {
         left.after_close = Some(on_the_machine(wanted));
     }
+    if expect == Expect::OwnSession && !left.escaped.is_empty() {
+        match ThisMachine.processes() {
+            Ok(all) => chosen.take_orphans(&all, members.folder(), wanted, working_folder),
+            Err(failed) => chosen.failed.push(failed.to_string()),
+        }
+    }
 
-    let verdict = judge(&left);
+    let verdict = judge(&left, expect);
     case.say(format!(
         "T-{number} is {} after {} s; the host listed the command's processes: {}",
         left.state,
@@ -543,6 +581,10 @@ struct Chosen {
     jobs: Vec<String>,
     /// Why a look at the machine's processes failed, each time one did.
     failed: Vec<String>,
+    /// When the worker's window began, as the earliest look at its process said.
+    window_began: Option<u64>,
+    /// What escaped the window and cannot be proved the run's own, each as the machine lists it.
+    unproven: Vec<String>,
 }
 
 impl Chosen {
@@ -565,6 +607,10 @@ impl Chosen {
         jobs: &[(u32, String)],
         wanted: &str,
     ) {
+        if let Some(own) = own {
+            let began = self.window_began.get_or_insert(own.started);
+            *began = (*began).min(own.started);
+        }
         let in_window = own.map(|own| holding(all, own, wanted)).unwrap_or_default();
         let mut of_jobs = Vec::new();
         for (pid, file) in jobs {
@@ -588,6 +634,17 @@ impl Chosen {
                 self.processes.push(one);
             }
         }
+    }
+
+    /// Adds what escaped every window and is provably the run's own (red: none yet).
+    fn take_orphans(
+        &mut self,
+        all: &[Running],
+        folder: &Path,
+        wanted: &str,
+        folder_of: impl Fn(u32) -> Option<PathBuf>,
+    ) {
+        let _ = (all, folder, wanted, folder_of);
     }
 
     /// What may still run of what the run chose, a problem of the run each: what could not

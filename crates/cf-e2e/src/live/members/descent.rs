@@ -266,6 +266,33 @@ pub fn holding(all: &[Running], window: Identity, text: &str) -> Vec<Running> {
     chosen
 }
 
+/// The folder the process `pid` runs in, as the system says it now (the real path, with
+/// no link in it): none where it cannot be read, where no process has the number, and on
+/// any machine but a Mac's (the one place a check needs it, [`orphans_in_folder`]).
+pub fn working_folder(pid: u32) -> Option<std::path::PathBuf> {
+    let _ = pid;
+    None
+}
+
+/// The processes of `all` that a check can call its own although no window holds them any
+/// longer: each holds `text` in its command line, is an orphan (its parent is the system's
+/// init, 1), began no earlier than `since` (when the check's window began), and runs in
+/// `folder`, which is the check's own (a folder made for the run, whose real path is
+/// compared), as `folder_of` says it. A process that began before the window, that has a
+/// parent, whose folder is another or cannot be read, or whose command does not hold `text`
+/// is none of them, whatever else it says: it is the number, the start and the folder
+/// together that make a process the run's, never the command line alone.
+pub fn orphans_in_folder(
+    all: &[Running],
+    text: &str,
+    folder: &std::path::Path,
+    since: u64,
+    folder_of: impl Fn(u32) -> Option<std::path::PathBuf>,
+) -> Vec<Running> {
+    let _ = (all, text, folder, since, &folder_of);
+    Vec::new()
+}
+
 /// What macOS says of a process, read where it is held (`proc_pidinfo`): the process that
 /// started it, and when it began, in microseconds since 1970.
 #[cfg(any(target_os = "macos", test))]
