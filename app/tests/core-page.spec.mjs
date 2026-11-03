@@ -7463,7 +7463,10 @@ async function leftWithSavesOnTheirWay(page, words, { next = false } = {}) {
 test('Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it', async ({
   page,
 }) => {
-  await open(page, twoWithOwnSettings())
+  // foundry's chief has no window open, harbour's has: what the save says is harbour's.
+  const data = twoWithOwnSettings()
+  data.boards[2].lanes.find((lane) => lane.participant.role === 'chief').pane = null
+  await open(page, data)
   const left = await leftWithSavesOnTheirWay(page, 'Harbour: anything left?', { next: true })
   const { calling, specs, dialog } = left
   // harbour's answers come now: nothing of them is in foundry's dialog.
