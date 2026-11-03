@@ -29,8 +29,8 @@ fn lines(text: &str) -> Vec<String> {
     text.lines().map(str::to_owned).collect()
 }
 
-/// Claude Code 2.1.317's offer to install an LSP plugin, as its last lines show it.
-const LSP: &str = " LSP plugin recommendation\n Plugin:       rust-analyzer-lsp\n Triggered by: .rs files\n\n Would you like to install this LSP plugin?\n\n ❯ Yes, install\n   No, not now\n   Never for this plugin\n   Disable all LSP recommendations";
+/// Claude Code 2.1.317's offer to install an LSP plugin, as a live member's window drew it.
+const LSP: &str = " LSP plugin recommendation\n   Plugin: clangd-lsp\n   Triggered by: .c files\n\n   Would you like to install this LSP plugin?\n\n   \u{276f} 1. Yes, install\n     2. No, not now\n     3. Never for this plugin\n     4. Disable all LSP recommendations\n\n\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)";
 
 #[test]
 fn a_dialog_its_status_says_is_open_is_one_of_claude_codes_and_its_question_tools_is_the_windows_own(

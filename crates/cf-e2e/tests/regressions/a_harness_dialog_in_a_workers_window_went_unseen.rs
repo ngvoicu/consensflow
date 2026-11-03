@@ -5,11 +5,13 @@
 //! choices), and the chief never heard of it; nothing of it was in the daemon's log or events.
 //! The report is `issues/a-harness-dialog-in-an-unwatched-window-goes-unseen.md` in
 //! consensflow-sme. Claude Code 2.1.317 draws that offer when a turn writes a file of an
-//! extension a marketplace has an LSP plugin for, says `waiting` ("dialog open") in its status
-//! meanwhile, writes nothing of it in the conversation, and closes it by itself after 30 s.
+//! extension a marketplace has an LSP plugin for whose server is on the `PATH`, over its
+//! spinner while the turn works, its status `busy` all along; it writes nothing of it in the
+//! conversation, and closes it by itself after 30 s (`cargo xtask live harness-dialogs`,
+//! 2026-11-03): only the screen shows it.
 //!
-//! The stand-in Claude draws the offer as its turn works (`LSP-OFFER <seconds>`, its
-//! `offers`), its status waiting on it, then answers. What the owner should have seen: the
+//! The stand-in Claude draws the offer as that run saw it, as its turn works (`LSP-OFFER
+//! <seconds>`, its `offers`), then answers. What the owner should have seen: the
 //! chief, who gave the task, and the human are told once, in words that name the window,
 //! the question, its choices and that it waits, and the task goes on to its result.
 //!

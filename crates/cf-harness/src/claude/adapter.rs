@@ -554,12 +554,13 @@ impl Window for ClaudeWindow {
         })
     }
 
-    /// Claude Code's status says `waiting` while any dialog of its own is open, and why
-    /// (2.1.317's table of its dialogs): "input needed" for its question tool, which is the
-    /// board's to answer in a member's window and the human's in the chief's; every other
-    /// reason ("dialog open", "permission prompt", "sandbox request", "goal proposal") is a
-    /// dialog of Claude Code's that waits for a key, an offer to install a plugin among them
-    /// (T-1183). A window whose status says nothing of a dialog is left to the screen.
+    /// Claude Code's status says `waiting`, and why, for a dialog of its own (2.1.317's table of
+    /// its dialogs): "input needed" for its question tool, which is the board's to answer in a
+    /// member's window and the human's in the chief's; every other reason ("dialog open",
+    /// "permission prompt", "sandbox request", "goal proposal") is a dialog of Claude Code's
+    /// that waits for a key (T-1183). It does not always: with its offer to install an LSP
+    /// plugin open in a turn at work it said `busy` (`cargo xtask live harness-dialogs`,
+    /// 2026-11-03), so a window whose status says no wait is left to the screen.
     fn dialog_sign(&self, observed: &Observed) -> DialogSign {
         match &observed.waiting {
             Some(Waiting { reason }) if reason.as_deref() == Some(status::QUESTION_TOOL) => {

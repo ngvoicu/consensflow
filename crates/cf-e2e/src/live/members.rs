@@ -406,6 +406,13 @@ impl Members {
         self.rig.screen(pane)
     }
 
+    /// The screen of the window whose pane is `pane` (its id and generation) as the pane host
+    /// draws it, its last `tail` lines ([`Rig::snapshot`]): what the engine reads of it. None
+    /// where the host does not answer.
+    pub fn snapshot(&self, pane: &Value, tail: usize) -> Option<Value> {
+        self.rig.snapshot(pane, tail)
+    }
+
     /// The end of the screen of the window whose pane is `pane` (its id), as a
     /// line ([`last_lines`]): what a check says of a window to say what it saw.
     pub fn tail(&self, pane: &str) -> String {

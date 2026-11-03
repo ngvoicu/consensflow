@@ -51,6 +51,31 @@ fn claude_codes_lsp_offer_is_a_dialog_with_its_question_and_four_choices() {
     );
 }
 
+/// The same offer as Claude Code 2.1.317 drew it in a member's window mid-turn, numbered and
+/// unframed, over its spinner, as the pane host's snapshot had it (`cargo xtask live
+/// harness-dialogs`, 2026-11-03).
+const CLAUDE_LSP_LIVE: &str = " LSP plugin recommendation\n\n   LSP provides code intelligence like go-to-definition and error checking\n\n   Plugin: clangd-lsp\n   Marketplace: claude-plugins-official\n   Triggered by: .c files\n   Description: C/C++ language server (clangd) for code intelligence\n\n   Would you like to install this LSP plugin?\n\n   \u{276f} 1. Yes, install\n     2. No, not now\n     3. Never for this plugin\n     4. Disable all LSP recommendations\n\n\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)";
+
+#[test]
+fn claude_codes_lsp_offer_as_a_live_window_drew_it_is_read_numbers_and_spinner_and_all() {
+    let shown = read(&lines(CLAUDE_LSP_LIVE)).expect("the offer");
+    assert_eq!(
+        shown.dialog.question,
+        "Would you like to install this LSP plugin?"
+    );
+    assert_eq!(
+        shown.dialog.options,
+        [
+            "Yes, install",
+            "No, not now",
+            "Never for this plugin",
+            "Disable all LSP recommendations"
+        ]
+    );
+    assert!(shown.dialog.asks);
+    assert_eq!(shown.below.len(), 2);
+}
+
 #[test]
 fn the_cursor_on_a_later_choice_reads_the_same_choices() {
     let moved = CLAUDE_LSP

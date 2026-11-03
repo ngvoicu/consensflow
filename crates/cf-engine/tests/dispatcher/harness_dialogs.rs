@@ -14,17 +14,21 @@ use serde_json::json;
 use crate::chiefs::to_human;
 use crate::fixtures::Tiers;
 
-/// Claude Code 2.1.317's offer to install an LSP plugin, as its window's last lines show it.
-const LSP: [&str; 9] = [
-    "│ LSP plugin recommendation                       │",
-    "│ Plugin:       rust-analyzer-lsp                 │",
-    "│ Triggered by: .rs files                         │",
-    "│ Would you like to install this LSP plugin?      │",
-    "│ ❯ Yes, install                                  │",
-    "│   No, not now                                   │",
-    "│   Never for this plugin                         │",
-    "│   Disable all LSP recommendations               │",
-    "╰─────────────────────────────────────────────────╯",
+/// Claude Code 2.1.317's offer to install an LSP plugin, as a live member's window drew it
+/// mid-turn, over its spinner (`cargo xtask live harness-dialogs`, 2026-11-03).
+const LSP: [&str; 12] = [
+    " LSP plugin recommendation",
+    "   Plugin: clangd-lsp",
+    "   Marketplace: claude-plugins-official",
+    "   Triggered by: .c files",
+    "",
+    "   Would you like to install this LSP plugin?",
+    "",
+    "   \u{276f} 1. Yes, install",
+    "     2. No, not now",
+    "     3. Never for this plugin",
+    "     4. Disable all LSP recommendations",
+    "\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)",
 ];
 
 const QUESTION: &str = "Would you like to install this LSP plugin?";

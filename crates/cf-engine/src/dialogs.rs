@@ -13,10 +13,12 @@
 //! as a window starts, and from the window's own question tool, which the board answers (a
 //! harness that says a window waits on it says so, `dialog_waiting`):
 //!
-//! - **A harness that says when a dialog of its own is open** ([`DialogSign::Open`]: Claude
-//!   Code's status, `waiting` for a dialog that is not its question tool's) has its screen
-//!   looked at for the dialog's words, and the dialog is told of once it has been open
-//!   [`TELL_AFTER_MS`].
+//! - **A harness that says a dialog of its own is open** ([`DialogSign::Open`]: Claude Code's
+//!   status, `waiting` for a dialog that is not its question tool's) has its screen looked at
+//!   for the dialog's words, and the dialog is told of once it has been open
+//!   [`TELL_AFTER_MS`]. Claude Code does not say it of every dialog: with its offer to install
+//!   an LSP plugin open in a turn at work its status said `busy` (the live run of 2026-11-03),
+//!   and the screen told of it, as below.
 //! - **A harness that says nothing** ([`DialogSign::Screen`]) has its screen looked at once a
 //!   [`LOOK_EVERY_MS`] at most, and a dialog read there by its shape (a question with a line of
 //!   choices, the harness's cursor on one, and no prompt drawn below them) counts once

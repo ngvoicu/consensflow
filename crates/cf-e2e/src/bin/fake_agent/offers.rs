@@ -3,11 +3,12 @@
 //!
 //! A message with a line `LSP-OFFER <seconds>` makes the window offer to install an LSP plugin
 //! as its turn works, as Claude Code does once the turn writes a file of an extension a
-//! marketplace has a plugin for: its status says `waiting`, `waitingFor` "dialog open", and its
-//! screen shows the dialog ("LSP plugin recommendation", "Would you like to install this LSP
-//! plugin?", its `❯` on "Yes, install" and three choices more), for that long, as Claude Code
-//! closes it by itself after 30 s; then the screen is cleared to its prompt, the status is busy
-//! again, and the turn goes on. What is typed meanwhile answers nothing.
+//! marketplace has a plugin for: its screen shows the dialog ("LSP plugin recommendation",
+//! "Would you like to install this LSP plugin?", its `❯` on "1. Yes, install" and three choices
+//! more) over its spinner for that long, as Claude Code closes it by itself after 30 s, while
+//! its status says it is busy, as Claude Code's did in a turn at work (the live run of
+//! 2026-11-03); then the screen is cleared to its prompt and the turn goes on. What is typed
+//! meanwhile answers nothing.
 //!
 //! A message with a line `SURVEY` makes the window draw Claude Code's session survey under its
 //! prompt as its turn works ("How is Claude doing this session? (optional)", a digit a
@@ -22,7 +23,6 @@ use std::time::Duration;
 
 use cf_e2e::process::own_var;
 
-use super::records::Records;
 use super::say;
 
 /// The word of a line that asks for the LSP offer, and of one that asks for the survey.
@@ -32,25 +32,28 @@ const SURVEY: &str = "SURVEY";
 /// The file in the window's config folder of the surveys drawn.
 pub const SURVEYS: &str = "surveys";
 
-/// The offer, as Claude Code 2.1.317's dialog draws it.
-const DIALOG: &str = "\r\n\
-╭──────────────────────────────────────────────────────────────╮\r\n\
-│ LSP plugin recommendation                                    │\r\n\
-│                                                              │\r\n\
-│ LSP provides code intelligence like go-to-definition and     │\r\n\
-│ error checking                                               │\r\n\
-│                                                              │\r\n\
-│ Plugin:       rust-analyzer-lsp                              │\r\n\
-│ Marketplace:  claude-plugins-official                        │\r\n\
-│ Triggered by: .rs files                                      │\r\n\
-│                                                              │\r\n\
-│ Would you like to install this LSP plugin?                   │\r\n\
-│                                                              │\r\n\
-│ ❯ Yes, install                                               │\r\n\
-│   No, not now                                                │\r\n\
-│   Never for this plugin                                      │\r\n\
-│   Disable all LSP recommendations                            │\r\n\
-╰──────────────────────────────────────────────────────────────╯\r\n";
+/// The offer, as Claude Code 2.1.317 drew it in a member's window mid-turn, over its spinner
+/// (`cargo xtask live harness-dialogs`, 2026-11-03).
+const DIALOG: [&str; 18] = [
+    "",
+    " LSP plugin recommendation",
+    "",
+    "   LSP provides code intelligence like go-to-definition and error checking",
+    "",
+    "   Plugin: clangd-lsp",
+    "   Marketplace: claude-plugins-official",
+    "   Triggered by: .c files",
+    "   Description: C/C++ language server (clangd) for code intelligence",
+    "",
+    "   Would you like to install this LSP plugin?",
+    "",
+    "   \u{276f} 1. Yes, install",
+    "     2. No, not now",
+    "     3. Never for this plugin",
+    "     4. Disable all LSP recommendations",
+    "",
+    "\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)",
+];
 
 /// The session survey, as Claude Code draws it under its prompt.
 const SURVEY_LINES: &str =
@@ -85,14 +88,12 @@ fn note(config: &Path, name: &str, line: &str) -> io::Result<()> {
     file.write_all(format!("{line}\n").as_bytes())
 }
 
-/// The offer, open `open`: the status says it waits on it and the screen shows it; then it
-/// closes by itself and the turn goes on.
-pub fn offer(records: &Records, pid: u32, open: Duration) -> io::Result<()> {
-    records.waiting(pid, "dialog open")?;
-    say(DIALOG)?;
+/// The offer, open `open`: the screen shows it while the turn is at work; then it closes by
+/// itself and the turn goes on.
+pub fn offer(open: Duration) -> io::Result<()> {
+    say(&format!("{}\r\n", DIALOG.join("\r\n")))?;
     sleep(open);
-    say(PROMPT)?;
-    records.status(pid, "busy")
+    say(PROMPT)
 }
 
 /// The survey, unless the window's environment turns it off; one drawn is written down in the
@@ -131,12 +132,12 @@ mod tests {
     fn the_offer_draws_claude_codes_question_and_its_four_choices() {
         for words in [
             "Would you like to install this LSP plugin?",
-            "❯ Yes, install",
+            "\u{276f} 1. Yes, install",
             "No, not now",
             "Never for this plugin",
             "Disable all LSP recommendations",
         ] {
-            assert!(DIALOG.contains(words), "{words}");
+            assert!(DIALOG.iter().any(|line| line.contains(words)), "{words}");
         }
     }
 }

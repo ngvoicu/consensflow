@@ -62,7 +62,7 @@
 //! command, a sibling of the bare command, and no more, and the `/compact` put back in
 //! its input box, where what is pasted next goes after it.
 //! A message with a line `LSP-OFFER <seconds>` offers to install an LSP plugin as its turn
-//! works, its status `waiting` on the dialog that long, and one with a line `SURVEY` draws
+//! works, the dialog on its screen that long, and one with a line `SURVEY` draws
 //! the session survey unless the window's environment turns surveys off (`offers`).
 //!
 //! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
@@ -765,7 +765,7 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         offers::survey().map_err(failed)?;
     }
     if let Some(open) = offers::offer_in(text) {
-        offers::offer(records, pid, open).map_err(failed)?;
+        offers::offer(open).map_err(failed)?;
     }
     // What it did before it answers: the steps a worker's progress is, among them the call
     // that runs a job in the background or arms a monitor, and what it answers.
