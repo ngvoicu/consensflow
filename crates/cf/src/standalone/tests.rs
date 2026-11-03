@@ -151,7 +151,7 @@ impl io::Write for Gone {
 fn a_reader_that_went_away_is_the_callers_to_end_quietly_and_no_message_of_the_verb() {
     let home = tempfile::tempdir().unwrap();
     let vars = [("CONSENSFLOW_HOME", home.path().to_str().unwrap())];
-    for args in [&["help"][..], &["catalog"], &["agent", "list"]] {
+    for args in [&["help"][..], &["--version"]] {
         let mut err = Vec::new();
         let ended = run(&env(&vars), &words(args), &mut Gone, &mut err).unwrap_err();
         assert_eq!(ended.kind(), io::ErrorKind::BrokenPipe, "{args:?}");
@@ -160,16 +160,11 @@ fn a_reader_that_went_away_is_the_callers_to_end_quietly_and_no_message_of_the_v
 }
 
 #[test]
-fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
+fn with_no_folder_to_keep_its_things_in_a_verb_that_needs_it_says_so() {
     // `setup` and `doctor` say it before they make or say anything: the
-    // launcher would say its own words for a home it cannot find, and the
-    // roster would refuse again after.
+    // launcher would say its own words for a home it cannot find.
     for args in [
-        &["agent", "list"][..],
-        &["agent", "edit", "x"],
-        &["agent", "remove", "x"],
-        &["agent", "add", "x", "--harness", "claude", "--model", "m"],
-        &["setup"],
+        &["setup"][..],
         &["doctor"],
         &["doctor", "--anything"],
     ] {
@@ -184,8 +179,12 @@ fn with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so() {
             "{args:?}"
         );
     }
-    // The catalog is no file of the home's.
-    assert_eq!(ran(&NONE, &["catalog", "--harness", "pi"]).0, 0);
+    // The saved agents and the catalog are gone (harness-models): their verbs are none.
+    for verb in ["catalog", "agent"] {
+        let (code, _, wrong) = ran(&NONE, &[verb, "list"]);
+        assert_eq!(code, 1, "{verb}");
+        assert!(wrong.starts_with(&format!("cf: unknown command \"{verb}\"")), "{wrong}");
+    }
 }
 
 #[test]
@@ -213,13 +212,7 @@ fn setup_makes_the_command_in_the_home_and_says_what_it_found() {
     let dir = tempfile::tempdir().unwrap();
     let (code, said, wrong) = ran_in(dir.path(), &["setup"]);
     assert_eq!((code, wrong.as_str()), (0, ""));
-    let (harnesses, agents) = said.split_once('\n').unwrap();
-    assert_eq!(harnesses, "harnesses: none found on PATH");
-    assert!(
-        agents.starts_with("agents: ")
-            && agents.ends_with(" saved — manage them with cf ui or cf agent\n"),
-        "{agents:?}"
-    );
+    assert_eq!(said, "harnesses: none found on PATH\n", "no agents are counted");
     let extension = if cfg!(windows) { ".cmd" } else { "" };
     for name in ["cf", "consensflow"] {
         let command = dir
@@ -250,7 +243,7 @@ fn doctor_says_what_stops_it_after_the_lines_it_has_said() {
     let home = dir.path().join("consensflow");
     assert!(
         said.starts_with(&format!(
-            "consensflow {}\nhome:         {}\nharnesses:    none on PATH\nagents:       ",
+            "consensflow {}\nhome:         {}\nharnesses:    none on PATH\nroles:        ",
             env!("CARGO_PKG_VERSION"),
             home.display()
         )),
@@ -297,24 +290,13 @@ fn help_is_asked_by_the_word_among_a_verbs_words_ahead_of_a_double_dash() {
 #[test]
 fn the_usage_of_a_verb_is_its_lines_with_those_that_go_on_from_them() {
     assert_eq!(
-        usage_of(&["agent", "edit"]),
-        "  agent edit <name> [--model <m>] [--effort <e>] [--description <d>]\n    [--work-tier critical|complex|standard|light|auto]"
-    );
-    assert_eq!(usage_of(&["agent", "list"]), "  agent list [--json]");
-    assert_eq!(usage_of(&["agent"]).lines().count(), 7);
-    assert_eq!(
         usage_of(&["setup"]),
         "  setup                                     Prepare private launcher and integrations"
     );
+    assert_eq!(usage_of(&["doctor"]).lines().count(), 1);
+    assert_eq!(usage_of(&["agent"]), "", "no verb of saved agents");
+    assert_eq!(usage_of(&["catalog"]), "", "nor of a catalog");
     assert_eq!(usage_of(&["frobnicate"]), "");
-    // `agent` alone is every action of it, and an action the verb has not is none.
-    assert_eq!(
-        help_path("agent", &owned(&["edit", "--help"])),
-        ["agent", "edit"]
-    );
-    assert_eq!(help_path("agent", &owned(&["--help"])), ["agent"]);
-    assert_eq!(help_path("agent", &owned(&["frob", "-h"])), ["agent"]);
-    assert_eq!(help_path("catalog", &owned(&["add", "-h"])), ["catalog"]);
 }
 
 #[test]
@@ -325,61 +307,10 @@ fn a_verb_answers_help_before_it_reads_its_words_or_looks_at_the_home() {
         (&["setup", "x", "-h"], "  setup  "),
         (&["doctor", "-h"], "  doctor  "),
         (&["doctor", "--anything", "--help"], "  doctor  "),
-        (&["catalog", "--harness", "--help"], "  catalog [--harness"),
-        (&["agent", "list", "--nope", "-h"], "  agent list [--json]"),
-        (&["agent", "add", "--nope", "--help"], "  agent add <name>"),
-        (&["agent", "remove", "-h"], "  agent remove <name>"),
         (&["ui", "--help"], "  ui [--json] [--no-open]  "),
     ] {
         let (code, said, wrong) = ran(&NONE, args);
         assert_eq!((code, wrong.as_str()), (0, ""), "{args:?}");
         assert!(said.starts_with(line), "{args:?}: {said}");
     }
-}
-
-#[test]
-fn an_agent_list_row_keeps_two_spaces_between_its_columns_however_long_they_run() {
-    // A name, harness or model of the column's old fixed width or more was
-    // padded to nothing and ran into the next column: the model
-    // `openrouter/anthropic/claude-fable-5.1` came out `…5.1low`.
-    let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("consensflow");
-    fs::create_dir_all(&home).unwrap();
-    fs::write(
-        home.join("agents.json"),
-        r#"{"schemaVersion":1,"agents":[{"id":"long","name":"Long","kind":"codex","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","model":"openrouter/example/a-model-id-far-longer-than-the-guess","effort":"high"}]}"#,
-    )
-    .unwrap();
-    let (code, said, wrong) = ran_in(dir.path(), &["agent", "list"]);
-    assert_eq!((code, wrong.as_str()), (0, ""));
-    for line in said.lines().filter(|line| !line.is_empty()) {
-        // A row is name, harness, model, effort: columns run together come
-        // out as one word.
-        let words: Vec<&str> = line.split_whitespace().collect();
-        assert_eq!(words.len(), 4, "{line:?}");
-        let mut at = 0;
-        for (word, next) in words.iter().zip(&words[1..]) {
-            at += line[at..].find(word).unwrap() + word.len();
-            assert!(line[at..].find(next).unwrap() >= 2, "{line:?}");
-        }
-    }
-    assert!(
-        said.contains("openrouter/anthropic/claude-fable-5.1")
-            && !said.contains("claude-fable-5.1low")
-            && !said.contains("than-the-guesshigh"),
-        "{said}"
-    );
-}
-
-#[test]
-fn a_double_dash_makes_the_word_a_positional_as_it_was() {
-    let (code, said, wrong) = ran(&NONE, &["catalog", "--", "--help"]);
-    assert_eq!((code, wrong.as_str()), (0, ""));
-    assert!(
-        said.contains("every one of them is in your agents already"),
-        "{said}"
-    );
-    let (code, _, wrong) = ran(&NONE, &["agent", "add", "--", "-h"]);
-    assert_eq!(code, 1);
-    assert!(wrong.contains("-h needs --harness and --model"), "{wrong}");
 }

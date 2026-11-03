@@ -9,7 +9,7 @@ deleted.
 
 | File | What Node's CLI did | Read by |
 |---|---|---|
-| `cli.<platform>.json` | the standalone verbs (`--help`, the version, `catalog`, `agent`, `setup`, `doctor`): every scenario played against Node's CLI, `darwin` for macOS (and any system but Windows), `win32` for Windows, 374 cases each: what it printed, said on the error output and exited with, and the files it left. `FORMAT.md` says what is in them | `../cli_goldens/` |
+| `cli.<platform>.json` | the standalone verbs (`--help`, the version, `setup`, `doctor`): every scenario played against Node's CLI, `darwin` for macOS (and any system but Windows), `win32` for Windows, 77 cases each (Node's had 374: the cases of `catalog` and `agent` went with the catalog and the saved agents, and the two of `setup` and `doctor` that stopped at a file of agents they could not read, harness-models): what it printed, said on the error output and exited with, and the files it left. `FORMAT.md` says what is in them | `../cli_goldens/` |
 | `board.json` | the board commands, which a window's token makes `cf`: each case served by a scripted API, with the requests Node's board made, what it printed, its errors and its exit code. Recorded at `b54361c` from Node's `runCoreCli`, a commit that holds that code and the scripted API | `../board_goldens.rs` |
 
 The words after each verb were recorded too, through Node's `util.parseArgs`:
@@ -133,3 +133,13 @@ result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --
 script from the binary's own output, and nothing else in them moved. The daemon's traces
 hold no `cf task finish` line (`cf-board-028` and `-029` are departed for that, and are not
 played), so none was changed.
+
+## Without the catalog and the saved agents
+
+`cf catalog` and `cf agent add|list|edit|remove` went with the bundled list of models and the
+human's saved agents (spec `harness-models`, T-1187): a member is a harness, a model it lists,
+an effort and a tier. `tools/move_harness_models_goldens.py cli` took their 293 cases out of
+each `cli.<platform>.json`, their lines out of every usage printed (and the words of `ui` and
+`doctor` for them), and the count of saved agents out of what `setup` and `doctor` print; the two cases of
+`setup` and `doctor` that stopped at a file of agents they could not read went, as neither
+reads one.

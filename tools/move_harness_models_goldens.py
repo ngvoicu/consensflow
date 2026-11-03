@@ -5,6 +5,7 @@ staff table of a chief's text says the model each member runs on, in a column of
 after the member (`| Member | Model | Roles | Work tier |`).
 
     python3 -I tools/move_harness_models_goldens.py text crates/cf-engine/tests/goldens/text.json
+    python3 -I tools/move_harness_models_goldens.py cli crates/cf/tests/goldens/cli.<platform>.json
 
 `text` moves the role texts' tables: each staff row of `teamTable` and `roleInstructions`
 that says no model runs on `Opus · high` (what the text tests' rows run on where a row says
@@ -12,6 +13,13 @@ none, `MODEL_SHOWN` in `crates/cf-engine/tests/text/support.rs`), and the table 
 expected text holds gains that column; each `staffOf` row's members say what the
 participants they are read off run on. A row already moved says its model and is left as
 it is, so the move can be run again after a merge brings unmoved rows.
+
+`cli` moves `cf`'s recordings of its standalone verbs: the cases of `catalog` and of
+`agent` (its catalog and the human's saved agents, which are no more) go; every usage
+printed loses their lines, and `ui` and `doctor` their words for them; `setup` and
+`doctor` count no agents (the line `agents: …` goes), and their two cases that stopped
+at a file of agents they could not read go, as neither reads one. What else a case printed, wrote
+and exited with is as Node's was, and the rest of `cli_goldens` holds it.
 """
 
 import json
@@ -110,10 +118,88 @@ def move_text(path):
     print("moved %d rows of %s" % (moved, path))
 
 
+OLD_USAGE = """  catalog [--harness <h>] [--json]            List available agent presets
+  agent add <name>                           Add an agent of your own
+    [--harness <h>] [--model <m>] [--effort <e>] [--description <d>]
+    [--designer]                            An image agent (Codex only): an image designer
+  agent list [--json]
+  agent edit <name> [--model <m>] [--effort <e>] [--description <d>]
+    [--work-tier critical|complex|standard|light|auto]
+  agent remove <name>
+"""
+
+WORDS = [
+    (
+        "Run the app's daemon; open the agents screens",
+        "Run the app's daemon; open the harnesses screen",
+    ),
+    (
+        "Inspect runtime, roster and bundled roles",
+        "Inspect runtime, harnesses and bundled roles",
+    ),
+]
+
+
+def moved_text(text):
+    """A case's print with the usage and the counts moved."""
+    if text is None:
+        return None
+    text = text.replace(OLD_USAGE, "")
+    for before, after in WORDS:
+        text = text.replace(before, after)
+    lines = text.split("\n")
+    lines = [
+        line
+        for line in lines
+        if not (line.startswith("agents: ") and " saved — manage them with cf ui or cf agent" in line)
+        and not line.startswith("agents:       ")
+    ]
+    return "\n".join(lines)
+
+
+# The cases of `setup` and `doctor` that stopped at a file of saved agents they could not
+# read: neither reads one now, so neither stops.
+UNREAD = {
+    "setup: an agents file it cannot read, after what it said so far",
+    "doctor: an agents file it cannot read, after what it said so far",
+}
+
+
+def move_cli(path):
+    with open(path, encoding="utf-8") as file:
+        golden = json.load(file)
+    before = len(golden["cases"])
+    golden["cases"] = [
+        case
+        for case in golden["cases"]
+        if (not case["args"] or case["args"][0] not in ("catalog", "agent"))
+        and case["name"] not in UNREAD
+    ]
+    for case in golden["cases"]:
+        for key in ("stdout", "stderr"):
+            case[key] = moved_text(case.get(key))
+        rust = case.get("kept", {}).get("rust", {})
+        for key in ("stdout", "stderr"):
+            if key in rust:
+                rust[key] = moved_text(rust[key])
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(cli_text(golden))
+    print("%s: %d cases, %d went" % (path, len(golden["cases"]), before - len(golden["cases"])))
+
+
+def cli_text(golden):
+    """The recording as it is written: its head two spaces in, each case on a line of its own."""
+    head = ['  "%s": %s' % (key, json.dumps(value, ensure_ascii=False)) for key, value in golden.items() if key != "cases"]
+    cases = ",\n".join(
+        "    " + json.dumps(case, ensure_ascii=False, separators=(",", ":")) for case in golden["cases"]
+    )
+    return "{\n" + ",\n".join(head) + ',\n  "cases": [\n' + cases + "\n  ]\n}\n"
+
+
 def main(argv):
-    if len(argv) != 3 or argv[1] != "text":
+    if len(argv) != 3 or argv[1] not in ("text", "cli"):
         sys.exit(__doc__)
-    move_text(argv[2])
+    {"text": move_text, "cli": move_cli}[argv[1]](argv[2])
 
 
 if __name__ == "__main__":

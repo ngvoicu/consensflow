@@ -43,8 +43,10 @@ use serde_json::Value;
 /// tests run on, macOS's.
 const PLATFORM: &str = if cfg!(windows) { "win32" } else { "darwin" };
 
-/// How many cases there are at least: a file with fewer has lost some.
-const AT_LEAST: usize = 350;
+/// How many cases each recording holds at least: Node's 374, but the 293 of `catalog` and
+/// `agent`, verbs of a catalog and of saved agents that are no more, and the two of `setup`
+/// and `doctor` that stopped at a file of saved agents they could not read (harness-models).
+const AT_LEAST: usize = 77;
 
 /// How far from the run's own time an instant may be, in milliseconds, and still be the one it stamped.
 const MARGIN_MS: i64 = 5_000;
@@ -472,10 +474,11 @@ fn every_case_says_writes_and_exits_as_node_did() {
         differ.join("\n\n")
     );
     // Every case of `setup` and `doctor` was played, not left out.
-    assert!(verbs["setup"] >= 17, "{} cases of setup", verbs["setup"]);
-    assert!(verbs["doctor"] >= 22, "{} cases of doctor", verbs["doctor"]);
+    assert!(verbs["setup"] >= 16, "{} cases of setup", verbs["setup"]);
+    assert!(verbs["doctor"] >= 21, "{} cases of doctor", verbs["doctor"]);
     // What is paired holds in the cases it is meant for, and in no others.
-    assert_eq!(meant[paired::SHAPE], 13, "{meant:?}");
+    // 12: the 13th was the `setup` that stopped at a file of agents it could not read.
+    assert_eq!(meant[paired::SHAPE], 12, "{meant:?}");
     assert_eq!(meant[paired::COPY], 1, "{meant:?}");
     assert_eq!(meant.len(), 2, "{meant:?}");
 }
