@@ -135,6 +135,59 @@ impl Owner {
         made
     }
 
+    /// The `cliproxyapi` provider's files, as the owner's Mac keeps them in its agent folder:
+    /// the login (the only one the Mac's Pi has), the config pointed at the proxy `base_url`,
+    /// the models the proxy served last, `settings.json` naming the package among the owner's
+    /// other one, npm's manifests, and the package below `npm/node_modules` Pi loads it from.
+    fn cliproxyapi(&self, base_url: &str) {
+        let agent = self.path(".pi/agent");
+        write(&agent.join("auth.json"), &auth_cliproxyapi());
+        write(
+            &agent.join("cliproxyapi.json"),
+            &json!({
+                "baseUrl": base_url,
+                "apiKey": PROXY_KEY,
+                "providerId": "cliproxyapi",
+                "providerName": "CLIProxyAPI",
+            })
+            .to_string(),
+        );
+        write(
+            &agent.join("cliproxyapi-models.json"),
+            &json!({ "models": [{ "id": "muse-spark-1.3-contributor" }], "fetchedAt": at(NOW) })
+                .to_string(),
+        );
+        write(
+            &agent.join("settings.json"),
+            &json!({ "packages": ["npm:pi-web-access", "npm:@router-for-me/pi-cliproxyapi-provider"] })
+                .to_string(),
+        );
+        write(
+            &agent.join("npm/package.json"),
+            &json!({ "dependencies": {
+                "pi-web-access": "^0.46.0",
+                "@router-for-me/pi-cliproxyapi-provider": "^1.4.24",
+            } })
+            .to_string(),
+        );
+        write(&agent.join("npm/package-lock.json"), "{}");
+        let package = agent.join("npm/node_modules/@router-for-me/pi-cliproxyapi-provider");
+        write(
+            &package.join("package.json"),
+            &json!({
+                "name": "@router-for-me/pi-cliproxyapi-provider",
+                "version": "1.4.24",
+                "pi": { "extensions": ["./extensions/index.ts", "./extensions/tps.ts"] },
+            })
+            .to_string(),
+        );
+        write(&package.join("LICENSE"), "the package's license");
+        write(&package.join("README.md"), "the package's readme");
+        write(&package.join("extensions/index.ts"), "the provider's extension");
+        write(&package.join("extensions/lib.ts"), "the extension's library");
+        write(&package.join("extensions/tps.ts"), "the provider's second extension");
+    }
+
     fn codex(&self) -> Isolation {
         let mut made = Isolation::codex(self.home.path(), &self.path(".codex"));
         made.parent = self.parent.path().to_path_buf();
@@ -361,6 +414,171 @@ fn a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_els
     assert_eq!(isolation.made_at(at(NOW)).unwrap(), home);
     drop(isolation);
     assert!(!home.exists());
+}
+
+// ------------------------------------------------------------- the provider's files (T-1172)
+
+/// The key CLIProxyAPI is asked its models with: `access` of the `cliproxyapi` login and
+/// `apiKey` of `cliproxyapi.json`. The login's `refresh` is the endpoint's own metadata,
+/// still not a thing a run is given.
+const PROXY_KEY: &str = "cli-proxy-key-fedcba987654";
+const PROXY_META: &str = "proxy-meta-zyxwvutsrqponm";
+
+/// The `auth.json` of a Mac whose Pi has the `cliproxyapi` login alone, as the provider's
+/// extension writes it: the key in `access`, the endpoint's metadata in `refresh`, and an
+/// `expires` a hundred years on.
+fn auth_cliproxyapi() -> String {
+    json!({
+        "cliproxyapi": { "type": "oauth", "access": PROXY_KEY, "refresh": PROXY_META, "expires": ends(hours(876_600)) },
+    })
+    .to_string()
+}
+
+/// A stand-in for CLIProxyAPI: answers every HTTP request it gets with `401`, its answer to a
+/// keyless one, on a port of its own. Its `http://` URL.
+fn proxy_answering() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else {
+                return;
+            };
+            use std::io::Write;
+            let _ = stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+        }
+    });
+    url
+}
+
+/// A base URL nothing answers on: a port the system just let go of.
+fn proxy_gone() -> String {
+    format!(
+        "http://{}",
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+    )
+}
+
+/// Pi loads `cliproxyapi` as the package `settings.json`'s `packages` names, an `npm:` spec
+/// resolved below `npm/node_modules`, which reads `cliproxyapi.json` (the proxy's base URL
+/// and key) and `cliproxyapi-models.json` (the models it served last), and logs in by
+/// `auth.json`. A run on the provider's model is given all of it, the login without its
+/// `refresh`, and the owner's files are hashed with the provider's among them.
+#[test]
+fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    // The login, the provider's own files and its package, and a `settings.json` that names
+    // the provider's package alone: the owner's other package and npm's manifests are left.
+    assert_eq!(
+        files_below(&home),
+        [
+            "pi/agent/auth.json",
+            "pi/agent/cliproxyapi-models.json",
+            "pi/agent/cliproxyapi.json",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/LICENSE",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/README.md",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions/index.ts",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions/lib.ts",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions/tps.ts",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/package.json",
+            "pi/agent/settings.json",
+        ]
+    );
+    let copied = fs::read_to_string(home.join("pi/agent/auth.json")).unwrap();
+    let held: Value = serde_json::from_str(&copied).unwrap();
+    assert_eq!(
+        held,
+        json!({ "cliproxyapi": {
+            "type": "oauth",
+            "access": PROXY_KEY,
+            "expires": ends(hours(876_600)),
+        } })
+    );
+    assert!(!copied.contains(PROXY_META), "the refresh was copied: {copied}");
+    // The config and the models come whole; the settings name the provider's package alone.
+    assert_eq!(
+        fs::read_to_string(home.join("pi/agent/cliproxyapi.json")).unwrap(),
+        fs::read_to_string(owner.path(".pi/agent/cliproxyapi.json")).unwrap()
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            &fs::read_to_string(home.join("pi/agent/settings.json")).unwrap()
+        )
+        .unwrap(),
+        json!({ "packages": ["npm:@router-for-me/pi-cliproxyapi-provider"] })
+    );
+    // The provider's files of the owner's are hashed, before and after, as the rest are.
+    let said = isolation.evidence().unwrap();
+    for file in [
+        "cliproxyapi.json",
+        "cliproxyapi-models.json",
+        "npm/package.json",
+        "npm/package-lock.json",
+        "npm/node_modules/@router-for-me/pi-cliproxyapi-provider/package.json",
+    ] {
+        assert!(said.contains(&format!("~/.pi/agent/{file}")), "{file}: {said}");
+    }
+    assert!(isolation.finish().is_ok());
+}
+
+/// Refused before anything is made, in words naming what is missing and what the human can
+/// do: where the provider's config is missing, where its package is, where `settings.json`
+/// does not name it, and where the proxy it is set for does not answer.
+#[test]
+fn a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing() {
+    let owner = Owner::new();
+    let refused = |owner: &Owner| {
+        owner
+            .pi("cliproxyapi/muse-spark-1.3-contributor", hours(1))
+            .made_at(at(NOW))
+            .unwrap_err()
+            .to_string()
+    };
+    // The provider's own config is missing.
+    owner.cliproxyapi(&proxy_gone());
+    fs::remove_file(owner.path(".pi/agent/cliproxyapi.json")).unwrap();
+    let said = refused(&owner);
+    assert!(said.contains("`cliproxyapi`"), "{said}");
+    assert!(said.contains("cliproxyapi.json"), "{said}");
+    assert!(said.contains("--models pi="), "{said}");
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // The package Pi loads the provider from is missing.
+    owner.cliproxyapi(&proxy_gone());
+    fs::remove_dir_all(owner.path(".pi/agent/npm/node_modules")).unwrap();
+    let said = refused(&owner);
+    assert!(
+        said.contains("npm/node_modules/@router-for-me/pi-cliproxyapi-provider"),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // `settings.json` does not name the package in `packages`: Pi would never load it.
+    owner.cliproxyapi(&proxy_gone());
+    write(
+        &owner.path(".pi/agent/settings.json"),
+        &json!({ "packages": ["npm:pi-web-access"] }).to_string(),
+    );
+    let said = refused(&owner);
+    assert!(said.contains("settings.json"), "{said}");
+    assert!(
+        said.contains("npm:@router-for-me/pi-cliproxyapi-provider"),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // All of it is there, and the proxy does not answer.
+    owner.cliproxyapi(&proxy_gone());
+    let said = refused(&owner);
+    assert!(said.contains("does not answer"), "{said}");
+    assert!(said.contains("http://127.0.0.1:"), "{said}");
+    assert!(said.contains("--models pi="), "{said}");
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // No home was made anywhere along the refusals.
+    assert_eq!(owner.made(), 0);
 }
 
 #[test]

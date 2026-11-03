@@ -142,7 +142,11 @@ fn window(
                 command: "pi",
                 args,
                 prompt: None,
-                drop_env: &[],
+                // As Claude's key: leftovers of the cliproxyapi provider's env
+                // overrides (`cliproxyapi.json` answers the same) would move the
+                // window off the copied config onto another endpoint and another
+                // key, with no word on the board (T-1172).
+                drop_env: &["CLIPROXYAPI_BASE_URL", "CLIPROXYAPI_API_KEY"],
             }
         }
         // Codex announces no id: the broker names the thread once Codex starts it.

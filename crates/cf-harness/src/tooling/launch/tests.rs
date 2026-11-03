@@ -329,5 +329,8 @@ fn a_members_pi_window_is_the_adapters_whole_with_the_users_own_append_file_befo
         ["--model", "openrouter/x", "--thinking", "low", "--approve"]
     );
     assert_eq!(launched["env"]["CF_DELIVERY_LAUNCH_ID"], json!(LAUNCH));
-    assert_eq!(launched["dropEnv"], json!([]));
+    assert_eq!(
+        launched["dropEnv"],
+        json!(["CLIPROXYAPI_BASE_URL", "CLIPROXYAPI_API_KEY"])
+    );
 }

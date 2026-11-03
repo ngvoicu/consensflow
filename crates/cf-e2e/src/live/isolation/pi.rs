@@ -12,6 +12,7 @@
 //! as the run does and a margin; one that does not is a reason to refuse the run, said
 //! in words, and never a copy that would refresh.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -217,3 +218,142 @@ pub fn renewal(
         )))
     })
 }
+
+/// What a provider that the agent folder gives Pi, besides its `auth.json` entry, needs of a
+/// run's home ([`super::Seed::PiProvider`]): the `npm:` spec `settings.json`'s `packages`
+/// loads it by, the files of the folder it keeps, and the package folder below
+/// `npm/node_modules` Pi resolves the spec to. `cliproxyapi` is the only one the kit knows;
+/// a provider with no entry here (OpenRouter) is a login alone, which [`login`] copies.
+#[derive(Debug)]
+pub struct Provider {
+    /// The provider's name, as `auth.json` keys it and a model names it before its `/`.
+    pub name: &'static str,
+    /// The `npm:` spec `packages` names the package by.
+    pub spec: &'static str,
+    /// The package's folder below the agent folder (`npm/node_modules/…`), copied whole.
+    pub package: &'static str,
+    /// The file the connection is read from: required, and its `baseUrl` is the proxy a run
+    /// asks whether it answers ([`answers`]).
+    pub config: &'static str,
+    /// More files of the provider's that must be there.
+    pub required: &'static [&'static str],
+    /// The ones copied where the owner has them: the models' file is the proxy's cache of its
+    /// last answer, which the proxy refills where it is missing.
+    pub optional: &'static [&'static str],
+}
+
+impl Provider {
+    /// The files of `agent` a run on this provider is held not to change: its own, npm's
+    /// manifests (which the package's install records), and every file of the package.
+    pub fn watched(&self, agent: &Path) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = [self.config]
+            .into_iter()
+            .chain(self.required.iter().copied())
+            .chain(self.optional.iter().copied())
+            .map(|name| agent.join(name))
+            .collect();
+        files.extend(["npm/package.json", "npm/package-lock.json"].map(|name| agent.join(name)));
+        files.extend(below(&agent.join(self.package)));
+        files
+    }
+}
+
+/// [`Provider`] of the provider `name`, where the kit knows the agent folder gives it to Pi:
+/// `cliproxyapi`, which Pi 1.5.0 loads as the npm extension package `settings.json`'s
+/// `packages` names (`@router-for-me/pi-cliproxyapi-provider`), whose extensions read
+/// `cliproxyapi.json` for the proxy's base URL and key and `cliproxyapi-models.json` for the
+/// models it last served, with the login in `auth.json` (T-1172).
+pub fn provider(name: &str) -> Option<&'static Provider> {
+    const CLIPROXYAPI: Provider = Provider {
+        name: "cliproxyapi",
+        spec: "npm:@router-for-me/pi-cliproxyapi-provider",
+        package: "npm/node_modules/@router-for-me/pi-cliproxyapi-provider",
+        config: "cliproxyapi.json",
+        required: &[],
+        optional: &["cliproxyapi-models.json"],
+    };
+    (name == CLIPROXYAPI.name).then_some(&CLIPROXYAPI)
+}
+
+/// Every file below `folder`, folders walked into.
+fn below(folder: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = fs::read_dir(folder) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                files.extend(below(&path));
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+/// The proxy's base URL of `config`'s bytes, the provider's `cliproxyapi.json`: its `baseUrl`,
+/// or the extension's own default where it names none (the extension's own chain, less its
+/// environment variables, which a run's window never gets: the copied config answers there).
+pub fn base_url(config: &[u8]) -> String {
+    serde_json::from_slice::<Value>(config)
+        .ok()
+        .and_then(|config| config["baseUrl"].as_str().map(str::to_owned))
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:8317".to_owned())
+}
+
+/// Whether the proxy `base_url` answers, asked before anything is made for a run on the
+/// provider: an `http` URL gets a `GET /v1/models`, which the proxy answers even a keyless
+/// request to (a `401` is an answer); a URL of another scheme is asked for a listener alone.
+/// `Err` is why it does not, in words; never the key.
+pub fn answers(base_url: &str) -> std::result::Result<(), String> {
+    use std::io::{Read, Write};
+    use std::net::{TcpStream, ToSocketAddrs};
+
+    let Some((scheme, authority)) = base_url.split_once("://") else {
+        return Err(format!("no scheme in {base_url}"));
+    };
+    let authority = authority.split('/').next().unwrap_or_default();
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, port.parse::<u16>().unwrap_or(0)),
+        None => (
+            authority,
+            match scheme {
+                "https" => 443,
+                _ => 80,
+            },
+        ),
+    };
+    if host.is_empty() || port == 0 {
+        return Err(format!("no host:port in {base_url}"));
+    }
+    let address = (host, port)
+        .to_socket_addrs()
+        .map_err(|why| format!("{host}:{port} does not resolve ({why})"))?
+        .next()
+        .ok_or_else(|| format!("{host}:{port} does not resolve"))?;
+    let mut stream =
+        TcpStream::connect_timeout(&address, ANSWERS).map_err(|why| format!("{why}"))?;
+    stream
+        .set_read_timeout(Some(ANSWERS))
+        .and_then(|()| stream.set_write_timeout(Some(ANSWERS)))
+        .map_err(|why| format!("{why}"))?;
+    if scheme != "http" {
+        return Ok(());
+    }
+    stream
+        .write_all(
+            format!("GET /v1/models HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .map_err(|why| format!("{why}"))?;
+    let mut head = [0_u8; 64];
+    let read = stream.read(&mut head).map_err(|why| format!("{why}"))?;
+    match std::str::from_utf8(&head[..read]).map(|text| text.starts_with("HTTP/")) {
+        Ok(true) => Ok(()),
+        _ => Err("it answers with no HTTP".to_owned()),
+    }
+}
+
+/// How long the proxy is given to answer, before the run is refused.
+const ANSWERS: Duration = Duration::from_secs(5);

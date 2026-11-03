@@ -1,10 +1,19 @@
-# Every harness can sit in a seat of one rig on zeewin2, isolated (T-1136, the live matrix's prerequisites).
-# Four rules, each held by tests a Mac runs: a test machine whose Pi has no OpenRouter login runs Pi on
-# the model the kit names for that machine, says which, and chooses nothing else (`live/agents.rs`); no two
-# harness homes of one rig set one variable to two values (`rig/homes.rs`), the five harnesses' homes
-# together among them (`live/isolation/windows.rs`); the shell of every harness on Windows is named with
-# where it is known from (`live/members/descent/tests.rs`); and a seat's reply is the word and the command's
-# output (`tests/live_seat.rs`). One plant takes one rule out; a test of it fails. Every name holds `matrix`.
+# Every harness can sit in a seat of one rig on zeewin2, isolated (T-1136, the live matrix's
+# prerequisites); and Pi can sit in one on the owner's Mac through the provider its Pi has,
+# CLIProxyAPI (T-1172). Rules, each held by tests a Mac runs: a test machine whose Pi has no
+# OpenRouter login runs Pi on the model the kit names for that machine, says which, and chooses
+# nothing else, and the owner's Mac whose Pi has only the local proxy's `cliproxyapi` login runs
+# Pi on `cliproxyapi/muse-spark-1.3-contributor` at `minimal`, says which, and chooses nothing
+# else (`live/agents.rs`); a run on a provider the agent folder gives Pi carries its files, its
+# package, a `settings.json` that names it and its login with no refresh token, is refused before
+# a window where the provider or the proxy is missing, and holds every one of the provider's
+# owner files not to change (`live/isolation.rs`, `live/isolation/pi.rs`); a Pi window drops the
+# proxy's environment overrides (`cf-harness`' `shared/window_args.rs`); no two harness homes of
+# one rig set one variable to two values (`rig/homes.rs`), the five harnesses' homes together
+# among them (`live/isolation/windows.rs`); the shell of every harness on Windows is named with
+# where it is known from (`live/members/descent/tests.rs`); and a seat's reply is the word and
+# the command's output (`tests/live_seat.rs`). One plant takes one rule out; a test of it fails.
+# Every name holds `matrix`.
 
 [run]
 agents-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::agents::"]
@@ -14,6 +23,7 @@ descent-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mem
 seat-offline = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_seat"]
 login-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login::"]
 pi-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::tests::"]
+window-golden = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::window_args::tests::every_window_opens_and_resumes_as_node_built_it"]
 
 # ---------------------------------------------------------------------------- Pi on a test machine
 
@@ -44,8 +54,8 @@ runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''            *on == machine && providers.iter().any(|name| name == provider)'''
-replace = '''            providers.iter().any(|name| name == provider)'''
+find = '''            row.machine == machine && providers.iter().any(|name| name == row.provider)'''
+replace = '''            providers.iter().any(|name| name == row.provider)'''
 
 [[plant]]
 name = "matrix: any login on a test machine gets its Pi model, whatever the login is"
@@ -54,8 +64,8 @@ runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''            *on == machine && providers.iter().any(|name| name == provider)'''
-replace = '''            *on == machine'''
+find = '''            row.machine == machine && providers.iter().any(|name| name == row.provider)'''
+replace = '''            row.machine == machine'''
 
 [[plant]]
 name = "matrix: the owner's Mac gets a test machine's Pi model"
@@ -64,10 +74,10 @@ runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''        let (Some(machine), Some(providers)) = (machine, pi_providers) else {
+find = '''        let Some(providers) = pi_providers else {
             return self;
         };'''
-replace = '''        let machine = machine.unwrap_or("zeewin2");
+replace = '''        let machine = machine.or(Some("zeewin2"));
         let Some(providers) = pi_providers else {
             return self;
         };'''
@@ -89,8 +99,142 @@ runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''(a ChatGPT subscription's allowance, no usage credits)'''
-replace = '''(a ChatGPT subscription's allowance)'''
+find = '''        machine: Some("zeewin2"),
+        provider: "openai",
+        model: "openai/gpt-5.6-luna",
+        effort: None,
+        cheap: "a ChatGPT subscription's allowance, no usage credits",'''
+replace = '''        machine: Some("zeewin2"),
+        provider: "openai",
+        model: "openai/gpt-5.6-luna",
+        effort: None,
+        cheap: "a ChatGPT subscription's allowance",'''
+
+# ----------------------------------------------------------- Pi on the owner's Mac (T-1172)
+
+[[plant]]
+name = "matrix: the owner's Mac's Pi is run at no effort"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        model: "cliproxyapi/muse-spark-1.3-contributor",
+        effort: Some("minimal"),'''
+replace = '''        model: "cliproxyapi/muse-spark-1.3-contributor",
+        effort: None,'''
+
+[[plant]]
+name = "matrix: the owner's Mac's Pi runs on a model that is not the contributor's"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        model: "cliproxyapi/muse-spark-1.3-contributor",'''
+replace = '''        model: "cliproxyapi/muse-spark-1.3",'''
+
+[[plant]]
+name = "matrix: the owner's Mac is taken for a machine the kit has no row for"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        machine: None,
+        provider: "cliproxyapi",'''
+replace = '''        machine: Some("elsewhere"),
+        provider: "cliproxyapi",'''
+
+[[plant]]
+name = "matrix: the note on the Mac's Pi model leaves out that the proxy spends an allowance"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        cheap: "the person's own CLIProxyAPI proxy's contributor model, the same one the cheap Muse model is, whose allowance may be used to 100%",'''
+replace = '''        cheap: "the person's own CLIProxyAPI proxy's contributor model, the same one the cheap Muse model is",'''
+
+[[plant]]
+name = "matrix: a provider's package is named but never copied"
+meant = "a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        placed.push(Placed::Tree {
+            from: from.join(provider.package),
+            to: to.join(provider.package),
+        });'''
+replace = '''        let _ = (from.join(provider.package), to.join(provider.package));'''
+
+[[plant]]
+name = "matrix: the run's settings.json names every package the owner's does"
+meant = "a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            bytes: serde_json::json!({ "packages": [provider.spec] })'''
+replace = '''            bytes: serde_json::json!({ "packages": ["npm:pi-web-access", provider.spec] })'''
+
+[[plant]]
+name = "matrix: the provider's files are not hashed"
+meant = "a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            watched.extend(provider.watched(owner));'''
+replace = '''            let _ = provider.watched(owner);'''
+
+[[plant]]
+name = "matrix: a provider's config that is missing is no refusal"
+meant = "a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            bytes: fs::read(from.join(provider.config)).map_err(|_| {
+                missing(&format!("{} is missing", provider.config))
+            })?,'''
+replace = '''            bytes: fs::read(from.join(provider.config)).unwrap_or_default(),'''
+
+[[plant]]
+name = "matrix: a settings.json that names no package is let through"
+meant = "a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        if !named {'''
+replace = '''        if !named && false {'''
+
+[[plant]]
+name = "matrix: the proxy is never asked whether it answers"
+meant = "a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        pi::answers(&base).map_err(|why| {
+            Error::Daemon(format!(
+                "Pi's `{}` provider is set up, but the proxy it is set for does not answer at {base} ({why}): start it (the local CLIProxyAPI is a Homebrew install's service), or run on a model of another provider (--models pi=…)",
+                provider.name,
+            ))
+        })?;'''
+replace = '''        let _ = pi::answers(&base);'''
+
+[[plant]]
+name = "matrix: a Pi window keeps the proxy's environment overrides"
+meant = "every_window_opens_and_resumes_as_node_built_it"
+runs = ["window-golden"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''                drop_env: &["CLIPROXYAPI_BASE_URL", "CLIPROXYAPI_API_KEY"],'''
+replace = '''                drop_env: &[],'''
 
 # ---------------------------------------------------------------------------- no clobbering
 

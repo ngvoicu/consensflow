@@ -15,7 +15,7 @@
 //! |---|---|---|---|
 //! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
 //! | Codex | `CODEX_HOME` | `auth.json` | `auth.json`, `config.toml` |
-//! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
+//! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens; and, where the model's provider is one the folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's files, its package and a `settings.json` that names it | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/`, and the provider's files, npm's manifests and the package |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
 //! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
 //!
@@ -137,6 +137,16 @@ enum Seed {
         providers: Option<Vec<String>>,
         left: Duration,
     },
+    /// The files of the agent folder `from` that a provider of the run's Pi model lives by
+    /// ([`pi::provider`]): its config, the models it last served and the package
+    /// `settings.json`'s `packages` loads it by, copied whole below `to`, with a
+    /// `settings.json` made to name the package — refused, before anything is made, where one
+    /// it needs is missing or the proxy it is set for does not answer.
+    PiProvider {
+        from: PathBuf,
+        to: PathBuf,
+        provider: &'static pi::Provider,
+    },
     /// A link in `to` to each entry of the owner's folder `from` but those named in `except`:
     /// what other programs of the rig keep in a folder the variables move (another tool's login
     /// in `XDG_DATA_HOME`), left as it is for them. Where the folders are links' (Devin's, on Unix).
@@ -192,21 +202,33 @@ impl Plan {
     }
 
     /// Pi: `PI_CODING_AGENT_DIR`, holding the entries of `auth.json` that the model of the run
-    /// needs (`providers`) and that last `left`, and nothing else of the owner's. Pi writes its
-    /// sessions, its settings and its MCP logins there.
+    /// needs (`providers`) and that last `left`, and, where the model's provider is one the
+    /// agent folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's
+    /// own files, its package and a `settings.json` that names it. Pi writes its sessions,
+    /// its settings and its MCP logins there.
     fn pi(owner: &Path, providers: Option<Vec<String>>, left: Duration) -> Self {
+        let mut seeds = vec![Seed::PiLogin {
+            from: owner.join("auth.json"),
+            to: "pi/agent/auth.json".into(),
+            providers: providers.clone(),
+            left,
+        }];
+        let mut watched: Vec<PathBuf> = ["auth.json", "settings.json", "models.json", "mcp-auth.json"]
+            .map(|name| owner.join(name))
+            .into();
+        for provider in providers.iter().flatten().filter_map(|name| pi::provider(name)) {
+            seeds.push(Seed::PiProvider {
+                from: owner.to_path_buf(),
+                to: "pi/agent".into(),
+                provider,
+            });
+            watched.extend(provider.watched(owner));
+        }
         Self {
             folders: Vec::new(),
             vars: vec![("PI_CODING_AGENT_DIR", "pi/agent".into())],
-            seeds: vec![Seed::PiLogin {
-                from: owner.join("auth.json"),
-                to: "pi/agent/auth.json".into(),
-                providers,
-                left,
-            }],
-            watched: ["auth.json", "settings.json", "models.json", "mcp-auth.json"]
-                .map(|name| owner.join(name))
-                .into(),
+            seeds,
+            watched,
             records: vec![owner.join("sessions")],
             described: owner.join("auth.json").display().to_string(),
         }
@@ -575,16 +597,17 @@ impl Isolation {
         Ok(path)
     }
 
-    /// What `seed` puts in the home, read from the owner's: none where there is nothing to put.
-    fn read(&self, seed: &Seed, now: i64) -> Result<Option<Placed>> {
+    /// What `seed` puts in the home, read from the owner's: nothing where there is nothing
+    /// to put.
+    fn read(&self, seed: &Seed, now: i64) -> Result<Vec<Placed>> {
         match seed {
             Seed::Copy { from, to, login } => match fs::read(from) {
-                Ok(bytes) => Ok(Some(Placed::File {
+                Ok(bytes) => Ok(vec![Placed::File {
                     to: to.clone(),
                     bytes,
                     login: *login,
-                })),
-                Err(_) if !login => Ok(None),
+                }]),
+                Err(_) if !login => Ok(Vec::new()),
                 Err(failed) => Err(Error::Daemon(format!(
                     "{}'s login is not in {} ({failed}): {}",
                     self.harness.name(),
@@ -606,19 +629,106 @@ impl Isolation {
                     ))
                 })?;
                 let entries = self.pi_entries(from, providers.as_deref(), &text, now, *left)?;
-                Ok(Some(Placed::File {
+                Ok(vec![Placed::File {
                     to: to.clone(),
                     bytes: entries.to_string().into_bytes(),
                     login: true,
-                }))
+                }])
             }
+            Seed::PiProvider { from, to, provider } => self.pi_provider(from, to, provider),
             #[cfg(unix)]
-            Seed::Reach { from, to, except } => Ok(Some(Placed::Links {
+            Seed::Reach { from, to, except } => Ok(vec![Placed::Links {
                 from: from.clone(),
                 to: to.clone(),
                 except,
-            })),
+            }]),
         }
+    }
+
+    /// What a provider of the owner's agent folder `from` puts in `to` of the run's: its files
+    /// (`provider`'s required ones, and its optional ones that are there), its package whole,
+    /// and a `settings.json` made to name the package alone (the owner's names more of them,
+    /// which the run has none of). Refused, in words naming what is missing and what the human
+    /// can do, where the config, the `packages` entry or the package is missing, or the proxy
+    /// `cliproxyapi.json` sets does not answer; never what a file holds.
+    fn pi_provider(
+        &self,
+        from: &Path,
+        to: &Path,
+        provider: &'static pi::Provider,
+    ) -> Result<Vec<Placed>> {
+        let folder = shown(from, &self.owner_home);
+        let missing = |what: &str| {
+            Error::Daemon(format!(
+                "Pi's `{}` provider cannot be used for this run: {what}. Pi loads it as the package `{}`, which {folder}'s `settings.json` names in `packages` and `npm/node_modules` holds. Set it up in your own Pi (use pi, then /login), or run on a model of another provider (--models pi=…)",
+                provider.name, provider.spec,
+            ))
+        };
+        let mut placed = vec![Placed::File {
+            to: to.join(provider.config),
+            bytes: fs::read(from.join(provider.config)).map_err(|_| {
+                missing(&format!("{} is missing", provider.config))
+            })?,
+            login: false,
+        }];
+        for file in provider.required.iter().chain(provider.optional.iter()) {
+            match fs::read(from.join(file)) {
+                Ok(bytes) => placed.push(Placed::File {
+                    to: to.join(file),
+                    bytes,
+                    login: false,
+                }),
+                Err(_) if provider.optional.contains(file) => {}
+                Err(_) => return Err(missing(&format!("{file} is missing"))),
+            }
+        }
+        let named = files::read_string(&from.join("settings.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|settings| settings["packages"].as_array().cloned())
+            .is_some_and(|packages| {
+                packages
+                    .iter()
+                    .any(|package| package.as_str() == Some(provider.spec))
+            });
+        if !named {
+            return Err(missing(&format!(
+                "`settings.json`'s `packages` does not name `{}`",
+                provider.spec
+            )));
+        }
+        if !from
+            .join(provider.package)
+            .join("package.json")
+            .is_file()
+        {
+            return Err(missing(&format!(
+                "{}/package.json is missing",
+                provider.package
+            )));
+        }
+        let Placed::File { bytes: config, .. } = &placed[0] else {
+            unreachable!()
+        };
+        let base = pi::base_url(config);
+        pi::answers(&base).map_err(|why| {
+            Error::Daemon(format!(
+                "Pi's `{}` provider is set up, but the proxy it is set for does not answer at {base} ({why}): start it (the local CLIProxyAPI is a Homebrew install's service), or run on a model of another provider (--models pi=…)",
+                provider.name,
+            ))
+        })?;
+        placed.push(Placed::Tree {
+            from: from.join(provider.package),
+            to: to.join(provider.package),
+        });
+        placed.push(Placed::File {
+            to: to.join("settings.json"),
+            bytes: serde_json::json!({ "packages": [provider.spec] })
+                .to_string()
+                .into_bytes(),
+            login: false,
+        });
+        Ok(placed)
     }
 
     /// The entries of the owner's `auth.json` (`text`, read from `from`) that a run of Pi is
@@ -746,6 +856,9 @@ enum Placed {
         bytes: Vec<u8>,
         login: bool,
     },
+    /// The folder `from`, copied under `to` whole: the package a provider of Pi's is loaded
+    /// from ([`pi::Provider`]), whose files the owner was hashed not to change.
+    Tree { from: PathBuf, to: PathBuf },
     #[cfg(unix)]
     Links {
         from: PathBuf,
@@ -766,6 +879,10 @@ impl Placed {
                 write_bytes(&file, &bytes)?;
                 Ok(login.then_some(Copied { file, was: bytes }))
             }
+            Self::Tree { from, to } => {
+                copy_tree(&from, &home.join(to))?;
+                Ok(None)
+            }
             #[cfg(unix)]
             Self::Links { from, to, except } => {
                 link_each(&from, &home.join(to), except)?;
@@ -785,6 +902,25 @@ fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
             made.write_all(bytes).map_err(Error::file("write", file))
         }
     }
+}
+
+/// The folder `from` copied under `to`, its folders and files; the package's own perms are
+/// kept on the entries where the copy can have them.
+fn copy_tree(from: &Path, to: &Path) -> Result {
+    files::make_dir(to)?;
+    for entry in fs::read_dir(from).map_err(Error::file("read", from))?.flatten() {
+        let (entry_from, entry_to) = (entry.path(), to.join(entry.file_name()));
+        if entry
+            .file_type()
+            .map_err(Error::file("read", &entry_from))?
+            .is_dir()
+        {
+            copy_tree(&entry_from, &entry_to)?;
+        } else {
+            files::copy(&entry_from, &entry_to)?;
+        }
+    }
+    Ok(())
 }
 
 /// A link in `into` to each entry of `from` but those named in `except`: the program that

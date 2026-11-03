@@ -182,17 +182,18 @@ impl Models {
         line
     }
 
-    /// These models on the test machine `machine` (none on the owner's Mac), whose Pi has the
-    /// logins `pi_providers` (their names; none where the file could not be read): a Pi the flags
-    /// did not name, on a machine that has no login for the cheap model's provider
-    /// (OpenRouter) and has one the kit knows a model for ([`PI_ON`]), runs on that model, and
-    /// the run says which provider and model, and why. Nothing else is chosen: not on the
-    /// owner's Mac, not for a login the kit has no model for, not for a machine it has no entry
-    /// for. Those runs keep the cheap model, which the kit's isolation then refuses before
-    /// anything is spent, naming the logins Pi has.
+    /// These models on the machine `machine` (none on the owner's Mac, which the runner
+    /// signals no test machine for), whose Pi has the logins `pi_providers` (their names;
+    /// none where the file could not be read): a Pi the flags did not name, on a machine
+    /// that has no login for the cheap model's provider (OpenRouter) and has one the kit
+    /// knows a model for ([`PI_ON`]), runs on that model and its effort, and the run says
+    /// which provider and model, and why. Nothing else is chosen: not for a login the kit
+    /// has no model for, not for a machine it has no row for, not where Pi's logins are not
+    /// known. Those runs keep the cheap model, which the kit's isolation then refuses
+    /// before anything is spent, naming the logins Pi has.
     #[must_use]
     pub fn on_machine(mut self, machine: Option<&str>, pi_providers: Option<&[String]>) -> Self {
-        let (Some(machine), Some(providers)) = (machine, pi_providers) else {
+        let Some(providers) = pi_providers else {
             return self;
         };
         let cheap_provider = cheap(Harness::Pi).0.split('/').next().unwrap_or_default();
@@ -200,27 +201,78 @@ impl Models {
         {
             return self;
         }
-        let Some((_, provider, model)) = PI_ON.iter().find(|(on, provider, _)| {
-            *on == machine && providers.iter().any(|name| name == provider)
+        let Some(row) = PI_ON.iter().find(|row| {
+            row.machine == machine && providers.iter().any(|name| name == row.provider)
         }) else {
             return self;
         };
-        self.models[slot(Harness::Pi)].name = (*model).to_owned();
+        let pi = &mut self.models[slot(Harness::Pi)];
+        pi.name = row.model.to_owned();
+        pi.effort = row.effort.map(str::to_owned);
+        let effort = row
+            .effort
+            .map(|effort| format!(", effort {effort}"))
+            .unwrap_or_default();
         self.notes.push(format!(
-            "pi runs on {model} because {machine}'s Pi has a `{provider}` login (a ChatGPT subscription's allowance, no usage credits) and none for {cheap_provider}, the cheap model's provider; --models pi=… names another"
+            "pi runs on {}{effort} because {}'s Pi has a `{}` login ({}) and none for {cheap_provider}, the cheap model's provider; --models pi=… names another",
+            row.model,
+            machine.unwrap_or("the owner's Mac"),
+            row.provider,
+            row.cheap,
         ));
         self
     }
 }
 
-/// The model of Pi that a test machine gets when its Pi has no login for the cheap model's
-/// provider: the machine, the provider of the login it has, and the model the kit names for it.
-/// A subscription's login, never a key that is charged by use. (zeewin2's and zeewin's Pi 1.4.0 hold
-/// a ChatGPT login under `openai` and no OpenRouter entry; `openai/gpt-5.6-luna` is the cheap
-/// Codex model on that login and ran Pi 6 of 6 there, T-1080.)
-const PI_ON: [(&str, &str, &str); 2] = [
-    ("zeewin2", "openai", "openai/gpt-5.6-luna"),
-    ("zeewin", "openai", "openai/gpt-5.6-luna"),
+/// The model of Pi that a machine gets when its Pi has no login for the cheap model's
+/// provider: the machine (`None` is the owner's Mac, which the runner signals no test
+/// machine for), the provider of the login it has, the model the kit names for it, its
+/// effort, and why it is cheap — a subscription's allowance or the person's own proxy,
+/// never a key that is charged by use.
+struct PiOn {
+    /// The test machine's name; none for the owner's Mac.
+    machine: Option<&'static str>,
+    /// The provider the machine's Pi has a login for.
+    provider: &'static str,
+    /// The model the kit names for it.
+    model: &'static str,
+    /// The effort it runs at, where Pi takes one.
+    effort: Option<&'static str>,
+    /// Why the model is cheap, said in the run's log.
+    cheap: &'static str,
+}
+
+/// What a machine's Pi runs on when the flags did not name it and the machine has no login
+/// for the cheap model's provider: zeewin2's and zeewin's Pi 1.4.0 hold a ChatGPT login
+/// under `openai` and no OpenRouter entry, and `openai/gpt-5.6-luna` is the cheap Codex
+/// model on that login and ran Pi 6 of 6 there (T-1136). The owner's Mac's Pi 1.5.0 holds
+/// one `cliproxyapi` login, the local CLIProxyAPI proxy's, and no other; its model is the
+/// contributor the cheap Muse model is, whose allowance may be used to 100% (T-1172;
+/// Gabriel, 2026-11-03: "Pi on this Mac can be used with the models pi has now"). A machine
+/// this has no row for keeps the cheap model, and the kit's isolation refuses the run
+/// before anything is spent, naming the logins Pi has.
+const PI_ON: [PiOn; 3] = [
+    PiOn {
+        machine: Some("zeewin2"),
+        provider: "openai",
+        model: "openai/gpt-5.6-luna",
+        effort: None,
+        cheap: "a ChatGPT subscription's allowance, no usage credits",
+    },
+    PiOn {
+        machine: Some("zeewin"),
+        provider: "openai",
+        model: "openai/gpt-5.6-luna",
+        effort: None,
+        cheap: "a ChatGPT subscription's allowance, no usage credits",
+    },
+    PiOn {
+        machine: None,
+        provider: "cliproxyapi",
+        model: "cliproxyapi/muse-spark-1.3-contributor",
+        effort: Some("minimal"),
+        cheap: "the person's own CLIProxyAPI proxy's contributor model, the same one the cheap Muse model is, whose allowance may be used to 100%",
+    },
 ];
 
 /// What `--models` and `--claude-model` say (the variables' values, none where
@@ -550,7 +602,7 @@ mod tests {
             let model = model(harness);
             if harness == Harness::Pi && here.of(harness) != &Model::cheap(harness) {
                 assert!(
-                    PI_ON.iter().any(|(_, _, named)| *named == model.name),
+                    PI_ON.iter().any(|row| row.model == model.name),
                     "{model}"
                 );
             } else {
@@ -831,6 +883,37 @@ mod tests {
         }
     }
 
+    /// The owner's Mac's Pi holds one login, `cliproxyapi` — the local CLIProxyAPI proxy's — and
+    /// none for the cheap model's provider, OpenRouter, so it runs on the model that login serves:
+    /// the contributor model the cheap Muse model is, at `minimal` effort, and the run says why
+    /// (T-1172; Gabriel, 2026-11-03: "Pi on this Mac can be used with the models pi has now"; the
+    /// contributor model's allowance may be used to 100%, 2026-11-02).
+    #[test]
+    fn the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so() {
+        let have = |providers: &[&str]| {
+            providers
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let models = parse(None, None)
+            .unwrap()
+            .on_machine(None, Some(&have(&["cliproxyapi"])));
+        let pi = models.of(Harness::Pi);
+        assert_eq!(pi.name, "cliproxyapi/muse-spark-1.3-contributor");
+        assert_eq!(pi.effort.as_deref(), Some("minimal"));
+        let said = models.line();
+        assert!(
+            said.contains("pi cliproxyapi/muse-spark-1.3-contributor, effort minimal"),
+            "{said}"
+        );
+        assert!(
+            said.contains("`cliproxyapi`") && said.contains("none for openrouter"),
+            "{said}"
+        );
+        assert!(said.contains("allowance"), "{said}");
+    }
+
     /// A test machine whose Pi has an `openai` login (a ChatGPT subscription's) and none for the
     /// cheap model's provider, OpenRouter, runs Pi on the model the kit names for that machine, and
     /// the run says which provider and model, and that it spends no usage credits (T-1136: zeewin2's
@@ -893,6 +976,16 @@ mod tests {
             run(Some("pi=openrouter/x/y"), Some("zeewin2"), &["openai"]),
             "openrouter/x/y",
             "a model the run named"
+        );
+        assert_eq!(
+            run(Some("pi=openrouter/x/y"), None, &["cliproxyapi"]),
+            "openrouter/x/y",
+            "a model the run named, on the owner's Mac too"
+        );
+        assert_eq!(
+            run(None, None, &["cliproxyapi", "openrouter"]),
+            cheap_pi,
+            "the cheap provider's login wins over a machine's entry"
         );
         assert_eq!(
             run(None, Some("zeewin2"), &["openai", "openrouter"]),
