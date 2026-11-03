@@ -15,6 +15,8 @@ matrix-control = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_
 matrix-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
 # The stand-in agent's replies.
 matrix-fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "reply::"]
+# The rig's environment and its live Muse launcher.
+matrix-rig-install = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install::"]
 
 [[plant]]
 name = "live matrix: the oracle reads each task's assignee as another task's (a wrong assignee)"
@@ -115,3 +117,26 @@ runs = ["matrix-fake-agent-reply"]
 file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
 find = '''    let each = line.captures_iter(text);'''
 replace = '''    let each = line.captures_iter(text).take(1);'''
+
+# T-1152: one rig seats a live Muse and Devin. Devin's home of the run's own moves XDG_DATA_HOME
+# for the whole rig, the daemon's too; the launcher must give Muse that folder, and Devin's home
+# must not reach the person's own Muse folder.
+[[plant]]
+name = "live matrix: the rig's Muse writes its sessions in the rig's own folder, not where the daemon reads"
+meant = "a_live_muse_beside_devin_writes_its_sessions_where_the_daemon_reads_them_and_not_in_the_persons"
+runs = ["matrix-rig-install"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''data="${{XDG_DATA_HOME:-}}"'''
+replace = '''data=""'''
+
+[[plant]]
+name = "live matrix: Devin's home of the run's own reaches the person's Muse folder"
+meant = "a_live_muse_beside_devin_writes_its_sessions_where_the_daemon_reads_them_and_not_in_the_persons"
+runs = ["matrix-rig-install"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''const KIT_FOLDERS: &[&str] = &["devin", "muse"];'''
+replace = '''const KIT_FOLDERS: &[&str] = &["devin"];'''
