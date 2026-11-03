@@ -16,7 +16,7 @@ use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
     Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard, TaskThread,
-    RESUME_WORDS,
+    TaskView, RESUME_WORDS,
 };
 use serde_json::Value;
 
@@ -259,6 +259,19 @@ impl Dispatcher {
             if !task.blocked_by.is_empty() {
                 continue;
             }
+            // A tier nobody on the staff holds any more (its last member left, or its
+            // model moved to another tier) goes to the nearest one somebody does, as at
+            // `cf task add`: its requester is told once which.
+            let retiered = self
+                .seams
+                .ledger
+                .borrow_mut()
+                .retier_open_task(project.id, task.number)?;
+            let mut task = task;
+            if let Some(moved) = retiered {
+                self.tell_retiered(project, &task, &moved.from, &moved.to, &moved.holders)?;
+                task.tier = Some(moved.to);
+            }
             let candidates = self
                 .seams
                 .ledger
@@ -282,10 +295,6 @@ impl Dispatcher {
                     .waiting_noted
                     .borrow_mut()
                     .insert(task.id, project.id);
-                let why: Vec<String> = candidates
-                    .iter()
-                    .filter_map(|member| self.why_not_free(member))
-                    .collect();
                 let pool = if task.pool.as_deref() == Some("designer") {
                     "image designer".to_owned()
                 } else {
@@ -295,6 +304,25 @@ impl Dispatcher {
                         task.pool.as_deref().unwrap_or("null")
                     )
                 };
+                let mut why: Vec<String> = candidates
+                    .iter()
+                    .filter_map(|member| self.why_not_free(member))
+                    .collect();
+                // A wait always says why: nobody holds the role (the last member of it left
+                // after the task was given), or, if it ever came to it, that no member is free.
+                if why.is_empty() {
+                    why.push(match candidates.is_empty() {
+                        true => format!(
+                            "no {} is on the staff (ask the human for one, in your terminal)",
+                            if task.pool.as_deref() == Some("designer") {
+                                "image designer"
+                            } else {
+                                task.pool.as_deref().unwrap_or("member")
+                            }
+                        ),
+                        false => "none of them is free".to_owned(),
+                    });
+                }
                 self.seams.ledger.borrow_mut().note(
                     project.id,
                     &NewNote {
@@ -312,6 +340,35 @@ impl Dispatcher {
             }
         }
         Ok(assigned)
+    }
+
+    /// Tells a task's requester, once, that the tier it asked went to the nearest
+    /// one somebody holds, and whose it is.
+    fn tell_retiered(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        from: &str,
+        to: &str,
+        holders: &[String],
+    ) -> Result<(), EngineError> {
+        let pool = task.pool.as_deref().unwrap_or("member");
+        let members: Vec<String> = holders.iter().map(|handle| format!("@{handle}")).collect();
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: task.requester.clone(),
+                task: Some(task.number),
+                body: format!(
+                    "T-{} asked for a {from} {pool}; none is on the staff, so it goes to the {to} tier: {}.",
+                    task.number,
+                    members.join(", ")
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// Why a member is not free, the first reason that holds for it: on a

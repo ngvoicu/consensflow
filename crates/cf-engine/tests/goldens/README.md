@@ -151,3 +151,14 @@ and the task that needed it stayed stuck until the chief cancelled it and added 
 above (T-1176). The role-change budgets moved with it: a chief's replacement is read whole
 to 208 rows with specs on and 236 without (211 and 240), and to 42 and 71 with the most
 rules for the staff (46 and 75).
+
+The chief's text, in each of the twelve `roleInstructions` rows that hold it, says two
+things more (T-1108, `skill/core/chief.md`): after "goes to the nearest one somebody does,
+the next one up first" it says "you are told whose" (the note and the reply that say which
+member's tier took a task); and its line of `cf task edit` says what the command changes
+now, the brief, the tier, the tasks it needs and the tasks that wait for it: `cf task edit
+T-3 "…" [--tier <tier>] [--needs …] [--before …]`, with how a list is written, its `cf` the
+row's (T-1049, above). Changed by hand, in those words alone, on 2026-11-02, and recorded
+from the engine on 2026-11-03 when it was merged (T-1176). The role-change budgets moved
+with it: read whole to 205 rows with specs on and 234 without (208 and 236), and to 40 and
+69 with the most rules for the staff (42 and 71).

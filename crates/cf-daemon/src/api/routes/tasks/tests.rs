@@ -322,9 +322,10 @@ async fn a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_betwee
     assert_eq!(said["task"]["tier"], "standard");
     assert_eq!(
         said.as_object().unwrap().keys().collect::<Vec<_>>(),
-        ["task", "message", "asked", "gated"]
+        ["task", "message", "asked", "heldBy", "gated"]
     );
     assert_eq!(said["asked"], "critical");
+    assert_eq!(said["heldBy"], json!(["zeus"]), "whose tier it went to");
 }
 
 #[tokio::test]

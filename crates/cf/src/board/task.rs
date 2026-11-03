@@ -36,6 +36,13 @@ const BRIEFED: Shape = Shape {
     ..Shape::TEXT
 };
 
+/// The flags of `cf task edit`: a brief as any other, and the tier, the tasks it needs and
+/// the tasks that wait for it, which may stand alone.
+const EDIT: Shape = Shape {
+    valued: &[brief::FILE, "--tier", "--needs", "--before"],
+    ..Shape::TEXT
+};
+
 /// The flags of `cf task get`, which stand after its task.
 const GET: Shape = Shape {
     switches: &["--transcript"],
@@ -101,6 +108,7 @@ pub fn command(
 fn shape_of(verb: &str) -> Shape {
     match verb {
         "get" => GET,
+        "edit" => EDIT,
         _ => BRIEFED,
     }
 }
@@ -210,9 +218,10 @@ fn add(
         let nearest = match created.value().get("asked") {
             None => String::new(),
             asked => format!(
-                " (no {} {} is on the staff, so the nearest tier)",
+                " (no {} {} is on the staff, so the nearest tier{})",
                 js::text(asked),
-                js::text(pool)
+                js::text(pool),
+                held_by(created.value())
             ),
         };
         format!(
@@ -411,27 +420,51 @@ fn moved(
 ) -> Result<Said, Failure> {
     let briefed = matches!(action, "reopen" | "resume" | "edit");
     let words = split(rest, shape_of(action));
+    // `cf task edit T-3 --tier light` changes the tier alone: its brief stays.
+    let tier = words
+        .value("--tier")?
+        .filter(|_| action == "edit")
+        .map(str::to_owned);
+    let needs = links_of("--needs", &words, action)?;
+    let before = links_of("--before", &words, action)?;
+    let alone = tier.is_some() || needs.is_some() || before.is_some();
     let text = brief::brief_of(&words, given, input)?;
-    if matches!(action, "done" | "reopen" | "edit" | "resume") && js::trim(&text).is_empty() {
+    if matches!(action, "done" | "reopen" | "edit" | "resume")
+        && js::trim(&text).is_empty()
+        && (action != "edit" || !alone)
+    {
         let what = match action {
             "done" => "your result",
             "edit" => "the new brief",
             "resume" => "what to do now",
             _ => "the follow-up",
         };
-        return Err(Failure::Usage(format!(
-            "cf task {action} T-{number} \"{what}\""
-        )));
+        return Err(Failure::Usage(match action {
+            "edit" => format!(
+                "cf task edit T-{number} \"{what}\", or --tier <tier>, --needs T-4 or --before T-9"
+            ),
+            _ => format!("cf task {action} T-{number} \"{what}\""),
+        }));
     }
     // What the words that send a window on say of themselves.
-    let sent = if briefed {
+    let sent = if briefed && !text.is_empty() {
         format!("\n{}", brief::sent(&text))
     } else {
         String::new()
     };
     let mut body = Map::new();
-    if !text.is_empty() {
+    let has_brief = !text.is_empty();
+    if has_brief {
         body.insert("body".into(), text.into());
+    }
+    if let Some(tier) = &tier {
+        body.insert("tier".into(), tier.as_str().into());
+    }
+    if let Some(needs) = &needs {
+        body.insert("needs".into(), needs.clone());
+    }
+    if let Some(before) = &before {
+        body.insert("before".into(), before.clone());
     }
     let path = format!("/api/tasks/{number}/{action}");
     let mut answer = board.post(&path, &Value::Object(body))?;
@@ -460,13 +493,141 @@ fn moved(
             "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on.{}",
             on_its_way(answer.value())
         ),
-        "edit" => format!(
-            "T-{number} has your new brief; no window had the old one, and the ledger keeps it. {}",
-            task_line(&task)
+        "edit" => edited(
+            number,
+            &task,
+            answer.value(),
+            Changed {
+                brief: has_brief,
+                tier: tier.is_some(),
+                needs: needs.is_some(),
+                before: before.is_some(),
+            },
         ),
         _ => format!("{}{dropped}", task_line(&task)),
     };
     Ok(Said::new(task, format!("{said}{sent}")))
+}
+
+/// The members of the tier a task went to when nobody held the one asked, as `: @anubis`.
+fn held_by(answered: &Value) -> String {
+    answered
+        .get("heldBy")
+        .and_then(Value::as_array)
+        .map(|held| {
+            held.iter()
+                .map(|handle| format!("@{}", js::text(Some(handle))))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|held| !held.is_empty())
+        .map_or_else(String::new, |held| format!(": {held}"))
+}
+
+/// What `cf task edit` was given to change.
+struct Changed {
+    brief: bool,
+    tier: bool,
+    needs: bool,
+    before: bool,
+}
+
+/// The task numbers of `list` as `T-3, T-4`, or `nothing`.
+fn numbers_said(list: Option<&Value>) -> String {
+    // A task's needs are `{ number, state }`; the tasks that wait for it are numbers.
+    let numbers: Vec<String> = list
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .map(|item| format!("T-{}", js::text(Some(item.get("number").unwrap_or(item)))))
+                .collect()
+        })
+        .unwrap_or_default();
+    if numbers.is_empty() {
+        "nothing".to_owned()
+    } else {
+        numbers.join(", ")
+    }
+}
+
+/// `--needs` or `--before` read as the list it changes: `T-3,T-4` replaces what the task has,
+/// `+T-5,-T-6` adds and removes. Only `cf task edit` takes them.
+fn links_of(
+    flag: &str,
+    words: &super::words::Split,
+    action: &str,
+) -> Result<Option<Value>, Failure> {
+    let Some(word) = words.value(flag)?.filter(|_| action == "edit") else {
+        return Ok(None);
+    };
+    let parts: Vec<&str> = word.split(',').map(js::trim).collect();
+    let signed = parts
+        .iter()
+        .filter(|part| part.starts_with(['+', '-']))
+        .count();
+    let number = |part: &str| task_number(Some(part.trim_start_matches(['+', '-'])));
+    if signed == 0 {
+        let set: Result<Vec<u64>, Failure> = parts.iter().map(|part| number(part)).collect();
+        return Ok(Some(json!(set?)));
+    }
+    if signed < parts.len() {
+        return Err(Failure::Usage(format!(
+            "{flag} takes T-3,T-4 to replace the list, or +T-5,-T-6 to add and remove: not both in one"
+        )));
+    }
+    let (mut add, mut remove) = (Vec::new(), Vec::new());
+    for part in parts {
+        match part.starts_with('+') {
+            true => add.push(number(part)?),
+            false => remove.push(number(part)?),
+        }
+    }
+    Ok(Some(json!({ "add": add, "remove": remove })))
+}
+
+/// What `cf task edit` says: the brief is the task's now, the ledger keeps the old; the task is
+/// for another tier (the nearest one somebody holds, when nobody holds the tier asked, and who
+/// holds it); it needs other tasks now, and other tasks wait for it; and no window had it.
+fn edited(number: u64, task: &Value, answered: &Value, changed: Changed) -> String {
+    let now = a_pool(task.get("pool"), task.get("tier"));
+    let nearest = match answered.get("asked") {
+        None => String::new(),
+        asked => format!(
+            " (no {} {} is on the staff, so the nearest tier{})",
+            js::text(asked),
+            js::text(task.get("pool")),
+            held_by(answered)
+        ),
+    };
+    let mut parts = Vec::new();
+    if changed.brief {
+        parts.push("has your new brief".to_owned());
+    }
+    if changed.tier {
+        parts.push(format!("is for {now}{nearest}"));
+    }
+    if changed.needs {
+        parts.push(format!("needs {}", numbers_said(task.get("needs"))));
+    }
+    if changed.before {
+        parts.push(format!(
+            "is waited for by {}",
+            numbers_said(answered.get("waiting"))
+        ));
+    }
+    let last = parts.pop().unwrap_or_default();
+    let lead = match parts.is_empty() {
+        true => last,
+        false => format!("{} and {last}", parts.join(", ")),
+    };
+    let tail = if changed.brief {
+        "; no window had the old one, and the ledger keeps it."
+    } else if changed.tier {
+        "; no window had it."
+    } else {
+        "."
+    };
+    format!("T-{number} {lead}{tail} {}", task_line(task))
 }
 
 /// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
@@ -965,10 +1126,200 @@ and 2 idle sessions (`cf task list --all`)";
             &mut std::io::empty(),
         );
         assert!(
-            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\""),
+            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\", or --tier <tier>, --needs T-4 or --before T-9"),
             "a usage line was expected"
         );
         assert!(api.received().is_empty());
+    }
+
+    #[test]
+    fn a_tier_alone_is_posted_with_no_brief() {
+        let answer = json!({ "task": card(2, "open", None) });
+        let api = scripted(vec![reply(200, answer)]);
+        let words: Vec<String> = ["edit", "T-2", "--tier", "light"]
+            .iter()
+            .map(|word| (*word).to_owned())
+            .collect();
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        let posted: Vec<_> = api
+            .received()
+            .into_iter()
+            .map(|got| (got.path.clone(), got.json()))
+            .collect();
+        assert_eq!(
+            posted,
+            [(
+                "/api/tasks/2/edit".to_owned(),
+                Some(json!({ "tier": "light" }))
+            )]
+        );
+        assert!(
+            said.text
+                .starts_with("T-2 is for a standard worker; no window had it. T-2 [open]"),
+            "{}",
+            said.text
+        );
+    }
+
+    #[test]
+    fn a_tier_goes_with_a_brief_from_the_words_standard_input_or_a_file_in_one_command() {
+        let answer = json!({ "task": card(2, "open", None) });
+        let (posted, said) = edited(
+            &["T-2", "--tier", "light", "Parse the new way"],
+            "",
+            &answer,
+        );
+        assert_eq!(
+            posted,
+            [(
+                "/api/tasks/2/edit".to_owned(),
+                Some(json!({ "body": "Parse the new way", "tier": "light" }))
+            )]
+        );
+        assert!(
+            said.starts_with(
+                "T-2 has your new brief and is for a standard worker; no window had the old one"
+            ),
+            "{said}"
+        );
+        // The flag may stand after the words, and the words be standard input.
+        let (posted, _) = edited(
+            &["T-2", "-", "--tier", "light"],
+            "Parse\nthe new way\n",
+            &answer,
+        );
+        assert_eq!(
+            posted[0].1,
+            Some(json!({ "body": "Parse\nthe new way", "tier": "light" }))
+        );
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("brief.md");
+        std::fs::write(&file, "From a file\n").unwrap();
+        let (posted, _) = edited(
+            &["T-2", "--file", file.to_str().unwrap(), "--tier", "complex"],
+            "",
+            &answer,
+        );
+        assert_eq!(
+            posted[0].1,
+            Some(json!({ "body": "From a file", "tier": "complex" }))
+        );
+    }
+
+    #[test]
+    fn a_tier_the_staff_does_not_hold_is_said_with_the_members_of_the_tier_it_went_to() {
+        let answer = json!({
+            "task": card(2, "open", None),
+            "asked": "complex",
+            "heldBy": ["zeus", "diana"],
+        });
+        let (_, said) = edited(&["T-2", "--tier", "complex"], "", &answer);
+        assert!(
+            said.starts_with(
+                "T-2 is for a standard worker (no complex worker is on the staff, so the nearest tier: @zeus, @diana); no window had it."
+            ),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_task_added_for_a_tier_nobody_holds_says_whose_tier_it_went_to() {
+        let answer = json!({
+            "task": { "number": 5, "state": "open", "assignee": null, "requester": "chief",
+                "title": "Run it", "blockedBy": [], "pool": "tester", "tier": "standard" },
+            "message": null,
+            "asked": "complex",
+            "heldBy": ["anubis"],
+            "gated": false,
+        });
+        let (_, said) = added(&["--test", "--tier", "complex", "Run it"], &answer);
+        assert!(
+            said.contains("(no complex tester is on the staff, so the nearest tier: @anubis)"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_list_of_needs_replaces_and_a_signed_one_adds_and_removes() {
+        let answer = json!({ "task": card(2, "open", None), "waiting": [9, 10] });
+        for (words, sent) in [
+            (["--needs", "T-3,T-4"], json!([3, 4])),
+            (["--needs", "T-3"], json!([3])),
+            (["--needs", "+T-5"], json!({ "add": [5], "remove": [] })),
+            (["--needs", "-T-5"], json!({ "add": [], "remove": [5] })),
+            (
+                ["--needs", "+T-5,-T-6"],
+                json!({ "add": [5], "remove": [6] }),
+            ),
+        ] {
+            let (posted, said) = edited(&["T-2", words[0], words[1]], "", &answer);
+            assert_eq!(
+                posted,
+                [(
+                    "/api/tasks/2/edit".to_owned(),
+                    Some(json!({ "needs": sent }))
+                )],
+                "{words:?}"
+            );
+            assert!(said.starts_with("T-2 needs nothing. T-2 [open]"), "{said}");
+        }
+        let (posted, said) = edited(&["T-2", "--before", "-T-9"], "", &answer);
+        assert_eq!(
+            posted[0].1,
+            Some(json!({ "before": { "add": [], "remove": [9] } }))
+        );
+        assert!(
+            said.starts_with("T-2 is waited for by T-9, T-10. T-2 ["),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn the_flags_and_a_brief_go_in_one_command_and_a_list_that_mixes_is_a_usage_failure() {
+        let answer = json!({ "task": card(2, "open", None), "waiting": [9] });
+        let (posted, said) = edited(
+            &[
+                "T-2", "--tier", "light", "--needs", "+T-3", "--before", "T-9", "-",
+            ],
+            "A new brief\n",
+            &answer,
+        );
+        assert_eq!(
+            posted[0].1,
+            Some(json!({
+                "body": "A new brief",
+                "tier": "light",
+                "needs": { "add": [3], "remove": [] },
+                "before": [9],
+            }))
+        );
+        assert!(
+            said.starts_with("T-2 has your new brief, is for a standard worker, needs nothing and is waited for by T-9;"),
+            "{said}"
+        );
+        let api = scripted(vec![]);
+        for list in ["T-3,+T-4", "T-3,-T-4", "T-x", "+T-"] {
+            let words: Vec<String> = ["edit", "T-2", "--needs", list]
+                .iter()
+                .map(|word| (*word).to_owned())
+                .collect();
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let said = command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut std::io::empty(),
+            );
+            assert!(matches!(said, Err(Failure::Usage(_))), "{list}");
+        }
+        assert!(api.received().is_empty(), "the board is asked nothing");
     }
 
     #[test]

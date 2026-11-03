@@ -2,8 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskMoved, TaskReleased, TaskThread,
-    TaskView,
+    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskEdit, TaskEdited, TaskMoved,
+    TaskReleased, TaskRetiered, TaskThread, TaskView,
 };
 
 impl Ledger {
@@ -24,6 +24,17 @@ impl Ledger {
         participant_id: i64,
     ) -> Result<TaskMoved, LedgerError> {
         tasks::assign_task(&mut self.store, project_id, number, participant_id)
+    }
+
+    /// An open task for a tier nobody on the staff holds any more goes to the nearest
+    /// one somebody does: which tier it was for, which it is for, and who holds it;
+    /// none when it stays as it is.
+    pub fn retier_open_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<Option<TaskRetiered>, LedgerError> {
+        tasks::retier_open_task(&mut self.store, project_id, number)
     }
 
     /// A task given by tier goes back to the board for another member of that tier.
@@ -241,6 +252,17 @@ impl Ledger {
         body: &str,
     ) -> Result<TaskView, LedgerError> {
         tasks::edit_task(&mut self.store, project_id, number, by, body)
+    }
+
+    /// The brief, the tier, or both, of a task not yet given to a window, in one step.
+    pub fn edit_task_with(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        edit: &TaskEdit,
+    ) -> Result<TaskEdited, LedgerError> {
+        tasks::edit_task_with(&mut self.store, project_id, number, by, edit)
     }
 
     /// `from` tells an open task `words`, which no window has yet: they are added

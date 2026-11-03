@@ -84,8 +84,9 @@ const FINISH_IN_THE_USAGE: &str = "the usage `cf help` prints inside a window li
 /// prints the brief of a task no window holds under its header; those the
 /// decision on a result moved: the result is withdrawn, not pasted after it;
 /// those a question answered as it waited moved: it is read, not pasted; and
-/// those that print the verbs of `cf task`, which have `finish` now; and the one
-/// that tells a task still open, which is told now. Found by playing them against
+/// those that print the verbs of `cf task`, which have `finish` now; the one
+/// that tells a task still open, which is told now; and the one that gives a task
+/// a tier nobody holds, whose reply names the members of the tier it went to. Found by playing them against
 /// the daemon.
 const DEPARTED: &[Departed] = &[
     ("core-api-003", RESULT_ACCEPTED),
@@ -113,6 +114,10 @@ const DEPARTED: &[Departed] = &[
     (
         "cf-board-015",
         "`cf task get` prints the brief of a task no window ever held (here one cancelled, then deleted, while it was open) under its header, so the whole brief can be read before it goes out: Node printed the header alone",
+    ),
+    (
+        "cf-board-020",
+        "`cf task add` for a tier nobody on the staff holds says whose the nearest tier it went to is (`heldBy`, T-1108), where Node said only that it was the nearest tier",
     ),
     (
         "cf-board-022",

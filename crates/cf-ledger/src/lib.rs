@@ -43,10 +43,11 @@ pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationEnd,
     ConversationView, Cut, DeletedProject, EventView, HeldTask, HistoryEntry, HistoryFrom,
     HistoryItem, HistoryKey, HistoryRead, HistoryRow, Lane, LastSwitch, LatestMessages,
-    LatestTranscript, MemberView, MessageOpening, MessageView, ParticipantConversation,
+    LatestTranscript, Links, MemberView, MessageOpening, MessageView, ParticipantConversation,
     ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume, Scanned,
-    StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
-    TaskTranscript, TaskView, TextCut, TextPart, TierChange,
+    StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskReleased,
+    TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
+    TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{

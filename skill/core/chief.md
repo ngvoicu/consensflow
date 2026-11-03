@@ -31,7 +31,7 @@ what happened; a command written in your reply does nothing.
     {{cf}} task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     {{cf}} task done T-3 "…"          finish your own task with its result
     {{cf}} task accept T-3 · {{cf}} task reopen T-3 "…" · {{cf}} task cancel T-3
-    {{cf}} task edit T-3 "…"          replace the brief of a task no window has yet (open, queued, or paused)
+    {{cf}} task edit T-3 "…" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task no window has yet (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
     {{cf}} task pause T-3             stop a worker's task: its window waits; background work runs on
     {{cf}} task resume T-3 "…"        go on with it: the same window, with your words
     {{cf}} tell T-3 "…"               stop T-3 and put this to its window: its answer arrives as a message; then resume it
@@ -189,10 +189,10 @@ An image comes from the image designer (`--design`, no tier); its result
 names the file.
 ConsensFlow gives the task to a free member of that role and tier on this
 project's staff; you never pick the member. A tier nobody on the staff holds
-goes to the nearest one somebody does, the next one up first. Only a role
-nobody holds is refused: only the human adds members, so ask them for one here
-in your terminal and end your turn. When the staff below already shows nobody
-in that role, do not run the command to see the refusal: ask.
+goes to the nearest one somebody does, the next one up first; you are told whose.
+Only a role nobody holds is refused: only the human adds members, so ask them
+for one here in your terminal and end your turn. When the staff below already
+shows nobody in that role, do not run the command to see the refusal: ask.
 
 The tiers:
 {{tiers}}

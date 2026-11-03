@@ -144,3 +144,12 @@ checked; your words are its result`, in the six prints of `board.json` that hold
 `cf help`, `cf --help`, `cf -h --json`, `cf task --help`, `cf task help`): each is what the
 built `cf` prints from `crates/cf/src/board/usage.txt`, changed by hand in those words
 alone, and nothing else in them moved.
+
+## The usage after `cf task edit` took a tier, needs and before
+
+The entry of `cf task edit` in the usage (the six prints of `board.json` that hold it, `cf
+task --help` among them) is three lines: `cf task edit T-3 "…" [--tier <tier>] [--needs
+T-4,T-5|+T-5|-T-5] [--before …]`, and what it changes, the brief, the tier, the tasks the
+task needs and the tasks that wait for it, of a task no window has yet (T-1108): a list
+replaces, `+T-5` adds, `-T-5` removes. Changed by hand, in those words alone, as
+`crates/cf/src/board/usage.txt` has it.
