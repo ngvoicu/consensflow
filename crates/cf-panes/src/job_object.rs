@@ -71,7 +71,9 @@ use windows_sys::Win32::System::JobObjects::{
     JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows_sys::Win32::System::SystemServices::JOB_OBJECT_MSG_NEW_PROCESS;
+use windows_sys::Win32::System::SystemServices::{
+    JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS, JOB_OBJECT_MSG_EXIT_PROCESS, JOB_OBJECT_MSG_NEW_PROCESS,
+};
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
     PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -89,11 +91,12 @@ pub(crate) type Ps<'a> = &'a dyn Fn(&Path) -> Option<String>;
 pub(crate) struct JobObject {
     handle: HANDLE,
     /// How each process that joined the job began, and whether a shell started it: read as it
-    /// joined, from the job's completion port, while its starter lived ([`Births`]). The
-    /// listener that writes it ends when the job is dropped ([`Drop`]); none where the job
-    /// could not be given a port, and then no job is proved a shell's.
+    /// joined, from the job's completion port, while its starter lived ([`Births`]), and let
+    /// go of when it exits. The listener that writes it ends when the job is dropped ([`Drop`]).
     births: Arc<Mutex<Births>>,
-    port: Option<HANDLE>,
+    /// The job's completion port, which the listener reads: none where the job could not be
+    /// given one, and then no job is proved a shell's.
+    port: Option<Arc<Port>>,
 }
 
 // SAFETY: a job handle is a kernel handle, usable from any thread.
@@ -325,21 +328,32 @@ impl Drop for JobObject {
     fn drop(&mut self) {
         // SAFETY: the handle is ours and closed once; kill-on-close ends the tree.
         unsafe { CloseHandle(self.handle) };
-        if let Some(Port(port)) = self.port.map(Port) {
-            // The listener owns the port and closes it once it is told to stop.
-            // SAFETY: the port is open until the listener has been told to stop; a post to
-            // one that is gone only fails.
-            unsafe { PostQueuedCompletionStatus(port, 0, STOP, ptr::null()) };
+        if let Some(port) = &self.port {
+            // The listener is told to stop through a port this job holds open: it is never a
+            // number the system may have given to another handle, whatever became of the
+            // listener (T-1153's D3). The port is closed by the last of the two to let go.
+            // SAFETY: the port is open, for the job holds it.
+            unsafe { PostQueuedCompletionStatus(port.0, 0, STOP, ptr::null()) };
         }
     }
 }
 
-/// A completion port, which the listener of a job's births owns.
-#[derive(Clone, Copy)]
+/// A completion port, closed when the last that holds it lets go: the job and the listener of
+/// its births each hold it, so that neither can use a handle that is closed, or that the system
+/// has given to another since.
 struct Port(HANDLE);
 
 // SAFETY: a completion port is a kernel handle, usable from any thread.
 unsafe impl Send for Port {}
+// SAFETY: the kernel serializes what is done to one port from several threads.
+unsafe impl Sync for Port {}
+
+impl Drop for Port {
+    fn drop(&mut self) {
+        // SAFETY: the handle is ours, and closed here once.
+        unsafe { CloseHandle(self.0) };
+    }
+}
 
 /// The key of the message that tells the listener to stop: the job's own messages carry the key
 /// the job was given, which is none.
@@ -347,17 +361,20 @@ const STOP: usize = 1;
 
 /// Gives `job` a completion port, and starts the listener that reads each process as it joins
 /// the job (`JOB_OBJECT_MSG_NEW_PROCESS`, whose overlapped pointer is the process's number): its
-/// start, and whether the process that started it was a shell. None where the job could not be
-/// given a port or the listener could not be started.
-fn listen_for_births(job: HANDLE, births: &Arc<Mutex<Births>>) -> Option<HANDLE> {
+/// start, and whether the process that started it was a shell; and lets go of the birth of each
+/// that exits (`JOB_OBJECT_MSG_EXIT_PROCESS`). None where the job could not be given a port or
+/// the listener could not be started.
+fn listen_for_births(job: HANDLE, births: &Arc<Mutex<Births>>) -> Option<Arc<Port>> {
     // SAFETY: no file is associated; a new port, with as many threads as processors.
-    let port = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, ptr::null_mut(), 0, 1) };
-    if port.is_null() {
+    let raw = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, ptr::null_mut(), 0, 1) };
+    if raw.is_null() {
         return None;
     }
+    // From here the port is closed by whoever lets go of it last, on every way out.
+    let port = Arc::new(Port(raw));
     let association = JOBOBJECT_ASSOCIATE_COMPLETION_PORT {
         CompletionKey: ptr::null_mut(),
-        CompletionPort: port,
+        CompletionPort: raw,
     };
     // SAFETY: the structure is the one the information class names, at its size; the job and
     // the port are open.
@@ -369,51 +386,53 @@ fn listen_for_births(job: HANDLE, births: &Arc<Mutex<Births>>) -> Option<HANDLE>
             size_of::<JOBOBJECT_ASSOCIATE_COMPLETION_PORT>() as u32,
         )
     };
-    let births = Arc::clone(births);
-    let owned = Port(port);
-    let started = set != 0
-        && std::thread::Builder::new()
-            .name("cf-panes-job-births".to_owned())
-            .spawn(move || {
-                let owned = owned;
-                read_births(owned.0, &births);
-                // SAFETY: the listener owns the port, and closes it once.
-                unsafe { CloseHandle(owned.0) };
-            })
-            .is_ok();
-    if started {
-        Some(port)
-    } else {
-        // SAFETY: nothing else has the port.
-        unsafe { CloseHandle(port) };
-        None
+    if set == 0 {
+        return None;
     }
+    let (listener, births) = (Arc::clone(&port), Arc::clone(births));
+    std::thread::Builder::new()
+        .name("cf-panes-job-births".to_owned())
+        .spawn(move || read_births(&listener, &births))
+        .ok()
+        .map(|_| port)
 }
 
 /// Reads the messages of the job's port until it is told to stop.
-fn read_births(port: HANDLE, births: &Mutex<Births>) {
+fn read_births(port: &Port, births: &Mutex<Births>) {
     loop {
         let (mut message, mut key, mut overlapped) = (0u32, 0usize, ptr::null_mut::<OVERLAPPED>());
-        // SAFETY: the port is open; the three are writable.
+        // SAFETY: the port is open, for the listener holds it; the three are writable.
         let got = unsafe {
-            GetQueuedCompletionStatus(port, &mut message, &mut key, &mut overlapped, u32::MAX)
+            GetQueuedCompletionStatus(port.0, &mut message, &mut key, &mut overlapped, u32::MAX)
         };
         if got == 0 && overlapped.is_null() {
-            // The port was closed or broke: nothing more will be told.
+            // The wait failed: nothing more will be told.
             return;
         }
         if key == STOP {
             return;
         }
-        if got != 0 && message == JOB_OBJECT_MSG_NEW_PROCESS {
-            // The process's number, in the place of the pointer.
-            let pid = overlapped as usize as u32;
-            if let Some((began, by_a_shell)) = read_birth(pid) {
-                births
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .record(pid, began, by_a_shell);
+        if got == 0 {
+            continue;
+        }
+        // The process's number, in the place of the pointer.
+        let pid = overlapped as usize as u32;
+        match message {
+            JOB_OBJECT_MSG_NEW_PROCESS => {
+                if let Some((began, by_a_shell)) = read_birth(pid) {
+                    births
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .record(pid, began, by_a_shell);
+                }
             }
+            // The birth of a process that ended is of no use to anyone, and a number may be
+            // given to another.
+            JOB_OBJECT_MSG_EXIT_PROCESS | JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS => births
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .forget(pid),
+            _ => {}
         }
     }
 }

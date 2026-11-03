@@ -160,9 +160,10 @@ pub(crate) struct Baseline {
     rests: VecDeque<(u64, HashSet<ProcessKey>)>,
     /// The number the next rest is given.
     next_rest: u64,
-    /// The detached work the tree had when the latest turn was marked, by what a look before
-    /// the mark named: the turns after the one it was detached in do not forget it
-    /// ([`Baseline::detached`]).
+    /// The detached work the tree had when the latest turn was marked, as the look at the mark
+    /// named it: the turns after the one it was detached in do not forget it, and the host proves
+    /// it again whenever it names it ([`Baseline::detached`], [`Baseline::named`]). Only what runs
+    /// at a mark is kept, so it is bounded by the tree.
     carried: HashSet<ProcessKey>,
     /// What was seen to descend from a process of the harness's own at the latest
     /// look, and runs still: kept for the day the process that started it has gone. It
@@ -175,11 +176,21 @@ impl Baseline {
     /// the window's harness keeps its servers ([`Kept::of`]) and `harness` which
     /// harness it is.
     pub fn mark(&mut self, tree: &[Member], kept: Option<Kept>, harness: Option<String>) {
+        // What the turn that ends here left detached is carried into the next one: every paste
+        // marks a turn (a tell, the words of a resume), and a job the agent detached before it
+        // is the window's still (T-1153's D1). What ended is let go of by this, and a process
+        // that took its number is another's.
+        let carried: HashSet<ProcessKey> = self
+            .detached(tree)
+            .iter()
+            .map(|member| member.key)
+            .collect();
         let now: HashSet<ProcessKey> = tree.iter().map(|member| member.key).collect();
         if self.before.is_none() {
             self.launch.clone_from(&now);
         }
         self.before = Some(now);
+        self.carried = carried;
         self.kept = kept;
         self.harness = harness;
         // What the harness has now is its own, whatever becomes of what started it.
@@ -336,18 +347,21 @@ impl Baseline {
     }
 
     /// The work of `tree` that was detached from the turn, oldest first: a process that began
-    /// after the mark, is none of the harness's own and has lost the process that started it,
-    /// with what descends from it ([`work::detached`], which says what it cannot tell). It is the
-    /// window's where the tree holds it and not the turn's by a chain; nothing ends it but the
-    /// window's close. The host names none where no turn was marked.
+    /// after the mark (or was detached work at the mark before it: [`Baseline::mark`] carries it),
+    /// is none of the harness's own and has lost the process that started it, with what descends
+    /// from it ([`work::detached`], which says what it cannot tell). It is the window's where the
+    /// tree holds it and not the turn's by a chain; nothing ends it but the window's close. The
+    /// host names none where no turn was marked.
     pub fn detached(&self, tree: &[Member]) -> Vec<Member> {
         let Some(before) = &self.before else {
             return Vec::new();
         };
         let protected = self.protected(tree);
-        // What the tree had when the turn began, and what began after.
-        let (_, started): (Vec<&Member>, Vec<&Member>) =
-            tree.iter().partition(|member| before.contains(&member.key));
+        // What the tree had when the turn began and was not carried from the turn before, and
+        // the rest: what began after, and the work the turns before left detached.
+        let (_, started): (Vec<&Member>, Vec<&Member>) = tree.iter().partition(|member| {
+            before.contains(&member.key) && !self.carried.contains(&member.key)
+        });
         let detached = work::detached(&started, &protected);
         let mut jobs: Vec<Member> = started
             .into_iter()

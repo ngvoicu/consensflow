@@ -12,14 +12,20 @@
 //! was a shell. A process the host has no birth for, or one whose starter could not be read,
 //! is not proved: the host names less.
 //!
-//! The record is bounded ([`BIRTHS`]); the oldest is let go of first, and a process whose
-//! birth was let go of is not proved.
+//! **A birth is kept for as long as its process runs** (T-1153's D2): the job tells its port of
+//! each exit too (`JOB_OBJECT_MSG_EXIT_PROCESS`, `ABNORMAL_EXIT_PROCESS`), and the birth is let
+//! go of then ([`Births::forget`]). A server the agent leaves at the beginning of a day's work
+//! keeps its birth through any number of short-lived processes (a test run starts one for each
+//! test). The record is bounded all the same ([`BIRTHS`]), as a backstop for an exit that was not
+//! told: the one recorded longest ago is let go of first, a number recorded again counting as
+//! recorded now, and a process whose birth was let go of is not proved.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 
 use super::ProcessKey;
 
-/// How many births are kept: more than a window's processes in a day's work.
+/// How many births are kept at most: more than the processes a window has at once, in any
+/// day's work.
 const BIRTHS: usize = 8192;
 
 /// What was read of a process as it joined the job.
@@ -30,14 +36,18 @@ struct Birth {
     began: u64,
     /// Whether the process that started it was a shell, read as it began.
     started_by_a_shell: bool,
+    /// When it was recorded, in the record's own order.
+    recorded: u64,
 }
 
 /// The births of a job's processes.
 #[derive(Debug)]
 pub(crate) struct Births {
     by_number: HashMap<u32, Birth>,
-    /// The numbers, oldest first, for letting go of them.
-    order: VecDeque<u32>,
+    /// The numbers by when each was recorded, oldest first, for letting go of them.
+    order: BTreeMap<u64, u32>,
+    /// What the next record is numbered.
+    next: u64,
     /// How many are kept at most.
     cap: usize,
 }
@@ -53,36 +63,43 @@ impl Births {
     pub fn with_cap(cap: usize) -> Self {
         Self {
             by_number: HashMap::new(),
-            order: VecDeque::new(),
+            order: BTreeMap::new(),
+            next: 0,
             cap,
         }
     }
 
     /// A process joined the job: it is `pid`, it began at `began`, and the process that started
-    /// it was, or was not, a shell. A number that is recorded again is the newer process's.
+    /// it was, or was not, a shell. A number that is recorded again is the newer process's, and
+    /// goes to the back of the line to be let go of.
     pub fn record(&mut self, pid: u32, began: u64, started_by_a_shell: bool) {
-        if self
-            .by_number
-            .insert(
-                pid,
-                Birth {
-                    began,
-                    started_by_a_shell,
-                },
-            )
-            .is_none()
-        {
-            self.order.push_back(pid);
-        }
+        self.forget(pid);
+        let recorded = self.next;
+        self.next += 1;
+        self.by_number.insert(
+            pid,
+            Birth {
+                began,
+                started_by_a_shell,
+                recorded,
+            },
+        );
+        self.order.insert(recorded, pid);
         while self.order.len() > self.cap {
-            if let Some(oldest) = self.order.pop_front() {
-                self.by_number.remove(&oldest);
-            }
+            let Some((_, oldest)) = self.order.pop_first() else {
+                break;
+            };
+            self.by_number.remove(&oldest);
         }
     }
 
-    /// The process `pid` exited: its birth is let go of.
-    pub fn forget(&mut self, _pid: u32) {}
+    /// The process `pid` exited: its birth is let go of. A number nothing was recorded for is no
+    /// matter.
+    pub fn forget(&mut self, pid: u32) {
+        if let Some(birth) = self.by_number.remove(&pid) {
+            self.order.remove(&birth.recorded);
+        }
+    }
 
     /// Whether the process `key` names was started by a shell, as it was read when it began:
     /// false for a process whose birth is not kept, or is of another process of its number.

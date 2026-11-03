@@ -47,7 +47,9 @@
 //!   runs in the background for its agent and keeps the shell of). What it left is
 //!   *detached work* ([`detached`]) where the tree holds it. **Where the tree does not hold
 //!   it, nothing names it**: on the Mac a job that left the window's session (`setsid`, and
-//!   the shells of Claude Code and Pi, which lead sessions of their own) with its shell gone,
+//!   the tool shells of Claude Code, Pi and Devin, which lead sessions of their own: their
+//!   `nohup … &` jobs are in a session of their own once the shell has ended, T-1068's logs
+//!   show a terminal of `??`) with its shell gone,
 //!   whose program is a system binary (`sleep`, `ping`: no environment to read a marker
 //!   from) and which no look saw under the window's program, has no tie to the window left
 //!   (its session leader and its parent have gone, and the system keeps no record of who
@@ -56,7 +58,13 @@
 //!   the Endpoint Security framework needs an entitlement a ConsensFlow build does not
 //!   have. Such a job survives the window's close too, so a pause that closed the window
 //!   ended nothing of it, and a marker that can be read names it as possibly the window's
-//!   (`possibly_left`). On Windows no such job exists: the pane's job holds what a
+//!   (`possibly_left`). **This stays the written limit** (T-1100, answer A, 2026-11-03): the
+//!   kernel's "responsible process" of a process survives `setsid`, a double fork and a
+//!   system binary, and a program spawned with `responsibility_spawnattrs_setdisclaim` is
+//!   its own, so the job would read as the window's program's; that costs the TCC
+//!   attribution of the harness (a prompt in a window nobody watches) and a hand-rolled
+//!   `posix_spawn` for all five harnesses in place of portable-pty's fork path, too much
+//!   for 3.0.7. On Windows no such job exists: the pane's job holds what a
 //!   process starts wherever it goes. What it cannot prove there is a job whose starter was
 //!   not read as a shell: `cmd.exe /c start …` (`cmd.exe` is no shell here), one started
 //!   by a service (`schtasks`, a WMI call), and one whose birth the job's port did not tell.
@@ -148,8 +156,8 @@ fn descends_from_a_shell(member: &Member, started: &HashMap<ProcessKey, &Member>
     false
 }
 
-/// The processes of `started`, which began after the turn's mark, that are **detached
-/// work**: a job whose starter has gone, and what descends from it. Each is not in
+/// The processes of `started`, which began after the turn's mark or were detached work at an
+/// earlier turn's ([`super::Baseline::mark`] carries them), that are **detached work**: a job whose starter has gone, and what descends from it. Each is not in
 /// `protected` (what is never the turn's, with whatever descends from it), and the walk up
 /// from it, through the parents that began after the mark, ends at a process that has no
 /// parent at all: the one that started it is no process of the tree any longer

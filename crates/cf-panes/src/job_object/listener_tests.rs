@@ -42,18 +42,30 @@ fn handles() -> u32 {
     count
 }
 
+/// A PowerShell that is put in a job a moment after it starts, ended and waited for when it is
+/// dropped.
+struct Shell(std::process::Child);
+
+impl Drop for Shell {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// A PowerShell that is put in `job` a moment after it starts, running `script` after it has
 /// slept for two seconds (a child it started in the first instant would escape the job).
-fn a_shell_in(job: &JobObject, script: &str) -> std::process::Child {
+fn a_shell_in(job: &JobObject, script: &str) -> Shell {
     let shell = Command::new(system(r"WindowsPowerShell\v1.0\powershell.exe"))
         .args(["-NoProfile", "-NonInteractive", "-Command"])
         .arg(format!("Start-Sleep 2; {script}"))
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .unwrap();
+    let shell = Shell(shell);
     // SAFETY: both handles are open, the process's one until `shell` is dropped.
     let assigned =
-        unsafe { AssignProcessToJobObject(job.handle(), shell.as_raw_handle() as HANDLE) };
+        unsafe { AssignProcessToJobObject(job.handle(), shell.0.as_raw_handle() as HANDLE) };
     assert_ne!(assigned, 0, "{}", io::Error::last_os_error());
     shell
 }
@@ -72,7 +84,7 @@ fn a_birth_of_a_server_that_runs_is_kept_while_more_short_lived_processes_than_t
     let ping = system("PING.EXE");
     let cmd = system("cmd.exe");
     let job = JobObject::with_births(Births::with_cap(8)).unwrap();
-    let mut shell = a_shell_in(
+    let _shell = a_shell_in(
         &job,
         &format!(
             "Start-Process -WindowStyle Hidden -FilePath '{ping}' -ArgumentList '-n','1009','127.0.0.1'; \
@@ -100,7 +112,6 @@ fn a_birth_of_a_server_that_runs_is_kept_while_more_short_lived_processes_than_t
         job.started_by_a_shell(server.key),
         "the birth of a server that runs was let go of"
     );
-    let _ = shell.kill();
     let _ = std::fs::remove_dir_all(&folder);
 }
 
