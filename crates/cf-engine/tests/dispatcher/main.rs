@@ -64,6 +64,7 @@ mod final_answer;
 mod first_delivered;
 mod fixtures;
 mod follow_ups;
+mod harness_dialogs;
 mod held_at_work;
 mod interrupts;
 mod lanes;

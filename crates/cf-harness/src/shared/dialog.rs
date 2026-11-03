@@ -1,0 +1,200 @@
+//! A dialog of a harness's own that waits for a key, read off a window's screen by its shape:
+//! a list of choices, one of them marked by the harness's cursor (`❯`, `›`, `▶`, `→`, `>`), the
+//! others aligned with it or numbered after it, and above them the words it opens with, a
+//! question where it asks one. Claude Code 2.1.317 draws its offers so ("LSP plugin
+//! recommendation", "Would you like to install this LSP plugin?", `❯ Yes, install` and three
+//! more), as it draws its permission prompts, its usage-limit choices and its surveys; Codex
+//! 0.166 draws its own with `›` and numbers. None of them is in the conversation's record, and
+//! only the screen shows them (T-1183).
+//!
+//! The reader names what it found and leaves the judging to its caller: the lines below the
+//! choices ([`Shown::below`]: where the harness's prompt is drawn there, the choices are a
+//! conversation's words, or the box's own text), and whether the words above them ask anything
+//! ([`Dialog::asks`]). A screen with no cursor on a line of choices, or with fewer than two
+//! choices, shows none.
+
+use super::input_box::is_rule;
+use crate::contract::Dialog;
+
+/// The glyphs a harness marks the choice its Enter would take with.
+const CURSORS: [char; 6] = ['❯', '›', '▶', '►', '→', '>'];
+
+/// The characters of the frame a harness draws round a dialog, taken off both ends of a line.
+const FRAME: [char; 14] = [
+    '│', '┃', '║', '╭', '╮', '╰', '╯', '─', '━', '═', '┌', '┐', '└', '┘',
+];
+
+/// How many lines above its choices a dialog's words are looked for.
+const WORDS_ABOVE: usize = 8;
+
+/// What a screen shows of a dialog: the dialog, and what the reader's caller judges it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Shown {
+    pub(crate) dialog: Dialog,
+    /// The lines below the last choice: where the harness's prompt may be drawn.
+    pub(crate) below: Vec<String>,
+}
+
+/// A line without its frame and the spaces inside it, as wide as it was drawn: the frame's
+/// characters at its start become spaces, so a choice keeps the column it was drawn at.
+fn unframed(line: &str) -> String {
+    let start = line
+        .char_indices()
+        .find(|(_, at)| !at.is_whitespace() && !FRAME.contains(at))
+        .map_or(line.len(), |(at, _)| at);
+    let (frame, rest) = line.split_at(start);
+    let rest = rest.trim_end_matches(|at: char| at.is_whitespace() || FRAME.contains(&at));
+    " ".repeat(frame.chars().count()) + rest
+}
+
+/// The column of a line's first character that is not a space, in characters.
+fn indent(line: &str) -> Option<usize> {
+    line.chars().position(|at| !at.is_whitespace())
+}
+
+/// A choice's words without the number a harness draws before it (`1.`, `2)`): the number,
+/// where there is one.
+fn numbered(words: &str) -> (Option<u32>, &str) {
+    let digits = words.chars().take_while(char::is_ascii_digit).count();
+    if (1..=2).contains(&digits) {
+        let rest = &words[digits..];
+        if let Some(after) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+            return (words[..digits].parse().ok(), after.trim());
+        }
+    }
+    (None, words)
+}
+
+/// The line `line` as the harness's cursor on a choice: the column its words start at, and
+/// the words. None where it is no such line: a cursor with nothing after it is an empty box.
+fn cursor_on(line: &str) -> Option<(usize, String)> {
+    let at = indent(line)?;
+    let rest: String = line.chars().skip(at).collect();
+    let first = rest.chars().next()?;
+    if !CURSORS.contains(&first) {
+        return None;
+    }
+    let after = &rest[first.len_utf8()..];
+    let words = after.trim_start();
+    // A cursor glued to its words is no cursor (`>=`, `->`), and a lone one is a box.
+    if words.is_empty() || after.len() == words.len() {
+        return None;
+    }
+    let column = at + 1 + (after.chars().count() - words.chars().count());
+    words
+        .chars()
+        .next()
+        .is_some_and(char::is_alphanumeric)
+        .then(|| (column, words.trim_end().to_owned()))
+}
+
+/// The dialog the bottom of `screen` shows, where it shows one: its lowest line of choices
+/// with the harness's cursor on one, and the words above it.
+pub(crate) fn read(screen: &[String]) -> Option<Shown> {
+    let lines: Vec<String> = screen.iter().map(|line| unframed(line)).collect();
+    let (at, (column, chosen)) = lines
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(at, line)| cursor_on(line).map(|cursor| (at, cursor)))?;
+    // The choices aligned with the chosen one, above it and below, up to a line that is
+    // neither a choice nor one of a choice's own (a description drawn further in).
+    let choice = |line: &str| -> Option<Option<String>> {
+        let start = indent(line)?;
+        let words: String = line.chars().skip(start).collect();
+        match start.cmp(&column) {
+            // A line drawn where the choices are that says no words (a footer's `⏵⏵`, a
+            // frame) ends them.
+            std::cmp::Ordering::Equal if words.starts_with(char::is_alphanumeric) => {
+                Some(Some(words.trim_end().to_owned()))
+            }
+            std::cmp::Ordering::Greater => Some(None),
+            _ => None,
+        }
+    };
+    let mut first = at;
+    let mut above = Vec::new();
+    while first > 0 {
+        match choice(&lines[first - 1]) {
+            Some(words) => {
+                above.extend(words);
+                first -= 1;
+            }
+            None => break,
+        }
+    }
+    above.reverse();
+    // An input box is drawn under a rule across the screen, its mark on its first line (Claude
+    // Code's `❯`, Devin's `❭`): what it holds, a line or more, is no choice (`input_box`).
+    if first == at && first > 0 && is_rule(&screen[first - 1]) {
+        return None;
+    }
+    let mut last = at;
+    let mut below = Vec::new();
+    while last + 1 < lines.len() {
+        match choice(&lines[last + 1]) {
+            Some(words) => {
+                below.extend(words);
+                last += 1;
+            }
+            None => break,
+        }
+    }
+    let mut options: Vec<String> = above;
+    options.push(chosen);
+    options.extend(below);
+    // Choices that a harness numbers are numbered from one, in their order.
+    let numbers: Vec<Option<u32>> = options.iter().map(|words| numbered(words).0).collect();
+    if numbers.iter().any(Option::is_some) {
+        let counted = numbers
+            .iter()
+            .enumerate()
+            .all(|(at, number)| *number == u32::try_from(at + 1).ok());
+        if !counted {
+            return None;
+        }
+    }
+    let options: Vec<String> = options
+        .iter()
+        .map(|words| numbered(words).1.to_owned())
+        .collect();
+    if options.len() < 2 {
+        return None;
+    }
+    // The words it opens with: the nearest line above the choices that asks, or else the
+    // nearest that says anything.
+    let words: Vec<&str> = lines[first.saturating_sub(WORDS_ABOVE)..first]
+        .iter()
+        .rev()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+    let question = words.iter().find(|line| asks(line));
+    let (question, asks) = match question {
+        Some(question) => ((*question).to_owned(), true),
+        None => ((*words.first()?).to_owned(), false),
+    };
+    Some(Shown {
+        dialog: Dialog {
+            question,
+            options,
+            asks,
+            prompt_below: false,
+            closes_after_s: None,
+        },
+        below: screen[last + 1..].to_vec(),
+    })
+}
+
+/// Whether `line` asks: it ends in a question mark, or in one and a word in brackets
+/// ("How is Claude doing this session? (optional)").
+fn asks(line: &str) -> bool {
+    let line = line.trim_end();
+    line.ends_with('?')
+        || line
+            .rfind("? (")
+            .is_some_and(|at| line.ends_with(')') && line.len() - at < 24)
+}
+
+#[cfg(test)]
+mod tests;

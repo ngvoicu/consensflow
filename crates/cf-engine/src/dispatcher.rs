@@ -1172,6 +1172,14 @@ impl Dispatcher {
                 return Ok(());
             }
         };
+        // A dialog of its harness's that waits for a key is told of, and one only its screen
+        // shows holds the window as one its harness says it waits on (`dialogs`).
+        let observed = self
+            .watch_dialog(project, participant, record, observed)
+            .await?;
+        if self.forgotten(record) {
+            return Ok(());
+        }
         record.delivery.borrow_mut().lost = observed.lost().len();
         // Which look this is, for a rest to be read over looks that follow each other.
         let looked = self.looked(record);

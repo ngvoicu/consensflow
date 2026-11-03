@@ -58,6 +58,9 @@ pub struct FakeHost {
     /// The panes the engine looked at for how long they had printed nothing
     /// ([`EngineHost::quiet`]), in order.
     quiet_looks: RefCell<Vec<Pane>>,
+    /// The panes the engine looked at for a dialog of their harness
+    /// ([`EngineHost::screen`]), in order.
+    screen_looks: RefCell<Vec<Pane>>,
     /// What every exit says besides which pane ended
     /// ([`FakeHost::exits_showing`]): the program's code and signal, and the
     /// lines its screen ended with.
@@ -215,6 +218,12 @@ impl FakeHost {
     /// trace.
     pub fn quiet_looks(&self) -> Vec<Pane> {
         self.quiet_looks.borrow().clone()
+    }
+
+    /// The panes the engine looked at for a dialog of their harness, in order
+    /// ([`EngineHost::screen`]): no call of Node's host, so not among the requests.
+    pub fn screen_looks(&self) -> Vec<Pane> {
+        self.screen_looks.borrow().clone()
     }
 
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
@@ -467,6 +476,19 @@ impl EngineHost for FakeHost {
             .get("outputQuietMs")
             .and_then(Value::as_f64);
         Box::pin(async move { Ok(quiet) })
+    }
+
+    /// What the test set the screen to show ([`FakeHost::set_snapshot`]), its `ok` and all, as
+    /// `pane.snapshot` answers it. Answered at once, in no turn of its own, and written down
+    /// nowhere but [`FakeHost::screen_looks`]: Node's host had no such look.
+    fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>> {
+        self.screen_looks.borrow_mut().push(pane.clone());
+        let mut answer = Map::new();
+        answer.insert("ok".to_owned(), Value::Bool(true));
+        answer.extend(self.snapshot.borrow().clone());
+        // The lines as drawn go only to a request that asks for them (`request`): this asks none.
+        answer.remove("bottom");
+        Box::pin(async move { Ok(Value::Object(answer)) })
     }
 }
 

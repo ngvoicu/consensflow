@@ -80,8 +80,9 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, Dialog, DialogSign, FirstMessage, Held, Input, Launch, Observed, Over,
+    Pane, PaneHost, Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting,
+    Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Boundary, Options, Reading, Settlement};
@@ -93,6 +94,26 @@ use crate::shared::record_state::{observed_from, switched_to};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
 use crate::shared::{compacting, pane, specmint, window_args};
+
+/// What every window's Claude Code is started with in its environment, for its launch alone:
+/// no survey of its own (Claude Code 2.1.317's session survey "How is Claude doing this
+/// session?", its memory and plugin ratings), which waits under the prompt for a digit
+/// nobody in the window types (T-1183). It is the one switch of its offers a launch can give:
+/// the offer to install an LSP plugin, and a command's hint to install one, are turned off only
+/// in the owner's own `~/.claude.json` (`lspRecommendationDisabled`, `claudeCodeHints`), which
+/// ConsensFlow never writes; they close by themselves after 30 s, and the engine tells of them
+/// meanwhile (`dialogs`).
+const QUIET: [(&str, &str); 1] = [("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1")];
+
+/// The questions of Claude Code's offers to install a plugin (2.1.317): of an LSP plugin, for a
+/// file of an extension a marketplace has one for, and of a plugin a command's output hints at.
+const OFFERS_CLOSING: [&str; 2] = [
+    "Would you like to install this LSP plugin?",
+    "Would you like to install it?",
+];
+
+/// The seconds after which Claude Code closes those offers by itself (`Zlt=30000`).
+const OFFER_CLOSES_AFTER_S: u32 = 30;
 
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
@@ -204,7 +225,10 @@ impl Adapter for ClaudeAdapter {
             argv.extend(invocation.args);
             Ok(Prepared {
                 argv,
-                env: Vec::new(),
+                env: QUIET
+                    .iter()
+                    .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+                    .collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()
@@ -513,6 +537,37 @@ impl Window for ClaudeWindow {
 
     fn shows_prompt(&self, screen: &[String]) -> bool {
         super::trust::shows_prompt(screen)
+    }
+
+    /// Claude Code's offers to install a plugin close by themselves after 30 s, answered
+    /// "timeout" (an LSP plugin, which counts it as ignored) or "no" (a command's hint), as
+    /// 2.1.317's dialog of them draws them (`Zlt=30000`).
+    fn dialog(&self, screen: &[String]) -> Option<Dialog> {
+        let shown = crate::shared::dialog::read(screen)?;
+        let closes_after_s = OFFERS_CLOSING
+            .contains(&shown.dialog.question.as_str())
+            .then_some(OFFER_CLOSES_AFTER_S);
+        Some(Dialog {
+            prompt_below: self.shows_prompt(&shown.below),
+            closes_after_s,
+            ..shown.dialog
+        })
+    }
+
+    /// Claude Code's status says `waiting` while any dialog of its own is open, and why
+    /// (2.1.317's table of its dialogs): "input needed" for its question tool, which is the
+    /// board's to answer in a member's window and the human's in the chief's; every other
+    /// reason ("dialog open", "permission prompt", "sandbox request", "goal proposal") is a
+    /// dialog of Claude Code's that waits for a key, an offer to install a plugin among them
+    /// (T-1183). A window whose status says nothing of a dialog is left to the screen.
+    fn dialog_sign(&self, observed: &Observed) -> DialogSign {
+        match &observed.waiting {
+            Some(Waiting { reason }) if reason.as_deref() == Some(status::QUESTION_TOOL) => {
+                DialogSign::Shut
+            }
+            Some(_) => DialogSign::Open,
+            None => DialogSign::Screen,
+        }
     }
 
     fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {

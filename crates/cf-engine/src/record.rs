@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use crate::chief_switch::PendingSwitch;
 use crate::deliveries::DeliveryPart;
+use crate::dialogs::DialogWatch;
 use crate::runtime::Hold;
 use crate::scheduler::QuotaPart;
 use crate::transcripts::Copied;
@@ -31,6 +32,8 @@ pub(crate) struct Record {
     /// What its task is held for while its turn's work runs in the background
     /// (`turn_end`).
     pub(crate) held: RefCell<HeldPart>,
+    /// What the looks found of a dialog of its harness's that waits for a key (`dialogs`).
+    pub(crate) dialog: RefCell<DialogWatch>,
 }
 
 impl Record {
@@ -45,6 +48,7 @@ impl Record {
             copied: RefCell::new(None),
             pending_switch: RefCell::new(None),
             held: RefCell::new(HeldPart::default()),
+            dialog: RefCell::new(DialogWatch::default()),
         })
     }
 }

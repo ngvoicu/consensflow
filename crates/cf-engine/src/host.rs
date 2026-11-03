@@ -10,6 +10,7 @@
 //! that came before its open's answer is known by the time the answer is.
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
+use serde_json::Value;
 
 /// What a pane is opened with (`pane.open`): the window's pane, the folder its
 /// program starts in, the program and its arguments, the environment the
@@ -61,4 +62,10 @@ pub trait EngineHost: PaneHost {
     /// It is a read of the screen and changes nothing: the Node traces, which hold every
     /// call of the host the engine makes, have none of it, so a fake writes none down.
     fn quiet<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Option<f64>, HostError>>;
+    /// What `pane`'s screen shows now: the host's `pane.snapshot` of its last
+    /// [`cf_proto::panes::TAIL_LINES`] lines, as it answers it. The engine's look for a dialog
+    /// of the window's harness that waits for a key (`Dispatcher::watch_dialog`, T-1183). A
+    /// read of the screen that changes nothing, which the Node traces have none of, as
+    /// [`EngineHost::quiet`].
+    fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>>;
 }

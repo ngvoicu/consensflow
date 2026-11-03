@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, InputBox, Observed, Over, Pane, PaneHost, Question, Readiness, Trusts,
-    Waiting, Window, Work, NOT_ADMITTED,
+    Admission, DialogSign, Held, InputBox, Observed, Over, Pane, PaneHost, Question, Readiness,
+    Trusts, Waiting, Window, Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Settlement};
 use serde_json::{json, Value};
@@ -36,6 +36,9 @@ pub const TRUST_UNPLACED: &str = "Do you trust this folder? (a test's question, 
 pub const TRUST_QUOTED: &str = "Yes, I trust this folder / No, exit (a test's quote of them)";
 /// The line a test window's screen shows while its harness compacts its conversation.
 pub const COMPACTING: &str = "• Compacting the conversation (a test's compaction)";
+/// Why a test window waits where its harness says a dialog of its own is open, as Claude
+/// Code's status says one ([`DialogSign::Open`]); any other reason is its own question's.
+pub const DIALOG_OPEN: &str = "dialog open (a test's harness dialog)";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -146,6 +149,17 @@ impl Window for FakeWindow {
 
     fn compacting(&self, screen: &[String]) -> bool {
         holds(screen, COMPACTING)
+    }
+
+    /// Its harness says a dialog of its own is open where the window waits for
+    /// [`DIALOG_OPEN`]; any other wait is its own question's, and no wait leaves it to the
+    /// screen.
+    fn dialog_sign(&self, observed: &Observed) -> DialogSign {
+        match &observed.waiting {
+            Some(waiting) if waiting.reason.as_deref() == Some(DIALOG_OPEN) => DialogSign::Open,
+            Some(_) => DialogSign::Shut,
+            None => DialogSign::Screen,
+        }
     }
 
     fn follow(&self, session: &str) {

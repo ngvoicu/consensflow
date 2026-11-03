@@ -21,6 +21,7 @@ mod chief_switch;
 pub mod computer_use;
 mod deliveries;
 pub mod delivery_text;
+mod dialogs;
 pub mod dispatcher;
 pub mod handoff;
 pub mod host;

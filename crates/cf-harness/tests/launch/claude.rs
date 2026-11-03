@@ -32,6 +32,7 @@ mod agents;
 mod closed_at_rest;
 mod compact_cancelled;
 mod compaction_window;
+mod dialogs;
 mod moves;
 mod outside;
 mod relaunched;
@@ -322,7 +323,16 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_tas
     // process on the machine reads a command line.
     assert_eq!(plan.argv, argv);
     assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
-    assert!(plan.env.is_empty(), "cf stays usable inside the window");
+    // Nothing of the window's environment moves its PATH, so cf stays usable inside it; its
+    // one variable turns Claude Code's surveys off (T-1183).
+    assert_eq!(
+        plan.env,
+        [(
+            "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY".to_owned(),
+            "1".to_owned()
+        )],
+        "cf stays usable inside the window"
+    );
     assert_eq!(plan.drop_env, ["ANTHROPIC_API_KEY"]);
     let written: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
     assert_eq!(written["permissions"]["defaultMode"], "bypassPermissions");

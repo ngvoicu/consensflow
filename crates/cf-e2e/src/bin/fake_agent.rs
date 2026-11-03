@@ -61,6 +61,9 @@
 //! Escape in that time cancels it as Claude Code 2.1.310 does: the words before a
 //! command, a sibling of the bare command, and no more, and the `/compact` put back in
 //! its input box, where what is pasted next goes after it.
+//! A message with a line `LSP-OFFER <seconds>` offers to install an LSP plugin as its turn
+//! works, its status `waiting` on the dialog that long, and one with a line `SURVEY` draws
+//! the session survey unless the window's environment turns surveys off (`offers`).
 //!
 //! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
 //! or `<member> <milliseconds>` for that member's windows alone) continues by
@@ -108,6 +111,8 @@ mod images;
 mod input_box;
 #[path = "fake_agent/noise.rs"]
 mod noise;
+#[path = "fake_agent/offers.rs"]
+mod offers;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -754,6 +759,13 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     }
     if text.lines().any(|line| line.starts_with("TORN ")) {
         tear(records, pid, window).map_err(failed)?;
+    }
+    // Claude Code's offers that wait for a key, drawn as the turn works (`offers`).
+    if offers::survey_in(text) {
+        offers::survey().map_err(failed)?;
+    }
+    if let Some(open) = offers::offer_in(text) {
+        offers::offer(records, pid, open).map_err(failed)?;
     }
     // What it did before it answers: the steps a worker's progress is, among them the call
     // that runs a job in the background or arms a monitor, and what it answers.

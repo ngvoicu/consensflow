@@ -22,6 +22,10 @@ pub(super) struct Status {
     pub(super) state: State,
 }
 
+/// What Claude Code's status says a window waits on while its question tool's dialog is open
+/// (`waitingFor`, 2.1.317): the window's own question, never a dialog of Claude Code's (T-1183).
+pub(super) const QUESTION_TOOL: &str = "input needed";
+
 /// Whether a Claude is at work, at its prompt, or waiting on its own dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum State {

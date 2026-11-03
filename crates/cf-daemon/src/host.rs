@@ -24,6 +24,7 @@ use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::{Role, DEADLINE};
 use cf_proto::panes::{
     Background, CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
+    TAIL_LINES,
 };
 use serde_json::{json, Map, Value};
 
@@ -119,6 +120,18 @@ impl EngineHost for BridgeHost {
                 .map_err(host_error)
         })
     }
+
+    fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>> {
+        let sent = self
+            .bridge
+            .request("pane.snapshot", screen_request(pane), None);
+        Box::pin(async move { sent.await.map_err(host_error) })
+    }
+}
+
+/// The `pane.snapshot` of a pane's last lines, for the engine's look at its screen.
+fn screen_request(pane: &Pane) -> Value {
+    json!({ "id": pane.id, "generation": pane.generation, "tail": TAIL_LINES })
 }
 
 /// How long the host says a pane has printed nothing: its `pane.snapshot`'s
