@@ -989,15 +989,54 @@ mod tests {
     /// The first message of a fresh window whose brief says `brief_words`, a message m-12
     /// ("Use JSON") behind it: the brief it is given first, and the whole of its paste.
     fn launched_behind(brief_words: &str) -> (String, String) {
+        launched_behind_saying(brief_words, "Use JSON")
+    }
+
+    /// The same, the message m-12 saying `message_words`.
+    fn launched_behind_saying(brief_words: &str, message_words: &str) -> (String, String) {
         let brief = message(5, Some(3), brief_words.to_owned());
         let first = brief_first(&brief, &[], &CfWord::bare());
         let answer = delivery_text(
-            &message(12, Some(3), "Use JSON".to_owned()),
+            &message(12, Some(3), message_words.to_owned()),
             &[],
             &CfWord::bare(),
         );
         let paste = format!("{first}{answer}");
         (first, paste)
+    }
+
+    /// The picture the message names and not the brief, or both: the placeholders are the
+    /// paste's, whoever's pictures they stand for, and the brief is matched as before with
+    /// the blank line it had.
+    #[test]
+    fn a_picture_the_message_names_leaves_the_brief_before_it_matched_as_it_was() {
+        // (the brief, the message, the lines Claude attached)
+        let rows: [(&str, &str, &[usize]); 2] = [
+            ("Write the parser", "Look\n/work/images/shot.png", &[5]),
+            (
+                "Write the parser\n/work/images/desk.png",
+                "Look\n/work/images/shot.png",
+                &[2, 6],
+            ),
+        ];
+        for (at, (brief_words, message_words, taken)) in rows.into_iter().enumerate() {
+            let (first, paste) = launched_behind_saying(brief_words, message_words);
+            let record = claude_records(&paste, taken);
+            let dropped: Vec<&str> = record
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .collect();
+            for (record, blanks) in [(record.clone(), "kept"), (dropped.join("\n"), "dropped")] {
+                assert!(
+                    is_paste_of(&record, 12, Some(&first)),
+                    "row {at}, blank lines {blanks}: {record:?}"
+                );
+                assert!(
+                    !is_paste_of(&record, 12, None),
+                    "row {at}, blank lines {blanks}: no brief given first"
+                );
+            }
+        }
     }
 
     /// The first message of a fresh window is its paste behind the brief it was given

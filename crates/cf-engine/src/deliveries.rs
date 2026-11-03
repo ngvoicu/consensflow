@@ -515,18 +515,24 @@ impl Dispatcher {
             // mark goes only once the ledger has it: a write that failed leaves it,
             // for the next pass to ask again (the same, round 12).
             // An item the paste begins, as only a paste proves it arrived
-            // (`is_paste_of`): a header quoted in other words proves nothing.
+            // (`is_paste_of`): a header quoted in other words proves nothing. A launch's
+            // first message was pasted behind the brief its fresh window was given first,
+            // and the item the human's Enter made begins with that (T-812).
+            let found = self.seams.ledger.borrow().message(stale.message)?;
+            let first = match &found {
+                Some(found) => self.brief_given_first(found)?,
+                None => None,
+            };
             let copied = self
                 .seams
                 .ledger
                 .borrow()
                 .copied_items_since(record.id, &marker_of(stale.message), &stale.since)?
                 .into_iter()
-                .find(|(_, text)| is_paste_of(text, stale.message, None))
+                .find(|(_, text)| is_paste_of(text, stale.message, first.as_deref()))
                 .map(|(item, _)| item);
             if let Some(item) = copied {
                 let receipt = json!({ "item": item });
-                let found = self.seams.ledger.borrow().message(stale.message)?;
                 let tells = match &found {
                     Some(found) => self.tells_a_role(found)?,
                     None => None,

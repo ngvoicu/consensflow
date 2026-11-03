@@ -432,7 +432,7 @@ runs = ["engine-dispatcher-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                .find(|(_, text)| is_paste_of(text, stale.message, None))"
+find = "                .find(|(_, text)| is_paste_of(text, stale.message, first.as_deref()))"
 replace = "                .find(|(_, text)| text.starts_with(&marker_of(stale.message)))"
 
 [[plant]]
@@ -519,6 +519,36 @@ replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_tex
 name = "quoted header: a result of a fresh window is not found by its first message's text, the brief matched whole as before T-812 (T-812)"
 meant = "a_result_is_taken_from_a_fresh_window_whose_first_message_the_record_shows_by_its_text_behind_a_brief_with_a_picture"
 runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+
+[[plant]]
+name = "quoted header: a launch's first message the human sent from the box behind its brief is taken for none, the box emptied again and the note it carried left withdrawn (T-812)"
+meant = "a_first_message_of_a_fresh_window_the_human_sent_from_its_box_behind_the_brief_is_never_pasted_again"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                .find(|(_, text)| is_paste_of(text, stale.message, first.as_deref()))"
+replace = "                .find(|(_, text)| is_paste_of(text, stale.message, None))"
+
+[[plant]]
+name = "quoted header: a first message that names a picture behind a brief that names none is matched against the brief whole and pasted again (T-812)"
+meant = "a_first_message_that_names_a_picture_behind_a_brief_that_names_none_is_confirmed_once"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+
+[[plant]]
+name = "quoted header: the picture a message names, behind a brief with the blank line Claude Code dropped, is matched against the brief whole (T-812)"
+meant = "a_picture_the_message_names_leaves_the_brief_before_it_matched_as_it_was"
+runs = ["engine-lib-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
