@@ -116,10 +116,13 @@ fn no_live_test_sets_or_clears_the_config_folder_of_its_claude_code() {
 /// image designer (`live_designer.rs`); Muse's background work, one turn on its own
 /// model in its own TUI (`live_muse_background.rs`); and the one that runs no window and
 /// no model at all, which reads what Muse says of its models and its allowance
-/// (`live_muse_reads.rs`): a `--models` would be read by nothing there too.
-const OWN_AGENTS: [&str; 4] = [
+/// (`live_muse_reads.rs`), and the one that runs the machine's Claude Code against servers of its
+/// own and a model server that answers 401 (`live_keychain.rs`): a `--models` would be read by
+/// nothing there too.
+const OWN_AGENTS: [&str; 5] = [
     "live_agent.rs",
     "live_designer.rs",
+    "live_keychain.rs",
     "live_muse_background.rs",
     "live_muse_reads.rs",
 ];

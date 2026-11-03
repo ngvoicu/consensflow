@@ -84,6 +84,7 @@
     "live:stopped": "cargo xtask live stopped",
     "live:muse-window": "cargo xtask live muse-window",
     "live:launcher": "cargo xtask live launcher",
+    "live:keychain": "cargo xtask live keychain",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

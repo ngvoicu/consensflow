@@ -51,7 +51,7 @@ const KIT: [&str; 4] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 12] = [
+const BY_HAND: [(&str, &str, &str); 14] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -111,6 +111,20 @@ const BY_HAND: [(&str, &str, &str); 12] = [
         "crates/cf-e2e/tests/live_muse_reads.rs",
         "XDG_DATA_HOME",
         "the same reads' data folder, a throwaway holding a copy of the model catalog alone",
+    ),
+    (
+        "crates/cf-e2e/tests/live_keychain.rs",
+        "HOME",
+        "it runs the machine's Claude Code by itself, in no rig and on no login of the owner's, to show what a \
+         throwaway CLAUDE_CONFIG_DIR leaves in the owner's login Keychain (T-1102): HOME is the owner's, as \
+         `security` needs it to find the Keychain, and CLAUDE_CONFIG_DIR a folder of the case's own, holding a \
+         made-up login. Nothing of the owner's is read there, and `live::launcher::Guard` holds the owner's \
+         launcher and Keychain around the whole case",
+    ),
+    (
+        "crates/cf-e2e/tests/live_keychain.rs",
+        "CLAUDE_CONFIG_DIR",
+        "the same: the folder is the thing it shows the Keychain item of",
     ),
     (
         "crates/cf-e2e/tests/live_launcher.rs",

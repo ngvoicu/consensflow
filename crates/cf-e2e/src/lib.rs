@@ -85,7 +85,8 @@
 //! folder, and `live_task_working` a real worker's task working before its window runs
 //! its command, and `live_launcher` the switches that keep Claude Code's updater off the
 //! owner's `~/.local/bin/claude`, shown honoured by the machine's own, and a real window that leaves
-//! the launcher as it was). Run them with
+//! the launcher as it was, and `live_keychain` what the machine's Claude Code leaves in the login
+//! Keychain for a throwaway config folder, with the kit's flags and without them). Run them with
 //! `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with
