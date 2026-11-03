@@ -1,6 +1,6 @@
 //! Every open pane's input, in order: one worker and one bounded queue per
-//! pane, the page's numbered input admitted before it is answered, and why an
-//! input did not go in.
+//! pane, and a second for the terminal's replies, the page's numbered input
+//! admitted before it is answered, and why an input did not go in.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -26,12 +26,19 @@ const INPUT_SEQUENCE_GAP: &str = "pane-input-sequence-gap";
 const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
 
 /// What a pane's worker does, in order: the human's own keys (counted for
-/// what they leave unsent), the emulator's replies and the daemon's keys, a
-/// delivery's paste (and the count of the human's keys at which its adapter
-/// read the input box empty, if it did), a native send's claim.
+/// what they leave unsent), the daemon's keys, a delivery's paste (and the
+/// count of the human's keys at which its adapter read the input box empty, if
+/// it did), a native send's claim. And what its replies' worker does: the
+/// terminal's answers to what the program asked of it (where its cursor is),
+/// which never wait behind the others. A program may read nothing more until it
+/// has its answer: Codex on Windows asks where the cursor is as a paste comes,
+/// and while the answer waited behind the human's keys held after that paste
+/// (or a delivery's Enter, held the same way), it read none of the paste, and
+/// took the Enter for a line break in it (T-1048).
 pub enum InputWork {
     Typed(Vec<u8>),
     Write(Vec<u8>),
+    Reply(Vec<u8>),
     Paste {
         body: Vec<u8>,
         read_empty: Option<u64>,
@@ -42,7 +49,7 @@ pub enum InputWork {
 impl InputWork {
     fn byte_count(&self) -> usize {
         match self {
-            Self::Typed(bytes) | Self::Write(bytes) => bytes.len(),
+            Self::Typed(bytes) | Self::Write(bytes) | Self::Reply(bytes) => bytes.len(),
             Self::Paste { body, .. } => body.len().saturating_add(13),
             Self::Claim => 0,
         }
@@ -137,6 +144,8 @@ struct PageInputState {
 
 struct InputRoute {
     sender: mpsc::SyncSender<InputJob>,
+    /// The terminal's replies, to a worker of their own ([`InputWork::Reply`]).
+    replies: mpsc::SyncSender<InputJob>,
     pending_bytes: Arc<AtomicUsize>,
 }
 
@@ -146,7 +155,7 @@ pub struct InputQueue {
     panes: Arc<PaneTable>,
     arbiter: Arc<InputArbiter>,
     senders: Mutex<HashMap<PaneKey, InputRoute>>,
-    workers: Mutex<HashMap<PaneKey, JoinHandle<()>>>,
+    workers: Mutex<HashMap<PaneKey, Vec<JoinHandle<()>>>>,
     page: Mutex<PageInputState>,
     accepting: AtomicBool,
 }
@@ -196,6 +205,7 @@ impl InputQueue {
         match &work {
             InputWork::Typed(bytes)
             | InputWork::Write(bytes)
+            | InputWork::Reply(bytes)
             | InputWork::Paste { body: bytes, .. } => validate_input(bytes)?,
             InputWork::Claim => {}
         }
@@ -240,6 +250,16 @@ impl InputQueue {
         self.submit(key, InputWork::Write(bytes))
     }
 
+    /// The terminal's answer to what the program asked of it, from a peer that answers as
+    /// the page's terminal does (`pane.reply`): it goes past whatever the pane's input waits on.
+    pub(crate) fn reply(
+        &self,
+        key: PaneKey,
+        bytes: Vec<u8>,
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        self.submit(key, InputWork::Reply(bytes))
+    }
+
     /// The human's own keys, from a peer that types as the page does (the
     /// headless host's: `pane.typed`).
     pub(crate) fn typed(
@@ -279,21 +299,27 @@ impl InputQueue {
             return Err("pane input admission is closed".to_string());
         }
         let (sender, jobs) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
-        let panes = Arc::clone(&self.panes);
-        let arbiter = Arc::clone(&self.arbiter);
-        let worker_key = key.clone();
-        let worker = thread::Builder::new()
-            .name(format!("consensflow-input-{}", worker_key.id))
-            .spawn(move || input_worker(jobs, panes, arbiter, worker_key))
-            .map_err(|error| format!("could not start pane input queue: {error}"))?;
+        let (replies, replied) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        let mut workers = Vec::with_capacity(2);
+        for (name, jobs) in [("input", jobs), ("replies", replied)] {
+            let panes = Arc::clone(&self.panes);
+            let arbiter = Arc::clone(&self.arbiter);
+            let worker_key = key.clone();
+            let worker = thread::Builder::new()
+                .name(format!("consensflow-{name}-{}", worker_key.id))
+                .spawn(move || input_worker(jobs, panes, arbiter, worker_key))
+                .map_err(|error| format!("could not start pane input queue: {error}"))?;
+            workers.push(worker);
+        }
         self.workers
             .lock()
             .map_err(|_| "pane input worker lock is poisoned".to_string())?
-            .insert(key.clone(), worker);
+            .insert(key.clone(), workers);
         senders.insert(
             key.clone(),
             InputRoute {
                 sender,
+                replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
             },
         );
@@ -357,7 +383,11 @@ impl InputQueue {
             reserved_bytes,
             pending_bytes: Arc::clone(&route.pending_bytes),
         };
-        match route.sender.try_send(job) {
+        let sender = match job.work {
+            InputWork::Reply(_) => &route.replies,
+            _ => &route.sender,
+        };
+        match sender.try_send(job) {
             Ok(()) => Ok(receiver),
             Err(mpsc::TrySendError::Full(job)) => {
                 job.pending_bytes
@@ -389,7 +419,7 @@ impl InputQueue {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
         );
-        for worker in workers.into_values() {
+        for worker in workers.into_values().flatten() {
             let _ = worker.join();
         }
     }
@@ -404,7 +434,9 @@ fn input_worker(
     for job in jobs {
         let result = match job.work {
             InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),
-            InputWork::Write(bytes) => arbiter.write(&panes, &key, &bytes),
+            InputWork::Write(bytes) | InputWork::Reply(bytes) => {
+                arbiter.write(&panes, &key, &bytes)
+            }
             InputWork::Paste { body, read_empty } => {
                 arbiter.write_paste(&panes, &key, &body, read_empty)
             }
@@ -543,6 +575,94 @@ mod tests {
         drop(reader);
         drop(node_stream);
         connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// The terminal's answer to what the program asked goes past the pane's input held
+    /// behind a human's paste (T-1048): Codex on Windows asks where the cursor is as a paste
+    /// comes and reads none of it until it has the answer, and the answer waited behind the
+    /// human's Enter, held until the window drew the paste, which it never could. Here the
+    /// program records what it reads: the answer, sent once the human's paste went in, is read
+    /// before their held Enter.
+    #[cfg(unix)]
+    #[test]
+    fn a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste() {
+        use std::collections::HashMap;
+        use std::io::Read;
+        use std::path::Path;
+
+        use cf_proto::panes::SilentPaste;
+        use portable_pty::PtySize;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
+        let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
+        let count = paste.len() + 2;
+        let opened = panes
+            .open(
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_owned(),
+                    "-c".to_owned(),
+                    format!("stty raw -echo; printf ready; od -An -tx1 -N {count}"),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open a recorder");
+        let key = opened.key.clone();
+        let mut reader = opened.reader;
+        let mut ready = [0_u8; 5];
+        reader
+            .read_exact(&mut ready)
+            .expect("the recorder is ready");
+        assert_eq!(&ready, b"ready");
+        // Held until the window draws the paste, which the recorder never does: at the most.
+        let silent = SilentPaste {
+            pace_us_per_character: 0,
+            drawn_after_ms: 0,
+            quiet_ms: 100,
+            most_ms: 1_500,
+            most_us_per_character: 0,
+        };
+        let output = arbiter
+            .register_with(&key, Some(silent))
+            .expect("register the pane");
+        drop(output);
+        inputs.open(&key).expect("open the pane's input");
+
+        let typed = inputs
+            .typed(key.clone(), [paste, b"\r"].concat())
+            .expect("the human's paste and Enter");
+        thread::sleep(Duration::from_millis(200));
+        let replied = inputs
+            .reply(key.clone(), b"R".to_vec())
+            .expect("the terminal's answer");
+        let answered = Instant::now();
+        wait_for_input_blocking(replied).expect("the answer went in");
+        assert!(
+            answered.elapsed() < Duration::from_millis(1_000),
+            "{:?}: the answer waited behind the held Enter",
+            answered.elapsed()
+        );
+        wait_for_input_blocking(typed).expect("the paste and Enter went in");
+
+        let mut recorded = String::new();
+        reader
+            .read_to_string(&mut recorded)
+            .expect("what the recorder read");
+        let hex: String = recorded.split_whitespace().collect();
+        assert!(
+            hex.ends_with("520d"),
+            "the answer came after the Enter: {hex}"
+        );
+        inputs.close_and_drain();
     }
 
     /// Input for a pane the table never held is refused, and starts no

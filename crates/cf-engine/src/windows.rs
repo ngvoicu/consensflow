@@ -18,7 +18,7 @@ use cf_ledger::{
 };
 use cf_proto::agents::Harness;
 use cf_proto::bridge::DEADLINE;
-use cf_proto::panes::{Servers, BOTTOM_LINES, CLOSE_GRACE};
+use cf_proto::panes::{Servers, SilentPaste, BOTTOM_LINES, CLOSE_GRACE};
 use cf_proto::trace::WindowEvent;
 use futures_util::future::{select, Either};
 use serde_json::{json, Value};
@@ -467,6 +467,9 @@ struct Planned {
     keys: Interrupt,
     input: Input,
     servers: Servers,
+    /// How the harness reads a human's paste, where it reads one silently
+    /// ([`Adapter::silent_paste`](cf_harness::contract::Adapter::silent_paste)).
+    silent_paste: Option<SilentPaste>,
     harness: String,
     argv: Vec<String>,
     env: Vec<(String, String)>,
@@ -782,6 +785,7 @@ impl Dispatcher {
             argv: planned.argv.clone(),
             env,
             drop_env: planned.drop_env.clone(),
+            silent_paste: planned.silent_paste,
         }))
         .await;
         let exited = record
@@ -1162,6 +1166,7 @@ impl Dispatcher {
             keys: adapter.interrupt(),
             input: adapter.input(),
             servers: adapter.servers(),
+            silent_paste: adapter.silent_paste(),
             // The name the harness's own programs go by (`codex-…`): the roster's kind
             // is `claude-code` for the harness whose binary is `claude`.
             harness: Harness::from_kind(harness)

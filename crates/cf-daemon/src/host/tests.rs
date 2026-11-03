@@ -5,6 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::future::pending;
 
+use cf_proto::panes::SilentPaste;
 use serde_json::json;
 use tokio::task::LocalSet;
 
@@ -30,6 +31,7 @@ fn open(env: &[(&str, &str)]) -> OpenPane {
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect(),
         drop_env: vec!["TERM".to_owned()],
+        silent_paste: None,
     }
 }
 
@@ -58,6 +60,43 @@ async fn an_open_is_sent_with_the_keys_node_sent_and_its_env_as_the_engine_gave_
             assert_eq!(
                 serde_json::to_string(&body).unwrap(),
                 r#"{"id":"p1-chief","generation":1,"cwd":"/work/app","argv":["claude","--x"],"env":{"A":"3","B":"2","CONSENSFLOW_TOKEN":"t"},"dropEnv":["TERM"]}"#
+            );
+        })
+        .await;
+}
+
+/// A window whose harness reads a paste silently is opened saying how, for the pane host to
+/// hold the human's keys after their paste by (T-1048); every other open is as Node sent it.
+#[tokio::test]
+async fn an_open_of_a_harness_that_reads_a_paste_silently_says_how() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&seen);
+            app.on("pane.open", move |_, body| {
+                heard.borrow_mut().push(body);
+                async { Ok(json!({ "ok": true, "id": "p1-chief", "generation": 1 })) }
+            });
+            let host = host_over(&daemon);
+            let silent = SilentPaste {
+                pace_us_per_character: 600,
+                drawn_after_ms: 50,
+                quiet_ms: 120,
+                most_ms: 1_000,
+                most_us_per_character: 1_000,
+            };
+            let declared = OpenPane {
+                silent_paste: Some(silent),
+                ..open(&[])
+            };
+            host.open(declared).await.unwrap();
+            assert_eq!(
+                seen.borrow()[0]["silentPaste"],
+                json!({
+                    "paceUsPerCharacter": 600, "drawnAfterMs": 50, "quietMs": 120,
+                    "mostMs": 1000, "mostUsPerCharacter": 1000,
+                })
             );
         })
         .await;

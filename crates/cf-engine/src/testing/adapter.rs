@@ -27,7 +27,7 @@ use cf_harness::contract::{
     Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
@@ -216,6 +216,9 @@ pub struct FakeAdapter {
     /// How its windows' harness keeps its servers (`adapter.servers`): not known,
     /// as an adapter that says no more.
     pub servers: Cell<Servers>,
+    /// How its windows' harness reads a human's paste (`adapter.silent_paste`, which no
+    /// trace of Node's has): as one that declares nothing.
+    pub silent_paste: Cell<Option<SilentPaste>>,
     /// Whether its windows' harness keeps the instructions a resumed
     /// conversation began with (`adapter.keeps_first_instructions`, which no
     /// trace of Node's has): not, as an adapter that says no more.
@@ -365,6 +368,7 @@ impl FakeAdapter {
                 close_after: None,
             }),
             servers: Cell::new(Servers::Unknown),
+            silent_paste: Cell::new(None),
             keeps_first_instructions: Cell::new(false),
             one_account: Cell::new(false),
             ready_while_drawing: Cell::new(false),
@@ -1186,6 +1190,11 @@ impl Adapter for Asked {
 
     fn servers(&self) -> Servers {
         self.fake.servers.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the traces.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.fake.silent_paste.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

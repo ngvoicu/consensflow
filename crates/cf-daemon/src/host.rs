@@ -90,7 +90,7 @@ impl EngineHost for BridgeHost {
         for (name, value) in &open.env {
             env.insert(name.clone(), Value::String(value.clone()));
         }
-        let body = json!({
+        let mut body = json!({
             "id": open.pane.id,
             "generation": open.pane.generation,
             "cwd": open.cwd,
@@ -98,6 +98,11 @@ impl EngineHost for BridgeHost {
             "env": env,
             "dropEnv": open.drop_env,
         });
+        // Said only for a harness that reads a paste silently: every other open is as Node
+        // sent it.
+        if let Some(silent) = open.silent_paste {
+            body["silentPaste"] = json!(silent);
+        }
         let sent = self
             .bridge
             .request("pane.open", body, Some(self.open_deadline));
