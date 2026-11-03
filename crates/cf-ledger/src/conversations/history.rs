@@ -510,6 +510,16 @@ impl Reading<'_> {
     /// (the end of the part before the first it reads, where it goes on inside
     /// the item, read by itself: [`TAIL_BYTES`]). Says whether the read goes on.
     fn search(&mut self, met: Met, from_part: usize, needle: &str) -> Result<bool, LedgerError> {
+        // A call's header, read with its head, holds the words: it is shown as a read
+        // with no search shows it (chief-harness CHF-20), its text not searched.
+        let header = met
+            .item
+            .detail
+            .as_ref()
+            .and_then(|drawn| drawn.header.as_deref());
+        if from_part == 0 && header.is_some_and(|header| folded(header).contains(needle)) {
+            return self.show(met);
+        }
         if self.part_bytes(&met, 0)?.is_none() {
             if !self.may(met.bytes) {
                 return Ok(false);

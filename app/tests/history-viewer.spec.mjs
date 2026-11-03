@@ -6,10 +6,17 @@ import { refusedByPolicy, serveUi } from './serve-ui.mjs'
  * The history viewer (core/history-viewer.js) and the History button on every
  * window's head (core/terminals.js), against a stand-in for the app: the
  * daemon's `history.get` is answered from an in-page model of each history,
- * paged from a place as the daemon pages it (a few items a page), searched and
- * with the tools' outputs left out as the daemon does; `history.part` gives a
- * long item's parts; every call is recorded. The page is served under the
- * app's own Content-Security-Policy, which refuses nothing here.
+ * paged from a place as the daemon pages it, searched in an item's text and a
+ * call's header as the daemon searches; `history.part` gives a long item's
+ * parts; every call is recorded. The page is served under the app's own
+ * Content-Security-Policy, which refuses nothing here.
+ *
+ * The view is drawn to the approved mock (chief-harness CHF-20,
+ * `history-dark.png` and `history-light.png`): the human's prompts and
+ * ConsensFlow's deliveries as blue blocks, the agent's words as markdown,
+ * thinking dimmed, a tool's call as a block coloured by how it ended with its
+ * output folded to its last lines, an edit's change as red and green rows, and
+ * a compaction as a violet block.
  */
 let ui
 let refused
@@ -62,32 +69,108 @@ const item = (conversation, n, id, role, text, extra = {}) => ({
   ...extra,
 })
 
+/** A call's item: its output, and what its reader said of the call. */
+const call = (conversation, n, id, header, text, extra = {}) =>
+  item(conversation, n, id, 'tool', text, { kind: 'tool', name: 'Bash', header, ...extra })
+
 const DELIVERY = '[ConsensFlow m-12 · T-1 · result from @zeus]\nParser done, 14 tests.'
 
+/** A failing test run's output: 35 lines of progress, then the failure and the exit line. */
+const FAILING_RUN = [
+  ...Array.from({ length: 35 }, (_, at) => `  ✓ case ${at + 1}`),
+  'FAIL  filter.test.ts > empty query',
+  'TypeError: Cannot read properties of undefined',
+  'Command exited with code 1',
+].join('\n')
+
+const ANSWER = [
+  '## Fixed the empty filter',
+  '',
+  '- Missing queries now use an empty string in `normalize`.',
+  '- All 12 tests pass, including the regression case.',
+  '',
+  '```ts',
+  'normalize(undefined) === ""',
+  '```',
+].join('\n')
+
+const DIFF = [
+  '@@ -2 +2 @@',
+  '-  return query.trim().toLowerCase();',
+  '+  return (query ?? "").trim().toLowerCase();',
+].join('\n')
+
 /**
- * The chief's history: its Claude Code conversation (1), which a Switch chief to Codex
- * ended, and the one going on now (2). Four items a page, the tools' left out: the most
- * recent page holds the summary onwards, the one before it the rest.
+ * The chief's history, the mock's own: a Claude Code conversation (1) that fixes a filter
+ * and is compacted, then the one a Switch chief to Codex began (2).
  */
 function chiefHistory() {
   return {
     items: [
-      item(1, 0, 'u-1', 'user', 'Ship the parser'),
-      item(1, 1, 'u-2', 'user', `half a thought${DELIVERY}`, {
+      item(1, 0, 'u-1', 'user', 'Fix the crash when the task filter is empty.', {
+        kind: 'prompt',
+      }),
+      item(1, 1, 'th-1', 'custom', 'I’ll check how the filter handles an empty query.', {
+        kind: 'thinking',
+      }),
+      call(
+        1,
+        2,
+        't-1',
+        'read src/filter.ts:1-3',
+        'export function normalize(query?: string) {\n  return query.trim().toLowerCase();\n}',
+        { name: 'Read', status: 'ok', tookMs: 100 },
+      ),
+      call(1, 3, 't-2', '$ npm test', FAILING_RUN, { status: 'failed', tookMs: 1_200 }),
+      call(1, 4, 't-3', 'edit src/filter.ts', 'The file src/filter.ts has been updated.', {
+        name: 'Edit',
+        status: 'ok',
+        tookMs: 200,
+        diff: DIFF,
+      }),
+      call(1, 5, 't-4', '$ npm test', 'PASS  filter.test.ts  12 tests passed', {
+        status: 'ok',
+        tookMs: 1_200,
+      }),
+      item(1, 6, 'a-1', 'assistant', ANSWER, { kind: 'text' }),
+      item(1, 7, 'c-1', 'user', 'Summary: the empty filter is fixed, 12 tests pass.', {
+        compaction: true,
+        kind: 'compaction',
+        tokens: 3_903,
+      }),
+      item(2, 0, 'u-2', 'user', 'Also cover a query containing only spaces.', { kind: 'prompt' }),
+      item(2, 1, 'a-2', 'assistant', 'I’ll add a whitespace case to the same test file.', {
+        kind: 'text',
+      }),
+    ],
+  }
+}
+
+/**
+ * A member's session: a delivery under what the human typed with it, a call still
+ * running, rows an older build copied (no kind: drawn as plain blocks of their role),
+ * and a long item shown by its first part.
+ */
+function sessionHistory() {
+  return {
+    items: [
+      item(7, 0, 'w-1', 'user', `half a thought${DELIVERY}`, {
+        kind: 'prompt',
         delivery: {
-          line: `· m-12: @zeus's result on T-1 (cf task get T-1) ${HOSTILE}`,
+          line: "· m-12: @zeus's result on T-1 (cf task get T-1)",
           at: 'half a thought'.length,
         },
       }),
-      item(1, 2, 'a-1', 'assistant', 'On it'),
-      item(1, 3, 't-1', 'tool', 'ok 12 passed'),
-      item(1, 4, 'u-3', 'user', 'This session is being continued from a previous conversation.', {
+      call(7, 1, 'w-2', '$ cargo test', '', { status: 'running' }),
+      item(7, 2, 'w-3', 'user', 'Write the lexer'),
+      item(7, 3, 'w-4', 'assistant', 'On it, **now**.'),
+      item(7, 4, 'w-5', 'tool', 'ok 12 passed'),
+      item(7, 5, 'w-6', 'user', 'This session is being continued from a previous conversation.', {
         compaction: true,
       }),
-      item(1, 5, 'a-2', 'assistant', HOSTILE),
-      item(2, 0, 'u-5', 'user', 'Where are we?'),
-      item(2, 1, 't-2', 'tool', 'ls: 3 files'),
-      item(2, 2, 'a-5', 'assistant', 'Taken over: the parser is done.'),
+      item(7, 6, 'w-7', 'assistant', 'The first part', {
+        cut: { from: 0, bytes: 700_000, revision: 1 },
+      }),
     ],
   }
 }
@@ -148,21 +231,13 @@ function model() {
         },
       ],
     },
-    pageSize: 4,
+    pageSize: 20,
     histories: {
       chief: chiefHistory(),
-      // The session's: a short item, and a long one shown by its first part.
-      'zeus-amber-pine': {
-        items: [
-          item(7, 0, 'w-1', 'user', 'Write the lexer'),
-          item(7, 1, 'w-2', 'assistant', 'The first part', {
-            cut: { from: 0, bytes: 700_000, revision: 1 },
-          }),
-        ],
-      },
+      'zeus-amber-pine': sessionHistory(),
     },
     // A long item's parts, as `history.part` reads them.
-    parts: { 'w-2': ['The first part', ' and the rest, ', 'to its end.'] },
+    parts: { 'w-7': ['The first part', ' and the rest, ', 'to its end.'] },
   }
 }
 
@@ -181,15 +256,19 @@ async function open(page, data = model()) {
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // The daemon's pages: the most recent, the one before a place or the one after it,
       // one stream of items across conversations, each with its conversation and row; a
-      // search keeps the items that hold it in any case; the tools' outputs are left out
-      // unless asked for. A search the model says stops short (`partial`) finds nothing,
-      // and says where it stopped.
+      // search keeps the items whose text or call header holds it, in any case; the tools'
+      // outputs are left out unless asked for. A search the model says stops short
+      // (`partial`) finds nothing, and says where it stopped.
       'history.get': ({ handle, before, after, find, tools }) => {
         const model = window.__model
         if (model.historyRefusal) return { ok: false, error: model.historyRefusal }
         const history = model.histories[handle] ?? { items: [] }
         const size = model.pageSize
-        const holds = (it) => !find || it.text.toLowerCase().includes(find.toLowerCase())
+        const folded = (text) => (text ?? '').toLowerCase()
+        const holds = (it) =>
+          !find ||
+          folded(it.text).includes(folded(find)) ||
+          folded(it.header).includes(folded(find))
         const shown = history.items
           .filter((it) => tools || it.role !== 'tool')
           .filter((it) => holds(it) && !(find && model.partial))
@@ -208,13 +287,12 @@ async function open(page, data = model()) {
           newer = before ? (placeOf(items.at(-1)) ?? before) : null
         }
         if (find && model.partial) older = { conversation: 1, row: 0 }
-        // A read the model says went through as much as one may before anything it shows:
-        // conversations of tools' outputs alone, left out.
-        if (!find && model.readStops) {
+        // A read the model says went through as much as one may before anything it shows.
+        if (!find && model.readStops && !before) {
           items = []
-          older = { conversation: 1, row: 0 }
+          older = { conversation: 3, row: 0 }
         }
-        const partial = !!(find ? model.partial : model.readStops)
+        const partial = !!(find ? model.partial : model.readStops && !before)
         return answer({ history: { items, older, newer, partial } })
       },
       // A long item's text, a part at a time, as the daemon reads it, by the item's
@@ -318,14 +396,19 @@ async function openSession(page) {
   return viewer
 }
 
-/** The labels of the items shown, in order. */
-const labels = (viewer) =>
-  viewer
-    .locator('.history-item > .transcript-head')
-    .evaluateAll((heads) => heads.map((head) => head.textContent.split(' · ')[0]))
+/** The items shown, in order, by the ids the stand-in gave them. */
+const ids = (viewer) =>
+  viewer.locator('.history-item').evaluateAll((items) => items.map((it) => it.dataset.id))
 
-/** The ids the stand-in gave the items shown, by their text, in order. */
-const texts = (viewer) => viewer.locator('.history-item > .transcript-body').allTextContents()
+/** The block that draws item `id`. */
+const block = (viewer, id) => viewer.locator(`.history-item[data-id="${id}"]`)
+
+/** The colour `property` of `locator`'s element computes to. */
+const colour = (locator, property = 'background-color') =>
+  locator.evaluate((element, property) => getComputedStyle(element)[property], property)
+
+/** The quiet first row that loads what comes before the items shown. */
+const earlier = (viewer) => viewer.locator('.history-earlier')
 
 test.describe('the History button', () => {
   test("is on the chief's head beside Switch chief, on a session's, and on the chief's card with no window", async ({
@@ -336,11 +419,12 @@ test.describe('the History button', () => {
       'History',
       'Switch chief',
     ])
-    // A session's terminal, once the human shows it, reads its own history.
+    // A session's terminal, once the human shows it, reads its own history, tools' calls too.
     const viewer = await openSession(page)
-    expect(await asked(page)).toEqual([{ project: 1, handle: 'zeus-amber-pine', tools: false }])
+    expect(await asked(page)).toEqual([{ project: 1, handle: 'zeus-amber-pine', tools: true }])
     await expect(viewer.locator('.history-body')).toContainText('Write the lexer')
     await viewer.getByRole('button', { name: 'Close' }).click()
+    await expect(viewer).toBeHidden()
     // The chief's window goes down: its card stays, with History.
     await page.evaluate(() => {
       const chief = window.__model.board.lanes.find((l) => l.participant.handle === 'chief')
@@ -364,7 +448,7 @@ test.describe('the History button', () => {
     await page.keyboard.press('Enter')
     const viewer = page.getByRole('dialog', { name: 'History', exact: true })
     await expect(viewer).toBeVisible()
-    expect(await asked(page)).toEqual([{ project: 1, handle: 'chief', tools: false }])
+    expect(await asked(page)).toEqual([{ project: 1, handle: 'chief', tools: true }])
     await page.keyboard.press('Escape')
     await expect(viewer).toBeHidden()
   })
@@ -376,169 +460,411 @@ test.describe('the history viewer', () => {
   }) => {
     await open(page)
     const viewer = await openChief(page)
-    await expect(viewer.locator('.history-hint')).toHaveText('Not stored: tool calls and thinking.')
     await expect(viewer.locator('.history-title')).toHaveText('History')
+    // What the mock has above the stream: the title, the search, the close. Nothing says
+    // what is not stored, and nothing switches the tools' calls off.
+    await expect(viewer.getByRole('searchbox', { name: 'Search history' })).toBeVisible()
+    await expect(viewer.locator('.history-hint')).toHaveCount(0)
+    await expect(viewer.getByRole('checkbox')).toHaveCount(0)
+    await expect(viewer.getByRole('button', { name: /^(Older|Newer)$/ })).toHaveCount(0)
     await expect(
       viewer.locator('.history-who, .history-conversation, .history-heading, .history-about'),
     ).toHaveCount(0)
-    // The most recent page runs across the switch: the Claude conversation's last two
-    // items, then the Codex one's, in one list.
+    // Both conversations, in one list, oldest first.
     await expect(viewer.locator('.history-body ol.history-items')).toHaveCount(1)
-    expect(await texts(viewer)).toEqual([
-      'This session is being continued from a previous conversation.',
-      HOSTILE,
-      'Where are we?',
-      'Taken over: the parser is done.',
+    expect(await ids(viewer)).toEqual([
+      'u-1',
+      'th-1',
+      't-1',
+      't-2',
+      't-3',
+      't-4',
+      'a-1',
+      'c-1',
+      'u-2',
+      'a-2',
     ])
+    // No item is headed by a label or a time: the block's look says what it is.
+    await expect(viewer.locator('.history-item .transcript-head')).toHaveCount(0)
     const said = await viewer.textContent()
-    for (const name of ['Claude Code', 'Codex', 'ares', 'maia', 'Chief of Staff', 'switch']) {
+    for (const name of ['Claude Code', 'Codex', 'ares', 'Chief of Staff', 'switch']) {
       expect(said).not.toContain(name)
     }
+    // The newest item is in view.
+    const body = viewer.locator('.history-body')
+    expect(
+      await body.evaluate((body) => body.scrollTop + body.clientHeight >= body.scrollHeight - 1),
+    ).toBe(true)
     // A member's session is drawn the same way.
     await viewer.getByRole('button', { name: 'Close' }).click()
     const session = await openSession(page)
     await expect(session.locator('.history-title')).toHaveText('History')
-    const theirs = await session.textContent()
+    // A delivery is shown whole (O3), so its own header names its sender: only it may.
+    const theirs = await session.evaluate((dialog) =>
+      [...dialog.querySelectorAll('.history-head, .history-item:not([data-id="w-1"])')]
+        .map((it) => it.textContent)
+        .join('\n'),
+    )
     for (const name of ['Pi', 'zeus', 'amber-pine']) expect(theirs).not.toContain(name)
   })
 
-  test("labels items as the task drawer does, a compaction's summary as one, and shows every text as text", async ({
+  test("draws the human's prompts as blue blocks, and ConsensFlow's delivery in full in the same block", async ({
     page,
   }) => {
     await open(page)
     const viewer = await openChief(page)
-    expect(await labels(viewer)).toEqual([
-      'Compaction summary',
-      'The agent',
-      'Sent to the window',
-      'The agent',
+    const prompt = block(viewer, 'u-1')
+    await expect(prompt).toHaveAttribute('data-kind', 'prompt')
+    await expect(prompt).toHaveText('Fix the crash when the task filter is empty.')
+    const blue = await colour(prompt)
+    expect(blue).toBe(await colour(block(viewer, 'u-2')))
+    expect(blue).not.toBe(await colour(viewer.locator('.history-body')))
+    await viewer.getByRole('button', { name: 'Close' }).click()
+    // A delivery is shown whole, after what the human typed with it, in one blue block:
+    // nothing folds it to its line.
+    const session = await openSession(page)
+    const delivered = block(session, 'w-1')
+    await expect(delivered).toHaveAttribute('data-kind', 'prompt')
+    expect(await colour(delivered)).toBe(blue)
+    await expect(delivered.locator('details, summary')).toHaveCount(0)
+    await expect(delivered.locator('.history-text')).toHaveText(['half a thought', DELIVERY])
+    await expect(delivered.locator('.history-text').nth(1)).toBeVisible()
+  })
+
+  test("draws the agent's words as markdown, in the mock's heading, marker and inline-code colours", async ({
+    page,
+  }) => {
+    await open(page)
+    const viewer = await openChief(page)
+    const answer = block(viewer, 'a-1')
+    await expect(answer).toHaveAttribute('data-kind', 'text')
+    const heading = answer.locator('.md-heading')
+    await expect(heading).toHaveText('Fixed the empty filter')
+    await expect(answer.locator('li')).toHaveText([
+      'Missing queries now use an empty string in normalize.',
+      'All 12 tests pass, including the regression case.',
     ])
-    await expect(
-      viewer.locator('.history-item[data-compaction="true"] .transcript-body'),
-    ).toHaveText('This session is being continued from a previous conversation.')
-    // Markup in what an agent wrote is its words: nothing of it is drawn or run.
-    await expect(viewer.locator('.history-item[data-role="assistant"]').first()).toContainText(
-      HOSTILE,
+    await expect(answer.locator('li code')).toHaveText('normalize')
+    await expect(answer.locator('pre code')).toHaveText('normalize(undefined) === ""')
+    // Each its own colour, none the words' own.
+    const words = await colour(answer.locator('li').first(), 'color')
+    const marker = await answer
+      .locator('li')
+      .first()
+      .evaluate((li) => getComputedStyle(li, '::marker').color)
+    const seen = [
+      await colour(heading, 'color'),
+      marker,
+      await colour(answer.locator('li code'), 'color'),
+    ]
+    expect(new Set([words, ...seen]).size).toBe(4)
+    await expect(heading).toHaveCSS('text-decoration-line', 'underline')
+    // The agent's words sit on the stream itself, in no block.
+    expect(await colour(answer)).toBe('rgba(0, 0, 0, 0)')
+    // A plain answer is words.
+    await expect(block(viewer, 'a-2')).toHaveText(
+      'I’ll add a whitespace case to the same test file.',
     )
-    await viewer.getByRole('button', { name: 'Older' }).click()
-    await expect(viewer.locator('.history-delivery summary')).toContainText(HOSTILE)
+  })
+
+  test('draws thinking italic and dimmed, on the stream', async ({ page }) => {
+    await open(page)
+    const viewer = await openChief(page)
+    const thinking = block(viewer, 'th-1')
+    await expect(thinking).toHaveAttribute('data-kind', 'thinking')
+    await expect(thinking).toHaveText('I’ll check how the filter handles an empty query.')
+    await expect(thinking.locator('.history-text')).toHaveCSS('font-style', 'italic')
+    const dim = await colour(thinking.locator('.history-text'), 'color')
+    expect(dim).not.toBe(await colour(block(viewer, 'a-2').locator('p').first(), 'color'))
+    expect(await colour(thinking)).toBe('rgba(0, 0, 0, 0)')
+  })
+
+  test('draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey', async ({
+    page,
+  }) => {
+    await open(page)
+    const viewer = await openChief(page)
+    const read = block(viewer, 't-1')
+    await expect(read).toHaveAttribute('data-kind', 'tool')
+    await expect(read).toHaveAttribute('data-status', 'ok')
+    // The header: the verb, the path and the lines, each its own colour.
+    const head = read.locator('.history-call')
+    await expect(head).toHaveText('read src/filter.ts:1-3')
+    await expect(head.locator('.history-verb')).toHaveText('read')
+    await expect(head.locator('.history-path')).toHaveText('src/filter.ts')
+    await expect(head.locator('.history-range')).toHaveText(':1-3')
+    await expect(read.locator('.history-output')).toHaveText(
+      'export function normalize(query?: string) {\n  return query.trim().toLowerCase();\n}',
+    )
+    await expect(read.locator('.history-fold')).toHaveCount(0)
+    await expect(read.locator('.history-took')).toHaveText('Took 0.1s')
+    // A failed run: red, its 38 lines folded to the last 5, the exit line among them.
+    const failed = block(viewer, 't-2')
+    await expect(failed).toHaveAttribute('data-status', 'failed')
+    await expect(failed.locator('.history-call')).toHaveText('$ npm test')
+    const fold = failed.getByRole('button', { name: '… (33 earlier lines, click to expand)' })
+    await expect(fold).toBeVisible()
+    await expect(failed.locator('.history-output')).toHaveText(
+      [
+        '  ✓ case 34',
+        '  ✓ case 35',
+        'FAIL  filter.test.ts > empty query',
+        'TypeError: Cannot read properties of undefined',
+        'Command exited with code 1',
+      ].join('\n'),
+    )
+    await expect(failed.locator('.history-took')).toHaveText('Took 1.2s')
+    const green = await colour(read)
+    const red = await colour(failed)
+    expect(red).not.toBe(green)
+    expect(await colour(block(viewer, 't-4'))).toBe(green)
+    // A click unfolds the whole output.
+    await fold.click()
+    await expect(failed.locator('.history-fold')).toHaveCount(0)
+    await expect(failed.locator('.history-output')).toHaveText(FAILING_RUN)
+    await viewer.getByRole('button', { name: 'Close' }).click()
+    // A call still running, and an older build's call output with no status: grey both.
+    const session = await openSession(page)
+    const running = block(session, 'w-2')
+    await expect(running).toHaveAttribute('data-status', 'running')
+    await expect(running.locator('.history-call')).toHaveText('$ cargo test')
+    await expect(running.locator('.history-took')).toHaveText('Still running')
+    const grey = await colour(running)
+    expect([green, red]).not.toContain(grey)
+    expect(await colour(block(session, 'w-4'))).not.toBe(grey)
+    expect(await colour(block(session, 'w-5'))).toBe(grey)
+  })
+
+  test('unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold', async ({
+    page,
+  }) => {
+    const data = model()
+    // Claude Code says the exit first, then what the command wrote.
+    const output = ['Exit code 2', ...Array.from({ length: 9 }, (_, at) => `line ${at + 1}`)]
+    data.histories.chief.items.push(
+      call(2, 2, 't-9', '$ make', `${output.join('\n')}\n\n`, { status: 'failed', tookMs: 61_500 }),
+    )
+    await open(page, data)
+    const viewer = await openChief(page)
+    const failed = block(viewer, 't-9')
+    // Trailing blank lines are not lines of the output.
+    const fold = failed.getByRole('button', { name: '… (5 earlier lines, click to expand)' })
+    await expect(failed.locator('.history-output')).toHaveText(
+      ['line 5', 'line 6', 'line 7', 'line 8', 'line 9'].join('\n'),
+    )
+    await expect(failed.locator('.history-exit')).toHaveText('Exit code 2')
+    await expect(failed.locator('.history-took')).toHaveText('Took 1m 1.5s')
+    await fold.focus()
+    await page.keyboard.press('Enter')
+    await expect(failed.locator('.history-output')).toHaveText(output.join('\n'))
+    // Shown whole, the exit line is in it once.
+    await expect(failed.locator('.history-exit')).toHaveCount(0)
+    // A call that went well says no exit line, wherever its output says one.
+    const ok = block(viewer, 't-1')
+    await expect(ok.locator('.history-exit')).toHaveCount(0)
+  })
+
+  test("draws an edit's change as red and green rows", async ({ page }) => {
+    await open(page)
+    const viewer = await openChief(page)
+    const edit = block(viewer, 't-3')
+    await expect(edit.locator('.history-call')).toHaveText('edit src/filter.ts')
+    await expect(edit.locator('.history-path')).toHaveText('src/filter.ts')
+    const rows = edit.locator('.history-diff > *')
+    await expect(rows).toHaveText([
+      '@@ -2 +2 @@',
+      '-  return query.trim().toLowerCase();',
+      '+  return (query ?? "").trim().toLowerCase();',
+    ])
+    await expect(rows.nth(1)).toHaveAttribute('data-sign', 'removed')
+    await expect(rows.nth(2)).toHaveAttribute('data-sign', 'added')
+    const removed = await colour(rows.nth(1), 'color')
+    const added = await colour(rows.nth(2), 'color')
+    expect(removed).not.toBe(added)
+    expect([removed, added]).not.toContain(await colour(rows.nth(0), 'color'))
+    // The change says what the edit did: its tool's own words of it are not drawn.
+    await expect(edit).not.toContainText('has been updated')
+    await expect(edit.locator('.history-took')).toHaveText('Took 0.2s')
+  })
+
+  test('draws a compaction as a violet block, with its tokens, and its summary on a click', async ({
+    page,
+  }) => {
+    await open(page)
+    const viewer = await openChief(page)
+    const compaction = block(viewer, 'c-1')
+    await expect(compaction).toHaveAttribute('data-kind', 'compaction')
+    await expect(compaction.locator('.history-call')).toHaveText('[compaction]')
+    const expand = compaction.getByRole('button', {
+      name: 'Compacted from 3,903 tokens (click to expand)',
+    })
+    const summary = compaction.locator('.history-text')
+    await expect(summary).toBeHidden()
+    await expand.click()
+    await expect(summary).toHaveText('Summary: the empty filter is fixed, 12 tests pass.')
+    await expect(summary).toBeVisible()
+    const violet = await colour(compaction)
+    for (const other of ['u-1', 't-1', 't-2']) {
+      expect(await colour(block(viewer, other))).not.toBe(violet)
+    }
+    await viewer.getByRole('button', { name: 'Close' }).click()
+    // An older build's compaction summary, which says no tokens, is a compaction all the same.
+    const session = await openSession(page)
+    const old = block(session, 'w-6')
+    await expect(old).toHaveAttribute('data-kind', 'compaction')
+    expect(await colour(old)).toBe(violet)
+    await old.getByRole('button', { name: 'Compacted (click to expand)' }).click()
+    await expect(old.locator('.history-text')).toHaveText(
+      'This session is being continued from a previous conversation.',
+    )
+  })
+
+  test('draws the rows an older build copied as plain blocks of their role', async ({ page }) => {
+    await open(page)
+    const viewer = await openSession(page)
+    // No kind: the human's words a prompt, the agent's words its text, a tool's output a
+    // grey block headed as the drawer heads one.
+    await expect(block(viewer, 'w-3')).toHaveAttribute('data-kind', 'prompt')
+    await expect(block(viewer, 'w-3')).toHaveText('Write the lexer')
+    await expect(block(viewer, 'w-4')).toHaveAttribute('data-kind', 'text')
+    await expect(block(viewer, 'w-4')).toHaveText('On it, now.')
+    const output = block(viewer, 'w-5')
+    await expect(output).toHaveAttribute('data-kind', 'tool')
+    await expect(output).toHaveAttribute('data-status', 'unknown')
+    await expect(output.locator('.history-call')).toHaveText('Tool output')
+    await expect(output.locator('.history-output')).toHaveText('ok 12 passed')
+    await expect(output.locator('.history-took')).toHaveCount(0)
+  })
+
+  test('shows every text as text, never as markup', async ({ page }) => {
+    const data = model()
+    data.histories.chief.items = [
+      item(1, 0, 'x-1', 'user', `${HOSTILE}${DELIVERY}${HOSTILE}`, {
+        kind: 'prompt',
+        delivery: { line: HOSTILE, at: HOSTILE.length },
+      }),
+      item(1, 1, 'x-2', 'custom', HOSTILE, { kind: 'thinking' }),
+      call(1, 2, 'x-3', `$ ${HOSTILE}`, `${HOSTILE}\n`.repeat(9), {
+        status: 'failed',
+        diff: `-${HOSTILE}\n+${HOSTILE}`,
+      }),
+      call(1, 3, 'x-4', `read ${HOSTILE}:1-2`, HOSTILE, { status: 'ok' }),
+      item(1, 4, 'x-5', 'assistant', `# ${HOSTILE}\n\n- \`${HOSTILE}\`\n\n${HOSTILE}`, {
+        kind: 'text',
+      }),
+      item(1, 5, 'x-6', 'user', HOSTILE, { compaction: true, kind: 'compaction', tokens: 1 }),
+      item(1, 6, 'x-7', 'custom', HOSTILE, { kind: 'notice' }),
+      item(1, 7, 'x-8', 'assistant', HOSTILE),
+    ]
+    await open(page, data)
+    const viewer = await openChief(page)
+    for (const id of ['x-1', 'x-2', 'x-3', 'x-4', 'x-5', 'x-6', 'x-7', 'x-8']) {
+      await expect(block(viewer, id)).toContainText(HOSTILE)
+    }
+    await block(viewer, 'x-3').locator('.history-fold').click()
+    await block(viewer, 'x-6').locator('.history-expand').click()
+    await expect(block(viewer, 'x-6').locator('.history-text')).toHaveText(HOSTILE)
     await expect(viewer.locator('img, script')).toHaveCount(0)
     expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
   })
 
-  test('folds a delivery to its line, under what the human typed with it, and opens it on a click or a key', async ({
+  test('loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item', async ({
     page,
   }) => {
-    await open(page)
+    const data = model()
+    data.pageSize = 4
+    // A window short enough that the first page overflows it: what is in view can be kept.
+    await page.setViewportSize({ width: 1000, height: 320 })
+    await open(page, data)
     const viewer = await openChief(page)
-    await viewer.getByRole('button', { name: 'Older' }).click()
-    const delivered = viewer.locator('.history-item').filter({ has: page.locator('details') })
-    await expect(delivered.locator('> .transcript-body')).toHaveText('half a thought')
-    const fold = delivered.locator('details.history-delivery')
-    await expect(fold.locator('summary')).toHaveText(
-      `· m-12: @zeus's result on T-1 (cf task get T-1) ${HOSTILE}`,
-    )
-    const whole = fold.locator('.transcript-body')
-    await expect(whole).toBeHidden()
-    await fold.locator('summary').click()
-    await expect(whole).toHaveText(DELIVERY)
-    await fold.locator('summary').click()
-    await expect(whole).toBeHidden()
-    await fold.locator('summary').focus()
-    await page.keyboard.press('Enter')
-    await expect(whole).toBeVisible()
-  })
-
-  test('goes older from the oldest item shown and newer from the newest, never repeating or skipping one', async ({
-    page,
-  }) => {
-    await open(page)
-    const viewer = await openChief(page)
-    const status = viewer.locator('.history-page')
-    const older = viewer.getByRole('button', { name: 'Older' })
-    const newer = viewer.getByRole('button', { name: 'Newer' })
-    await expect(status).toHaveText('The most recent')
-    await expect(newer).toBeDisabled()
-    await expect(older).toBeEnabled()
-    const first = await texts(viewer)
+    expect(await ids(viewer)).toEqual(['a-1', 'c-1', 'u-2', 'a-2'])
+    const row = earlier(viewer)
+    await expect(row).toHaveText('… earlier history, click to load')
     // Meanwhile the chief says more: a page already read is not moved by it.
     await page.evaluate(() => {
       const { items } = window.__model.histories.chief
       items.push({ ...items.at(-1), row: 203, id: 'a-6', text: 'And more.' })
     })
-    await older.click()
-    await expect(status).toHaveText('Earlier items')
-    await expect(older).toBeDisabled()
-    const before = await texts(viewer)
-    expect([...before, ...first]).toEqual([
-      'Ship the parser',
-      'half a thought',
-      'On it',
-      'This session is being continued from a previous conversation.',
-      HOSTILE,
-      'Where are we?',
-      'Taken over: the parser is done.',
+    // The row is the stream's first, and loading it keeps what was in view where it was.
+    const body = viewer.locator('.history-body')
+    const top = () => block(viewer, 'a-1').evaluate((it) => it.getBoundingClientRect().top)
+    // The row is scrolled to before it is clicked, as a click scrolls to what it clicks.
+    await row.scrollIntoViewIfNeeded()
+    const before = await top()
+    await row.click()
+    await expect(block(viewer, 't-1')).toHaveCount(1)
+    expect(await ids(viewer)).toEqual(['t-1', 't-2', 't-3', 't-4', 'a-1', 'c-1', 'u-2', 'a-2'])
+    expect(Math.abs((await top()) - before)).toBeLessThan(2)
+    await row.focus()
+    await page.keyboard.press('Enter')
+    expect(await ids(viewer)).toEqual([
+      'u-1',
+      'th-1',
+      't-1',
+      't-2',
+      't-3',
+      't-4',
+      'a-1',
+      'c-1',
+      'u-2',
+      'a-2',
     ])
-    await newer.click()
-    await expect(status).toHaveText('Earlier items')
-    await expect(viewer.locator('.history-item')).toHaveCount(4)
-    await newer.click()
-    await expect(status).toHaveText('The most recent')
-    expect(await texts(viewer)).toEqual(['And more.'])
-    const places = (await asked(page)).map(({ before, after }) => ({
-      before,
-      after,
-    }))
-    expect(places).toEqual([
+    // Nothing older: the row goes.
+    await expect(earlier(viewer)).toHaveCount(0)
+    expect(
+      (await asked(page)).map(({ before, after }) => ({
+        before,
+        after,
+      })),
+    ).toEqual([
       { before: undefined, after: undefined },
-      { before: { conversation: 1, row: 104 }, after: undefined },
-      { before: undefined, after: { conversation: 1, row: 102 } },
-      { before: undefined, after: { conversation: 2, row: 202 } },
+      { before: { conversation: 1, row: 106 }, after: undefined },
+      { before: { conversation: 1, row: 102 }, after: undefined },
     ])
+    // Refresh reads the most recent again: what the chief said meanwhile is there.
+    await viewer.getByRole('button', { name: 'Refresh' }).click()
+    expect(await ids(viewer)).toEqual(['c-1', 'u-2', 'a-2', 'a-6'])
+    await expect(body.locator('.history-earlier')).toHaveCount(1)
   })
 
-  test('finds words in any case, says when nothing holds them, and where a search stopped short', async ({
+  test("finds words in any case, in a call's header and its output, says when nothing holds them, and where a search stopped short", async ({
     page,
   }) => {
     await open(page)
     const viewer = await openChief(page)
-    const find = viewer.getByRole('searchbox', { name: 'Find in the history' })
-    await find.fill('PARSER')
+    const find = viewer.getByRole('searchbox', { name: 'Search history' })
+    await find.fill('NPM TEST')
     await find.press('Enter')
-    // The stored text is searched: the delivery holds "Parser done", under what was typed with it.
-    expect(await texts(viewer)).toEqual([
-      'Ship the parser',
-      'half a thought',
-      'Taken over: the parser is done.',
-    ])
+    // Found in the calls' headers, the output alone holding none of it.
+    expect(await ids(viewer)).toEqual(['t-2', 't-4'])
+    await expect(block(viewer, 't-4').locator('.history-call')).toHaveText('$ npm test')
     expect((await asked(page)).at(-1)).toEqual({
       project: 1,
       handle: 'chief',
-      tools: false,
-      find: 'PARSER',
+      tools: true,
+      find: 'NPM TEST',
     })
-    await expect(viewer.locator('.history-page')).toHaveText('The most recent')
+    await find.fill('typeerror')
+    await find.press('Enter')
+    expect(await ids(viewer)).toEqual(['t-2'])
     await find.fill('zzz')
-    await viewer.getByRole('button', { name: 'Find' }).click()
+    await find.press('Enter')
     await expect(viewer.locator('.history-note')).toHaveText('Nothing in this history holds "zzz".')
-    await expect(viewer.getByRole('button', { name: 'Older' })).toBeDisabled()
-    await expect(viewer.getByRole('button', { name: 'Newer' })).toBeDisabled()
+    await expect(earlier(viewer)).toHaveCount(0)
     // A search through a long history stops at what one read may go through, and goes on.
     await page.evaluate(() => {
       window.__model.partial = true
     })
-    await viewer.getByRole('button', { name: 'Find' }).click()
-    await expect(viewer.locator('.history-note')).toHaveText(
-      'Nothing found yet that holds "zzz": Older searches further back.',
+    await find.press('Enter')
+    await expect(viewer.locator('.history-note')).toHaveText('Nothing found yet that holds "zzz".')
+    await expect(earlier(viewer)).toHaveText(
+      '… the search stopped here to stay quick, click to search further back',
     )
-    await expect(viewer.locator('.history-page')).toHaveText(
-      'The most recent; the search stopped here to stay quick: Older searches further back',
-    )
-    await viewer.getByRole('button', { name: 'Older' }).click()
+    await earlier(viewer).click()
     expect((await asked(page)).at(-1)).toEqual({
       project: 1,
       handle: 'chief',
-      tools: false,
+      tools: true,
       find: 'zzz',
       before: { conversation: 1, row: 0 },
     })
@@ -551,66 +877,52 @@ test.describe('the history viewer', () => {
     data.readStops = true
     await open(page, data)
     const viewer = await openChief(page)
-    await expect(viewer.locator('.history-note')).toHaveText(
-      'Nothing to show yet: Older reads further back.',
+    await expect(viewer.locator('.history-note')).toHaveText('Nothing to show yet.')
+    await expect(earlier(viewer)).toHaveText(
+      '… the read stopped here to stay quick, click to read further back',
     )
-    await expect(viewer.locator('.history-page')).toHaveText(
-      'The most recent; the read stopped here to stay quick: Older reads further back',
-    )
-    await viewer.getByRole('button', { name: 'Older' }).click()
-    expect((await asked(page)).at(-1)).toEqual({
-      project: 1,
-      handle: 'chief',
-      tools: false,
-      before: { conversation: 1, row: 0 },
-    })
-  })
-
-  test("shows the tools' outputs on the switch", async ({ page }) => {
-    await open(page)
-    const viewer = await openChief(page)
-    await expect(viewer.locator('.history-item[data-role="tool"]')).toHaveCount(0)
-    await viewer.getByRole('checkbox', { name: 'Show tool output' }).check()
-    await expect(viewer.locator('.history-item[data-role="tool"]')).toHaveText(/ls: 3 files/)
+    await earlier(viewer).click()
     expect((await asked(page)).at(-1)).toEqual({
       project: 1,
       handle: 'chief',
       tools: true,
+      before: { conversation: 3, row: 0 },
     })
-    expect(await labels(viewer)).toContain('Tool output')
+    await expect(viewer.locator('.history-note')).toHaveCount(0)
+    expect((await ids(viewer)).length).toBe(10)
   })
 
-  test('shows a long item by a part, and the whole of it on asking, read a part at a time', async ({
+  test('shows a long item by a part, and the whole of it on a click row, read a part at a time', async ({
     page,
   }) => {
     await open(page)
     const viewer = await openSession(page)
-    const long = viewer.locator('.history-item').filter({ hasText: 'The first part' })
-    await expect(long.locator('.history-cut')).toContainText('Its first part')
-    await long.getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
-    const whole = viewer.locator('.history-item').filter({ hasText: 'to its end.' })
-    await expect(whole.locator('.transcript-body')).toHaveText(
-      'The first part and the rest, to its end.',
-    )
-    await expect(whole.locator('.history-cut')).toHaveCount(0)
+    const long = block(viewer, 'w-7')
+    await expect(long.locator('.history-text, p').first()).toHaveText('The first part')
+    const more = long.getByRole('button', { name: '… (684 KB in all, click to load the rest)' })
+    await more.click()
+    await expect(block(viewer, 'w-7')).toHaveText('The first part and the rest, to its end.')
+    await expect(block(viewer, 'w-7').locator('.history-more')).toHaveCount(0)
     const read = (await asked(page, 'history.part')).map(({ from }) => from)
     expect(read).toEqual([0, 14, 29])
     expect((await asked(page, 'history.part'))[0]).toEqual({
       project: 1,
       handle: 'zeus-amber-pine',
       conversation: 7,
-      row: 701,
+      row: 706,
       from: 0,
     })
     // A search shows the part where it found its words, and says from where.
     await page.evaluate(() => {
-      window.__model.histories['zeus-amber-pine'].items[1].cut = {
+      window.__model.histories['zeus-amber-pine'].items[6].cut = {
         from: 5_000,
         bytes: 700_000,
       }
     })
     await viewer.getByRole('button', { name: 'Refresh' }).click()
-    await expect(viewer.locator('.history-cut')).toContainText('… from character 5001')
+    await expect(block(viewer, 'w-7').locator('.history-more')).toHaveText(
+      '… (684 KB in all, shown from character 5,001, click to load it whole)',
+    )
   })
 
   test('reads a long item again from its start when it is copied again meanwhile, and says so when it keeps changing', async ({
@@ -622,83 +934,72 @@ test.describe('the history viewer', () => {
     const grown = ['The FIRST part', ' grown, ', 'and now ends.']
     // Copied again once its first part is read: the second part is the new copy's.
     data.copies = {
-      'w-2': [
+      'w-7': [
         { revision: 1, parts: first },
         { revision: 2, parts: grown },
       ],
     }
     await open(page, data)
     const viewer = await openSession(page)
-    const long = viewer.locator('.history-item').filter({ hasText: 'The first part' })
-    await long.getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
-    const whole = viewer.locator('.history-item').filter({ hasText: 'now ends.' })
-    await expect(whole.locator('.transcript-body')).toHaveText(
-      'The FIRST part grown, and now ends.',
-    )
+    const more = () => block(viewer, 'w-7').locator('.history-more')
+    await more().click()
+    await expect(block(viewer, 'w-7')).toHaveText('The FIRST part grown, and now ends.')
     // Never a text of two copies: the second copy is read again from its start.
     expect((await asked(page, 'history.part')).map(({ from }) => from)).toEqual([0, 14, 0, 14, 22])
     // An item copied again at every part, as one still being written fast may be:
     // three reads, then the viewer says so and may be asked again.
     await page.evaluate((first) => {
-      window.__model.copies['w-2'] = Array.from({ length: 20 }, (_, at) => ({
+      window.__model.copies['w-7'] = Array.from({ length: 20 }, (_, at) => ({
         revision: 10 + at,
         parts: first,
       }))
     }, first)
     await viewer.getByRole('button', { name: 'Refresh' }).click()
-    const again = viewer.locator('.history-item').filter({ hasText: 'The first part' })
-    const button = again.getByRole('button', {
-      name: 'Show the whole item (684 KB)',
-    })
-    await button.click()
-    await expect(again.locator('.history-refusal')).toHaveText(
+    await more().click()
+    await expect(block(viewer, 'w-7').locator('.history-refusal')).toHaveText(
       'It changed each time it was read: show it again to read it as it is now.',
     )
-    await expect(button).toBeEnabled()
+    await expect(more()).toBeEnabled()
     expect((await asked(page, 'history.part')).length).toBe(5 + 6)
   })
 
-  test('keeps a long delivery folded when its whole is the copy the page showed, and not one copied again since', async ({
+  test('shows a long delivery whole in its blue block once read, and a copy that holds it no longer as it is', async ({
     page,
   }) => {
     const data = model()
     const header = '[ConsensFlow m-12 · T-1 · result from @zeus]\n'
-    const line = "· m-12: @zeus's result on T-1 (cf task get T-1)"
-    // A long delivery, shown by its first part and folded to its line.
     data.histories['zeus-amber-pine'].items.push(
-      item(7, 2, 'w-3', 'user', `${header}Parser done`, {
+      item(7, 7, 'w-8', 'user', `${header}Parser done`, {
+        kind: 'prompt',
         cut: { from: 0, bytes: 700_000, revision: 1 },
-        delivery: { line, at: 0 },
+        delivery: { line: "· m-12: @zeus's result on T-1 (cf task get T-1)", at: 0 },
       }),
     )
-    data.parts['w-3'] = [`${header}Parser done`, ', all of it.']
+    data.parts['w-8'] = [`${header}Parser done`, ', all of it.']
     await open(page, data)
     const viewer = await openSession(page)
-    const long = () => viewer.locator('.history-item').nth(2)
-    await expect(long().locator('.history-delivery summary')).toHaveText(line)
-    await long().getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
-    await expect(long().locator('.history-cut')).toHaveCount(0)
-    await expect(long().locator('.history-delivery summary')).toHaveText(line)
-    await expect(long().locator('.history-delivery pre')).toContainText('Parser done, all of it.')
-    // Copied again since the page was read, the human's words in its place: the whole of
-    // the new copy is drawn as it is, under no line of the message it no longer holds.
+    await block(viewer, 'w-8').locator('.history-more').click()
+    await expect(block(viewer, 'w-8').locator('.history-text')).toHaveText([
+      `${header}Parser done, all of it.`,
+    ])
+    await expect(block(viewer, 'w-8')).toHaveAttribute('data-kind', 'prompt')
+    // Copied again since the page was read, the human's words in its place: drawn as it is.
     await page.evaluate(() => {
       window.__model.copies = {
-        'w-3': [{ revision: 2, parts: ['Typed instead', ' by the human.'] }],
+        'w-8': [{ revision: 2, parts: ['Typed instead', ' by the human.'] }],
       }
     })
     await viewer.getByRole('button', { name: 'Refresh' }).click()
-    await expect(long().locator('.history-cut')).toHaveCount(1)
-    await long().getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
-    await expect(long().locator('.history-cut')).toHaveCount(0)
-    await expect(long().locator('.history-delivery')).toHaveCount(0)
-    await expect(long().locator('.transcript-body')).toHaveText('Typed instead by the human.')
+    await block(viewer, 'w-8').locator('.history-more').click()
+    await expect(block(viewer, 'w-8').locator('.history-text')).toHaveText([
+      'Typed instead by the human.',
+    ])
   })
 
   test('holds a search to 1,000 characters, and says so of a longer one', async ({ page }) => {
     await open(page)
     const viewer = await openChief(page)
-    const find = viewer.getByRole('searchbox', { name: 'Find in the history' })
+    const find = viewer.getByRole('searchbox', { name: 'Search history' })
     await expect(find).toHaveAttribute('maxlength', '1000')
     const searches = async () => (await asked(page)).filter((asking) => asking.find).length
     // A longer one put in the box past its bound, as a paste or a script may.
@@ -718,29 +1019,62 @@ test.describe('the history viewer', () => {
     expect(await searches()).toBe(1)
   })
 
-  test("says the daemon's refusal in its words, and draws in the app's theme", async ({ page }) => {
+  test("says the daemon's refusal in its words", async ({ page }) => {
     const data = model()
     data.historyRefusal = '"chief" is not in project 1'
     await open(page, data)
     const viewer = await openChief(page)
     await expect(viewer.locator('.history-refusal')).toHaveText('"chief" is not in project 1')
-    // Its colours are the theme's: change the theme's, and the viewer's change with them.
-    const colours = () =>
-      viewer.evaluate((dialog) => {
-        const body = getComputedStyle(dialog.querySelector('.history-body'))
-        return [
-          getComputedStyle(dialog).backgroundColor,
-          getComputedStyle(dialog).color,
-          body.backgroundColor,
-        ]
-      })
-    expect(await colours()).toEqual(['rgb(17, 42, 49)', 'rgb(233, 241, 239)', 'rgb(12, 32, 38)'])
-    await page.evaluate(() => {
-      const root = document.documentElement.style
-      root.setProperty('--panel', '#fafafa')
-      root.setProperty('--foam', '#101010')
-      root.setProperty('--deep', '#f0f0f0')
-    })
-    expect(await colours()).toEqual(['rgb(250, 250, 250)', 'rgb(16, 16, 16)', 'rgb(240, 240, 240)'])
   })
+
+  for (const [scheme, expected] of [
+    [
+      'dark',
+      {
+        dialog: 'rgb(30, 33, 36)',
+        words: 'rgb(230, 232, 234)',
+        prompt: 'rgb(31, 74, 99)',
+        ok: 'rgb(42, 74, 53)',
+        failed: 'rgb(110, 40, 40)',
+        compaction: 'rgb(62, 46, 92)',
+      },
+    ],
+    [
+      'light',
+      {
+        dialog: 'rgb(246, 245, 241)',
+        words: 'rgb(34, 36, 38)',
+        prompt: 'rgb(214, 230, 240)',
+        ok: 'rgb(220, 235, 217)',
+        failed: 'rgb(242, 212, 212)',
+        compaction: 'rgb(230, 220, 242)',
+      },
+    ],
+  ]) {
+    test(`draws in the mock's ${scheme} colours, in a monospace of the Mac's or Windows'`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await open(page)
+      const viewer = await openChief(page)
+      expect({
+        dialog: await colour(viewer),
+        words: await colour(viewer, 'color'),
+        prompt: await colour(block(viewer, 'u-1')),
+        ok: await colour(block(viewer, 't-1')),
+        failed: await colour(block(viewer, 't-2')),
+        compaction: await colour(block(viewer, 'c-1')),
+      }).toEqual(expected)
+      // Each engine says the faces its own way: WebKit without their quotes.
+      const font = (await colour(viewer.locator('.history-body'), 'font-family'))
+        .split(',')
+        .map((face) => face.trim().replaceAll('"', ''))
+      for (const face of ['SF Mono', 'Menlo', 'Cascadia Mono', 'Consolas', 'monospace']) {
+        expect(font).toContain(face)
+      }
+      // The Mac's faces before Windows', and a monospace last.
+      expect(font.indexOf('Menlo')).toBeLessThan(font.indexOf('Consolas'))
+      expect(font.at(-1)).toBe('monospace')
+    })
+  }
 })
