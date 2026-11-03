@@ -115,20 +115,23 @@ pub fn pane_reply_enqueue<R: Runtime>(
 
 #[tauri::command]
 pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value {
-    if let Err(error) = validate_text(&ticket, "pane input ticket") {
-        return json!({"ok":false,"error":error});
-    }
-    let inputs = {
-        let state = app.state::<AppRuntime>();
-        Arc::clone(&state.inputs)
-    };
-    let completion = inputs.take_page_completion(&ticket);
-    let human = completion.as_ref().is_ok_and(|completion| completion.human);
-    let result = input_result(completion).await;
-    if human && result["ok"] == true {
-        let _ = app.emit(PAGE_STATE_EVENT, json!({"reason":"human-input"}));
-    }
-    result
+    crate::panics::settled("pane_input_wait", async move {
+        if let Err(error) = validate_text(&ticket, "pane input ticket") {
+            return json!({"ok":false,"error":error});
+        }
+        let inputs = {
+            let state = app.state::<AppRuntime>();
+            Arc::clone(&state.inputs)
+        };
+        let completion = inputs.take_page_completion(&ticket);
+        let human = completion.as_ref().is_ok_and(|completion| completion.human);
+        let result = input_result(completion).await;
+        if human && result["ok"] == true {
+            let _ = app.emit(PAGE_STATE_EVENT, json!({"reason":"human-input"}));
+        }
+        result
+    })
+    .await
 }
 
 #[tauri::command]
@@ -139,22 +142,25 @@ pub async fn pane_resize<R: Runtime>(
     cols: u16,
     rows: u16,
 ) -> Value {
-    if let Err(error) = validate_size(cols, rows) {
-        return json!({"ok":false,"error":error});
-    }
-    let key = match pane_key(&id, generation) {
-        Ok(key) => key,
-        Err(error) => return json!({"ok":false,"error":error}),
-    };
-    let panes = {
-        let state = app.state::<AppRuntime>();
-        Arc::clone(&state.panes)
-    };
-    run_blocking("pane_resize", move || {
-        match panes.resize(&key, rows, cols) {
-            Ok(()) => json!({"ok":true}),
-            Err(error) => json!({"ok":false,"error":error.to_string()}),
+    crate::panics::settled("pane_resize", async move {
+        if let Err(error) = validate_size(cols, rows) {
+            return json!({"ok":false,"error":error});
         }
+        let key = match pane_key(&id, generation) {
+            Ok(key) => key,
+            Err(error) => return json!({"ok":false,"error":error}),
+        };
+        let panes = {
+            let state = app.state::<AppRuntime>();
+            Arc::clone(&state.panes)
+        };
+        run_blocking("pane_resize", move || {
+            match panes.resize(&key, rows, cols) {
+                Ok(()) => json!({"ok":true}),
+                Err(error) => json!({"ok":false,"error":error.to_string()}),
+            }
+        })
+        .await
     })
     .await
 }
@@ -166,21 +172,24 @@ pub async fn pane_ack<R: Runtime>(
     generation: u64,
     seq: u64,
 ) -> Value {
-    if let Err(error) = validate_seq(seq) {
-        return json!({"ok":false,"error":error});
-    }
-    let key = match pane_key(&id, generation) {
-        Ok(key) => key,
-        Err(error) => return json!({"ok":false,"error":error}),
-    };
-    let panes = {
-        let state = app.state::<AppRuntime>();
-        Arc::clone(&state.panes)
-    };
-    match panes.ack(&key, seq) {
-        Ok(()) => json!({"ok":true}),
-        Err(error) => json!({"ok":false,"error":error.to_string()}),
-    }
+    crate::panics::settled("pane_ack", async move {
+        if let Err(error) = validate_seq(seq) {
+            return json!({"ok":false,"error":error});
+        }
+        let key = match pane_key(&id, generation) {
+            Ok(key) => key,
+            Err(error) => return json!({"ok":false,"error":error}),
+        };
+        let panes = {
+            let state = app.state::<AppRuntime>();
+            Arc::clone(&state.panes)
+        };
+        match panes.ack(&key, seq) {
+            Ok(()) => json!({"ok":true}),
+            Err(error) => json!({"ok":false,"error":error.to_string()}),
+        }
+    })
+    .await
 }
 
 async fn task_operation<R: Runtime>(
@@ -254,16 +263,19 @@ pub async fn daemon_request<R: Runtime>(
     operation: String,
     body: Value,
 ) -> Value {
-    let Some(operation) = DAEMON_OPERATIONS
-        .iter()
-        .find(|allowed| **allowed == operation)
-    else {
-        return json!({"ok":false,"error":format!("unknown daemon operation {operation}")});
-    };
-    if !body.is_object() {
-        return json!({"ok":false,"error":"a daemon request body is an object"});
-    }
-    task_operation(app, operation, body).await
+    crate::panics::settled("daemon_request", async move {
+        let Some(operation) = DAEMON_OPERATIONS
+            .iter()
+            .find(|allowed| **allowed == operation)
+        else {
+            return json!({"ok":false,"error":format!("unknown daemon operation {operation}")});
+        };
+        if !body.is_object() {
+            return json!({"ok":false,"error":"a daemon request body is an object"});
+        }
+        task_operation(app, operation, body).await
+    })
+    .await
 }
 
 /// The page's pane-output subscription, taken ONCE for the life of the page.
@@ -297,21 +309,24 @@ pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
-    let (panes, output, inputs, daemon) = {
-        let state = app.state::<AppRuntime>();
-        (
-            Arc::clone(&state.panes),
-            Arc::clone(&state.output),
-            Arc::clone(&state.inputs),
-            Arc::clone(&state.daemon),
-        )
-    };
-    inputs.begin_page();
-    output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
-    // Once the new page listens: everything sent before it went to the old.
-    panes.ack_all();
-    daemon.tell_again();
-    json!({"ok":true})
+    crate::panics::settled("subscribe_output", async move {
+        let (panes, output, inputs, daemon) = {
+            let state = app.state::<AppRuntime>();
+            (
+                Arc::clone(&state.panes),
+                Arc::clone(&state.output),
+                Arc::clone(&state.inputs),
+                Arc::clone(&state.daemon),
+            )
+        };
+        inputs.begin_page();
+        output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
+        // Once the new page listens: everything sent before it went to the old.
+        panes.ack_all();
+        daemon.tell_again();
+        json!({"ok":true})
+    })
+    .await
 }
 
 /// The address of one agents screen (the agents, the harnesses): the
@@ -319,6 +334,7 @@ pub async fn subscribe_output<R: Runtime>(
 /// dialog of its own.
 #[tauri::command]
 pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
+    crate::panics::settled("agents_screen", async move {
     let daemon = Arc::clone(&app.state::<AppRuntime>().daemon);
     // Off the async runtime: asked while the daemon is starting, it waits.
     run_blocking("agents_screen", move || {
@@ -330,6 +346,8 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
             Err(error) => json!({"ok":false,"error":error}),
         }
     })
+    .await
+})
     .await
 }
 
