@@ -56,7 +56,10 @@ async fn whether_the_folder_holds_a_file_is_remembered_for_a_moment_which_is_sai
             let held = asked_with(Value::Null, &[(".specs/a/SPEC.md", "# A")], |specs| {
                 specs.remembering_for(Duration::from_secs(60))
             });
-            assert_eq!(held.present().await, json!({ "ok": true, "present": true }));
+            assert_eq!(
+                held.present().await,
+                json!({ "ok": true, "present": true, "on": false })
+            );
             fs::remove_dir_all(held.specs()).unwrap();
             let remembered = held.present().await;
             assert_eq!(remembered["present"], true, "remembered");
@@ -69,7 +72,7 @@ async fn whether_the_folder_holds_a_file_is_remembered_for_a_moment_which_is_sai
             fs::remove_dir_all(forgets.specs()).unwrap();
             assert_eq!(
                 forgets.present().await,
-                json!({ "ok": true, "present": false }),
+                json!({ "ok": true, "present": false, "on": false }),
                 "read again"
             );
         })
@@ -99,7 +102,10 @@ async fn whether_the_folder_holds_a_file_is_looked_at_once_however_many_ask_mean
             tokio::time::sleep(Duration::from_millis(50)).await;
             open_gate(&gate);
             for answer in [first.await, second.await, third.await] {
-                assert_eq!(answer.unwrap(), json!({ "ok": true, "present": true }));
+                assert_eq!(
+                    answer.unwrap(),
+                    json!({ "ok": true, "present": true, "on": false })
+                );
             }
             assert_eq!(looks.load(Ordering::SeqCst), 1, "one look for the three");
             // Once it has answered, the next asks again.
