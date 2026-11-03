@@ -52,6 +52,16 @@ const PARTS = {
   },
 }
 
+/**
+ * What a missing permission may mean when ConsensFlow is on in System Settings all the same
+ * (T-903): macOS keeps a grant for one copy of the app, and a build made on this Mac that was
+ * allowed leaves one the installed app is never found to satisfy. The engine's note says the
+ * same words (cf-engine's `computer_use`), which name no permission: a note opens the pane of
+ * each name it has.
+ */
+export const MEND =
+  'If ConsensFlow is already on in that list, macOS may hold the grant for another copy of the app, so remove it with − and add /Applications/ConsensFlow.app with +.'
+
 /** ConsensFlow's permissions, by the daemon's word for each and the pane that gives it. */
 const GRANTS = [
   { key: 'accessibility', pane: 'accessibility', name: 'Accessibility' },
@@ -79,6 +89,7 @@ export class ComputerUseSection {
   #permissions
   #grants
   #grantsOf
+  #mend
   #page
   /** What the daemon last said for the project the section is drawn for. */
   #said = null
@@ -95,6 +106,8 @@ export class ComputerUseSection {
     this.#permissions = section.querySelector('.computer-use-permissions')
     this.#grants = section.querySelector('.computer-use-grants')
     this.#grantsOf = section.querySelector('.computer-use-grants-of')
+    this.#mend = section.querySelector('.computer-use-mend')
+    this.#mend.textContent = MEND
     this.#page = page
     // Back from System Settings: what it was given there shows, for the project still open.
     window.addEventListener('focus', () => {
@@ -167,6 +180,8 @@ export class ComputerUseSection {
       grantsOf === null
         ? ''
         : `This ConsensFlow was started from ${grantsOf}, so these are that app's permissions, not ConsensFlow's.`
+    // Shown while a permission reads missing, and only then.
+    this.#mend.hidden = permissions === null || GRANTS.every(({ key }) => permissions[key] === true)
     redraw(
       this.#grants,
       permissions === null
@@ -212,7 +227,10 @@ export function notePanes(message) {
   // ConsensFlow's own note only: it has no sender, and a member's with the same words is a member's.
   if (message.kind !== 'note' || message.sender != null) return []
   if (!message.body?.startsWith(NOTE_OPENING)) return []
-  const named = message.body.slice(message.body.indexOf('allow it '))
+  // The names after `allow it`, up to where the note says where to allow them.
+  const from = message.body.indexOf('allow it ')
+  const to = message.body.indexOf(' in System Settings', from)
+  const named = message.body.slice(from, to === -1 ? undefined : to)
   return GRANTS.filter(({ name }) => named.includes(name)).map(({ pane, name }) => ({
     pane,
     name,

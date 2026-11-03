@@ -14,7 +14,9 @@
 //!
 //! - what the app's bundle is made of: `sidecar` (`build-cf`, `stage`, `conpty`),
 //!   `portable` (the portable Windows exe) and `candidate` (this checkout built
-//!   as another app, installed beside the live one);
+//!   as another app, installed beside the live one), and what it is called:
+//!   `identity` (`build-identity`, which refuses a build that would carry the
+//!   release's bundle identifier anywhere but GitHub's runner);
 //! - the gate, and what runs a part of it or a suite beside it: `check` (the whole
 //!   gate), `app` and `clippy_windows` (the lint and the tests where the app or
 //!   the platform cannot be built as it ships), `suites` (`test daemons`,
@@ -52,6 +54,7 @@ pub mod context;
 mod departures;
 mod dispatch;
 mod evals;
+mod identity;
 mod live;
 mod plants;
 mod portable;

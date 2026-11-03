@@ -26,6 +26,14 @@ const CLAUDE: &str = "claude-code";
 /// buttons to System Settings (`app/ui/core/board.js`, `computerUseNote`).
 pub const NOTE_OPENING: &str = "Claude Code's computer use is on for this project, but ConsensFlow";
 
+/// What to do when System Settings shows ConsensFlow on and the permission reads missing
+/// all the same (T-903): macOS keeps a grant for one copy of the app, so one that was
+/// given to a build made on this Mac is never found to be the installed app's. It names no
+/// permission, for the page opens the pane of each name a note has; the page says the same
+/// words in Project settings (`app/ui/core/computer-use.js`, `MEND`).
+const MEND: &str = "If ConsensFlow is already on in that list, macOS may hold the grant for another \
+                    copy of the app, so remove it with − and add /Applications/ConsensFlow.app with +.";
+
 /// What the engine keeps across launches: the missing states each project was
 /// told of already, and the projects seen mended since the app started (whose last
 /// note says what is no longer so).
@@ -44,7 +52,7 @@ pub fn note_for(missing: ScreenPermissions) -> String {
     };
     format!(
         "{NOTE_OPENING} can't control the screen until you allow it {needs} in System Settings → \
-         Privacy & Security."
+         Privacy & Security. {MEND}"
     )
 }
 

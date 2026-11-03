@@ -38,7 +38,7 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix app
       # The page and the bundled cf, then the app and its installer.
-      - run: npm --prefix app run build
+      - run: npm --prefix app run build -- --config src-tauri/tauri.release.conf.json
       - run: npm --prefix app run portable
 
       # The portable exe, started once as someone would: its first start

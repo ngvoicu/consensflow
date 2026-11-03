@@ -101,17 +101,25 @@ fn the_npm_check_is_the_lint_and_the_tests_which_cargo_xtask_check_runs_as_two_s
 #[test]
 fn the_app_package_stages_and_packs_through_cargo_xtask_and_leaves_building_to_tauri() {
     let scripts = scripts("app/package.json");
-    let held: BTreeMap<&str, &str> = ["prepare-sidecar", "prepare:app", "portable", "build", "dev"]
-        .into_iter()
-        .map(|name| (name, scripts[name].as_str()))
-        .collect();
+    let held: BTreeMap<&str, &str> = [
+        "prepare-sidecar",
+        "check-identity",
+        "prepare:app",
+        "portable",
+        "build",
+        "dev",
+    ]
+    .into_iter()
+    .map(|name| (name, scripts[name].as_str()))
+    .collect();
     assert_eq!(
         held,
         BTreeMap::from([
             ("prepare-sidecar", "cargo xtask stage"),
+            ("check-identity", "cargo xtask build-identity"),
             (
                 "prepare:app",
-                "npm run bundle:ui && npm run prepare-sidecar"
+                "npm run check-identity && npm run bundle:ui && npm run prepare-sidecar"
             ),
             ("portable", "cargo xtask portable pack"),
             ("build", "tauri build"),
@@ -130,12 +138,17 @@ fn tauri_prepares_the_app_before_a_build_and_before_a_dev_run_which_waits_for_it
     );
 }
 
-/// Tauri merges the candidate's and Windows' configurations over the one (JSON
-/// merge patch): a `build` of theirs would replace the hook, and a candidate or a
-/// Windows bundle would go unstaged.
+/// Tauri merges the candidate's, the release's and Windows' configurations over the
+/// one (JSON merge patch): a `build` of theirs would replace the hook, and a
+/// candidate, a release or a Windows bundle would go unprepared, unstaged, or
+/// unchecked for the identifier it carries.
 #[test]
-fn the_candidate_and_windows_configurations_are_merged_over_it_without_a_word_of_build() {
-    for file in ["tauri.candidate.conf.json", "tauri.windows.conf.json"] {
+fn the_candidate_release_and_windows_configurations_are_merged_over_it_without_a_word_of_build() {
+    for file in [
+        "tauri.candidate.conf.json",
+        "tauri.release.conf.json",
+        "tauri.windows.conf.json",
+    ] {
         let config = json_of(&format!("app/src-tauri/{file}"));
         assert!(config.get("build").is_none(), "{file} says `build`");
     }

@@ -100,9 +100,12 @@ runs = ["page-computer-use"]
 file = "app/ui/core/computer-use.js"
 find = '''  if (message.kind !== 'note' || message.sender != null) return []
   if (!message.body?.startsWith(NOTE_OPENING)) return []
-  const named = message.body.slice(message.body.indexOf('allow it '))'''
-replace = '''  if (message.kind !== 'note') return []
-  const named = message.body.includes('allow it ') ? message.body : 'Accessibility'''
+  // The names after `allow it`, up to where the note says where to allow them.
+  const from = message.body.indexOf('allow it ')
+  const to = message.body.indexOf(' in System Settings', from)
+  const named = message.body.slice(from, to === -1 ? undefined : to)'''
+replace = """  if (message.kind !== 'note') return []
+  const named = message.body.includes('allow it ') ? message.body : 'Accessibility'"""
 
 [[plant]]
 name = "parity computer use: the permissions are not read again as the dialog opens"
@@ -274,3 +277,67 @@ runs = ["daemon-seams"]
 file = "crates/cf-daemon/src/seams.rs"
 find = '''        .filter_map(|name| Some((name.clone(), env.os(&name)?.to_str()?.to_owned())))'''
 replace = '''        .filter_map(|name| Some((name.clone(), env.text(&name)?.to_owned())))'''
+
+# T-903: System Settings showed ConsensFlow on, and ConsensFlow read the permission as missing,
+# for macOS held the grant for another copy of the app (a build made on this Mac that was
+# allowed). The note and Project settings say how to mend it, in words that name no permission.
+[[plant]]
+name = "parity computer use: the note leaves out how to mend an entry macOS holds for another copy"
+meant = "the_note_says_how_to_mend_an_entry_macos_holds_for_another_copy_of_the_app"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''         Privacy & Security. {MEND}"'''
+replace = '''         Privacy & Security."'''
+
+[[plant]]
+name = "parity computer use: the mend sentence names a permission"
+meant = "the_note_says_how_to_mend_an_entry_macos_holds_for_another_copy_of_the_app"
+runs = ["engine-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = '''const MEND: &str = "If ConsensFlow is already on in that list,'''
+replace = '''const MEND: &str = "If ConsensFlow is already on in the Screen & System Audio Recording list,'''
+
+[[plant]]
+name = "parity computer use: a note's buttons follow every name after the words allow it"
+meant = "a note of computer use that names one permission opens that pane alone, whatever else it says"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''  const named = message.body.slice(from, to === -1 ? undefined : to)'''
+replace = '''  const named = message.body.slice(from)
+  void to'''
+
+[[plant]]
+name = "parity computer use: Project settings tells how to mend an entry while every permission is allowed"
+meant = "Project settings: computer use that is on says so, and on Windows says Claude Code has none there"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''    this.#mend.hidden = permissions === null || GRANTS.every(({ key }) => permissions[key] === true)'''
+replace = '''    this.#mend.hidden = permissions === null'''
+
+[[plant]]
+name = "parity computer use: Project settings never tells how to mend an entry"
+meant = "Project settings: computer use says where Claude Code turns it on, and each macOS permission opens its pane"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''    this.#mend.hidden = permissions === null || GRANTS.every(({ key }) => permissions[key] === true)'''
+replace = '''    this.#mend.hidden = true'''
+
+[[plant]]
+name = "parity computer use: Project settings says other words than the note does"
+meant = "Project settings: computer use says where Claude Code turns it on, and each macOS permission opens its pane"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''macOS may hold the grant for another copy of the app, so remove it'''
+replace = '''macOS may hold the grant for another copy of the app, so delete it'''
