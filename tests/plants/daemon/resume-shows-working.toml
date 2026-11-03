@@ -36,7 +36,7 @@
 # runs them all.
 
 [run]
-engine-dispatcher-resumed-at-work = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resumed_at_work::"]
+engine-dispatcher-resumed-at-work = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resumed_at_work"]
 engine-lib-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "stops::"]
 daemon-routes-verbs = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_tell_of_a_task_shown_working"]
 rig-regression-resumed-after-tell = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it::"], builds = true }
