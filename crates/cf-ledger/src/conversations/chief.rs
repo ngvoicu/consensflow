@@ -137,7 +137,7 @@ pub(crate) fn switch_chief(
         let chief = store.participant_by_handle(project_id, "chief")?;
         store.db.execute(
             "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = NULL, agent = NULL, launched_model = NULL,
-           gone_model = NULL, out_until = NULL, switched_from_harness = ?, switched_from_model = ?,
+           gone_model = NULL, out_until = NULL, needs_edit = 0, switched_from_harness = ?, switched_from_model = ?,
            switched_from_agent = ?, switched_from_cut = ?
          WHERE id = ?",
             params![
@@ -208,6 +208,26 @@ pub(crate) fn last_switch(
         },
         cut: chief.switched_from_cut == 1,
     }))
+}
+
+/// A chief the update could not tell the model of (`needs_edit`, T-1202) whose harness's
+/// record names the model and the effort its conversation ran on last: it runs on them, and
+/// needs no edit. Pi's thinking is held as its effort, as Pi's is everywhere.
+pub(crate) fn chief_ran_on(
+    store: &mut Store,
+    participant_id: i64,
+    model: &str,
+    effort: Option<&str>,
+) -> Result<(), LedgerError> {
+    model::require_model_id(model)?;
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE participant SET model = ?, effort = ?, needs_edit = 0
+              WHERE id = ? AND role = 'chief'",
+            params![model, effort, participant_id],
+        )?;
+        Ok(())
+    })
 }
 
 /// The chief's launch asked its harness for `model`, none where it left the model to the

@@ -116,6 +116,48 @@ impl Dispatcher {
         ChiefRuns::of(chief, used)
     }
 
+    /// Whether the chief that needs an edit (`chief`, T-1202) has a model now: the one its
+    /// harness's record names its conversation ran on last, kept for it with its effort and
+    /// the mark taken off. A record read once and naming none is not read again (`record`'s
+    /// `no_model_in_record`) until the human switches the chief, which takes the mark off.
+    pub(crate) async fn chief_model_from_record(
+        &self,
+        chief: &ParticipantView,
+        record: &Rc<Record>,
+    ) -> Result<bool, EngineError> {
+        if record.window.borrow().no_model_in_record {
+            return Ok(false);
+        }
+        let session = self
+            .conversation_to_go_on_with(chief)
+            .await?
+            .and_then(|conversation| conversation.native_session);
+        let adapter = self
+            .seams
+            .adapters
+            .adapter(chief.harness.as_deref().unwrap_or_default());
+        let used = match (session, adapter) {
+            (Some(session), Some(adapter)) => {
+                adapter
+                    .last_used(&session, chief.launched_model.as_deref())
+                    .await
+            }
+            _ => None,
+        };
+        let Some(used) = used else {
+            record.window.borrow_mut().no_model_in_record = true;
+            self.changed();
+            return Ok(false);
+        };
+        let effort = used.effort.as_deref().or(used.thinking.as_deref());
+        self.seams
+            .ledger
+            .borrow_mut()
+            .chief_ran_on(chief.id, &used.model, effort)?;
+        self.changed();
+        Ok(true)
+    }
+
     /// The chief's launch asked for `runs`: kept for the next reopen to compare the record
     /// with.
     pub(crate) fn chief_launched(

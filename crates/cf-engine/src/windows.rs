@@ -194,6 +194,9 @@ pub(crate) struct Relaunch {
 
 /// The record's window part.
 pub(crate) struct WindowPart {
+    /// A chief that needs an edit (T-1202) whose harness's record was read and named no
+    /// model: it is held, and its record not read again, until the human switches it.
+    pub(crate) no_model_in_record: bool,
     /// The harness's window on its launch (the adapter's `launch` bag).
     pub(crate) window: Option<Rc<dyn Window>>,
     /// The keys that interrupt a turn in it (its adapter's `interrupt`).
@@ -321,6 +324,7 @@ pub(crate) struct Abandoned {
 impl Default for WindowPart {
     fn default() -> Self {
         Self {
+            no_model_in_record: false,
             window: None,
             keys: None,
             input: Input::Channel,
@@ -591,6 +595,29 @@ impl Dispatcher {
         if !self.end_abandoned(record).await? {
             return Ok(());
         }
+        // A chief the update could not tell the model of (T-1202) opens on no default,
+        // whichever way its launch was asked for: it takes the model its harness's record
+        // names, and opens on that, its row read again; with none, nothing is begun, and
+        // what waits for it stays queued for Switch chief
+        // ([`Dispatcher::chief_model_from_record`]).
+        let resolved;
+        let participant = if participant.role == "chief" && participant.needs_edit {
+            if !self.chief_model_from_record(participant, record).await? {
+                return Ok(());
+            }
+            let now = self.known_project(participant.project_id)?;
+            let Some(chief) = now
+                .participants
+                .into_iter()
+                .find(|chief| chief.id == participant.id)
+            else {
+                return Ok(());
+            };
+            resolved = chief;
+            &resolved
+        } else {
+            participant
+        };
         record.window.borrow_mut().launches += 1;
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never

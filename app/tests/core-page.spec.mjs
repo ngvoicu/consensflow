@@ -2736,6 +2736,38 @@ test('a member the update could not run on what it ran on says it needs an edit,
   await expect(member.getByRole('button', { name: 'Edit @my-coder' })).toBeVisible()
 })
 
+test('a chief the update could not tell the model of says so on its card, and Switch chief gives it one', async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { harness: 'claude-code', model: null, needsEdit: true })
+  chief.activity = { state: 'closed' }
+  chief.pane = null
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.locator('.terminal-status')).toHaveText(
+    "Needs a model: ConsensFlow couldn't tell which model this chief used before the update. Pick one with Switch chief; what was written to the chief waits until then",
+  )
+  await expect(card.locator('.terminal-status')).toHaveAttribute('data-state', 'missing')
+  await expect(card.locator('.terminal-meta')).toHaveText('Claude Code · no model: needs an edit')
+  // The way out is on the card: Switch chief, to a model the harness lists.
+  await card.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await pickChief(dialog, 'Codex', 'GPT-6 Astra')
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([{ project: 1, harness: 'codex', model: 'gpt-6-astra', when: 'turn', note: false }])
+  // The daemon takes the mark off with the switch: the card says what the chief runs on.
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    Object.assign(lane.participant, { harness: 'codex', model: 'gpt-6-astra', needsEdit: false })
+  })
+  await expect(card.locator('.terminal-meta')).toHaveText('Codex · gpt-6-astra')
+  await expect(card.locator('.terminal-status')).not.toContainText('Needs a model')
+})
+
 test("says on the chief's card in the dock what the chief is doing and runs on, and switches it from there", async ({
   page,
 }) => {

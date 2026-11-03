@@ -764,3 +764,134 @@ fn a_chief_at_rest_that_ends_failing_past_its_launch_budget_keeps_its_model() {
         );
     }
 }
+
+/// A chief the update could not tell the model of (T-1202) whose harness's record names
+/// what its conversation ran on last: it keeps that model and effort, needs no edit, and
+/// opens on them.
+#[test]
+fn a_chief_that_needs_an_edit_takes_the_model_its_record_names_and_opens_on_it() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Hello");
+    context.pass().unwrap();
+    context.close_project(project).unwrap();
+    let chief = chief_of(&context, project).id;
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute_batch(&format!(
+            "UPDATE participant SET model = NULL, effort = NULL, needs_edit = 1 WHERE id = {chief}"
+        ))
+        .unwrap();
+    });
+    context.adapter.with("chief", |chief| {
+        chief.used = Some(used("claude-sonnet-5-5", Some("low"), false))
+    });
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let held = chief_of(&context, project);
+    assert_eq!(
+        (
+            held.model.as_deref(),
+            held.effort.as_deref(),
+            held.needs_edit
+        ),
+        (Some("claude-sonnet-5-5"), Some("low"), false)
+    );
+    let reopened = context.adapter.prepared().last().cloned().unwrap();
+    assert_eq!(reopened["role"], "chief");
+    assert!(
+        reopened["resume"].is_string(),
+        "on its conversation: {reopened}"
+    );
+    assert_eq!(reopened["agent"], agent("claude-sonnet-5-5", Some("low")));
+}
+
+/// A chief the update could not tell the model of, with no record that names one, never
+/// opens on its harness's default: what is written to it waits, queued, and its record is
+/// read once. Switch chief gives it a model, takes the mark off, and it opens with what
+/// waited.
+#[test]
+fn a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    let chief = chief_of(&context, project).id;
+    // Its window never had a conversation of its harness's, which is closed with the
+    // project: there is no record to read.
+    context.pass().unwrap();
+    context.close_project(project).unwrap();
+    let before = context
+        .adapter
+        .prepared()
+        .into_iter()
+        .filter(|launch| launch["role"] == "chief")
+        .count();
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute_batch(&format!(
+            "UPDATE participant SET model = NULL, effort = NULL, needs_edit = 1 WHERE id = {chief}"
+        ))
+        .unwrap();
+    });
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &cf_ledger::NewNote {
+                from: Some("human".to_owned()),
+                to: "chief".to_owned(),
+                body: "Plan the release".to_owned(),
+                task: None,
+            },
+        )
+        .unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let chiefs = |context: &Context| {
+        context
+            .adapter
+            .prepared()
+            .into_iter()
+            .filter(|launch| launch["role"] == "chief")
+            .count()
+    };
+    assert_eq!(chiefs(&context), before, "no window on a default");
+    assert_eq!(
+        context.message(note.id).state,
+        "queued",
+        "what was written waits"
+    );
+    assert!(chief_of(&context, project).needs_edit);
+    assert!(
+        context.adapter.asked_used().len() <= 1,
+        "its record is read once: {:?}",
+        context.adapter.asked_used()
+    );
+    // The human picks a model in Switch chief: the mark goes, and the chief opens on it.
+    context
+        .switch_chief(project, to("claude-code", "diana"), SwitchWhen::Now, false)
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let switched = chief_of(&context, project);
+    assert!(!switched.needs_edit);
+    assert_eq!(chiefs(&context), before + 1);
+    let launched = context
+        .adapter
+        .prepared()
+        .into_iter()
+        .rfind(|launch| launch["role"] == "chief")
+        .unwrap();
+    assert_eq!(launched["agent"], agent("gpt-5.6-luna", None));
+    assert_ne!(
+        context.message(note.id).state,
+        "queued",
+        "what waited went in"
+    );
+}

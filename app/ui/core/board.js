@@ -346,7 +346,8 @@ export const HARNESS_NAMES = {
  * The model the chief runs on, as its card says it (O7): the one its window last ran on
  * where the human switched it there, else the one picked for it.
  */
-const chiefModel = (participant) => participant.ranOn ?? participant.model
+const chiefModel = (participant) =>
+  participant.needsEdit ? 'no model: needs an edit' : (participant.ranOn ?? participant.model)
 
 /**
  * What a member's model is called (harness-models): the name its harness's list gave it,
@@ -407,6 +408,14 @@ export function laneStatus(lane, board, now) {
   // What the human typed and did not send holds a message whether or not the window
   // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
   const holding = 'A message waits until you send or erase what you typed here'
+  // A chief the update could not tell the model of (T-1202), whose harness's record named
+  // none: its window stays closed until a model is picked for it, and nothing is lost.
+  if (participant.needsEdit && participant.role === 'chief') {
+    return [
+      'missing',
+      "Needs a model: ConsensFlow couldn't tell which model this chief used before the update. Pick one with Switch chief; what was written to the chief waits until then",
+    ]
+  }
   // A member the update could not run on what it ran on (T-1202) runs nothing until edited.
   if (participant.needsEdit && participant.role !== 'chief') {
     return [

@@ -26,6 +26,8 @@ hm-page-needs-edit = ["node", "app/node_modules/@playwright/test/cli.js", "test"
 hm-page-designer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "keeps an image designer a member of its own"]
 hm-harness-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "window_args::"]
 hm-ledger-replay = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "replay"]
+hm-engine-chief-models = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::"]
+hm-page-chief-model = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "could not tell the model of"]
 hm-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a project in a chosen folder|shows the staff as one row per member"]
 
 [[plant]]
@@ -525,3 +527,85 @@ find = '''
 replace = '''
       const key = `${harness} ${model} ${effort ?? ''}`
 '''
+
+[[plant]]
+name = "harness models: a chief that needs an edit opens on its harness's default"
+meant = "a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief"
+runs = ["hm-engine-chief-models"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        let participant = if participant.role == "chief" && participant.needs_edit {
+'''
+replace = '''
+        let participant = if participant.role == "chief" && participant.needs_edit && false {
+'''
+
+[[plant]]
+name = "harness models: a chief that needs an edit keeps no model its record names"
+meant = "a_chief_that_needs_an_edit_takes_the_model_its_record_names_and_opens_on_it"
+runs = ["hm-engine-chief-models"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''
+            .chief_ran_on(chief.id, &used.model, effort)?;
+'''
+replace = '''
+            .chief_launched(chief.id, None)?;
+'''
+
+[[plant]]
+name = "harness models: a chief's record that named no model is read pass after pass"
+meant = "a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief"
+runs = ["hm-engine-chief-models"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''
+        if record.window.borrow().no_model_in_record {
+'''
+replace = '''
+        if record.window.borrow().no_model_in_record && false {
+'''
+
+[[plant]]
+name = "harness models: Switch chief leaves the mark on a chief that needs an edit"
+meant = "a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief"
+runs = ["hm-engine-chief-models"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+           gone_model = NULL, out_until = NULL, needs_edit = 0,'''
+replace = '''
+           gone_model = NULL, out_until = NULL,'''
+
+[[plant]]
+name = "harness models: a chief's card says nothing of the model it needs"
+meant = "a chief the update could not tell the model of says so on its card, and Switch chief gives it one"
+runs = ["hm-page-chief-model"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+  if (participant.needsEdit && participant.role === 'chief') {
+'''
+replace = '''
+  if (false && participant.needsEdit && participant.role === 'chief') {
+'''
+
+[[plant]]
+name = "harness models: a chief's card names a model the chief has not got"
+meant = "a chief the update could not tell the model of says so on its card, and Switch chief gives it one"
+runs = ["hm-page-chief-model"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+participant.needsEdit ? 'no model: needs an edit''''
+replace = '''
+false ? 'no model: needs an edit''''

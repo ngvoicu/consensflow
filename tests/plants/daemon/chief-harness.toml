@@ -769,8 +769,10 @@ runs = ["chm-page-card"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = 'const chiefModel = (participant) => participant.ranOn ?? participant.model'
-replace = 'const chiefModel = (participant) => participant.model'
+find = '''
+  participant.needsEdit ? 'no model: needs an edit' : (participant.ranOn ?? participant.model)'''
+replace = '''
+  participant.needsEdit ? 'no model: needs an edit' : participant.model'''
 
 [[plant]]
 name = "chief: Switch chief takes the pick for the model the chief is on"
