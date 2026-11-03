@@ -1182,6 +1182,9 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
   padding: 4px 26px 22px;
   font: 13.5px/1.55 var(--history-mono);
   overflow-wrap: anywhere;
+  /* The viewer keeps what is in view as an earlier page comes in above it, in every
+     engine alike: Chromium's own anchoring would move it again, and WebKit has none. */
+  overflow-anchor: none;
 }
 .history-body:focus-visible { outline: none; }
 .history-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

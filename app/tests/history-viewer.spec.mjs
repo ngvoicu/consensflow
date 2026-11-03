@@ -22,6 +22,9 @@ let ui
 let refused
 
 test.setTimeout(30_000)
+// An action on what is not there fails its test, never times it out: a plant that renames a
+// button is caught by the test, not taken for a broken run.
+test.use({ actionTimeout: 5_000 })
 
 test.beforeAll(async () => {
   ui = await serveUi()
@@ -643,6 +646,16 @@ test.describe('the history viewer', () => {
     const output = ['Exit code 2', ...Array.from({ length: 9 }, (_, at) => `line ${at + 1}`)]
     data.histories.chief.items.push(
       call(2, 2, 't-9', '$ make', `${output.join('\n')}\n\n`, { status: 'failed', tookMs: 61_500 }),
+      call(
+        2,
+        3,
+        't-10',
+        '$ make check',
+        ['Process exited with code 0', ...output.slice(1)].join('\n'),
+        {
+          status: 'ok',
+        },
+      ),
     )
     await open(page, data)
     const viewer = await openChief(page)
@@ -660,7 +673,8 @@ test.describe('the history viewer', () => {
     // Shown whole, the exit line is in it once.
     await expect(failed.locator('.history-exit')).toHaveCount(0)
     // A call that went well says no exit line, wherever its output says one.
-    const ok = block(viewer, 't-1')
+    const ok = block(viewer, 't-10')
+    await expect(ok.locator('.history-fold')).toHaveCount(1)
     await expect(ok.locator('.history-exit')).toHaveCount(0)
   })
 
@@ -698,6 +712,7 @@ test.describe('the history viewer', () => {
     const expand = compaction.getByRole('button', {
       name: 'Compacted from 3,903 tokens (click to expand)',
     })
+    await expect(expand).toBeVisible()
     const summary = compaction.locator('.history-text')
     await expect(summary).toBeHidden()
     await expand.click()
@@ -780,6 +795,8 @@ test.describe('the history viewer', () => {
     expect(await ids(viewer)).toEqual(['a-1', 'c-1', 'u-2', 'a-2'])
     const row = earlier(viewer)
     await expect(row).toHaveText('… earlier history, click to load')
+    const first = viewer.locator('ol.history-items > :first-child .history-earlier')
+    await expect(first).toHaveCount(1)
     // Meanwhile the chief says more: a page already read is not moved by it.
     await page.evaluate(() => {
       const { items } = window.__model.histories.chief
@@ -795,6 +812,7 @@ test.describe('the history viewer', () => {
     await expect(block(viewer, 't-1')).toHaveCount(1)
     expect(await ids(viewer)).toEqual(['t-1', 't-2', 't-3', 't-4', 'a-1', 'c-1', 'u-2', 'a-2'])
     expect(Math.abs((await top()) - before)).toBeLessThan(2)
+    await expect(first).toHaveCount(1)
     await row.focus()
     await page.keyboard.press('Enter')
     expect(await ids(viewer)).toEqual([
@@ -969,21 +987,23 @@ test.describe('the history viewer', () => {
     const data = model()
     const header = '[ConsensFlow m-12 · T-1 · result from @zeus]\n'
     data.histories['zeus-amber-pine'].items.push(
-      item(7, 7, 'w-8', 'user', `${header}Parser done`, {
+      item(7, 7, 'w-8', 'user', `Typed ${header}Parser done`, {
         kind: 'prompt',
         cut: { from: 0, bytes: 700_000, revision: 1 },
-        delivery: { line: "· m-12: @zeus's result on T-1 (cf task get T-1)", at: 0 },
+        delivery: { line: "· m-12: @zeus's result on T-1 (cf task get T-1)", at: 6 },
       }),
     )
-    data.parts['w-8'] = [`${header}Parser done`, ', all of it.']
+    data.parts['w-8'] = [`Typed ${header}Parser done`, ', all of it.']
     await open(page, data)
     const viewer = await openSession(page)
     await block(viewer, 'w-8').locator('.history-more').click()
     await expect(block(viewer, 'w-8').locator('.history-text')).toHaveText([
+      'Typed',
       `${header}Parser done, all of it.`,
     ])
     await expect(block(viewer, 'w-8')).toHaveAttribute('data-kind', 'prompt')
-    // Copied again since the page was read, the human's words in its place: drawn as it is.
+    // Copied again since the page was read, the human's words in its place: drawn as it is,
+    // not split where the delivery the page showed began.
     await page.evaluate(() => {
       window.__model.copies = {
         'w-8': [{ revision: 2, parts: ['Typed instead', ' by the human.'] }],

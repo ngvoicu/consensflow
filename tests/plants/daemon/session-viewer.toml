@@ -71,15 +71,14 @@ viewer-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressio
 viewer-ui-button = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "the History button"]
 viewer-ui-stream = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "draws one stream of items"]
 viewer-ui-labels = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "shows every text as text"]
-viewer-ui-delivery = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "folds a delivery"]
-viewer-ui-paging = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "goes older from the oldest item shown"]
+viewer-ui-delivery = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "delivery in full in the same block"]
+viewer-ui-paging = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "loads earlier history from a quiet first row"]
 viewer-ui-find = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "finds words in any case"]
-viewer-ui-tools = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "on the switch"]
 viewer-ui-long = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "shows a long item by a part"]
 viewer-ui-revision = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "copied again meanwhile"]
-viewer-ui-fold = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "keeps a long delivery folded"]
+viewer-ui-fold = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "shows a long delivery whole"]
 viewer-ui-cap = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "holds a search to 1,000 characters"]
-viewer-ui-theme = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "app's theme"]
+viewer-ui-theme = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "draws in the mock's"]
 viewer-ui-drawer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "names a compaction's summary in what a window wrote"]
 
 # The ledger: the mark, and what a read of the history says of each conversation.
@@ -203,34 +202,24 @@ find = "    let onward = if trimmed { last_taken } else { read.resume };"
 replace = "    let onward = read.resume;"
 
 [[plant]]
-name = "session viewer: Older asks for the most recent page again"
-meant = "goes older from the oldest item shown and newer from the newest, never repeating or skipping one"
+name = "session viewer: the earlier row asks for the most recent page again"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
 runs = ["viewer-ui-paging"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "void this.#read({ before: this.#shown.older })"
-replace = "void this.#read({})"
+find = "      void this.#read(this.#shown.older)"
+replace = "      void this.#read()"
 
 [[plant]]
-name = "session viewer: Newer asks for what comes before the newest item shown, not after it"
-meant = "goes older from the oldest item shown and newer from the newest, never repeating or skipping one"
+name = "session viewer: no row loads an older page"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
 runs = ["viewer-ui-paging"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "void this.#read({ after: this.#shown.newer }, true)"
-replace = "void this.#read({ before: this.#shown.newer }, true)"
-
-[[plant]]
-name = "session viewer: Older never moves to an older page"
-meant = "goes older from the oldest item shown and newer from the newest, never repeating or skipping one"
-runs = ["viewer-ui-paging"]
-
-[[plant.edit]]
-file = "app/ui/core/history-viewer.js"
-find = "    this.#older.disabled = older === null"
-replace = "    this.#older.disabled = true"
+find = "    if (history.older === null) return []"
+replace = "    return []"
 
 # Round 2, P2 4, and round 3, P2 2: a read that goes through more than its page.
 
@@ -340,7 +329,7 @@ replace = "    text.to_ascii_lowercase()"
 
 [[plant]]
 name = "session viewer: a search's page says nothing of stopping short"
-meant = "finds words in any case, says when nothing holds them, and where a search stopped short"
+meant = "finds words in any case, in a call's header and its output, says when nothing holds them, and where a search stopped short"
 runs = ["viewer-ui-find"]
 
 [[plant.edit]]
@@ -552,7 +541,7 @@ replace = '''       WHERE ?1 IS NOT NULL AND h.conversation_id = ?2 AND h.item =
 
 [[plant]]
 name = "session viewer: Show the whole item reads its first part alone"
-meant = "shows a long item by a part, and the whole of it on asking, read a part at a time"
+meant = "shows a long item by a part, and the whole of it on a click row, read a part at a time"
 runs = ["viewer-ui-long"]
 
 [[plant.edit]]
@@ -737,18 +726,18 @@ replace = '''            element('span', 'terminal-meta', participant.harness ??
 
 [[plant]]
 name = "session viewer: an item's text is drawn as markup"
-meant = "labels items as the task drawer does, a compaction's summary as one, and shows every text as text"
+meant = "shows every text as text, never as markup"
 runs = ["viewer-ui-labels"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "    entry.append(element('pre', 'transcript-body', item.text))"
-replace = '''    entry.insertAdjacentHTML('beforeend', `<pre class="transcript-body">${item.text.replace(/ onerror="[^"]*"/g, '')}</pre>`)'''
+find = "  if (!item.delivery) return [element('pre', className, item.text)]"
+replace = '''  if (!item.delivery) { const pre = element('pre', className); pre.innerHTML = item.text.replace(/ onerror="[^"]*"/g, ''); return [pre] }'''
 
 [[plant]]
 name = "session viewer: a compaction's summary is labelled as what was sent to the window"
-meant = "labels items as the task drawer does, a compaction's summary as one, and shows every text as text"
-runs = ["viewer-ui-labels"]
+meant = "names a compaction's summary in what a window wrote as one, never as what was sent to it"
+runs = ["viewer-ui-drawer"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
@@ -766,18 +755,18 @@ find = "          `${itemLabel(item)}${item.complete ? '' : ' · still writing'}
 replace = "          `${item.role === 'user' ? 'Sent to the window' : itemLabel(item)}${item.complete ? '' : ' · still writing'}`,"
 
 [[plant]]
-name = "session viewer: a delivery is shown whole, not folded to its line"
-meant = "folds a delivery to its line, under what the human typed with it, and opens it on a click or a key"
+name = "session viewer: a delivery is folded to its line, not shown in full"
+meant = "draws the human's prompts as blue blocks, and ConsensFlow's delivery in full in the same block"
 runs = ["viewer-ui-delivery"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "  if (!item.delivery) {"
-replace = "  if (!item.delivery || true) {"
+find = "  const delivered = element('pre', className, item.text.slice(item.delivery.at))"
+replace = "  const delivered = element('pre', className, item.delivery.line)"
 
 [[plant]]
 name = "session viewer: the search is not sent with the read"
-meant = "finds words in any case, says when nothing holds them, and where a search stopped short"
+meant = "finds words in any case, in a call's header and its output, says when nothing holds them, and where a search stopped short"
 runs = ["viewer-ui-find"]
 
 [[plant.edit]]
@@ -786,34 +775,34 @@ find = "    if (find) asked.find = find"
 replace = ""
 
 [[plant]]
-name = "session viewer: Show tool output asks for no tools' outputs"
-meant = "shows the tools' outputs on the switch"
-runs = ["viewer-ui-tools"]
+name = "session viewer: the viewer asks for no tools' calls"
+meant = "is on the chief's head beside Switch chief, on a session's, and on the chief's card with no window"
+runs = ["viewer-ui-button"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "      tools: this.#tools.checked,"
-replace = "      tools: false,"
+find = "    const asked = { project: shown.project, handle: shown.handle, tools: true }"
+replace = "    const asked = { project: shown.project, handle: shown.handle, tools: false }"
 
 [[plant]]
-name = "session viewer: the viewer does not say what is not stored"
+name = "session viewer: the viewer still says tool calls and thinking are not stored"
 meant = "draws one stream of items across conversations, titled History and naming no conversation, harness or model"
 runs = ["viewer-ui-stream"]
 
 [[plant.edit]]
 file = "app/ui/index.html"
-find = '''<p class="history-hint">Not stored: tool calls and thinking.</p>'''
-replace = '''<p class="history-hint"></p>'''
+find = """<h2 class="history-title" id="history-title">History</h2>"""
+replace = """<h2 class="history-title" id="history-title">History</h2><p class="history-hint">Not stored: tool calls and thinking.</p>"""
 
 [[plant]]
-name = "session viewer: the viewer's page is drawn in a colour of its own, not the theme's"
-meant = "says the daemon's refusal in its words, and draws in the app's theme"
+name = "session viewer: a prompt is drawn in the dark blue in a light system too"
+meant = "draws in the mock's light colours, in a monospace of the Mac's or Windows'"
 runs = ["viewer-ui-theme"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = "align-content: start; gap: 22px; background: var(--deep); }"
-replace = "align-content: start; gap: 22px; background: #0c2026; }"
+find = """.history-item[data-kind="prompt"] { background: var(--history-prompt); }"""
+replace = """.history-item[data-kind="prompt"] { background: #1f4a63; }"""
 
 # Round 4, P1: an index of the log, or a read of it, that fails on what an older build wrote.
 
@@ -1297,14 +1286,14 @@ find = "            revision: met.revision,"
 replace = "            revision: met.revision * 0,"
 
 [[plant]]
-name = "session viewer: Show the whole item keeps the delivery's fold of a copy it no longer shows"
-meant = "keeps a long delivery folded when its whole is the copy the page showed, and not one copied again since"
+name = "session viewer: Show the whole item splits a copy it no longer shows where the delivery the page showed began"
+meant = "shows a long delivery whole in its blue block once read, and a copy that holds it no longer as it is"
 runs = ["viewer-ui-fold"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = "          const delivery = revision === item.cut.revision ? item.delivery : undefined"
-replace = "          const delivery = item.delivery"
+find = "      const delivery = revision === item.cut.revision ? item.delivery : undefined"
+replace = "      const delivery = item.delivery"
 
 # Round 6: an id is an identity, kept whole; a time a value, kept canonical; a
 # read of the history reads its participant's and project's fields it uses, and

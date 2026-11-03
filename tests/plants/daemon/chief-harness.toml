@@ -24,6 +24,14 @@
 # leave the history's own out, the engine copies the timeline (crates/cf-engine/src/transcripts.rs)
 # and the page and `cf task get --transcript` show a call's header (T-486).
 #
+# Phase 4's (CHF-20, CHF-21, T-731) hold `view:`: the history viewer drawn to the mock
+# (app/ui/core/history-viewer.js, app/ui/page.css, app/ui/index.html): each item by its kind,
+# or its role where an older build copied it; prompts and deliveries whole in blue blocks; a
+# call's header, its output folded to its last lines with an exit line kept in sight, its
+# change as rows, the time it took, and its colour; a compaction violet; the earlier history
+# from a quiet first row above what is in view; dark and light; and the ledger's search
+# finding a call's header.
+#
 # T-995's (Calliope's re-check T-994) hold `gone:`: the adapter hears a refusal of the model
 # asked for (Pi by the id after its provider), a held chief costs a pass nothing, a default
 # that is the gone model holds the chief, and the exit's screen is read without
@@ -1146,7 +1154,7 @@ replace = """        db.execute_batch(&made.replace(" WHERE ", " WHERE 1 AND "))
 
 [[plant]]
 name = "timeline: the viewer reads a long item of no conversation"
-meant = "shows a long item by a part, and the whole of it on asking, read a part at a time"
+meant = "shows a long item by a part, and the whole of it on a click row, read a part at a time"
 runs = ["tl-ui"]
 
 [[plant.edit]]
@@ -1161,8 +1169,8 @@ runs = ["tl-ui"]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
-find = """        ? 'Nothing to show yet: Older reads further back.'"""
-replace = """        ? 'Nothing is kept of this history yet.'"""
+find = """      let none = history.partial ? 'Nothing to show yet.' : 'Nothing is kept of this history yet.'"""
+replace = """      let none = 'Nothing is kept of this history yet.'"""
 
 [[plant]]
 name = "timeline: the viewer names whose history it shows"
@@ -1768,3 +1776,205 @@ runs = ["it-muse"]
 file = "crates/cf-harness/src/muse/record/held.rs"
 find = '    let (_, after) = said.split_once("--- original\n+++ updated\n")?;'
 replace = '    let (_, after) = said.split_once("--- before\n+++ after\n")?;'
+
+# Phase 4 (CHF-20, CHF-21, T-731): the view drawn to the mock.
+
+[[plant]]
+name = "view: an item is drawn by its role alone, never the kind its reader said"
+meant = "draws thinking italic and dimmed, on the stream"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (item.kind) return item.kind"
+replace = ""
+
+[[plant]]
+name = "view: a failed call is drawn as one whose status is unknown"
+meant = "draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  const status = ['ok', 'failed', 'running'].includes(item.status) ? item.status : 'unknown'"
+replace = "  const status = ['ok', 'running'].includes(item.status) ? item.status : 'unknown'"
+
+[[plant]]
+name = "view: a call's output is never folded"
+meant = "draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (lines.length <= FOLDED_LINES) {"
+replace = "  if (lines.length > 0) {"
+
+[[plant]]
+name = "view: blank lines at an output's end are counted as lines of it"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = '''  const lines = text.replace(/\s+$/, '').split('\n')'''
+replace = '''  const lines = text.split('\n')'''
+
+[[plant]]
+name = "view: a failed call's exit line above the fold is not kept in sight"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  const pinned = exit === undefined ? null : element('pre', 'history-exit', exit.trim())"
+replace = "  const pinned = null"
+
+[[plant]]
+name = "view: a call that went well keeps its exit line in sight too"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    status === 'failed' && !shown.some((line) => EXIT_LINE.test(line))"
+replace = "    !shown.some((line) => EXIT_LINE.test(line))"
+
+[[plant]]
+name = "view: a call of a minute or more says its time in seconds alone"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (seconds < 60) return `${seconds.toFixed(1)}s`"
+replace = "  return `${seconds.toFixed(1)}s`"
+
+[[plant]]
+name = "view: a call's header is drawn as one line, its path and lines not their own colours"
+meant = "draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  const file = FILE_CALL.exec(header)"
+replace = "  const file = null"
+
+[[plant]]
+name = "view: an edit's removed rows are drawn as kept ones"
+meant = "draws an edit's change as red and green rows"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    } else if (line.startsWith('-')) row.dataset.sign = 'removed'"
+replace = "    } else if (line.startsWith('-')) row.dataset.sign = 'kept'"
+
+[[plant]]
+name = "view: an edit that went well draws its tool's words with its change"
+meant = "draws an edit's change as red and green rows"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (!item.diff || status === 'failed') entry.append(...drawOutput(item.text, status))"
+replace = "  entry.append(...drawOutput(item.text, status))"
+
+[[plant]]
+name = "view: a compaction's summary is shown before any click"
+meant = "draws a compaction as a violet block, with its tokens, and its summary on a click"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  summary.hidden = true"
+replace = "  summary.hidden = false"
+
+[[plant]]
+name = "view: a compaction says no tokens"
+meant = "draws a compaction as a violet block, with its tokens, and its summary on a click"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "      ? `Compacted from ${item.tokens.toLocaleString('en')} tokens`"
+replace = "      ? 'Compacted'"
+
+[[plant]]
+name = "view: the agent's words are drawn as written, not as markdown"
+meant = "draws the agent's words as markdown, in the mock's heading, marker and inline-code colours"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    words.append(...render(item.text))"
+replace = "    words.append(item.text)"
+
+[[plant]]
+name = "view: an earlier page takes the place of the stream, not above it"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "      if (before && list) {"
+replace = "      if (false) {"
+
+[[plant]]
+name = "view: an earlier page above the stream moves what was in view"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "        this.#body.scrollTop = this.#body.scrollHeight - below"
+replace = ""
+
+[[plant]]
+name = "view: the earlier row is drawn below the items"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    list.append(...this.#earlier(history, find), ...items)"
+replace = "    list.append(...items, ...this.#earlier(history, find))"
+
+[[plant]]
+name = "view: thinking is not italic"
+meant = "draws thinking italic and dimmed, on the stream"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = ".history-item .history-thinking { font-style: italic;"
+replace = ".history-item .history-thinking { font-style: normal;"
+
+[[plant]]
+name = "view: the viewer is dark in a light system"
+meant = "draws in the mock's light colours, in a monospace of the Mac's or Windows'"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "@media (prefers-color-scheme: light) {\n  dialog.history-viewer {"
+replace = "@media (prefers-color-scheme: no-preference) {\n  dialog.history-viewer {"
+
+[[plant]]
+name = "view: the viewer's monospace has no face of Windows'"
+meant = "draws in the mock's dark colours, in a monospace of the Mac's or Windows'"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = """Menlo, "Cascadia Mono", "Cascadia Code", Consolas, monospace;"""
+replace = """Menlo, monospace;"""
+
+[[plant]]
+name = "view: a call's header is not searched"
+meant = "a_search_finds_a_calls_header_as_it_finds_its_output_a_long_output_by_its_header_too"
+runs = ["tl-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        if from_part == 0 && header.is_some_and(|header| folded(header).contains(needle)) {"
+replace = "        if from_part == 0 && header.is_some_and(|header| header.contains(needle)) {"

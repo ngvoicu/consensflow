@@ -1042,8 +1042,9 @@ const TRANSCRIPT_ROLE = {
 }
 
 /**
- * What a copied item is, as the drawer and the history viewer label it: by its
- * role, and the summary a compaction wrote in the user's place as one.
+ * What a copied item is, as the drawer labels it (and the history viewer heads a
+ * tool's output an older build copied): by its role, and the summary a compaction
+ * wrote in the user's place as one.
  */
 export const itemLabel = (item) =>
   item.compaction ? 'Compaction summary' : (TRANSCRIPT_ROLE[item.role] ?? item.role)
