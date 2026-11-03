@@ -398,6 +398,23 @@ pub fn window_life() -> Vec<Scenario> {
                         result.as_ref().is_some_and(|id| chief_given(judged, &format!("[ConsensFlow m-{id} ")) == 1),
                         format!("{result:?}"),
                     ),
+                    {
+                        // The field's results stayed queued: the worker's turn that got through
+                        // brings the chief on the same account back, and the result goes in then.
+                        let events = &judged.snapshot.events;
+                        let waited = judged.nth("A", 0).zip(result.as_ref().and_then(Value::as_i64)).and_then(|(number, id)| {
+                            Some(
+                                crate::matrix::observe::delivered_at(events, id)?
+                                    - crate::matrix::observe::reached_at(events, number, "done")?,
+                            )
+                        });
+                        Check::new(
+                            "A",
+                            "its result went in within 30 s of the worker's turn that got through",
+                            waited.is_some_and(|waited| waited <= 30_000),
+                            format!("{waited:?} ms after it was done"),
+                        )
+                    },
                 ]
             },
             &[],

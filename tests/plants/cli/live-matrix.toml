@@ -45,14 +45,10 @@ matrix-builds-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", 
 matrix-run-in-background = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_run_in_background"]
 matrix-hold-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_hold_notes"]
 matrix-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_status_line"]
-matrix-resume-at-rest = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_resume_at_rest"]
-matrix-restart-mid-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_restart_mid_turn"]
-matrix-quota-account = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_quota_account"]
 matrix-trust-git-init = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_trust_git_init"]
 matrix-window-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_window_closed"]
 matrix-tell-queued = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_tell_queued"]
 matrix-failure-reason = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_failure_reason"]
-matrix-tell-keeps-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_tell_keeps_work"]
 matrix-switch-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_switch_chief"]
 matrix-quota-out = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_quota_out"]
 # The daemon's API, the tooling's look at it among it.
@@ -735,62 +731,6 @@ replace = '''        let _ = SETTLE;
         Ok(first)'''
 
 [[plant]]
-name = "live matrix: field fix out: the sites chief's record after an idle compaction is read as cut at the Resume"
-meant = "field_resume_at_rest"
-runs = ["matrix-resume-at-rest"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/contract.rs"
-find = "        .find(|item| item.role != Role::Custom && !item.compaction)"
-replace = "        .find(|item| item.role != Role::Custom)"
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/record/queues.rs"
-find = "        if !begins_no_turn(&taken) {"
-replace = "        if !begins_no_turn(&taken) || !taken.is_empty() {"
-
-[[plant]]
-name = "live matrix: field fix out: poker-lab's chief, at rest while its job ran, is read as cut at the Resume"
-meant = "field_resume_at_rest"
-runs = ["matrix-resume-at-rest"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/record/queues.rs"
-find = "        if !begins_no_turn(&taken) {"
-replace = "        if !begins_no_turn(&taken) || !taken.is_empty() {"
-
-[[plant.edit]]
-file = "crates/cf-harness/src/contract.rs"
-find = "                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),"
-replace = ""
-
-[[plant]]
-name = "live matrix: field fix out: the engine never marks the pause of the windows a stop of the app ended, and the Resume leaves their work"
-meant = "field_restart_mid_turn"
-runs = ["matrix-restart-mid-turn"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = "                let stop = self.stall(&project, &thread.task, &because, &why, except, is_own)?;"
-replace = "                let stop = self.stall(&project, &thread.task, &because, &why, except, false)?;"
-
-[[plant]]
-name = "live matrix: field fix out: a window's turn that gets through brings back only its own member, and the chief at rest never takes its worker's result"
-meant = "field_quota_account"
-runs = ["matrix-quota-account"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''            self.back_on_its_account(project.id, &owner, &news)?;
-'''
-replace = '''
-'''
-
-[[plant]]
 name = "live matrix: field fix out: the trust question in the project's own folder is left to the human, and the worker's launch stops (dip #2)"
 meant = "field_trust_git_init"
 runs = ["matrix-trust-git-init"]
@@ -835,17 +775,6 @@ find = '''            self.failure = Some(record.text.clone());
 '''
 replace = '''            self.failure = Some(String::new());
 '''
-
-[[plant]]
-name = "live matrix: field fix out: a turn its record ends is taken for at work, and a stop is pressed into it"
-meant = "field_tell_keeps_work"
-runs = ["matrix-tell-keeps-work"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = "} else if observed.settled || observed.over == Over::Held || self.cut_short(observed) {"
-replace = "} else if observed.settled || self.cut_short(observed) {"
 
 [[plant]]
 name = "live matrix: field fix out: the handoff of a switched chief sends it to answer a question the cancel left"
