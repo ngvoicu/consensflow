@@ -195,8 +195,9 @@ fn a_failure_is_the_text_string_makes_of_it() {
     assert!(quota_of(&json!(429)));
     assert!(quota_of(&json!("OpenAI API error (429): x")));
     assert!(quota_of(&json!(["402: more credits"])));
-    // `[object Object]`, and the empty text, and a number that is no status.
-    for error in [json!({}), json!(null), json!(""), json!(500), json!(true)] {
+    // `[object Object]`, and the empty text, and a number that is no refusal's status (a
+    // 500 is a server's error: a refusal for a moment, T-1112).
+    for error in [json!({}), json!(null), json!(""), json!(200), json!(true)] {
         assert!(!quota_of(&error), "{error}");
     }
     // No message at all is `provider error`: a failure, no quota.
@@ -521,4 +522,43 @@ fn a_step_pi_wrote_with_no_model_behind_it_is_synthetic_and_one_the_model_began_
     // A step that stopped is the model's, whatever it says.
     let record = Stage::with(&[header(), user("u1", "go"), assistant("a1", "stop", "")]).at(0);
     assert!(!record.items.last().unwrap().synthetic);
+}
+
+#[test]
+fn a_providers_refusal_for_a_moment_is_busy_and_no_quota() {
+    // T-1112: Anthropic's 529 as Pi's Anthropic provider words it (its status, then the
+    // body), an OpenAI-shaped 503, words of a model at capacity; a 400 stays the turn's
+    // failure, and Pi's own "provider error" (no message) is none.
+    for error in [
+        r#"529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+        "OpenAI API error (503): Service Unavailable",
+        "Provider returned error: model is at capacity",
+        "The servers are currently busy, please try again",
+        "520 Cloudflare: web server returned an unknown error",
+    ] {
+        let mut stage = Stage::with(&[
+            header(),
+            failing("a1", &json!(error), &json!(1_790_000_000_000_i64)),
+        ]);
+        let record = stage.at(0);
+        assert!(record.failed, "{error}");
+        assert_eq!(
+            record.quota.as_deref(),
+            Some(&Quota::Busy {
+                at: Some("2026-09-21T14:13:20.000Z".to_owned()),
+                because: error.to_owned(),
+            }),
+            "{error}"
+        );
+    }
+    let mut stage = Stage::with(&[
+        header(),
+        failing(
+            "a1",
+            &json!(r#"400 {"type":"error","error":{"type":"invalid_request_error"}}"#),
+            &json!(1_790_000_000_000_i64),
+        ),
+    ]);
+    let record = stage.at(0);
+    assert!(record.failed && record.quota.is_none());
 }

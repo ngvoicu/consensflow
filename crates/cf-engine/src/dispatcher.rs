@@ -44,7 +44,7 @@ use crate::pacing;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{moved_hold, out_words, News, SchedulerState, Unwell};
+use crate::scheduler::{busy_turn, moved_hold, out_words, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
@@ -1285,7 +1285,10 @@ impl Dispatcher {
         }
         self.record_quota(record, &owner, observed.quota.clone());
         self.tell_drift(project, participant, record, &observed)?;
-        if self.refused_here(record, &owner) {
+        // A chief's turn its busy model refused is the human's to hear, as before (T-1112): the
+        // chief has no task to hold and try again, and a hold would lose its turn unheard.
+        let chief_busy = participant.role == "chief" && busy_turn(&observed);
+        if !chief_busy && self.refused_here(record, &owner) {
             return self
                 .out_of_quota(project, participant, record, &owner, &observed)
                 .await;
@@ -1369,6 +1372,9 @@ impl Dispatcher {
             if self.close_if_free(record).await? {
                 return Ok(());
             }
+        } else if chief_busy {
+            self.tell_chief_failed(project, participant, record, &observed)
+                .await?;
         } else if observed.failed && !self.cut_short(&observed) {
             // A refusal for quota is the quota's to say; any other failure is the human's to hear.
             self.tell_chief_failed(project, participant, record, &observed)
@@ -1505,10 +1511,15 @@ impl Dispatcher {
         let until = owner.out_until.clone().unwrap_or_default();
         let reported = record.quota.borrow().reported.clone();
         let unwell = Unwell::of(reported.as_deref());
-        self.set_activity(
-            record,
-            Activity::because(ActivityState::Out, out_words(&until, unwell)),
-        )?;
+        // A window of a member out for its busy model whose own record shows no refusal says
+        // so too (T-1112).
+        let words = match unwell {
+            None if self.busy_until(owner.id).as_deref() == Some(until.as_str()) => {
+                format!("model busy, tried again at {until}")
+            }
+            _ => out_words(&until, unwell),
+        };
+        self.set_activity(record, Activity::because(ActivityState::Out, words))?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
         if participant.role != "chief" && self.refused_unhandled(record) {
@@ -1599,14 +1610,22 @@ impl Dispatcher {
         // the quota now, not for a job of an earlier turn (`turn_end`).
         record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
-        let reset = self.reset_of(reported.as_deref());
         let unwell = Unwell::of(reported.as_deref());
+        // A busy model is tried again after a backoff of the engine's, by its tries (T-1112).
+        let reset = if let Some(Unwell::Busy(_)) = unwell {
+            self.busy_reset(project, participant)?
+        } else {
+            self.reset_of(reported.as_deref())
+        };
         let marked = self.seams.ledger.borrow_mut().mark_out(
             owner.id,
             &reset,
             unwell.map_or("out of quota", Unwell::hold),
         )?;
         let until = marked.out_until.clone().unwrap_or_default();
+        if let Some(Unwell::Busy(_)) = unwell {
+            self.marked_busy(owner.id, &until);
+        }
         self.set_activity(
             record,
             Activity::because(ActivityState::Out, out_words(&until, unwell)),
@@ -1619,6 +1638,7 @@ impl Dispatcher {
                 match unwell {
                     Some(Unwell::Account(_)) => "its account is unavailable",
                     Some(Unwell::Moved(_)) => "its model moved on its own",
+                    Some(Unwell::Busy(_)) => "its model was busy",
                     None => "the harness ran out of quota",
                 },
             )?;

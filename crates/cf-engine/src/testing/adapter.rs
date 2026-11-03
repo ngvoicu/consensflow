@@ -666,7 +666,8 @@ impl FakeAdapter {
         let mut item = self.item(Role::Assistant, "You've hit your weekly limit");
         if let Quota::Exhausted { at: Some(at), .. }
         | Quota::Unavailable { at: Some(at), .. }
-        | Quota::Moved { at: Some(at), .. } = &quota
+        | Quota::Moved { at: Some(at), .. }
+        | Quota::Busy { at: Some(at), .. } = &quota
         {
             item.at = Some(json!(at));
         }

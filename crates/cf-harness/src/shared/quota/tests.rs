@@ -37,7 +37,10 @@ fn instant(text: &str) -> f64 {
 fn resets(text: &str, at_ms: f64) -> Option<String> {
     match exhausted_quota(text, at_ms, &local()).unwrap() {
         Quota::Exhausted { resets_at, .. } => resets_at,
-        Quota::Usage { .. } | Quota::Unavailable { .. } | Quota::Moved { .. } => {
+        Quota::Usage { .. }
+        | Quota::Unavailable { .. }
+        | Quota::Moved { .. }
+        | Quota::Busy { .. } => {
             unreachable!("a refusal is exhausted")
         }
     }
