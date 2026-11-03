@@ -1,0 +1,626 @@
+# A macOS privacy dialog drawn in the app's name, which a worker's command waits on, was told to
+# nobody (field, 3.0.7-alpha.1, 2026-11-03, T-1194): another user's Mac showed "Allow ConsensFlow to
+# access your music, video activity, and media library in Apple Music?" over a Claude Code window.
+# On a Mac every window's process has the app as its responsible process, so a folder or a library a
+# command touches (`ls ~/Music`, `find ~`, a project on the home folder) is asked in the app's name.
+# The pane host reads the system's log of those requests (`crates/cf-panes/src/tcc*`), finds the
+# window whose tree holds the process (`process_tree.rs` `holds`, `pty/holding.rs`), and tells the
+# daemon (`pane.tcc`); the engine tells whoever gave the window's task and the human once and holds
+# the window while the dialog waits (`crates/cf-engine/src/privacy.rs`). Claude's window is denied
+# reads of the two libraries (`claude/install.rs` `private_reads`), and the worker roles say to look
+# inside the project folder (`skill/core/staff.md`).
+#
+# The tests are the pane host's own (`tcc/tests.rs` on lines recorded from a real Mac, `tcc/watch/
+# tests.rs`, `tcc/real/tests.rs`, `process_tree/holds_tests.rs`, `pty/holding.rs`, `alerts.rs`), the
+# engine's `tests/dispatcher/privacy_prompts.rs`, the daemon's `host/tests.rs` and `start/tests/
+# restart.rs`, Claude's `tests/launch/claude/private_folders.rs`, and the role-text golden. Every name
+# holds `privacy prompts`, so `cargo xtask plants daemon "privacy prompts"` runs them all.
+
+[run]
+pv-tcc = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "tcc::"]
+pv-holds = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::holds_tests"]
+pv-holding = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::holding"]
+pv-alerts = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "alerts::"]
+pv-handler = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::the_host_says_how_many_alerts"]
+pv-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "privacy_prompts::"]
+pv-engine-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "privacy::"]
+pv-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests"]
+pv-daemon-start = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::restart::a_privacy_dialog"]
+pv-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::private_folders"]
+pv-claude-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::install"]
+pv-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
+
+[[plant]]
+name = "privacy prompts: a dialog raised in another app's name is told"
+meant = "a_dialog_raised_in_another_apps_name_is_not_told"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/lines.rs"
+find = '''
+                if who.responsible != self.app {
+                    return None;
+                }'''
+replace = '''
+                if who.responsible != self.app && false {
+                    return None;
+                }'''
+
+[[plant]]
+name = "privacy prompts: the app's own access is told as a window's"
+meant = "a_dialog_the_app_raises_for_itself_is_not_a_windows"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/lines.rs"
+find = '''
+        if who.pid == self.app {
+            return None;
+        }'''
+replace = '''
+        if who.pid == self.app && false {
+            return None;
+        }'''
+
+[[plant]]
+name = "privacy prompts: a request that only asks, with no dialog, is told"
+meant = "what_the_system_only_asks_is_no_dialog"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/lines.rs"
+find = '''
+            "AUTHREQ_PROMPTING" => {'''
+replace = '''
+            "AUTHREQ_PROMPTING" | "AUTHREQ_CTX" => {'''
+
+[[plant]]
+name = "privacy prompts: one message number of two daemons is one request"
+meant = "two_daemons_message_numbers_do_not_mix"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/lines.rs"
+find = "        let key = (tccd, id);"
+replace = "        let key = (0, id);"
+
+[[plant]]
+name = "privacy prompts: the requests kept while their lines come have no bound"
+meant = "requests_that_never_become_a_dialog_are_not_kept_for_ever"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/lines.rs"
+find = "const KEPT: usize = 512;"
+replace = "const KEPT: usize = 1 << 30;"
+
+[[plant]]
+name = "privacy prompts: a request is told every time its lines are read"
+meant = "the_lines_of_a_request_join_in_any_order_and_a_request_is_told_once"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/lines.rs"
+find = '''
+        if partial.settled {
+            return None;
+        }'''
+replace = '''
+        if false {
+            return None;
+        }'''
+
+[[plant]]
+name = "privacy prompts: the program of a process is never its file's name"
+meant = "a_recorded_apple_music_dialog_is_one_prompt_naming_the_service_the_process_and_its_program"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/lines.rs"
+find = '''
+    let file = process.binary_path.rsplit('/').next().unwrap_or("");'''
+replace = '''
+    let file = "";'''
+
+[[plant]]
+name = "privacy prompts: a reader is started with no window open"
+meant = "nothing_is_read_while_no_window_is_open_and_a_reader_starts_when_one_opens"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = '''
+        if windows.open() == 0 {
+            time.sleep(IDLE_POLL);
+            continue;
+        }'''
+replace = '''
+        if windows.open() == 0 && false {
+            time.sleep(IDLE_POLL);
+            continue;
+        }'''
+
+[[plant]]
+name = "privacy prompts: a dialog is told with no window though one holds its process"
+meant = "a_dialog_in_the_apps_name_is_told_with_the_window_that_holds_its_process"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = "                        tells.prompt(windows.holding(prompt.pid), &prompt);"
+replace = "                        tells.prompt(None, &prompt);"
+
+[[plant]]
+name = "privacy prompts: a log the reader is refused is started again and nothing is said"
+meant = "a_log_the_reader_is_refused_is_told_once_with_its_words_and_never_read_again"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = "        if !run.banner {"
+replace = "        if !run.banner && false {"
+
+[[plant]]
+name = "privacy prompts: a reader that ends at once is started again for ever"
+meant = "a_reader_that_ends_again_and_again_at_once_is_called_unreadable_after_three"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = "            if quick >= QUICK_ENDS {"
+replace = "            if quick >= QUICK_ENDS + 1_000 {"
+
+[[plant]]
+name = "privacy prompts: the pauses before a reader is started again do not grow"
+meant = "a_reader_that_ended_is_started_again_after_pauses_that_double_and_start_over_after_a_steady_run"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = "        backoff = (backoff * 2).min(BACKOFF_MAX);"
+replace = "        backoff = backoff.min(BACKOFF_MAX);"
+
+[[plant]]
+name = "privacy prompts: a steady run does not start the pauses over"
+meant = "a_reader_that_ended_is_started_again_after_pauses_that_double_and_start_over_after_a_steady_run"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = '''
+        if lasted >= STEADY {
+            backoff = BACKOFF_FIRST;
+        }'''
+replace = '''
+        if lasted >= STEADY && false {
+            backoff = BACKOFF_FIRST;
+        }'''
+
+[[plant]]
+name = "privacy prompts: the reader runs on with every window closed"
+meant = "the_reader_is_ended_when_no_window_has_been_open_for_a_while_and_started_when_one_opens"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = "            if time.now().saturating_duration_since(since) >= CLOSE_AFTER {"
+replace = "            if time.now().saturating_duration_since(since) >= CLOSE_AFTER * 1_000 {"
+
+[[plant]]
+name = "privacy prompts: a stop does not end the reader"
+meant = "a_stop_ends_the_reader_and_none_is_started_once_it_is_set"
+runs = ["pv-tcc"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/watch.rs"
+find = "        if stop.load(Ordering::SeqCst) && !run.asked {"
+replace = "        if stop.load(Ordering::SeqCst) && false {"
+
+[[plant]]
+name = "privacy prompts: the reader's error stream is not in its output, so a refusal is not read"
+meant = "the_log_is_asked_for_the_dialogs_and_for_the_requests_in_the_apps_name_alone"
+runs = ["pv-tcc"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/real.rs"
+find = '''
+        "exec \"$@\" 2>&1",'''
+replace = '''
+        "exec \"$@\"",'''
+
+[[plant]]
+name = "privacy prompts: the log is asked for the requests of every app"
+meant = "the_log_is_asked_for_the_dialogs_and_for_the_requests_in_the_apps_name_alone"
+runs = ["pv-tcc"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/real.rs"
+find = '''
+eventMessage CONTAINS \"AUTHREQ_ATTRIBUTION\" AND eventMessage CONTAINS \"pid={app},\"'''
+replace = '''
+eventMessage CONTAINS \"AUTHREQ_ATTRIBUTION\" AND eventMessage CONTAINS \"pid={app},\" OR eventMessage CONTAINS \"AUTHREQ_ATTRIBUTION\"'''
+
+[[plant]]
+name = "privacy prompts: a reader asked to end is not signalled"
+meant = "a_reader_that_is_asked_to_end_ends_though_it_has_nothing_to_say"
+runs = ["pv-tcc"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/real.rs"
+find = '''
+                _ = &mut ended => {
+                    child.terminate(Ending::Asked);
+                    break;
+                }'''
+replace = '''
+                _ = &mut ended => {
+                    break;
+                }'''
+
+[[plant]]
+name = "privacy prompts: a window holds what it does not and not what it does"
+meant = "a_window_holds_its_program_and_what_runs_below_it"
+runs = ["pv-holds"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = "            .any(|member| member.key.pid == pid))"
+replace = "            .any(|member| member.key.pid != pid))"
+
+[[plant]]
+name = "privacy prompts: every pane holds every process"
+meant = "a_window_holds_its_program_and_the_sleep_below_it_and_this_test_is_no_windows"
+runs = ["pv-holding"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/holding.rs"
+find = ".find(|(_, tree)| tree.holds(pid).unwrap_or(false))"
+replace = ".find(|(_, tree)| tree.holds(pid).unwrap_or(true))"
+
+[[plant]]
+name = "privacy prompts: every window of the system's is an alert"
+meant = "an_alert_is_a_window_of_the_notification_centre_above_the_level_of_an_ordinary_window"
+runs = ["pv-alerts"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/alerts.rs"
+find = "        .filter(|window| window.owner == OWNER && window.layer > 0)"
+replace = "        .filter(|window| window.layer > 0)"
+
+[[plant]]
+name = "privacy prompts: the host answers no look at the alerts"
+meant = "the_host_says_how_many_alerts_the_system_has_on_screen"
+runs = ["pv-handler"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''
+    builder.on("pane.alerts", |_bridge, _body| {'''
+replace = '''
+    builder.on("pane.alert", |_bridge, _body| {'''
+
+[[plant]]
+name = "privacy prompts: a dialog is told every time the host names it"
+meant = "a_dialog_for_a_process_of_a_window_is_told_once_to_the_tasks_giver_and_the_human"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+            if !part.told.insert(prompt.service.clone()) {
+                return Ok(());
+            }'''
+replace = "            part.told.insert(prompt.service.clone());"
+
+[[plant]]
+name = "privacy prompts: a window waits on nothing while a dialog is up"
+meant = "the_window_waits_on_the_dialog_in_its_lane_until_its_record_moves"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = "        if observed.waiting.is_none() {"
+replace = "        if false {"
+
+[[plant]]
+name = "privacy prompts: the dialog's wait is never looked at"
+meant = "the_window_waits_on_the_dialog_in_its_lane_until_its_record_moves"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        let observed = self.watch_privacy(record, observed).await;"
+replace = "        let observed = observed;"
+
+[[plant]]
+name = "privacy prompts: the wait does not end when the window's record moves"
+meant = "the_window_waits_on_the_dialog_in_its_lane_until_its_record_moves"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = "        let mut over = items != baseline || now - hold.since >= HOLD_MS;"
+replace = "        let mut over = now - hold.since >= HOLD_MS;"
+
+[[plant]]
+name = "privacy prompts: the wait does not end when no alert is on screen"
+meant = "the_window_stops_waiting_when_no_alert_is_on_screen_any_more"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = "            over = matches!(alerts, Ok(Some(0)));"
+replace = "            over = false && matches!(alerts, Ok(Some(0)));"
+
+[[plant]]
+name = "privacy prompts: the wait has no bound"
+meant = "the_window_stops_waiting_after_ten_minutes_whatever_is_on_screen"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = "|| now - hold.since >= HOLD_MS;"
+replace = ";"
+
+[[plant]]
+name = "privacy prompts: the alerts are looked at before the dialog is drawn"
+meant = "the_window_stops_waiting_when_no_alert_is_on_screen_any_more"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = "        let due = now - hold.since >= FIRST_LOOK_MS"
+replace = "        let due = true"
+
+[[plant]]
+name = "privacy prompts: the alerts are looked at at every look"
+meant = "the_window_stops_waiting_when_no_alert_is_on_screen_any_more"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = ".is_none_or(|looked| now - looked >= LOOK_EVERY_MS);"
+replace = ".is_none_or(|_| true);"
+
+[[plant]]
+name = "privacy prompts: a window that closed keeps what it waited on and was told"
+meant = "a_window_that_closed_forgets_what_it_waited_on_and_what_was_told_of_it"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        *record.privacy.borrow_mut() = PrivacyPart::default();"
+replace = "        let _ = PrivacyPart::default();"
+
+[[plant]]
+name = "privacy prompts: a process no window holds is told every time"
+meant = "a_process_no_window_holds_is_told_to_the_human_alone_once_for_each_service"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+        if !self
+            .privacy
+            .loose
+            .borrow_mut()
+            .insert(prompt.service.clone())
+        {
+            return Ok(());
+        }'''
+replace = '''
+        self.privacy
+            .loose
+            .borrow_mut()
+            .insert(prompt.service.clone());'''
+
+[[plant]]
+name = "privacy prompts: an unreadable log is told every time"
+meant = "a_log_the_host_cannot_read_is_told_once_to_the_human_and_written_to_the_daemons_log"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+        if self.privacy.unreadable.replace(true) {
+            return;
+        }'''
+replace = "        self.privacy.unreadable.replace(true);"
+
+[[plant]]
+name = "privacy prompts: an unreadable log is not written in the daemon's log"
+meant = "a_log_the_host_cannot_read_is_told_once_to_the_human_and_written_to_the_daemons_log"
+runs = ["pv-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = "        self.seams.log.warn(&format!("
+replace = "        let _ = (&format!("
+
+[[plant]]
+name = "privacy prompts: a window opened on the home folder is told every time"
+meant = "a_window_opened_on_the_home_folder_is_told_to_the_human_once"
+runs = ["pv-engine"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+        if !self.privacy.home.borrow_mut().insert(participant.id) {
+            return;
+        }'''
+replace = "        self.privacy.home.borrow_mut().insert(participant.id);"
+
+[[plant]]
+name = "privacy prompts: a window opened on the home folder is told of nothing"
+meant = "a_window_opened_on_the_home_folder_is_told_to_the_human_once"
+runs = ["pv-engine"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        self.home_note(project, participant, home.as_deref(), &workspace(project));"
+replace = "        let _ = &home;"
+
+[[plant]]
+name = "privacy prompts: the home folder is no folder to be told of"
+meant = "only_the_home_folder_and_the_music_folder_are_told_of_when_a_window_opens_on_them"
+runs = ["pv-engine-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+    if folder == home {
+        Some(Opened::Home)'''
+replace = '''
+    if false {
+        Some(Opened::Home)'''
+
+[[plant]]
+name = "privacy prompts: a folder in Music is no folder to be told of"
+meant = "only_the_home_folder_and_the_music_folder_are_told_of_when_a_window_opens_on_them"
+runs = ["pv-engine-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+folder.starts_with(&format!("{music}/"))'''
+replace = "false"
+
+[[plant]]
+name = "privacy prompts: a service is said in no words"
+meant = "a_service_the_system_names_is_said_in_what_it_guards"
+runs = ["pv-engine-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/privacy.rs"
+find = '''
+        "MediaLibrary" => "your music and media library (Apple Music)",'''
+replace = '''
+        "MediaLibrary" => "your music",'''
+
+[[plant]]
+name = "privacy prompts: a panic in the telling of a dialog ends the bridge's reader"
+meant = "a_privacy_dialog_that_panics_is_written_down_and_the_bridge_goes_on"
+runs = ["pv-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "    if let Err(panicked) = contain_now(|| told(event)) {"
+replace = '''
+    told(event);
+    if let Err(panicked) = contain_now(|| ()) {'''
+
+[[plant]]
+name = "privacy prompts: a dialog the host names is read as the other event"
+meant = "a_privacy_dialog_the_host_names_is_told_where_it_is_read_and_one_that_names_none_is_not"
+runs = ["pv-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        _prompts: bridge.on_event(TCC_PROMPT_EVENT, move |body| {"
+replace = "        _prompts: bridge.on_event(TCC_UNREADABLE_EVENT, move |body| {"
+
+[[plant]]
+name = "privacy prompts: the host's count of alerts is read from a field it does not send"
+meant = "the_alerts_on_screen_are_asked_of_the_host_and_a_host_that_cannot_count_says_none"
+runs = ["pv-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''
+        .get("alerts")'''
+replace = '''
+        .get("alert")'''
+
+[[plant]]
+name = "privacy prompts: the daemon does not listen for the host's privacy dialogs"
+meant = "a_privacy_dialog_the_host_tells_reaches_the_engine_and_the_human_is_told_in_the_project"
+runs = ["pv-daemon-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "    watch_privacy(&bridge, Rc::clone(&spawn), move |event| match event {"
+replace = "    let _unheard = (&bridge, Rc::clone(&spawn), move |event: PrivacyEvent| match event {"
+
+[[plant]]
+name = "privacy prompts: Claude's settings file denies nothing on a Mac"
+meant = "a_window_on_a_mac_denies_the_music_library_and_the_photos_libraries_to_clauds_reads"
+runs = ["pv-claude"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''
+        file["permissions"]["deny"] = json!(reads);'''
+replace = "        let _ = reads;"
+
+[[plant]]
+name = "privacy prompts: Claude's window is not told the project's folder, so a project in Music is denied its own"
+meant = "a_window_on_a_mac_denies_the_music_library_and_the_photos_libraries_to_clauds_reads"
+runs = ["pv-claude"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "                Some(launch.directory),"
+replace = "                None,"
+
+[[plant]]
+name = "privacy prompts: a window on Windows is denied reads of Music"
+meant = "nothing_is_denied_on_windows_and_only_the_libraries_a_folder_is_not_in_are_denied_on_a_mac"
+runs = ["pv-claude-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''
+    if env.on_windows() {
+        return Vec::new();
+    }'''
+replace = '''
+    if false {
+        return Vec::new();
+    }'''
+
+[[plant]]
+name = "privacy prompts: a project in Music is denied its own folder"
+meant = "a_project_that_lives_in_the_music_folder_is_not_denied_its_own_folder_and_nor_is_one_in_a_photos_library"
+runs = ["pv-claude"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = "    if !in_music {"
+replace = "    if true {"
+
+[[plant]]
+name = "privacy prompts: a project in a Photos library is denied its own folder"
+meant = "a_project_that_lives_in_the_music_folder_is_not_denied_its_own_folder_and_nor_is_one_in_a_photos_library"
+runs = ["pv-claude"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = "    if !in_photos {"
+replace = "    if true {"
+
+[[plant]]
+name = "privacy prompts: the worker roles say nothing of the home folder"
+meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
+runs = ["pv-text"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''
+
+Look for files inside the project folder, never over the home folder or in
+`~/Music` or `~/Pictures` (`find ~`, `grep -r ~`, `ls ~/Music`): on a Mac that
+makes macOS ask the person at the screen, in ConsensFlow's name, and your command
+waits until they answer.
+'''
+replace = ""
