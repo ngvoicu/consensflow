@@ -28,6 +28,8 @@ thread_local! {
 mod keys;
 mod output_end;
 mod owed;
+#[cfg(all(test, windows))]
+mod probe;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 mod sentinel;
 mod turn;

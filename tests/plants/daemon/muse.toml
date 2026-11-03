@@ -30,6 +30,10 @@ muse-hook-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch", 
 # their plants say `harnesses = ["muse"]` and are not run there: T-829).
 muse-rig-resume = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::a_muse_worker_cut"]
 muse-rig-take-back = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::an_interrupt_before"]
+muse-rig-launch = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_window::a_task_goes_from_its_brief"]
+# T-790: the live kit's question tools, and the rig's reading of a request's.
+muse-live-agents = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::agents"]
+muse-e2e-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests"]
 # T-829: the engine's clear of a withheld paste, the live runs' seats, and the plant runner.
 muse-withheld = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "withheld_enter::"]
 muse-box-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::the_engine_is_told"]
@@ -38,6 +42,11 @@ muse-live-approval = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "l
 muse-live-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "plan::"]
 muse-live-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
 muse-plant-runner = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::"]
+# T-792: which process started another (a launcher's child), and the rig's Muse on Windows.
+muse-parent = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "parent::"]
+muse-e2e-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::"]
+muse-cmd-word = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "cmd_word::"]
+muse-holders = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "holders::"]
 muse-role-cleared = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::cleared"]
 muse-role-came-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests"]
 muse-live-kit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::"]
@@ -49,6 +58,15 @@ muse-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared
 muse-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state"]
 muse-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 muse-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+# T-954 (T-985 on T-790): the live TUI probes refuse off a Mac; the rule of the kit's homes.
+muse-tui-probes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_posture", "off_a_mac"]
+muse-live-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes::"]
+muse-live-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_notes", "tests::"]
+muse-live-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
+muse-live-specs-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "launched::"]
+muse-silent-paste = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "silent_paste::"]
+muse-live-window-rules = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_window", "tests::"]
+muse-live-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "codex_devin::tests::"]
 muse-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 muse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says an account that refused"]
 muse-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_teammates_turn"]
@@ -244,10 +262,10 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/paths.rs"
 find = '''
-    Ok(PathBuf::from(match set(env, "XDG_DATA_HOME") {
+    Ok(PathBuf::from(plain(&match set(env, "XDG_DATA_HOME") {
 '''
 replace = '''
-    Ok(PathBuf::from(match env.os("XDG_DATA_HOME").map(|data| data.to_string_lossy().into_owned()) {
+    Ok(PathBuf::from(plain(&match env.os("XDG_DATA_HOME").map(|data| data.to_string_lossy().into_owned()) {
 '''
 
 # The paths: a session's folder is named as the session is written, on a Mac's disk too,
@@ -307,10 +325,10 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
 find = '''
-        return Err(version::required());
+                return Err(version::required());
 '''
 replace = '''
-        return Ok(executable.to_owned());
+                return Ok(executable.to_owned());
 '''
 
 # MUS-23 (reversing T-703's 402-as-quota, Calliope's P2 on T-767): a billing refusal is not a
@@ -851,8 +869,11 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''    Ok(if binary.is_file() {'''
-replace = '''    Ok(if binary.is_file() && false {'''
+find = '''                .is_file()
+                .then(|| binary.to_string_lossy().into_owned())'''
+replace = '''                .is_file()
+                .then(|| binary.to_string_lossy().into_owned())
+                .filter(|_| false)'''
 
 # What a launch runs: with the launcher's update off.
 [[plant]]
@@ -930,8 +951,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/paths.rs"
-find = '''        .find(|(_, head)| head.pid == Some(u64::from(pid)))'''
-replace = '''        .find(|(_, head)| head.pid.is_some())'''
+find = '''    named(&|named| named == u64::from(pid)).or_else(|| {'''
+replace = '''    named(&|_| true).or_else(|| {'''
 
 # The window's session: none older than its launch, whatever its pid.
 [[plant]]
@@ -3025,7 +3046,7 @@ runs = ["muse-kit-find"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''    let launcher = match crate::live::machine::find("muse", path, None) {'''
+find = '''    let launcher = match crate::live::machine::find("muse", path, Some(".CMD;.EXE")) {'''
 replace = '''    let launcher = match None::<std::path::PathBuf>.filter(|_| !path.is_empty()) {'''
 
 [[plant]]
@@ -3035,7 +3056,7 @@ runs = ["muse-kit-find"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''    let real = fs::canonicalize(&launcher).unwrap_or_else(|_| launcher.clone());'''
+find = '''    let real = files::real_path(&launcher);'''
 replace = '''    let real = launcher.clone();'''
 
 # Muse meets chief-meeting Phase 1 (integration D1, T-946; Calliope's T-945): a hold for the human
@@ -3120,3 +3141,483 @@ file = "crates/cf-harness/src/muse/window.rs"
 find = '''            self.input.replace(HumanInput::of(&snapshot));'''
 replace = '''            let _ = HumanInput::of(&snapshot);'''
 
+# --- T-792: Windows (MUS-20) ---
+
+# The launch on Windows: a launcher that is a batch file (`muse.cmd`) with no binary beside it
+# is refused in plain words, never run through cmd.exe (Calliope, T-824 P2-4).
+[[plant]]
+name = "muse: a batch-file launcher is run when no binary is beside it"
+meant = "a_batch_file_launcher_with_no_binary_beside_it_is_refused_in_plain_words_and_never_run"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''        None if batch_file(launcher) => Err(format!('''
+replace = '''        None if batch_file(launcher) && false => Err(format!('''
+
+[[plant]]
+name = "muse: a .bat launcher is no batch file"
+meant = "a_batch_file_launcher_with_no_binary_beside_it_is_refused_in_plain_words_and_never_run"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''        extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")'''
+replace = '''        extension.eq_ignore_ascii_case("cmd")'''
+
+# The session a fresh window shows, on Windows: Muse names no process in its log there (no
+# route facts, T-708), and its lock does (`.session.lock`, `pid=`); a launcher's child is the
+# window's where none names the window's own process (Windows has no exec, T-792).
+[[plant]]
+name = "muse: a session's lock is never read"
+meant = "where_the_log_names_no_process_the_session_s_lock_names_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    if head.pid.is_none() {'''
+replace = '''    if false {'''
+
+[[plant]]
+name = "muse: a session's lock is believed over its log"
+meant = "where_the_log_names_no_process_the_session_s_lock_names_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    if head.pid.is_none() {'''
+replace = '''    if true {'''
+
+[[plant]]
+name = "muse: a launcher's child is not the window's"
+meant = "a_session_of_a_process_the_window_s_process_started_is_its_own_where_none_names_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''                .is_some_and(|parent| parent == pid)'''
+replace = '''                .is_some_and(|parent| parent == pid && false)'''
+
+[[plant]]
+name = "muse: the window's own process is passed over for a launcher's child"
+meant = "a_session_of_a_process_the_window_s_process_started_is_its_own_where_none_names_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    named(&|named| named == u64::from(pid)).or_else(|| {'''
+replace = '''    named(&|named| named == u64::from(pid) && false).or_else(|| {'''
+
+# Muse's places on Windows: the profile is its home there, and a verbatim folder is read plain.
+[[plant]]
+name = "muse: HOME is Muse's home on Windows"
+meant = "on_windows_the_data_folder_is_in_the_profile_and_a_verbatim_folder_is_read_plain"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    if env.on_windows() {'''
+replace = '''    if false {'''
+
+[[plant]]
+name = "muse: a verbatim data folder is read as it is"
+meant = "on_windows_the_data_folder_is_in_the_profile_and_a_verbatim_folder_is_read_plain"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    Ok(PathBuf::from(plain(&match set(env, "XDG_DATA_HOME") {'''
+replace = '''    Ok(PathBuf::from(String::clone(&match set(env, "XDG_DATA_HOME") {'''
+
+[[plant]]
+name = "muse: a verbatim share is read as a drive's"
+meant = "a_verbatim_path_is_the_drive_or_share_path_it_names_and_any_other_is_as_it_is"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''    if let Some(share) = path.strip_prefix(r"\\?\UNC\") {'''
+replace = '''    if let Some(share) = path.strip_prefix(r"\\?\UNC\").filter(|_| false) {'''
+
+[[plant]]
+name = "muse: a verbatim path's drive is any character"
+meant = "a_verbatim_path_is_the_drive_or_share_path_it_names_and_any_other_is_as_it_is"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''            if rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)'''
+replace = '''            if rest.as_bytes().first().is_some()'''
+
+# Which process started another: Unix's table, Windows' snapshot.
+[[plant]]
+name = "muse: a process's parent is itself (Unix)"
+meant = "a_child_s_parent_is_the_process_that_started_it"
+runs = ["muse-parent"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/parent.rs"
+find = '''        u32::try_from(process.parent).ok()'''
+replace = '''        u32::try_from(process.identity.pid).ok()'''
+
+[[plant]]
+name = "muse: a process's parent is itself (Windows)"
+meant = "a_child_s_parent_is_the_process_that_started_it"
+runs = ["muse-parent"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/parent.rs"
+find = '''                    found = Some(entry.th32ParentProcessID);'''
+replace = '''                    found = Some(entry.th32ProcessID);'''
+
+# The rig's Muse on Windows: echo refuses a model, and a live run keeps the person's login where it is.
+[[plant]]
+name = "muse: the rig's Muse on Windows keeps the model echo refuses"
+meant = "the_rig_s_muse_on_windows_runs_the_machine_s_on_echo_without_a_model_or_live_as_given"
+runs = ["muse-e2e-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''            if word == "--model" || word == "--reasoning-effort" {'''
+replace = '''            if word == "--reasoning-effort" {'''
+
+[[plant]]
+name = "muse: the rig's live Muse on Windows reads the rig's config"
+meant = "the_rig_s_muse_on_windows_runs_the_machine_s_on_echo_without_a_model_or_live_as_given"
+runs = ["muse-e2e-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''                        "XDG_CONFIG_HOME".to_owned(),'''
+replace = '''                        "XDG_CONFIG_HOME_UNREAD".to_owned(),'''
+
+# The hook on Windows: Muse runs `commandWindows` in cmd.exe through Rust's quoting, where no
+# quoted word survives (T-792's probe; Calliope's T-824 P2-4 took it for PowerShell's): a line
+# of plain words, short forms for a blank, and a path with neither refused.
+[[plant]]
+name = "muse: the Windows hook quotes its words"
+meant = "on_windows_the_hook_is_a_cmd_line_of_words_with_no_quote_and_a_path_cmd_cannot_take_is_refused"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''            cf_process::cmd_word(Path::new(path)).ok_or_else(|| {'''
+replace = '''            Some(format!("\"{path}\"")).ok_or_else(|| {'''
+
+[[plant]]
+name = "muse: a hook with no Windows form"
+meant = "on_windows_the_hook_is_a_cmd_line_of_words_with_no_quote_and_a_path_cmd_cannot_take_is_refused"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''    if windows {'''
+replace = '''    if false {'''
+
+[[plant]]
+name = "muse: a Windows hook off Windows"
+meant = "on_windows_the_hook_is_a_cmd_line_of_words_with_no_quote_and_a_path_cmd_cannot_take_is_refused"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''    if windows {'''
+replace = '''    if true {'''
+
+[[plant]]
+name = "muse: a blank is a word of cmd's"
+meant = "a_plain_path_is_its_own_word_and_one_cmd_would_split_is_none_where_no_short_form_is"
+runs = ["muse-cmd-word"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/cmd_word.rs"
+find = '''            .any(|c| c.is_whitespace() || "\"&|<>^%!(),;=".contains(c))'''
+replace = '''            .any(|c| "\"&|<>^%!(),;=".contains(c))'''
+
+[[plant]]
+name = "muse: cmd's ampersand is a plain character"
+meant = "a_plain_path_is_its_own_word_and_one_cmd_would_split_is_none_where_no_short_form_is"
+runs = ["muse-cmd-word"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/cmd_word.rs"
+find = '''            .any(|c| c.is_whitespace() || "\"&|<>^%!(),;=".contains(c))'''
+replace = '''            .any(|c| c.is_whitespace() || "\"|<>^%!(),;=".contains(c))'''
+
+[[plant]]
+name = "muse: a short form is never asked (Windows)"
+meant = "on_windows_a_path_with_a_blank_is_named_by_its_short_form"
+runs = ["muse-cmd-word"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/cmd_word.rs"
+find = '''    let short = short(path)?;'''
+replace = '''    let short = short(path).filter(|_| false)?;'''
+
+# Muse's lock on Windows keeps its words from being read: the process that holds it open names it.
+[[plant]]
+name = "muse: a held lock names nobody (Windows)"
+meant = "on_windows_a_lock_whose_words_cannot_be_read_is_named_by_the_process_that_holds_it"
+runs = ["muse-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''                    held_by(&lock, holders)'''
+replace = '''                    None'''
+
+# Its twin on every system (T-1121's finding 1): a lock that cannot be read, a folder in its
+# place, is asked of who holds it.
+[[plant]]
+name = "muse: an unreadable lock is never asked who holds it"
+meant = "a_closed_session_s_lock_names_nobody_unasked_and_only_one_that_cannot_be_read_is_asked_who_holds_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''                    held_by(&lock, holders)'''
+replace = '''                    None'''
+
+[[plant]]
+name = "muse: a file's holder is another process (Windows)"
+meant = "a_file_a_process_holds_open_is_held_by_it"
+runs = ["muse-holders"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/holders.rs"
+find = '''                .map(|holder| holder.Process.dwProcessId)'''
+replace = '''                .map(|holder| holder.Process.dwProcessId + 1)'''
+# MUS-13 (T-790): a member's window has no question tool (`--disable-request-user-input`) and
+# asks with `cf ask`; the chief keeps its dialog.
+[[plant]]
+name = "muse: a member's window keeps its question tools"
+meant = "a_members_window_has_no_question_tool_and_the_chiefs_keeps_its_own"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            if launch.role != "chief" {
+                argv.push(NO_QUESTION_TOOL.to_owned());
+            }'''
+replace = '''            let _ = NO_QUESTION_TOOL;'''
+
+[[plant]]
+name = "muse: the chief's window loses its question tool too"
+meant = "a_members_window_has_no_question_tool_and_the_chiefs_keeps_its_own"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            if launch.role != "chief" {'''
+replace = '''            if !launch.role.is_empty() {'''
+
+[[plant]]
+name = "muse: an echo member's window is launched with its question tools"
+meant = "a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole"
+runs = ["muse-rig-launch"]
+harnesses = ["muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            if launch.role != "chief" {
+                argv.push(NO_QUESTION_TOOL.to_owned());
+            }'''
+replace = '''            let _ = NO_QUESTION_TOOL;'''
+
+[[plant]]
+name = "muse: the live kit tells a Muse member to use the question tool it has not"
+meant = "only_pi_and_muse_members_have_no_tool_to_ask_a_question_with"
+runs = ["muse-live-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        Harness::Muse | Harness::Pi => None,'''
+replace = '''        Harness::Muse => Some("request_user_input tool"),
+        Harness::Pi => None,'''
+
+[[plant]]
+name = "muse: a request's async question tool is not read as one"
+meant = "the_question_tools_of_each_request_are_read_from_its_toolset"
+runs = ["muse-e2e-reads"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''                .filter(|tool| tool.starts_with("request_user_input"))'''
+replace = '''                .filter(|tool| *tool == "request_user_input")'''
+
+# T-954, Calliope's T-985 on Muse on Windows (MUS-20). P2-2: a closed session's lock is read and
+# names nobody; only a lock whose words cannot be read (Muse holds it so on Windows) is asked of
+# Restart Manager, never at every look for every closed session begun since the launch.
+[[plant]]
+name = "muse: a closed session's readable lock is asked of Restart Manager at every look"
+meant = "a_closed_session_s_lock_names_nobody_unasked_and_only_one_that_cannot_be_read_is_asked_who_holds_it"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/paths.rs"
+find = '''            match locked_by(&lock) {
+                Ok(named) => named,'''
+replace = '''            match locked_by(&lock) {
+                Ok(named) => named.or_else(|| held_by(&lock, holders)),'''
+
+# T-985 P3-2 on T-790: the live probes that run Muse's TUI alone copy the person's auth.json,
+# which off a Mac is the whole login: they refuse there, before anything is made or spent.
+[[plant]]
+name = "muse: the live TUI probes run off a Mac on a copy of the whole login"
+meant = "off_a_mac_the_muse_tui_probes_refuse_plainly_before_anything_is_made"
+runs = ["muse-tui-probes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse/tui.rs"
+find = '''    if mac {
+        return Ok(());
+    }'''
+replace = '''    if mac || !mac {
+        return Ok(());
+    }'''
+
+# The table of homes made by hand follows T-790's move of the TUI probes' folders into
+# `live_muse/tui.rs`, and names the question case's throwaway CODEX_HOME with its reason.
+[[plant]]
+name = "muse: the question case's CODEX_HOME is excused with no reason"
+meant = "no_live_source_makes_the_home_of_a_real_harness_by_hand"
+runs = ["muse-live-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/cli/live_homes.rs"
+find = '''        "crates/cf-e2e/tests/live_muse_window.rs",
+        "CODEX_HOME",'''
+replace = '''        "crates/cf-e2e/tests/live_muse_window.rs",
+        "CODEX_HOMES",'''
+
+# MUS-17 (T-954): the live notes check refused a Muse chief as a harness of its own queue; Muse
+# is pasted into as Claude is, so it is a chief there, and one of the check's own when none is named.
+[[plant]]
+name = "muse: the live notes check refuses a Muse chief as one that queues its messages"
+meant = "devin_claude_and_muse_are_the_chiefs_unless_told_and_those_told_run_once_each_in_the_order_given"
+runs = ["muse-live-notes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_notes.rs"
+find = '''            Some(harness @ (Harness::Claude | Harness::Devin | Harness::Muse)) => harness,'''
+replace = '''            Some(harness @ (Harness::Claude | Harness::Devin)) => harness,'''
+
+# MUS-18 (T-954): live parity's Muse worker runs on the human's own Muse settings, whose
+# SessionStart hook ConsensFlow's launch merges with its own: the case gives those settings
+# the hook whose word the worker must say.
+[[plant]]
+name = "muse: live parity's Muse case gives the human's settings no hook"
+meant = "muse_s_case_gives_the_human_s_settings_a_server_and_a_hook_that_says_its_word"
+runs = ["muse-live-parity"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/codex_devin.rs"
+find = '''        "hooks": { "SessionStart": [ { "matcher": "", "hooks": [ {'''
+replace = '''        "no_hooks": { "SessionStart": [ { "matcher": "", "hooks": [ {'''
+
+# MUS-17 (T-954): live stops' midtool told the member to run `ping` by name because the run found
+# it on its own PATH; Muse's shell on the Mac had no /sbin, and its member's "ping: command not
+# found" read as a member that never ran its command. The ping is told by the path it was found at.
+[[plant]]
+name = "muse: live stops' midtool tells the member a ping by name its shell may not find"
+meant = "the_command_of_this_machine_is_its_own_ping_or_a_sleep_of_the_same_time"
+runs = ["muse-live-stops-tool"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
+find = '''            Ok(at) => Self::ping_at(&at),'''
+replace = '''            Ok(_) => Self::ping(false),'''
+
+# MUS-17 (T-954): live specs read a window's role where Claude, Pi, Codex and Devin are given it,
+# and not where Muse is (the role file of its SessionStart hook, in its -c hooks=): a Muse
+# chief's "launch says nothing of specs" and "has the section of specs" read as no role at all.
+[[plant]]
+name = "muse: live specs reads no role of a Muse window's"
+meant = "each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_finds_it_there"
+runs = ["muse-live-specs-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/launched.rs"
+find = '''    argv.iter()
+        .find_map(|word| muse_role_file(word))
+        .map(RoleText::File)'''
+replace = '''    argv.iter()
+        .find_map(|word| muse_role_file(word))
+        .map(RoleText::File)
+        .filter(|_| false)'''
+
+# T-954 (Gabriel, 2026-11-02): live Muse tests run on the contributor model, which drew about half
+# the allowance of muse-spark-1.3 as the product launches Muse; test code only, never the product.
+[[plant]]
+name = "muse: the live kit's cheap Muse model is the paid one"
+meant = "a_run_says_each_harness_with_its_model_and_its_effort_where_it_has_one"
+runs = ["muse-live-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        Harness::Muse => ("muse-spark-1.3-contributor", Some("minimal")),'''
+replace = '''        Harness::Muse => ("muse-spark-1.3", Some("minimal")),'''
+
+# T-954 (the chief's m-6883): Muse on Windows loses an Enter that comes while it still reads a
+# paste's keys, or soon after the last; its adapter declares how it reads a paste there, and on
+# the Mac, where it took its Enter as it came, nothing.
+[[plant]]
+name = "muse: Muse on Windows declares no silent paste"
+meant = "on_windows_codex_devin_and_muse_read_a_paste_silently_at_their_measured_paces"
+runs = ["muse-silent-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS)'''
+replace = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS).filter(|_| false)'''
+
+[[plant]]
+name = "muse: Muse declares a silent paste on the Mac too"
+meant = "elsewhere_devin_alone_reads_a_paste_silently_at_the_same_pace"
+platforms = ["macos"]
+runs = ["muse-silent-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''        self.env().on_windows().then_some(MUSE_ON_WINDOWS)'''
+replace = '''        Some(MUSE_ON_WINDOWS)'''
+
+# T-1121's finding 5: Muse's limit on the hold is two milliseconds a character; it drew the long
+# paste at about one in the live run, which a limit of one leaves no room over.
+[[plant]]
+name = "muse: Muse on Windows holds an Enter at most a millisecond a character"
+meant = "on_windows_codex_devin_and_muse_read_a_paste_silently_at_their_measured_paces"
+runs = ["muse-silent-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''    most_us_per_character: 2_000,'''
+replace = '''    most_us_per_character: 1_000,'''
+
+# T-1121's finding 7: a live Muse with no isolation row of the kit's (Windows) says its login is
+# copied into the rig's home, as it is, never that it is read in place.
+[[plant]]
+name = "muse: the live kit says a Windows Muse's login is read in place"
+meant = "a_muse_found_with_no_home_of_the_kits_says_its_login_is_copied_into_the_rigs_home"
+runs = ["muse-live-kit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mod.rs"
+find = '''        (None, None) if install.harness() == Harness::Muse => format!('''
+replace = '''        (None, None) if install.harness() == Harness::Muse && false => format!('''
+
+# T-1126 (the chief's call on T-1124's finding): the question case's foreign rules no longer forbid
+# cf, a conflict the cheap model lost 3 runs of 18; the word that proves they are read stays.
+[[plant]]
+name = "muse: the question case's foreign rules forbid cf again"
+meant = "the_foreign_rules_ask_for_a_word_a_member_keeps_and_forbid_no_cf"
+runs = ["muse-live-window-rules"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse_window.rs"
+find = '''const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n";'''
+replace = '''const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n- Never run the `cf` command, for any reason.\n";'''

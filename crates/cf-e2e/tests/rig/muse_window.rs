@@ -5,8 +5,9 @@
 //! model that never calls a tool, asks or works in the background, and whose timing is
 //! no model's. What the real model does is the live kit's (`muse-window`).
 //!
-//! Each case is skipped, in plain words, on a machine with no Muse Code installed: CI's,
-//! and the Windows machines, which have none yet (MUS-20).
+//! Each case is skipped, in plain words, on a machine with no Muse Code installed: CI's.
+//! On Windows (zeewin2, MUS-20) the rig's Muse is the `muse-stand-in` program, which runs
+//! the machine's Muse as its child (`cf_e2e::muse::StandIn`).
 
 #[cfg(unix)]
 use std::sync::Arc;
@@ -17,7 +18,8 @@ use cf_e2e::live::isolation::Isolation;
 use cf_e2e::muse::members::{
     echo_worker, in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
 };
-use cf_e2e::muse::{self, deliveries, has, messages, terminals};
+use cf_e2e::muse::{self, deliveries, has, messages, question_tools, terminals};
+use cf_e2e::process::{is_alive, signal, Signal};
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::json;
 
@@ -27,10 +29,13 @@ use crate::{config, secs, Outcome};
 /// enough for the daemon to see it at work.
 const TURN_MS: u64 = 4_000;
 
+/// The rig's Muse on Windows, which runs the machine's ([`muse::StandIn`]).
+const MUSE_STAND_IN: &str = env!("CARGO_BIN_EXE_muse-stand-in");
+
 /// A rig whose Muse windows run the machine's Muse, or why there is none.
 fn muse_rig() -> Option<Config> {
     match muse::installed() {
-        Ok(install) => Some(config().muse(install, TURN_MS)),
+        Ok(install) => Some(config().muse(install.through(MUSE_STAND_IN), TURN_MS)),
         Err(why) => {
             #[allow(clippy::print_stderr)] // Said in the output of the case it skips.
             {
@@ -82,6 +87,13 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
     assert!(argv
         .iter()
         .any(|word| word.starts_with("hooks=") && word.contains("hook muse-session")));
+    // A member has no question tool: it asks with `cf ask` (MUS-13, T-790), and Muse
+    // offered none in its request.
+    assert!(
+        argv.iter()
+            .any(|word| word == "--disable-request-user-input"),
+        "{argv:?}"
+    );
     assert!(
         !argv.iter().any(|word| word.contains("T1_DONE")),
         "{argv:?}"
@@ -89,6 +101,11 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
     // Its session: one turn, its role text given by the hook, ended.
     let (_, log) = the_session(&rig);
     assert_eq!(terminals(&log), ["completed"]);
+    let offered = question_tools(&log);
+    assert!(
+        !offered.is_empty() && offered.iter().all(Vec::is_empty),
+        "{offered:?}"
+    );
     assert!(log.iter().any(|record| {
         muse::kind(record) == "run/context_block_updated"
             && record["payload"]["event"]["id"] == "hook:session_start:session:0"
@@ -333,13 +350,14 @@ fn words_that_land_in_a_turn_at_work_are_the_turn_s_at_once_and_its_task_ends_on
     )?;
     in_its_turn(&rig, &project, 1, secs(90))?;
     // A paste that reaches the window while its turn works, as one the daemon began at a
-    // look that found it at rest does: Muse steers the running turn with it, and writes it
-    // at once, while that turn still works, so the record shows the hand-over.
+    // look that found it at rest does, through the pane host as the daemon pastes (its
+    // Enter once the window has drawn the paste: on Windows Muse takes an Enter in the same
+    // breath as a paste into it, T-792): Muse steers the running turn with it, and writes
+    // it at once, while that turn still works, so the record shows the hand-over.
     let pane = pane_of(&project)?;
-    let typed = "\u{1b}[200~Steer: say MID_TURN too.\u{1b}[201~\r";
     let answer = rig.host(
-        "pane.input",
-        json!({ "id": pane["id"], "generation": pane["generation"], "bytes": typed.as_bytes() }),
+        "pane.write_paste",
+        json!({ "id": pane["id"], "generation": pane["generation"], "body": "Steer: say MID_TURN too." }),
     )?;
     assert_eq!(answer["ok"], true, "{answer}");
     rig.wait_for("Muse to take the words in", secs(30), || {
@@ -532,6 +550,83 @@ fn a_stop_that_finds_the_muse_window_at_rest_is_paid_with_no_key() -> Outcome {
         "no second stop"
     );
     assert!(pane_of(&project)?.is_object(), "the window is open");
+    rig.close()?;
+    Ok(())
+}
+
+/// A window whose own process is killed in its turn (the stand-in's on Windows, where Muse
+/// is its child; Muse itself on a Mac) leaves no Muse running: the host closes the window,
+/// and its job (Windows) or its session (a Mac) ends what it started (T-708: killing the
+/// root of `muse.cmd`'s chain alone left PowerShell and Muse running), and the board says
+/// the task waits, paused.
+#[test]
+fn a_window_whose_process_is_killed_in_its_turn_leaves_no_muse_running() -> Outcome {
+    let Some(config) = muse_rig_of(30_000) else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    let project = project(&rig, &echo_worker())?;
+    rig.tell(
+        project.id(),
+        "DISPATCH --tier standard Reply with exactly: T1_DONE",
+    )?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
+    let pids = rig.muse_pids();
+    let &(window, muse) = pids
+        .last()
+        .expect("the window's processes, as its Muse wrote them");
+    assert!(is_alive(muse), "Muse {muse} runs in its turn");
+    signal(window, Signal::Kill)?;
+    rig.wait_for("the killed window's Muse to be gone", secs(30), || {
+        Ok(!is_alive(muse) && !is_alive(window))
+    })?;
+    // The board says so: the task waits, paused, for whoever goes on with it.
+    rig.wait_for("T-1 to be paused", secs(60), || {
+        Ok(project.task(1)?["state"] == "paused")
+    })?;
+    rig.close()?;
+    Ok(())
+}
+
+/// A project in a folder whose name is not ASCII: the window opens there, its brief goes
+/// in, its result comes back, and Muse's log names the folder as it is (MUS-20: on Windows
+/// a path reaches Muse through the console and the command line as UTF-16).
+#[test]
+fn a_task_in_a_folder_whose_name_is_not_ascii_goes_from_its_brief_to_its_result() -> Outcome {
+    let Some(config) = muse_rig() else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    let folder = rig.workspace().join("zo\u{eb}-\u{65e5}\u{672c}");
+    std::fs::create_dir_all(&folder).map_err(|source| cf_e2e::Error::File {
+        action: "make",
+        path: folder.clone(),
+        source,
+    })?;
+    let roster = json!({
+        "schemaVersion": 1,
+        "agents": [
+            { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
+            { "id": "muse-worker", "kind": "muse", "model": "muse-spark-1.3", "effort": "minimal", "workTier": "standard" },
+        ],
+    });
+    cf_e2e::files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
+    project.add_member("muse-worker")?;
+    rig.tell(
+        project.id(),
+        "DISPATCH --tier standard Reply with exactly: T1_DONE",
+    )?;
+    rig.wait_for("T-1 to be answered", secs(120), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let (_, log) = the_session(&rig);
+    let named = log
+        .iter()
+        .find_map(|record| record["payload"]["record"]["workspace_root"].as_str())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(named.ends_with("zo\u{eb}-\u{65e5}\u{672c}"), "{named}");
     rig.close()?;
     Ok(())
 }

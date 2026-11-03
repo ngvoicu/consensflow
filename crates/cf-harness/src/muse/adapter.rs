@@ -8,16 +8,25 @@
 //! its record is the session's log (`record`).
 //!
 //! Full permission is the posture every harness's window runs in (the owner's decision
-//! of 2026-09-19) until MUS-16 says otherwise: `--yolo` turns approval and the sandbox
-//! off and trusts the workspace for the run, so no trust dialog is asked and none is
-//! saved. It keeps Muse's question tool, which MUS-13's door answers.
+//! of 2026-09-19), and Muse's too (MUS-16, T-790): `--yolo` turns approval and the
+//! sandbox off and trusts the workspace for the run, so no trust dialog is asked and
+//! none is saved. A softer mode keeps Muse's sandbox, which refuses a write outside the
+//! project and the temporary folders, and with its default network (`proxy-only`) the
+//! member's `cf` its connection to the daemon (Muse 1.4.14, `live_muse_posture`).
+//!
+//! A member's window has no question tool (MUS-13, T-790): Muse sends no `PreToolUse`
+//! for `request_user_input` (T-705, 1.4.13), nor for the `request_user_input_async`
+//! that `--yolo` adds (1.4.14), so no hook can answer one from the board, and nobody
+//! watches a member's window to answer its dialog. `--disable-request-user-input`
+//! withholds both, and the member asks with `cf ask`, as its role text says and as
+//! Pi's does. The chief keeps its dialog, which the human answers in its window.
 
 use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::Variant;
 
 use super::index;
@@ -31,6 +40,9 @@ use crate::seams::Services;
 use crate::shared::paths::agents_skills;
 use crate::shared::role::write_role;
 use crate::shared::{specmint, window_args};
+
+/// Withholds Muse's question tools for the run: a member asks with `cf ask`.
+const NO_QUESTION_TOOL: &str = "--disable-request-user-input";
 
 /// Muse Code, as the engine launches its windows.
 pub struct MuseAdapter {
@@ -53,6 +65,21 @@ impl MuseAdapter {
         &self.services.records
     }
 }
+
+/// How Muse on Windows reads a paste (`Adapter::silent_paste`): never sooner than 0.5 ms a
+/// character (it read at 0.6 to 0.75), by what it drew from the paste's first key on, then 200 ms
+/// of nothing (it redraws every 50 to 65 ms while it reads, and took an Enter 157 ms after its last
+/// draw), at the most a second and two milliseconds a character: in the live run it still drew
+/// the long paste at about 1 ms a character (its Enter went at 8.2 s, under a limit of 8.8 s at 1
+/// ms a character that only its fixed second kept ahead), and the Enter goes once it is quiet, so
+/// the limit only bounds a window that never goes quiet (T-1121's finding 5).
+const MUSE_ON_WINDOWS: SilentPaste = SilentPaste {
+    pace_us_per_character: 500,
+    drawn_after_ms: 0,
+    quiet_ms: 200,
+    most_ms: 1_000,
+    most_us_per_character: 2_000,
+};
 
 impl Adapter for MuseAdapter {
     fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
@@ -120,6 +147,9 @@ impl Adapter for MuseAdapter {
             let mut argv = vec![integration.program];
             argv.extend(integration.args);
             argv.extend(invocation.args);
+            if launch.role != "chief" {
+                argv.push(NO_QUESTION_TOOL.to_owned());
+            }
             Ok(Prepared {
                 argv,
                 env: integration.env,
@@ -155,8 +185,25 @@ impl Adapter for MuseAdapter {
     /// turn, each a child of its own process in a group of its own, and the human's
     /// `!` command likewise (the research of T-700, Muse 1.4.13 on macOS): Codex's
     /// shape. Where the agent's own tool calls run (its managed shell, in a sandbox
-    /// where one is on) needs a model's turn to see, and is not seen yet. Linux and
-    /// Windows have not been probed.
+    /// where one is on) needs a model's turn to see, and is not seen yet. On Windows
+    /// it is not known (T-792): that shape is told by process groups, which Windows has
+    /// none of, and a server and the agent's shell are both children of Muse's process
+    /// in the window's job, which nothing here tells apart; so the host leaves them
+    /// alone and tells the turn no command of Muse's there. Muse's record keeps no monitor of
+    /// a command (Claude's does), so the engine's release of a monitor that said its command
+    /// ended never waits on this for a Muse member; what `Unknown` costs is a command its turn
+    /// left running, which the host does not name.
+    ///
+    /// `Servers::ByShell` (Claude's on Windows, T-906) was tried live on zeewin2 (T-1126,
+    /// `live finish muse`, its step of a command left running, Muse 1.4.14): Muse runs each
+    /// command of its agent in a `powershell.exe -NoLogo -NoProfile -Command …` of its own,
+    /// the shape `ByShell` reads, and asked to leave a command running it either used its own
+    /// background tool and ended the command itself (3 runs of 5; nothing for any shape to
+    /// see), or detached it with `Start-Process`, whose PowerShell exits at once (2 of 5, one
+    /// on each shape). A process its shell outlived is no command under `ByShell` either, so
+    /// the chief was told nothing of the detached ping under both, and `ByShell` changed no
+    /// verdict: Muse stays `Unknown` until a case shows a command `ByShell` would name. Linux
+    /// has not been probed.
     fn servers(&self) -> Servers {
         if cfg!(target_os = "macos") && !self.env().on_windows() {
             Servers::AtLaunch
@@ -169,6 +216,20 @@ impl Adapter for MuseAdapter {
     /// the command line, which every process on the machine reads.
     fn first_message(&self) -> FirstMessage {
         FirstMessage::Delivered
+    }
+
+    /// On Windows Muse reads a paste's key presses a character at a time, redrawing its box as it
+    /// goes, and takes an Enter that comes while they are still coming, or soon after the last,
+    /// for a line break in the paste. A measured heuristic (T-954, Muse Code 1.4.14 on zeewin2,
+    /// 2026-11-02, `live paste-enter muse -- probe_the_gap`): a line was drawn whole at 58 to 93
+    /// ms, and an Enter 100 ms after the paste stayed in it while one at 250 ms went; 7,775
+    /// characters (`[Pasted Content … chars]`) were read at 0.6 to 0.75 ms a character, redrawn
+    /// every 50 to 65 ms and whole at 4.5 to 5.8 s, and an Enter at 1.5 and 3 s stayed in it while
+    /// one at 6 s went. Unheld, an Enter in the paste's own write was lost at every length, and one
+    /// a second after the long paste too (T-1084, 4 of 6). On the Mac the terminal hands Muse a
+    /// paste whole, and it took its Enter as it came, 6 of 6 (T-1086).
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.env().on_windows().then_some(MUSE_ON_WINDOWS)
     }
 
     /// Pasted, and its box cleared with Control-C ([`CLEAR_INPUT`]).

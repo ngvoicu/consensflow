@@ -1,9 +1,9 @@
 //! Live: a Muse member's window as the daemon opens one, on the real model. It is opt-in
 //! (`cargo xtask live muse-window`): it spends the Muse account's allowance on a worker of
-//! Muse's cheap model, `muse-spark-1.3` at `minimal` (contributor mode off; `--models
+//! Muse's cheap model, `muse-spark-1.3-contributor` at `minimal` (contributor mode off; `--models
 //! muse=<model>:<effort>` names another), and needs Muse Code installed and
-//! logged in, so it is ignored unless asked for and is no part of `check` or of CI. Mac
-//! only for now: no Windows machine has Muse yet (MUS-20).
+//! logged in, so it is ignored unless asked for and is no part of `check` or of CI. On a
+//! Mac and on Windows (MUS-20, T-792: Muse runs there as the rig's stand-in's child).
 //!
 //! The rig's cases (`tests/rig/muse_window.rs`) run the same windows on Muse's fake model,
 //! which repeats each message after a delay: it never calls a tool, and its timing is no
@@ -32,6 +32,9 @@
 //! - `after`      a task put after another, on the same conversation (`muse resume`)
 //! - `restart`    the same after the app quit at rest
 //! - `rest`       a stop that finds the window at rest (the human's Escape first)
+//! - `question`   the worker asks the chief with `cf ask` (it has no question tool: MUS-13),
+//!   the answer comes back into its next turn, and its role text wins over the person's
+//!   rules of another harness that say never to run `cf` (MUS-16)
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -39,26 +42,49 @@ use std::time::Duration;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, agents, Harness, Log};
 use cf_e2e::muse::members::{
-    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker,
+    in_its_turn, last_resumed, message_with, pane_of, project, the_session, worker, WORKER,
 };
-use cf_e2e::muse::{self, deliveries, has, messages, moved_away, records, shape, terminals};
+use cf_e2e::muse::{
+    self, deliveries, has, messages, moved_away, question_tools, records, shape, terminals,
+};
 use cf_e2e::process::own_var;
 use cf_e2e::rig::{Config, Project, Rig};
-use cf_e2e::{checkout, Error, Result};
+use cf_e2e::{checkout, files, Error, Result};
 use serde_json::{json, Value};
 
 /// The stand-in for the chief's window, built for these tests.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
+/// The rig's Muse on Windows, which runs the machine's ([`muse::StandIn`]).
+const MUSE_STAND_IN: &str = env!("CARGO_BIN_EXE_muse-stand-in");
+
 /// The cases, in the order they run.
-const CASES: [&str; 8] = [
-    "result", "early", "tell", "steer", "cut", "after", "restart", "rest",
+const CASES: [&str; 9] = [
+    "result", "early", "tell", "steer", "cut", "after", "restart", "rest", "question",
 ];
 
 /// A brief whose turn runs a shell command a while before it answers: a turn a stop,
 /// a tell or a quit can find at work after the model's first output.
 const LONG: &str =
     "Run the shell command `sleep 25` and wait for it to finish, then reply with exactly: T1_DONE";
+
+/// The question case's brief: a question only the chief can answer. The stand-in chief
+/// answers a question that ends `REPLY <words>` with those words (`fake-agent`).
+const QUESTION: &str = "Before you do anything else, ask the chief which colour to use, red or blue, and end your question with the words REPLY blue. Do not pick a colour yourself: wait for the chief's answer. Once you have it, reply with exactly one line: COLOUR=<the answer>";
+
+/// The person's rules of another harness, which Muse reads as theirs: `$CODEX_HOME/AGENTS.md`
+/// where there is no `~/.claude/CLAUDE.md` (Muse 1.4.14, T-790's echo probe), loaded as a
+/// `rules-file` reminder in every posture. One rule a member can keep, which proves they are
+/// read.
+///
+/// Until T-1126 they also said "Never run the `cf` command, for any reason. When you need to
+/// know something, choose the answer yourself.", to pit the person's rules against the role's
+/// `cf ask`. On the cheap Muse model (`muse-spark-1.3-contributor`, minimal) the person's rule
+/// won 3 runs of 18 over the Mac and zeewin2 (T-954, T-1124): the worker asked in words as its
+/// turn's last message and never ran `cf ask`, so its task ended with the question as its
+/// result. That is the model's choice between two instructions, not a defect of ConsensFlow's,
+/// and a case that loses one run in six proves nothing either way; it is left out.
+const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n";
 
 fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
@@ -471,12 +497,149 @@ fn rest_case(live: &Live) -> Result<String> {
     Ok(said)
 }
 
+fn question_case(live: &Live) -> Result<String> {
+    let foreign = tempfile::tempdir().map_err(|source| Error::File {
+        action: "make",
+        path: PathBuf::from("a temporary folder"),
+        source,
+    })?;
+    files::write(&foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
+    let config = live
+        .config()
+        .var("CODEX_HOME", foreign.path().display().to_string());
+    let rig = Rig::start(config)?;
+    let project = project(&rig, &live.agent)?;
+    dispatch(&rig, &project, QUESTION)?;
+    let chiefs = |project: &Project<'_>, kind: &str| -> Result<Value> {
+        Ok(project
+            .inbox("chief")?
+            .into_iter()
+            .find(|message| message["kind"] == kind)
+            .unwrap_or_default())
+    };
+    let asked = rig.wait_for(
+        "the worker's question to reach the chief",
+        secs(300),
+        || Ok(!chiefs(&project, "question")?.is_null()),
+    );
+    if let Err(waited) = asked {
+        // What the worker did instead, for the red to be read (T-954: one run of nine timed out
+        // here and said nothing more; its rerun held).
+        let did = what_the_worker_did(&rig, &project);
+        rig.close()?;
+        return Err(Error::Daemon(format!("{waited}\n{did}")));
+    }
+    done(&rig, &project, 1, secs(300))?;
+    let question = chiefs(&project, "question")?;
+    let worker = worker(&project)?;
+    let answer = project
+        .inbox(&worker)?
+        .into_iter()
+        .find(|message| message["kind"] == "answer")
+        .unwrap_or_default();
+    let result = chiefs(&project, "result")?["body"].to_string();
+    let (_, log) = the_session(&rig);
+    let offered = question_tools(&log);
+    let dialog = has(&log, "run/user_input_prompt_requested");
+    // The rules were read: Muse put them in the request's context.
+    let read = log.iter().any(|record| {
+        muse::kind(record) == "run/model_request_configured"
+            && record.to_string().contains("FOREIGN_SEEN")
+    });
+    still_on(&rig, &live.model)?;
+    // Muse reads the person's `~/.claude/CLAUDE.md` before `$CODEX_HOME/AGENTS.md`, and a
+    // live window's home is the person's (T-985 P3-1 on T-790): where they have one, the
+    // rules this case gives are never read, and that check is skipped, saying why.
+    let owners = owners_claude_rules(&live.home);
+    let skipped = owners.as_ref().map_or(String::new(), |path| {
+        format!(
+            "; the foreign rules' check is skipped: the person has {}, which Muse reads before $CODEX_HOME/AGENTS.md",
+            path.display()
+        )
+    });
+    let said = format!(
+        "the question from {} ({:?}), the answer {} ({}), the result {result}, question tools offered {offered:?}, a dialog {dialog}, the foreign rules read {read}{skipped}, turns {:?}\n{}",
+        question["sender"], question["body"], answer["state"], answer["body"], terminals(&log), shape_of(&rig)
+    );
+    rig.close()?;
+    held(
+        question["sender"]
+            .as_str()
+            .is_some_and(|sender| sender == worker || sender.starts_with(WORKER))
+            && question["taskNumber"] == 1,
+        format!("no board question from the worker: {said}"),
+    )?;
+    held(
+        answer["state"] == "delivered",
+        format!("the answer did not reach the worker: {said}"),
+    )?;
+    held(
+        result.contains("COLOUR=blue"),
+        format!("the result: {said}"),
+    )?;
+    held(
+        !offered.is_empty() && offered.iter().all(Vec::is_empty) && !dialog,
+        format!("Muse offered a question tool: {said}"),
+    )?;
+    if owners.is_none() {
+        held(read, format!("the foreign rules were not read: {said}"))?;
+    }
+    Ok(said)
+}
+
+/// What the worker did, as a red case says it: its task as the board has it, the last lines its
+/// window drew, and the shape of its session.
+fn what_the_worker_did(rig: &Rig, project: &Project<'_>) -> String {
+    let task = project.task(1).map_or_else(
+        |failed| failed.to_string(),
+        |task| {
+            let messages: Vec<String> = task["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|message| {
+                    format!(
+                        "{} {} from {}: {}",
+                        message["kind"],
+                        message["state"],
+                        message["sender"],
+                        live::cut(message["body"].as_str().unwrap_or_default(), 300)
+                    )
+                })
+                .collect();
+            format!("T-1 {}; {}", task["state"], messages.join(" | "))
+        },
+    );
+    let read = rig.muse_sessions().iter().any(|(_, log)| {
+        records(log).iter().any(|record| {
+            muse::kind(record) == "run/model_request_configured"
+                && record.to_string().contains("FOREIGN_SEEN")
+        })
+    });
+    let screen = pane_of(project)
+        .ok()
+        .and_then(|pane| pane["id"].as_str().map(|id| rig.screen(id)))
+        .map_or_else(String::new, |screen| live::last_lines(&screen));
+    format!(
+        "the task: {task}\nthe foreign rules were read: {read}\nits window last drew:\n{screen}\nits session: {}",
+        shape_of(rig)
+    )
+}
+
+/// The person's own Claude Code rules in the home `home`, which Muse reads as theirs before
+/// any other harness's: none where they have none.
+fn owners_claude_rules(home: &std::path::Path) -> Option<PathBuf> {
+    Some(home.join(".claude").join("CLAUDE.md")).filter(|path| path.is_file())
+}
+
 #[test]
 #[ignore = "opt-in: spends the Muse account's allowance; cargo xtask live muse-window"]
 fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
     let log = Log::begin("live muse-window")?;
-    let install = muse::installed().map_err(Error::Daemon)?;
-    let home = PathBuf::from(own_var("HOME").ok_or_else(|| Error::Daemon("no home".to_owned()))?);
+    let install = muse::installed()
+        .map_err(Error::Daemon)?
+        .through(MUSE_STAND_IN);
+    let home = muse::real_home().map_err(Error::Daemon)?;
     let agent = agents::agent(Harness::Muse);
     log.launched(&agents::row(Harness::Muse, "standard"));
     let model = agents::model(Harness::Muse).name;
@@ -508,6 +671,7 @@ fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
             "cut" => cut_case(&live),
             "after" => after_case(&live, false),
             "restart" => after_case(&live, true),
+            "question" => question_case(&live),
             _ => rest_case(&live),
         };
         let stop = ran
@@ -535,4 +699,23 @@ fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
     let after = live.allowance(&log).unwrap_or_else(|stop| stop.to_string());
     log.say(format!("allowance after the run: {after}"));
     report::conclude(&log, "what each case came to", &checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FOREIGN_RULES;
+
+    /// The person's rules the question case gives Muse prove they are read (a word a member
+    /// keeps) and pit nothing against the role's `cf ask`: a rule that forbids `cf` lost the
+    /// role 3 runs of 18 on the cheap model (T-1124), the model's choice and no defect of
+    /// ConsensFlow's.
+    #[test]
+    fn the_foreign_rules_ask_for_a_word_a_member_keeps_and_forbid_no_cf() {
+        assert!(FOREIGN_RULES.contains("FOREIGN_SEEN"));
+        assert!(!FOREIGN_RULES.contains("`cf`"), "{FOREIGN_RULES}");
+        assert!(
+            !FOREIGN_RULES.to_lowercase().contains("never run"),
+            "{FOREIGN_RULES}"
+        );
+    }
 }

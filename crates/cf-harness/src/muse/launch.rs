@@ -53,22 +53,39 @@ pub(super) struct Integration {
 
 /// The binary the launcher `executable` runs: `muse-bin-<version>` beside it, where
 /// `.muse-version` names a version and that binary is there (`.exe` on Windows); the
-/// program itself where not. A Muse older than ConsensFlow reads is refused.
+/// program itself where not. A Muse older than ConsensFlow reads is refused, and so is
+/// a launcher that is a batch file (Windows' `muse.cmd`) with no binary of its own
+/// beside it: `cmd.exe` runs one, and takes the quotes and the `|`, `&`, `<` and `>`
+/// of the hooks' JSON (`-c hooks=…`) for its own, so the window would open with no
+/// hooks of ConsensFlow's, or none at all.
 pub(super) fn pinned(executable: &str, env: &Env) -> Result<String, String> {
     let launcher = Path::new(executable);
-    let Some(line) = version::installed(launcher) else {
-        return Ok(executable.to_owned());
+    let pinned = match version::installed(launcher) {
+        None => None,
+        Some(line) => {
+            if Version::of(&line).is_some_and(|found| !found.supported()) {
+                return Err(version::required());
+            }
+            let suffix = if env.on_windows() { ".exe" } else { "" };
+            let binary = really(launcher).with_file_name(format!("muse-bin-{line}{suffix}"));
+            binary
+                .is_file()
+                .then(|| binary.to_string_lossy().into_owned())
+        }
     };
-    if Version::of(&line).is_some_and(|found| !found.supported()) {
-        return Err(version::required());
+    match pinned {
+        Some(binary) => Ok(binary),
+        None if batch_file(launcher) => Err(format!(
+            "Muse Code's launcher {executable} is a batch file, which cmd.exe would run with the hooks ConsensFlow gives the window mangled, and no muse-bin-<version>.exe named by its .muse-version is beside it: reinstall Muse Code or run `muse` once to finish its update"
+        )),
+        None => Ok(executable.to_owned()),
     }
-    let real = really(launcher);
-    let suffix = if env.on_windows() { ".exe" } else { "" };
-    let binary = real.with_file_name(format!("muse-bin-{line}{suffix}"));
-    Ok(if binary.is_file() {
-        binary.to_string_lossy().into_owned()
-    } else {
-        executable.to_owned()
+}
+
+/// Whether `program` is one Windows runs through `cmd.exe`: a `.cmd` or `.bat` file.
+fn batch_file(program: &Path) -> bool {
+    program.extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
     })
 }
 
@@ -88,17 +105,41 @@ fn really(launcher: &Path) -> PathBuf {
 
 /// The hook ConsensFlow adds for a launch's SessionStart: `cf hook muse-session` of the
 /// window's `cf` (`pane_cf`, named in full, as Muse's hook shell has a `PATH` of its
-/// own), with the role file and the file it writes the window's sessions in. A check
-/// that keeps a launch's hooks to ConsensFlow's knows it by this.
-pub(crate) fn added_hook(pane_cf: &str, role_file: &str, said: &str) -> Value {
-    json!({
-        "matcher": "",
-        "hooks": [{
-            "type": "command",
-            "command": cf_hook(pane_cf, "muse-session", &[role_file, said]),
-            "timeout": SESSION_HOOK_SECONDS,
-        }],
-    })
+/// own), with the role file and the file it writes the window's sessions in. Muse runs
+/// `command` in a POSIX shell; on Windows (`windows`) it runs `commandWindows` in
+/// cmd.exe, through Rust's own quoting, so that every `"` of it reaches cmd.exe as `\"`
+/// and no quoted word survives (T-792's probe on zeewin2: "The filename, directory
+/// name, or volume label syntax is incorrect"): there each word is a path cmd.exe takes
+/// as it is, its short form where it holds a blank ([`cf_process::cmd_word`]), and a
+/// launch whose paths have neither is refused in plain words. A check that keeps a
+/// launch's hooks to ConsensFlow's knows it by this.
+pub(crate) fn added_hook(
+    pane_cf: &str,
+    role_file: &str,
+    said: &str,
+    windows: bool,
+) -> Result<Value, String> {
+    let mut hook = json!({
+        "type": "command",
+        "command": cf_hook(pane_cf, "muse-session", &[role_file, said]),
+        "timeout": SESSION_HOOK_SECONDS,
+    });
+    if windows {
+        let word = |path: &str| {
+            cf_process::cmd_word(Path::new(path)).ok_or_else(|| {
+                format!(
+                    "Muse Code runs its hooks on Windows through cmd.exe with no quoted word, and {path} holds a blank or a character cmd.exe reads as its own and has no short name (8.3 names are off for its drive): ConsensFlow cannot give the window its role there"
+                )
+            })
+        };
+        hook["commandWindows"] = Value::String(format!(
+            "{} hook muse-session {} {}",
+            word(pane_cf)?,
+            word(role_file)?,
+            word(said)?
+        ));
+    }
+    Ok(json!({ "matcher": "", "hooks": [hook] }))
 }
 
 /// The hooks the owner's settings give Muse, in `env`'s config: none where there is no
@@ -151,7 +192,10 @@ pub(super) fn integration(
     let root = launch_folder("muse", env, launch)?;
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
     let said = path::join(&[&root, SAID]);
-    let hooks = hooks(env, added_hook(pane_cf, role_file, &said))?;
+    let hooks = hooks(
+        env,
+        added_hook(pane_cf, role_file, &said, env.on_windows())?,
+    )?;
     let mut given = vec![(NO_UPDATE.0.to_owned(), NO_UPDATE.1.to_owned())];
     given.extend(super::paths::data_home_given(env).map(|real| ("XDG_DATA_HOME".to_owned(), real)));
     Ok(Integration {

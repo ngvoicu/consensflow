@@ -383,6 +383,7 @@ mod tests {
         let muse = crate::muse::Installed {
             binary: PathBuf::from("/bin/muse-bin-1.4.14"),
             version: "1.4.14".to_owned(),
+            stand_in: None,
         };
         let with = config().muse(muse, 10);
         let env = environment(&linked, &linked.join("fake-bin"), &with, &[]);
@@ -783,6 +784,7 @@ mod tests {
         crate::muse::Installed {
             binary,
             version: "1.4.14-R7309.1".to_owned(),
+            stand_in: None,
         }
     }
 

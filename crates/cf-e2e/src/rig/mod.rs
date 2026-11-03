@@ -279,8 +279,9 @@ impl Config {
     /// sets `CF_TEST_MUSE_DELAY_MS`: they find the rig's launcher first on their `PATH`
     /// as `muse`, and the binary it names beside it ([`crate::muse::write_stand_in`]).
     /// What each was run with is in `muse-argv.log` of the rig's folder
-    /// ([`Rig::muse_launches`]). A script that runs it, so Unix's (a Mac's: no
-    /// Windows machine has Muse yet).
+    /// ([`Rig::muse_launches`]), and each window's process and its Muse's in
+    /// `muse-pids.log` ([`Rig::muse_pids`]). A script that runs it on a Mac; on Windows
+    /// `install`'s stand-in program ([`crate::muse::Installed::through`]).
     #[must_use]
     pub fn muse(mut self, install: crate::muse::Installed, delay_ms: u64) -> Self {
         self.muse = Some((install, crate::muse::Run::Echo { turn_ms: delay_ms }));
@@ -288,8 +289,9 @@ impl Config {
     }
 
     /// [`Config::muse`], live: the windows run the machine's Muse on the model each is
-    /// launched on, with the person's login (its secret in the keychain, which Muse finds
-    /// by `real_home`), their settings and sessions in the rig's home
+    /// launched on, with the person's login (on a Mac its secret in the keychain, which Muse
+    /// finds by `real_home`; on Windows a copy of its file without a refresh token, in the
+    /// rig's home), their settings and sessions in the rig's home
     /// ([`crate::muse::write_live_stand_in`]). It spends the account's allowance.
     #[must_use]
     pub fn muse_live(

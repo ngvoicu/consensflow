@@ -1038,7 +1038,7 @@ mod tests {
         // all of it.
         let script = r#"repaint() { printf '\033[17;1H%s\033[18;3H' "$2"; i=0; while [ $i -lt $1 ]; do
   printf '\033[39m\033[49m\033[59m\033[0m\033[18;3H\033[17;1H%s\033[18;3H' "$2"
-  sleep 0.05; i=$((i+1)); done; }
+  /bin/sleep 0.05; i=$((i+1)); done; }
 repaint 80 '> Ask anything'; repaint 1200 '> Tsk anything'"#;
         let pane = json!({"id":"repaint-pane","generation":1});
         let opened = ask(
