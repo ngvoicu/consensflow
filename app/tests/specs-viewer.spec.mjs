@@ -1553,3 +1553,206 @@ for (const colorScheme of ['dark', 'light']) {
     expect(await style(spec.locator('h1'), 'color')).toBe(await colour('--foam'))
   })
 }
+
+/**
+ * The registry as a Specmint that links each spec writes it (a field report, 2026-11-03, a
+ * project's own): the id is a link to the spec, and a status is capitalised. Its rows were
+ * all dead, and drawn faded, for the viewer took the link's markdown for the spec's id, and
+ * so found no folder of that name.
+ */
+const LINKED = [
+  '# Spec Registry',
+  '',
+  '| ID | Title | Status | Priority | Progress | Updated |',
+  '|----|-------|--------|----------|----------|---------|',
+  '| [user-auth](./user-auth/SPEC.md) | User Auth System | Active | high | 5/12 | 2026-11-03 |',
+  '| [api-refactor](./api-refactor/SPEC.md) | API Refactoring | Paused | medium | 2/8 | 2026-10-29 |',
+  '| [upload-fix](./upload-fix/SPEC.md) | Fix File Upload Bug | Completed | low | 5/5 | 2026-09-30 |',
+  '| [gone-spec](./gone-spec/SPEC.md) | A Spec With No Folder | Archived | low | 0/0 | 2026-08-21 |',
+  '',
+].join('\n')
+const LINKED_HTML = [
+  '# Spec Registry',
+  '',
+  '| ID | Title | Status | Priority | Progress | Updated |',
+  '|----|-------|--------|----------|----------|---------|',
+  // Linked to a SPEC.md the folder does not have: its spec is a SPEC.html, which opens.
+  '| [checkout-flow](./checkout-flow/SPEC.md) | Checkout Flow | Active | high | 2/3 | 2026-11-03 |',
+  '',
+].join('\n')
+
+/** The registry of project `id` in `data` read as `text`. */
+function writes(data, id, text) {
+  const file = data.specs[id].files['registry.md']
+  file.text = text
+  file.size = text.length
+}
+
+/** The model of the tests with the registries of the first and the third project linked. */
+function linkedModel() {
+  const data = model()
+  writes(data, 1, LINKED)
+  writes(data, 3, LINKED_HTML)
+  return data
+}
+
+/** What shows of the specs a viewer lists, and that every row of a spec the folder has can be pressed. */
+async function seesRows(viewer, ids) {
+  const rows = shown(viewer).getByRole('list', { name: 'Specs' }).locator('button.registry-row')
+  await expect(rows.locator('small')).toHaveText(ids)
+  // The viewer is whole, as are its rows: not faded, not inert, and none of a spec the folder has is disabled.
+  await expect(viewer).toHaveCSS('opacity', '1')
+  expect(await viewer.evaluate((dialog) => dialog.inert)).toBe(false)
+  const state = await rows.evaluateAll((all) =>
+    all.map((row) => [row.dataset.spec, row.disabled, getComputedStyle(row).opacity]),
+  )
+  expect(state.map(([id]) => id)).toEqual(ids)
+  return state
+}
+
+/** The registry's row of the spec titled `title`, as a person finds it: by what it says. */
+const rowTitled = (viewer, title) =>
+  shown(viewer)
+    .locator('button.registry-row')
+    .filter({
+      has: viewer.page().locator('strong', { hasText: new RegExp(`^${literally(title)}$`) }),
+    })
+
+test.describe('a registry that links each spec', () => {
+  for (const [what, size] of [
+    ['a wide window', { width: 1440, height: 900 }],
+    ['a narrow one', { width: 720, height: 700 }],
+  ]) {
+    test(`takes the clicks of its tree and its rows, from the board's Specs button, in ${what}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size)
+      await open(page, linkedModel())
+      const viewer = await openViewer(page)
+      // A file of the tree takes a click (so the tree was never the dead part)...
+      await fileIn(viewer, 'api-refactor/research-01.md').click({ timeout: 3_000 })
+      await expect(viewer.locator('.specs-path')).toHaveText('api-refactor/research-01.md')
+      await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+      await expect(viewer.locator('.specs-path')).toHaveText('registry.md')
+      // ...and so does a row of the registry, each opening the spec it names.
+      for (const [id, title] of [
+        ['api-refactor', 'API Refactoring'],
+        ['upload-fix', 'Fix File Upload Bug'],
+        ['user-auth', 'User Auth System'],
+      ]) {
+        await rowTitled(viewer, title).click({ timeout: 3_000 })
+        await expect(viewer.locator('.specs-path')).toHaveText(`${id}/SPEC.md`)
+        await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+        await expect(viewer.locator('.specs-path')).toHaveText('registry.md')
+      }
+      // The links are shown as the words they are, and every spec the folder has is a row that can be pressed.
+      const state = await seesRows(viewer, ['user-auth', 'api-refactor', 'upload-fix', 'gone-spec'])
+      expect(state).toEqual([
+        ['user-auth', false, '1'],
+        ['api-refactor', false, '1'],
+        ['upload-fix', false, '1'],
+        // The one with no folder says so, and is the one that is faded.
+        ['gone-spec', true, '0.45'],
+      ])
+      await expect(viewer.locator('button.registry-row[data-spec="gone-spec"]')).toHaveAttribute(
+        'title',
+        'gone-spec has no folder here',
+      )
+      // An id the registry gives as a link is drawn as one: underlined, and none of its markdown shows.
+      const id = shown(viewer).locator('button.registry-row small').first()
+      await expect(id).toHaveText('user-auth')
+      await expect(id).toHaveClass('registry-link')
+      await expect(id).toHaveCSS('text-decoration-line', 'underline')
+      await expect(shown(viewer)).not.toContainText('](')
+      // The tree follows the registry: its specs by their titles, in its order.
+      const tree = viewer.getByRole('navigation', { name: 'The specs folder' })
+      expect((await level(tree.locator('> ul'))).slice(0, 5)).toEqual([
+        'registry.md',
+        'User Auth System/',
+        'API Refactoring/',
+        'Fix File Upload Bug/',
+        'legacy-cleanup/',
+      ])
+      await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(viewer).toBeHidden()
+    })
+  }
+
+  test('takes the clicks from Specs… in the project menu, and after the project shown is changed', async ({
+    page,
+  }) => {
+    await open(page, linkedModel())
+    // The menu, for a project the board does not show: it is shown first, and its rows are live.
+    await page.locator('#projects li.project[data-project="3"]').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Specs…' }).click()
+    const viewer = page.getByRole('dialog', { name: 'Specs of checkout' })
+    await expect(viewer).toBeVisible()
+    await expect(page.locator('#project-title')).toHaveText('checkout')
+    // Its link names a SPEC.md the folder lacks: the spec is the folder's SPEC.html, which opens.
+    await rowTitled(viewer, 'Checkout Flow').click({ timeout: 3_000 })
+    await expect(viewer.locator('.specs-path')).toHaveText('checkout-flow/SPEC.html')
+    await fileIn(viewer, 'checkout-flow/research-01.md').click({ timeout: 3_000 })
+    await expect(viewer.locator('.specs-path')).toHaveText('checkout-flow/research-01.md')
+    await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+    expect(await seesRows(viewer, ['checkout-flow'])).toEqual([['checkout-flow', false, '1']])
+    await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(viewer).toBeHidden()
+    // The project changed, and the viewer opened again, on the other one: rows and tree as live.
+    await choose(page, 'harbour')
+    await expect(page.locator('#project-title')).toHaveText('harbour')
+    const again = await openViewer(page)
+    await rowTitled(again, 'User Auth System').click({ timeout: 3_000 })
+    await expect(again.locator('.specs-path')).toHaveText('user-auth/SPEC.md')
+    await fileIn(again, 'user-auth/research-01.md').click({ timeout: 3_000 })
+    await expect(again.locator('.specs-path')).toHaveText('user-auth/research-01.md')
+    await fileIn(again, 'registry.md').click({ timeout: 3_000 })
+    expect(
+      (await seesRows(again, ['user-auth', 'api-refactor', 'upload-fix', 'gone-spec']))[0],
+    ).toEqual(['user-auth', false, '1'])
+    // The same, for the project the menu names while the board shows another.
+    await again.getByRole('button', { name: 'Close', exact: true }).click()
+    await page.locator('#projects li.project[data-project="1"]').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Specs…' }).click()
+    await rowTitled(
+      page.getByRole('dialog', { name: 'Specs of harbour' }),
+      'API Refactoring',
+    ).click({
+      timeout: 3_000,
+    })
+    await expect(page.locator('.specs-path')).toHaveText('api-refactor/SPEC.md')
+  })
+
+  test('opens what a link names only inside the folder: out of it, with a scheme or to no file, the id decides', async ({
+    page,
+  }) => {
+    const data = model()
+    writes(
+      data,
+      1,
+      [
+        '| ID | Title | Status | Priority | Progress | Updated |',
+        '|---|---|---|---|---|---|',
+        "| [user-auth](javascript:window.__pwned='id-link') | A | active | high | 1/2 | 2026-11-03 |",
+        '| [api-refactor](../../package.json) | B | paused | low | 1/2 | 2026-11-03 |',
+        `| [upload-fix](${trap.origin}/x) | C | completed | low | 1/2 | 2026-11-03 |`,
+        // A link to a file of another spec of the folder opens that file, as a link in a page does.
+        '| [legacy-cleanup](./user-auth/research-01.md) | D | archived | low | 1/2 | 2026-11-03 |',
+        '',
+      ].join('\n'),
+    )
+    await open(page, data)
+    const viewer = await openViewer(page)
+    for (const [title, opens] of [
+      ['A', 'user-auth/SPEC.md'],
+      ['B', 'api-refactor/SPEC.md'],
+      ['C', 'upload-fix/SPEC.md'],
+      ['D', 'user-auth/research-01.md'],
+    ]) {
+      await rowTitled(viewer, title).click({ timeout: 3_000 })
+      await expect(viewer.locator('.specs-path')).toHaveText(opens)
+      await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+    }
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
+    expect(trap.received).toEqual([])
+  })
+})

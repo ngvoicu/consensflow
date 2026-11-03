@@ -46,6 +46,8 @@ viewer-button = ["node", "app/node_modules/@playwright/test/cli.js", "test", "ap
 viewer-menu = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "in the project menu"]
 viewer-tree = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "the specs tree"]
 viewer-registry = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "the registry"]
+# A registry that links each spec (a Specmint's newer form): its rows take clicks, its ids read as links.
+viewer-linked = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "a registry that links each spec"]
 viewer-markdown = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "a Markdown spec"]
 viewer-files = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "other files"]
 viewer-html = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "an HTML spec"]
@@ -1246,6 +1248,66 @@ runs = ["viewer-registry"]
 file = "app/ui/core/specs-viewer.js"
 find = "        if (opens !== null) void this.#choose(opens)"
 replace = "        if (opens === null) void this.#choose(opens)"
+
+[[plant]]
+name = "specs viewer: a registry's linked id keeps its markdown, and every row of it is dead and faded"
+meant = "reads a link in a spec's cell as the spec's id, and keeps where it leads"
+runs = ["viewer-arranging", "viewer-linked"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "if (link !== null) row.id = link.text"
+replace = ""
+
+[[plant]]
+name = "specs viewer: a registry's link is not followed, the id alone opens the spec"
+meant = "is the file its link names, else its spec by the id"
+runs = ["viewer-arranging", "viewer-linked"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "  const linked = row.href === null ? null : linkTarget(REGISTRY, row.href, folder, files)"
+replace = "  const linked = null"
+
+[[plant]]
+name = "specs viewer: a registry's link is followed wherever it leads"
+meant = "never follows a link out of the folder, or one with a scheme: the id decides"
+runs = ["viewer-arranging", "viewer-linked"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "  const linked = row.href === null ? null : linkTarget(REGISTRY, row.href, folder, files)"
+replace = "  const linked = row.href"
+
+[[plant]]
+name = "specs viewer: a registry's linked id is drawn as plain text"
+meant = "takes the clicks of its tree and its rows, from the board's Specs button, in a wide window"
+runs = ["viewer-linked"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "element('small', row.href === null ? null : 'registry-link', row.id)"
+replace = "element('small', null, row.id)"
+
+[[plant]]
+name = "specs viewer: a cell that holds more than a link is read as the link"
+meant = "reads a link in a spec's cell as the spec's id, and keeps where it leads"
+runs = ["viewer-arranging"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = '''  const found = /^\[([^[\]]*)\]\((?:<([^<>()\s]*)>|([^<>()\s]*))\)$/.exec(cell)'''
+replace = '''  const found = /\[([^[\]]*)\]\((?:<([^<>()\s]*)>|([^<>()\s]*))\)$/.exec(cell)'''
+
+[[plant]]
+name = "specs viewer: a registry's link cell is read by a pattern that reads the cell again and again"
+meant = "reads a line built to make a pattern read it again and again in a moment"
+runs = ["viewer-arranging"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = '''  const found = /^\[([^[\]]*)\]\((?:<([^<>()\s]*)>|([^<>()\s]*))\)$/.exec(cell)'''
+replace = '''  const found = /^\[(.*)\]\((?:<(.*)>|(.*))\)$/.exec(cell)'''
 
 [[plant]]
 name = "specs viewer: every row of a registry of thousands is drawn"

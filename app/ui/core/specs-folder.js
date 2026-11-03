@@ -143,6 +143,18 @@ export function specFile(arranged, id) {
   return folder === undefined ? null : (filesOf([folder])[0] ?? null)
 }
 
+/**
+ * The file a registry `row` opens: the one its link names (`row.href`) where that leads to a
+ * file of the folder (`files`, the folder being `folder`), else its spec's own file by the row's
+ * id. A link is followed only as a link between files is (`linkTarget`): never out of the folder,
+ * never with a scheme, never to what the folder has not; then the id decides. None where the
+ * folder has no such spec.
+ */
+export function rowFile(row, arranged, folder, files) {
+  const linked = row.href === null ? null : linkTarget(REGISTRY, row.href, folder, files)
+  return linked ?? specFile(arranged, row.id)
+}
+
 /** The file the viewer opens on: the registry, or the first spec where there is none. */
 export function firstFile(arranged) {
   if (arranged.some((entry) => entry.path === REGISTRY)) return REGISTRY
@@ -198,7 +210,9 @@ function columnsOf(line) {
  * the head gives them (a kluris registry has Progress before Priority). None where the text
  * holds no such table: the viewer shows it as the markdown it is. Each line is read once, in
  * time that grows with its length alone: its cells are split and trimmed, and each cell is
- * held to a pattern that cannot read a character twice.
+ * held to a pattern that cannot read a character twice. A spec's id may be a link to it
+ * (`[id](./id/SPEC.md)`): the id is the link's words, and `href` is where it leads (none for a
+ * plain id).
  */
 export function readRegistry(text) {
   const lines = text.split(/\r?\n/)
@@ -214,12 +228,27 @@ export function readRegistry(text) {
     const row = Object.fromEntries(
       COLUMNS.map((column, place) => [column, said[places[place]] ?? '']),
     )
+    // A Specmint that links each spec writes its id as the link: `[id](./id/SPEC.md)`.
+    const link = linkCell(row.id)
+    row.href = link === null ? null : link.href
+    if (link !== null) row.id = link.text
     const progress = /^(\d+)\s*\/\s*(\d+)$/.exec(row.progress)
     row.done = progress === null ? null : Number(progress[1])
     row.total = progress === null ? null : Number(progress[2])
     rows.push(row)
   }
   return { heading: heading?.replace(/^\s*#{1,6}\s+/, '').trim() ?? null, rows }
+}
+
+/**
+ * A cell that is one markdown link, `[words](address)` or `[words](<address>)`: its words and
+ * where it leads; none where the cell is anything else (more than the link, or no link). The
+ * words hold no bracket and the address no parenthesis, space or angle bracket, so the pattern
+ * reads each character of the cell once.
+ */
+function linkCell(cell) {
+  const found = /^\[([^[\]]*)\]\((?:<([^<>()\s]*)>|([^<>()\s]*))\)$/.exec(cell)
+  return found === null ? null : { text: found[1].trim(), href: found[2] ?? found[3] }
 }
 
 /** Whether `line` is the rule under a table's head of `count` cells. */
