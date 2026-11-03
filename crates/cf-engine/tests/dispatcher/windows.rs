@@ -106,15 +106,40 @@ fn a_worker_window_that_ends_mid_task_says_how_it_ended_and_what_it_showed_in_th
 }
 
 /// Kluris T-153 (T-823): a Claude Code worker's window closed with exit code 143 after the
-/// project's own tests killed its `cargo test`, and the pause note said only "exit code 143"
-/// and that its last screen lines named a secret, so they were left out: the chief never
-/// learned the cause. No stop and no close of ConsensFlow's was under way, so the note says
-/// the signal and that it did not come from ConsensFlow; it says what the window was running
-/// (its record's last tool call); and one line of the screen that names a secret takes only
-/// itself and its neighbours out, not the screen.
+/// project's own tests killed its `cargo test`, and the pause note said only "exit code 143".
+/// No stop and no close of ConsensFlow's was under way, so the note says the signal and that it
+/// did not come from ConsensFlow.
 #[cfg(unix)]
 #[test]
-fn a_worker_window_a_signal_ended_says_the_signal_what_it_was_running_and_what_its_screen_showed() {
+fn a_worker_window_a_signal_ended_says_the_signal_and_that_consensflow_did_not_send_it() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .host
+        .exits_showing(Some(143), None, Some(&["Running the workspace tests"]));
+    context.exit("zeus");
+
+    let task = context.task(project.id, 1);
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    assert_eq!(
+        note.body,
+        "T-1 is paused: @zeus's window closed (exit code 143, the status of a program ended by SIGTERM, \
+         which ConsensFlow did not send: it had no stop or close of its own under way); \
+         its screen ended with: \"Running the workspace tests\". \
+         Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// The same window's note said "its last screen lines named a secret, so they are left out"
+/// for one line, and the chief never learned the cause (T-823, kluris T-153): it says what the
+/// window was running, the last tool call its record shows, and one line of the screen that
+/// names a secret takes only itself and its neighbours out, not the screen.
+#[test]
+fn a_worker_window_that_closed_says_what_it_was_running_and_leaves_out_only_the_lines_that_name_a_secret(
+) {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     context.give(project.id, "zeus", "Parser");
@@ -125,7 +150,7 @@ fn a_worker_window_a_signal_ended_says_the_signal_what_it_was_running_and_what_i
             Some("cargo fmt --check && cargo test --workspace -- --nocapture".to_owned());
     });
     context.host.exits_showing(
-        Some(143),
+        Some(3),
         None,
         Some(&[
             "Running the workspace tests",
@@ -141,8 +166,7 @@ fn a_worker_window_a_signal_ended_says_the_signal_what_it_was_running_and_what_i
     let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
     assert_eq!(
         note.body,
-        "T-1 is paused: @zeus's window closed (exit code 143, the status of a program ended by SIGTERM, \
-         which ConsensFlow did not send: it had no stop or close of its own under way); \
+        "T-1 is paused: @zeus's window closed (exit code 3); \
          its last tool call was: \"cargo fmt --check && cargo test --workspace -- --nocapture\"; \
          its screen ended with: \"Running the workspace tests / bye\" \
          (3 lines that named or lay beside a secret were left out). \

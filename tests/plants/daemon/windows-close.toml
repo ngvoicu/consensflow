@@ -705,7 +705,7 @@ replace = '''        1 => " (1 lines that named or lay beside a secret were left
 
 [[plant]]
 name = "windows close: a status above 128 names no signal"
-meant = "an_exit_above_128_names_its_signal_and_a_close_not_ours_says_so"
+meant = "a_status_is_a_signals_only_where_there_are_signals"
 runs = ["engine-shown"]
 
 [[plant.edit]]
@@ -715,7 +715,7 @@ replace = '''    if true {'''
 
 [[plant]]
 name = "windows close: SIGTERM is named SIGKILL"
-meant = "an_exit_above_128_names_its_signal_and_a_close_not_ours_says_so"
+meant = "a_status_is_a_signals_only_where_there_are_signals"
 runs = ["engine-shown"]
 
 [[plant.edit]]
@@ -727,6 +727,7 @@ replace = '''        15 => "SIGKILL",'''
 name = "windows close: a signal is not said to be none of ConsensFlow's"
 meant = "an_exit_above_128_names_its_signal_and_a_close_not_ours_says_so"
 runs = ["engine-shown"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
@@ -735,8 +736,9 @@ replace = '''        Some(if false && self.outside {'''
 
 [[plant]]
 name = "windows close: a pause note does not say the signal was not ConsensFlow's"
-meant = "a_worker_window_a_signal_ended_says_the_signal_what_it_was_running_and_what_its_screen_showed"
+meant = "a_worker_window_a_signal_ended_says_the_signal_and_that_consensflow_did_not_send_it"
 runs = ["engine-windows"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
@@ -745,7 +747,7 @@ replace = '''                shown.with_last_call(last_call)'''
 
 [[plant]]
 name = "windows close: a pause note does not read the last tool call of the record"
-meant = "a_worker_window_a_signal_ended_says_the_signal_what_it_was_running_and_what_its_screen_showed"
+meant = "a_worker_window_that_closed_says_what_it_was_running_and_leaves_out_only_the_lines_that_name_a_secret"
 runs = ["engine-windows"]
 
 [[plant.edit]]

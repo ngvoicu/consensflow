@@ -1310,7 +1310,7 @@ replace = '''                Reading::Known(_) => None,'''
 
 [[plant]]
 name = "failure reason: the engine reads no last tool call of a record"
-meant = "a_worker_window_a_signal_ended_says_the_signal_what_it_was_running_and_what_its_screen_showed"
+meant = "a_worker_window_that_closed_says_what_it_was_running_and_leaves_out_only_the_lines_that_name_a_secret"
 runs = ["failure-reason-windows"]
 
 [[plant.edit]]

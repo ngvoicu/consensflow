@@ -801,15 +801,14 @@ fn a_screen_of_nothing_but_secrets_says_its_lines_were_left_out() {
 #[test]
 fn the_last_tool_call_is_said_before_the_screen_masked_and_cut_short() {
     let call = |line: &str| {
-        shown(Some(143), None, Some(&PI))
+        shown(Some(2), None, Some(&PI))
             .with_last_call(Some(line.to_owned()))
             .after("@zeus's window closed")
     };
     let screen = "its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\"";
     assert_eq!(
         call("cargo fmt --check && cargo test --workspace"),
-        format!("@zeus's window closed (exit code 143); its last tool call was: \"cargo fmt --check && cargo test --workspace\"; {screen}")
-            .replace("exit code 143", "exit code 143, the status of a program ended by SIGTERM")
+        format!("@zeus's window closed (exit code 2); its last tool call was: \"cargo fmt --check && cargo test --workspace\"; {screen}")
     );
     // A key-like string in it is masked and counted, as in a screen's line.
     assert!(
