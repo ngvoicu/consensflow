@@ -699,9 +699,13 @@ meant = "a_chief_on_a_model_its_harness_does_not_list_or_will_not_run_is_refused
 runs = ["chm-daemon"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/page/chief.rs"
-find = '    let Some(listing) = kept.filter(|listing| !listing.models.is_empty()) else {'
-replace = '    let Some(listing) = kept.filter(|_| false) else {'
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+        .filter(|listing| !listing.models.is_empty());
+    let Some(listing) = kept else {'''
+replace = '''
+        .filter(|_| false);
+    let Some(listing) = kept else {'''
 
 [[plant]]
 name = "chief: the page marks no contributor model in the chief's list"

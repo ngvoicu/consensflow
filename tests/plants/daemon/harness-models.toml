@@ -22,6 +22,10 @@ hm-evals-plan = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "plan
 hm-e2e-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
 hm-page-chief = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "asks the chief's effort"]
 hm-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "the name a member had before"]
+hm-page-needs-edit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "could not run on what it ran on"]
+hm-page-designer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "keeps an image designer a member of its own"]
+hm-harness-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "window_args::"]
+hm-ledger-replay = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "replay"]
 hm-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a project in a chosen folder|shows the staff as one row per member"]
 
 [[plant]]
@@ -88,14 +92,10 @@ runs = ["hm-ledger-handles", "hm-engine-named"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/schema.rs"
 find = '''
-    if version == 29 {
         crate::handles::name_members_by_model(db)?;
-    }
 '''
 replace = '''
-    if version == 29 {
         let _ = crate::handles::name_members_by_model;
-    }
 '''
 
 [[plant]]
@@ -106,10 +106,11 @@ runs = ["hm-ledger-members"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
 find = '''
-                 WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL",
+                 ORDER BY id DESC LIMIT 1",
 '''
 replace = '''
-                 WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL AND 0",
+                   AND 0
+                 ORDER BY id DESC LIMIT 1",
 '''
 
 [[plant]]
@@ -294,7 +295,7 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''
-      const key = `${harness} ${model} ${effort ?? ''}`
+      const key = `${harness} ${model} ${effort ?? ''} ${role === 'designer'}`
 '''
 replace = '''
       const key = `${harness} ${model} ${effort ?? ''} ${role}`
@@ -328,4 +329,199 @@ find = '''
 '''
 replace = '''
   return null
+'''
+
+[[plant]]
+name = "harness models: the migration reads no agents file of the human's"
+meant = "migration_0029_runs_each_agent_of_the_human_s_own_on_what_the_agents_file_saved_for_it"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = '''
+        crate::saved_agents::import_saved_agents(db)?;
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "harness models: a member the migration cannot resolve is named for its harness's default"
+meant = "migration_0029_keeps_an_agent_it_cannot_read_as_it_was_and_turns_none_into_a_default"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+               AND needs_edit = 0
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "harness models: a Pi agent's saved thinking is read under effort"
+meant = "migration_0029_runs_each_agent_of_the_human_s_own_on_what_the_agents_file_saved_for_it"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/saved_agents.rs"
+find = '''
+        let effort = text(if kind == "pi" { "thinking" } else { "effort" });
+'''
+replace = '''
+        let effort = text("effort");
+'''
+
+[[plant]]
+name = "harness models: a Devin agent's saved effort is not joined to its model"
+meant = "migration_0029_runs_each_agent_of_the_human_s_own_on_what_the_agents_file_saved_for_it"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/saved_agents.rs"
+find = '''
+            Some(effort) if kind == "devin" && !model.ends_with(&format!("-{effort}")) => {
+'''
+replace = '''
+            Some(effort) if false && kind == "devin" && !model.ends_with(&format!("-{effort}")) => {
+'''
+
+[[plant]]
+name = "harness models: a handle says an effort its model's name ends with twice"
+meant = "a_taken_handle_puts_the_harness_in_front_then_a_number_after"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        .filter(|effort| !slug(&[shown]).ends_with(&format!("-{}", slug(&[effort]))))
+'''
+replace = '''
+        .filter(|_| true)
+'''
+
+[[plant]]
+name = "harness models: a member that needs an edit is shown on its harness's default"
+meant = "a_member_that_needs_an_edit_is_shown_on_no_model_never_its_harness_s_default"
+runs = ["hm-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    if participant.needs_edit {
+'''
+replace = '''
+    if participant.needs_edit && false {
+'''
+
+[[plant]]
+name = "harness models: Edit member leaves the mark on a member that needs an edit"
+meant = "edit_member_takes_the_mark_off_a_member_that_needs_an_edit"
+runs = ["hm-ledger-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                    needs_edit = 0
+'''
+replace = '''
+                    needs_edit = needs_edit
+'''
+
+[[plant]]
+name = "harness models: a member that needs an edit is free for a task"
+meant = "a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default"
+runs = ["hm-engine-named"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if member.needs_edit {
+'''
+replace = '''
+        if member.needs_edit && false {
+'''
+
+[[plant]]
+name = "harness models: a member that needs an edit opens on its harness's default"
+meant = "a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default"
+runs = ["hm-engine-named"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        if participant.role != "chief" && participant.needs_edit {
+'''
+replace = '''
+        if participant.role != "chief" && participant.needs_edit && false {
+'''
+
+[[plant]]
+name = "harness models: the board says nothing of a member that needs an edit"
+meant = "a member the update could not run on what it ran on says it needs an edit, on its row and in the staff, with Edit at hand"
+runs = ["hm-page-needs-edit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+  if (participant.needsEdit && participant.role !== 'chief') {
+'''
+replace = '''
+  if (false && participant.needsEdit && participant.role !== 'chief') {
+'''
+
+[[plant]]
+name = "harness models: New project drops the chief's effort"
+meant = "a_chief_is_held_and_launched_on_the_model_and_effort_picked_on_each_harness"
+runs = ["hm-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''
+                Some(effort) => Some(effort.as_str()?.to_owned()),
+'''
+replace = '''
+                Some(_) => None,
+'''
+
+[[plant]]
+name = "harness models: a member that left comes back on another's row, whatever it ran on"
+meant = "a_member_that_left_is_known_by_its_harness_model_and_effort_not_by_its_name"
+runs = ["hm-ledger-members", "hm-ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                   AND harness = ? AND model IS ? AND effort IS ? AND designer = ?
+'''
+replace = '''
+                   AND (? IS NOT NULL OR ? IS NOT NULL OR ? IS NOT NULL OR ? IS NOT NULL)
+'''
+
+[[plant]]
+name = "harness models: an image designer is merged into a worker on its model and refused"
+meant = "a_worker_and_an_image_designer_on_one_model_and_effort_are_two_members_in_either_order"
+runs = ["hm-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+            && member_now.designer == member.designer
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "harness models: New project merges an image designer into a worker on its model"
+meant = "New project keeps an image designer a member of its own beside a worker on the same model, in either order"
+runs = ["hm-page-designer"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+      const key = `${harness} ${model} ${effort ?? ''} ${role === 'designer'}`
+'''
+replace = '''
+      const key = `${harness} ${model} ${effort ?? ''}`
 '''

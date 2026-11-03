@@ -127,6 +127,7 @@ fn after(db: &Connection, version: usize) -> Result<(), LedgerError> {
         crate::conversations::fields_within(db)?;
     }
     if version == 29 {
+        crate::saved_agents::import_saved_agents(db)?;
         crate::handles::name_members_by_model(db)?;
     }
     Ok(())
@@ -173,7 +174,7 @@ mod tests {
             "31301910ef2d690f1a505af6b238fce655119196717215c4eb648ec60f2f3b67",
             "62b85e52ff13bb47d900b48629ca79be159622665d66e2a1a0931e8c7e0f87a9",
             "2a187d9caae6a081baac4f401cd45c976f1ec2b015c249b2f3df83d6a1462cad",
-            "464f4ae093771db432a237b824fc6c6ebdd00a41eae1371aa192afb0248a7da7",
+            "63a67f0a6c3a32d0899abe87eb09c3417e732b063ac2be4fcc64e28dc82aefcc",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())

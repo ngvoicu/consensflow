@@ -274,7 +274,8 @@ pub(crate) fn edit_member(
             ));
         }
         store.db.execute(
-            "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, tier = ?
+            "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, tier = ?,
+                    needs_edit = 0
              WHERE id = ? OR member_id = ?",
             params![
                 edit.harness,

@@ -29,6 +29,7 @@ mod page_reads;
 mod projects;
 mod questions;
 mod queue;
+mod saved_agents;
 mod schema;
 mod specs;
 mod staff;

@@ -77,12 +77,7 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
         })
         .map(|member| StaffRow {
             name: member.handle.clone(),
-            model: cf_ledger::handles::model_and_effort(
-                member.model_name.as_deref(),
-                member.model.as_deref(),
-                member.harness.as_deref(),
-                member.effort.as_deref(),
-            ),
+            model: cf_ledger::handles::runs_on(member),
             roles: member.roles.clone(),
             work_tier: member.tier.as_deref().and_then(work_tier),
         })

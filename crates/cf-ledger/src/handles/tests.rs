@@ -52,6 +52,11 @@ fn a_taken_handle_puts_the_harness_in_front_then_a_number_after() {
         member_handle("Opus", Some("high"), "devin", |h| taken.contains(&h)),
         "devin-opus-high"
     );
+    // A name that says its effort already says it once.
+    assert_eq!(
+        member_handle("claude-opus-5-5-max", Some("max"), "devin", none_taken),
+        "claude-opus-5-5-max"
+    );
 }
 
 #[test]
@@ -190,10 +195,11 @@ fn migration_0029_runs_each_ready_made_agent_s_member_on_its_model_and_names_it_
                 s("SWE-2"),
                 s("light")
             ),
-            // An agent the catalog never had keeps its harness and no model.
+            // An agent the catalog never had keeps its harness, no model and the name it had:
+            // it needs an edit, and is never turned into its harness's default.
             (
                 6,
-                "hermes-code-default".to_owned(),
+                "buri".to_owned(),
                 s("buri"),
                 s("hermes-code"),
                 None,
@@ -290,10 +296,234 @@ fn migration_0029_puts_the_harness_in_front_of_a_name_two_members_share() {
         .collect();
     assert_eq!(
         handles,
+        ["claude-opus-5-5-high", "pi-claude-opus-5-5-high", "mine"]
+    );
+}
+
+/// A ledger 0028 left in a file, whose participants run on agents of the human's own: one
+/// they defined (`my-coder`, `my-pi`, `my-chief`), one Add member made for a model
+/// (T-1143's `codex-gpt-6-astra-high`), a ready-made one the human edited (`zeus`), and one
+/// that is in no file and no catalog (`ghost`); `agents` is the agents file beside it, or
+/// none.
+fn custom_0028(agents: Option<serde_json::Value>) -> (tempfile::TempDir, Connection) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Connection::open(dir.path().join("consensflow.db")).unwrap();
+    migrate(&db, &MIGRATIONS[..28]).unwrap();
+    db.execute_batch(
+        "INSERT INTO project (id, directory, name, state, created_at, updated_at)
+           VALUES (1, '/work/app', 'app', 'open', 't', 't');
+         INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, model, tier, member_id, created_at, left_at, designer) VALUES
+           (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, 't', NULL, 0),
+           (2, 1, 'chief', 'chief', '[]', 'my-chief', 'claude-code', NULL, NULL, NULL, 't', NULL, 0),
+           (3, 1, 'my-coder', 'worker', '[\"worker\"]', 'my-coder', 'codex', NULL, 'standard', NULL, 't', NULL, 0),
+           (4, 1, 'codex-gpt-6-astra-high', 'reviewer', '[\"reviewer\"]', 'codex-gpt-6-astra-high', 'codex', 'gpt-6-astra', 'complex', NULL, 't', NULL, 0),
+           (5, 1, 'my-pi', 'advisor', '[\"advisor\"]', 'my-pi', 'pi', NULL, 'critical', NULL, 't', NULL, 0),
+           (6, 1, 'zeus', 'worker', '[\"worker\"]', 'zeus', 'claude-code', NULL, 'critical', NULL, 't', NULL, 0),
+           (7, 1, 'ghost', 'worker', '[\"worker\"]', 'ghost', 'codex', NULL, 'light', NULL, 't', NULL, 0),
+           (8, 1, 'my-coder-amber-pine', 'worker', '[\"worker\"]', 'my-coder', 'codex', NULL, 'standard', 3, 't', NULL, 0),
+           (9, 1, 'ghost-brisk-birch', 'worker', '[\"worker\"]', 'ghost', 'codex', NULL, 'light', 7, 't', NULL, 0),
+           (10, 1, 'my-devin', 'tester', '[\"tester\"]', 'my-devin', 'devin', NULL, 'standard', NULL, 't', NULL, 0);",
+    )
+    .unwrap();
+    if let Some(agents) = agents {
+        std::fs::write(dir.path().join("agents.json"), agents.to_string()).unwrap();
+    }
+    (dir, db)
+}
+
+/// The agents file of [`custom_0028`]'s human, as 3.0.6 wrote it.
+fn their_agents() -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "agents": [
+            { "id": "my-chief", "kind": "claude-code", "model": "claude-sonnet-5-5", "effort": "high", "workTier": "standard" },
+            { "id": "my-coder", "kind": "codex", "model": "gpt-6.1-sol", "effort": "ultra", "workTier": "standard" },
+            { "id": "codex-gpt-6-astra-high", "kind": "codex", "model": "gpt-6-astra", "effort": "high", "workTier": "complex" },
+            { "id": "my-pi", "kind": "pi", "model": "anthropic/claude-opus-5-5", "thinking": "low", "workTier": "critical" },
+            { "id": "zeus", "kind": "claude-code", "model": "claude-sonnet-5-5", "effort": "low", "workTier": "critical" },
+            { "id": "my-devin", "kind": "devin", "model": "claude-opus-5-5", "effort": "max", "workTier": "standard" },
+        ],
+        "preferences": { "ownHarnessOnly": false },
+    })
+}
+
+/// A participant as the custom-agent tests read it: id, handle, model, effort, model's
+/// name, whether it needs an edit.
+type RunsOn = (
+    i64,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+);
+
+/// Each participant as the tests read it.
+fn runs_on(db: &Connection) -> Vec<RunsOn> {
+    db.prepare(
+        "SELECT id, handle, model, effort, model_name, needs_edit FROM participant ORDER BY id",
+    )
+    .unwrap()
+    .query_map([], |row| {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get::<_, i64>(5)? == 1,
+        ))
+    })
+    .unwrap()
+    .map(Result::unwrap)
+    .collect()
+}
+
+#[test]
+fn migration_0029_runs_each_agent_of_the_human_s_own_on_what_the_agents_file_saved_for_it() {
+    let (_dir, db) = custom_0028(Some(their_agents()));
+    migrate(&db, &MIGRATIONS).unwrap();
+    let s = |text: &str| Some(text.to_owned());
+    assert_eq!(
+        runs_on(&db),
         [
-            "claude-opus-5-5-high",
-            "pi-claude-opus-5-5-high",
-            "claude-code-default"
+            (1, "human".to_owned(), None, None, None, false),
+            // The chief keeps the model and effort its agent saved.
+            (
+                2,
+                "chief".to_owned(),
+                s("claude-sonnet-5-5"),
+                s("high"),
+                None,
+                false
+            ),
+            (
+                3,
+                "gpt-6-1-sol-ultra".to_owned(),
+                s("gpt-6.1-sol"),
+                s("ultra"),
+                None,
+                false
+            ),
+            // Add member's agent for a model: the effort it saved beside the model.
+            (
+                4,
+                "gpt-6-astra-high".to_owned(),
+                s("gpt-6-astra"),
+                s("high"),
+                None,
+                false
+            ),
+            // Pi's thinking is the effort it runs at.
+            (
+                5,
+                "anthropic-claude-opus-5-5-low".to_owned(),
+                s("anthropic/claude-opus-5-5"),
+                s("low"),
+                None,
+                false
+            ),
+            // A ready-made agent the human edited runs on the edit, not the catalog's.
+            (
+                6,
+                "claude-sonnet-5-5-low".to_owned(),
+                s("claude-sonnet-5-5"),
+                s("low"),
+                None,
+                false
+            ),
+            // An agent no file and no catalog knows is kept as it was, and needs an edit.
+            (7, "ghost".to_owned(), None, None, None, true),
+            (
+                8,
+                "gpt-6-1-sol-ultra-amber-pine".to_owned(),
+                s("gpt-6.1-sol"),
+                s("ultra"),
+                None,
+                false
+            ),
+            (9, "ghost-brisk-birch".to_owned(), None, None, None, true),
+            // Devin's agent named the model and its effort apart, and its launch joined them.
+            (
+                10,
+                "claude-opus-5-5-max".to_owned(),
+                s("claude-opus-5-5-max"),
+                s("max"),
+                None,
+                false
+            ),
         ]
     );
+}
+
+#[test]
+fn migration_0029_keeps_an_agent_it_cannot_read_as_it_was_and_turns_none_into_a_default() {
+    // No agents file beside the ledger: the human's own agents are read nowhere.
+    let (_dir, db) = custom_0028(None);
+    migrate(&db, &MIGRATIONS).unwrap();
+    let s = |text: &str| Some(text.to_owned());
+    let rows = runs_on(&db);
+    let row = |id: i64| rows.iter().find(|row| row.0 == id).unwrap().clone();
+    for id in [3, 5, 7, 8, 9, 10] {
+        let (_, handle, model, effort, _, needs_edit) = row(id);
+        assert!(needs_edit, "{handle} needs an edit");
+        assert_eq!((model, effort), (None, None), "{handle} runs on no default");
+        assert!(!handle.contains("default"), "{handle} keeps its name");
+    }
+    assert_eq!(row(3).1, "my-coder");
+    // T-1143's member holds its model, but not the effort only its agent said: it needs one.
+    assert_eq!(
+        row(4),
+        (
+            4,
+            "codex-gpt-6-astra-high".to_owned(),
+            s("gpt-6-astra"),
+            None,
+            None,
+            true
+        )
+    );
+    // A ready-made agent runs on the catalog's, as it ran.
+    assert_eq!(
+        row(6),
+        (
+            6,
+            "opus-max".to_owned(),
+            s("claude-opus-5-5"),
+            s("max"),
+            s("Opus"),
+            false
+        )
+    );
+    // The chief runs on what its harness's record says it ran on last (CHF-05): it is marked
+    // for Switch chief to pick a model for it, and keeps its row as it was.
+    assert_eq!(row(2), (2, "chief".to_owned(), None, None, None, true));
+}
+
+#[test]
+fn a_member_that_needs_an_edit_is_shown_on_no_model_never_its_harness_s_default() {
+    let (dir, db) = custom_0028(None);
+    migrate(&db, &MIGRATIONS).unwrap();
+    drop(db);
+    let ledger = crate::open_ledger(
+        &dir.path().join("consensflow.db"),
+        crate::Options::default(),
+    )
+    .unwrap();
+    let project = ledger.project(1).unwrap().unwrap();
+    let shown = |handle: &str| {
+        crate::handles::runs_on(
+            project
+                .participants
+                .iter()
+                .find(|participant| participant.handle == handle)
+                .unwrap(),
+        )
+    };
+    assert_eq!(shown("ghost"), NEEDS_AN_EDIT);
+    assert_eq!(shown("opus-max"), "Opus · max");
+    assert!(project
+        .participants
+        .iter()
+        .any(|participant| participant.needs_edit));
 }

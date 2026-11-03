@@ -92,7 +92,7 @@ const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
 /// Why a trace that starts from a ledger Node left departs at its first read of a member:
 /// migration 0029 named each member of a ready-made agent by its model, and runs it and a
 /// chief that named no model on that agent's model (harness-models).
-const NAMED_BY_MODEL: &str = "the ledger Node left is migrated by 0029: each member of a ready-made agent is named and run by its model (`@zeus` is `@opus-max`, a member of an agent the catalog never had is `@claude-code-default`), and a chief that named no model runs on its agent's";
+const NAMED_BY_MODEL: &str = "the ledger Node left is migrated by 0029: each member of a ready-made agent is named and run by its model (`@zeus` is `@opus-max`; a member of an agent it cannot resolve keeps its name and needs an edit), and a chief that named no model runs on its agent's";
 
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("evals-measure-002", 0, NAMED_BY_MODEL),
@@ -103,7 +103,6 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("evals-measure-016", 0, NAMED_BY_MODEL),
     ("home-copies-002", 1, NAMED_BY_MODEL),
     ("home-copies-003", 1, NAMED_BY_MODEL),
-    ("ledger-010", 1, NAMED_BY_MODEL),
     ("ledger-conversations-006", 1, NAMED_BY_MODEL),
     ("ledger-schema-015", 0, NAMED_BY_MODEL),
     ("ledger-schema-018", 1, NAMED_BY_MODEL),

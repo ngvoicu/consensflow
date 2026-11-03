@@ -60,13 +60,13 @@ runs = ["mm-daemon"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
 find = '''
-        model: Some(listed.launch_model(effort)),
+        model: listed.launch_model(effort),
 '''
 replace = '''
-        model: Some(match effort {
+        model: match effort {
             Some(effort) if !listed.launch_ids.is_empty() => format!("{}-{effort}", listed.model()),
             _ => listed.model(),
-        }),
+        },
 '''
 
 [[plant]]
@@ -77,10 +77,10 @@ runs = ["mm-daemon"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
 find = '''
-            && member_now.effort == member.effort
+            && member_now.designer == member.designer
     })?;'''
 replace = '''
-            && member_now.effort == member.effort
+            && member_now.designer == member.designer
             && false
     })?;'''
 

@@ -489,3 +489,44 @@ fn a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add() {
         ["human", "chief"]
     );
 }
+
+/// A member that needs an edit (the update could not tell what it ran on, T-1202) is
+/// edited to a model: it runs on it, its windows with it, and it no longer needs one.
+#[test]
+fn edit_member_takes_the_mark_off_a_member_that_needs_an_edit() {
+    let dir = tempfile::tempdir().expect("a home");
+    let file = dir.path().join("consensflow.db");
+    let mut ledger = open_ledger(&file, options()).expect("a ledger");
+    let project = project(
+        &mut ledger,
+        vec![on(
+            "codex",
+            "gpt-6.1-sol",
+            Some("high"),
+            "GPT-6.1-Sol",
+            "standard",
+        )],
+    );
+    drop(ledger);
+    let db = rusqlite::Connection::open(&file).expect("the file");
+    db.execute_batch("UPDATE participant SET model = NULL, effort = NULL, model_name = NULL, needs_edit = 1 WHERE handle = 'gpt-6-1-sol-high'")
+        .expect("marked");
+    drop(db);
+    let mut ledger = open_ledger(&file, options()).expect("the ledger again");
+    assert!(named(&ledger, project.id, "gpt-6-1-sol-high").needs_edit);
+    let edited = ledger
+        .edit_member(
+            project.id,
+            "gpt-6-1-sol-high",
+            &MemberEdit {
+                harness: "codex".into(),
+                model: Some("gpt-6.1-sol".into()),
+                effort: Some("ultra".into()),
+                model_name: Some("GPT-6.1-Sol".into()),
+                tier: "standard".into(),
+            },
+        )
+        .expect("edited");
+    assert!(!edited.needs_edit);
+    assert_eq!(edited.effort.as_deref(), Some("ultra"));
+}

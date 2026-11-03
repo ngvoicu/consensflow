@@ -38,7 +38,7 @@ pub fn node_staff(request: &Value) -> Value {
 
 /// What neither side of an answer is compared by: what a participant runs on (Node's named
 /// its ready-made agent, this one's its model, its effort, its model's name, its harness's
-/// name and the two as a lane says them, each held apart, a chief's model aside, which the
+/// name, the two as a lane says them, and the mark of one that needs an edit, each held apart, a chief's model aside, which the
 /// recordings were moved to), and of a staff a new
 /// project starts from, all but its harness and roles.
 pub fn hold_apart_what_members_run_on(value: &mut Value) {
@@ -46,7 +46,14 @@ pub fn hold_apart_what_members_run_on(value: &mut Value) {
         Value::Object(fields) => {
             let participant = fields.contains_key("handle");
             if participant || fields.contains_key("roles") {
-                for key in ["agent", "effort", "modelName", "harnessName", "runsOn"] {
+                for key in [
+                    "agent",
+                    "effort",
+                    "modelName",
+                    "harnessName",
+                    "runsOn",
+                    "needsEdit",
+                ] {
                     fields.shift_remove(key);
                 }
                 let chief = fields.get("role").and_then(Value::as_str) == Some("chief");
@@ -66,23 +73,28 @@ pub fn hold_apart_what_members_run_on(value: &mut Value) {
 }
 
 /// The columns migration 0029 added to `participant`, and the one it no longer writes.
-pub(super) const COLUMNS: [(&str, &str); 3] = [
+pub(super) const COLUMNS: [(&str, &str); 4] = [
     ("participant", "effort"),
     ("participant", "model_name"),
+    ("participant", "needs_edit"),
     ("participant", "agent"),
 ];
 
 /// What SQLite wrote into the text of the `participant` table for the columns migration
 /// 0029 added: after the last column and before the table's own checks.
-pub(super) const COLUMN_LINES: &str = ", effort TEXT, model_name TEXT";
+pub(super) const COLUMN_LINES: &str = ", effort TEXT, model_name TEXT, needs_edit INTEGER NOT NULL DEFAULT 0 CHECK (needs_edit IN (0, 1))";
 
-/// What migration 0029 made taken out of the ledger `db` holds: its columns of
-/// `participant` dropped, and 0028's mark of a tier the human chose back, as 0028 left it,
-/// so that a test can take a ledger this build wrote for one an older build left, whose
-/// version it sets, and which migrates to this build's again. The handles 0029 made stay.
+/// For tests alone, and of the table's shape alone: what migration 0029 made taken out of
+/// the ledger `db` holds, its columns of `participant` dropped and 0028's mark of a tier the
+/// human chose back, as 0028 left it, so that a test can take a ledger this build wrote for
+/// one an older build left, whose version it sets, and which migrates to this build's again.
+/// No build undoes 0029, and this keeps no data: the efforts, the models' names and the
+/// marks of a member that needs an edit go with their columns, the handles 0029 made stay,
+/// and a migration again finds no ready-made agent's name to read them back from.
 pub fn undo_migration_0029(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
-        "ALTER TABLE participant DROP COLUMN model_name;
+        "ALTER TABLE participant DROP COLUMN needs_edit;
+         ALTER TABLE participant DROP COLUMN model_name;
          ALTER TABLE participant DROP COLUMN effort;
          ALTER TABLE participant ADD COLUMN tier_chosen INTEGER NOT NULL DEFAULT 0 CHECK (tier_chosen IN (0, 1));",
     )
@@ -101,6 +113,8 @@ mod tests {
         .unwrap()
     }
 
+    /// The undo is a test's, and of the table's shape: it is held to the shape alone, the
+    /// data being no undo's to keep (no build undoes 0029).
     #[test]
     fn undoing_migration_0029_leaves_the_table_0028_left_and_the_ledger_migrates_again() {
         let before = rusqlite::Connection::open_in_memory().unwrap();

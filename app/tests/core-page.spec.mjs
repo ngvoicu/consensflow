@@ -2701,6 +2701,41 @@ test('redraws a drawer whose task changed, its fold still open and read again', 
   await expect(drawer.locator('.transcript-body').nth(2)).toHaveText('Covering the errors.')
 })
 
+test('a member the update could not run on what it ran on says it needs an edit, on its row and in the staff, with Edit at hand', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(9, 'my-coder', 'worker', {
+      agent: 'my-coder',
+      harness: 'codex',
+      model: null,
+      effort: null,
+      tier: 'standard',
+      needsEdit: true,
+    }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  const row = page.locator('tr[data-handle="my-coder"]')
+  await expect(row.locator('.row-status')).toHaveText(
+    'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it',
+  )
+  await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
+  // It runs on no default, and says so.
+  await expect(row.locator('.row-meta')).toContainText('no model: needs an edit')
+  await expect(row.locator('.row-meta')).not.toContainText('default')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const member = settings.locator('tr[data-handle="my-coder"]')
+  await expect(member.locator('.member-gone')).toHaveText(
+    'The update could not tell what my-coder ran on: edit it to a model its harness lists, or remove it.',
+  )
+  await expect(member.getByRole('button', { name: 'Edit @my-coder' })).toBeVisible()
+})
+
 test("says on the chief's card in the dock what the chief is doing and runs on, and switches it from there", async ({
   page,
 }) => {

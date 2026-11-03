@@ -32,11 +32,15 @@ pub(super) async fn handle(
                 "harness": member.harness,
                 "harnessName": cf_ledger::handles::harness_label(member.harness.as_deref()),
                 "model": said(member.model.as_deref()),
-                "modelName": cf_ledger::handles::model_shown(
-                    member.model_name.as_deref(),
-                    member.model.as_deref(),
-                    member.harness.as_deref(),
-                ),
+                "modelName": if member.needs_edit {
+                    cf_ledger::handles::NEEDS_AN_EDIT.to_owned()
+                } else {
+                    cf_ledger::handles::model_shown(
+                        member.model_name.as_deref(),
+                        member.model.as_deref(),
+                        member.harness.as_deref(),
+                    )
+                },
                 "effort": said(member.effort.as_deref()),
             })
         })

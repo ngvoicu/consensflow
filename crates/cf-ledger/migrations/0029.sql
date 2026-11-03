@@ -15,12 +15,17 @@
 -- recorded (CHF-03's recordings), the catalog's label else. A Devin agent named the model
 -- and its effort apart, and its launch joined them: its row holds the joined id the launch
 -- passed. An agent the table does not know (one the human defined, or one of a harness
--- ConsensFlow runs no more) keeps its harness and no model, which the staff dialog marks.
--- A model its harness no longer lists is kept, and the staff dialog marks it gone. The
--- members' handles are made from their models after this SQL ([`crate::schema`]'s
--- `after`), which SQL cannot do. Each column added is one line, as 0026 added its own.
+-- ConsensFlow runs no more) is marked as needing an edit (`needs_edit`): it is never
+-- turned into its harness's default. A model its harness no longer lists is kept, and the
+-- staff dialog marks it gone. After this SQL ([`crate::schema`]'s `after`), which SQL
+-- cannot do: the agents of the human's own are read from the agents file beside the ledger
+-- (`agents.json`, 3.0.6's), the ones they defined and the ones Add member made for a model,
+-- each participant of one taking the harness's model and effort it saved and losing its
+-- mark; then the members' handles are made from their models, a member still marked
+-- keeping the one it had. Each column added is one line, as 0026 added its own.
   ALTER TABLE participant ADD COLUMN effort TEXT;
   ALTER TABLE participant ADD COLUMN model_name TEXT;
+  ALTER TABLE participant ADD COLUMN needs_edit INTEGER NOT NULL DEFAULT 0 CHECK (needs_edit IN (0, 1));
   ALTER TABLE participant DROP COLUMN tier_chosen;
   CREATE TEMP TABLE ready_made (name TEXT PRIMARY KEY, harness TEXT NOT NULL, model TEXT, effort TEXT, model_name TEXT);
   INSERT INTO ready_made (name, harness, model, effort, model_name) VALUES
@@ -249,4 +254,11 @@
    WHERE model IS NULL
      AND agent IN (SELECT name FROM ready_made)
      AND harness = (SELECT harness FROM ready_made WHERE name = participant.agent);
+  UPDATE participant
+     SET needs_edit = 1
+   WHERE agent IS NOT NULL
+     AND role <> 'human'
+     AND (role <> 'chief' OR model IS NULL)
+     AND NOT EXISTS (SELECT 1 FROM ready_made
+                      WHERE name = participant.agent AND harness = participant.harness);
   DROP TABLE ready_made;

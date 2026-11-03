@@ -578,8 +578,7 @@ impl Staffing {
             .adapter
             .prepared()
             .into_iter()
-            .filter(|launch| launch["role"] == "chief" && launch["project"]["id"] == project)
-            .last()
+            .rfind(|launch| launch["role"] == "chief" && launch["project"]["id"] == project)
             .unwrap_or_else(|| panic!("no launch of project {project}'s chief"))
     }
 }

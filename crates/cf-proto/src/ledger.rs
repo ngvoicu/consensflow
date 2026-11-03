@@ -33,6 +33,11 @@ pub struct ParticipantView {
     /// effort. Said only where there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_name: Option<String>,
+    /// A member from before the models were the harnesses' own whose agent the update
+    /// could not resolve (T-1202): it keeps the name it had and runs on nothing until the
+    /// human edits it. Said only where it is so.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub needs_edit: bool,
     /// A chief's: the model its last launch asked its harness for, read from its record
     /// or picked; none where it left it to the harness's default. Not said: the board
     /// says it of the chief's lane.
@@ -155,6 +160,10 @@ pub struct MemberView {
     /// How many of its windows have a task on their hands now.
     pub sessions: i64,
     pub out_until: Option<String>,
+    /// Whether the update could not tell what it runs on (T-1202): it takes no task until
+    /// the human edits it. Said only where it is so.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub needs_edit: bool,
 }
 
 /// A member an open task may go to, and whether the task was taken from it.
@@ -664,6 +673,7 @@ mod tests {
             model: None,
             effort: None,
             model_name: None,
+            needs_edit: false,
             launched_model: None,
             gone_model: None,
             ran_on: None,
@@ -699,6 +709,7 @@ mod tests {
             model: Some("openrouter/anthropic/claude-fable-5".into()),
             effort: None,
             model_name: None,
+            needs_edit: false,
             launched_model: Some("openai/gpt-6-luna".into()),
             gone_model: None,
             ran_on: None,
@@ -732,6 +743,7 @@ mod tests {
                 taken: 2,
                 sessions: 1,
                 out_until: None,
+                needs_edit: false,
             },
             had_it: true,
         };

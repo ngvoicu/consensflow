@@ -65,12 +65,7 @@ pub(super) async fn list(
         });
         let participant = &lane.participant;
         if participant.harness.is_some() {
-            entry["runsOn"] = json!(cf_ledger::handles::model_and_effort(
-                participant.model_name.as_deref(),
-                participant.model.as_deref(),
-                participant.harness.as_deref(),
-                participant.effort.as_deref(),
-            ));
+            entry["runsOn"] = json!(cf_ledger::handles::runs_on(participant));
         }
         lanes.push(entry);
     }

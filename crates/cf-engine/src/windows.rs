@@ -981,6 +981,12 @@ impl Dispatcher {
         role: Option<RoleText>,
         prelude: Option<Prelude>,
     ) -> Result<Option<Planned>, EngineError> {
+        // A member the update could not run on what it ran on (T-1202) opens no window on
+        // its harness's default: its work goes back to the board, and the human hears why.
+        if participant.role != "chief" && participant.needs_edit {
+            self.needs_an_edit(record, project, participant, delivering)?;
+            return Ok(None);
+        }
         // A first message withdrawn while the launch waited (a continuation whose
         // task moved on, the ledger's) opens no window: the launch is over, and
         // what waits now is the next pass's.
@@ -1337,6 +1343,28 @@ impl Dispatcher {
     /// the human hears why once. Where a role was to be said first, a member's
     /// failing message is the one it went ahead of, and the note that says the
     /// role is withdrawn with it; a chief's stays in its queue (`role_change`).
+    /// A member that needs an edit does not open: its tiered work goes back to the board
+    /// for another member, what was on its way to it fails so its requester hears why,
+    /// and a session's window the human opened, with nothing to deliver, says why it did
+    /// not come.
+    fn needs_an_edit(
+        &self,
+        record: &Rc<Record>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        delivering: Option<&Delivering>,
+    ) -> Result<(), EngineError> {
+        let because = crate::scheduler::needs_an_edit_because(
+            participant.member.as_deref().unwrap_or(&participant.handle),
+            participant.agent.as_deref(),
+        );
+        self.release_its_work(project, participant, &because, delivering.cloned())?;
+        if delivering.is_none() {
+            self.launch_failed(record, project, participant, None, &because)?;
+        }
+        Ok(())
+    }
+
     /// A participant forgotten while it launched hears nothing and settles
     /// nothing.
     pub(crate) fn launch_failed(

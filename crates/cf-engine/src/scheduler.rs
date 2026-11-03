@@ -20,6 +20,7 @@ use cf_ledger::{
 };
 use serde_json::Value;
 
+use crate::deliveries::Delivering;
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -323,6 +324,12 @@ impl Dispatcher {
             return Some(format!(
                 "@{} runs on {harness}, whose windows ConsensFlow cannot open (remove @{} from the staff and add a member on another harness)",
                 member.handle, member.handle
+            ));
+        }
+        if member.needs_edit {
+            return Some(needs_an_edit_because(
+                &member.handle,
+                member.agent.as_deref(),
             ));
         }
         if self.out(member.out_until.as_deref()) {
@@ -1246,6 +1253,35 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// A member that runs nothing now: its tiered work goes back to the board for another
+    /// member with `because`, and what was on its way to it (`delivering`) fails, so its
+    /// requester hears why.
+    pub(crate) fn release_its_work(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        because: &str,
+        delivering: Option<Delivering>,
+    ) -> Result<(), EngineError> {
+        let tiered: Vec<TaskCard> = self
+            .active_work(project, participant)?
+            .into_iter()
+            .filter(|task| task.pool.is_some())
+            .collect();
+        for task in &tiered {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .release_task(project.id, task.number, because)?;
+        }
+        match delivering {
+            Some(delivering) => self.settle_failure(delivering, because, false)?,
+            None if !tiered.is_empty() => self.changed(),
+            None => {}
+        }
+        Ok(())
+    }
+
     /// The work a participant holds and has not finished: queued, working or waiting.
     fn active_work(
         &self,
@@ -1294,6 +1330,15 @@ fn rank<'a>(mut free: Vec<&'a Candidate>, candidates: &[Candidate]) -> Vec<&'a C
         )
     });
     free
+}
+
+/// Why a member that needs an edit (T-1202), `handle`, runs nothing: the update could not
+/// tell what its agent (`agent`) ran on, and it runs on no default.
+pub(crate) fn needs_an_edit_because(handle: &str, agent: Option<&str>) -> String {
+    format!(
+        "@{handle} needs an edit: the update could not tell what it ran on ({} is in no catalog and no agents file); edit it under Project settings, or remove it",
+        agent.unwrap_or("its agent")
+    )
 }
 
 #[cfg(test)]

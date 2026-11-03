@@ -163,3 +163,85 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
     assert_eq!(context.task(project.id, 1).task.state, "done");
     context.close();
 }
+
+/// A member the update could not run on what it ran on before (its agent was in no catalog
+/// and no agents file: T-1202) keeps its name and needs an edit: it takes no new task, and
+/// a window of it that comes back after a restart does not open on its harness's default.
+/// Its task goes back to the board for another member.
+#[test]
+fn a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            pool: Some("worker".to_owned()),
+            tier: Some("standard".to_owned()),
+            body: "Write the parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let before = context.task(project.id, 1).task;
+    assert_eq!(before.state, "working");
+    let member = context.id(project.id, "zeus");
+    let launches = context.adapter.prepared().len();
+    // The update found nothing to run zeus on: it and its window need an edit.
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute_batch(&format!(
+            "UPDATE participant SET model = NULL, effort = NULL, needs_edit = 1
+               WHERE id = {member} OR member_id = {member};"
+        ))
+        .unwrap();
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    let opened: Vec<_> = context.adapter.prepared()[launches..]
+        .iter()
+        .filter(|launch| launch["role"] != "chief")
+        .cloned()
+        .collect();
+    assert_eq!(
+        opened,
+        Vec::<serde_json::Value>::new(),
+        "no member window opened"
+    );
+    let task = context.task(project.id, 1).task;
+    assert_eq!(
+        (task.state.as_str(), task.assignee.as_deref()),
+        ("open", None),
+        "its task is back on the board"
+    );
+    // And a new one waits for a member that can take it.
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            pool: Some("worker".to_owned()),
+            tier: Some("standard".to_owned()),
+            body: "Write the lexer".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    after.pass().unwrap();
+    assert_eq!(context.task(project.id, 2).task.state, "open");
+    // It was never given to the member that needs an edit: no member was free for it.
+    let given: Vec<_> = context
+        .ledger
+        .borrow()
+        .events(project.id, 0, 10_000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "task.assigned" && event.data["task"] == 2)
+        .collect();
+    assert!(given.is_empty(), "{given:?}");
+}

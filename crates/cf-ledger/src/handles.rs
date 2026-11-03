@@ -41,6 +41,24 @@ pub fn model_and_effort(
     }
 }
 
+/// What a member that needs an edit (T-1202) is shown to run on: no model, which is so,
+/// never its harness's default, which it does not run on.
+pub const NEEDS_AN_EDIT: &str = "no model: needs an edit";
+
+/// What `participant` is shown to run on, as the page, `cf` and the chief's text show it:
+/// its model and effort ([`model_and_effort`]), or [`NEEDS_AN_EDIT`].
+pub fn runs_on(participant: &crate::ParticipantView) -> String {
+    if participant.needs_edit {
+        return NEEDS_AN_EDIT.to_owned();
+    }
+    model_and_effort(
+        participant.model_name.as_deref(),
+        participant.model.as_deref(),
+        participant.harness.as_deref(),
+        participant.effort.as_deref(),
+    )
+}
+
 /// How the page names a harness, by its kind.
 pub fn harness_label(harness: Option<&str>) -> &str {
     match harness {
@@ -92,7 +110,11 @@ pub fn member_handle(
     harness: &str,
     mut taken: impl FnMut(&str) -> bool,
 ) -> String {
-    let effort = effort.unwrap_or_default();
+    // A name that ends with its effort already (Devin's id for it, where its list was never
+    // kept: `claude-opus-5-5-max`) does not say it twice.
+    let effort = effort
+        .filter(|effort| !slug(&[shown]).ends_with(&format!("-{}", slug(&[effort]))))
+        .unwrap_or_default();
     let plain = slug(&[shown, effort]);
     if !taken(&plain) {
         return plain;
@@ -119,14 +141,16 @@ pub(crate) fn handle_taken(db: &Connection, project: i64, handle: &str) -> rusql
 /// Migration 0029's part SQL cannot do: every member a ready-made agent named (its row
 /// keeps the agent's name in `agent`) takes a handle made from its model, in the order
 /// the members joined, and each of its windows its member's new handle with the window's
-/// own two words after. The chief and the human keep theirs, and a member that names no
-/// agent was named by its model when it joined.
+/// own two words after. The chief and the human keep theirs, a member that names no agent
+/// was named by its model when it joined, and one that needs an edit (an agent the migration
+/// could not resolve) keeps the name it had, its windows theirs.
 /// Tasks, messages and every other row point at participants by id: their authors stay.
 pub(crate) fn name_members_by_model(db: &Connection) -> Result<(), LedgerError> {
     let members = db
         .prepare(
             "SELECT id, project_id, handle, harness, model, effort, model_name FROM participant
              WHERE member_id IS NULL AND role NOT IN ('human', 'chief') AND agent IS NOT NULL
+               AND needs_edit = 0
              ORDER BY project_id, id",
         )?
         .query_map([], |row| {

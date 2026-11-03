@@ -91,6 +91,23 @@ function goneCell(name, model, runs, harness) {
   return cell
 }
 
+/**
+ * A staff table's first cell for a member the update could not run on what it ran on
+ * (T-1202): no model, and what to do in words.
+ */
+function needsEditCell(name, runs, agent) {
+  const cell = whoCell(name, runs)
+  cell.append(
+    element('br'),
+    element(
+      'span',
+      'member-gone',
+      `The update could not tell what ${agent ?? 'its agent'} ran on: edit it to a model its harness lists, or remove it.`,
+    ),
+  )
+  return cell
+}
+
 /** A staff table with nobody in it says so, and what to do, across its three columns. */
 function nobodyRow(text) {
   const row = element('tr', 'staff-empty')
@@ -1144,9 +1161,11 @@ export class ProjectSettingsDialog {
     // and its replacement are the staff chains' (CHN-11).
     const gone = this.#modelGone(member)
     const who = () =>
-      gone
-        ? goneCell(name, modelShown(member), runs, HARNESS_NAMES[member.harness])
-        : whoCell(name, runs)
+      member.needsEdit
+        ? needsEditCell(name, runs, member.agent)
+        : gone
+          ? goneCell(name, modelShown(member), runs, HARNESS_NAMES[member.harness])
+          : whoCell(name, runs)
     if (this.#removing === member.handle) {
       const row = element('tr')
       row.dataset.handle = member.handle

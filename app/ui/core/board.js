@@ -353,6 +353,7 @@ const chiefModel = (participant) => participant.ranOn ?? participant.model
  * else its id, else its harness's default (the image designer from before, on Codex's).
  */
 export const modelShown = (participant) =>
+  (participant.needsEdit && 'no model: needs an edit') ||
   participant.modelName?.trim() ||
   participant.model ||
   `${HARNESS_NAMES[participant.harness] ?? participant.harness} default`
@@ -406,6 +407,13 @@ export function laneStatus(lane, board, now) {
   // What the human typed and did not send holds a message whether or not the window
   // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
   const holding = 'A message waits until you send or erase what you typed here'
+  // A member the update could not run on what it ran on (T-1202) runs nothing until edited.
+  if (participant.needsEdit && participant.role !== 'chief') {
+    return [
+      'missing',
+      'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it',
+    ]
+  }
   if (outOfQuota(participant, now)) {
     // Why, in the engine's own words (its account refused, its model moved on its own), where
     // it said them; else what the time it marked the member out until says of it.
