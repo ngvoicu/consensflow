@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 use cf_e2e::live::members::Account;
 
 use super::super::begin::{begin, Begun};
-use super::super::judge::lane_went_working_then_closed;
 use super::super::tool::{self, Command};
 use super::super::{stop_it, Hold};
 use super::{context, project, WORK};
@@ -148,7 +147,8 @@ fn a_member_paused_while_its_command_runs_stops_with_it_and_the_hosts_tree_says_
 
 /// T-5's shape: the turn goes on through the rounds while its command runs (the
 /// stand-in takes a minute and a half to wind its turn down, and leaves the command
-/// running), so the daemon closes the window that did not stop, the case does not hold,
+/// running), so the daemon keeps open the window that did not stop, for its command,
+/// which runs on (T-1117: a pause never ends a window's work); the case does not hold,
 /// and it says each round all the same, with the command running at each look.
 #[test]
 fn a_member_whose_turn_goes_on_while_its_command_runs_is_a_stop_the_case_fails_and_says_each_round_of(
@@ -178,23 +178,28 @@ fn a_member_whose_turn_goes_on_while_its_command_runs_is_a_stop_the_case_fails_a
         said.contains("FAIL the daemon read the window at rest, and paid the stop there: its reading of the window never turned idle in the "),
         "{said}"
     );
-    // The window that did not stop was closed after its third round (whether the notes
-    // that say so had landed by the end of the watch is the host's grace's). It was
-    // working at the first look at the lane, whenever that came.
-    assert!(lane_went_working_then_closed(&said), "{said}");
-    // At each of the three looks the command is there.
-    assert_eq!(
+    // The window that did not stop is kept open for its command, never closed, and the
+    // board says it owes the stop.
+    assert!(
+        said.contains("ok   its window is open, as it was: 0 closes asked of its pane"),
+        "{said}"
+    );
+    assert!(
+        said.contains("unstopped on its lane: {\"task\":1,\"rounds\":3}"),
+        "{said}"
+    );
+    // At each of the three looks and at the end, the command is there.
+    assert!(
         said.matches("the host's tree still has the command (")
-            .count(),
-        3,
+            .count()
+            >= 3,
         "{said}"
     );
     assert!(!said.contains("no longer has the command"), "{said}");
-    // The watch ended once the closed lane had rested, as a window at rest ends it.
     assert!(
         said.lines()
             .any(|line| line.starts_with("     at the end, +")
-                && line.contains(" s: the lane read closed;")),
+                && line.contains(" s: the lane read working unstopped ")),
         "{said}"
     );
     members.close().unwrap();

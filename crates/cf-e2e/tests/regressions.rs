@@ -81,6 +81,8 @@ mod a_monitor_claude_ended_by_its_shell_held_its_task;
 mod a_parent_agents_session_reached_every_window;
 #[path = "regressions/a_paste_devin_held_pasted_again_after_a_switch_and_a_restart.rs"]
 mod a_paste_devin_held_pasted_again_after_a_switch_and_a_restart;
+#[path = "regressions/a_pause_a_busy_worker_ignored_closed_its_window_and_ended_its_work.rs"]
+mod a_pause_a_busy_worker_ignored_closed_its_window_and_ended_its_work;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
 #[path = "regressions/a_question_the_chief_answered_was_typed_in_later.rs"]

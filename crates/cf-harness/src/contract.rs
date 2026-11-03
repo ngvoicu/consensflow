@@ -553,6 +553,14 @@ pub trait Window {
     fn recheck(&self) -> Work<'_, ()> {
         Box::pin(async {})
     }
+    /// The commands the harness itself says it keeps running for the window, each by its
+    /// command line, which no process tree need show (Codex's background terminals: a
+    /// program it starts with no shell is no turn's work by the host's chain, T-1137). A
+    /// window's close ends them. None where the harness could not say; none running from a
+    /// harness that keeps no such word (the default).
+    fn kept_commands(&self) -> Work<'_, Option<Vec<String>>> {
+        Box::pin(async { Some(Vec::new()) })
+    }
     /// What the window's input box holds on its screen now, where its harness takes a
     /// message pasted into that box (Claude Code, Devin): a paste whose Enter did not take
     /// still sits there (3.0.7 chief-meeting, CMT-24). None where the screen shows no box

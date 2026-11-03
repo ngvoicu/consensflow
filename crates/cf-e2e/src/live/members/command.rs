@@ -128,16 +128,23 @@ pub fn quiet_command(seconds: u64, windows: bool) -> String {
 /// exactly the command's words and nothing after them. A shell's line that ends with the
 /// command runs it too (`/bin/sh -c "$0" "$@" sleep 119`). Windows' PowerShell starts a
 /// program it finds on the `PATH` by its path, and the line of a `ping -n 120 127.0.0.1`
-/// it ran is `"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1` (zeewin, 2026-10-16).
+/// it ran is `"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1` (zeewin, 2026-10-16). A
+/// command that names its program by a path (`/sbin/ping`, as the Mac's member is told
+/// it, T-1117) is run by a line that names it by any path, or bare.
 pub fn runs_command(line: &str, command: &str) -> bool {
     let line = line.trim_end();
     match command.split_once(' ') {
         Some((program, words)) => line
             .strip_suffix(words)
             .and_then(|before| before.strip_suffix(' '))
-            .is_some_and(|before| ends_with_program(before, program)),
-        None => ends_with_program(line, command),
+            .is_some_and(|before| ends_with_program(before, file_of(program))),
+        None => ends_with_program(line, file_of(command)),
     }
+}
+
+/// The file `program` names: its last part where it is a path.
+fn file_of(program: &str) -> &str {
+    program.rsplit(['/', '\\']).next().unwrap_or(program)
 }
 
 /// Whether `before`, a command line up to a word, ends with the program `program` as a
@@ -357,6 +364,11 @@ mod tests {
         ));
         assert!(!runs_command(r"C:\tools\noping.exe -n 120 127.0.0.1", ping));
         assert!(!runs_command("-n 120 127.0.0.1", ping));
+        // A command told by its program's path is run by a line naming it by any, or bare.
+        let by_path = "/sbin/ping -c 61 127.0.0.1";
+        assert!(runs_command("/sbin/ping -c 61 127.0.0.1", by_path));
+        assert!(runs_command("ping -c 61 127.0.0.1", by_path));
+        assert!(!runs_command("/sbin/noping -c 61 127.0.0.1", by_path));
     }
 
     #[test]
