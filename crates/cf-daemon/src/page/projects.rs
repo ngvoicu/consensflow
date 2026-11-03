@@ -189,7 +189,10 @@ fn typed(request: &Map<String, Value>) -> Option<NewProject> {
         chief: NewChief {
             harness: chief.get("harness")?.as_str()?.to_owned(),
             model: Some(chief.get("model")?.as_str()?.to_owned()),
-            effort: None,
+            effort: match chief.get("effort") {
+                None | Some(Value::Null) => None,
+                Some(effort) => Some(effort.as_str()?.to_owned()),
+            },
         },
         staff: staff.iter().map(member).collect::<Option<Vec<_>>>()?,
         gate: match request.get("gate") {

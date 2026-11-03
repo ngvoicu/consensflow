@@ -113,6 +113,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-022", 1, NAMED_BY_MODEL),
     ("ledger-projects-008", 3, "a member whose model is named as another member's on another harness joins with its harness in front (`@pi-zeus`), where Node refused it as `member-exists`"),
     ("ledger-staff-007", 3, "a member's handle is made from its model, so a model named `human` joins as `@pi-human` beside the human, where Node refused the agent id"),
+    ("ledger-staff-005", 5, "a member that left comes back as itself only on the harness, model and effort it ran on: Node's `zeus` re-added on Pi took the Claude Code member's row by its name, where this one joins as a member of its own"),
     ("ledger-conversations-010", 4, NO_TIERS_FOLLOWED),
     ("ledger-projects-006", 6, NO_TIERS_FOLLOWED),
 

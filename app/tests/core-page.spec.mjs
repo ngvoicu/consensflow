@@ -7659,6 +7659,38 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     ])
 })
 
+test('New project keeps an image designer a member of its own beside a worker on the same model, in either order', async ({
+  page,
+}) => {
+  await open(page)
+  for (const order of [
+    ['worker', 'designer'],
+    ['designer', 'worker'],
+  ]) {
+    await page.getByRole('button', { name: 'New project' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New project' })
+    await pickChief(dialog, 'Codex', 'GPT-6 Astra')
+    for (const role of order) {
+      await pickMember(dialog, { role, harness: 'Codex', model: 'GPT-5.6 Luna', tier: 'light' })
+      await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+    }
+    await dialog.getByRole('button', { name: 'Start project' }).click()
+    const one = (role) => ({
+      harness: 'codex',
+      model: 'gpt-5.6-luna',
+      effort: null,
+      tier: 'light',
+      roles: [role],
+    })
+    await expect
+      .poll(async () => (await calls(page, 'project.open')).at(-1)?.staff)
+      .toEqual(order.map(one))
+    await page.evaluate(() => {
+      window.__calls = []
+    })
+  }
+})
+
 test("docks the chief's terminal and a member's own, offers no Open terminal for them, and feeds them their output", async ({
   page,
 }) => {

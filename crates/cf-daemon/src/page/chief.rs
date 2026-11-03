@@ -14,48 +14,35 @@ use cf_proto::agents::Harness;
 use serde_json::Value;
 
 use super::body::{Body, Said};
+use super::staff::{effort_of, resolve};
 use super::Page;
 
-/// The chief `body` asks for (`harness`, `model`): a model is named; where `installed`
-/// asks it, its harness is installed here (a Switch chief's: New project offers only
-/// those, and Node's never asked it of one); and the model is one the harness lists and
-/// runs, where the home keeps its listing. That ConsensFlow opens the harness's windows at
-/// all is the engine's to say, as it opens the project or switches the chief.
+/// The chief `body` asks for (`harness`, `model`, `effort`): a model is named; where
+/// `installed` asks it, its harness is installed here (a Switch chief's: New project offers
+/// only those, and Node's never asked it of one); and the model and its effort are checked
+/// and held as a member's are ([`resolve`]): one the harness lists and runs, at an effort it
+/// lists for it, Devin's as the exact id it lists for the effort, where the home keeps its
+/// listing. That ConsensFlow opens the harness's windows at all is the engine's to say, as it
+/// opens the project or switches the chief.
 pub(super) fn chief_asked(page: &Page, body: Body<'_>, installed: bool) -> Result<SwitchTo, Said> {
     let model = require_chief_model(body.get("model").and_then(Value::as_str))?;
+    let effort = effort_of(body)?;
     let kind = body.text("harness").into_owned();
-    if let Some(harness) = Harness::from_kind(&kind) {
-        if installed && missing_harnesses(&page.env).contains(&harness) {
-            return Err(Said(format!("{kind} is not installed here")));
-        }
-        listed(page, harness, &kind, model)?;
+    let Some(harness) = Harness::from_kind(&kind) else {
+        // No harness ConsensFlow runs: the engine refuses it in its own words.
+        return Ok(SwitchTo {
+            harness: kind,
+            model: model.to_owned(),
+            effort: effort.map(str::to_owned),
+        });
+    };
+    if installed && missing_harnesses(&page.env).contains(&harness) {
+        return Err(Said(format!("{kind} is not installed here")));
     }
+    let resolved = resolve(page, harness, &kind, model, effort)?;
     Ok(SwitchTo {
         harness: kind,
-        model: model.to_owned(),
-        effort: None,
+        model: resolved.model,
+        effort: resolved.effort,
     })
-}
-
-/// Whether `harness`, as the home keeps its listing, lists `model` and runs it: refused
-/// where it keeps one that does not, and taken on the harness's word where it keeps none.
-fn listed(page: &Page, harness: Harness, kind: &str, model: &str) -> Result<(), Said> {
-    cf_ledger::model::require_model_id(model)?;
-    let kept = page
-        .ledger
-        .borrow()
-        .model_listing(harness.as_str())
-        .map_err(|failed| failed.to_string())?;
-    let Some(listing) = kept.filter(|listing| !listing.models.is_empty()) else {
-        return Ok(());
-    };
-    match listing.model(model) {
-        None => Err(Said(format!(
-            "{kind} does not list {model}: pick one of its models"
-        ))),
-        Some(listed) if listed.disabled => Err(Said(format!(
-            "{kind} lists {model} but will not run it: pick another of its models"
-        ))),
-        Some(_) => Ok(()),
-    }
 }

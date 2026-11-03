@@ -135,9 +135,11 @@ pub(crate) fn add_participant(
     participant_view(&store.participant_row(id)?)
 }
 
-/// A member joins the staff under a handle made from its model ([`crate::handles`]); one
-/// that left the staff under the handle its model and effort make comes back under it, on
-/// the harness, model, designer flag and tier given now, in the roles given now.
+/// A member joins the staff under a handle made from its model ([`crate::handles`]). One
+/// that left the staff comes back as itself where it ran on the same harness, model, effort
+/// and designer flag: under the handle it had, in the tier and the roles given now. A member
+/// is known by what it runs on, never by its name: another whose name a departed member's
+/// would be joins under a handle of its own.
 pub(crate) fn add_member(
     store: &mut Store,
     project_id: i64,
@@ -145,18 +147,21 @@ pub(crate) fn add_member(
 ) -> Result<ParticipantView, LedgerError> {
     let roles = member.check()?;
     store.write(|store| {
-        let named = crate::handles::member_handle(
-            &member.shown(),
-            member.effort.as_deref(),
-            &member.harness,
-            |_| false,
-        );
         let left = store
             .db
             .query_row(
                 "SELECT id, handle FROM participant
-                 WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL",
-                params![project_id, named],
+                 WHERE project_id = ? AND left_at IS NOT NULL AND member_id IS NULL
+                   AND role NOT IN ('human', 'chief')
+                   AND harness = ? AND model IS ? AND effort IS ? AND designer = ?
+                 ORDER BY id DESC LIMIT 1",
+                params![
+                    project_id,
+                    member.harness,
+                    member.model,
+                    member.effort,
+                    i64::from(member.designer)
+                ],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;

@@ -809,7 +809,8 @@ export class NewProjectDialog {
   #pickedStaff() {
     const staff = new Map()
     for (const { harness, model, effort, tier, role } of this.#picked) {
-      const key = `${harness} ${model} ${effort ?? ''}`
+      // An image designer holds no other role: it is a member of its own beside a worker.
+      const key = `${harness} ${model} ${effort ?? ''} ${role === 'designer'}`
       if (!staff.has(key)) staff.set(key, { harness, model, effort, tier, roles: [] })
       staff.get(key).roles.push(role)
     }

@@ -123,3 +123,53 @@ fn a_muse_contributor_model_the_human_picked_runs_in_its_contributor_mode() {
         words(&["--model", "muse-spark-1.3-contributor", "--yolo"])
     );
 }
+
+/// What a chief or a member picked on each harness reaches its window as (harness-models):
+/// the agent the engine gives the launch (`ChiefRuns`: the effort, Pi's as its thinking,
+/// none for Devin, whose model is the exact id it lists for the effort) becomes the flags
+/// the harness takes.
+#[test]
+fn a_model_and_effort_picked_reach_each_harness_s_window_as_it_takes_them() {
+    let agent = |model, effort, thinking| Agent {
+        model: Some(model),
+        effort,
+        thinking,
+        designer: false,
+    };
+    for (harness, given, flags) in [
+        (
+            Harness::Claude,
+            agent("claude-opus-5-5", Some("high"), None),
+            vec!["--model", "claude-opus-5-5", "--effort", "high"],
+        ),
+        (
+            Harness::Codex,
+            agent("gpt-6.1-sol", Some("ultra"), None),
+            vec![
+                "--model",
+                "gpt-6.1-sol",
+                "-c",
+                "model_reasoning_effort=\"ultra\"",
+            ],
+        ),
+        (
+            Harness::Pi,
+            agent("anthropic/claude-fable-5", None, Some("max")),
+            vec!["--model", "anthropic/claude-fable-5", "--thinking", "max"],
+        ),
+        (
+            Harness::Devin,
+            agent("swe-2-max", None, None),
+            vec!["--model", "swe-2-max"],
+        ),
+        (
+            Harness::Muse,
+            agent("muse-wonder-1.0", Some("low"), None),
+            vec!["--model", "muse-wonder-1.0", "--reasoning-effort", "low"],
+        ),
+    ] {
+        let window = start(harness, given, Some("s-1"), Some("hello")).expect("a window");
+        let args = window.args.join(" ");
+        assert!(args.contains(&flags.join(" ")), "{harness:?}: {args}");
+    }
+}

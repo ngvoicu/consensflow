@@ -447,3 +447,139 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
         })
         .await;
 }
+
+/// An image designer draws with Codex's image tool and holds no other role, so it is a
+/// member of its own beside a worker on the same model and effort, whichever is added
+/// first: the second is named with its harness in front, and neither is refused.
+#[tokio::test]
+async fn a_worker_and_an_image_designer_on_one_model_and_effort_are_two_members_in_either_order() {
+    LocalSet::new()
+        .run_until(async {
+            let on = |roles: Value| {
+                json!({ "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "tier": "light", "roles": roles })
+            };
+            // A worker first, then the designer.
+            let first = staffing();
+            let worker = first.add(on(json!(["worker"]))).await;
+            assert_eq!(worker["member"]["handle"], "gpt-6-1-sol-high", "{worker}");
+            let designer = first.add(on(json!(["designer"]))).await;
+            assert_eq!(designer["ok"], true, "{designer}");
+            assert_eq!(designer["member"]["handle"], "codex-gpt-6-1-sol-high");
+            assert_eq!(designer["member"]["designer"], true);
+            assert_eq!(first.member("gpt-6-1-sol-high").roles, ["worker"]);
+            assert!(!first.member("gpt-6-1-sol-high").designer);
+            // The designer first, then a worker; a second designer is that designer again.
+            let staffing = staffing();
+            let designer = staffing.add(on(json!(["designer"]))).await;
+            assert_eq!(designer["member"]["handle"], "gpt-6-1-sol-high", "{designer}");
+            let worker = staffing.add(on(json!(["worker", "reviewer"]))).await;
+            assert_eq!(worker["ok"], true, "{worker}");
+            assert_eq!(worker["member"]["handle"], "codex-gpt-6-1-sol-high");
+            assert_eq!(worker["member"]["designer"], false);
+            let again = staffing.add(on(json!(["designer"]))).await;
+            assert_eq!(again["member"]["handle"], "gpt-6-1-sol-high", "{again}");
+            assert_eq!(staffing.member("gpt-6-1-sol-high").roles, ["designer"]);
+        })
+        .await;
+}
+
+/// A chief is picked as a member is (HMD-04): the harness, a model it lists and an effort it
+/// lists for it, checked against the kept listing and held as the harness takes it (Devin's
+/// as the exact id it lists for the effort). New project and Switch chief both keep what
+/// was picked, and the chief's next launch is given it: its effort, Pi's as its thinking.
+#[tokio::test]
+async fn a_chief_is_held_and_launched_on_the_model_and_effort_picked_on_each_harness() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            // (harness, model as the picker sends it, effort, model held, effort held,
+            // what the launch is given: model, effort, thinking)
+            let picks = [
+                ("claude-code", "claude-opus-5-5", "high", "claude-opus-5-5", Some("high"), None),
+                ("codex", "gpt-6.1-sol", "ultra", "gpt-6.1-sol", Some("ultra"), None),
+                ("pi", "anthropic/claude-fable-5", "max", "anthropic/claude-fable-5", None, Some("max")),
+                ("devin", "swe-2", "max", "swe-2-max", None, None),
+                ("muse", "muse-wonder-1.0", "low", "muse-wonder-1.0", Some("low"), None),
+            ];
+            for (harness, model, effort, held, given_effort, given_thinking) in picks {
+                let opened = ask(
+                    &staffing.app,
+                    "project.open",
+                    json!({
+                        "directory": format!("/work/{harness}"),
+                        "harness": harness, "model": model, "effort": effort, "staff": [],
+                    }),
+                )
+                .await;
+                assert_eq!(opened["ok"], true, "{harness}: {opened}");
+                let project = opened["project"]["id"].as_i64().unwrap();
+                let chief = staffing.chief_of(project);
+                assert_eq!(
+                    (chief.model.as_deref(), chief.effort.as_deref()),
+                    (Some(held), Some(effort)),
+                    "{harness}: the chief holds what was picked"
+                );
+                let launch = staffing.last_chief_launch(project);
+                assert_eq!(
+                    (
+                        launch["agent"]["model"].as_str(),
+                        launch["agent"]["effort"].as_str(),
+                        launch["agent"]["thinking"].as_str(),
+                    ),
+                    (Some(held), given_effort, given_thinking),
+                    "{harness}: {launch}"
+                );
+            }
+            // Switch chief takes the same choice, Devin's at another effort: the engine is
+            // handed the exact id Devin lists for it, and the effort beside it (the engine
+            // keeps what it is handed, `chief_switch`).
+            let asked = json!({ "project": 1, "harness": "devin", "model": "swe-2", "effort": "high", "when": "now" });
+            let target = crate::page::chief::chief_asked(&staffing.rig.page, crate::page::body::Body::new(&asked), true)
+                .expect("a switch");
+            assert_eq!(
+                (target.harness.as_str(), target.model.as_str(), target.effort.as_deref()),
+                ("devin", "swe-2-high", Some("high"))
+            );
+            // An effort the model does not list, or none where it lists some, is refused.
+            for (body, said) in [
+                (json!({ "harness": "codex", "model": "gpt-6-luna", "effort": "ultra" }), "codex runs gpt-6-luna at low, medium, high, xhigh, max, not ultra"),
+                (json!({ "harness": "devin", "model": "swe-2" }), "pick the effort devin runs swe-2 at: medium, high, max"),
+            ] {
+                let mut asked = json!({ "directory": "/work/refused", "staff": [] });
+                asked.as_object_mut().unwrap().extend(body.as_object().unwrap().clone());
+                let refused = ask(&staffing.app, "project.open", asked).await;
+                assert_eq!(refused["error"], said, "{refused}");
+            }
+        })
+        .await;
+}
+
+impl Staffing {
+    /// The chief of `project` as the ledger holds it.
+    fn chief_of(&self, project: i64) -> cf_ledger::ParticipantView {
+        self.rig
+            .kit
+            .ledger
+            .borrow()
+            .project(project)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|participant| participant.role == "chief")
+            .expect("the chief")
+    }
+
+    /// The last launch the engine's adapter prepared for the chief of `project`.
+    fn last_chief_launch(&self, project: i64) -> Value {
+        self.rig.kit.settle();
+        self.rig
+            .kit
+            .adapter
+            .prepared()
+            .into_iter()
+            .filter(|launch| launch["role"] == "chief" && launch["project"]["id"] == project)
+            .last()
+            .unwrap_or_else(|| panic!("no launch of project {project}'s chief"))
+    }
+}

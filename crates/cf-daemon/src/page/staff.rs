@@ -52,7 +52,9 @@ pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, 
 /// `member.add`: Add member (T-1143). A member on a model its harness lists, at an effort
 /// it lists for it, in the tier the human chose, a worker unless the page says otherwise,
 /// named by the model ([`cf_ledger::handles`]). A member on that harness, model and effort
-/// already takes the roles as roles more, in the tier chosen now.
+/// already takes the roles as roles more, in the tier chosen now. An image designer, which
+/// draws with Codex's image tool and holds no other role, is that only to a designer: a
+/// worker on the same model is a member beside it, whichever came first.
 pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
     let member = picked_member(page, body, true)?;
@@ -60,6 +62,7 @@ pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         member_now.harness.as_deref() == Some(member.harness.as_str())
             && member_now.model == member.model
             && member_now.effort == member.effort
+            && member_now.designer == member.designer
     })?;
     let mut ledger = page.ledger.borrow_mut();
     let Some(existing) = on_it else {
@@ -206,17 +209,52 @@ fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<
         Some(Value::String(model)) if !model.is_empty() => model.as_str(),
         _ => return Err(Said::from("pick the member's model: one its harness lists")),
     };
-    cf_ledger::model::require_model_id(model)?;
-    let effort = match body.get("effort") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(effort)) if !effort.is_empty() => Some(effort.as_str()),
-        Some(_) => {
-            return Err(Said::from(
-                "an effort is one of the words its harness lists",
-            ))
-        }
-    };
+    let effort = effort_of(body)?;
     let tier = tier_of(body.get("tier"))?;
+    let resolved = resolve(page, harness, &kind, model, effort)?;
+    Ok(Picked {
+        harness,
+        model: Some(resolved.model),
+        effort: resolved.effort,
+        model_name: resolved.model_name,
+        tier,
+    })
+}
+
+/// The effort `body` names: none where it names none, else a word its harness lists.
+pub(super) fn effort_of<'b>(body: Body<'b>) -> Result<Option<&'b str>, Said> {
+    match body.get("effort") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(effort)) if !effort.is_empty() => Ok(Some(effort.as_str())),
+        Some(_) => Err(Said::from(
+            "an effort is one of the words its harness lists",
+        )),
+    }
+}
+
+/// A model and an effort picked on a harness, as its harness takes them.
+pub(super) struct Resolved {
+    /// The model as the launch passes it: Devin's the exact id it lists for the effort.
+    pub(super) model: String,
+    pub(super) effort: Option<String>,
+    /// The name the harness's list gives the model; none where its list was never kept.
+    pub(super) model_name: Option<String>,
+}
+
+/// `model` at `effort` on `harness` (`kind`, as the body said it), checked as Add member,
+/// Edit member, New project and Switch chief all check it: a model id the ledger takes; where
+/// the home keeps the harness's listing, one it lists and runs, at one of the efforts it
+/// lists for it (none where it lists none), named as the listing names it, and held as the
+/// launch passes it (Devin's effort is part of the id it lists for it, `model_uid`). A harness
+/// never read is taken at its word, as it was asked.
+pub(super) fn resolve(
+    page: &Page,
+    harness: Harness,
+    kind: &str,
+    model: &str,
+    effort: Option<&str>,
+) -> Result<Resolved, Said> {
+    cf_ledger::model::require_model_id(model)?;
     let kept = page
         .ledger
         .borrow()
@@ -224,12 +262,10 @@ fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<
         .map_err(|failed| failed.to_string())?
         .filter(|listing| !listing.models.is_empty());
     let Some(listing) = kept else {
-        return Ok(Picked {
-            harness,
-            model: Some(model.to_owned()),
+        return Ok(Resolved {
+            model: model.to_owned(),
             effort: effort.map(str::to_owned),
             model_name: None,
-            tier,
         });
     };
     let Some(listed) = listing.model(model) else {
@@ -261,12 +297,10 @@ fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<
         }
         _ => {}
     }
-    Ok(Picked {
-        harness,
-        model: Some(listed.launch_model(effort)),
+    Ok(Resolved {
+        model: listed.launch_model(effort),
         effort: effort.map(str::to_owned),
         model_name: Some(listed.label.clone()),
-        tier,
     })
 }
 

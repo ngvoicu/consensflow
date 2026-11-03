@@ -340,6 +340,75 @@ fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_ba
     assert_eq!(other.handle, "opus-max");
 }
 
+/// A member that left comes back as itself, by what it ran on, and under the handle it
+/// had: never as another member whose name its own would be, and never under a new one.
+#[test]
+fn a_member_that_left_is_known_by_its_harness_model_and_effort_not_by_its_name() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let pi = on(
+        "pi",
+        "anthropic/claude-opus-5-5",
+        Some("high"),
+        "Claude Opus 5.5",
+        "complex",
+    );
+    let devin = on(
+        "devin",
+        "claude-opus-5-5-high",
+        Some("high"),
+        "Claude Opus 5.5",
+        "complex",
+    );
+    let project = project(&mut ledger, vec![pi.clone(), devin.clone()]);
+    let named = |ledger: &Ledger, handle: &str| named(ledger, project.id, handle).id;
+    let (pi_id, devin_id) = (
+        named(&ledger, "claude-opus-5-5-high"),
+        named(&ledger, "devin-claude-opus-5-5-high"),
+    );
+    // Pi's leaves; Devin's on the same model's name and effort is not it.
+    ledger
+        .remove_member(project.id, "claude-opus-5-5-high")
+        .expect("removed");
+    ledger
+        .remove_member(project.id, "devin-claude-opus-5-5-high")
+        .expect("removed");
+    let devin_back = ledger.add_member(project.id, &devin).expect("back");
+    assert_eq!(
+        (devin_back.id, devin_back.handle.as_str()),
+        (devin_id, "devin-claude-opus-5-5-high"),
+        "Devin's comes back as itself, under its own handle"
+    );
+    let pi_back = ledger.add_member(project.id, &pi).expect("back");
+    assert_eq!(
+        (
+            pi_back.id,
+            pi_back.handle.as_str(),
+            pi_back.harness.as_deref()
+        ),
+        (pi_id, "claude-opus-5-5-high", Some("pi")),
+        "Pi's comes back as itself"
+    );
+    // A member on another model with a name a departed one had is a member of its own.
+    ledger
+        .remove_member(project.id, "claude-opus-5-5-high")
+        .expect("removed");
+    let other = ledger
+        .add_member(
+            project.id,
+            &on(
+                "claude-code",
+                "claude-opus-5-5",
+                Some("high"),
+                "Claude Opus 5.5",
+                "light",
+            ),
+        )
+        .expect("added");
+    assert_ne!(other.id, pi_id);
+    assert_eq!(other.handle, "claude-code-claude-opus-5-5-high");
+}
+
 #[test]
 fn a_member_needs_a_tier_and_a_word_for_an_effort_and_the_staff_a_project_starts_from_says_what_each_runs(
 ) {
