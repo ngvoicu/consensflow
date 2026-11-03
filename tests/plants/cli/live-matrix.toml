@@ -876,15 +876,15 @@ find = '''        format!("{BYPASS} {text}")'''
 replace = "        text.clone()"
 
 [[plant]]
-name = "live matrix: field fix out: a Devin window opened on a turn its record cannot end reads at rest for good"
+name = "live matrix: field fix out: a stamped Devin window reads at rest through its turn, and its reopen replays it as work"
 meant = "devin_worker_field_devin_reopened"
 runs = ["matrix-devin-reopened"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "                .is_some_and(|open| open.unchanged(&reading))"
-replace = "                .is_some_and(|open| open.unchanged(&reading) && reading.read_failed())"
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                Some("working") => self.busy = true,'''
+replace = '''                Some("working") => {}'''
 
 [[plant]]
 name = "live matrix: field fix out: the system's folders of programs are not looked in for a harness"
@@ -992,3 +992,15 @@ runs = ["matrix-process-lib"]
 file = "crates/cf-e2e/src/process.rs"
 find = '''    std::env::split_paths(path).find_map(|folder| {'''
 replace = '''    std::env::split_paths(path).collect::<Vec<_>>().into_iter().rev().find_map(|folder| {'''
+
+[[plant]]
+name = "live matrix: a rig's stand-in Devin keeps its store in the folders of the machine a caller passed"
+meant = "a_rig_given_a_stand_in_devin_keeps_its_folders_in_the_rigs_home_over_the_machines"
+runs = ["matrix-rig-install"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = """    if config.devin.is_some() {
+        env.retain(|(name, _)| name != "APPDATA" && name != "LOCALAPPDATA");"""
+replace = """    if config.devin.is_some() && false {
+        env.retain(|(name, _)| name != "APPDATA" && name != "LOCALAPPDATA");"""
