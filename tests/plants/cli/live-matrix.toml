@@ -41,6 +41,8 @@ matrix-recap = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_ma
 matrix-image-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_image_result"]
 matrix-question-not-retyped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_question_not_retyped"]
 # LMX-14, window life (T-1195): the cases by name.
+matrix-restart-mid-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_restart_mid_turn"]
+matrix-tell-keeps-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_tell_keeps_work"]
 matrix-builds-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_builds_daemon"]
 matrix-run-in-background = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_run_in_background"]
 matrix-hold-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_hold_notes"]
@@ -801,3 +803,26 @@ find = '''    let rate_limited = status == Some(429.0)
 replace = '''    let rate_limited = status == Some(-429.0)
         || record.get("error").and_then(Value::as_str) == Some("rate_limit-not")
         || spent;'''
+
+# The runner's rules of this round (T-1195): a step the app is restarted before, and the Escapes a
+# check reads.
+
+[[plant]]
+name = "live matrix: a step the app is to be restarted before is run with no restart"
+meant = "field_restart_mid_turn"
+runs = ["matrix-restart-mid-turn"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = "        if step.restarts && !(restarted && index == from) {"
+replace = "        if false && step.restarts && !(restarted && index == from) {"
+
+[[plant]]
+name = "live matrix: a check reads no Escape the daemon pressed"
+meant = "field_tell_keeps_work"
+runs = ["matrix-tell-keeps-work"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = "        self.members.rig().keys_pressed(&id, &[27])"
+replace = "        self.members.rig().keys_pressed(&id, &[27]) * 0"
