@@ -231,7 +231,9 @@ impl Ledger {
     }
 
     /// Messages of `recipient` among `ids` that `cf` served whole are received,
-    /// as the way they were served receives them (`Read`): how many were.
+    /// as the way they were served receives them (`Read`): how many were. One whose
+    /// paste is still on its way keeps the read until its delivery ends, and is not
+    /// counted.
     pub fn receive_read(
         &mut self,
         recipient: i64,

@@ -245,11 +245,16 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
             message_line(&message),
             js::text(message.get("body"))
         );
-        let delivered = message.get("state").and_then(Value::as_str) == Some("delivered");
+        // A role goes in by a note, and a window reads it as soon as it has the paste:
+        // before the daemon has seen the paste arrive, as often as after.
+        let reached = matches!(
+            message.get("state").and_then(Value::as_str),
+            Some("delivered" | "delivering")
+        );
         let told = message
             .get("id")
             .and_then(Value::as_i64)
-            .filter(|_| role && delivered);
+            .filter(|_| role && reached);
         let waiting = lines::waiting_message(&message);
         let said = Said::new(message, text);
         return Ok(match told {

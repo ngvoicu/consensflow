@@ -906,7 +906,10 @@ impl Dispatcher {
                         .ledger
                         .borrow()
                         .message(first)?
-                        .is_some_and(|message| message.state == "delivered"),
+                        // A role the window read the moment it had it is `read`, not `delivered`.
+                        .is_some_and(|message| {
+                            matches!(message.state.as_str(), "delivered" | "read")
+                        }),
                     None => false,
                 };
                 if at_launch && !came_up && shown.is_known() {

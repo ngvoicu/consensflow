@@ -5,7 +5,11 @@
 # The role counts as told once the window has read the note: `cf` printed it whole and said so
 # (up to a bound of a role's own, `cf_base::role_read`, which Codex and Muse were shown whole),
 # the board says which notes tell a role (`"role": true`), and the ledger marks a delivered role
-# note read and records the conversation told it, in one write. Then no line and no repeat at the
+# note read and records the conversation told it, in one write. A window reads the note the
+# moment it has it, often before the daemon has seen the paste arrive: that read is kept with the
+# note (T-1075; its receipt, `readEarly`) and told by the write that confirms the paste, in the
+# conversation it was made in; given back to the queue, a message a read receives is read, and a
+# role waits for its paste with the read kept. Then no line and no repeat at the
 # next Resume; a role not read by then is said again and the human told so. The engine's
 # `role_change` (and its greeting of a session no hook greeted), the ledger's `receive_read`, the
 # daemon's `GET /api/inbox/<id>` and the `cf` command each hold a rule; one plant takes one out,
@@ -19,6 +23,9 @@ engine-cleared = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "di
 engine-role-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::"]
 ledger-read = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "read_in_the_inbox::"]
 cf-board-role = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_role_cf_inbox_read"]
+cf-board-inbox = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_message_cf_inbox_read"]
+cf-board-thread = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_task_thread_printed_whole"]
+cf-lines = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::lines::tests::the_answers_still_waiting"]
 base-role-read = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "role_read::"]
 daemon-message = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::message"]
 
@@ -124,7 +131,7 @@ replace = '''            if false {'''
 
 [[plant]]
 name = "role read: a role read in a task's thread is told"
-meant = "a_role_read_in_the_inbox_is_recorded_only_from_its_recipient_and_only_once_delivered"
+meant = "a_role_read_in_the_inbox_is_recorded_only_from_its_recipient_and_only_in_the_inbox"
 runs = ["ledger-read"]
 
 [[plant.edit]]
@@ -134,7 +141,7 @@ replace = '''            if role && message.state == "delivered" {'''
 
 [[plant]]
 name = "role read: a role read before its delivery was confirmed is told"
-meant = "a_role_read_in_the_inbox_is_recorded_only_from_its_recipient_and_only_once_delivered"
+meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
 runs = ["ledger-read"]
 
 [[plant.edit]]
@@ -196,7 +203,7 @@ replace = "            if true {"
 
 [[plant]]
 name = "role read: cf says it read a role only as far as every harness shows an output"
-meant = "a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_bound_of_a_role"
+meant = "a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_acknowledged_up_to_the_bound_of_a_role"
 runs = ["cf-board-role"]
 
 [[plant.edit]]
@@ -206,22 +213,22 @@ replace = "            seen: cut::seen_whole,"
 
 [[plant]]
 name = "role read: cf says it read a role whatever the board says the note is"
-meant = "a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_bound_of_a_role"
+meant = "a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_acknowledged_up_to_the_bound_of_a_role"
 runs = ["cf-board-role"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "            .filter(|_| role && delivered);"
-replace = "            .filter(|_| delivered);"
+find = "            .filter(|_| role && reached);"
+replace = "            .filter(|_| reached);"
 
 [[plant]]
-name = "role read: cf says it read a role before it was delivered"
-meant = "a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_bound_of_a_role"
+name = "role read: cf says it read a role that was read already"
+meant = "a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_acknowledged_up_to_the_bound_of_a_role"
 runs = ["cf-board-role"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "            .filter(|_| role && delivered);"
+find = "            .filter(|_| role && reached);"
 replace = "            .filter(|_| role);"
 
 [[plant]]
@@ -236,10 +243,273 @@ replace = ""
 
 [[plant]]
 name = "role read: the bound of a role is past what Codex and Muse were shown"
-meant = "a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_bound_of_a_role"
+meant = "a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_acknowledged_up_to_the_bound_of_a_role"
 runs = ["cf-board-role"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/role_read.rs"
 find = "pub const ROLE_READ_WHOLE_BYTES: usize = 29_000;"
 replace = "pub const ROLE_READ_WHOLE_BYTES: usize = 40_000;"
+
+# A read made while the paste of a message is still on its way (T-1075, critical review T-1014 note 8).
+# A window reads the note the moment it has it, before the daemon has seen the paste arrive: the
+# ledger keeps the read in the message's receipt, with the conversation it was made in (`keep_read`),
+# and tells it when the delivery ends: a role is read and recorded by the write that confirms the
+# paste; a message a read receives is read when its paste is given back, and not typed in again; a
+# role given back keeps the read and waits for its paste. `cf` says it read a message whose paste is
+# on its way as it says it of a queued one. One plant takes one of these out, and a test of it fails.
+
+# The ledger: a read on its way is kept, and only the reads that tell something.
+
+[[plant]]
+name = "role read: a read made while the note's paste is on its way is dropped"
+meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            if message.state == \"delivering\" {"
+replace = "            if false {"
+
+[[plant]]
+name = "role read: a read made while the note's paste is on its way is dropped (engine)"
+meant = "a_role_told_in_part_read_before_its_delivery_was_confirmed_is_kept_and_told_once_it_is_confirmed"
+runs = ["engine-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            if message.state == \"delivering\" {"
+replace = "            if false {"
+
+[[plant]]
+name = "role read: a task's words read while their paste is on its way keep the read"
+meant = "a_tasks_words_read_while_their_paste_is_on_its_way_keep_no_read"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            Read::Inbox => message.kind != \"task\","
+replace = "            Read::Inbox => true,"
+
+[[plant]]
+name = "role read: a note read in a thread while its paste is on its way keeps the read"
+meant = "a_role_read_by_another_or_in_a_thread_while_its_paste_is_on_its_way_is_not_kept"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+            Read::Inbox => message.kind != "task",
+            Read::Task => message.kind == "answer",
+'''
+replace = '''
+            Read::Inbox => message.kind != "task",
+            Read::Task => true,
+'''
+
+[[plant]]
+name = "role read: the first read a note has on its way is the one kept"
+meant = "a_role_read_again_in_a_later_conversation_while_its_paste_is_on_its_way_is_kept_for_that_one"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "\"UPDATE message SET receipt = ? WHERE id = ? AND state = 'delivering'\","
+replace = "\"UPDATE message SET receipt = ? WHERE id = ? AND state = 'delivering' AND receipt IS NULL\","
+
+[[plant]]
+name = "role read: a read is kept with no conversation"
+meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "    let conversation = current_conversation(store, message.recipient_id)?.map(|found| found.id);"
+replace = "    let conversation = None;"
+
+# The ledger: what the confirmation of the paste does with it.
+
+[[plant]]
+name = "role read: a delivery confirmed does not tell the read made while it was on its way"
+meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if let Some(read) = early {
+            told_when_confirmed(store, message_id, read)?;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "role read: a delivery confirmed does not tell the read made while it was on its way (engine)"
+meant = "a_role_told_in_part_read_before_its_delivery_was_confirmed_is_kept_and_told_once_it_is_confirmed"
+runs = ["engine-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if let Some(read) = early {
+            told_when_confirmed(store, message_id, read)?;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "role read: the proof of a paste takes the place of the read made while it was on its way"
+meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+            early,
+        ))'''
+replace = '''
+            None,
+        ))'''
+
+[[plant]]
+name = "role read: a read made in one conversation tells another that began since"
+meant = "a_role_read_on_its_way_in_a_conversation_that_ended_before_the_paste_was_proved_tells_the_other_nothing"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "    if now == kept.conversation {"
+replace = "    if true || now == kept.conversation {"
+
+[[plant]]
+name = "role read: a message that says no role is read when its paste is confirmed after a read on its way"
+meant = "a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_what_its_paste_made_it_with_the_read_kept"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "    if kept.via != Read::Inbox || !says_a_role(store, message_id)? {"
+replace = "    if kept.via != Read::Inbox {"
+
+# The ledger: what a paste given back does with it.
+
+[[plant]]
+name = "role read: a message read while its paste was on its way is typed in again when it is given back"
+meant = "a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_read_when_the_paste_is_given_back_and_never_typed_in_again"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if settle_when_given_back(store, message_id)? {"
+replace = "        if false {"
+
+[[plant]]
+name = "role read: a note that says a role is read by a read made while its paste was on its way and given back"
+meant = "a_role_read_on_its_way_stays_with_the_note_when_its_paste_is_given_back_and_tells_the_role_when_it_goes_in"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+    let role = says_a_role(store, message_id)?;
+    if message.state != "queued" || !via.receives(&message, role) {'''
+replace = '''
+    let role = says_a_role(store, message_id)?;
+    if message.state != "queued" {'''
+
+[[plant]]
+name = "role read: a role given back to the queue forgets the read made while it was on its way"
+meant = "a_role_read_on_its_way_stays_with_the_note_when_its_paste_is_given_back_and_tells_the_role_when_it_goes_in"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+               handed_at = NULL
+         WHERE id = ?",'''
+replace = '''
+               handed_at = NULL, receipt = NULL
+         WHERE id = ?",'''
+
+[[plant]]
+name = "role read: a role given back to the queue forgets the read made while it was on its way (engine)"
+meant = "a_role_read_before_its_window_closed_is_told_when_the_next_launch_finds_the_note_in_the_record"
+runs = ["engine-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+               handed_at = NULL
+         WHERE id = ?",'''
+replace = '''
+               handed_at = NULL, receipt = NULL
+         WHERE id = ?",'''
+
+[[plant]]
+name = "role read: an answer read while its paste was on its way and given back leaves its task waiting"
+meant = "an_answer_read_in_a_thread_while_its_paste_is_on_its_way_is_read_when_the_paste_is_given_back"
+runs = ["ledger-read"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+    received_as(store, &message, &json!({ "read": via.word() }))?;
+    reconcile_of(store, &message)?;
+    Ok(true)'''
+replace = '''
+    received_as(store, &message, &json!({ "read": via.word() }))?;
+    Ok(true)'''
+
+# The engine: a chief window that read its role the moment it had it, and went by itself, came up.
+
+[[plant]]
+name = "role read: a chief whose first message was read is taken for one that never came up"
+meant = "a_chief_window_that_goes_by_itself_after_reading_its_role_note_came_up_and_the_human_is_told_nothing_of_a_launch_that_did_not"
+runs = ["engine-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                            matches!(message.state.as_str(), \"delivered\" | \"read\")"
+replace = "                            message.state == \"delivered\""
+
+# `cf`: a message whose paste is on its way is read as a queued one is.
+
+[[plant]]
+name = "role read: cf says it read only a queued message whole, not one being pasted"
+meant = "a_message_cf_inbox_read_printed_whole_while_it_waited_or_was_pasted_is_acknowledged_and_nothing_else_is"
+runs = ["cf-board-inbox"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = "        Some(\"queued\" | \"delivering\")"
+replace = "        Some(\"queued\")"
+
+[[plant]]
+name = "role read: cf says only the queued answers of a thread are read, not one being pasted"
+meant = "the_answers_still_waiting_to_be_pasted_or_being_pasted_are_the_queued_ones_and_only_the_answers"
+runs = ["cf-lines"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = "        Some(\"queued\" | \"delivering\")"
+replace = "        Some(\"queued\")"
+
+[[plant]]
+name = "role read: cf task get says only the queued answers of a thread are read, not one being pasted"
+meant = "a_task_thread_printed_whole_acknowledges_the_answer_being_pasted_with_the_queued_ones"
+runs = ["cf-board-thread"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = "        Some(\"queued\" | \"delivering\")"
+replace = "        Some(\"queued\")"
+
+[[plant]]
+name = "role read: cf says it read a role only once it is delivered, not while it is being delivered"
+meant = "a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_acknowledged_up_to_the_bound_of_a_role"
+runs = ["cf-board-role"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "            Some(\"delivered\" | \"delivering\")"
+replace = "            Some(\"delivered\")"

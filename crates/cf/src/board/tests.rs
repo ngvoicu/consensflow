@@ -312,6 +312,27 @@ fn an_acknowledgement_that_fails_leaves_what_was_printed_and_the_exit_as_they_we
     assert_eq!(ran.err, "");
 }
 
+/// An answer of the thread whose paste is on its way is acknowledged with the queued ones: a
+/// window runs `cf task get` as soon as it has the answer, before the board has seen it arrive.
+#[test]
+fn a_task_thread_printed_whole_acknowledges_the_answer_being_pasted_with_the_queued_ones() {
+    let mut pasted = thread();
+    pasted["task"]["messages"].as_array_mut().unwrap().push(
+        json!({ "id": 16, "kind": "answer", "state": "delivering", "task": 3,
+            "sender": "chief", "body": "Four spaces" }),
+    );
+    let ran = cf(
+        &["task", "get", "T-3"],
+        vec![reply(200, pasted), reply(200, json!({}))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert_eq!(
+        ran.asked[1].2,
+        acknowledged(&[12, 15, 16], "task"),
+        "the answers still waiting or being pasted, and no other message"
+    );
+}
+
 /// A message `cf inbox read` printed whole.
 fn message(kind: &str, state: &str) -> Value {
     json!({ "message": {
@@ -320,18 +341,26 @@ fn message(kind: &str, state: &str) -> Value {
     } })
 }
 
-/// A message `cf inbox read` printed whole while it still waited to be pasted
-/// is acknowledged, whatever its kind: the board decides what a read in the
-/// inbox receives, and a question, a result or a note read there is not typed
-/// in after it (T-260). One that is not queued is not.
+/// A message `cf inbox read` printed whole while it still waited to be pasted, or
+/// while its paste was on its way (a window reads a message the moment it has it,
+/// before the board has seen it arrive), is acknowledged, whatever its kind: the
+/// board decides what a read in the inbox receives, and a question, a result or a
+/// note read there is not typed in after it (T-260). One that is delivered, read or
+/// withdrawn is not.
 #[test]
-fn a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_nothing_else_is() {
+fn a_message_cf_inbox_read_printed_whole_while_it_waited_or_was_pasted_is_acknowledged_and_nothing_else_is(
+) {
     for kind in ["answer", "question", "result", "note"] {
-        for json in [false, true] {
+        for (state, json) in [
+            ("queued", false),
+            ("queued", true),
+            ("delivering", false),
+            ("delivering", true),
+        ] {
             let ran = cf_with(
                 &["inbox", "read", "m-12"],
                 json,
-                vec![reply(200, message(kind, "queued")), reply(200, json!({}))],
+                vec![reply(200, message(kind, state)), reply(200, json!({}))],
                 None,
             );
             assert_eq!(ran.code.unwrap(), 0);
@@ -339,7 +368,7 @@ fn a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_not
             assert_eq!(
                 asked(&ran),
                 [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")],
-                "{kind}"
+                "{kind} {state}"
             );
             assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
             assert_eq!(ran.flushed_at, Some(1));
@@ -348,7 +377,7 @@ fn a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_not
     for (kind, state) in [
         ("note", "delivered"),
         ("answer", "read"),
-        ("question", "delivering"),
+        ("question", "failed"),
         ("result", "cancelled"),
     ] {
         let ran = cf(
@@ -617,12 +646,15 @@ fn an_answer_cf_inbox_read_printed_past_what_a_harness_shows_is_not_acknowledged
 }
 
 /// A role too long for one message went into its window in part, and `cf inbox
-/// read` printed its note whole once it was delivered: it says so to the board,
-/// up to the bound a role is read whole at by the windows a role goes to by a note
+/// read` printed its note whole once it was delivered, or while its delivery was
+/// still being confirmed (the note tells the window to read it now, before the
+/// daemon has seen the paste arrive): it says so to the board, up to the bound a
+/// role is read whole at by the windows a role goes to by a note
 /// (`role_read_whole`), past the one every harness shows. A note the board does not
-/// say tells a role, or one not delivered, is as any message.
+/// say tells a role, or one read already, is as any message.
 #[test]
-fn a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_bound_of_a_role() {
+fn a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_acknowledged_up_to_the_bound_of_a_role(
+) {
     let role = |state: &str, body: String, said: bool| {
         let mut answer = message("note", state);
         answer["message"]["body"] = json!(body);
@@ -634,17 +666,28 @@ fn a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_b
     };
     for json in [false, true] {
         // The lines of a JSON output are one: its newlines are escapes.
-        for (body, taken) in [
-            ("x".repeat(20_000), true),
-            (format!("{}\n", "x".repeat(40)).repeat(400), true),
-            ("x".repeat(30_000), false),
-            ("\n".repeat(600), json),
+        for (body, taken, state) in [
+            ("x".repeat(20_000), true, "delivered"),
+            (
+                format!("{}\n", "x".repeat(40)).repeat(400),
+                true,
+                "delivered",
+            ),
+            ("x".repeat(30_000), false, "delivered"),
+            ("\n".repeat(600), json, "delivered"),
+            ("x".repeat(20_000), true, "delivering"),
+            (
+                format!("{}\n", "x".repeat(40)).repeat(400),
+                true,
+                "delivering",
+            ),
+            ("x".repeat(30_000), false, "delivering"),
         ] {
             let ran = cf_with(
                 &["inbox", "read", "m-12"],
                 json,
                 vec![
-                    reply(200, role("delivered", body.clone(), true)),
+                    reply(200, role(state, body.clone(), true)),
                     reply(200, json!({})),
                 ],
                 None,
@@ -660,13 +703,13 @@ fn a_role_cf_inbox_read_printed_whole_once_delivered_is_acknowledged_up_to_the_b
                 assert_eq!(
                     asked(&ran),
                     [("GET", "/api/inbox/12")],
-                    "{} bytes",
+                    "{} bytes {state}",
                     body.len()
                 );
             }
         }
     }
-    for (state, said) in [("delivered", false), ("read", true), ("delivering", true)] {
+    for (state, said) in [("delivered", false), ("read", true)] {
         let ran = cf(
             &["inbox", "read", "m-12"],
             vec![
