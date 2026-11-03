@@ -9,6 +9,7 @@
 mod editing;
 mod finishing;
 mod giving;
+mod outage;
 mod own_steps;
 mod pausing;
 
@@ -30,6 +31,8 @@ pub use giving::NewTask;
 pub(crate) use giving::{
     assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
 };
+pub(crate) use outage::{no_longer_failed, no_longer_waiting, tell_closed};
+pub use outage::{window_closed, SAME_ERROR_WITHIN_MS};
 pub(crate) use own_steps::withdrawn_late;
 pub use pausing::resumed_in_vain;
 pub(crate) use pausing::{

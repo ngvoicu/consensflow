@@ -67,7 +67,7 @@
 
 use cf_harness::contract::Pane;
 use cf_harness::records::Pending;
-use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
+use cf_ledger::{window_closed, NewNote, ParticipantView, ProjectView, TaskThread};
 use cf_proto::panes::{Background, BackgroundProcess, PossiblyLeft};
 
 use crate::dispatcher::Dispatcher;
@@ -114,13 +114,13 @@ impl Dispatcher {
             return Ok(());
         };
         let number = thread.task.number;
-        self.seams.ledger.borrow_mut().note(
+        self.seams.ledger.borrow_mut().tell_closed(
             project.id,
             &NewNote {
                 from: None,
                 to: thread.task.requester.clone(),
                 task: Some(number),
-                body: closed_leaving(&format!("T-{number}'s window closed"), left, possibly),
+                body: closed_leaving(&window_closed(number), left, possibly),
             },
         )?;
         Ok(())

@@ -372,7 +372,20 @@ impl Ledger {
         number: i64,
         reason: &str,
     ) -> Result<TaskView, LedgerError> {
-        tasks::give_up_task(&mut self.store, project_id, number, reason)
+        tasks::give_up_task(&mut self.store, project_id, number, reason, "")
+    }
+
+    /// [`Ledger::give_up_task`] of a task whose failure said what `cause` says (what the
+    /// engine tells one outage from the next by): its requester is told in one note of the
+    /// windows that failed alike while it has still to be given the first.
+    pub fn give_up_task_for_cause(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        reason: &str,
+        cause: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::give_up_task(&mut self.store, project_id, number, reason, cause)
     }
 
     /// What the note that tells `requester` that task `number` failed adds of the tasks it asked

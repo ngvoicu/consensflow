@@ -219,10 +219,12 @@ runs = ["engine-queued-tells"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-            .give_up_task(project.id, task.number, because)?;
+            cause,
+        )?;
         Ok(())'''
 replace = '''
-            .give_up_task(project.id, task.number, because)?;
+            cause,
+        )?;
         self.tell_failed(project, task, &task.requester, because, &[], None, "")'''
 
 [[plant]]
@@ -234,10 +236,10 @@ runs = ["ledger-told-edges", "engine-queued-tells"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
         if given_up {
-            let words = failed(told.waiting_for_the_reopen(None));'''
+            outage::tell_failure('''
 replace = '''
         if given_up && false {
-            let words = failed(told.waiting_for_the_reopen(None));'''
+            outage::tell_failure('''
 
 [[plant]]
 name = "removal tellers: the daemon gives up on a task and the words told to its window go with what was queued"

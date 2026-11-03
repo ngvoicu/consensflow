@@ -85,6 +85,7 @@ mod not_ready;
 mod nothing_to_stop;
 mod open_deadline;
 mod out_of_quota;
+mod outage_notes;
 mod own_steps;
 mod pacing;
 mod participant_leaves;

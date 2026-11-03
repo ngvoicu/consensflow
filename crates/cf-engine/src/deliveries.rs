@@ -1993,17 +1993,23 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// `task` fails `because`, as the failed turn of its window said it, which `cause` tells
+    /// from another outage (empty where the screen could not be read). The ledger tells the
+    /// requester, with the words that went (T-437), and of the windows that failed alike
+    /// before it was given the first, in one note.
     pub(crate) fn fail_task(
         &self,
         project: &ProjectView,
         task: &TaskView,
         because: &str,
+        cause: &str,
     ) -> Result<(), EngineError> {
-        // The ledger tells the requester, with the words that went (T-437).
-        self.seams
-            .ledger
-            .borrow_mut()
-            .give_up_task(project.id, task.number, because)?;
+        self.seams.ledger.borrow_mut().give_up_task_for_cause(
+            project.id,
+            task.number,
+            because,
+            cause,
+        )?;
         Ok(())
     }
 

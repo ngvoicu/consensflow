@@ -306,10 +306,7 @@ impl Dispatcher {
         if observed.failed {
             // A failed turn holds its task for nothing it left (T-532's P3-3).
             record.held.borrow_mut().reset();
-            let because = self
-                .why_it_failed(participant, record, observed)
-                .await?
-                .said;
+            let why = self.why_it_failed(participant, record, observed).await?;
             // The task may have moved on while the window was looked at.
             let still = self
                 .seams
@@ -318,7 +315,7 @@ impl Dispatcher {
                 .active_task(participant.id, false)?
                 .is_some_and(|now| now.task.id == thread.task.id && now.task.state == "working");
             if still && !self.forgotten(record) {
-                self.fail_task(project, &thread.task, &because)?;
+                self.fail_task(project, &thread.task, &why.said, &why.key)?;
             }
             return Ok(Turn::Open);
         }
