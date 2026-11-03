@@ -180,7 +180,30 @@ pub fn field() -> Vec<Scenario> {
                     .events
                     .iter()
                     .any(|event| event["kind"] == "task.retiered");
+                let events = &judged.snapshot.events;
+                let t = judged.nth("T", 0).unwrap_or(0);
+                let opened_complex = events.iter().any(|event| {
+                    event["kind"] == "task.opened"
+                        && event["data"]["task"] == t
+                        && event["data"]["tier"] == "complex"
+                });
+                let left = events.iter().any(|event| {
+                    event["kind"] == "member.left"
+                        && event["data"]["handle"] == "matrix-tester-complex"
+                });
                 vec![
+                    Check::new(
+                        "T",
+                        "it was opened for a complex tester",
+                        opened_complex,
+                        format!("T-{t}"),
+                    ),
+                    Check::new(
+                        "staff",
+                        "the complex tester left the staff while T waited",
+                        left,
+                        "member.left",
+                    ),
                     oracle::state(judged, "T", 0, &["done"]),
                     Check::new(
                         "T",
