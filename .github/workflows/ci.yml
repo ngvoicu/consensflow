@@ -100,7 +100,8 @@ jobs:
       # turns in one process (cf_e2e::serial); nextest runs each in a process of its own,
       # each on a board of its own (a home, a daemon, its ports), 4 at a time: the runners
       # have 3 processors (macOS) and 4 (Windows), and a case mostly waits on its board.
-      # On a Mac 4 at a time took 316 s, its cases 1,179 s together (T-1184). The limit is
+      # Its 40 cases took 468 to 494 s 4 at a time on a Mac and 474 s on Windows (T-1186;
+      # 31 took 256 to 316 s, T-1184). The limit is
       # set with a margin over that until CI's own runs read it (`cargo xtask ci-times
       # --step "The live matrix"`); suites.rs holds this step, ci_times' tests its limit.
       - name: The live matrix on the stand-ins
