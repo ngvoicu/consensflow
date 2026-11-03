@@ -229,8 +229,8 @@ runs = ["handoff-receipt-doors"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "            shut_doors(store, &task, window)?;"
-replace = "            let _ = (window, shut_doors as fn(&Store, &TaskRow, i64) -> Result<(), LedgerError>);"
+find = "        shut_doors(store, task, window)?;"
+replace = "        let _ = (window, shut_doors as fn(&Store, &TaskRow, i64) -> Result<(), LedgerError>);"
 
 [[plant]]
 name = "handoff questions: the doors shut are every question's of the project, not the task's"

@@ -132,7 +132,7 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        withdraw_result(store, &task, "was accepted")?;
+    withdraw_result(store, task, "was accepted")?;
 '''
 replace = ""
 

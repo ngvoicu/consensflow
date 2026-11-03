@@ -124,7 +124,7 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
+find = '    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
 replace = ''
 
 [[plant]]
@@ -144,7 +144,7 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        withdraw_result(store, &task, "was accepted")?;'
+find = '    withdraw_result(store, task, "was accepted")?;'
 replace = ''
 
 [[plant]]
@@ -394,7 +394,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        withdraw_result(store, &task, "was accepted")?;'
+find = '    withdraw_result(store, task, "was accepted")?;'
 replace = ''
 
 [[plant]]

@@ -211,7 +211,7 @@ fn a_task_that_fails_leaves_its_follow_up_waiting_and_the_chief_is_told_once() {
     assert_eq!(
         notes_to_the_chief(&w, b),
         [format!(
-            "T-{b} waits for T-{a}, which failed: cancel T-{b}, or reopen T-{a} and let it finish."
+            "T-{b} waits for T-{a}, which failed: cancel T-{b}, reopen T-{a} and let it finish, or accept T-{a} with what you checked: cf task accept T-{a} \"…\""
         )]
     );
 
@@ -289,7 +289,7 @@ fn a_follow_up_that_waits_for_a_task_failing_twice_is_told_to_the_chief_each_tim
         .fail_task(w.project, a, "its pane died again")
         .expect("failed again");
     let told = format!(
-        "T-{b} waits for T-{a}, which failed: cancel T-{b}, or reopen T-{a} and let it finish."
+        "T-{b} waits for T-{a}, which failed: cancel T-{b}, reopen T-{a} and let it finish, or accept T-{a} with what you checked: cf task accept T-{a} \"…\""
     );
     assert_eq!(notes_to_the_chief(&w, b), [told.clone(), told]);
     assert_eq!(w.state(b), "open");

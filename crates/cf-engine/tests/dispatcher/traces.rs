@@ -49,7 +49,8 @@
 //! task goes on; a result the chief decides on before it is given it is
 //! withdrawn, not pasted after the decision; a window that did not come up is
 //! asked what it shows before it is closed; the human's Resume of a project has
-//! the work its Close paused at work again), is named in [`DEPARTED`], with
+//! the work its Close paused at work again; the note that a task failed offers the
+//! chief the accept as well as the reopen), is named in [`DEPARTED`], with
 //! what it does that Node does not. It is held to a trace of its own, recorded
 //! from the engine (`tests/departures/`, `npm run departures`), and fails when
 //! Node's trace is the engine's again, so the departure is taken off once Node
@@ -211,6 +212,9 @@ const READ_ONCE_MORE: &str = "before the paste its record never showed goes agai
 /// its last tool call (the owner's decision of 2026-10-15), where Node's is everything the
 /// member wrote in its turn, in order.
 const FINAL_ANSWER: &str = "the member wrote a report, ran a command and ended with `Committed.`: the result is `Committed.`, the final answer, where Node's is the report and `Committed.`, everything it wrote in the turn";
+
+/// A task failed, said to its requester (T-1111).
+const ACCEPT_IN_THE_FAIL_NOTE: &str = "the note that T-1 failed says how to reopen it and then `, or accept it with what you checked: cf task accept T-1 \"…\"`, where Node's ends at the reopen: a failed task whose work is done is accepted by the chief on its word, with the words of what it checked as its result";
 
 /// The tests the engine departs from Node's trace in on purpose, each with
 /// what the engine does that Node does not. Node never withdraws a note that
@@ -423,6 +427,30 @@ const DEPARTED: &[(&str, &str)] = &[
     (
         "hands nothing to an old chief whose switch waited for its turn's end once its project is deleted, nor switches a project created meanwhile",
         "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
+    ),
+    (
+        "begins the preparation of every launch of a pass before it writes the failure of the first",
+        ACCEPT_IN_THE_FAIL_NOTE,
+    ),
+    (
+        "fails a deleted session's follow-up as any launch fails when its harness has lost the conversation, and the task goes to its tier instead",
+        ACCEPT_IN_THE_FAIL_NOTE,
+    ),
+    (
+        "fails what was given to a member on it by name, and its requester hears why",
+        ACCEPT_IN_THE_FAIL_NOTE,
+    ),
+    (
+        "tells the human once when a task they gave fails",
+        ACCEPT_IN_THE_FAIL_NOTE,
+    ),
+    (
+        "fails the task when the worker window cannot open",
+        ACCEPT_IN_THE_FAIL_NOTE,
+    ),
+    (
+        "forgets the files a launch wrote when its window never opens: refused by the host, or its adapter failed",
+        ACCEPT_IN_THE_FAIL_NOTE,
     ),
 ];
 

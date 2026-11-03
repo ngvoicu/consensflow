@@ -555,7 +555,11 @@ fn a_member_removed_takes_the_words_told_to_its_tasks_window_and_whoever_told_th
 fn a_task_whose_harness_failed_keeps_the_words_still_on_their_way_for_its_reopen_and_whoever_told_them_hears_they_wait(
 ) {
     let why = "@zeus's harness reported a failure";
-    let reopen = |task: i64| format!(" Reopen it with: cf task reopen T-{task} \"…\"");
+    let reopen = |task: i64| {
+        format!(
+            " Reopen it with: cf task reopen T-{task} \"…\", or accept it with what you checked: cf task accept T-{task} \"…\""
+        )
+    };
     let wait = |ids: &[i64]| {
         let named: Vec<String> = ids.iter().map(|id| format!("m-{id}")).collect();
         format!(

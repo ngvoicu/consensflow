@@ -89,15 +89,15 @@
 //! note whole and said so, and the ledger then records the role told, in the
 //! write that marks the note read (`receive_read`). `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 211
-//! rows with specs on, 240 without, on the same text (its bytes are the bound).
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 208
+//! rows with specs on, 236 without, on the same text (its bytes are the bound).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 46 rows (75 without specs) is read whole,
-//! a staff of 25 with 1,049 bytes and 62 lines to spare.
+//! the most rules and a staff of up to 42 rows (71 without specs) is read whole,
+//! a staff of 25 with 874 bytes and 60 lines to spare.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).

@@ -17,7 +17,7 @@ use cf_engine::testing::Context;
 fn failed(tiers: &Tiers<'_>, because: &str) -> String {
     let handle = tiers.assignee(1);
     let because = because.replace("@zeus", &format!("@{handle}"));
-    format!("T-1 failed: {because}. Reopen it with: cf task reopen T-1 \"…\"")
+    format!("T-1 failed: {because}. Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"")
 }
 
 /// zeus's turn on T-1 fails, its record saying `words` of why.
@@ -487,7 +487,7 @@ fn the_rows_a_paste_carried_are_part_of_it_on_screen_and_the_error_after_them_is
     assert_eq!(
         told,
         [format!(
-            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )]
     );
 }
@@ -575,7 +575,7 @@ fn a_long_brief_whose_header_scrolled_off_is_still_no_reason() {
     assert_eq!(
         told_of_t1(&context, project.id),
         [format!(
-            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )]
     );
 }

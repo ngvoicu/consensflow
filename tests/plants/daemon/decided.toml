@@ -20,9 +20,9 @@ runs = ["decided-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
-        withdraw_result(store, &task, "was accepted")?;'''
-replace = '        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
+    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
+    withdraw_result(store, task, "was accepted")?;'''
+replace = '    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
 
 [[plant]]
 name = "decided result: an accept leaves it, and the dispatcher pastes it into the chief"
@@ -32,9 +32,9 @@ runs = ["decided-engine"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
-        withdraw_result(store, &task, "was accepted")?;'''
-replace = '        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
+    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
+    withdraw_result(store, task, "was accepted")?;'''
+replace = '    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
 
 [[plant]]
 name = "decided result: a sending back leaves the result its requester was not given"

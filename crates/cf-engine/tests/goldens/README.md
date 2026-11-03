@@ -139,3 +139,15 @@ the window's history, or one of an agent type the owner defined for Codex) acts 
 window. T-766 saw it: four of four Codex sub-agents that held a member's role and could not
 answer something asked the board as the member (`cf ask`), and none of three did with the
 member's sentence in that role.
+
+The chief's twelve rows say, in item 4 of "What you do" after "any task that needs it stays
+blocked", "A failed task whose work you checked is accepted too, with what you checked:
+`cf task accept T-3 "what I checked"`" (`skill/core/chief.md`), where Node's said nothing of
+a failed task, its `cf` the row's, as in every command of the text (T-1049, above): a
+designer's session died after it had saved both final files, `cf task accept` was refused,
+and the task that needed it stayed stuck until the chief cancelled it and added it again
+(T-1111, the field report of 2026-11-02). Changed by hand, in those words alone, on
+2026-11-02, and recorded from the engine on 2026-11-03 when it was merged onto the texts
+above (T-1176). The role-change budgets moved with it: a chief's replacement is read whole
+to 208 rows with specs on and 236 without (211 and 240), and to 42 and 71 with the most
+rules for the staff (46 and 75).

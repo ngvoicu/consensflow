@@ -70,7 +70,7 @@ fn a_codex_worker_whose_turn_failed_fails_its_task_with_what_codex_said() -> Out
     assert_eq!(
         failed_notes(&project)?,
         [format!(
-            "T-1 failed: @{session}'s harness reported a failure; it said: \"{SAID}\". Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: @{session}'s harness reported a failure; it said: \"{SAID}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )]
     );
     rig.close()?;

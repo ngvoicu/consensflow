@@ -112,7 +112,10 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["task", "accept"],
-        "  cf task accept|cancel T-3         move a task you asked for\n",
+        concat!(
+            "  cf task accept|cancel T-3         move a task you asked for\n",
+            "  cf task accept T-3 \"…\"            accept a failed task you checked; your words are its result\n",
+        ),
     ),
     (
         &["task", "cancel"],
