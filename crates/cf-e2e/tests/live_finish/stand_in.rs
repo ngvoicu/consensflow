@@ -83,7 +83,14 @@ fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_ru
     let log = Log::new("live finish test");
     let plan = leaving::plan(Who::StandIn);
     let brief = leaving::stand_in_brief(true);
-    let finished = leaving::run_asked(Who::StandIn, &plan, Path::new(FAKE_AGENT), &brief, &log)?;
+    let finished = leaving::run_asked(
+        Who::StandIn,
+        &plan,
+        Path::new(FAKE_AGENT),
+        &brief,
+        leaving::Expect::Ended,
+        &log,
+    )?;
     let text = finished.case.text();
     assert!(!finished.case.held(), "{text}");
     assert!(
@@ -107,6 +114,95 @@ fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_ru
         !cf_e2e::process::is_alive(job)
     });
     assert!(gone, "the job {job} is left running: {text}");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_own_holds_the_case_as_the_known_limit_and_the_run_ends_the_job(
+) -> Result {
+    // Pi's and Devin's tool shells lead sessions of their own (T-1068: `sleep 4711`, parent 1,
+    // terminal `??`), so a job they detach with `&` once the shell ends has nothing that ties it
+    // to the window: the host never lists it, the close does not find it and the chief is told
+    // nothing. The step expects that of those two on a Mac. It holds when the task is done and
+    // its result delivered, the chief was told nothing false and the job is the run's own, which
+    // the run ends by which process it is.
+    let log = Log::new("live finish test");
+    let plan = leaving::plan(Who::StandIn);
+    let brief = leaving::stand_in_brief(true);
+    let finished = leaving::run_asked(
+        Who::StandIn,
+        &plan,
+        Path::new(FAKE_AGENT),
+        &brief,
+        leaving::Expect::OwnSession,
+        &log,
+    )?;
+    let text = finished.case.text();
+    // The harness of the plants keeps the end of a long failure: what went wrong comes last.
+    assert!(
+        finished.case.held(),
+        "{text}\n\nthe first thing wrong: {}",
+        finished.summary
+    );
+    assert!(
+        text.contains("the known limit on a Mac"),
+        "the run says what it let pass: {text}"
+    );
+    assert!(
+        text.contains(
+            "ok   the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing: T-1 done "
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("what the chief was told of work the turn left: nothing"),
+        "{text}"
+    );
+    assert!(text.contains(", terminal ??)"), "{text}");
+    assert!(!text.contains("FAIL"), "{text}");
+    // The run found the job in its own folder: an orphan that began after the window.
+    assert!(
+        text.contains("the run found what the agent detached in its own folder"),
+        "{text}"
+    );
+    // It ended the job: nothing of the run's is left on the machine for what its seconds are.
+    let job = process_after(&text, "still running: ").expect("the line names the job's process");
+    let gone = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        !cf_e2e::process::is_alive(job)
+    });
+    assert!(gone, "the job {job} is left running: {text}");
+    Ok(())
+}
+
+#[test]
+fn a_run_that_expects_the_limit_of_a_job_the_close_ends_holds_it_to_the_ending_and_lets_nothing_pass(
+) -> Result {
+    // The expectation lets one shape pass. A stand-in that leaves its job in a shell that waits
+    // for it, as Claude Code's shell tool does, is ended by the window's close and the chief is
+    // told, and the run says so: the same checks as for a harness that is expected to end it.
+    let log = Log::new("live finish test");
+    let plan = leaving::plan(Who::StandIn);
+    let brief = leaving::stand_in_brief(false);
+    let finished = leaving::run_asked(
+        Who::StandIn,
+        &plan,
+        Path::new(FAKE_AGENT),
+        &brief,
+        leaving::Expect::OwnSession,
+        &log,
+    )?;
+    let text = finished.case.text();
+    assert!(finished.case.held(), "{text}");
+    assert!(
+        text.contains(
+            "ok   the command was ended by the window's close after the result, and the chief told: T-1 done "
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("the known limit on a Mac"), "{text}");
+    assert!(!text.contains("FAIL"), "{text}");
     Ok(())
 }
 
