@@ -126,8 +126,8 @@ pub fn seat_fields() -> Vec<Scenario> {
                     Check::new(
                         "A",
                         "the chief was told what its window's close ended",
-                        chief_messages_with(judged, "sleep 600").len() == 1,
-                        crate::live::cut(&chief_messages_with(judged, "sleep 600").join(" | "), 200),
+                        chief_messages_with(judged, "which its close ended").len() == 1,
+                        crate::live::cut(&chief_messages_with(judged, "which its close ended").join(" | "), 200),
                     ),
                 ]
             },
