@@ -29,6 +29,7 @@ dl-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_fin
 name = "detached limit: Claude Code is let off the ending too"
 meant = "a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_the_ending_for_the_rest"
 runs = ["dl-leaving"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
@@ -39,6 +40,7 @@ replace = '''            Who::Harness(Harness::Pi | Harness::Devin | Harness::Cl
 name = "detached limit: Devin is not expected to come to the limit"
 meant = "a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_the_ending_for_the_rest"
 runs = ["dl-leaving"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
@@ -121,6 +123,7 @@ replace = '''        Ok(()) if false => format!('''
 name = "detached limit: the case calls a limit it let pass an ending"
 meant = "a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_own_holds_the_case_as_the_known_limit_and_the_run_ends_the_job"
 runs = ["dl-stand-in"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
@@ -153,6 +156,7 @@ replace = '''    expect == Expect::OwnSession'''
 name = "detached limit: the run never looks for its own orphans"
 meant = "a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_own_holds_the_case_as_the_known_limit_and_the_run_ends_the_job"
 runs = ["dl-stand-in"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
@@ -163,6 +167,7 @@ replace = '''    if false {'''
 name = "detached limit: the run says nothing of the orphans its folder found"
 meant = "a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_own_holds_the_case_as_the_known_limit_and_the_run_ends_the_job"
 runs = ["dl-stand-in"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
@@ -318,6 +323,7 @@ replace = '''.is_none_or(|there| there == folder)'''
 name = "detached limit: a folder is compared as it is spelled, through its links"
 meant = "a_folder_is_compared_by_its_real_path_and_another_folder_is_another"
 runs = ["dl-descent"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
@@ -338,6 +344,7 @@ replace = '''std::iter::once(orphan.clone())'''
 name = "detached limit: the folder a Mac says is read to the end of the block, not to its 0"
 meant = "a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has"
 runs = ["dl-descent"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent/native.rs"
@@ -348,6 +355,7 @@ replace = '''.take_while(|_| true)'''
 name = "detached limit: the folder a Mac says is the process's, read from another flavor"
 meant = "a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has"
 runs = ["dl-descent"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent/native.rs"
