@@ -511,3 +511,15 @@ runs = ["friction-leg-closes"]
 file = "crates/cf-engine/src/ownership.rs"
 find = 'if waiting.task.state == "queued" && never_in_a_window {'
 replace = 'if false {'
+
+[[plant]]
+name = "board friction: hold: a hold note given up after the resume is failed"
+meant = "a_hold_note_given_up_after_the_task_was_resumed_is_withdrawn_and_not_failed_and_its_warning_stays"
+runs = ["friction-hold-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''    [Way::Resume, Way::Gone, Way::Held]
+        .into_iter()'''
+replace = '''    [Way::Resume, Way::Gone]
+        .into_iter()'''

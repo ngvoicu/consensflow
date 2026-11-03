@@ -248,6 +248,36 @@ fn a_hold_note_on_its_way_when_the_task_is_resumed_is_not_sent_again_after_a_ref
 }
 
 #[test]
+fn a_hold_note_given_up_after_the_task_was_resumed_is_withdrawn_and_not_failed_and_its_warning_stays(
+) {
+    // The other way a delivery ends: the chief's window is gone, and the note fails for good
+    // (`fail_delivery`). A note for a task that moved on while it was on its way is no failure:
+    // it is withdrawn, and the warning that the window before may still write is said apart.
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_with_two_queued_tasks(&dir);
+    ledger.hold_for_context(1, 2, &unproven()).expect("held");
+    let held = notes_about(&ledger, 2)[0].id;
+    ledger.begin_delivery(held).expect("on its way");
+    ledger
+        .resume_task(1, 2, Some("human"), "Go on in a window of your own.")
+        .expect("resumed");
+
+    ledger
+        .fail_delivery(held, "the chief's window is gone")
+        .expect("given up");
+
+    assert_eq!(
+        message(&ledger, held).state,
+        "cancelled",
+        "withdrawn, not failed"
+    );
+    assert_eq!(
+        said_again(&ledger),
+        [format!("T-2 resumed. Before that, {}.", unproven())]
+    );
+}
+
+#[test]
 fn a_hold_for_a_conversation_the_harness_lost_leaves_no_warning_when_its_note_goes() {
     let dir = tempfile::tempdir().expect("a folder");
     let mut ledger = ledger_with_two_queued_tasks(&dir);
