@@ -197,7 +197,7 @@ pub enum Reply {
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
 /// ConsensFlow installed there. What it printed and said, trimmed.
-fn run_cf(words: &[String]) -> String {
+pub fn run_cf(words: &[String]) -> String {
     match Run::new("cf")
         .args(words)
         .inheriting_env()

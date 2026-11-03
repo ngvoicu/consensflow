@@ -137,6 +137,8 @@ mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
 mod a_workers_question_in_its_last_words_was_given_as_its_result;
 #[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
 mod a_workers_still_going_was_given_as_its_result;
+#[path = "regressions/a_workers_write_up_was_lost_when_its_question_was_still_out.rs"]
+mod a_workers_write_up_was_lost_when_its_question_was_still_out;
 #[path = "regressions/an_idle_quit_with_a_message_queued_read_as_a_cut_turn.rs"]
 mod an_idle_quit_with_a_message_queued_read_as_a_cut_turn;
 #[path = "regressions/claude_continues_by_itself_after_its_limit.rs"]
