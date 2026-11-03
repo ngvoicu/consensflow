@@ -378,9 +378,8 @@ replace = '''        (["task.assigned"].contains(&event["kind"].as_str().unwrap_
 
 [[plant]]
 name = "live matrix: the daemon's refusal words are not written"
-meant = "field6_paused_holder"
-runs = ["matrix-control-field6"]
-builds = true
+meant = "a_tooling_daemon_writes_each_window_request_it_answered_with_its_refusal_code_and_no_token"
+runs = ["matrix-daemon-api"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/calls.rs"
