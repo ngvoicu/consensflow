@@ -1519,6 +1519,20 @@ find = '''                set_conversation_role_text(store, conversation.id, &ro
 replace = '''                let _ = (conversation.id, &role);
 '''
 
+# The chief's role with specs on goes in part (T-1009, and with the window's cf in every
+# command T-1049): it is recorded where `cf inbox read` read it (T-1021), not where it was
+# delivered. Both recordings out: the text said is recorded nowhere (T-1093).
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''        set_conversation_role_text(store, conversation.id, &role)?;
+    }
+    Ok(())
+'''
+replace = '''        let _ = (conversation.id, &role);
+    }
+    Ok(())
+'''
+
 [[plant]]
 name = "codex role rig: the copy of the skill is kept in the harness's folder of launches (the Claude rig)"
 meant = "a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_next_launch_and_a_worker_never_is"
