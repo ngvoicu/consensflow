@@ -237,7 +237,7 @@ fn a_task_in_a_window_cannot_wait_for_a_new_one_and_the_refusal_says_what_to_do_
     assert_eq!(queued.code(), Some("not-on-the-board"));
     assert_eq!(
         queued.to_string(),
-        "T-1 is queued: only a task still on the board can wait for a new one; a task in a window is not pulled back. Add the new task without --before, then put T-1 behind it with cf task edit T-1 --needs +T-<the new task> while its brief has not begun to reach its window; or cancel it and add it again with --needs on the new task"
+        "T-1 is queued: only a task still on the board can wait for a new one; a task in a window is not pulled back. Add the new task without --before, then put T-1 behind it with cf task edit T-1 --needs +T-<the new task>; or cancel it and add it again with --needs on the new task"
     );
     ledger.begin_delivery(brief).expect("its delivery begins");
     ledger
