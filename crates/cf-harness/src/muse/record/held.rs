@@ -19,6 +19,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::field;
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::reading::{native_id, Role};
 
@@ -32,6 +33,8 @@ pub(super) struct Held {
     calls: HashMap<Arc<str>, HashSet<Arc<str>>>,
     /// The questions and approvals each run asked that are not settled.
     asked: HashMap<Arc<str>, HashSet<Arc<str>>>,
+    /// The last tool call any run committed, as a line (`calls::describe`).
+    last_call: Option<Arc<LastCall>>,
 }
 
 impl Held {
@@ -49,6 +52,10 @@ impl Held {
         Ok(match kind {
             "assistant_tool_calls_committed" => {
                 for call in list(field(event, "tool_calls")) {
+                    let name = field(Some(call), "name").and_then(Value::as_str);
+                    if let Some(line) = describe(name, field(Some(call), "args")) {
+                        self.last_call = Some(line);
+                    }
                     if let Some(id) = id_of(call, &["call_id", "id"]) {
                         self.calls.entry(Arc::clone(run)).or_default().insert(id);
                     }
@@ -122,6 +129,11 @@ impl Held {
                 self.asked.remove(run);
             }
         }
+    }
+
+    /// The last tool call any run committed, as a line.
+    pub(super) fn last_call(&self) -> Option<&Arc<LastCall>> {
+        self.last_call.as_ref()
     }
 
     /// Whether the run `run` holds a tool call or a question open.

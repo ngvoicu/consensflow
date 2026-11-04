@@ -56,6 +56,32 @@ fn a_failed_turn_says_what_its_harness_said_of_it() {
 }
 
 #[test]
+fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_before_its_words() {
+    // T-823: Codex's safety filter refused the turn (kluris T-158 and T-163), and the board
+    // said only that the harness reported a failure.
+    let context = Context::new();
+    let tiers = working(&context);
+    context.adapter.with("zeus", |agent| {
+        agent.failure_kind = Some(
+            "Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness"
+                .to_owned(),
+        );
+    });
+    fails(
+        &context,
+        Some("This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request."),
+    );
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure: Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness; it said: \"This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request.\""
+        )]
+    );
+}
+
+#[test]
 fn a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last() {
     let context = Context::new();
     let tiers = working(&context);
@@ -97,7 +123,8 @@ fn the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line() {
     // A first line too long for the quote is cut, and nothing after it is kept.
     let context = Context::new();
     let tiers = working(&context);
-    let long = format!("Internal error: {}", "x".repeat(600));
+    // Words: forty letters in a row are a token's, and are hidden.
+    let long = format!("Internal error: {}", "ab ".repeat(200));
     fails(&context, Some(&format!("{long}\nsecond line")));
     let quoted = format!("{}…", &long[..399]);
     assert_eq!(

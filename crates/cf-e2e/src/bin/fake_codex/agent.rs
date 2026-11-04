@@ -428,6 +428,24 @@ impl Agent {
             );
             return;
         }
+        // The turn Codex's safety filter refused, as the rollouts of kluris T-158 and T-163
+        // recorded it (2026-10-27, Codex 0.164.0): the error's words and its kind.
+        if text.contains("TURN-FILTERED") {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. If you\u{2019}re doing authorized security work that requires more cyber permissive safeguards, apply for Daybreak access via https://platform.openai.com/settings/organization/status-and-access before retrying.",
+                        "codex_error_info": "cyber_policy",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
         if text.contains("TURN-FAILS") {
             self.write(
                 "event_msg",

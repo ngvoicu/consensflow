@@ -22,6 +22,7 @@ use super::patterns::{BARE_COMPACT, CAVEAT, OUTPUT};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
 use crate::shared::quota::{account_refusal, busy_refusal, spent_extra_usage, Refusal};
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -98,6 +99,9 @@ pub(super) struct Assistant {
     pub(super) text: String,
     /// The tool calls and results of the content, in order.
     pub(super) blocks: Vec<Block>,
+    /// The last tool call of the main conversation the content makes, as a line
+    /// (`describe`): what the window was doing, for the note of a window that closed.
+    pub(super) last_call: Option<Arc<LastCall>>,
     /// The message stopped as `end_turn` or `stop_sequence`.
     pub(super) ended: bool,
     /// Claude Code's own close of the turn it found cut as it resumed the
@@ -384,6 +388,7 @@ fn assistant(record: &Value, session: &str) -> Projected {
             _ => None,
         })
         .collect();
+    let last_call = blocks_of_main_calls(content, main);
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
     let text = claude_text(content);
     let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
@@ -420,6 +425,7 @@ fn assistant(record: &Value, session: &str) -> Projected {
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
         blocks,
+        last_call,
         ended: matches!(
             in_message("stop_reason").and_then(Value::as_str),
             Some("end_turn" | "stop_sequence")
@@ -558,6 +564,25 @@ fn first_call(content: Option<&Value>) -> Option<Value> {
         .iter()
         .find(|block| kind(block) == Some("tool_result"))
         .and_then(|block| said(block.get("tool_use_id")))
+}
+
+/// The last `tool_use` of the main conversation's content as a line: what the window ran
+/// last. A subagent's calls (`main` false) and the API's own server tools are no call of the
+/// window's.
+fn blocks_of_main_calls(content: Option<&Value>, main: bool) -> Option<Arc<LastCall>> {
+    if !main {
+        return None;
+    }
+    blocks(content)
+        .iter()
+        .rev()
+        .filter(|block| kind(block) == Some("tool_use"))
+        .find_map(|block| {
+            describe(
+                block.get("name").and_then(Value::as_str),
+                block.get("input"),
+            )
+        })
 }
 
 /// What call of the main conversation (`main`) a `tool_use` block makes, by its tool's

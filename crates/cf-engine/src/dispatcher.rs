@@ -46,7 +46,7 @@ use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::{busy_turn, moved_hold, out_words, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
-use crate::shown::Shown;
+use crate::shown::{Part, Shown};
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
@@ -773,6 +773,8 @@ impl Dispatcher {
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
         let said_yes = trust::yes_at_exit(&record, &shown);
+        // What the engine had sent this window, told before `closed` clears it.
+        let sent = record.window.borrow().sent_to.contains(pane);
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -956,6 +958,38 @@ impl Dispatcher {
                     .await?;
             }
         } else {
+            // What the window was doing when it closed under its task, from its conversation's
+            // record, where the close is not the engine's own (which says why it closed
+            // instead): the note names the last tool call, which no screen of the window says
+            // (T-823, kluris T-153). A participant that moved on while the record was read
+            // settles nothing more of this exit, as after `settle_gone`. No stop and no close of
+            // the engine's own was under way when it is not an own close: a signal that ended
+            // the program came from outside ConsensFlow, which the note says.
+            let own_close = record.window.borrow().own_exit_of(pane).is_some();
+            let last_call = if own_close
+                || self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .active_task(record.id, false)?
+                    .is_none()
+            {
+                None
+            } else {
+                let launches = record.window.borrow().launches;
+                let call = self.last_call_of(participant.id).await;
+                if !self.still_as_it_went(&record, launches) {
+                    self.changed();
+                    return Ok(());
+                }
+                call
+            };
+            let shown = if own_close {
+                shown
+            } else {
+                let part = if sent { Part::Sent } else { Part::NotSent };
+                shown.with_part(part).with_last_call(last_call)
+            };
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
             // A task shown working (or waiting) for the words that resumed it, which had not
             // gone in, goes back to queued with them: the claim was its window's, and the

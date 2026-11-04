@@ -46,6 +46,7 @@ use crate::shared::quota::{
     unavailable_quota, Quota,
 };
 use crate::shared::record::cache::{Look, Options};
+use crate::shared::record::calls::{describe, LastCall};
 use crate::shared::record::followed::{Followed, Parser};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -134,6 +135,8 @@ struct Session {
     failed: bool,
     /// Why the latest turn failed, where Pi said (`errorMessage`).
     failure: Option<String>,
+    /// The last tool call the session shows, as a line (`calls::describe`).
+    last_call: Option<Arc<LastCall>>,
     quota: Option<Arc<Quota>>,
     records: usize,
     keys: Keys,
@@ -152,6 +155,7 @@ impl Session {
             terminal: None,
             failed: false,
             failure: None,
+            last_call: None,
             quota: None,
             records: 0,
             keys: Keys::default(),
@@ -232,6 +236,10 @@ impl Session {
         if let Some(Value::Array(blocks)) = field("content") {
             for block in blocks {
                 if block.get("type").and_then(Value::as_str) == Some("toolCall") {
+                    let name = block.get("name").and_then(Value::as_str);
+                    if let Some(line) = describe(name, block.get("arguments")) {
+                        self.last_call = Some(line);
+                    }
                     let call = self.keys.of(block.get("id"));
                     if call.truthy() {
                         self.open_tools.insert(call);
@@ -338,6 +346,7 @@ impl Session {
         record.in_flight = in_flight;
         record.failed = self.failed;
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
+        record.last_call.clone_from(&self.last_call);
         record.quota = self.quota.clone();
         record.settlement = if native_settled || can_settle {
             Settlement::Settled

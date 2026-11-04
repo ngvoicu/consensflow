@@ -163,6 +163,9 @@ impl Transcript {
         if let Some(model) = &record.model {
             self.answered_from(model, record.fallback.as_ref(), record.at.as_ref());
         }
+        if record.last_call.is_some() {
+            self.last_call.clone_from(&record.last_call);
+        }
         let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));
         let item = self.items.assistant(Arc::clone(&message_id), at, seq);
