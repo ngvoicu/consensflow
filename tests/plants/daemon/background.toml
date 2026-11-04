@@ -1434,7 +1434,7 @@ runs = ["panes-lib-turn"]
 file = "crates/cf-panes/src/pty/turn.rs"
 find = '''
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+        Ok(steady(&first, self.named(baseline)?))'''
 replace = '''
         let _ = SETTLE;
         Ok(first)'''
@@ -1492,7 +1492,7 @@ builds = true
 file = "crates/cf-panes/src/pty/turn.rs"
 find = '''
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+        Ok(steady(&first, self.named(baseline)?))'''
 replace = '''
         let _ = SETTLE;
         Ok(first)'''
@@ -1530,7 +1530,7 @@ replace = '''
 file = "crates/cf-panes/src/pty/turn.rs"
 find = '''
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+        Ok(steady(&first, self.named(baseline)?))'''
 replace = '''
         let _ = SETTLE;
         Ok(first)'''
@@ -1549,7 +1549,8 @@ builds = true
 file = "crates/cf-engine/src/dispatcher.rs"
 find = """
                 let watching = self.watch_monitors(participant, record, &observed).await;
-                self.collect(project, participant, record, &observed, watching)
+                let turn = self
+                    .collect(project, participant, record, &observed, watching)
                     .await?;"""
 replace = """
                 let watching = self.watch_monitors(participant, record, &observed).await;
@@ -1562,10 +1563,12 @@ replace = """
                     ),
                     None => false,
                 };
-                if !running {
+                let turn = if running {
+                    Turn::Held
+                } else {
                     self.collect(project, participant, record, &observed, watching)
-                        .await?;
-                }"""
+                        .await?
+                };"""
 
 [[plant]]
 name = "background regression: a build's daemon, its build ended, is taken for the turn's work and told as left"

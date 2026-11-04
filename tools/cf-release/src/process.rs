@@ -96,7 +96,7 @@ mod tests {
     /// The cargo that runs these tests: a program that is on every machine that
     /// gets this far, and answers `--version` and refuses what it does not know.
     fn cargo() -> &'static OsStr {
-        OsStr::new(env!("CARGO"))
+        OsStr::new(crate::nested_cargo::CARGO)
     }
 
     fn args(words: &[&str]) -> Vec<OsString> {
@@ -107,13 +107,26 @@ mod tests {
     /// same code, and a refusal would write its complaint where these tests' output goes.
     #[test]
     fn a_program_runs_to_its_end_and_its_code_comes_back() {
-        let env = Env::from_process();
+        let env = crate::env_without_the_tests_own();
         assert_eq!(run(cargo(), &args(&["--version"]), &env).unwrap(), 0);
     }
 
     #[test]
+    fn the_environment_a_cargo_is_given_has_none_of_the_variables_cargo_gave_the_test() {
+        // Cargo sets these for the test that runs this; the rest of the environment stays.
+        assert!(Env::from_process().os("CARGO_MANIFEST_DIR").is_some());
+        let env = crate::env_without_the_tests_own();
+        assert!(
+            env.os("CARGO_MANIFEST_DIR").is_none(),
+            "the manifest's folder"
+        );
+        assert!(env.os("CARGO_PKG_NAME").is_none(), "the package's name");
+        assert!(env.os("PATH").is_some(), "the PATH stays");
+    }
+
+    #[test]
     fn what_a_program_wrote_is_kept_when_asked_with_the_code_it_left() {
-        let env = Env::from_process();
+        let env = crate::env_without_the_tests_own();
         let answered = capture(cargo(), &args(&["--version"]), &env).unwrap();
         assert_eq!(answered.code, 0);
         assert!(answered.stdout.starts_with("cargo "), "{answered:?}");

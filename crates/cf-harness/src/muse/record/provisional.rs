@@ -26,7 +26,7 @@ use serde_json::Value;
 
 use super::super::usage::wire_quota;
 use super::field;
-use crate::shared::quota::{account_refusal, Quota, Refusal};
+use crate::shared::quota::{account_refusal, busy_refusal, Quota, Refusal};
 
 /// What the provisional shapes said so far.
 #[derive(Default)]
@@ -73,6 +73,15 @@ impl Provisional {
             Refused::Account(Refusal::Credentials) => {
                 (unavailable(at, LOGIN_REFUSED), Some(LOGIN_REFUSED))
             }
+            // Its provider refused for a moment (T-1112): held and tried again, in Muse's
+            // own words, no failure of the turn.
+            Refused::Busy => (
+                Quota::Busy {
+                    at,
+                    because: reason?.trim().chars().take(300).collect(),
+                },
+                None,
+            ),
         };
         self.refusals.insert(Arc::clone(run), Arc::new(refusal));
         plain
@@ -89,6 +98,9 @@ impl Provisional {
 enum Refused {
     Limit,
     Account(Refusal),
+    /// A server error or a model at capacity: `API error <5xx>`, or words of an overloaded
+    /// or busy model (T-1112).
+    Busy,
 }
 
 /// The plain words of a failure for billing (MUS-23): what `muse usage` calls
@@ -119,14 +131,17 @@ fn refused_for(reason: &str) -> Option<Refused> {
     if let Some(refusal) = account_refusal(reason, api_status(&lower)) {
         return Some(Refused::Account(refusal));
     }
-    [
+    let limit = [
         "api error 429",
         "usage limit reached",
         "usage limit was reached",
     ]
     .iter()
-    .any(|words| lower.contains(words))
-    .then_some(Refused::Limit)
+    .any(|words| lower.contains(words));
+    if limit {
+        return Some(Refused::Limit);
+    }
+    busy_refusal(reason, api_status(&lower)).then_some(Refused::Busy)
 }
 
 /// The status of `API error <status>`, in a lowercased reason.

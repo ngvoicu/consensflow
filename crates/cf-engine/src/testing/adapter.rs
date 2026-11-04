@@ -27,7 +27,7 @@ use cf_harness::contract::{
     Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
-use cf_proto::panes::Servers;
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
@@ -139,6 +139,9 @@ pub struct FakeAgent {
     /// Why its record cannot be read now: each look reads none (`Reading::Unknown`),
     /// as when the reader's read of the transcript fails.
     pub unreadable: Option<String>,
+    /// The commands its harness says it keeps running (`Window::kept_commands`): none
+    /// unless a test says, and none where it says the harness could not tell.
+    pub kept_commands: Option<Vec<String>>,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -216,6 +219,9 @@ pub struct FakeAdapter {
     /// How its windows' harness keeps its servers (`adapter.servers`): not known,
     /// as an adapter that says no more.
     pub servers: Cell<Servers>,
+    /// How its windows' harness reads a human's paste (`adapter.silent_paste`, which no
+    /// trace of Node's has): as one that declares nothing.
+    pub silent_paste: Cell<Option<SilentPaste>>,
     /// Whether its windows' harness keeps the instructions a resumed
     /// conversation began with (`adapter.keeps_first_instructions`, which no
     /// trace of Node's has): not, as an adapter that says no more.
@@ -314,6 +320,13 @@ pub struct FakeAdapter {
     /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
     /// suite, where each window began clean.
     pub rereads_failures: Cell<bool>,
+    /// Its windows record what they are given, a launch's first message too, and begin
+    /// no turn on it: the message stays the last item of their record, and the window
+    /// reads at rest (`Some(true)`: Devin and Muse past their first moments) or in flight
+    /// (`Some(false)`: Claude Code, Codex and Pi, whose readers take a record that ends on
+    /// a message of the user's for a turn begun). None: a message that arrives begins a
+    /// turn, as the fake of Node's suite's did (the field bug T-1130).
+    pub never_begins: Cell<Option<bool>>,
 }
 
 impl FakeAdapter {
@@ -365,6 +378,7 @@ impl FakeAdapter {
                 close_after: None,
             }),
             servers: Cell::new(Servers::Unknown),
+            silent_paste: Cell::new(None),
             keeps_first_instructions: Cell::new(false),
             one_account: Cell::new(false),
             ready_while_drawing: Cell::new(false),
@@ -391,6 +405,7 @@ impl FakeAdapter {
             idle_word: Cell::new(true),
             input_box: Cell::new(None),
             rereads_failures: Cell::new(false),
+            never_begins: Cell::new(None),
         })
     }
 
@@ -662,7 +677,8 @@ impl FakeAdapter {
         let mut item = self.item(Role::Assistant, "You've hit your weekly limit");
         if let Quota::Exhausted { at: Some(at), .. }
         | Quota::Unavailable { at: Some(at), .. }
-        | Quota::Moved { at: Some(at), .. } = &quota
+        | Quota::Moved { at: Some(at), .. }
+        | Quota::Busy { at: Some(at), .. } = &quota
         {
             item.at = Some(json!(at));
         }
@@ -877,7 +893,7 @@ impl FakeAdapter {
                     // The harness's own words, as the reader makes of the companion.
                     agent.items.push(self.item(Role::Custom, &sources));
                 }
-                agent.settled = false;
+                agent.settled = self.never_begins.get().unwrap_or(false);
                 agent.pending = Pending::default();
                 agent.monitors.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
@@ -1060,13 +1076,14 @@ impl Asked {
             opening: None,
             resumable: Some(true),
             unreadable: None,
+            kept_commands: Some(Vec::new()),
         };
         if let Some(message) = launch
             .message
             .filter(|_| !fake.forgets_first_messages.get())
         {
             agent.items.push(fake.item(Role::User, message));
-            agent.settled = false;
+            agent.settled = fake.never_begins.get().unwrap_or(false);
         }
         fake.agents.borrow_mut().push(agent);
         let handle = launch.handle.to_owned();
@@ -1186,6 +1203,11 @@ impl Adapter for Asked {
 
     fn servers(&self) -> Servers {
         self.fake.servers.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the traces.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.fake.silent_paste.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

@@ -5,7 +5,7 @@
 //! copied.
 
 use cf_harness::contract::Observed;
-use cf_harness::records::Item;
+use cf_harness::records::{Item, Role};
 use cf_ledger::ParticipantView;
 use serde_json::Value;
 
@@ -108,13 +108,21 @@ impl Dispatcher {
     }
 }
 
-/// An item as the ledger copies it: as its reading writes it, and marked when
-/// it is a compaction's summary, which a reading never says.
+/// An item as the ledger copies it: as its reading writes it, marked when it is a
+/// compaction's summary, which a reading never says, and the harness's own when it
+/// is a user's item with no human's words in it (Claude Code's `<task-notification>`,
+/// which a reading keeps a user's, as Node read it, and `synthetic`). Copied as the
+/// user's, it was taken for the human typing to the chief: the wake-up calls read it
+/// as news, and a project's third nudge came with nothing moved on its board (the
+/// field board of 2026-11-02, T-1113).
 fn to_copy(item: &Item) -> Value {
     let mut value = serde_json::to_value(item).unwrap_or(Value::Null);
-    if item.compaction {
-        if let Value::Object(fields) = &mut value {
+    if let Value::Object(fields) = &mut value {
+        if item.compaction {
             fields.insert("compaction".to_owned(), Value::Bool(true));
+        }
+        if item.synthetic && item.role == Role::User {
+            fields.insert("role".to_owned(), Value::from("custom"));
         }
     }
     value

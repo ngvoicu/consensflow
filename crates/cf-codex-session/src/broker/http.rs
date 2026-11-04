@@ -92,6 +92,16 @@ async fn route(
         shared.refresh_idle().await;
         return Ok(json(StatusCode::OK, &shared.session()));
     }
+    // What Codex keeps running for the shown thread, Codex asked first.
+    if request.method() == Method::GET && target == "/terminals" {
+        return Ok(match shared.terminals().await {
+            Some(terminals) => json(StatusCode::OK, &terminals),
+            None => refuse(
+                StatusCode::SERVICE_UNAVAILABLE,
+                Refusal::NativeSessionUnavailable,
+            ),
+        });
+    }
     if request.method() != Method::POST || target != "/deliver" {
         return Ok(refuse(StatusCode::NOT_FOUND, Refusal::InvalidRecord));
     }

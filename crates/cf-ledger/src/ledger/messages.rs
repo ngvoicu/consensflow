@@ -100,6 +100,29 @@ impl Ledger {
         messages::note_hold_unavailable(&mut self.store, project_id, to, number, handle, because)
     }
 
+    /// ConsensFlow tells `to` that T-`number` is held with `handle` because its model was busy,
+    /// `because` (T-1112): tried again after a backoff, and handed to another free member of
+    /// its tier once the tries are spent where it was given by tier (`tiered`).
+    pub fn note_hold_busy(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        number: i64,
+        handle: &str,
+        because: &str,
+        tiered: bool,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_hold_busy(
+            &mut self.store,
+            project_id,
+            to,
+            number,
+            handle,
+            because,
+            tiered,
+        )
+    }
+
     /// ConsensFlow tells `to` that T-`number` is held with `handle` because its harness moved
     /// its window's model on its own, `because` (MUS-24): no reset, only the human's word.
     pub fn note_hold_moved(
@@ -147,17 +170,27 @@ impl Ledger {
     }
 
     /// Tells T-`number`'s requester what the window of `handle` ended its turn on tell `tell`
-    /// with, while the task is paused: `words`, its last complete answer after the tell. A note
-    /// for each tell; none where there is one.
+    /// with, while the task is paused: `words`, its last complete answer after the tell, and
+    /// `reply`, what it wrote first, before its first tool call, where that is other words
+    /// (T-1151). A note for each tell; none where there is one.
     pub fn note_paused_answer(
         &mut self,
         project_id: i64,
         number: i64,
         handle: &str,
         tell: i64,
+        reply: Option<&str>,
         words: &str,
     ) -> Result<Option<MessageView>, LedgerError> {
-        messages::note_paused_answer(&mut self.store, project_id, number, handle, tell, words)
+        messages::note_paused_answer(
+            &mut self.store,
+            project_id,
+            number,
+            handle,
+            tell,
+            reply,
+            words,
+        )
     }
 
     /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
@@ -231,7 +264,9 @@ impl Ledger {
     }
 
     /// Messages of `recipient` among `ids` that `cf` served whole are received,
-    /// as the way they were served receives them (`Read`): how many were.
+    /// as the way they were served receives them (`Read`): how many were. One whose
+    /// paste is still on its way keeps the read until its delivery ends, and is not
+    /// counted.
     pub fn receive_read(
         &mut self,
         recipient: i64,

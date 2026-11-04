@@ -20,18 +20,31 @@
 //! as a working one is, `finish`), and a resume sends the window on. The ledger writes the
 //! note and keeps its words true as the task moves (`cf-ledger`'s `paused_answers`): a
 //! resume does not take it back unread, it says the task has moved on and that its result
-//! will be the next complete answer; Finish withdraws it. What the window wrote before its
-//! last tool call, or in an earlier turn, stays in the transcript, as everywhere else.
+//! will be the next complete answer; Finish withdraws it.
+//!
+//! **What the window wrote first** (T-1151): a window answers a question before it works, so
+//! the note also holds what it wrote after the tell and before its first tool call, where it
+//! went on to a tool and then to other last words (`Answers::reply`). `live tell devin` lost
+//! it: Devin wrote the line asked for as text, ran its command, and ended with the last
+//! line, and the note had that alone; Claude Code, Codex and Muse write the same record, and
+//! theirs reached the chief because the model also put the line into `cf answer`, or wrote
+//! it again. It is not told again when it is the last words, or when the window sent it with
+//! `cf answer` (the chief has it as a message of its own). Finish takes the last words only.
+//! What it wrote between its tools, or in an earlier turn, stays in the transcript, as
+//! everywhere else.
 //!
 //! A harness that marks the text of a turn it was stopped in complete would have a note with
 //! those cut words, after a tell as after any pause; Claude Code marks it incomplete, and
 //! [`answers_to_the_task`] takes only a complete answer.
 //!
 //! **The chief may resume at once**, on the answer it was given, while the window is still
-//! at work on the rest of its turn: the resume waits behind the turn, the task is queued
-//! when the turn ends, and its answer is the follow-up to the resume's words, not the turn
-//! on the tell. That turn's end is told all the same, in the words of a task that has
-//! moved on.
+//! at work on the rest of its turn: the resume's words wait behind the turn, and the task
+//! reads queued until the window's record shows it acting after the resume, then working
+//! (`resumed_at_work`, T-1139: before, it read queued for as long as the turn ran, with the
+//! window at work on it). The turn's end is no result either way: the answer to the resume's
+//! words is the follow-up, not the turn on the tell ([`Dispatcher::collect`] leaves a task
+//! whose resume words wait to this note). That turn's end is told all the same, in the
+//! words of a task that has moved on.
 //!
 //! **A turn that left a Monitor** that said it ended is told as a working task's result is:
 //! once a look at the window's commands found none of the monitor's running
@@ -44,7 +57,7 @@
 use cf_harness::contract::Observed;
 use cf_ledger::{ParticipantView, ProjectView};
 
-use super::{pending_after_look, words_of, Watching, WITHOUT_ANSWER};
+use super::{pending_after_look, reply_of, words_of, Watching, WITHOUT_ANSWER};
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::role_change::answers_to_the_task;
@@ -52,7 +65,7 @@ use crate::seams::EngineError;
 
 impl Dispatcher {
     /// The turn of the window of a paused task (or of one resumed, whose resume waits behind
-    /// the turn), looked at: if it ended with a complete answer after the chief's tell,
+    /// the turn, whether it reads queued or working meanwhile), looked at: if it ended with a complete answer after the chief's tell,
     /// whoever gave the task is told it (see above). Nothing where the task is neither, no
     /// tell is the latest message the window was pasted, the turn goes on, left work pending
     /// (the monitors that said they ended are over once a look found no command, as for a
@@ -72,11 +85,16 @@ impl Dispatcher {
         }
         // Paused, or resumed already with the resume queued behind the turn that just ended.
         let found = self.seams.ledger.borrow().task_in_hand(participant.id)?;
-        let Some(thread) =
-            found.filter(|thread| matches!(thread.task.state.as_str(), "paused" | "queued"))
-        else {
+        // Or at work on the turn it was resumed in, the words that resumed it still waiting
+        // (`resumed_at_work`).
+        let Some(thread) = found else {
             return Ok(());
         };
+        let waiting = thread.task.state == "working"
+            && self.resume_words_wait(project.id, thread.task.number)?;
+        if !waiting && !matches!(thread.task.state.as_str(), "paused" | "queued") {
+            return Ok(());
+        }
         let tells: Vec<i64> = thread
             .messages
             .iter()
@@ -110,11 +128,23 @@ impl Dispatcher {
         if words == WITHOUT_ANSWER {
             return Ok(());
         }
+        // What it wrote first, before its first tool call, is its reply to the tell: told
+        // beside its last words, unless those are the same words or it sent them with `cf
+        // answer`, which reached the chief as a message of its own.
+        let reply = reply_of(&answers.reply).filter(|reply| {
+            *reply != words
+                && !thread.messages.iter().any(|message| {
+                    message.kind == "answer"
+                        && message.reply_to == Some(tell)
+                        && message.body.contains(reply.as_str())
+                })
+        });
         let written = self.seams.ledger.borrow_mut().note_paused_answer(
             project.id,
             thread.task.number,
             &participant.handle,
             tell,
+            reply.as_deref(),
             &words,
         )?;
         if written.is_none() {

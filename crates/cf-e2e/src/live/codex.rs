@@ -225,6 +225,45 @@ pub fn methods(messages: &[Message]) -> Vec<String> {
         .collect()
 }
 
+/// What a Codex window's broker says Codex keeps running for its thread (`GET /terminals`,
+/// which asks Codex's server for its background terminals, T-1137), as the daemon asks it
+/// before it closes a window that did not stop: the broker found by the bridge in the
+/// window's `pane.open` (`open`, its environment's `CF_CODEX_SESSION_BRIDGE`). Each by its
+/// command line; an error where the window is no Codex's, or its broker gave no list.
+pub fn kept_commands(open: &Value) -> Result<Vec<String>> {
+    // `cf_proto::codex::BRIDGE_VARIABLE`, which the kit's library does not depend on.
+    let bridge = open["env"]["CF_CODEX_SESSION_BRIDGE"]
+        .as_str()
+        .ok_or_else(|| Error::Daemon("the window was opened with no Codex bridge".to_owned()))?;
+    let bridge: Value = serde_json::from_str(bridge).map_err(|source| Error::Json {
+        text: bridge.to_owned(),
+        source,
+    })?;
+    let (port, token) = (bridge["port"].as_u64(), bridge["token"].as_str());
+    let (Some(port), Some(token)) = (port, token) else {
+        return Err(Error::Daemon(format!(
+            "a Codex bridge with no port or token: {bridge}"
+        )));
+    };
+    let reply =
+        crate::http::Http::new().get(&format!("http://127.0.0.1:{port}/terminals"), Some(token))?;
+    let said = reply.json()?;
+    said["commands"]
+        .as_array()
+        .and_then(|commands| {
+            commands
+                .iter()
+                .map(|command| command.as_str().map(str::to_owned))
+                .collect()
+        })
+        .ok_or_else(|| {
+            Error::Daemon(format!(
+                "the broker gave no list ({}): {said}",
+                reply.status
+            ))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

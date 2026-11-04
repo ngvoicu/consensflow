@@ -1,0 +1,45 @@
+# Every command that takes words takes `--file <path>` for them, and a flag
+# the command does not know, in front of the words, is refused rather than
+# kept as the words. One plant takes one piece out; a test of it fails. The
+# field report these rules were made for (2026-11-02): `cf task done T-1110
+# --file /tmp/result.md` stored "--file /tmp/result.md" as the result.
+
+[run]
+# The commands run as a window runs them, against a scripted API.
+brief = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_from_a_file"]
+# The words parser's own tests.
+words = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::words::"]
+
+[[plant]]
+name = "a brief's file: the moved task commands do not know --file, and it is words"
+meant = "a_task_done_takes_its_result_from_a_file_as_the_report_ran_it"
+runs = ["brief"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "const FILED: Shape = Shape {\n    valued: &[brief::FILE],"
+replace = "const FILED: Shape = Shape {\n    valued: &[],"
+
+[[plant]]
+name = "a brief's file: note, ask and answer do not know --file, and it is words"
+meant = "every_command_that_takes_words_takes_a_file_of_them"
+runs = ["brief"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+    switches: &["--human"],
+    valued: &[brief::FILE],'''
+replace = '''
+    switches: &["--human"],
+    valued: &[],'''
+
+[[plant]]
+name = "a brief's words: a flag a command does not know in front of them is kept"
+meant = "a_flag_the_command_does_not_know_in_front_of_the_words_is_refused_not_kept"
+runs = ["brief"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/words.rs"
+find = "            if split.stray.is_none()"
+replace = "            if split.stray.is_some()"

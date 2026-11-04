@@ -23,9 +23,13 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// fixed 10 ms was a Mac's speed: through Windows' ConPTY the paste was still
 /// going in when its Enter came, and Devin took the Enter into it; and 120 ms
 /// of silence was not enough either, since Devin reads a long paste silently
-/// before it draws it.
+/// before it draws it. A window whose harness declared how it reads a paste
+/// ([`cf_proto::panes::SilentPaste`]) has a delivery's Enter wait the longer of this and
+/// that, for the paste's length: one that redraws while it reads never goes quiet for
+/// 120 ms, and a long brief was still being read at 2 s (T-1127).
 pub const ENTER: EnterTiming = EnterTiming {
     least_ms: 10,
+    drawn_after_ms: 0,
     quiet_ms: 120,
     most_ms: 2_000,
 };

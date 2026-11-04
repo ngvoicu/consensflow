@@ -364,6 +364,19 @@ fn a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_p
     Ok(())
 }
 
+/// Waits for the chief to have T-1's result: it accepts T-1 then, and a follow-up of T-1
+/// waits for that acceptance (T-1118). Told before the result reaches it, its accept is
+/// refused (the result is not received yet), and the follow-up waits for good.
+fn the_chief_is_given_the_result_of_t1(rig: &Rig, project: &Project) -> Outcome {
+    rig.wait_for("the chief to be given T-1's result", secs(120), || {
+        Ok(project
+            .inbox("chief")?
+            .iter()
+            .any(|message| message["kind"] == "result" && message["state"] == "delivered"))
+    })?;
+    Ok(())
+}
+
 #[test]
 fn a_task_put_after_another_opens_the_worker_again_on_the_same_conversation() -> Outcome {
     let Some(config) = muse_rig_of(2_000) else {
@@ -379,9 +392,13 @@ fn a_task_put_after_another_opens_the_worker_again_on_the_same_conversation() ->
         Ok(project.task(1)?["state"] == "done")
     })?;
     let (session, _) = the_session(&rig);
+    the_chief_is_given_the_result_of_t1(&rig, &project)?;
+    // The chief's stand-in runs a message's DISPATCH lines and then nothing else: the
+    // accept is a message of its own.
+    rig.tell(project.id(), "CF task accept T-1")?;
     rig.tell(
         project.id(),
-        "CF task accept T-1\nDISPATCH --tier standard --after T-1 Reply with exactly: T2_DONE",
+        "DISPATCH --tier standard --after T-1 Reply with exactly: T2_DONE",
     )?;
     rig.wait_for("T-2 to be answered", secs(120), || {
         Ok(project.task(2)?["state"] == "done")
@@ -427,9 +444,13 @@ fn a_conversation_the_app_quit_at_rest_is_gone_on_with_after_the_restart() -> Ou
     let resumed = rig.page("project.resume", json!({ "project": id }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
     let project = Project::new(&rig, id);
+    the_chief_is_given_the_result_of_t1(&rig, &project)?;
+    // The chief's stand-in runs a message's DISPATCH lines and then nothing else: the
+    // accept is a message of its own.
+    rig.tell(id, "CF task accept T-1")?;
     rig.tell(
         id,
-        "CF task accept T-1\nDISPATCH --tier standard --after T-1 Reply with exactly: T2_DONE",
+        "DISPATCH --tier standard --after T-1 Reply with exactly: T2_DONE",
     )?;
     rig.wait_for("T-2 to be answered", secs(120), || {
         Ok(project.task(2)?["state"] == "done")

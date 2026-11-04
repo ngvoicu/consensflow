@@ -109,9 +109,15 @@ fn a_turn_refused_for_the_accounts_limits_says_the_quota_spent_at_its_time() {
         );
         assert!(quota.at().is_some_and(|at| at.starts_with("2026-10-26T")));
     }
-    for reason in ["API error 500: upstream", "tool failed"] {
-        assert_eq!(refused(reason).quota, None, "{reason}");
-    }
+    // A server's error is a refusal for a moment (T-1112); a tool's failure is the turn's.
+    assert!(
+        refused("API error 500: upstream")
+            .quota
+            .as_deref()
+            .is_some_and(Quota::busy),
+        "a 500"
+    );
+    assert_eq!(refused("tool failed").quota, None);
     // A later turn that got through says no refusal.
     let after = record_of(&[
         run(2, "t1", json!({ "kind": "started" })),

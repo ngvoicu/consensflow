@@ -270,6 +270,7 @@ const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 8] = [
         "the Windows installer's name in a release's checksums, which the Mac's installer reads; it starts sh and the Mac's tools",
         &[
             r#"if (argc < 2 || posix_spawn(&pid, argv[1], 0, 0, argv + 1, environ) != 0) return 127;"#,
+            r#"const child = spawn('hdiutil', creation(dmg), { stdio: ['ignore', 'ignore', 'pipe'] })"#,
             r#"const ran = spawnSync(program, args, { encoding: 'utf8' })"#,
             r#"const child = spawn(program, words, {"#,
             r#"return spawnSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', plist], {"#,

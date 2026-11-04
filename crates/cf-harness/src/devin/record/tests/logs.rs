@@ -6,6 +6,7 @@ use std::fs::{self, File, FileTimes};
 use std::time::{Duration, UNIX_EPOCH};
 
 use super::*;
+use crate::shared::quota::Quota;
 
 #[test]
 fn conflicting_completion_evidence_fails_the_look_until_the_logs_agree() {
@@ -360,4 +361,37 @@ fn a_turn_that_ended_in_an_error_keeps_the_words_its_end_said() {
         failure_of(ended("cancelled", Some("Stopped by the user"))),
         (false, None)
     );
+}
+
+#[test]
+fn a_turn_its_provider_refused_for_a_moment_is_busy_dated_by_its_chain() {
+    // T-1112: the turn's end says the model is overloaded; a failure whose words say no such
+    // thing stays the turn's own.
+    let quota_of = |said: &str| {
+        let staged = Staged::new();
+        staged.chain(&[
+            user("u-1", Some(json!("request-1"))),
+            reply("a-1", json!("Looking")),
+        ]);
+        let end = json!({ "sessionId": SESSION, "turnClientMessageId": "request-1",
+            "cause": "error", "errorMessage": said });
+        staged.wire(
+            "launch-1",
+            &[chunk(Some(json!("Looking")), "stream-1"), end],
+        );
+        match &*look(&mut staged.reader()) {
+            Reading::Known(record) => {
+                assert!(record.failed, "{said}");
+                record.quota.clone()
+            }
+            Reading::Unknown(reason) | Reading::Missing(reason) => panic!("unknown: {reason}"),
+        }
+    };
+    let said = "Model provider error: 529 overloaded_error: Overloaded";
+    let Some(Quota::Busy { at, because }) = quota_of(said).as_deref().cloned() else {
+        panic!("{said}: no busy refusal");
+    };
+    assert_eq!(because, said);
+    assert!(at.is_some(), "dated, so the next try's refusal is another");
+    assert_eq!(quota_of("The agent crashed: no such model"), None);
 }

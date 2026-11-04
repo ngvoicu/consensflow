@@ -3,7 +3,7 @@
 //! staff and assigned by the daemon to a new session of a member; and a task
 //! taken back to the board for another member of its tier.
 
-use cf_proto::ledger::{TaskCreated, TaskMoved, TaskReleased};
+use cf_proto::ledger::{TaskCreated, TaskMoved, TaskReleased, TaskRetiered};
 use rusqlite::params;
 use serde_json::{json, Map, Value};
 
@@ -17,8 +17,8 @@ use crate::model::{
 };
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{
-    follow_up_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
-    start_session, Giving,
+    follow_up_session, has_members_of_tier, holders_of_tier, nearest_tier, require_free,
+    require_member_row, start_session, Giving,
 };
 use crate::store::Store;
 use crate::views::TaskRow;
@@ -143,8 +143,10 @@ fn distinct(numbers: &[u64], field: &str) -> Result<Vec<i64>, LedgerError> {
 
 /// A task, from the chief or the human. Given `to`, it is queued for that
 /// participant at once (the chief, the human, or the requester itself). Given
-/// `after`, it is queued for the session that did that task at once, or, when the
-/// task is still on its work, waits on the board for it to be accepted.
+/// `after`, it is queued for the session that did that task at once when nothing
+/// that window did waits for the chief's decision, and otherwise waits on the board
+/// for those tasks to be accepted: T-`after` while it is at work or its result is
+/// in, and every other task of the session whose result is in and not decided.
 /// Given a pool and tier instead, it opens for the daemon to assign to a
 /// member of that pool and tier. A task on the board may need other tasks:
 /// it waits until each is accepted, one the human cleared from the board
@@ -182,19 +184,18 @@ pub(crate) fn create_task(
             ));
         }
         // A follow-up goes to the session that did the task followed, while it
-        // is still there: the one case a coordinator names a window. For a task
-        // whose result is in, the session must be free; for one still on its
-        // work, the follow-up waits on the board behind it, T-`after` being one
-        // of the tasks it needs. A task named for a session is held to the free
-        // rule, whether it goes to the window now or waits on the board for what
-        // it needs.
-        let mut behind = None;
+        // is still there: the one case a coordinator names a window. The session
+        // must be free, and hold no result the chief has not decided; where the
+        // task followed is still on its work or has its result in, or another task
+        // of the session has, the follow-up waits on the board behind them, which
+        // are among the tasks it needs. A task
+        // named for a session is held to the free rule, whether it goes to the
+        // window now or waits on the board for what it needs.
+        let mut behind = Vec::new();
         let assignee = match (request.after, &request.to) {
             (Some(after), _) => {
-                let follow_up = follow_up_session(store, project_id, after, &blocking)?;
-                if follow_up.behind {
-                    behind = Some(after);
-                }
+                let follow_up = follow_up_session(store, project_id, after)?;
+                behind = follow_up.behind;
                 Some(follow_up.session)
             }
             (None, Some(to)) => {
@@ -204,10 +205,15 @@ pub(crate) fn create_task(
             }
             (None, None) => None,
         };
-        let needed = match behind {
-            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),
-            _ => needed.clone(),
-        };
+        let needed = [needed.as_slice(), &behind]
+            .concat()
+            .into_iter()
+            .fold(Vec::new(), |mut all, number| {
+                if !all.contains(&number) {
+                    all.push(number);
+                }
+                all
+            });
         // A tier nobody on the staff holds goes to the nearest one somebody does,
         // the next one up first: light work with only critical members still goes.
         let tier = match assignee {
@@ -367,7 +373,7 @@ pub(crate) fn create_task(
 }
 
 /// Whether `task_id` needs `other_id`, directly or through the tasks it needs.
-fn upstream(store: &Store, task_id: i64, other_id: i64) -> Result<bool, LedgerError> {
+pub(super) fn upstream(store: &Store, task_id: i64, other_id: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
         .prepare(
@@ -453,6 +459,51 @@ pub(crate) fn assign_task(
     })
 }
 
+/// An open task whose tier nobody on the staff holds any more (the last member
+/// of it left, or its tier moved with the catalog, after the task was given)
+/// goes to the nearest tier somebody does, the next one up first, as a task
+/// given now would: the same rule, kept for as long as the task is open. Says
+/// which tier it was for, which it is for now, and who holds it; none when the
+/// task is not open, has no tier, or its tier is held, or no tier of its role
+/// is held at all (that is for the board to say, as it waits).
+pub(crate) fn retier_open_task(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<Option<TaskRetiered>, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let (true, Some(pool), Some(asked)) = (
+            task.state == "open",
+            task.pool.as_deref(),
+            task.tier.as_deref(),
+        ) else {
+            return Ok(None);
+        };
+        let Some(tier) = nearest_tier(store, project_id, pool, Some(asked))? else {
+            return Ok(None);
+        };
+        if tier == asked || !has_members_of_tier(store, project_id, pool, Some(&tier))? {
+            return Ok(None);
+        }
+        let at = store.at();
+        store.db.execute(
+            "UPDATE task SET tier = ?, updated_at = ? WHERE id = ?",
+            params![tier, at, task.id],
+        )?;
+        store.log(
+            project_id,
+            "task.retiered",
+            json!({ "task": number, "from": asked, "to": tier }),
+        )?;
+        Ok(Some(TaskRetiered {
+            from: asked.to_owned(),
+            holders: holders_of_tier(store, project_id, pool, &tier)?,
+            to: tier,
+        }))
+    })
+}
+
 /// A task given by tier goes back to the board for another member of that
 /// tier: taken from a member that ran out of quota (the daemon), or
 /// reassigned by the human, working or paused. The task opens again with a
@@ -467,6 +518,19 @@ pub(crate) fn release_task(
     project_id: i64,
     number: i64,
     because: &str,
+) -> Result<TaskReleased, LedgerError> {
+    release_inside(store, project_id, number, because, false)
+}
+
+/// [`release_task`], for a caller that is in a step of its own. `untouched` says
+/// that no window began the task (its brief had not reached the member it is taken
+/// from): the next member is not warned to check the tree for partial changes.
+pub(crate) fn release_inside(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+    untouched: bool,
 ) -> Result<TaskReleased, LedgerError> {
     model::require_text(because, "because", 1000)?;
     store.write(|store| {
@@ -486,6 +550,7 @@ pub(crate) fn release_task(
         // state. It remembers the member it was taken from (a session's member),
         // and is no pause of its project's suspension now, for a Resume to resume.
         let body = match (&member, &carried) {
+            (Some(_), Some(carried)) if untouched => format!("{}{}", task.body, carried.kept),
             (Some(member), Some(carried)) => format!(
                 "{}{}\n\nReassigned from @{} ({because}); check the working tree for partial changes.",
                 task.body, carried.kept, member.handle

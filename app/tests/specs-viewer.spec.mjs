@@ -110,6 +110,18 @@ function model() {
     projects: projects.map((made) => made.shown),
     boards: Object.fromEntries(projects.map((made) => [made.shown.id, made.board])),
     specs: Object.fromEntries(projects.map((made) => [made.shown.id, made.specs])),
+    // What the app says of specs for every project (Settings → Specs), and the Specmint
+    // the build bundles, as `specs.get` and `specs.set` answer them.
+    specsApp: { on: false },
+    specmint: {
+      version: '3.0.0',
+      variants: ['core', 'core-html', 'tdd', 'tdd-html'].map((name) => ({
+        name,
+        version: '3.0.0',
+        commit: 'a1b2c3d',
+        about: `The ${name} variant`,
+      })),
+    },
   }
 }
 
@@ -119,25 +131,100 @@ async function open(page, data = model()) {
     window.__model = data
     window.__listeners = new Map()
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
+    // The specs folder the daemon reads for the project (the viewer's `folder_of`): the
+    // project's own word, else the app's, else `.specs`, whether specs are on or off.
+    const folderOf = (project) =>
+      data.boards[project].project.specs?.folder ?? data.specsApp?.folder ?? '.specs'
+    // What that folder holds: a test that gives a project more than one names them under
+    // `byFolder`; `specs[project]` alone is the one folder it has.
+    const specOf = (project) => {
+      const specs = data.specs[project]
+      return specs?.byFolder ? (specs.byFolder[folderOf(project)] ?? null) : specs
+    }
+    // Whether specs are on for the project, resolved as its chief's launch is given it
+    // (SpecsView::resolve): the project's own word, else the app's.
+    const specsOn = (project) =>
+      data.boards[project].project.specs?.on ?? data.specsApp?.on ?? false
+    // What `specs.get` and `specs.set` answer: the app's raw word, what a project that names
+    // none then uses, and the bundled Specmint.
+    const specsAnswer = () =>
+      answer({
+        app: data.specsApp,
+        applied: {
+          folder: data.specsApp.folder ?? '.specs',
+          variant: data.specsApp.variant ?? 'core',
+        },
+        specmint: data.specmint,
+      })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: [], missing: [] }),
       'board.get': ({ project }) => answer({ board: data.boards[project] }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
+      // What a project says of specs: kept as it was said, each part left out when it says
+      // none, and the daemon's own refusal where a test has it refuse.
+      'project.specs': ({ project, on, folder, variant }) => {
+        if (data.specsRefusal) return { ok: false, error: data.specsRefusal }
+        const said = {}
+        if (on !== null) said.on = on
+        if (folder !== null) said.folder = folder
+        if (variant !== null) said.variant = variant
+        const shown = data.boards[project].project
+        if (Object.keys(said).length === 0) delete shown.specs
+        else shown.specs = said
+        return answer({ project: shown })
+      },
+      'specs.get': () => specsAnswer(),
+      // Each part given is kept (`null`, or a blank folder, names none again).
+      'specs.set': ({ on, folder, variant }) => {
+        if (data.specsAppRefusal) return { ok: false, error: data.specsAppRefusal }
+        const app = data.specsApp
+        if (on !== undefined) app.on = on
+        if (folder !== undefined) {
+          if (folder === null || folder.trim() === '') delete app.folder
+          else app.folder = folder.trim()
+        }
+        if (variant !== undefined) {
+          if (variant === null) delete app.variant
+          else app.variant = variant
+        }
+        return specsAnswer()
+      },
+      // What Project settings reads as it opens, beside the specs above.
+      'wakeup.get': () =>
+        answer({
+          wakeUp: {
+            on: false,
+            everyMs: 3_600_000,
+            every: 1,
+            unit: 'hours',
+            text: '',
+            defaultText: true,
+          },
+        }),
+      'computer_use.get': () =>
+        answer({
+          system: 'macos',
+          grantsOf: null,
+          permissions: { accessibility: false, screenRecording: false },
+          harnesses: { 'claude-code': { on: false, folder: '/work/harbour' } },
+        }),
       // What the daemon reads of a project's specs folder: the folder the project names, else
-      // `.specs`, found empty where it is not there, or refused in the daemon's words.
+      // the app's, else `.specs`, found empty where it is not there, or refused in the daemon's
+      // words.
       'specs.tree': ({ project }) => {
-        const specs = data.specs[project]
+        const specs = specOf(project)
         if (data.treeRefusal) return { ok: false, error: data.treeRefusal }
-        const folder = data.boards[project].project.specs?.folder ?? '.specs'
-        if (!specs) return answer({ specs: { folder, found: false, entries: [] } })
+        if (!specs) {
+          return answer({ specs: { folder: folderOf(project), found: false, entries: [] } })
+        }
         return answer({
           specs: { folder: specs.folder, found: specs.found, entries: specs.entries },
         })
       },
       // A file a test has slow (`slowFiles`, its path and how long) comes after that long.
       'specs.file': ({ project, path }) => {
-        const file = data.specs[project]?.files[path]
+        const file = specOf(project)?.files[path]
         const said =
           file === undefined
             ? { ok: false, error: `no file ${path} in the specs folder` }
@@ -145,14 +232,15 @@ async function open(page, data = model()) {
         const slow = data.slowFiles?.[path]
         return slow ? new Promise((later) => setTimeout(() => later(said), slow)) : said
       },
-      // Whether the folder holds a file anywhere: what shows the board's button. Said once from
-      // the daemon's memory where a test says when it reads again (`presentAgainIn`), and held
-      // until the test lets it go where a test has the folder slow (`presentHeld`).
+      // Whether the folder holds a file anywhere, and whether specs are on for the project:
+      // what shows the board's button. Said once from the daemon's memory where a test says
+      // when it reads again (`presentAgainIn`), and held until the test lets it go where a test
+      // has the folder slow (`presentHeld`).
       'specs.present': ({ project }) => {
         if (data.presentRefusal) return { ok: false, error: data.presentRefusal }
         const holds = (entries) =>
           entries.some((entry) => (entry.entries ? holds(entry.entries) : true))
-        const said = { present: holds(data.specs[project]?.entries ?? []) }
+        const said = { present: holds(specOf(project)?.entries ?? []), on: specsOn(project) }
         if (data.presentAgainIn) {
           said.readAgainIn = data.presentAgainIn
           data.presentAgainIn = null
@@ -167,7 +255,7 @@ async function open(page, data = model()) {
       // any file that is no HTML file of the folder.
       'specs.open': ({ project, path }) => {
         if (data.openRefusal) return { ok: false, error: data.openRefusal }
-        if (data.specs[project]?.files[path] === undefined) {
+        if (specOf(project)?.files[path] === undefined) {
           return { ok: false, error: `no file ${path} in the specs folder` }
         }
         if (!/\.html?$/i.test(path)) {
@@ -412,6 +500,146 @@ test.describe('the Specs button', () => {
     // Asked once more, then no more: a fresh answer says nothing of reading again.
     await page.waitForTimeout(700)
     expect(await calls(page, 'specs.present')).toEqual([{ project: 1 }, { project: 1 }])
+  })
+})
+
+test.describe('the Specs button follows the setting', () => {
+  /**
+   * In the Specs section of the project's settings: the mode picked (and the folder or
+   * variant given), then saved and the dialog closed, as the human does.
+   */
+  async function saveSpecs(page, mode, { folder, variant } = {}) {
+    await page.locator('#project-settings-button').click()
+    const dialog = page.getByRole('dialog', { name: 'Project settings' })
+    await expect(dialog).toBeVisible()
+    const specs = dialog.locator('.project-specs')
+    await specs.locator('select[name="specs"]').selectOption(mode)
+    if (folder !== undefined) await specs.locator('input[name="specsFolder"]').fill(folder)
+    if (variant !== undefined) {
+      await specs.locator('select[name="specsVariant"]').selectOption(variant)
+    }
+    await specs.getByRole('button', { name: 'Save specs' }).click()
+    await dialog.getByRole('button', { name: 'Close' }).click()
+    await expect(dialog).toBeHidden()
+  }
+
+  /** In Settings, Specs: the dialog of what the app says of specs for every project. */
+  async function openSpecsSettings(page) {
+    await page.locator('#settings-button').click()
+    await page.locator('#specs-settings-button').click()
+    const dialog = page.getByRole('dialog', { name: 'Specs' })
+    await expect(dialog).toBeVisible()
+    return dialog
+  }
+
+  test('turning specs on shows the button at once, with no folder yet: the viewer says where the chief will write', async ({
+    page,
+  }) => {
+    const data = model()
+    data.specs[1] = null
+    await open(page, data)
+    const specsButton = page.locator('#specs-button')
+    await expect(page.locator('#project-title')).toHaveText('harbour')
+    await expect(specsButton).toBeHidden()
+    // Specs are turned on in the project's settings and saved: presence is read again at
+    // once, and the button shows for the setting alone, before any spec is written.
+    await saveSpecs(page, 'on')
+    await expect.poll(async () => (await calls(page, 'specs.present')).length).toBeGreaterThan(1)
+    await expect(specsButton).toBeVisible()
+    const viewer = await openViewer(page)
+    await expect(shown(viewer)).toHaveText(
+      "No specs folder yet: .specs is not in the project's folder. The chief makes it when it writes its first spec.",
+    )
+  })
+
+  test('the first spec written is shown by the button and the viewer with no project opened again', async ({
+    page,
+  }) => {
+    const data = model()
+    data.specs[1] = null
+    await open(page, data)
+    await saveSpecs(page, 'on')
+    const specsButton = page.locator('#specs-button')
+    await expect(specsButton).toBeVisible()
+    // The chief writes its first spec: the board's next read of the folder finds it.
+    await page.evaluate(
+      ({ path, text }) => {
+        window.__model.specs[1] = {
+          folder: '.specs',
+          found: true,
+          entries: [
+            {
+              name: 'user-auth',
+              path: 'user-auth',
+              entries: [{ name: 'SPEC.md', path, size: text.length }],
+            },
+          ],
+          files: { [path]: { path, size: text.length, text } },
+        }
+      },
+      { path: 'user-auth/SPEC.md', text: '# User Auth\n' },
+    )
+    await changed(page)
+    await expect(specsButton).toBeVisible()
+    const viewer = await openViewer(page)
+    await fileIn(viewer, 'user-auth/SPEC.md').click()
+    await expect(shown(viewer).locator('.spec-markdown')).toContainText('User Auth')
+  })
+
+  test('the folder named again in Settings, Specs is the one presence reads', async ({ page }) => {
+    const data = model()
+    // `.specs` holds nothing and `docs/plans` a spec; the project says off, so the button is
+    // the folder's alone. The project's folder is unset: it uses the app's.
+    data.boards[2].project.specs = { on: false }
+    data.specs[2] = {
+      byFolder: { '.specs': null, 'docs/plans': specsOf('core', 'docs/plans') },
+    }
+    await open(page, data)
+    await choose(page, 'foundry')
+    const specsButton = page.locator('#specs-button')
+    await expect(page.locator('#project-title')).toHaveText('foundry')
+    await expect(specsButton).toBeHidden()
+    const asked = (await calls(page, 'specs.present')).length
+    // The app names another folder: the save is read of presence at once, and the folder
+    // with files shows the button.
+    const dialog = await openSpecsSettings(page)
+    await dialog.locator('input[name="folder"]').fill('docs/plans')
+    await dialog.locator('input[name="folder"]').press('Enter')
+    await expect.poll(() => calls(page, 'specs.set')).toEqual([{ folder: 'docs/plans' }])
+    await expect
+      .poll(async () => (await calls(page, 'specs.present')).length)
+      .toBeGreaterThan(asked)
+    await expect(specsButton).toBeVisible()
+  })
+
+  test('specs on for every project shows the button on a project that says nothing of them', async ({
+    page,
+  }) => {
+    const data = model()
+    data.specs[1] = null
+    await open(page, data)
+    const specsButton = page.locator('#specs-button')
+    await expect(specsButton).toBeHidden()
+    const dialog = await openSpecsSettings(page)
+    await dialog.locator('input[name="on"]').check()
+    await expect.poll(() => calls(page, 'specs.set')).toEqual([{ on: true }])
+    await expect(specsButton).toBeVisible()
+  })
+
+  test('specs turned off with an empty folder hides the button again', async ({ page }) => {
+    const data = model()
+    data.specs[1] = null
+    data.boards[1].project.specs = { on: true }
+    await open(page, data)
+    const specsButton = page.locator('#specs-button')
+    await expect(specsButton).toBeVisible()
+    await saveSpecs(page, 'off')
+    await expect.poll(async () => (await calls(page, 'specs.present')).length).toBeGreaterThan(1)
+    await expect(specsButton).toBeHidden()
+    // And a folder with files still shows it, specs off: the setting is not the folder's.
+    data.boards[4].project.specs = { on: false }
+    await choose(page, 'limiter')
+    await expect(specsButton).toBeVisible()
   })
 })
 
@@ -1553,3 +1781,206 @@ for (const colorScheme of ['dark', 'light']) {
     expect(await style(spec.locator('h1'), 'color')).toBe(await colour('--foam'))
   })
 }
+
+/**
+ * The registry as a Specmint that links each spec writes it (a field report, 2026-11-03, a
+ * project's own): the id is a link to the spec, and a status is capitalised. Its rows were
+ * all dead, and drawn faded, for the viewer took the link's markdown for the spec's id, and
+ * so found no folder of that name.
+ */
+const LINKED = [
+  '# Spec Registry',
+  '',
+  '| ID | Title | Status | Priority | Progress | Updated |',
+  '|----|-------|--------|----------|----------|---------|',
+  '| [user-auth](./user-auth/SPEC.md) | User Auth System | Active | high | 5/12 | 2026-11-03 |',
+  '| [api-refactor](./api-refactor/SPEC.md) | API Refactoring | Paused | medium | 2/8 | 2026-10-29 |',
+  '| [upload-fix](./upload-fix/SPEC.md) | Fix File Upload Bug | Completed | low | 5/5 | 2026-09-30 |',
+  '| [gone-spec](./gone-spec/SPEC.md) | A Spec With No Folder | Archived | low | 0/0 | 2026-08-21 |',
+  '',
+].join('\n')
+const LINKED_HTML = [
+  '# Spec Registry',
+  '',
+  '| ID | Title | Status | Priority | Progress | Updated |',
+  '|----|-------|--------|----------|----------|---------|',
+  // Linked to a SPEC.md the folder does not have: its spec is a SPEC.html, which opens.
+  '| [checkout-flow](./checkout-flow/SPEC.md) | Checkout Flow | Active | high | 2/3 | 2026-11-03 |',
+  '',
+].join('\n')
+
+/** The registry of project `id` in `data` read as `text`. */
+function writes(data, id, text) {
+  const file = data.specs[id].files['registry.md']
+  file.text = text
+  file.size = text.length
+}
+
+/** The model of the tests with the registries of the first and the third project linked. */
+function linkedModel() {
+  const data = model()
+  writes(data, 1, LINKED)
+  writes(data, 3, LINKED_HTML)
+  return data
+}
+
+/** What shows of the specs a viewer lists, and that every row of a spec the folder has can be pressed. */
+async function seesRows(viewer, ids) {
+  const rows = shown(viewer).getByRole('list', { name: 'Specs' }).locator('button.registry-row')
+  await expect(rows.locator('small')).toHaveText(ids)
+  // The viewer is whole, as are its rows: not faded, not inert, and none of a spec the folder has is disabled.
+  await expect(viewer).toHaveCSS('opacity', '1')
+  expect(await viewer.evaluate((dialog) => dialog.inert)).toBe(false)
+  const state = await rows.evaluateAll((all) =>
+    all.map((row) => [row.dataset.spec, row.disabled, getComputedStyle(row).opacity]),
+  )
+  expect(state.map(([id]) => id)).toEqual(ids)
+  return state
+}
+
+/** The registry's row of the spec titled `title`, as a person finds it: by what it says. */
+const rowTitled = (viewer, title) =>
+  shown(viewer)
+    .locator('button.registry-row')
+    .filter({
+      has: viewer.page().locator('strong', { hasText: new RegExp(`^${literally(title)}$`) }),
+    })
+
+test.describe('a registry that links each spec', () => {
+  for (const [what, size] of [
+    ['a wide window', { width: 1440, height: 900 }],
+    ['a narrow one', { width: 720, height: 700 }],
+  ]) {
+    test(`takes the clicks of its tree and its rows, from the board's Specs button, in ${what}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size)
+      await open(page, linkedModel())
+      const viewer = await openViewer(page)
+      // A file of the tree takes a click (so the tree was never the dead part)...
+      await fileIn(viewer, 'api-refactor/research-01.md').click({ timeout: 3_000 })
+      await expect(viewer.locator('.specs-path')).toHaveText('api-refactor/research-01.md')
+      await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+      await expect(viewer.locator('.specs-path')).toHaveText('registry.md')
+      // ...and so does a row of the registry, each opening the spec it names.
+      for (const [id, title] of [
+        ['api-refactor', 'API Refactoring'],
+        ['upload-fix', 'Fix File Upload Bug'],
+        ['user-auth', 'User Auth System'],
+      ]) {
+        await rowTitled(viewer, title).click({ timeout: 3_000 })
+        await expect(viewer.locator('.specs-path')).toHaveText(`${id}/SPEC.md`)
+        await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+        await expect(viewer.locator('.specs-path')).toHaveText('registry.md')
+      }
+      // The links are shown as the words they are, and every spec the folder has is a row that can be pressed.
+      const state = await seesRows(viewer, ['user-auth', 'api-refactor', 'upload-fix', 'gone-spec'])
+      expect(state).toEqual([
+        ['user-auth', false, '1'],
+        ['api-refactor', false, '1'],
+        ['upload-fix', false, '1'],
+        // The one with no folder says so, and is the one that is faded.
+        ['gone-spec', true, '0.45'],
+      ])
+      await expect(viewer.locator('button.registry-row[data-spec="gone-spec"]')).toHaveAttribute(
+        'title',
+        'gone-spec has no folder here',
+      )
+      // An id the registry gives as a link is drawn as one: underlined, and none of its markdown shows.
+      const id = shown(viewer).locator('button.registry-row small').first()
+      await expect(id).toHaveText('user-auth')
+      await expect(id).toHaveClass('registry-link')
+      await expect(id).toHaveCSS('text-decoration-line', 'underline')
+      await expect(shown(viewer)).not.toContainText('](')
+      // The tree follows the registry: its specs by their titles, in its order.
+      const tree = viewer.getByRole('navigation', { name: 'The specs folder' })
+      expect((await level(tree.locator('> ul'))).slice(0, 5)).toEqual([
+        'registry.md',
+        'User Auth System/',
+        'API Refactoring/',
+        'Fix File Upload Bug/',
+        'legacy-cleanup/',
+      ])
+      await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(viewer).toBeHidden()
+    })
+  }
+
+  test('takes the clicks from Specs… in the project menu, and after the project shown is changed', async ({
+    page,
+  }) => {
+    await open(page, linkedModel())
+    // The menu, for a project the board does not show: it is shown first, and its rows are live.
+    await page.locator('#projects li.project[data-project="3"]').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Specs…' }).click()
+    const viewer = page.getByRole('dialog', { name: 'Specs of checkout' })
+    await expect(viewer).toBeVisible()
+    await expect(page.locator('#project-title')).toHaveText('checkout')
+    // Its link names a SPEC.md the folder lacks: the spec is the folder's SPEC.html, which opens.
+    await rowTitled(viewer, 'Checkout Flow').click({ timeout: 3_000 })
+    await expect(viewer.locator('.specs-path')).toHaveText('checkout-flow/SPEC.html')
+    await fileIn(viewer, 'checkout-flow/research-01.md').click({ timeout: 3_000 })
+    await expect(viewer.locator('.specs-path')).toHaveText('checkout-flow/research-01.md')
+    await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+    expect(await seesRows(viewer, ['checkout-flow'])).toEqual([['checkout-flow', false, '1']])
+    await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(viewer).toBeHidden()
+    // The project changed, and the viewer opened again, on the other one: rows and tree as live.
+    await choose(page, 'harbour')
+    await expect(page.locator('#project-title')).toHaveText('harbour')
+    const again = await openViewer(page)
+    await rowTitled(again, 'User Auth System').click({ timeout: 3_000 })
+    await expect(again.locator('.specs-path')).toHaveText('user-auth/SPEC.md')
+    await fileIn(again, 'user-auth/research-01.md').click({ timeout: 3_000 })
+    await expect(again.locator('.specs-path')).toHaveText('user-auth/research-01.md')
+    await fileIn(again, 'registry.md').click({ timeout: 3_000 })
+    expect(
+      (await seesRows(again, ['user-auth', 'api-refactor', 'upload-fix', 'gone-spec']))[0],
+    ).toEqual(['user-auth', false, '1'])
+    // The same, for the project the menu names while the board shows another.
+    await again.getByRole('button', { name: 'Close', exact: true }).click()
+    await page.locator('#projects li.project[data-project="1"]').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Specs…' }).click()
+    await rowTitled(
+      page.getByRole('dialog', { name: 'Specs of harbour' }),
+      'API Refactoring',
+    ).click({
+      timeout: 3_000,
+    })
+    await expect(page.locator('.specs-path')).toHaveText('api-refactor/SPEC.md')
+  })
+
+  test('opens what a link names only inside the folder: out of it, with a scheme or to no file, the id decides', async ({
+    page,
+  }) => {
+    const data = model()
+    writes(
+      data,
+      1,
+      [
+        '| ID | Title | Status | Priority | Progress | Updated |',
+        '|---|---|---|---|---|---|',
+        "| [user-auth](javascript:window.__pwned='id-link') | A | active | high | 1/2 | 2026-11-03 |",
+        '| [api-refactor](../../package.json) | B | paused | low | 1/2 | 2026-11-03 |',
+        `| [upload-fix](${trap.origin}/x) | C | completed | low | 1/2 | 2026-11-03 |`,
+        // A link to a file of another spec of the folder opens that file, as a link in a page does.
+        '| [legacy-cleanup](./user-auth/research-01.md) | D | archived | low | 1/2 | 2026-11-03 |',
+        '',
+      ].join('\n'),
+    )
+    await open(page, data)
+    const viewer = await openViewer(page)
+    for (const [title, opens] of [
+      ['A', 'user-auth/SPEC.md'],
+      ['B', 'api-refactor/SPEC.md'],
+      ['C', 'upload-fix/SPEC.md'],
+      ['D', 'user-auth/research-01.md'],
+    ]) {
+      await rowTitled(viewer, title).click({ timeout: 3_000 })
+      await expect(viewer.locator('.specs-path')).toHaveText(opens)
+      await fileIn(viewer, 'registry.md').click({ timeout: 3_000 })
+    }
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
+    expect(trap.received).toEqual([])
+  })
+})

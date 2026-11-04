@@ -108,14 +108,16 @@ enum Seed {
         providers: Option<Vec<String>>,
         left: Duration,
     },
-    /// A link in `to` to each entry of the owner's folder `from` but the one named `except`:
+    /// A link in `to` to each entry of the owner's folder `from` but those named in `except`:
     /// what other programs of the rig keep in a folder the variables move (another tool's login
-    /// in `XDG_DATA_HOME`), left as it is for them. Where the folders are links' (Devin's, on Unix).
+    /// in `XDG_DATA_HOME`), left as it is for them; never a harness's of the kit's own, which
+    /// has a home of the run's (Muse's, whose sessions the daemon reads in the folder: T-1152).
+    /// Where the folders are links' (Devin's, on Unix).
     #[cfg(unix)]
     Reach {
         from: PathBuf,
         to: PathBuf,
-        except: &'static str,
+        except: &'static [&'static str],
     },
 }
 
@@ -226,12 +228,12 @@ impl Plan {
                 Seed::Reach {
                     from: config.to_path_buf(),
                     to: "config".into(),
-                    except: "devin",
+                    except: KIT_FOLDERS,
                 },
                 Seed::Reach {
                     from: data.to_path_buf(),
                     to: "data".into(),
-                    except: "devin",
+                    except: KIT_FOLDERS,
                 },
             ],
             watched: vec![
@@ -250,6 +252,12 @@ impl Plan {
         }
     }
 }
+
+/// The folders of the XDG layout that harnesses of the kit keep their own things in, which a
+/// home of the run's own never reaches the owner's of: Devin's (copied in), and Muse's, which
+/// the rig's launcher gives the run's own (`crate::muse::write_live_stand_in`).
+#[cfg(unix)]
+const KIT_FOLDERS: &[&str] = &["devin", "muse"];
 
 /// The owner's folder `variable` names, or `below` in their `home` where it names none.
 #[cfg(unix)]
@@ -585,7 +593,7 @@ enum Placed {
     Links {
         from: PathBuf,
         to: PathBuf,
-        except: &'static str,
+        except: &'static [&'static str],
     },
 }
 
@@ -622,15 +630,15 @@ fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
     }
 }
 
-/// A link in `into` to each entry of `from` but `except`: the program that reads the folder
+/// A link in `into` to each entry of `from` but those `except` names: the program that reads the folder
 /// where the variables moved it finds what it had.
 #[cfg(unix)]
-fn link_each(from: &Path, into: &Path, except: &str) -> Result {
+fn link_each(from: &Path, into: &Path, except: &[&str]) -> Result {
     let Ok(entries) = fs::read_dir(from) else {
         return Ok(());
     };
     for entry in entries.flatten() {
-        if entry.file_name() == except {
+        if except.iter().any(|name| entry.file_name() == *name) {
             continue;
         }
         let link = into.join(entry.file_name());

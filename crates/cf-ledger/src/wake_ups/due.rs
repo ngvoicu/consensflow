@@ -29,6 +29,13 @@
 //!   was sent, or the human typed to the chief in its own window. A quiet
 //!   board alone never skips a wake-up: the first after an enable or a Resume
 //!   always goes.
+//!
+//! The interval counts too from the human's last words to the chief (a nudge
+//! never follows them at once), and is doubled for each of the newest wake-ups,
+//! in a row, that the chief answered only by writing to the human; and a wake-up
+//! that something moved before is skipped, and the skip logged, while the chief's
+//! newest note to the human is unread, three intervals in a row at the most
+//! (`waiting`).
 
 use cf_base::time;
 use cf_proto::ledger::MessageView;
@@ -36,7 +43,8 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use super::setting;
-use crate::conversations::typed_since;
+use super::waiting;
+use crate::conversations::{typed_at, typed_since};
 use crate::messages::cancel_message;
 use crate::model::{sql_list, LedgerError};
 use crate::queue::{send, Sent};
@@ -177,6 +185,12 @@ fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerErr
 
 /// Whether the calls were turned on, or the project resumed, since `last`.
 fn begun_since(store: &Store, project_id: i64, last: &Last) -> Result<bool, LedgerError> {
+    begun_after(store, project_id, last.event)
+}
+
+/// Whether the calls were turned on, or the project resumed, after the event `event`: the
+/// human is back.
+pub(super) fn begun_after(store: &Store, project_id: i64, event: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
         .prepare(
@@ -186,7 +200,7 @@ fn begun_since(store: &Store, project_id: i64, last: &Last) -> Result<bool, Ledg
                         AND json_extract(data, '$.from.on') = 0
                         AND json_extract(data, '$.to.on') = 1))",
         )?
-        .exists(params![project_id, last.event])?)
+        .exists(params![project_id, event])?)
 }
 
 /// Whether something happened since `last` that the chief may not have seen:
@@ -209,6 +223,28 @@ fn changed_since(store: &Store, project_id: i64, last: &Last) -> Result<bool, Le
     }
     let chief = store.participant_by_handle(project_id, "chief")?;
     typed_since(store, chief.id, &last.at, last.message)
+}
+
+/// What the interval counts from, once the human's last words to the chief are counted:
+/// `origin`, or the time those words were copied where it is later. A nudge never comes at
+/// once after them.
+fn typed_origin(
+    store: &Store,
+    project_id: i64,
+    last: Option<&Last>,
+    origin: i64,
+) -> Result<i64, LedgerError> {
+    let chief = store.participant_by_handle(project_id, "chief")?;
+    let typed = typed_at(
+        store,
+        chief.id,
+        &time::iso(origin),
+        None,
+        last.map_or(0, |last| last.message),
+    )?;
+    Ok(typed
+        .and_then(|at| time::parse(&at))
+        .map_or(origin, |typed| typed.max(origin)))
 }
 
 /// Queues the project's wake-up if it is due at `now_ms`, and logs it: the
@@ -236,6 +272,15 @@ pub(crate) fn queue_if_due(
     if now_ms < origin.saturating_add(wake_up.every_ms) {
         return Ok(None);
     }
+    // Only a call that is due by the log alone reads the chief's copy and the events once more:
+    // what they say can put it off, never bring it on.
+    let origin = typed_origin(store, project_id, last.as_ref(), origin)?;
+    let apart = wake_up
+        .every_ms
+        .saturating_mul(1 << waiting::doublings(store, project_id)?);
+    if now_ms < origin.saturating_add(apart) {
+        return Ok(None);
+    }
     // A chief with work on its way is not asked whether it has any, the first
     // wake-up or the hundredth: the skip is logged and the interval counts from it.
     let tasks = work_on_its_way(store, project_id)?;
@@ -250,8 +295,26 @@ pub(crate) fn queue_if_due(
         return Ok(None);
     }
     if let Some(last) = &last {
-        if !begun_since(store, project_id, last)? && !changed_since(store, project_id, last)? {
-            return Ok(None);
+        if !begun_since(store, project_id, last)? {
+            if !changed_since(store, project_id, last)? {
+                return Ok(None);
+            }
+            // A chief that waits on the human is not asked whether it has work: skipped, and
+            // the interval counts from the skip, as for work on its way.
+            let unread = waiting::unread_by_the_human(store, project_id)?;
+            if !unread.is_empty()
+                && waiting::silent_skips_since(store, project_id, last.event)?
+                    < waiting::MOST_SILENT_SKIPS
+            {
+                store.write(|store| {
+                    store.log(
+                        project_id,
+                        "project.wake_up_skipped",
+                        json!({ "waitingOnTheHuman": unread }),
+                    )
+                })?;
+                return Ok(None);
+            }
         }
     }
     store

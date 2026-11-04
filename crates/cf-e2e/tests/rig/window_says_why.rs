@@ -79,7 +79,7 @@ fn says_a_window_that_stayed_named_a_secret_in_the_failure_the_chiefs_window_and
     let told = failure_told(&rig, project)?;
     let body = told["body"].as_str().unwrap_or_default();
     let failure = Regex::new(&format!(
-        r#"^T-1 failed: the window never showed the prompt its first message waits for, a screen line with "bypass permissions on"; {SCREEN}\. Reopen it with: cf task reopen T-1 "…"$"#
+        r#"^T-1 failed: the window never showed the prompt its first message waits for, a screen line with "bypass permissions on"; {SCREEN}\. Reopen it with: cf task reopen T-1 "…", or accept it with what you checked: cf task accept T-1 "…"$"#
     ))?;
     assert!(failure.is_match(body), "{body}");
     // The human hears it too, with whom it did not reach.
@@ -121,7 +121,7 @@ fn says_the_exit_code_of_a_window_that_ended_and_that_its_screen_named_a_secret(
     let told = failure_told(&rig, project)?;
     let body = told["body"].as_str().unwrap_or_default();
     let failure = Regex::new(&format!(
-        r#"^T-1 failed: {WORKER}'s window closed \(exit code 3\); {SCREEN}\. Reopen it with: cf task reopen T-1 "…"$"#
+        r#"^T-1 failed: {WORKER}'s window closed \(exit code 3\); {SCREEN}\. Reopen it with: cf task reopen T-1 "…", or accept it with what you checked: cf task accept T-1 "…"$"#
     ))?;
     assert!(failure.is_match(body), "{body}");
     let logged = Regex::new(&format!(

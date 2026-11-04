@@ -135,6 +135,20 @@ pub(super) async fn create(
     // the nearest.
     if let Some(asked) = &created.asked {
         answer.insert("asked".to_owned(), json!(asked));
+        // And whose tier it went to, so the chief is told which member holds it.
+        let (pool, tier) = (created.task.pool.as_deref(), created.task.tier.as_deref());
+        let held_by: Vec<String> = match pool {
+            Some(pool) => context
+                .ledger
+                .borrow()
+                .members(caller.project.id, pool)?
+                .into_iter()
+                .filter(|member| member.tier.as_deref() == tier)
+                .map(|member| member.handle)
+                .collect(),
+            None => Vec::new(),
+        };
+        answer.insert("heldBy".to_owned(), json!(held_by));
     }
     answer.insert("gated".to_owned(), json!(gated));
     Ok(Answer::created(Value::Object(answer)))

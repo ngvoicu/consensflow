@@ -114,7 +114,7 @@ mod tests {
             })
         };
         for _ in 0..20 {
-            let ran = Run::new(env!("CARGO"))
+            let ran = Run::cargo()
                 .args([
                     "build",
                     "--offline",
@@ -126,7 +126,6 @@ mod tests {
                     "cf",
                 ])
                 .cwd(checkout::root())
-                .inheriting_env()
                 .unlimited()
                 .run()
                 .unwrap();

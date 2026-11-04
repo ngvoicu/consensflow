@@ -22,8 +22,8 @@ use std::path::Path;
 
 use cf_daemon::api::body::MAX_JSON_BYTES;
 
-use super::words::Split;
-use super::{text_of, Failure};
+use super::words::{quoted, Split};
+use super::{text_of, without_byte_order_mark, Failure};
 
 /// The flag that names a file to read the words from.
 pub const FILE: &str = "--file";
@@ -53,11 +53,19 @@ pub fn brief_of(
     given: &[OsString],
     input: &mut dyn Read,
 ) -> Result<String, Failure> {
+    // A flag the command does not know, in front of the words, is refused: it
+    // is never kept as the words (`Split::stray`). Help is asked first.
+    if let Some(flag) = words.stray_flag() {
+        return Err(Failure::Usage(format!(
+            "unknown flag {}: write it after -- to keep it as words",
+            quoted(flag)
+        )));
+    }
     if !words.given(FILE) {
         return text_of(words.text.clone(), input);
     }
     let name = words
-        .value_back(FILE)
+        .value_back(FILE)?
         .and_then(|back| given.len().checked_sub(back))
         .and_then(|at| given.get(at))
         .filter(|name| !name.is_empty())
@@ -76,10 +84,11 @@ pub fn brief_of(
     let bytes =
         read_brief(path).map_err(|why| Failure::Failed(format!("cannot read {shown}{why}")))?;
     let text = String::from_utf8_lossy(&bytes);
+    let text = without_byte_order_mark(&text);
     let text = text
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(&text);
+        .unwrap_or(text);
     Ok(text.to_owned())
 }
 

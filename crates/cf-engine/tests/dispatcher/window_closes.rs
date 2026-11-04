@@ -119,6 +119,7 @@ fn closed_with_its_task_done_and_its_exit_late_pauses_nothing_its_session_is_giv
                 .unwrap();
             1
         } else {
+            context.accept_if_done(project, 1);
             context.create_task(
                 project,
                 NewTask {

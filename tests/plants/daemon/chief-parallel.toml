@@ -1,0 +1,101 @@
+# The chief knows a member runs many tasks at once (T-1129, 3.0.7; Gabriel's field board of
+# 2026-11-02: the chief sent T-6, then T-8 `--after T-6`, then T-9 `--after T-8` into one worker's
+# window, one behind the other, as if a member were a person who could be busy, and when that window
+# stuck, all the work behind it stopped).
+#
+# The chief's text no longer says a task goes to a "free" member: each task gets a new window of a
+# member of its role and tier; the staff's intro says a member is a model that runs any number of tasks
+# at once, each in its own window; and the `--after` line says a follow-up is only for a next step that
+# needs what its window knows, and that anything else starts at once beside that window's work. One
+# plant takes one of the three out (or puts the old word back), and a pin of the chief's text fails.
+#
+# The receipt of `cf task add`, which the chief reads after every task it adds, said "the first free
+# one gets it" (T-1134); it says now that the task starts in a new window of a member of its role and
+# tier. A plant puts the old words back, and one takes the sentence out; the board's trace of Node's
+# receipt departs on purpose (RECEIPT_NEW_WINDOW in cf-daemon's api test).
+#
+# Every name holds `chief parallel`, so `npm run plants:daemon -- "chief parallel"` runs them all.
+
+[run]
+engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles"]
+cf-lib-receipt = ["cargo", "test", "--offline", "-p", "cf", "--lib", "a_task_added_is_never_said"]
+
+[[plant]]
+name = "chief parallel: a task is said to go to a free member again"
+meant = "never_says_a_member_is_free_or_busy"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "Each task gets a new window of a member of that role and tier on this\n"
+replace = "ConsensFlow gives the task to a free member of that role and tier on this\n"
+
+[[plant]]
+name = "chief parallel: a member is said to be busy with its task, and takes no other"
+meant = "never_says_a_member_is_free_or_busy"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "model, not a person: it runs any number of tasks at once, each in its own\nwindow.\n"
+replace = "model, not a person: a busy member takes no other task until its own is accepted.\n"
+
+[[plant]]
+name = "chief parallel: a task is no longer said to get a window of its own"
+meant = "tells_the_chief_each_task_gets_a_new_window_of_a_member_of_its_role_and_tier"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "Each task gets a new window of a member of that role and tier on this\n"
+replace = "Each task goes to a member of that role and tier on this\n"
+
+[[plant]]
+name = "chief parallel: the staff is not told a member runs any number of tasks at once"
+meant = "tells_the_chief_a_member_is_a_model_that_runs_any_number_of_tasks_at_once_each_in_its_own_window"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = " Each member is a\nmodel, not a person: it runs any number of tasks at once, each in its own\nwindow.\n"
+replace = "\n"
+
+[[plant]]
+name = "chief parallel: a follow-up is for any next step, not only one that needs its window's knowledge"
+meant = "tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_starts_at_once_beside_it"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "that window's own work, only when it needs what that window already knows (carry out"
+replace = "that window's own work (carry out"
+
+[[plant]]
+name = "chief parallel: the chief is not told fresh work starts at once beside the window's own"
+meant = "tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_starts_at_once_beside_it"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "stay fresh, and start at once beside that window's work\n"
+replace = "stay fresh\n"
+
+[[plant]]
+name = "chief parallel: the receipt of a task added says the first free one gets it again"
+meant = "a_task_added_is_never_said_to_wait_for_a_free_member_and_goes_to_a_new_window"
+runs = ["cf-lib-receipt"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "; it starts in a new window of one, and its result arrives in your inbox.{waits}{holds}{gated}"
+replace = "; the first free one gets it, and its result arrives in your inbox.{waits}{holds}{gated}"
+
+[[plant]]
+name = "chief parallel: the receipt of a task added says nothing of where it goes"
+meant = "a_task_added_is_never_said_to_wait_for_a_free_member_and_goes_to_a_new_window"
+runs = ["cf-lib-receipt"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "; it starts in a new window of one, and its result arrives in your inbox.{waits}{holds}{gated}"
+replace = "; its result arrives in your inbox.{waits}{holds}{gated}"

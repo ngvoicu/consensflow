@@ -77,7 +77,9 @@ fn tells_the_human_once_when_a_task_they_gave_fails() {
     assert_eq!(context.task(project.id, 1).task.state, "failed");
     assert_eq!(
         told(&context, context.id(project.id, "human")),
-        [r#"T-1 failed: refused by the test. Reopen it with: cf task reopen T-1 "…""#]
+        [
+            r#"T-1 failed: refused by the test. Reopen it with: cf task reopen T-1 "…", or accept it with what you checked: cf task accept T-1 "…""#
+        ]
     );
     held_to(
         context.close(),

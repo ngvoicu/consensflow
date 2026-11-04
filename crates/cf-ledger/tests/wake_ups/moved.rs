@@ -94,6 +94,11 @@ fn the_human_typing_to_the_chief_in_its_window_counts_and_what_a_delivery_made_d
         .copy_transcript(conversation.id, &[header, reply, typed], 0)
         .unwrap();
     assert!(
+        w.due().is_none(),
+        "a nudge never follows the human's words at once: the interval counts from them"
+    );
+    w.advance(MINUTE);
+    assert!(
         w.due().is_some(),
         "words typed in the chief's window are a message that came"
     );
@@ -125,6 +130,7 @@ fn the_summary_a_compaction_writes_in_the_user_s_place_is_no_typing_and_the_same
     w.ledger
         .copy_transcript(conversation.id, &[summary, typed], 0)
         .unwrap();
+    w.advance(MINUTE);
     assert!(w.due().is_some(), "the same words, typed, are the human's");
 }
 
@@ -173,7 +179,8 @@ fn an_item_copied_again_as_it_was_is_not_new_and_one_a_tool_wrote_is_no_typing()
     w.ledger
         .copy_transcript(conversation.id, std::slice::from_ref(&typed), 0)
         .unwrap();
-    w.advance(MINUTE / 2);
+    // Their words restart the interval: the first wake-up is a minute after them.
+    w.advance(MINUTE);
     w.wake_and_deliver();
     // A tool's output and the chief's words are not what the human typed.
     w.advance(MINUTE);
@@ -182,12 +189,15 @@ fn an_item_copied_again_as_it_was_is_not_new_and_one_a_tool_wrote_is_no_typing()
     w.ledger
         .copy_transcript(conversation.id, &[typed.clone(), tool, said], 0)
         .unwrap();
+    // An interval on: a nudge never follows the human's words at once, so what is new shows later.
+    w.advance(MINUTE);
     assert!(w.due().is_none(), "nothing the human typed is new");
     // The same text once more (a window read again from its first item) is not new.
     w.advance(MINUTE);
     w.ledger
         .copy_transcript(conversation.id, &[typed], 0)
         .unwrap();
+    w.advance(MINUTE);
     assert!(
         w.due().is_none(),
         "what was typed before the wake-up, copied again, is no news"

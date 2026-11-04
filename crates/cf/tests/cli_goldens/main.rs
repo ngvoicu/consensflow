@@ -477,5 +477,6 @@ fn every_case_says_writes_and_exits_as_node_did() {
     // What is paired holds in the cases it is meant for, and in no others.
     assert_eq!(meant[paired::SHAPE], 13, "{meant:?}");
     assert_eq!(meant[paired::COPY], 1, "{meant:?}");
-    assert_eq!(meant.len(), 2, "{meant:?}");
+    assert_eq!(meant[paired::USAGE], 9, "{meant:?}");
+    assert_eq!(meant.len(), 3, "{meant:?}");
 }

@@ -150,7 +150,14 @@ pub fn write_live_stand_in(
         r#"#!/bin/bash
 # The rig's Muse, live: the machine's, on its real model, the person's keychain login.
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
-export HOME='{real}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
+# Its sessions go where the daemon reads them: the data folder the window was given, which a
+# harness's home of the run's own may have moved for the whole rig (Devin's), by its real
+# path; the rig's own where it was given none, or the person's.
+data="${{XDG_DATA_HOME:-}}"
+case "$data" in ''|'{real}'|'{real}'/*) data='{rig}/.local/share' ;; esac
+data="$(cd "$data" 2>/dev/null && pwd -P || printf '%s' "$data")"
+case "$data" in '{real}'|'{real}'/*) data='{rig}/.local/share' ;; esac
+export HOME='{real}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME="$data" XDG_CACHE_HOME='{rig}/.cache'
 exec '{binary}' "$@"
 "#,
         argv = argv.display(),

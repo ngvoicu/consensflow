@@ -96,7 +96,14 @@ fn the_usage_is_the_one_node_printed_with_this_builds_version_and_a_blank_line_a
             )),
             "{said}"
         );
-        assert!(said.ends_with("(cf help there says more).\n\n"), "{said:?}");
+        assert!(
+            said.contains("(cf help there says more).\n\nA text of many lines"),
+            "{said:?}"
+        );
+        assert!(
+            said.ends_with("reads it from standard input.\n\n"),
+            "{said:?}"
+        );
         assert!(!said.contains("{version}"));
     }
 }

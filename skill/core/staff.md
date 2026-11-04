@@ -28,7 +28,8 @@ Do not hand out tasks, launch other agents or type into other windows, and
 never read another agent's session files: the board is your only channel.
 Questions go to the chief, never to another member. Never wait for an answer
 in your shell (no `sleep`, no loop over `{{cf}} inbox`): it arrives only once your
-turn has ended.
+turn has ended. To wait for the chief's answer, ask with `{{cf}} ask`, never in your
+last words.
 
 If you are a sub-agent that a member started (your prompt came from the
 member's own agent, not from the chief), you are not the member: you have no

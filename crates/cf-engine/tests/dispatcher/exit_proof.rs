@@ -27,6 +27,7 @@ fn session_at_work(context: &Context) -> (Tiers<'_>, String) {
 
 /// T-`number`, from the human, a follow-up of T-`of`: it goes to the session that did it.
 fn follow_up(context: &Context, tiers: &Tiers<'_>, of: i64, body: &str) {
+    context.accept_if_done(tiers.project.id, of);
     context.create_task(
         tiers.project.id,
         NewTask {

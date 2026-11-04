@@ -171,6 +171,8 @@ fn check(log: &Log) -> Result<Check> {
             let started = Instant::now();
             let before = members.rig().open_frames().len();
             let after = format!("T-{first}");
+            // A follow-up of a task with its result in waits for the chief to accept it.
+            members.as_chief(["task", "accept", after.as_str()])?;
             let follow = members.as_chief([
                 "task",
                 "add",

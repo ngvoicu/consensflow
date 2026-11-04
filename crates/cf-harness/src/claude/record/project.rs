@@ -21,7 +21,7 @@ use super::jobs::Watch;
 use super::patterns::{BARE_COMPACT, CAVEAT, OUTPUT};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
-use crate::shared::quota::{account_refusal, spent_extra_usage, Refusal};
+use crate::shared::quota::{account_refusal, busy_refusal, spent_extra_usage, Refusal};
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -111,6 +111,10 @@ pub(super) struct Assistant {
     /// What the account refused for, where it is its billing or its login: no limit that
     /// resets (MUS-23).
     pub(super) account: Option<Refusal>,
+    /// A refusal of its provider for a moment, which waiting cures: a 5xx or 529
+    /// (`apiErrorStatus`), the error `server_error`, or words that say the model is
+    /// overloaded or at capacity (T-1112). Never a quota's or an account's.
+    pub(super) busy: bool,
     /// The model a message of the main conversation says it was written by, where it names
     /// one (not Claude Code's own `<synthetic>` messages, nor an API error's).
     pub(super) model: Option<Arc<str>>,
@@ -430,6 +434,11 @@ fn assistant(record: &Value, session: &str) -> Projected {
         } else {
             None
         },
+        busy: refused
+            && !rate_limited
+            && account_refusal(&text, status).is_none()
+            && (record.get("error").and_then(Value::as_str) == Some("server_error")
+                || busy_refusal(&text, status)),
         text,
     }))
 }

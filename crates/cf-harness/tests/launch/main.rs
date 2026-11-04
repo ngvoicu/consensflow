@@ -19,4 +19,5 @@ mod pi;
 mod scenarios;
 mod secrets;
 mod servers;
+mod silent_paste;
 mod tables;

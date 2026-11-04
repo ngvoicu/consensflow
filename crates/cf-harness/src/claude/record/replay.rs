@@ -12,7 +12,7 @@ use super::project::{
     Absorbed, Assistant, Block, Boundary, Call, Compacting, Hook, Projected, ToolResult, User,
 };
 use super::{Candidate, Terminal, Transcript, TypedCompact};
-use crate::shared::quota::{exhausted_quota, unavailable_quota};
+use crate::shared::quota::{busy_quota, exhausted_quota, unavailable_quota};
 use crate::shared::record::reading::{native_id, ModelMoved, Role};
 
 impl Transcript {
@@ -207,6 +207,9 @@ impl Transcript {
                 let at_ms = date_parse(record.at.as_ref())?;
                 let quota = unavailable_quota(at_ms, refusal, &record.text)?;
                 self.quota = Some(Arc::new(quota));
+            } else if record.busy {
+                let at_ms = date_parse(record.at.as_ref())?;
+                self.quota = Some(Arc::new(busy_quota(at_ms, &record.text)?));
             }
             self.terminal = Some(Terminal::Native);
             return Ok(());

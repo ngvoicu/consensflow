@@ -196,6 +196,7 @@ find = '''
                 match unwell {
                     Some(Unwell::Account(_)) => "its account is unavailable",
                     Some(Unwell::Moved(_)) => "its model moved on its own",
+                    Some(Unwell::Busy(_)) => "its model was busy",
                     None => "the harness ran out of quota",
                 },
             )?;

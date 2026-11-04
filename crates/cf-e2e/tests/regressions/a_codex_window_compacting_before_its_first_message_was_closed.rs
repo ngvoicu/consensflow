@@ -96,9 +96,12 @@ fn a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_d
         Ok(project.lane(&assignee)?["activity"]["state"] == "closed")
     })?;
 
-    // T-2, a follow-up for the same window, opens it again on its thread with T-2 as its
+    // T-2, a follow-up for the same window (T-1 is accepted first: a follow-up of a task
+    // with its result in waits for that), opens it again on its thread with T-2 as its
     // first message, and the thread compacts for twice the time the daemon gives a first
     // message before it takes it.
+    let ran = rig.cf_in_window(&chief, ["task", "accept", "T-1"])?;
+    assert_eq!(ran.code, Some(0), "{ran}");
     let ran = rig.cf_in_window(
         &chief,
         [

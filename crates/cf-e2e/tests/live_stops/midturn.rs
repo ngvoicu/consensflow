@@ -419,6 +419,6 @@ mod tests {
         assert!(over(90_000, end, None, Some(10_000), tool));
         // A watch of the numbers' sort is as long as [`STOP`], and a tool's longer.
         assert_eq!(Hold::NUMBERS.stop, STOP);
-        assert!(tool::hold(&Command::ping(false), true).stop > STOP);
+        assert!(tool::hold(&Command::here(), true).stop > STOP);
     }
 }

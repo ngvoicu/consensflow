@@ -240,8 +240,12 @@ runs = ["help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = '    let question = require_text(text_of(words.text, input)?, "cf ask \"your question\"")?;'
-replace = '    let question = require_text(text_of(rest.join(" "), input)?, "cf ask \"your question\"")?;'
+find = '''
+    let question = require_text(
+        brief::brief_of(&words, given, input)?,'''
+replace = '''
+    let question = require_text(
+        text_of(rest.join(" "), input)?,'''
 
 [[plant]]
 name = "help: the usage of a command goes on after the commands"

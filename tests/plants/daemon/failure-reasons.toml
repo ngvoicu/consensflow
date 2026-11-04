@@ -1048,9 +1048,9 @@ find = '''
                     &because,
                     &told,
                     None,
-                    theirs(&task.requester),
+                    &format!("{waits}{}", theirs(&task.requester)),
                 )?;'''
-replace = "                let _ = (&because, &told, theirs(&task.requester));"
+replace = "                let _ = (&because, &told, &waits, theirs(&task.requester));"
 
 # T-946: the members kit ran a live Muse chief on the owner's `~/.config/muse` and `~/.local/share/muse`:
 # every harness the kit launches says its home, Muse runs through the rig's own launcher, and the owner's

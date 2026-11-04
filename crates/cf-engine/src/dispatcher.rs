@@ -44,13 +44,13 @@ use crate::pacing;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{moved_hold, out_words, News, SchedulerState, Unwell};
+use crate::scheduler::{busy_turn, moved_hold, out_words, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
-use crate::turn_end::{last_paste, lost_in_turn};
+use crate::turn_end::{last_paste, lost_in_turn, Turn};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -906,7 +906,10 @@ impl Dispatcher {
                         .ledger
                         .borrow()
                         .message(first)?
-                        .is_some_and(|message| message.state == "delivered"),
+                        // A role the window read the moment it had it is `read`, not `delivered`.
+                        .is_some_and(|message| {
+                            matches!(message.state.as_str(), "delivered" | "read")
+                        }),
                     None => false,
                 };
                 if at_launch && !came_up && shown.is_known() {
@@ -929,6 +932,22 @@ impl Dispatcher {
             }
         } else {
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
+            // A task shown working (or waiting) for the words that resumed it, which had not
+            // gone in, goes back to queued with them: the claim was its window's, and the
+            // words reopen the window. Paused here, the window's exit would undo the chief's
+            // resume (T-1153's F1).
+            let task = match task {
+                Some(thread)
+                    if self.withdraw_resume_claim(
+                        project.id,
+                        (thread.task.number, thread.task.state.as_str()),
+                        "its window closed",
+                    )? =>
+                {
+                    None
+                }
+                other => other,
+            };
             // What the host lists is the turn's work, by its own proof, as it was when the
             // window closed.
             let left = shown.left_running();
@@ -1285,7 +1304,10 @@ impl Dispatcher {
         }
         self.record_quota(record, &owner, observed.quota.clone());
         self.tell_drift(project, participant, record, &observed)?;
-        if self.refused_here(record, &owner) {
+        // A chief's turn its busy model refused is the human's to hear, as before (T-1112): the
+        // chief has no task to hold and try again, and a hold would lose its turn unheard.
+        let chief_busy = participant.role == "chief" && busy_turn(&observed);
+        if !chief_busy && self.refused_here(record, &owner) {
             return self
                 .out_of_quota(project, participant, record, &owner, &observed)
                 .await;
@@ -1349,6 +1371,9 @@ impl Dispatcher {
             }
             // A held task's window that went on with it by itself: its task goes on.
             self.went_on_by_itself(project, participant, &observed)?;
+            // A resumed task whose window is at work on it reads working while its words
+            // wait for the window's rest.
+            self.show_resumed_at_work(project, participant, record, &observed)?;
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
@@ -1363,12 +1388,22 @@ impl Dispatcher {
                 // turn left is ended; the window closes below if it is free (`turn_end`), once
                 // its screen is drawn where its task is done (`still_drawing`).
                 let watching = self.watch_monitors(participant, record, &observed).await;
-                self.collect(project, participant, record, &observed, watching)
+                let turn = self
+                    .collect(project, participant, record, &observed, watching)
                     .await?;
+                // A turn that came to nothing may be one that never began on what its
+                // window was given (`never_began`).
+                if matches!(turn, Turn::Open) {
+                    self.watch_begun(project, participant, record, &observed)
+                        .await?;
+                }
             }
             if self.close_if_free(record).await? {
                 return Ok(());
             }
+        } else if chief_busy {
+            self.tell_chief_failed(project, participant, record, &observed)
+                .await?;
         } else if observed.failed && !self.cut_short(&observed) {
             // A refusal for quota is the quota's to say; any other failure is the human's to hear.
             self.tell_chief_failed(project, participant, record, &observed)
@@ -1505,10 +1540,15 @@ impl Dispatcher {
         let until = owner.out_until.clone().unwrap_or_default();
         let reported = record.quota.borrow().reported.clone();
         let unwell = Unwell::of(reported.as_deref());
-        self.set_activity(
-            record,
-            Activity::because(ActivityState::Out, out_words(&until, unwell)),
-        )?;
+        // A window of a member out for its busy model whose own record shows no refusal says
+        // so too (T-1112).
+        let words = match unwell {
+            None if self.busy_until(owner.id).as_deref() == Some(until.as_str()) => {
+                format!("model busy, tried again at {until}")
+            }
+            _ => out_words(&until, unwell),
+        };
+        self.set_activity(record, Activity::because(ActivityState::Out, words))?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
         if participant.role != "chief" && self.refused_unhandled(record) {
@@ -1599,14 +1639,22 @@ impl Dispatcher {
         // the quota now, not for a job of an earlier turn (`turn_end`).
         record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
-        let reset = self.reset_of(reported.as_deref());
         let unwell = Unwell::of(reported.as_deref());
+        // A busy model is tried again after a backoff of the engine's, by its tries (T-1112).
+        let reset = if let Some(Unwell::Busy(_)) = unwell {
+            self.busy_reset(project, participant)?
+        } else {
+            self.reset_of(reported.as_deref())
+        };
         let marked = self.seams.ledger.borrow_mut().mark_out(
             owner.id,
             &reset,
             unwell.map_or("out of quota", Unwell::hold),
         )?;
         let until = marked.out_until.clone().unwrap_or_default();
+        if let Some(Unwell::Busy(_)) = unwell {
+            self.marked_busy(owner.id, &until);
+        }
         self.set_activity(
             record,
             Activity::because(ActivityState::Out, out_words(&until, unwell)),
@@ -1619,6 +1667,7 @@ impl Dispatcher {
                 match unwell {
                     Some(Unwell::Account(_)) => "its account is unavailable",
                     Some(Unwell::Moved(_)) => "its model moved on its own",
+                    Some(Unwell::Busy(_)) => "its model was busy",
                     None => "the harness ran out of quota",
                 },
             )?;

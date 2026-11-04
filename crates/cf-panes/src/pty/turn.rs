@@ -103,26 +103,71 @@ impl Tree {
         }
     }
 
-    /// The turn's work that `baseline` proves, and still is [`SETTLE`] after it was
-    /// first found ([`steady`]): looked at again when the first look finds any, so that
-    /// a run of the harness's own, which has ended by then, is none of it.
+    /// Of the detached work `candidates` (jobs whose starter has gone), the ones the host may
+    /// name, by what the platform can prove of them; none where every one may be.
+    ///
+    /// **On the Mac**, the ones a close of the window ends: what the tree selects and the bound
+    /// allows (`ProcessTree::closing`). A process that only the window's marker ties to it, or
+    /// one that left the window's session after a look saw it, is left running by a close, and
+    /// is not the work a close ends. A process has no recorded starter there, and a daemon
+    /// (Gradle's, an `adb` server) makes a session of its own, which is what keeps it out.
+    ///
+    /// **On Windows**, the ones whose starter was a shell, as it was read when they began
+    /// (`JobObject::started_by_a_shell`, from the job's completion port): the pane's job holds
+    /// every process the window starts, so holding says nothing of whose it is, and a build's
+    /// daemon is held as a `Start-Process` job is. A job whose starter was a build tool, or
+    /// `cmd.exe` (no shell here: the host's `work`), or whose birth was not read, is not named.
+    fn proved(
+        &self,
+        candidates: &[Member],
+    ) -> io::Result<Option<std::collections::HashSet<crate::background::ProcessKey>>> {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = candidates;
+            self.tree.closing().map(Some)
+        }
+        #[cfg(windows)]
+        {
+            Ok(Some(crate::background::proved_by_birth(
+                candidates,
+                |key| self.job.started_by_a_shell(key),
+            )))
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = candidates;
+            Ok(None)
+        }
+    }
+
+    /// What the host names of the tree now: the turn's work that `baseline` proves, and the
+    /// work detached from it that the platform proves the window's close ends or the agent's
+    /// ([`Baseline::named`], [`Tree::proved`]).
+    fn named(&self, baseline: &Baseline) -> io::Result<Vec<Member>> {
+        baseline.named(&self.members()?, |candidates| self.proved(candidates))
+    }
+
+    /// What the host names of the tree, and still is [`SETTLE`] after it was first found
+    /// ([`steady`]): looked at again when the first look finds any, so that a run of the
+    /// harness's own, which has ended by then, is none of it.
     fn steady_work(&self, baseline: &Baseline) -> io::Result<Vec<Member>> {
-        let first = baseline.turn_work(&self.members()?);
+        let first = self.named(baseline)?;
         if first.is_empty() {
             return Ok(first);
         }
         thread::sleep(SETTLE);
-        Ok(steady(&first, baseline.turn_work(&self.members()?)))
+        Ok(steady(&first, self.named(baseline)?))
     }
 }
 
-/// What `tree` has running that is the turn's work, where the turn `baseline` was
-/// marked at began. A pane never marked has none, and its tree is not looked at.
+/// What `tree` has running that the host names, where the turn `baseline` was marked at
+/// began: the turn's work, and the work detached from it that a close would end. A pane
+/// never marked has none, and its tree is not looked at.
 fn looked_at(baseline: &Baseline, tree: &Tree) -> io::Result<Background> {
     if !baseline.is_marked() {
         return Ok(Background::default());
     }
-    Ok(baseline.left_running(&tree.members()?))
+    Ok(listed(tree.named(baseline)?))
 }
 
 /// [`looked_at`], and what it finds is looked for again [`SETTLE`] later: what is still
