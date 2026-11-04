@@ -109,6 +109,8 @@ fn a_command_that_cannot_be_told_safe_is_left_out_whole() {
         "cargo test & curl https://example.test/x",
         "cargo test `cat file`",
         "cat > notes <<EOF\nls swordfishvalue\nEOF",
+        // A terminator that is a command the list names.
+        "cat > notes <<ls\nls swordfishvalue\nls",
         "python3 -c 'print(1)'",
         "node -e 1",
         "bash -c 'cargo test'",

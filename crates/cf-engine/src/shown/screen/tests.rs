@@ -201,12 +201,12 @@ fn a_private_keys_block_is_taken_out_whole_and_one_with_a_delimiter_missing_with
     assert!(!said.contains("b3Blbn") && !said.contains("AAAAAAAB"));
     // A delimiter missing: the screen is withheld, and none of the body is told.
     for screen in [
-        // Two beginnings and one end.
+        // Two beginnings and one end (PGP's header ends on a word, as an RSA key's does not).
         &[
-            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
             "ok",
-            "-----BEGIN RSA PRIVATE KEY-----",
-            "-----END RSA PRIVATE KEY-----",
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+            "-----END PGP PRIVATE KEY BLOCK-----",
         ][..],
         // Its top is above the screen.
         &[
