@@ -225,6 +225,7 @@ pub(crate) fn relaunch_stalled(
     participant_id: i64,
     message_id: i64,
     seq: i64,
+    item: &str,
 ) -> Result<TaskView, LedgerError> {
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
@@ -266,6 +267,13 @@ pub(crate) fn relaunch_stalled(
             message_id,
             "its window began no turn on it, and ConsensFlow relaunched the window",
         )?;
+        // Where the window's record held the copy that never began (`item`): the message is
+        // received again only by a copy after it (T-1223's P2-2). Its receipt keeps it until a
+        // copy arrives, which writes the receipt of its own.
+        store.db.execute(
+            "UPDATE message SET receipt = json_object('before', ?) WHERE id = ?",
+            params![item, message_id],
+        )?;
         let task = store.task_row(project_id, number)?;
         store.move_task(
             &task,
@@ -279,7 +287,7 @@ pub(crate) fn relaunch_stalled(
         store.log(
             project_id,
             "task.relaunched",
-            json!({ "task": number, "message": message_id, "stop": seq }),
+            json!({ "task": number, "message": message_id, "stop": seq, "item": item }),
         )?;
         task_by_id(store, task.id)
     })

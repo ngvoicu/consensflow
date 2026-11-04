@@ -925,11 +925,10 @@ impl Dispatcher {
             part.conversation = conversation_id;
             part.unproven = resumed_on.is_some() && !proven;
         }
-        // A window relaunched for a message it began no turn on (`stops`) is told as it came
-        // back: on its conversation, or afresh where its harness held it no more.
-        if let Err(cause) = self.tell_relaunched(project, participant, record, resumed) {
-            self.write_down(&cause);
-        }
+        // A window relaunched for a message it began no turn on (`stops`) came back: on its
+        // conversation, or afresh where its harness held it no more. It is told once that
+        // message has arrived.
+        self.relaunched_back(record, resumed);
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;

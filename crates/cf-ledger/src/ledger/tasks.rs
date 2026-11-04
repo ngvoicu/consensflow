@@ -134,6 +134,7 @@ impl Ledger {
         participant_id: i64,
         message_id: i64,
         seq: i64,
+        item: &str,
     ) -> Result<TaskView, LedgerError> {
         tasks::relaunch_stalled(
             &mut self.store,
@@ -142,6 +143,7 @@ impl Ledger {
             participant_id,
             message_id,
             seq,
+            item,
         )
     }
 

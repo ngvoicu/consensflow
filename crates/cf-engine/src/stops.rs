@@ -64,7 +64,7 @@ use std::sync::Arc;
 use cf_base::js;
 use cf_harness::contract::{Observed, Over};
 use cf_harness::records::{Reading, Role};
-use cf_ledger::{LedgerError, NewNote, ParticipantView, ProjectView, Stop};
+use cf_ledger::{LedgerError, MessageView, NewNote, ParticipantView, ProjectView, Stop};
 use serde_json::Value;
 
 use crate::background::close_would_end;
@@ -175,6 +175,8 @@ pub(crate) struct Relaunching {
     pub(crate) message: i64,
     pub(crate) requester: String,
     pub(crate) rounds: u32,
+    /// How the window came back, once it did: on its conversation, or afresh.
+    pub(crate) resumed: Option<bool>,
 }
 
 /// What came of a stall's relaunch.
@@ -737,6 +739,7 @@ impl Dispatcher {
             participant.id,
             message,
             stalled.seq,
+            &stalled.item,
         );
         match relaunched {
             Ok(task) => {
@@ -745,6 +748,7 @@ impl Dispatcher {
                     message,
                     requester: task.requester,
                     rounds,
+                    resumed: None,
                 });
             }
             Err(LedgerError::Refused(refusal)) => {
@@ -779,39 +783,59 @@ impl Dispatcher {
         Ok(Relaunch::Done)
     }
 
-    /// The window relaunched for a message it began no turn on is opened again, `resumed` on
-    /// its conversation or afresh where its harness held it no more: its requester is told
-    /// once, as it happened.
+    /// The window relaunched for a message it began no turn on came back, `resumed` on its
+    /// conversation or afresh where its harness held it no more: kept for the note its
+    /// requester is told once that message has arrived ([`Dispatcher::tell_relaunched`]).
+    pub(crate) fn relaunched_back(&self, record: &Record, resumed: bool) {
+        if let Some(relaunching) = record.relaunching.borrow_mut().as_mut() {
+            relaunching.resumed = Some(resumed);
+        }
+    }
+
+    /// `message` arrived in the window relaunched to be given it again, by a copy after the
+    /// one that never began (`confirm_arrival`): its requester is told once, as it happened.
+    /// Nothing is said before that arrival, nor of a relaunch whose window never came back
+    /// (T-1223's P2-2).
     pub(crate) fn tell_relaunched(
         &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
         record: &Record,
-        resumed: bool,
+        arrived: &MessageView,
     ) -> Result<(), EngineError> {
-        let Some(relaunching) = record.relaunching.borrow_mut().take() else {
-            return Ok(());
+        let relaunching = {
+            let mut kept = record.relaunching.borrow_mut();
+            match kept.as_ref() {
+                Some(relaunching)
+                    if relaunching.message == arrived.id && relaunching.resumed.is_some() =>
+                {
+                    kept.take()
+                }
+                _ => None,
+            }
         };
-        let Relaunching {
+        let Some(Relaunching {
             number,
             message,
             requester,
             rounds,
-        } = relaunching;
-        let how = if resumed {
+            resumed,
+        }) = relaunching
+        else {
+            return Ok(());
+        };
+        let how = if resumed == Some(true) {
             "relaunched it on its conversation"
         } else {
             "opened it afresh, as its harness held its conversation no more,"
         };
+        let handle = &arrived.recipient;
         self.seams.ledger.borrow_mut().note(
-            project.id,
+            arrived.project_id,
             &NewNote {
                 from: None,
                 to: requester,
                 task: Some(number),
                 body: format!(
-                    "T-{number}'s window (@{}) began no turn on m-{message} and went on through the interrupt {rounds} times with nothing of its own running, so ConsensFlow {how} and gave it m-{message} again. T-{number} goes on by itself.",
-                    participant.handle
+                    "T-{number}'s window (@{handle}) began no turn on m-{message} and went on through the interrupt {rounds} times with nothing of its own running, so ConsensFlow {how} and gave it m-{message} again. T-{number} goes on by itself."
                 ),
             },
         )?;

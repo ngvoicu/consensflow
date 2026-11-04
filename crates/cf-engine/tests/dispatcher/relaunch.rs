@@ -578,3 +578,72 @@ fn a_screen_that_says_nothing_of_its_output_keeps_the_window() {
         during_the_fresh_read(context, |_, host| host.set_snapshot(json!({})));
     });
 }
+
+/// zeus's record's items of the user's: their ids, in order.
+fn users_items(context: &Context) -> Vec<String> {
+    context
+        .adapter
+        .agent("zeus")
+        .items
+        .iter()
+        .filter(|item| item.role == Role::User)
+        .map(|item| item.id.to_string())
+        .collect()
+}
+
+#[test]
+fn a_replay_into_a_conversation_that_kept_its_first_copy_is_received_as_the_new_one() {
+    // T-1223's P2-2, its first probe: the conversation keeps the stalled copy (`i-3`) through
+    // the relaunch, and the replay goes in after it (`i-5`). The receipt names the replay: what
+    // reads the window's turns from it reads them from there (result-after-held-turn's
+    // `paste_of`).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.adapter.resumes_records.set(true);
+    let brief = stalled(&context, &tiers);
+    let old = context.message(brief).receipt["item"]
+        .as_str()
+        .expect("received once")
+        .to_owned();
+    context.adapter.never_begins.set(None);
+    context.host.exits_showing(Some(0), None, None);
+    rounds(&context);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let users = users_items(&context);
+    assert!(users.contains(&old), "the first copy kept: {users:?}");
+    let replay = context.message(brief);
+    assert_eq!(replay.state, "delivered");
+    let new = replay.receipt["item"].as_str().expect("received again");
+    assert_ne!(new, old, "the replay's own receipt");
+    assert_eq!(
+        users.iter().rposition(|id| id == new),
+        users.iter().rposition(|id| *id == old).map(|at| at + 1),
+        "the copy after the first: {users:?}"
+    );
+    assert_eq!(relaunch_notes(&tiers).len(), 1);
+}
+
+#[test]
+fn a_replay_the_reopened_harness_drops_is_not_received_and_nothing_says_it_went_in() {
+    // T-1223's P2-2, its second probe: the reopened harness takes nothing of its first
+    // message; only the stalled copy is in its record. The replay is no arrival: not delivered,
+    // the task not at work, and no note says it was given again.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.adapter.resumes_records.set(true);
+    let brief = stalled(&context, &tiers);
+    context.adapter.never_begins.set(None);
+    context.host.exits_showing(Some(0), None, None);
+    let kills = context.host.killed().len();
+    context.adapter.forgets_first_messages.set(true);
+    rounds(&context);
+    assert!(context.host.killed().len() > kills, "relaunched");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_ne!(context.message(brief).state, "delivered");
+    assert_ne!(tiers.task(2).task.state, "working");
+    assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
+}
