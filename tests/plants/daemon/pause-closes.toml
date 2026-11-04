@@ -21,6 +21,12 @@
 # - the kept note says a task resumed meanwhile is paused, or offers a cancelled one a resume;
 # - a hold asks a stop (bug 10), or a resume whose words never went in does;
 # - a reopen, or a resume, asks a stop (bug 9's class);
+# - a window that never began its brief, which ignores ConsensFlow's own stop of it, is kept
+#   (T-1130's relaunch lost), its stop goes unmarked, its relaunch gives no brief again, or
+#   its task is not resumed; or a pause's stop relaunches a window as the stall's does;
+# - a stop owed when its task left the window's hands is owed again when it comes back
+#   (the chief's Finish of a paused task, then its reopen), or the stop a look found is
+#   never kept;
 # - the live suite's cases against the stand-in agent (`crates/cf-e2e/tests/live_stops/
 #   midturn/`) read the lane over the stop, at whatever look the first came (T-403), and a
 #   close is read from the pane host's closes of the window, never from a note's words
@@ -289,3 +295,73 @@ platforms = ["macos", "linux"]
 file = "crates/cf-e2e/tests/live_stops/midturn/stand_in.rs"
 find = "        stall(members.rig().daemon_pid(), Duration::from_millis(200)).unwrap();"
 replace = "        let _ = (members, stall);"
+
+[[plant]]
+name = "pause closes: a window that never began its brief is kept for ConsensFlow's own stop"
+meant = "a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched_on_its_conversation_and_goes_on_by_itself"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                    (None, Kept::No) if self.stalled_for(record, stop) => {"
+replace = "                    (None, Kept::No) if false && self.stalled_for(record, stop) => {"
+
+[[plant]]
+name = "pause closes: a pause's stop relaunches a window as the stall's does"
+meant = "the_chiefs_pause_of_a_window_that_never_began_its_brief_keeps_it_and_relaunches_nothing"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        record.window.borrow().stalled_stop == Some((stop.task_id, stop.seq))"
+replace = "        record.window.borrow().stalled_stop.is_some() || stop.seq > 0"
+
+[[plant]]
+name = "pause closes: the stall's stop goes unmarked"
+meant = "a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched_on_its_conversation_and_goes_on_by_itself"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "            .filter(|stop| stop.task_id == thread.task.id)"
+replace = "            .filter(|_| false)"
+
+[[plant]]
+name = "pause closes: the relaunch gives no brief again"
+meant = "a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched_on_its_conversation_and_goes_on_by_itself"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '            let words = format!("{RELAUNCHED}\n\n{}", task.body);'
+replace = '            let words = format!("{RELAUNCHED}{}", "");'
+
+[[plant]]
+name = "pause closes: a relaunched window's task is not resumed"
+meant = "a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched_on_its_conversation_and_goes_on_by_itself"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '        let gone_on = task.state == "paused" && {'
+replace = '        let gone_on = task.state == "no such state" && {'
+
+[[plant]]
+name = "pause closes: a stop owed when its task left the window's hands is owed again when it comes back"
+meant = "a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_nothing_into_the_turn_after"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                    part.left_stop.take() == Some(now)"
+replace = "                    part.left_stop.take() == Some(now) && now.1 < 0"
+
+[[plant]]
+name = "pause closes: the stop a look found is never kept"
+meant = "a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_nothing_into_the_turn_after"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                    part.seen_stop = Some(now);"
+replace = "                    part.seen_stop = None;"
