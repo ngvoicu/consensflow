@@ -776,13 +776,39 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// The task leaves the window's hands at a step that made it so (the chief's Finish): a
-    /// stop it was asked before, still owed, is settled there, whatever look comes next or
-    /// never comes between it and a reopen (T-1220's P2-4). A stop asked after has a greater
-    /// sequence, and is owed.
+    /// The task leaves the window's hands at a step that made it so (the chief's Finish or
+    /// the human's Done, ConsensFlow's give-up of a failed turn): a stop it was asked before,
+    /// still owed, is settled there, whatever look comes next or never comes between it and a
+    /// reopen (T-1220's P2-4, T-1223's P2-4). A delivery given up for good fails its task
+    /// with no stop owed: told words go in only at rest, after the stop is paid, a brief
+    /// fails only a task still queued for it, and the words that resume a task pause it
+    /// again. The stop is the one read before that step ([`Dispatcher::owed_at_departure`]),
+    /// never whatever is latest later: a stop asked after has a greater sequence, and is owed.
     pub(crate) fn settle_at_departure(&self, record: &Record, stop: Option<&Stop>) {
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
             self.pay(record, stop);
+        }
+    }
+
+    /// The stop `participant`'s window was asked for T-`number`, read before a step that may
+    /// take the task out of its hands: what [`Dispatcher::settled_at_departure`] settles.
+    pub(crate) fn owed_at_departure(
+        &self,
+        participant: i64,
+        number: i64,
+    ) -> Result<Option<Stop>, EngineError> {
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .stop_of(participant)?
+            .filter(|stop| stop.number == number))
+    }
+
+    /// [`Dispatcher::settle_at_departure`] on `participant`'s window, where it has one.
+    pub(crate) fn settled_at_departure(&self, participant: i64, stop: Option<Stop>) {
+        if let (Some(record), Some(stop)) = (self.record(participant), stop) {
+            self.settle_at_departure(&record, Some(&stop));
         }
     }
 

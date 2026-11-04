@@ -309,7 +309,7 @@ impl Dispatcher {
                 .active_task(participant.id, false)?
                 .is_some_and(|now| now.task.id == thread.task.id && now.task.state == "working");
             if still && !self.forgotten(record) {
-                self.fail_task(project, &thread.task, &because)?;
+                self.fail_task(project, participant.id, &thread.task, &because)?;
             }
             return Ok(Turn::Open);
         }

@@ -1406,6 +1406,128 @@ fn a_finish_and_a_reopen_between_two_looks_settle_the_stop_and_a_pause_after_is_
 }
 
 #[test]
+fn a_failure_and_a_reopen_between_two_looks_settle_the_stop_and_a_pause_after_is_owed() {
+    // T-1223's P2-4, the re-check's chain: the pause of T-1 is pressed once into its window at
+    // work, the chief resumes it (queued again), ConsensFlow gives it up (`fail_task`, as a
+    // look at a failed turn does) and the chief reopens it, with no look between those. The
+    // old stop is settled by the give-up; a pause asked after the reopen is owed.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    assert_eq!(pressed, 1, "the pause's first round");
+    context.resume_task(project, 1, "Go on");
+    assert_eq!(context.task(project, 1).task.state, "queued");
+    context
+        .give_up_task(project, 1, "its window's turn failed")
+        .unwrap();
+    assert_eq!(context.task(project, 1).task.state, "failed");
+    let at_failure = context.host.inputs().len();
+    context.adapter.with("zeus", |agent| {
+        agent.failed = false;
+        agent.failure = None;
+        agent.settled = false;
+    });
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        at_failure,
+        "nothing pressed after the failure"
+    );
+    // The control: a pause asked now is owed, and pressed.
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs().len(),
+        at_failure + 1,
+        "a new pause is pressed"
+    );
+}
+
+#[test]
+fn a_tell_to_a_task_paused_for_its_window_gone_asks_a_stop_of_the_window_the_human_brought_back() {
+    // T-1223's P2-3: zeus's window exits and T-1 is paused for it; the human opens the window
+    // again and begins a turn in it; then the chief tells T-1. The tell takes the pause over
+    // and asks its own stop, which the window at work is pressed for; the tell goes in once
+    // the window has stopped, once.
+    let context = Context::new();
+    let (project, session) = held_open(&context);
+    context.exit("zeus");
+    context.pass().unwrap();
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "paused",
+        "its window gone"
+    );
+    let stops_before = stops_of(&context, project, 1);
+    context.open_window(project, &session).unwrap();
+    context.pass().unwrap();
+    its_own_turn(&context, "Show me the parser's tests");
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    let tell = context
+        .tell(project, &session, 1, "Check the README first")
+        .id;
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    let stops = stops_of(&context, project, 1);
+    assert_eq!(
+        stops.len(),
+        stops_before.len() + 1,
+        "the tell asked a stop: {stops:?}"
+    );
+    assert!(
+        context.host.inputs().len() > pressed,
+        "the window at work is pressed for it"
+    );
+    assert_eq!(
+        context.message(tell).state,
+        "queued",
+        "it waits for the stop"
+    );
+    context.adapter.answer("zeus", "Stopped");
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.message(tell).state,
+        "delivered",
+        "in once the window stopped"
+    );
+    assert_eq!(given_zeus(&context, "Check the README first"), 1, "once");
+}
+
+/// The stops asked of T-`number`, by the moves to paused that counted one.
+fn stops_of(context: &Context, project: i64, number: i64) -> Vec<Value> {
+    context
+        .ledger
+        .borrow()
+        .events(project, 0, 5_000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| {
+            event.kind == "task.state"
+                && event.data["task"] == number
+                && event.data["stop"].is_number()
+        })
+        .map(|event| event.data["stop"].clone())
+        .collect()
+}
+
+#[test]
 fn a_projects_close_closes_a_kept_window_as_the_humans_own_shutdown() {
     // T-1199 round 3, the chief's 8: a pause never closes a window, but the human's Close of
     // the project (and the app's quit) is no pause: it closes every window, a kept one too,

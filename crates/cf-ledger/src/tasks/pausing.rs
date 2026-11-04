@@ -168,14 +168,15 @@ pub(crate) fn unmark_pause(
 /// reason (`never_began`): the stall a relaunch goes on from.
 pub const NEVER_BEGAN: &str = "its window began no turn on ";
 
-/// Whether `task` is paused by ConsensFlow on its own, to go on by itself: held for its
-/// member's quota or a busy model (`held_until`), or stalled for a message its window began
-/// no turn on (its last move to paused named nobody, for [`NEVER_BEGAN`]'s reason), and not
-/// with its project's suspension, which [`take_over_pause`] takes over. A tell or a pause of
-/// the chief's or the human's takes such a task over (T-1220's P1-1): their stop is asked,
-/// and the hold's time and the stall's relaunch are the task's no more. A task paused for a
-/// window that went away is no such task: its windows owe nothing, and a tell to it is told
-/// as it always was.
+/// Whether `task` is paused by ConsensFlow on its own: held for its member's quota or a busy
+/// model (`held_until`), or its last move to paused named nobody (a message its window began
+/// no turn on, [`NEVER_BEGAN`]; its window gone; a window that held several tasks; words that
+/// resumed it in vain), and not with its project's suspension, which [`take_over_pause`]
+/// takes over, nor held for the chief's word on the conversation it follows
+/// ([`hold_for_context`]), which no window has. A tell or a pause of the chief's or the
+/// human's takes such a task over (T-1220's P1-1): their stop is asked, of whatever window
+/// holds the task by then (one the human brought back after its window went, T-1223's
+/// P2-3), and the hold's time and the stall's relaunch are the task's no more.
 pub(crate) fn paused_by_consensflow(store: &Store, task: &TaskRow) -> Result<bool, LedgerError> {
     if task.state != "paused" {
         return Ok(false);
@@ -191,18 +192,21 @@ pub(crate) fn paused_by_consensflow(store: &Store, task: &TaskRow) -> Result<boo
     if held.is_some() {
         return Ok(true);
     }
-    let last: Option<(Option<String>, Option<String>)> = store
+    // The pause is whoever's last made it theirs: its move to paused, or a takeover of the
+    // suspension's pause (`task.pause-taken`, which names who took it).
+    let last: Option<(Option<String>, Option<bool>)> = store
         .db
         .query_row(
-            "SELECT json_extract(data, '$.by'), json_extract(data, '$.because') FROM event
-             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)
-               AND json_extract(data, '$.task') = ?2 AND json_extract(data, '$.to') = 'paused'
+            "SELECT json_extract(data, '$.by'), json_extract(data, '$.context') FROM event
+             WHERE project_id = ?1 AND json_valid(data) AND json_extract(data, '$.task') = ?2
+               AND (kind = 'task.pause-taken'
+                    OR (kind = 'task.state' AND json_extract(data, '$.to') = 'paused'))
              ORDER BY id DESC LIMIT 1",
             params![task.project_id, task.number],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    Ok(matches!(last, Some((None, Some(because))) if because.starts_with(NEVER_BEGAN)))
+    Ok(matches!(last, Some((None, context)) if context != Some(true)))
 }
 
 /// ConsensFlow relaunches the window of task T-`number` that began no turn on message

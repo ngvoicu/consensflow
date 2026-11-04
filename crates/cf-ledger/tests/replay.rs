@@ -102,7 +102,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
     ("core-dispatcher-028", 90, COPY_AFTER_THE_KEPT),
-    ("core-dispatcher-029", 81, COPY_AFTER_THE_KEPT),
+    ("core-dispatcher-029", 47, TELL_TAKES_A_WINDOW_LOSS_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
     ("core-dispatcher-055", 71, TAKEN_BEFORE_GIVEN),
     ("core-dispatcher-056", 103, DECIDED_BEFORE_PASTED),
@@ -223,6 +223,13 @@ const FOLLOW_UP_BEHIND_WORK: &str =
 const FOLLOW_UP_BEHIND_RESULT: &str =
     "the chief queues a follow-up (`--after T-1`) while T-1's result is in and not accepted: it is taken, open and waiting for T-1 to be accepted, and nothing is queued for the window, where Node queued it for the window at once";
 /// The copy of a record that shrank puts its new items after the ones it kept (T-1118).
+/// The chief's tell lands on a task ConsensFlow paused when its window went: the tell takes
+/// that pause over, as the chief's own, and asks its stop of whatever window holds the task by
+/// then (the window the human may have brought back), where Node's left the pause
+/// ConsensFlow's and asked no stop (T-1199, T-1223's P2-3). The trace's later departure
+/// (`COPY_AFTER_THE_KEPT`) is no longer reached.
+const TELL_TAKES_A_WINDOW_LOSS_PAUSE: &str = "the chief's tell takes over the pause ConsensFlow made when the window went, as the chief's own pause (a move to paused by the chief), and asks its stop, where Node's left it ConsensFlow's";
+
 const COPY_AFTER_THE_KEPT: &str =
     "a window's record shrank (a resumed window rewrote it) and is copied from its start: an item it shows at the place of an older one the copy kept is put after every item the copy has (`seq`), where Node's took the older one's place and sorted among them";
 /// A task that open tasks wait for is not cancelled: they are released when it
