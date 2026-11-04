@@ -208,6 +208,9 @@ fn rows_of_base64_and_nothing_else_withhold_the_screen() {
             "the padding alone after a body",
             vec!["MIIEvQIBADANBgkq", "=="],
         ),
+        // A short body, below any size of its own, and the padding alone after it: the padding
+        // row is the second row that looks encoded.
+        ("a short body and its padding alone", vec!["0QAAAA", "=="]),
         // A key cropped to one row: a narrow body, and one with a symbol in it.
         ("one narrow row of a key's body", vec!["hkiG9w0BAQEFAASC"]),
         ("one narrow row with a plus", vec!["abcdefghij+klm"]),
