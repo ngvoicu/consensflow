@@ -25,8 +25,8 @@
 #   (T-1130's relaunch lost), its stop goes unmarked, its relaunch gives no brief again, or
 #   its task is not resumed; or a pause's stop relaunches a window as the stall's does;
 # - a stop owed when its task left the window's hands is owed again when it comes back
-#   (the chief's Finish of a paused task, then its reopen), or the stop a look found is
-#   never kept, or the Finish settles nothing (T-1220's P2-4);
+#   (the chief's Finish of a paused task, then its reopen): the Finish settles nothing
+#   (T-1220's P2-4);
 # - T-1220's round: a tell or a pause takes no held or stalled task over (quota's reset,
 #   the relaunch); the relaunch is asked nothing again (a word of an answer since, unsent
 #   words, a screen or a record unread, a dialog, a look after the host's answer, a
@@ -326,7 +326,7 @@ replace = "                        if let Some(stalled) = self.stalled_for(recor
 
 [[plant]]
 name = "pause closes: a pause's stop relaunches a window as the stall's does"
-meant = "the_chiefs_pause_of_a_window_that_never_began_its_brief_keeps_it_and_relaunches_nothing"
+meant = "a_pause_after_the_stall_takes_the_task_out_of_its_relaunch"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -377,26 +377,6 @@ replace = """            return Err(refused(format!("m-{message_id} was relaunch
         if message_id > 0 {
             return task_by_id(store, task.id);
         }"""
-
-[[plant]]
-name = "pause closes: a stop owed when its task left the window's hands is owed again when it comes back"
-meant = "a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_nothing_into_the_turn_after"
-runs = ["engine-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = "                    part.left_stop.take() == Some(now)"
-replace = "                    part.left_stop.take() == Some(now) && now.1 < 0"
-
-[[plant]]
-name = "pause closes: the stop a look found is never kept"
-meant = "a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_nothing_into_the_turn_after"
-runs = ["engine-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = "                    part.seen_stop = Some(now);"
-replace = "                    part.seen_stop = None;"
 
 [[plant]]
 name = "pause closes: a tell takes no held or stalled task over"
@@ -484,7 +464,7 @@ replace = "        let Some(snapshot) = snapshot.or(Some(serde_json::Value::Null
 
 [[plant]]
 name = "pause closes: the relaunch retires a window showing a dialog of its own"
-meant = "a_window_showing_a_dialog_of_its_own_is_kept_and_never_relaunched"
+meant = "a_window_showing_a_dialog_of_its_own_after_the_hosts_answer_is_kept_and_never_relaunched"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -497,7 +477,7 @@ replace = """        if record.delivery.borrow().delivering.is_some()
 
 [[plant]]
 name = "pause closes: the relaunch retires a window whose record is unread"
-meant = "a_window_whose_record_cannot_be_read_is_kept_and_never_relaunched"
+meant = "a_window_whose_record_cannot_be_read_after_the_hosts_answer_is_kept_and_never_relaunched"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]

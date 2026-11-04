@@ -386,7 +386,7 @@ replace = """        if participant.role == "chief" {
 
 [[plant]]
 name = "quota wait: a tell answered while the words that resume the task wait is taken for a turn of the window's own"
-meant = "a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_windows_own"
+meant = "a_tell_to_a_task_held_at_its_reset_takes_it_over_goes_in_on_its_own_and_no_resume_follows"
 runs = ["quota-wait-engine"]
 
 [[plant.edit]]

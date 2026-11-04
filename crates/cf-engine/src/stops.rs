@@ -44,9 +44,9 @@
 //! on: it is kept instead), resumes that stall alone, is told as it happened (on its
 //! conversation, or afresh), and is tried once for a message (T-1220). A tell or a pause
 //! takes a stalled or a held task over, and asks its stop (`cf_ledger`'s
-//! `paused_by_consensflow`). A stop a task was asked before it left the window's hands (done, accepted, called
-//! off) is settled when it comes back to them with no stop asked since: a reopen, a resume
-//! or a follow-up presses nothing for it. Only a pause asks a stop: the chief's or
+//! `paused_by_consensflow`). A stop the task was asked of its window, owed still when the
+//! chief's Finish makes it done, is settled there: a reopen after presses nothing for it,
+//! whatever look comes between (T-1220's P2-4). Only a pause asks a stop: the chief's or
 //! the human's, a tell's, ConsensFlow's own of a window that began nothing, or a project's
 //! Close; a hold for quota and a resume whose words never went in ask none (`cf_ledger`'s
 //! `pause`), and a reopen, a resume, a follow-up and an answer are words that wait for the
@@ -393,7 +393,6 @@ impl Dispatcher {
             self.taken_back_since_paid(participant, record, observed)?;
         }
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
-        self.settle_since_it_left(record, stop.as_ref());
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
             let look = if look == Look::Work && past_its_turn(record, &stop, observed) {
                 Look::Rest
@@ -448,37 +447,6 @@ impl Dispatcher {
         match paid {
             Some(stop) => self.take_back(participant, &stop, observed),
             None => Ok(()),
-        }
-    }
-
-    /// A task that left the window's hands (done, accepted or called off: the ledger counts
-    /// none of its stops then) and comes back to them with no stop asked since (a reopen, a
-    /// resume of its result's follow-up) owes none of what it was asked before it left:
-    /// those were asked of turns that are over, and a stop left owed would press the turn the
-    /// window is on when the task comes back (T-1199: a stop owed when a task is finished by
-    /// the worker's `cf task done` or the chief's Finish). What the last look found is kept;
-    /// a stop asked since it left has a greater sequence, and is owed.
-    fn settle_since_it_left(&self, record: &Record, stop: Option<&Stop>) {
-        let settle = {
-            let mut part = record.window.borrow_mut();
-            match stop {
-                None => {
-                    if let Some(seen) = part.seen_stop.take() {
-                        part.left_stop = Some(seen);
-                    }
-                    false
-                }
-                Some(stop) => {
-                    let now = (stop.task_id, stop.seq);
-                    part.seen_stop = Some(now);
-                    part.left_stop.take() == Some(now)
-                }
-            }
-        };
-        if let Some(stop) = stop.filter(|_| settle) {
-            if self.owes(record, stop) {
-                self.pay(record, stop);
-            }
         }
     }
 

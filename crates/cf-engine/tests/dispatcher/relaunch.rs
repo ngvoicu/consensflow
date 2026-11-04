@@ -129,17 +129,6 @@ fn a_window_whose_screen_cannot_be_read_is_kept_and_never_relaunched() {
 }
 
 #[test]
-fn a_window_whose_record_cannot_be_read_is_kept_and_never_relaunched() {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus"]);
-    stalled(&context, &tiers);
-    let killed = context.host.killed().len();
-    context.adapter.unread("zeus", true);
-    rounds(&context);
-    kept(&context, &tiers, killed);
-}
-
-#[test]
 fn a_relaunch_whose_task_was_paused_again_while_its_window_closed_resumes_nothing() {
     // T-1220's P1-3: the host's answer to the kill is late; meanwhile the chief resumes T-2
     // and the human pauses it again. Once the kill is answered, the newer pause stays.
@@ -384,22 +373,6 @@ fn a_relaunched_window_is_told_on_its_conversation_once_the_window_is_back() {
 }
 
 #[test]
-fn a_window_showing_a_dialog_of_its_own_is_kept_and_never_relaunched() {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus"]);
-    stalled(&context, &tiers);
-    let killed = context.host.killed().len();
-    context.adapter.with("zeus", |agent| {
-        agent.waiting = Some(cf_harness::contract::Waiting {
-            reason: Some("Allow this command?".to_owned()),
-        });
-    });
-    rounds(&context);
-    assert_eq!(context.host.killed().len(), killed, "kept, never retired");
-    assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
-}
-
-#[test]
 fn a_resume_after_the_stall_moves_its_delivery_and_nothing_is_relaunched() {
     // A changed delivery revokes the relaunch: the chief resumes T-2 after the stall, and the
     // task is no longer the stall's to give back.
@@ -439,6 +412,53 @@ fn a_window_that_began_while_the_host_showed_its_screen_is_kept_and_never_relaun
             }
         },
     ));
+    rounds(&context);
+    assert_eq!(context.host.killed().len(), killed, "kept, never retired");
+    assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
+}
+
+/// `change` is made of zeus's window while the host answers the relaunch's own look at its
+/// screen (the only one that asks for no tail): what the window is after the stall, once the
+/// look that kept nothing from the relaunch is past.
+fn during_the_relaunchs_look(
+    context: &Context,
+    change: impl Fn(&cf_engine::testing::FakeAdapter) + 'static,
+) {
+    let adapter = std::rc::Rc::clone(&context.adapter);
+    *context.host.on_request.borrow_mut() = Some(std::rc::Rc::new(
+        move |op: &str, body: &serde_json::Value| {
+            if op == "pane.snapshot" && body.get("tail").is_none() {
+                change(&adapter);
+            }
+        },
+    ));
+}
+
+#[test]
+fn a_window_whose_record_cannot_be_read_after_the_hosts_answer_is_kept_and_never_relaunched() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    stalled(&context, &tiers);
+    let killed = context.host.killed().len();
+    during_the_relaunchs_look(&context, |adapter| adapter.unread("zeus", true));
+    rounds(&context);
+    assert_eq!(context.host.killed().len(), killed, "kept, never retired");
+    assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
+}
+
+#[test]
+fn a_window_showing_a_dialog_of_its_own_after_the_hosts_answer_is_kept_and_never_relaunched() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    stalled(&context, &tiers);
+    let killed = context.host.killed().len();
+    during_the_relaunchs_look(&context, |adapter| {
+        adapter.with("zeus", |agent| {
+            agent.waiting = Some(cf_harness::contract::Waiting {
+                reason: Some("Allow this command?".to_owned()),
+            });
+        });
+    });
     rounds(&context);
     assert_eq!(context.host.killed().len(), killed, "kept, never retired");
     assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());

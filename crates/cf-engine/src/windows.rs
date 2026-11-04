@@ -299,11 +299,6 @@ pub(crate) struct WindowPart {
     /// generation. A window that ignores every round of that stop, running nothing and still
     /// on nothing, is relaunched (`stops`), never kept.
     pub(crate) stalled: Option<crate::stops::Stalled>,
-    /// The stop its last look found asked of it, and the one it was asked while its task
-    /// was in its hands, once the task left them (done, accepted, or called off): a task
-    /// that comes back with no stop asked since owes none of what it was asked before.
-    pub(crate) seen_stop: Option<(i64, i64)>,
-    pub(crate) left_stop: Option<(i64, i64)>,
     /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,
     /// The stop it ignored in every round, while it lasts.
@@ -383,8 +378,6 @@ impl Default for WindowPart {
             stopped: None,
             paid_untaken: None,
             stalled: None,
-            seen_stop: None,
-            left_stop: None,
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
@@ -536,8 +529,6 @@ impl Dispatcher {
             window.settled = false;
             window.stopped = None;
             window.stalled = None;
-            window.seen_stop = None;
-            window.left_stop = None;
             window.interrupted = None;
             window.unstopped = None;
             window.owner = None;
