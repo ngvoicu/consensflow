@@ -10,33 +10,38 @@
 //! looks like a key or a token in them is hidden ([`mask`]): a screen can echo
 //! one, and the note goes to the board, the chief's window and the log.
 //!
-//! **A line that names a secret is not quoted, and neither are the lines beside it.** A
-//! credential is no token by its shape (`password: correct horse battery staple`, a value
-//! in quotes that goes on over the next line, YAML's `'it''s'`), and no masker of the
-//! syntaxes it is written in holds (both reviews of 2026-10-16 found one gap after another).
-//! So a line that names a secret-like word ([`secret`]: a password, `pwd`, an API or private
-//! key or a credential anywhere in a name, whatever its case or split, such as `PassWord` or
-//! `MYSQL_PWD`; a secret, a token, `auth` or `bearer` as a word or a part of a name such as
-//! `DB_SECRET`, never a piece of a word such as `author`) is left out of the quote with the
-//! rows next to it (a long value wraps onto the next row; a name can end the row above), and
-//! the rest of the lines the quote would show are quoted through the masker, the note saying
-//! how many were left out. What a value may do over more rows is not split: a quote it opens
-//! and does not close, a `\` that continues the row, a block it opens, and a private key's
-//! block (its base64 rows name nothing) take the lines to where they end, or the end of the
-//! screen ([`without_secrets`]). Where every line the quote would show is left out, the note
-//! says that its last screen lines named a secret, so they are left out; how the program
-//! ended is said all the same. Every line the host sent is looked at, not only those the
-//! quote would keep: a value that goes on over a line keeps no name on the line it ends on.
-//! The screens that name one and hold nothing else are the cost: Pi without a login says "No
-//! API key found for the selected model", and its note says its lines were left out, with the
-//! exit code (T-823: until then one line that named a secret left the whole screen out, and a
-//! chief whose worker closed with exit 143 never learned why).
+//! **A screen that names a secret is not quoted at all.** A credential is no token
+//! by its shape (`password: correct horse battery staple`, a value in quotes that
+//! goes on over the next line, YAML's `'it''s'`), and no masker of the syntaxes it
+//! is written in holds (both reviews of 2026-10-16 found one gap after another).
+//! So where any of the lines the host sent of the screen's end names a secret-like
+//! word ([`secret`]: a password, `pwd`, an API or private key or a credential anywhere
+//! in a name, whatever its case or split, such as `PassWord` or `MYSQL_PWD`; a secret,
+//! a token, `auth` or `bearer` as a word or a part of a name such as `DB_SECRET`, never
+//! a piece of a word such as `author`), the note says that the lines were left out,
+//! and quotes none of them; how the program ended is said all the same. Every line
+//! the host sent is looked at, not only those the quote would keep: a value that
+//! goes on over a line keeps no name on the line it ends on. The cost is the screens
+//! that name one and hold none: Pi without a login says "No API key found for the
+//! selected model", and its note says its lines were left out, with the exit code;
+//! so does a screen that shows the shell's `pwd`.
+//!
+//! **No row beside a secret is quoted, and no guess is made of where a secret ends.** T-823's
+//! first version left out the row that named a secret and its neighbours and quoted the rest,
+//! and a review (T-1216, then T-1222) put passwords in the ledger with it twice over: a label
+//! with its value below, a YAML block, a value hard-wrapped over rows, a sentence that trails
+//! off, an assignment wrapped over rows of one word. Guessing the extent failed both times,
+//! and the base's rule stands in alpha.2. Quoting a row next to a secret, where the extent is
+//! *proven*, is later work (`issues/per-line-quoting-of-a-screen-next-to-a-secret.md` in the
+//! brain). The rows are also looked at together for a key with no name and no delimiter in view
+//! ([`screen`]): rows of base64 and nothing else withhold the screen.
 //!
 //! **How the program ended** is said as the host said it: its signal where it sent one, and a
-//! status above 128 as the signal it is (143 is SIGTERM, 137 SIGKILL, [`signalled`]). A close
-//! ConsensFlow had no part in, none of its own under way, says that the signal did not come from
-//! it ([`Shown::outside`]). **What the window was doing** is the last tool call its record
-//! shows, said before its screen, masked and cut short ([`Shown::with_last_call`]).
+//! status above 128 as consistent with the signal it names (143 SIGTERM, 137 SIGKILL,
+//! [`signalled`]), no more; whether ConsensFlow sent it is said only from what the engine
+//! recorded ([`Part`]). **What the window was doing** is the last tool call its record shows,
+//! said before its screen: the tool, and for a shell call the first word of the command where
+//! it is a program the list names, never more of the command ([`Shown::with_last_call`]).
 //!
 //! **A program the host could not end** (`survivor`) is said in place of how it
 //! ended: it may still run ([`Shown::outlived`]). Nothing waits for it: a window
@@ -64,7 +69,6 @@ use mask::mask;
 pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
-#[cfg(test)]
 use secret::names_a_secret;
 
 /// The most lines of a screen a note quotes: the last ones.
@@ -247,21 +251,23 @@ impl Shown {
         let Some(tail) = &self.tail else {
             return said;
         };
-        // None where the screen is withheld whole: the extent of a secret on it is not known.
-        let Some((kept, left_out)) = screen::without_secrets(tail) else {
+        // The base's rule (the lead's decision of round 5), and the review of `860010398`: where
+        // the extent of a secret cannot be proven the whole screen goes, and no row beside a
+        // secret is ever quoted. Every line the host sent is looked at, not only those the quote
+        // would keep: a value that goes on over a line keeps no name on the line it ends on.
+        if tail.iter().any(|line| names_a_secret(line)) {
             said.push_str("; its last screen lines named a secret, so they are left out");
             return said;
-        };
-        match Quote::of(&kept, Keep::Last) {
-            None if left_out > 0 => {
-                said.push_str("; its last screen lines named a secret, so they are left out");
-            }
+        }
+        // Rows of base64 with no name and no delimiter in view: a key cropped by the window.
+        if screen::holds_a_key(tail) {
+            said.push_str("; its last screen lines held what may be a key, so they are left out");
+            return said;
+        }
+        match Quote::of(tail, Keep::Last) {
             None if self.pasted => said.push_str("; its screen showed nothing of its own"),
             None => said.push_str("; its screen was empty"),
-            Some(quote) => {
-                said.push_str(&quote.after("; its screen ended with"));
-                said.push_str(&left_out_words(left_out));
-            }
+            Some(quote) => said.push_str(&quote.after("; its screen ended with")),
         }
         said
     }
@@ -556,15 +562,6 @@ fn cut_to(text: &str, limit: usize) -> String {
         cut(text, limit)
     } else {
         text.to_owned()
-    }
-}
-
-/// What a note says of the `count` lines of a screen it left out of its quote.
-fn left_out_words(count: usize) -> String {
-    match count {
-        0 => String::new(),
-        1 => " (1 line that named or lay beside a secret was left out)".to_owned(),
-        count => format!(" ({count} lines that named or lay beside a secret were left out)"),
     }
 }
 

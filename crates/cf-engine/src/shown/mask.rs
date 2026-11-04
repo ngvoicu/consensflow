@@ -25,8 +25,8 @@
 //! - any run of 24 letters, digits, `_` and `-` with at least one letter and one
 //!   digit in it (a hex or base64url token), and any run of 40 characters of
 //!   base64's own (letters, digits, `+`, `/`, `=`) with the same; and a base64 value with
-//!   no digit: forty letters and digits or more with a capital in them, or a run of that
-//!   length with a `+` in it or `=` at its end.
+//!   no digit: forty letters and digits or more with a letter in them, in any case, or a
+//!   run of that length with a `+` in it or `=` at its end.
 //!
 //! **The spans of every rule are found in the text as it was**, joined where they overlap
 //! or touch, and replaced once (T-823): no part of a value is left to a rule that comes
@@ -159,21 +159,24 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         rule(r"[A-Za-z0-9_-]{24,}", 0, has_a_letter_and_a_digit),
         // A base64 token, whose own characters include the path's.
         rule(r"[A-Za-z0-9+/=]{40,}", 0, has_a_letter_and_a_digit),
-        // A base64 value with no digit in it (`YWJj` twelve times): forty letters or more in a
-        // run, in both cases or in capitals alone, is no word, and a long name in a case of
-        // its own or a number is left (T-823, the review of `a26e0848e`).
+        // A base64 value with no digit in it (`YWJj` twelve times): forty letters and digits or
+        // more in a run, in any case, is no word and no number (T-823, the reviews of `a26e0848e`
+        // and `860010398`).
         rule(r"[A-Za-z0-9]{40,}={0,2}", 0, is_base64_letters),
         // One with a `+`, or padded: no path and no word has them.
         rule(r"[A-Za-z0-9+/]{39,}={0,2}", 0, is_base64_marked),
     ]
 });
 
-/// A run of forty letters and digits or more that is no word: it has a capital in it.
-/// All small letters is a word, and digits alone a number.
+/// A run of forty letters and digits or more that is no number: it has a letter in it, in
+/// any case. A run of small letters alone was taken for a word, and the review of `860010398`
+/// found a 48-letter base64 value of them: no word is forty letters long, and a camel-case
+/// name of that length is a false alarm that costs nothing.
 fn is_base64_letters(found: &str) -> bool {
-    let run = found.trim_end_matches('=');
-    run.chars().any(|c| c.is_ascii_uppercase())
-        && (run.chars().any(|c| c.is_ascii_lowercase()) || run.len() >= 40)
+    found
+        .trim_end_matches('=')
+        .chars()
+        .any(|c| c.is_ascii_alphabetic())
 }
 
 /// A base64 run that says what it is by its characters: a `+` in it, or `=` at its end.

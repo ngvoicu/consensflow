@@ -328,13 +328,6 @@ replace = '''
             .filter(|line| !line.trim().is_empty())
 '''
 
-# The rows a quote may show are chosen before the quote is made (`without_secrets`), where
-# the screen's chrome is left out as well.
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/screen.rs"
-find = "        .filter(|&at| tail[at].chars().any(char::is_alphanumeric))"
-replace = "        .filter(|&at| !tail[at].trim().is_empty())"
-
 [[plant]]
 name = "failure reason: a task released to the board while its window is looked at is failed after"
 meant = "a_task_released_to_the_board_while_its_window_is_looked_at_is_not_failed_after"
@@ -1246,7 +1239,7 @@ replace = '''                Reading::Known(_) => None,'''
 
 [[plant]]
 name = "failure reason: the engine reads no last tool call of a record"
-meant = "a_worker_window_that_closed_says_what_it_was_running_and_leaves_out_only_the_lines_that_name_a_secret"
+meant = "a_worker_window_that_closed_says_what_it_was_running_and_the_screen_where_no_row_names_a_secret"
 runs = ["failure-reason-windows"]
 
 [[plant.edit]]
@@ -1429,17 +1422,6 @@ find = '''        rule(r"[A-Za-z0-9+/]{39,}={0,2}", 0, is_base64_marked),'''
 replace = '''        rule(r"[A-Za-z0-9+/]{39,}={0,2}", 0, has_a_letter_and_a_digit),'''
 
 [[plant]]
-name = "failure reason: a long word of small letters is taken for base64"
-meant = "a_long_word_a_name_a_path_and_a_number_are_not_taken_for_base64"
-runs = ["failure-reason-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''    run.chars().any(|c| c.is_ascii_uppercase())
-        && (run.chars().any(|c| c.is_ascii_lowercase()) || run.len() >= 40)'''
-replace = '''    run.chars().any(|c| c.is_ascii_alphabetic())'''
-
-[[plant]]
 name = "failure reason: an address inside a URL's user takes the host with it"
 meant = "the_user_and_password_of_a_url_are_hidden_and_the_host_is_not"
 runs = ["failure-reason-shown"]
@@ -1458,3 +1440,23 @@ runs = ["failure-reason-shown"]
 file = "crates/cf-engine/src/shown/mask.rs"
 find = '''(?:-[uU]|--user|--proxy-user)'''
 replace = '''(?:--user)'''
+
+[[plant]]
+name = "failure reason: a run of small letters is no token"
+meant = "a_long_run_of_small_letters_is_hidden_too"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        .any(|c| c.is_ascii_alphabetic())'''
+replace = '''        .any(|c| c.is_ascii_uppercase())'''
+
+[[plant]]
+name = "failure reason: a number of forty digits is taken for base64"
+meant = "a_name_a_path_and_a_number_are_not_taken_for_base64"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        .any(|c| c.is_ascii_alphabetic())'''
+replace = '''        .any(|_| true)'''

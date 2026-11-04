@@ -1,12 +1,17 @@
-//! A screen that names a secret, put in a note (T-823, the review of `a26e0848e`): for every
-//! shape of a value the review tried or the chief named, no part of it reaches the note, and
-//! the screens the extent of which is known are still quoted for the rest of their rows.
+//! A screen that names a secret or holds what may be a key, put in a note (T-823, the reviews
+//! of `a26e0848e` and `860010398`): for every shape of a value the reviews tried or the chief
+//! named, no part of it reaches the note, because the whole screen is withheld, and a screen
+//! that holds neither is quoted as it always was.
 
 use crate::shown::Shown;
 
-/// The sentence a screen withheld whole is told in.
-const WHOLE: &str =
+/// What a screen withheld for a secret it names is told in.
+const NAMED: &str =
     "gone (exit code 1); its last screen lines named a secret, so they are left out";
+
+/// What a screen withheld for rows that may be a key is told in.
+const KEY: &str =
+    "gone (exit code 1); its last screen lines held what may be a key, so they are left out";
 
 /// What the note says of a window that ended with `screen` on it.
 fn note(screen: &[&str]) -> String {
@@ -18,10 +23,8 @@ fn note(screen: &[&str]) -> String {
     .after("gone")
 }
 
-/// `rows` between rows that name nothing, so that a screen withheld whole is told from one every
-/// row of which a row's reach took out (the review of `a26e0848e`: a short screen could not
-/// tell a verdict of "unknown" from a verdict of "prose", and plants that took the first for
-/// the second were missed).
+/// `rows` between rows that name nothing, so that a screen withheld whole is told from one
+/// that is quoted around them.
 fn padded<'a>(rows: &[&'a str]) -> Vec<&'a str> {
     let mut screen = vec!["pad one", "pad two", "pad three"];
     screen.extend_from_slice(rows);
@@ -37,81 +40,83 @@ fn leaks(note: &str, value: &str) -> bool {
         .any(|piece| note.contains(&piece.iter().collect::<String>()))
 }
 
-/// Screens whose secret is `value`, and the note of each must hold none of it.
-fn assert_withheld_whole(screens: &[&[&str]], value: &str) {
+/// Screens whose secret is `value`: the note of each is the sentence, whole, and holds none of it.
+fn assert_withheld(screens: &[&[&str]], sentence: &str, value: &str) {
     for screen in screens {
-        let said = note(&padded(screen));
-        assert_eq!(said, WHOLE, "{screen:?}");
-        assert!(!leaks(&said, value), "{screen:?}");
-    }
-}
-
-/// The review's first three screens, which put a password in the ledger.
-#[test]
-fn a_label_with_its_value_below_a_yaml_block_and_a_hard_wrapped_value_withhold_the_screen() {
-    // `Password:` and its value two rows down, an instruction between.
-    assert_withheld_whole(
-        &[&["Password:", "Enter the value below", "red green blue"]],
-        "red green blue",
-    );
-    // A folded scalar with a modifier, `>-`, whose third row `runs_on` never saw.
-    assert_withheld_whole(
-        &[&["PASSWORD: >-", "  correct horse", "  battery staple"]],
-        "battery staple",
-    );
-    // A value of several words broken by hand over three rows.
-    assert_withheld_whole(
-        &[&["password: correct horse", "battery staple", "alpha bravo"]],
-        "battery staple",
-    );
-}
-
-/// The block scalars, with every modifier, and the other marks that open a value.
-#[test]
-fn every_block_scalar_and_every_opener_withholds_the_screen() {
-    for opener in [
-        "|",
-        "|-",
-        "|+",
-        ">",
-        ">-",
-        ">+",
-        ">2",
-        "|2-",
-        "|1",
-        ">-  # a comment",
-        "{",
-        "[",
-        "(",
-        "\\",
-        "<<EOF",
-        "&anchor",
-        "!!binary |",
-        // A value of one word that ends in a backslash.
-        "abc\\",
-    ] {
-        for name in ["password", "secret", "api_key", "token", "DB_PASSWORD"] {
-            let row = format!("{name}: {opener}");
-            // The rows that follow are indented, as a block's are, or are not: a screen is
-            // not bound to show a block as YAML does.
-            for following in [
-                ["  correct horse", "  battery staple", "  alpha bravo"],
-                ["correct horse", "battery staple", "alpha bravo"],
-            ] {
-                let mut rows = vec!["start", "ok", row.as_str()];
-                rows.extend(following);
-                rows.push("end");
-                let said = note(&padded(&rows));
-                assert_eq!(said, WHOLE, "{row} / {following:?}");
-                assert!(!said.contains("battery"), "{row}");
-            }
+        for rows in [screen.to_vec(), padded(screen)] {
+            let said = note(&rows);
+            assert_eq!(said, sentence, "{rows:?}");
+            assert!(!leaks(&said, value), "{rows:?}");
         }
     }
 }
 
-/// A label and its prompts, whatever ends them.
+/// The screens the review of `860010398` put a password in the ledger with: a sentence that
+/// trails off, an assignment of one word wrapped by hand, and a token wrapped over rows of one
+/// short word each.
 #[test]
-fn a_row_that_is_a_label_or_ends_at_the_name_withholds_the_screen() {
+fn the_screens_the_second_review_put_in_the_ledger_withhold_the_whole_screen() {
+    assert_withheld(
+        &[
+            &[
+                "The password consists of these words",
+                "correct",
+                "horse",
+                "battery",
+                "staple",
+                "connection failed",
+            ],
+            &[
+                "PASSWORD=correct",
+                "horse",
+                "battery staple",
+                "connection failed",
+            ],
+            &[
+                "API_KEY=sk-abcdefghijkl",
+                "mnopqrstuvwx",
+                "xyz",
+                "connection failed",
+            ],
+        ],
+        NAMED,
+        "battery staple xyz mnopqrstuvwx",
+    );
+}
+
+/// The screens the first review put a password in the ledger with: a label with its value
+/// below, a YAML block scalar with a modifier, a value hard-wrapped over rows.
+#[test]
+fn the_screens_the_first_review_put_in_the_ledger_withhold_the_whole_screen() {
+    assert_withheld(
+        &[
+            &["Password:", "Enter the value below", "red green blue"],
+            &["PASSWORD: >-", "  correct horse", "  battery staple"],
+            &["password: correct horse", "battery staple", "alpha bravo"],
+        ],
+        NAMED,
+        "red green blue battery staple alpha bravo",
+    );
+}
+
+/// Every shape of a value, whatever its extent: the screen is withheld, so none of it is told.
+#[test]
+fn a_row_that_names_a_secret_withholds_the_screen_whatever_follows_it() {
+    for opener in [
+        "|", "|-", "|+", ">", ">-", ">+", ">2", "{", "[", "(", "\\", "<<EOF", "&anchor", "abc\\",
+    ] {
+        for name in ["password", "secret", "api_key", "token", "DB_PASSWORD"] {
+            let row = format!("{name}: {opener}");
+            for following in [
+                ["  correct horse", "  battery staple", "  alpha bravo"],
+                ["correct horse", "battery staple", "alpha bravo"],
+            ] {
+                let mut rows = vec![row.as_str()];
+                rows.extend(following);
+                assert_withheld(&[&rows], NAMED, "battery staple");
+            }
+        }
+    }
     for label in [
         "Password:",
         "password =",
@@ -124,196 +129,136 @@ fn a_row_that_is_a_label_or_ends_at_the_name_withholds_the_screen() {
         "secret ->",
         "token=>",
         "Bearer",
-        // A row that ends on a mark that opens, and is not the name.
         "Using the secret flag \\",
         "see the token list [",
+        "No API key found for the selected model. Use /login to log into a provider.",
+        "export DB_PASSWORD=hunter2hunter2",
+        "API_KEY=\"abcdef",
+        "token: 'abc",
+        "password: hunter2",
+        "password: correct horse battery staple",
+        "Authorization: Bearer abcdefgh",
+        "echo \"my password hunter2",
+        "password: \"abc\" def ghi",
+        "\"api_key\": \"abc123abc123\",",
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----END PGP PRIVATE KEY BLOCK-----",
     ] {
-        assert_withheld_whole(
-            &[&["start", "ok", label, "", "hunter2hunter2 and more", "end"]],
+        assert_withheld(
+            &[&["start", label, "hunter2hunter2 and more", "end"]],
+            NAMED,
             "hunter2hunter2",
         );
     }
-}
-
-/// A value wrapped over rows, quoted or not.
-#[test]
-fn a_value_that_goes_on_over_rows_withholds_the_screen() {
-    assert_withheld_whole(
+    // The beginning of a block with no end in view, an end with no beginning, two beginnings.
+    assert_withheld(
         &[
             &[
-                "start",
                 "ok",
-                "API_KEY=\"abcdef",
-                "ghijkl",
-                "mnopqr\"",
-                "end",
+                "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+                "bGluZSBvbmU=",
+                "bGluZSB0d28=",
             ],
-            &["start", "ok", "token: 'abc", "def", "ghi'", "end"],
-            // A quote that closes on the row and a value the next row goes on with, deeper.
+            &["x", "y", "-----END RSA PRIVATE KEY-----", "done"],
             &[
-                "start",
+                "-----BEGIN PGP PRIVATE KEY BLOCK-----",
                 "ok",
-                "password: hunter2",
-                "  continued here",
-                "end",
-            ],
-            // An unquoted value of several words.
-            &[
-                "start",
-                "ok",
-                "password: correct horse battery staple",
-                "end",
-            ],
-            &["start", "ok", "Authorization: Bearer abcdefgh", "end"],
-            // The rest of a row after a quote that closes.
-            &["start", "ok", "password: \"abc\" def ghi", "end"],
-            // A sentence that opens a quote on the row and does not close it.
-            &[
-                "start",
-                "ok",
-                "echo \"my password hunter2",
-                "and more words",
-                "end",
+                "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+                "-----END PGP PRIVATE KEY BLOCK-----",
             ],
         ],
-        "battery staple",
+        NAMED,
+        "bGluZSBvbmU= bGluZSB0d28=",
     );
 }
 
-/// A private key's block: whole, cut at its top, cut at its foot, and cut at both.
+/// A key with nothing to say so: no delimiter, no name, rows as narrow as the window was.
 #[test]
-fn a_private_keys_block_is_taken_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen() {
-    // Whole: out, with its neighbours, and the rest is quoted.
-    let said = note(&[
-        "building",
-        "ok",
-        "-----BEGIN OPENSSH PRIVATE KEY-----",
-        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ",
-        "AAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACD",
-        "-----END OPENSSH PRIVATE KEY-----",
-        "ok",
-        "finished",
-    ]);
-    assert_eq!(
-        said,
-        "gone (exit code 1); its screen ended with: \"finished\" (5 lines that named or lay beside a secret were left out)"
-    );
-    assert!(!said.contains("b3Blbn") && !said.contains("AAAAAAAB"));
-    // A delimiter missing: the screen is withheld, and none of the body is told.
-    for screen in [
-        // Two beginnings and one end (PGP's header ends on a word, as an RSA key's does not).
-        &[
-            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-            "ok",
-            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-            "-----END PGP PRIVATE KEY BLOCK-----",
-        ][..],
-        // Its top is above the screen.
-        &[
-            "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ",
-            "AAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACD",
-            "-----END OPENSSH PRIVATE KEY-----",
-            "done",
-        ][..],
-        // Its foot is below the screen.
-        &[
-            "ok",
-            "-----BEGIN RSA PRIVATE KEY-----",
-            "MIIEowIBAAKCAQEAxampleexampleexampleexample",
-            "ZXhhbXBsZWV4YW1wbGVleGFtcGxlZXhhbXBsZQ",
-        ][..],
-        // No delimiter in view: the middle of a block, rows of base64 and nothing else.
-        &[
-            "ok",
-            "MIIEowIBAAKCAQEAxampleexampleexampleexample",
-            "ZXhhbXBsZWV4YW1wbGVleGFtcGxlZXhhbXBsZQ",
-            "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=",
-            "done",
-        ][..],
-    ] {
-        let said = note(&padded(screen));
-        assert_eq!(said, WHOLE, "{screen:?}");
-        assert!(!said.contains("MIIEow") && !said.contains("ZXhhbX") && !said.contains("b3Blbn"));
-    }
-}
-
-/// Values the extent of which is the row: quoted, `.env`, JSON, YAML. They are out with their
-/// neighbours, and the rest of the screen is quoted through the masker.
-#[test]
-fn an_assignment_whose_value_is_on_its_row_leaves_out_itself_and_its_neighbours_only() {
-    let screen = [
-        "start",
-        "ok",
-        "DB_HOST=localhost",
-        "DB_PASSWORD=hunter2hunter2",
-        "DEBUG=true",
-        "cargo test exited",
-        "bye",
+fn rows_of_base64_and_nothing_else_withhold_the_screen() {
+    // The review's: two short endings, a crop of a PEM body in rows of sixteen, a run of
+    // forty-eight small letters.
+    let lowercase = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv";
+    assert_eq!(lowercase.len(), 48);
+    let hash = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    let cases: Vec<(&str, Vec<&str>)> = vec![
+        ("two short endings", vec!["YQ==", "Yg=="]),
+        (
+            "a crop of a PEM body",
+            vec!["MIIEvQIBADANBgkq", "hkiG9w0BAQEFAASC"],
+        ),
+        ("a run of small letters", vec![lowercase]),
+        (
+            "a run of small letters in narrow rows",
+            vec!["abcdefghijklmnop", "qrstuvwxyzabcdef", "ghijklmnopqrstuv"],
+        ),
+        ("a hash", vec![hash]),
+        (
+            "a body, a short ending",
+            vec!["ZXhhbXBsZWV4YW1wbGVleGFtcGxlZXhh", "bXBsZQ=="],
+        ),
+        (
+            "a body of slashes and pluses",
+            vec!["a+b/c+d/e+f/g+h/", "i+j/k+l/m+n/o+p/"],
+        ),
+        (
+            "a body with digits",
+            vec!["hkiG9w0BAQEFAASC", "MIIEvQIBADANBgkq", "AQ"],
+        ),
+        (
+            "the padding alone after a body",
+            vec!["MIIEvQIBADANBgkq", "=="],
+        ),
+        // Each reason by itself: digits among small letters, a capital after a small letter.
+        (
+            "letters and digits, no capital",
+            vec!["abc123def456", "ghi789jkl012"],
+        ),
+        (
+            "capitals after small letters, no digit",
+            vec!["abcDEFghiJKLmno", "pqrSTUvwxYZAbcd"],
+        ),
     ];
-    let said = note(&screen);
-    assert_eq!(
-        said,
-        "gone (exit code 1); its screen ended with: \"ok / cargo test exited / bye\" (3 lines that named or lay beside a secret were left out)"
-    );
-    assert!(!said.contains("hunter2"));
-    for row in [
-        r#""api_key": "abc123abc123","#,
-        "export API_KEY='red green blue'",
-        r#"DB_PASSWORD="alpha bravo charlie""#,
-        "password: 'it''s a secret'",
-        "x-api-key: abcdefghijklmno",
-        "PassWord=\"alpha bravo charlie\"",
-    ] {
-        let said = note(&["start", "ok", row, "end of it", "bye", "fin"]);
-        assert!(
-            !said.contains("alpha") && !said.contains("abc123") && !said.contains("red green"),
-            "{row}: {said}"
-        );
-        assert!(said.contains("\"start / bye / fin\""), "{row}: {said}");
+    for (label, rows) in &cases {
+        for screen in [rows.clone(), padded(rows)] {
+            let said = note(&screen);
+            assert_eq!(said, KEY, "{label}: {screen:?}");
+            for row in rows.iter().filter(|row| row.len() >= 8) {
+                assert!(!leaks(&said, row), "{label}");
+            }
+        }
     }
 }
 
-/// Prose that names a secret and says all it has to on its row, a test's name among it.
+/// What is not a key is quoted as it always was: words, paths, a single short row, numbers.
 #[test]
-fn prose_that_is_whole_on_its_row_leaves_out_the_row_and_two_each_way() {
-    let said = note(&[
-        "a",
-        "b",
-        "c",
-        "test brain::auth::rejects_expired_token ... ok",
-        "d",
-        "e",
-        "f",
-        "g",
-        "h",
-    ]);
-    assert_eq!(
-        said,
-        "gone (exit code 1); its screen ended with: \"f / g / h\" (3 lines that named or lay beside a secret were left out)"
-    );
-    // The screen of Pi with no login, and the errors of the others, say what failed.
-    for words in [
-        "No API key found for the selected model. Use /login to log into a provider.",
-        "Invalid API key · Please run /login",
-        "Authentication failed: the credentials were refused by the server",
+fn a_screen_with_no_secret_and_no_key_on_it_is_quoted_as_it_always_was() {
+    for screen in [
+        vec![
+            "compiling",
+            "error[E0308]: mismatched types",
+            "  --> src/lib.rs:4",
+        ],
+        vec!["running 3 tests", "ok", "done"],
+        vec!["Compiling", "Finished", "Running"],
+        vec!["YQ==", "next row says words"],
+        vec!["ok", "YQ=="],
+        vec!["/Users/gabrielvoicu/Projects/ngvoicu/consensflow-trees/failure-why"],
+        vec!["12", "345", "6789"],
+        vec!["connection", "refused"],
+        vec!["src/lib.rs", "src/main.rs"],
+        // A rule of equals signs across the screen is chrome, not a key's padding.
+        vec![
+            "========================================================================",
+            "Summary",
+            "ok",
+        ],
+        // Two encoded-looking rows with prose between them are two rows, not a run.
+        vec!["YQ==", "some words here", "Yg=="],
     ] {
-        let said = note(&["", words, ""]);
-        assert_eq!(said, WHOLE, "{words}");
+        let said = note(&screen);
+        assert!(said.contains("its screen ended with"), "{screen:?}: {said}");
+        assert!(!said.contains("left out"), "{screen:?}: {said}");
     }
-}
-
-/// Nothing named, nothing changed: a screen with no secret on it is quoted whole.
-#[test]
-fn a_screen_with_no_secret_on_it_is_quoted_as_it_always_was() {
-    let said = note(&[
-        "compiling",
-        "error[E0308]: mismatched types",
-        "  --> src/lib.rs:4",
-    ]);
-    assert_eq!(
-        said,
-        "gone (exit code 1); its screen ended with: \"compiling / error[E0308]: mismatched types / --> src/lib.rs:4\""
-    );
 }
 
 /// Values with no name before them, on rows that name nothing: the masker's.
@@ -336,13 +281,10 @@ fn a_value_with_no_name_before_it_is_masked_where_it_stands() {
             "JhbGciOiJ",
         ),
         (
-            "value YWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJj end",
-            "YWJjYWJj",
-        ),
-        (
             "git clone https://alice:swordfish@github.test/x/y.git",
             "swordfish",
         ),
+        ("$ curl -u alice:swordfish https://x.test/", "swordfish"),
     ] {
         let said = note(&["start", row, "end"]);
         assert!(!leaks(&said, value), "{row}: {said}");
@@ -350,11 +292,12 @@ fn a_value_with_no_name_before_it_is_masked_where_it_stands() {
 }
 
 /// The review of `a26e0848e` tried a screen for every way a secret can be shown, and its probe
-/// failed nine of twenty-one. These are those ways, each a screen and the pieces of the secret
-/// it holds: none of them may reach the note, and the delimiterless key's fragment is among
-/// them. (The probe itself was not left on the board; the cases are written from its report.)
+/// failed nine of twenty-one; the re-check failed one of them and twelve more. These are those
+/// ways and the ones the chief named, each a screen and the pieces of the secret it holds: none
+/// of them may reach the note. (The probes were not left on the board; the cases are written from
+/// their reports.)
 #[test]
-fn the_twenty_four_screens_of_the_review_leak_nothing() {
+fn the_twenty_four_screens_of_the_reviews_leak_nothing() {
     // Pieces of secrets are made in two (`concat!`) where their shape is a token's.
     let sk = concat!("sk-ant", "-api03-Zx9QpLmNoPqRsTuVwXyZaBcDeF");
     let ghp = concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789");
@@ -539,6 +482,64 @@ fn the_twenty_four_screens_of_the_review_leak_nothing() {
             vec!["MIIEowIB", "ZXhhbXBs", "QUJDREVG"],
         ),
         (
+            "a key in rows of sixteen",
+            vec![
+                "ok".into(),
+                "MIIEvQIBADANBgkq".into(),
+                "hkiG9w0BAQEFAASC".into(),
+                "done".into(),
+            ],
+            vec!["MIIEvQIB", "hkiG9w0B"],
+        ),
+        (
+            "a key's short endings",
+            vec!["ok".into(), "YQ==".into(), "Yg==".into(), "done".into()],
+            vec!["YQ==", "Yg=="],
+        ),
+        (
+            "a prompt with the value below",
+            vec![
+                "start".into(),
+                "The password is".into(),
+                "correct horse".into(),
+                "battery staple".into(),
+                "end".into(),
+            ],
+            vec!["correct horse", "battery staple"],
+        ),
+        (
+            "a sentence that trails off",
+            vec![
+                "The password consists of these words".into(),
+                "correct".into(),
+                "horse".into(),
+                "battery".into(),
+                "staple".into(),
+                "connection failed".into(),
+            ],
+            vec!["battery", "staple"],
+        ),
+        (
+            "an assignment wrapped by hand",
+            vec![
+                "PASSWORD=correct".into(),
+                "horse".into(),
+                "battery staple".into(),
+                "connection failed".into(),
+            ],
+            vec!["battery staple", "horse"],
+        ),
+        (
+            "a token wrapped in short rows",
+            vec![
+                "API_KEY=sk-abcdefghijkl".into(),
+                "mnopqrstuvwx".into(),
+                "xyz".into(),
+                "connection failed".into(),
+            ],
+            vec!["mnopqrstuvwx"],
+        ),
+        (
             "Pi without a login",
             vec![
                 "Pi".into(),
@@ -565,19 +566,8 @@ fn the_twenty_four_screens_of_the_review_leak_nothing() {
             ],
             vec![],
         ),
-        (
-            "a prompt with the value below",
-            vec![
-                "start".into(),
-                "The password is".into(),
-                "correct horse".into(),
-                "battery staple".into(),
-                "end".into(),
-            ],
-            vec!["correct horse", "battery staple"],
-        ),
     ];
-    assert!(cases.len() >= 21);
+    assert!(cases.len() >= 24);
     for (label, rows, pieces) in &cases {
         let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
         let said = note(&rows);
@@ -585,24 +575,4 @@ fn the_twenty_four_screens_of_the_review_leak_nothing() {
             assert!(!said.contains(piece), "{label}: {piece} in {said}");
         }
     }
-}
-
-/// A token wrapped by hand over rows of one word each: the rows after the first are out as long
-/// as they are one word.
-#[test]
-fn the_rows_of_a_token_wrapped_by_hand_are_left_out_as_long_as_they_are_one_word() {
-    let said = note(&[
-        "start",
-        "ok",
-        "API_KEY=abcdefgh",
-        "ijklmnopqr",
-        "stuvwxyzab",
-        "cdefghijkl",
-        "end",
-        "fin",
-    ]);
-    for piece in ["ijklmn", "stuvwx", "cdefgh"] {
-        assert!(!said.contains(piece), "{said}");
-    }
-    assert!(said.contains("\"end / fin\""), "{said}");
 }

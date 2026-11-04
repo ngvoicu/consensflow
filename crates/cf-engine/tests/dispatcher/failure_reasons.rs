@@ -123,7 +123,8 @@ fn the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line() {
     // A first line too long for the quote is cut, and nothing after it is kept.
     let context = Context::new();
     let tiers = working(&context);
-    let long = format!("Internal error: {}", "x".repeat(600));
+    // Words: forty letters in a row are a token's, and are hidden.
+    let long = format!("Internal error: {}", "ab ".repeat(200));
     fails(&context, Some(&format!("{long}\nsecond line")));
     let quoted = format!("{}…", &long[..399]);
     assert_eq!(

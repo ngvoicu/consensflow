@@ -1,7 +1,6 @@
-//! What a note says of the last tool call, and what it must never say (T-823, the review of
-//! `a26e0848e`): `curl -u alice:swordfish` was quoted whole. A command is quoted only when
-//! every word of it can be told safe; anything else, and any tool whose input is a script or
-//! a prompt, is the tool's name alone.
+//! What a note says of the last tool call, and what it must never say (T-823, the reviews of
+//! `a26e0848e` and `860010398`): never the arguments of a command. The tool, and for a shell
+//! call the first word where it is a program the list names, and nothing after it.
 
 use super::*;
 
@@ -10,158 +9,197 @@ fn say(command: &str) -> String {
     words(&LastCall::shell("Bash", command))
 }
 
-/// What the note says when it is left out whole.
-const LEFT_OUT: &str =
-    "; its last tool call was Bash; what it was given may name a secret, so it is left out";
+/// What the note says when the command's first word is no program the list names: the tool.
+const TOOL_ONLY: &str = "; its last tool call was Bash";
+
+/// The note says the program and that the command went on: `cargo …`.
+fn program_then_more(program: &str) -> String {
+    format!("; its last tool call was Bash: \"{program} \u{2026}\"")
+}
 
 #[test]
-fn a_build_or_test_command_is_quoted_whole() {
-    for command in [
-        "cargo fmt --check && cargo test --workspace -- --nocapture",
-        "cargo test -p cf-engine --lib shown::",
-        "git status --short",
-        "ls -la crates/cf-engine/src",
-        "cd ~/Projects/ngvoicu/consensflow-trees/failure-why && cargo test 2>&1 | tail -5",
-        "RUST_LOG=debug cargo test --workspace",
-        "npm run lint && npm test",
-        "make build; make test",
-        "pytest tests/ -x -k a_long_test_name_that_goes_on_and_on",
+fn a_listed_program_is_named_and_what_follows_it_is_not() {
+    for (command, program) in [
+        (
+            "cargo fmt --check && cargo test --workspace -- --nocapture",
+            "cargo",
+        ),
+        ("cargo test -p cf-engine --lib shown::", "cargo"),
+        ("git status --short", "git"),
+        ("npm run lint && npm test", "npm"),
+        ("make build; make test", "make"),
+        (
+            "pytest tests/ -x -k a_long_test_name_that_goes_on_and_on",
+            "pytest",
+        ),
+        ("ls -la crates/cf-engine/src", "ls"),
+        // A path to the program is its last part, and the path is not said.
+        ("/usr/bin/git status", "git"),
+        ("./cargo test", "cargo"),
+        ("/home/me/.secret-place/cargo test", "cargo"),
+        // The command goes on over a line.
+        ("cargo\n  test", "cargo"),
     ] {
-        assert_eq!(
-            say(command),
-            format!("; its last tool call was: \"{command}\""),
-            "{command}"
-        );
+        assert_eq!(say(command), program_then_more(program), "{command}");
+    }
+    // A command of one word goes on over nothing.
+    assert_eq!(say("ls"), "; its last tool call was Bash: \"ls\"");
+    // The tool's name is said as it is, and a call with none is a command.
+    assert_eq!(
+        words(&LastCall::shell("shell", "cargo test")),
+        "; its last tool call was shell: \"cargo \u{2026}\""
+    );
+    assert_eq!(
+        words(&LastCall::shell("", "cargo test")),
+        "; its last tool call was a command: \"cargo \u{2026}\""
+    );
+}
+
+/// The three commands the re-check persisted, and every shape the first review named, each on a
+/// program the list names: the note says the program and not one word more.
+#[test]
+fn nothing_of_a_command_after_its_program_is_ever_said() {
+    for (command, program, secret) in [
+        // T-1222: a wrapper, an option with an argument before the subcommand, a script.
+        (
+            "npm exec -- docker login -p redgreenblue",
+            "npm",
+            "redgreenblue",
+        ),
+        (
+            "git -C /w config http.extraHeader X-Session:redgreenblue",
+            "git",
+            "redgreenblue",
+        ),
+        ("node login.js alice redgreenblue", "node", "redgreenblue"),
+        // T-1216 and the first review: a URL's user, a token in a config, a login.
+        (
+            "git clone https://alice:swordfish@github.test/x/y.git",
+            "git",
+            "swordfish",
+        ),
+        (
+            "git clone https://swordfishvalue@localhost/x/y.git",
+            "git",
+            "swordfishvalue",
+        ),
+        (
+            "npm config set //registry.test/:_authToken=swordfishvalue",
+            "npm",
+            "swordfishvalue",
+        ),
+        ("cargo login swordfishvalue", "cargo", "swordfishvalue"),
+        (
+            "cargo publish --token swordfishvalue",
+            "cargo",
+            "swordfishvalue",
+        ),
+        (
+            "cargo test -- --password=swordfishvalue",
+            "cargo",
+            "swordfishvalue",
+        ),
+        (
+            "git commit -m \"rotate the key to swordfishvalue\"",
+            "git",
+            "swordfishvalue",
+        ),
+        (
+            "git -c http.extraHeader=swordfish fetch",
+            "git",
+            "swordfish",
+        ),
+        (
+            "python3 -c 'print(1)' swordfishvalue",
+            "python3",
+            "swordfishvalue",
+        ),
+        ("node -e 1 swordfishvalue", "node", "swordfishvalue"),
+        (
+            "cat > notes <<EOF\nls swordfishvalue\nEOF",
+            "cat",
+            "swordfishvalue",
+        ),
+        ("cat /home/me/.aws/credentials", "cat", "credentials"),
+        ("ls /home/me/.config/secrets.toml", "ls", "secrets"),
+        (
+            "pytest --api-key swordfishvalue",
+            "pytest",
+            "swordfishvalue",
+        ),
+        (
+            "cargo test ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "cargo",
+            "abcdefghij",
+        ),
+        (
+            "cargo test && curl -u alice:swordfish https://example.test/",
+            "cargo",
+            "swordfish",
+        ),
+        (
+            "tar xf a.tgz --passphrase swordfishvalue",
+            "tar",
+            "swordfishvalue",
+        ),
+    ] {
+        let said = say(command);
+        assert_eq!(said, program_then_more(program), "{command}");
+        assert!(!said.contains(secret), "{command}");
     }
 }
 
-/// Every credential-bearing shape the review and the chief named, and a few beside them:
-/// none of the value reaches the note, and the call is left out whole.
+/// A command whose first word is no program on the list is the tool's name alone: a variable on
+/// its line, a wrapper, a client that takes a credential, a quote, a substitution.
 #[test]
-fn a_command_that_carries_a_credential_is_left_out_whole() {
+fn a_command_whose_first_word_is_not_a_listed_program_is_the_tool_alone() {
     for command in [
-        // curl's, wget's and the clients that take a user and a password.
         "curl -u alice:swordfish https://example.test/",
         "curl --user alice:swordfish https://example.test/",
-        "curl --proxy-user alice:swordfish https://example.test/",
-        "curl -ualice:swordfish https://example.test/",
-        "curl https://example.test/ -U proxyuser:swordfish",
         "wget --user alice --password swordfish https://example.test/",
         "mysql -u root -pswordfish",
-        "mysql -u root --password=swordfish",
         "sshpass -p swordfish ssh host",
         "redis-cli -a swordfish",
         "docker login -u me -p swordfish",
-        // A URL's user, with or without a password, on any scheme and any tool.
-        "git clone https://alice:swordfish@github.test/x/y.git",
-        "git clone https://ghp_notarealtokenvalue@github.test/x/y.git",
-        "git clone https://swordfishvalue@localhost/x/y.git",
-        "cargo install --git ssh://alice:swordfish@host/x",
-        "psql postgres://alice:swordfish@db.test/app",
-        // Flags that say what they carry.
-        "tool --token swordfishvalue",
-        "tool --with-token < file",
         "gh auth login --with-token",
-        "tool --api-key swordfishvalue",
-        "tool --secret=swordfishvalue",
-        "npm config set //registry.test/:_authToken=swordfishvalue",
-        // Names and headers.
-        "export TOKEN=swordfishvalue",
         "TOKEN=swordfishvalue cargo test",
-        "curl -H 'Authorization: Bearer swordfishvalue' https://example.test/",
-        "curl -H \"X-Api-Key: swordfishvalue\" https://example.test/",
+        "export TOKEN=swordfishvalue",
+        "RUST_LOG=debug cargo test",
+        "sudo cargo test --token swordfish",
+        "env TOKEN=swordfish cargo test",
+        "bash -c 'cargo test swordfish'",
+        "sh -lc 'cargo test swordfish'",
         "echo swordfishvalue | tool",
-        // The same on tools the list does say: the words carry it, not the tool.
-        "cargo publish --token swordfishvalue",
-        "cargo test -- --password=swordfishvalue",
-        "npm publish --//registry.test/:_authToken=swordfishvalue",
-        "git push https://swordfishvalue@github.test/x/y.git",
-        "git -c http.extraHeader=swordfish fetch",
-        "ls /home/me/.aws/credentials",
-        "pytest --api-key swordfishvalue",
-        // Subcommands that take a token on the line.
-        "cargo login swordfishvalue",
-        "npm login",
-        "git credential fill",
+        "printf swordfishvalue",
+        "sed -i s/old/swordfishvalue/ file",
+        "grep -r swordfishvalue .",
+        "xargs rm swordfish",
+        "\"cargo\" test swordfish",
+        "'cargo' test swordfish",
+        "$(which cargo) test swordfish",
+        "`which cargo` test swordfish",
+        "cargo;rm swordfish",
+        "cargo-evil swordfish",
+        // A first word that is written with more than a program's characters.
+        "$HOME/cargo test swordfish",
+        "$(evil)/cargo test swordfish",
+        "xcargo test swordfish",
+        "cd /w && cargo test --token swordfish",
+        "someothertool --flag swordfish",
+        "",
+        "   ",
     ] {
         let said = say(command);
-        assert_eq!(said, LEFT_OUT, "{command}");
+        assert_eq!(said, TOOL_ONLY, "{command:?}");
         assert!(
             !said.contains("swordfish") && !said.contains("alice"),
-            "{command}"
+            "{command:?}"
         );
     }
 }
 
-/// What cannot be classified is not quoted: a quoted string, a substitution, a heredoc, an
-/// interpreter's script, a tool the list does not know, a variable's value at the front.
-#[test]
-fn a_command_that_cannot_be_told_safe_is_left_out_whole() {
-    for command in [
-        "git commit -m \"rotate the key to swordfishvalue\"",
-        "git commit -m 'rotate to swordfishvalue'",
-        "cargo test -- \"a name with spaces\"",
-        "cargo test $(cat secret.txt)",
-        "cargo test $(cat notes.txt)",
-        "cargo test && someothertool --flag",
-        "ls | sh",
-        "cargo test; curl https://example.test/x",
-        "cargo test & curl https://example.test/x",
-        "cargo test `cat file`",
-        "cat > notes <<EOF\nls swordfishvalue\nEOF",
-        // A terminator that is a command the list names.
-        "cat > notes <<ls\nls swordfishvalue\nls",
-        "python3 -c 'print(1)'",
-        "node -e 1",
-        "bash -c 'cargo test'",
-        "sh -lc cargo",
-        "someothertool --flag value",
-        "FOO=swordfishvalue cargo test",
-        "cargo test >(cat)",
-        "echo hello",
-        "printf swordfishvalue",
-        "sed -i s/old/swordfishvalue/ file",
-        "grep -r swordfishvalue .",
-        "xargs rm",
-    ] {
-        let said = say(command);
-        assert_eq!(said, LEFT_OUT, "{command}");
-        assert!(!said.contains("swordfish"), "{command}");
-    }
-}
-
-/// A token-shaped word that the masker would hide leaves the call out, rather than quoting
-/// it with a hole; and the decision is on the whole, whatever the note's bound is.
-#[test]
-fn a_command_with_a_token_shaped_word_or_a_secret_past_the_bound_is_left_out() {
-    assert_eq!(
-        say("cargo test ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
-        LEFT_OUT
-    );
-    assert_eq!(say(&format!("cargo test {}", "YWJj".repeat(12))), LEFT_OUT);
-    // The secret is past the note's 200 characters: it is still the whole call that is judged.
-    let far = format!("cargo test {} --token swordfishvalue", "-v ".repeat(80));
-    let said = say(&far);
-    assert_eq!(said, LEFT_OUT);
-    // A long safe command is cut with a mark.
-    let long = format!("cargo test {}", "-v ".repeat(120));
-    let said = say(long.trim_end());
-    assert!(
-        said.starts_with("; its last tool call was: \"cargo test -v -v"),
-        "{said}"
-    );
-    assert!(said.ends_with("…\""), "{said}");
-    assert_eq!(
-        said.trim_start_matches("; its last tool call was: \"")
-            .trim_end_matches('"')
-            .chars()
-            .count(),
-        CALL_CHARS
-    );
-}
-
-/// A tool that was given text of its own (a script, a patch, a prompt, a URL, a query) is
-/// the tool's name alone, and a file is quoted with the tool unless it names a secret.
+/// A tool that was given text of its own is the tool's name alone, and a file is said, masked,
+/// unless its name names a secret or is token-shaped.
 #[test]
 fn a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_secret() {
     assert_eq!(
@@ -180,13 +218,24 @@ fn a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_s
         "https://alice:swordfish@example.test/x",
         "https://swordfishvalue@localhost/x",
     ] {
-        let said = words(&LastCall::on("Read", target));
         assert_eq!(
-            said,
-            "; its last tool call was Read; what it was given may name a secret, so it is left out",
+            words(&LastCall::on("Read", target)),
+            "; its last tool call was Read",
             "{target}"
         );
     }
+    // A file is said whole up to the note's bound, then cut with a mark.
+    let long = format!("src/{}lib.rs", "a/".repeat(150));
+    let said = words(&LastCall::on("Read", &long));
+    let quoted = said
+        .strip_prefix("; its last tool call was: \"")
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or_else(|| panic!("{said}"));
+    assert!(
+        quoted.starts_with("Read src/a/a/a/") && quoted.ends_with('\u{2026}'),
+        "{quoted}"
+    );
+    assert_eq!(quoted.chars().count(), CALL_CHARS);
     // A tool whose name is a token is masked like any word of a note.
     assert_eq!(
         words(&LastCall::tool(concat!(
@@ -195,10 +244,10 @@ fn a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_s
         ))),
         "; its last tool call was [masked]"
     );
-    // A call with no tool named, and a command that cannot be said.
+    // A call with no tool named and no command says nothing.
     assert_eq!(words(&LastCall::tool("")), "");
     assert_eq!(
         words(&LastCall::shell("", "curl -u a:b https://x.test")),
-        "; its last tool call was a command that may name a secret, so it is left out"
+        "; its last tool call was a command"
     );
 }

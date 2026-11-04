@@ -2,24 +2,22 @@
 //! doing when it closed under its task (kluris T-153: a `cargo test --workspace` the project's
 //! own tests had killed), which no screen of it says.
 //!
-//! **A command is quoted only when every word of it can be told safe.** A command line
-//! carries a credential in more shapes than a list holds: `curl -u user:pass`, a URL's user,
-//! `mysql -psecret`, `--with-token`, a token as the word after `cargo login`, a password
-//! typed in a quoted string or a heredoc. The first version quoted what the masker and the
-//! secret-name test let through, and `curl -u alice:swordfish https://example.test` reached
-//! the ledger (the review of `a26e0848e`, P1). So the rule is the other way: a command is
-//! said when it is made of plain words (no quotes, no parentheses or backticks, so no
-//! substitution, and no heredoc), each of its
-//! commands (split at `&&`, `||`, `;`, `|`, `&` and the end of a line) is a build, test,
-//! version-control or file tool the list below names, none takes a credential by its
-//! subcommand or an environment variable it was given, and neither the secret-name test, the
-//! masker nor a URL's user finds anything in the whole of it. Anything else is left out, and
-//! the note says the tool alone. The decision is on the whole command, before the note's bound
-//! cuts it (a secret past the 200 characters is still a secret in the call).
+//! **Never the arguments of a command.** A command line carries a credential in more shapes
+//! than any rule can list, and each version that tried failed: the first quoted what the masker
+//! and the secret-name test let through (`curl -u alice:swordfish`), the second quoted "plain
+//! words of a listed tool" and the review of `860010398` read a password out of
+//! `npm exec -- docker login -p …` (a wrapper), `git -C /w config http.extraHeader …` (an option
+//! with an argument before the subcommand) and `node login.js alice …` (a script with positional
+//! credentials). So the note says the tool (`Bash`) and, for a shell call, the first word of the
+//! command where it is a program the list below names, and nothing after it: `Bash: "cargo …"`.
+//! A command whose first word is not on the list (a variable assignment, `sudo`, `curl`, a path
+//! into someone's folder) is the tool's name alone. What `cargo test --workspace` was running
+//! when the window closed is the cause, and `cargo …` points at it; the rest of the line is the
+//! record's, which the human can read.
 //!
-//! What a tool was given as text of its own (a script, a patch, a prompt, a URL, a query) never
-//! reaches here: the reader keeps it as nothing (`cf-harness`' `calls`). A file a tool works on
-//! is said unless its name names a secret or is token-shaped.
+//! A tool given text of its own (a script, a patch, a prompt, a URL, a query) never reaches
+//! here: the reader keeps it as nothing (`cf-harness`' `calls`). A file a tool works on is
+//! said, masked, unless its name names a secret or is token-shaped.
 
 use std::sync::LazyLock;
 
@@ -34,50 +32,15 @@ const CALL_CHARS: usize = 200;
 /// The most characters a tool's name takes.
 const TOOL_CHARS: usize = 40;
 
-/// The commands a note may quote: build, test, version-control and file tools, whose words
-/// are flags, names and paths. A tool that takes a credential or runs the text it is given
-/// (`curl`, `ssh`, `mysql`, `docker`, `gh`, `bash -c`, `echo`, `sed`, `grep`) is not here.
-const SAFE_TOOLS: [&str; 62] = [
+/// The programs a note may name as the first word of a shell call: build, test,
+/// version-control and file tools. The program only: what it was given is never said, so a
+/// program that takes a credential on its line (`git`, `npm`, `cargo login`) is named safely,
+/// and the list is of programs worth naming, not of programs that are safe to run.
+const PROGRAMS: [&str; 42] = [
     "cargo", "rustc", "rustfmt", "npm", "npx", "yarn", "pnpm", "bun", "tsc", "vitest", "jest",
-    "biome", "eslint", "prettier", "make", "cmake", "ninja", "git", "ls", "cd", "pwd", "cat",
-    "head", "tail", "wc", "diff", "sort", "uniq", "mkdir", "rmdir", "rm", "cp", "mv", "touch",
-    "chmod", "tar", "unzip", "gzip", "gunzip", "which", "whoami", "date", "sleep", "true", "false",
-    "test", "python", "python3", "pytest", "node", "go", "mvn", "gradle", "dotnet", "java", "ruby",
-    "tree", "kill", "pkill", "killall", "file", "stat",
-];
-
-/// The tools that run the text they are given as code: `-c`, `-e` and their kin say it.
-const INTERPRETERS: [&str; 6] = ["python", "python3", "node", "ruby", "perl", "bun"];
-
-/// The flags of an interpreter that take code from the line.
-const CODE_FLAGS: [&str; 7] = ["-c", "-e", "-E", "--eval", "-p", "--print", "-"];
-
-/// The environment variables a command may be given on its line: none that holds a secret by
-/// its name, and the values of these are settings.
-const SAFE_VARIABLES: [&str; 8] = [
-    "RUST_LOG",
-    "RUST_BACKTRACE",
-    "CARGO_TARGET_DIR",
-    "CARGO_BUILD_JOBS",
-    "NODE_ENV",
-    "CI",
-    "FORCE_COLOR",
-    "NO_COLOR",
-];
-
-/// The subcommands that take a credential on the line or store one, by tool.
-const CREDENTIAL_SUBCOMMANDS: [(&str, &[&str]); 6] = [
-    ("cargo", &["login", "logout", "owner", "yank"]),
-    (
-        "npm",
-        &[
-            "login", "logout", "adduser", "token", "config", "set", "auth",
-        ],
-    ),
-    ("yarn", &["login", "logout", "npm", "config", "set", "auth"]),
-    ("pnpm", &["login", "logout", "config", "set", "auth"]),
-    ("npx", &["login", "adduser"]),
-    ("git", &["credential", "config"]),
+    "biome", "eslint", "prettier", "make", "cmake", "ninja", "git", "ls", "cat", "head", "tail",
+    "wc", "diff", "mkdir", "rm", "cp", "mv", "tar", "python", "python3", "pytest", "node", "go",
+    "mvn", "gradle", "dotnet", "java", "ruby", "kill", "pkill", "killall",
 ];
 
 /// A URL with a user in it, with or without a password: `scheme://user:pass@host`.
@@ -85,45 +48,40 @@ const CREDENTIAL_SUBCOMMANDS: [(&str, &[&str]); 6] = [
 static USER_IN_URL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s]*@").expect("a pattern of call"));
 
-/// A redirection, whose target is a path: `2>&1`, `&>`, `> file`, `>> file`, `< file`.
-#[allow(clippy::expect_used)]
-static REDIRECTION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\d*>&\d+|&>|\d*>>?\s*[^\s|&;<>]+|<\s*[^\s|&;<>]+").expect("a pattern of call")
-});
-
-/// Where a command ends and the next begins.
-#[allow(clippy::expect_used)]
-static SEPARATOR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"&&|\|\||[;|&\n]").expect("a pattern of call"));
-
 /// What a note says of `call`, after "; ", or nothing where the call names nothing.
 pub(super) fn words(call: &LastCall) -> String {
     let tool = label(&call.tool);
     if let Some(command) = &call.command {
-        return if quotable_command(command) {
-            let one_line = command.split_whitespace().collect::<Vec<_>>().join(" ");
-            format!(
-                "; its last tool call was: \"{}\"",
-                cut_to(&one_line, CALL_CHARS)
-            )
-        } else {
-            left_out(&tool)
+        return match program(command) {
+            Some((program, more)) => {
+                let said = if more {
+                    format!("{program} \u{2026}")
+                } else {
+                    program.to_owned()
+                };
+                let who = if tool.is_empty() {
+                    "a command".to_owned()
+                } else {
+                    tool
+                };
+                format!("; its last tool call was {who}: \"{said}\"")
+            }
+            None if tool.is_empty() => "; its last tool call was a command".to_owned(),
+            None => format!("; its last tool call was {tool}"),
         };
     }
     if let Some(target) = &call.target {
-        return if quotable_target(target) {
+        if quotable_target(target) {
             let said = if tool.is_empty() {
                 target.clone()
             } else {
                 format!("{tool} {target}")
             };
-            format!(
+            return format!(
                 "; its last tool call was: \"{}\"",
                 cut_to(&said, CALL_CHARS)
-            )
-        } else {
-            left_out(&tool)
-        };
+            );
+        }
     }
     if tool.is_empty() {
         String::new()
@@ -132,13 +90,18 @@ pub(super) fn words(call: &LastCall) -> String {
     }
 }
 
-/// What a note says of a call whose command or file it cannot say.
-fn left_out(tool: &str) -> String {
-    if tool.is_empty() {
-        "; its last tool call was a command that may name a secret, so it is left out".to_owned()
-    } else {
-        format!("; its last tool call was {tool}; what it was given may name a secret, so it is left out")
-    }
+/// The program a shell command begins with, where the list names it, and whether the command
+/// goes on after it. The first word as it is written: a path to it is its last part, and
+/// nothing else is looked at.
+fn program(command: &str) -> Option<(&'static str, bool)> {
+    let mut words = command.split_whitespace();
+    let first = words.next()?;
+    let name = first.rsplit('/').next().unwrap_or(first);
+    let listed = PROGRAMS.iter().find(|program| **program == name)?;
+    let written = first
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c));
+    written.then(|| (*listed, words.next().is_some()))
 }
 
 /// A tool's name as a note says it: masked, on one line, cut short.
@@ -153,74 +116,6 @@ fn quotable_target(target: &str) -> bool {
         && !names_a_secret(target)
         && mask(target).count == 0
         && !USER_IN_URL.is_match(target)
-}
-
-/// Whether a shell command may be quoted: see the module's rule.
-fn quotable_command(command: &str) -> bool {
-    let plain = command
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || " \t\n_-./:=+,@%^~*?[]{}$|&;<>#!\\".contains(c));
-    if !plain
-        || command.contains("<<")
-        || names_a_secret(command)
-        || mask(command).count > 0
-        || USER_IN_URL.is_match(command)
-    {
-        return false;
-    }
-    let joined = command.replace("\\\n", " ");
-    let bare = REDIRECTION.replace_all(&joined, " ");
-    let mut any = false;
-    for segment in SEPARATOR.split(&bare) {
-        let words: Vec<&str> = segment.split_whitespace().collect();
-        if words.is_empty() {
-            continue;
-        }
-        any = true;
-        if !quotable_segment(&words) {
-            return false;
-        }
-    }
-    any
-}
-
-/// Whether one command of a line (`words`, its variables first) may be quoted.
-fn quotable_segment(words: &[&str]) -> bool {
-    let mut at = 0;
-    while let Some((name, value)) = words.get(at).and_then(|word| word.split_once('=')) {
-        let a_name = !name.is_empty()
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-            && !name.starts_with(|c: char| c.is_ascii_digit());
-        if !a_name {
-            break;
-        }
-        let setting = value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_./:,=-".contains(c));
-        if !SAFE_VARIABLES.contains(&name) || !setting {
-            return false;
-        }
-        at += 1;
-    }
-    let Some(first) = words.get(at) else {
-        return false;
-    };
-    let tool = first.rsplit('/').next().unwrap_or(first);
-    if !SAFE_TOOLS.contains(&tool) {
-        return false;
-    }
-    let rest = &words[at + 1..];
-    if INTERPRETERS.contains(&tool) && rest.iter().any(|word| CODE_FLAGS.contains(word)) {
-        return false;
-    }
-    if tool == "git" && rest.contains(&"-c") {
-        return false;
-    }
-    let subcommand = rest.iter().find(|word| !word.starts_with('-'));
-    CREDENTIAL_SUBCOMMANDS
-        .iter()
-        .filter(|(name, _)| *name == tool)
-        .all(|(_, denied)| subcommand.is_none_or(|word| !denied.contains(word)))
 }
 
 #[cfg(test)]

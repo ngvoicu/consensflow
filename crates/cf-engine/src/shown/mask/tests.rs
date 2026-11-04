@@ -200,10 +200,9 @@ fn a_long_base64_value_is_hidden_whether_or_not_a_digit_is_in_it() {
 
 /// What is no base64 stays: a word, a camel-case name, a path, a number.
 #[test]
-fn a_long_word_a_name_a_path_and_a_number_are_not_taken_for_base64() {
+fn a_name_a_path_and_a_number_are_not_taken_for_base64() {
     for text in [
         "ConsensFlowSupervisorStartupFailedError",
-        "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
         "/Users/gabrielvoicu/Projects/ngvoicu/consensflow/crates",
         "cf_engine_dispatcher_tests_a_very_long_name_that_goes_on",
         "01234567890123456789012345678901234567890123456789",
@@ -281,6 +280,28 @@ fn the_user_and_password_of_a_commands_dash_u_are_hidden() {
         "git push -u origin main",
         "curl -u alice https://x.test",
         "ls -U",
+    ] {
+        assert_eq!(hidden(text), text, "{text}");
+    }
+}
+
+/// The review of `860010398` found a 48-letter base64 value of small letters alone survive: no
+/// word is forty letters long, so a run of that length is hidden in any case.
+#[test]
+fn a_long_run_of_small_letters_is_hidden_too() {
+    for run in [
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv".to_owned(),
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz".to_owned(),
+        "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWZnaGlqa2w".to_owned(),
+    ] {
+        let masked = mask(&format!("value {run} end"));
+        assert_eq!(masked.text, "value [masked] end", "{run}");
+        assert_eq!(masked.count, 1);
+    }
+    // Thirty-nine is a long word, and a run of digits is a number.
+    for text in [
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklm",
+        "01234567890123456789012345678901234567890123456789",
     ] {
         assert_eq!(hidden(text), text, "{text}");
     }

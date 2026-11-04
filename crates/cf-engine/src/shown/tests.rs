@@ -48,13 +48,11 @@ fn a_window_that_never_showed_its_message_has_a_screen_and_no_code() {
 }
 
 /// Every credential both reviews of 2026-10-16 found the masker let through, and every
-/// diagnostic they found it hid: where every line the quote would show names a secret-like
-/// word, or lies beside one that does, the note quotes none of the lines, and says so; how
-/// the program ended is said all the same. (A screen with lines of its own as well is quoted
-/// for them, below, T-823.)
+/// diagnostic they found it hid: where a line names a secret-like word, the note quotes
+/// none of the lines, and says so; how the program ended is said all the same.
 #[test]
 fn a_screen_that_names_a_secret_is_quoted_not_at_all_and_its_code_is_said() {
-    let screens: [&[&str]; 12] = [
+    let screens: [&[&str]; 13] = [
         // Round 1.
         &[r#"DB_PASSWORD="alpha bravo charlie""#],
         &[r#"DB_PASSWORD="correct horse battery staple""#],
@@ -71,6 +69,8 @@ fn a_screen_that_names_a_secret_is_quoted_not_at_all_and_its_code_is_said() {
         &[r#"Invalid token: "expired""#],
         &[r#"private_key_path: "/tmp/id_rsa""#],
         &[r#"SyntaxError: unexpected token: "}""#],
+        // An identifier, a header, and the word in a sentence above the last line.
+        &["Authorization: Bearer abc", "exited", "bye"],
     ];
     for screen in screens {
         let said = shown(Some(1), None, Some(screen)).after("@zeus's window closed");
@@ -111,9 +111,7 @@ fn the_words_are_found_in_any_case_inside_a_name_and_on_any_line_the_host_sent()
     ] {
         assert!(names_a_secret(line), "{line}");
     }
-    // Every line the host sent is looked at, not only those the quote would keep: a name
-    // above them whose value goes on over rows takes the rows to the end of the screen.
-    let mut tail = vec![r#"export DB_PASSWORD="alpha"#.to_owned()];
+    let mut tail = vec!["export DB_PASSWORD=x".to_owned()];
     tail.extend((1..=10).map(|number| format!("line {number}")));
     let said = Shown {
         tail: Some(tail),
@@ -325,7 +323,9 @@ fn only_the_last_lines_are_quoted() {
 
 #[test]
 fn a_quote_is_held_to_its_characters_and_the_older_lines_go_first() {
-    let long = "w".repeat(190);
+    // Rows of words: a row of 190 letters with no blank in it is a key's body (`screen`).
+    let long = format!("{}xy", "abc ".repeat(47));
+    assert_eq!(long.len(), 190);
     let lines = ["the oldest", long.as_str(), long.as_str(), "newest of them"];
     let said = shown(None, None, Some(&lines)).after("gone");
     let quote = said
@@ -343,7 +343,8 @@ fn a_last_line_longer_than_the_quote_is_cut_with_a_mark() {
     let said = shown(
         None,
         None,
-        Some(&["start of a very long line", &"x".repeat(5_000)]),
+        // Words: a row of 5,000 letters with no blank in it is a key's body (`screen`).
+        Some(&["start of a very long line", &"word ".repeat(1_000)]),
     )
     .after("gone");
     let quote = said
@@ -659,154 +660,6 @@ fn an_exit_above_128_is_a_number_on_windows() {
     );
 }
 
-/// What a note says of the lines it left out, for `count` of them.
-fn beside(count: usize) -> String {
-    let (lines, was) = if count == 1 {
-        ("line", "was")
-    } else {
-        ("lines", "were")
-    };
-    format!(" ({count} {lines} that named or lay beside a secret {was} left out)")
-}
-
-/// T-823, kluris T-153: one line that named a secret left the whole screen out, and the chief
-/// never learned the cause. A line that names a secret is left out with the lines beside it
-/// (a value goes on over the next row, a name can end the row above), and the rest is quoted
-/// through the masker, the count said.
-#[test]
-fn a_line_that_names_a_secret_is_left_out_with_its_neighbours_and_the_rest_quoted() {
-    let screen = [
-        "Compiling cf-engine v3.0.7",
-        "warning: unused import",
-        "export DB_PASSWORD=hunter2",
-        "thread 'main' panicked at src/lib.rs:4",
-        "error: test failed",
-        "cargo test exited",
-    ];
-    assert_eq!(
-        shown(Some(101), None, Some(&screen)).after("gone"),
-        format!(
-            "gone (exit code 101); its screen ended with: \"Compiling cf-engine v3.0.7 / error: test failed / cargo test exited\"{}",
-            beside(3)
-        )
-    );
-    // The lines above the six the quote keeps are not its lines: a name among them leaves
-    // nothing out, and its neighbour above the quote's lines is none of them.
-    let mut long = vec!["export DB_PASSWORD=hunter2".to_owned()];
-    long.extend((1..=10).map(|number| format!("line {number}")));
-    let long: Vec<&str> = long.iter().map(String::as_str).collect();
-    assert_eq!(
-        shown(Some(1), None, Some(&long)).after("gone"),
-        "gone (exit code 1); its screen ended with: \"line 5 / line 6 / line 7 / line 8 / line 9 / line 10\""
-    );
-    // A blank row beside the name is no row of the quote's: one row left out, and one said.
-    assert_eq!(
-        shown(None, None, Some(&["fine", "", "password: y"])).after("gone"),
-        format!("gone; its screen ended with: \"fine\"{}", beside(1))
-    );
-    // Three left out, three said.
-    assert_eq!(
-        shown(None, None, Some(&["fine", "x", "password: y", "z", "ok"])).after("gone"),
-        format!("gone; its screen ended with: \"fine / ok\"{}", beside(3))
-    );
-}
-
-/// What a name's value does over more than the next row: a quote it opens and does not close,
-/// a line it continues with `\`, a block it opens. Nothing says where it ends, so the whole
-/// screen is withheld (the review of `a26e0848e`; `screen.rs` has the rest of the shapes).
-#[test]
-fn a_secret_whose_value_goes_on_over_rows_withholds_the_whole_screen() {
-    for opening in [
-        r#"export API_KEY="abc"#,
-        "export API_KEY='abc",
-        "export API_KEY=abc \\",
-        r#""credentials": {"#,
-        "token: |",
-    ] {
-        let screen = [
-            "pad", "pad", "pad", "start", "ok", opening, "def", "ghi", "pad", "pad", "pad",
-        ];
-        assert_eq!(
-            shown(Some(1), None, Some(&screen)).after("gone"),
-            format!("gone (exit code 1); {LEFT_OUT}"),
-            "{opening}"
-        );
-    }
-    // A quote it closes, and YAML's doubled one, run on no further than the next row.
-    for closed in [r#"export API_KEY="abc""#, "password: 'it''s'"] {
-        let screen = ["start", "ok", closed, "def", "ghi", "after", "end"];
-        assert_eq!(
-            shown(Some(1), None, Some(&screen)).after("gone"),
-            format!(
-                "gone (exit code 1); its screen ended with: \"ghi / after / end\"{}",
-                beside(3)
-            ),
-            "{closed}"
-        );
-    }
-}
-
-/// A private key's block is left out whole, its base64 rows among it, which name nothing on
-/// their own; so are the rows beside it. A block with a delimiter missing, or cut at both ends,
-/// withholds the screen: nothing says where its body ends.
-#[test]
-fn a_private_keys_block_is_left_out_whole_and_one_with_a_delimiter_missing_withholds_the_screen() {
-    let screen = [
-        "building",
-        "ok",
-        "-----BEGIN OPENSSH PRIVATE KEY-----",
-        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ",
-        "AAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACD",
-        "-----END OPENSSH PRIVATE KEY-----",
-        "ok",
-        "finished",
-    ];
-    assert_eq!(
-        shown(Some(1), None, Some(&screen)).after("gone"),
-        format!(
-            "gone (exit code 1); its screen ended with: \"finished\"{}",
-            beside(5)
-        )
-    );
-    // The first row of a block above the screen.
-    let below = [
-        "ZmFrZSBrZXkgYm9keSBvbmUgdHdvIHRocmVl",
-        "AAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACD",
-        "-----END RSA PRIVATE KEY-----",
-        "next",
-        "then",
-    ];
-    // A block that never ends in view.
-    let open = [
-        "fine",
-        "ok",
-        "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-        "bGluZSBvbmU=",
-        "bGluZSB0d28=",
-    ];
-    for screen in [&below[..], &open[..]] {
-        let mut padded = vec!["pad", "pad", "pad"];
-        padded.extend_from_slice(screen);
-        padded.extend(["pad", "pad", "pad"]);
-        let screen = &padded[..];
-        assert_eq!(
-            shown(Some(1), None, Some(screen)).after("gone"),
-            format!("gone (exit code 1); {LEFT_OUT}"),
-            "{screen:?}"
-        );
-    }
-}
-
-/// Where every row of the quote is left out, the note says the lines were: the sentence the
-/// whole-screen rule always had.
-#[test]
-fn a_screen_of_nothing_but_secrets_says_its_lines_were_left_out() {
-    assert_eq!(
-        shown(Some(1), None, Some(&["x", "password: y", "z"])).after("gone"),
-        format!("gone (exit code 1); {LEFT_OUT}")
-    );
-}
-
 /// T-823: the last tool call the record shows is what the window was doing when it closed. What
 /// may be said of it is `call`'s; here it is where the note says it.
 #[test]
@@ -814,9 +667,12 @@ fn the_last_tool_call_is_said_before_the_screen_and_a_host_that_sent_no_screen_h
     let screen = "its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\"";
     assert_eq!(
         shown(Some(2), None, Some(&PI))
-            .with_last_call(Some(LastCall::shell("Bash", "cargo fmt --check && cargo test --workspace")))
+            .with_last_call(Some(LastCall::shell(
+                "Bash",
+                "cargo fmt --check && cargo test --workspace"
+            )))
             .after("@zeus's window closed"),
-        format!("@zeus's window closed (exit code 2); its last tool call was: \"cargo fmt --check && cargo test --workspace\"; {screen}")
+        format!("@zeus's window closed (exit code 2); its last tool call was Bash: \"cargo \u{2026}\"; {screen}")
     );
     // Nothing of a call where the record shows none, and the call still said with no screen.
     assert_eq!(
@@ -829,13 +685,16 @@ fn the_last_tool_call_is_said_before_the_screen_and_a_host_that_sent_no_screen_h
         shown(Some(2), None, None)
             .with_last_call(Some(LastCall::shell("Bash", "make test")))
             .after("gone"),
-        "gone (exit code 2); its last tool call was: \"make test\""
+        "gone (exit code 2); its last tool call was Bash: \"make \u{2026}\""
     );
-    // What a call names that a note must not say is left out where the note says it.
+    // A command whose program is not named is the tool alone, and none of its words are said.
     assert_eq!(
         shown(Some(2), None, None)
-            .with_last_call(Some(LastCall::shell("Bash", "curl -u alice:swordfish https://example.test/")))
+            .with_last_call(Some(LastCall::shell(
+                "Bash",
+                "curl -u alice:swordfish https://example.test/"
+            )))
             .after("gone"),
-        "gone (exit code 2); its last tool call was Bash; what it was given may name a secret, so it is left out"
+        "gone (exit code 2); its last tool call was Bash"
     );
 }
