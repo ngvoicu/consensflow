@@ -10,6 +10,9 @@
 //! blank in them; `=` for padding):
 //!
 //! - a row of forty characters or more by itself, in any case (a hash, a token, a key's body);
+//! - a row of twelve characters or more that looks encoded by itself (a key cropped to one row,
+//!   `hkiG9w0BAQEFAASC`: the review of `860010398` went from the whole block to two rows, and a
+//!   third variant is one);
 //! - two rows in a row that both look encoded: a digit among letters, a `+`, a `/`, an `=`, or
 //!   a capital after a small letter;
 //! - two rows in a row or more that are twelve characters or more each and forty together.
@@ -48,6 +51,12 @@ pub(super) fn holds_a_key(tail: &[String]) -> bool {
 /// Whether a run of rows of base64's characters (adjacent rows of the screen) may be a key.
 fn suspect(run: &[&str]) -> bool {
     if run.iter().any(|row| row.len() >= LONG) {
+        return true;
+    }
+    if run
+        .iter()
+        .any(|row| row.len() >= BODY_ROW && looks_encoded(row))
+    {
         return true;
     }
     if run

@@ -829,6 +829,16 @@ replace = '''    if run.iter().any(|row| row.len() >= LONG && false) {
     }'''
 
 [[plant]]
+name = "windows close: a row of twelve that looks encoded by itself is no key"
+meant = "rows_of_base64_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        .any(|row| row.len() >= BODY_ROW && looks_encoded(row))'''
+replace = '''        .any(|row| row.len() >= BODY_ROW && looks_encoded(row) && false)'''
+
+[[plant]]
 name = "windows close: two rows that look encoded are no key"
 meant = "rows_of_base64_and_nothing_else_withhold_the_screen"
 runs = ["engine-shown"]

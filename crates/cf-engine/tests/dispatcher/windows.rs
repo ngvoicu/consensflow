@@ -272,6 +272,7 @@ fn a_pause_note_the_ledger_holds_says_none_of_a_password_the_screen_or_the_last_
     for (screen, value) in [
         (vec!["YQ==", "Yg=="], "YQ=="),
         (vec!["MIIEvQIBADANBgkq", "hkiG9w0BAQEFAASC"], "hkiG9w0B"),
+        (vec!["hkiG9w0BAQEFAASC"], "hkiG9w0B"),
         (
             vec!["abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv"],
             "abcdefghijkl",

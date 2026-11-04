@@ -180,7 +180,7 @@ fn survives(text: &str, value: &str) -> bool {
 }
 
 /// T-823, the review of `a26e0848e` (P1): a base64 value with no digit in it was no token
-/// to the masker, and the rows beside a secret's label, which the note quotes, held it.
+/// to the masker, and a row that names nothing, which the note quotes, held it.
 #[test]
 fn a_long_base64_value_is_hidden_whether_or_not_a_digit_is_in_it() {
     for value in [
