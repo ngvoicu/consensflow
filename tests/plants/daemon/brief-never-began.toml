@@ -119,3 +119,20 @@ runs = ["bnb-engine"]
 file = "crates/cf-engine/src/never_began.rs"
 find = "            || observed.failed"
 replace = "            || observed.failed\n            || !observed.settled"
+
+# T-1209 (T-1200's open question): the Enter of a brief that never began waits on the screen's
+# clock, as every other Enter again does since T-1083; on the output's, a window that repaints
+# the same at rest (Muse after a stopped command) reads as printing for good.
+[[plant]]
+name = "brief never began: the Enter waits for the window's output to stop, not its screen"
+meant = "a_brief_a_window_that_repaints_at_rest_never_began_is_pressed_enter_once"
+runs = ["bnb-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = '''            .get(SCREEN_QUIET_MS)
+            .and_then(Value::as_f64)
+            .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);'''
+replace = '''            .get("outputQuietMs")
+            .and_then(Value::as_f64)
+            .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS && SCREEN_QUIET_MS != "");'''

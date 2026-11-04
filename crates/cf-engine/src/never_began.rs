@@ -44,6 +44,7 @@ use cf_base::{js, time};
 use cf_harness::contract::{Input, Observed};
 use cf_harness::records::{Reading, Role};
 use cf_ledger::{ParticipantView, ProjectView};
+use cf_proto::panes::SCREEN_QUIET_MS;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -289,8 +290,10 @@ impl Dispatcher {
         if js::truthy(snapshot.get("unsent")) {
             return Ok(Pressed::Unsent);
         }
+        // What the screen shows held still, not its output: a window that repaints the same
+        // at rest prints all the time (Muse Code after a stopped command, T-1083).
         let quiet = snapshot
-            .get("outputQuietMs")
+            .get(SCREEN_QUIET_MS)
             .and_then(Value::as_f64)
             .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
         if !quiet {

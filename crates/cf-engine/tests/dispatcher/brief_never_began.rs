@@ -169,6 +169,27 @@ fn a_brief_a_window_read_in_flight_never_began_is_pressed_enter_once_then_its_ta
     never_begun_is_pressed_enter_once_then_paused_and_told(false);
 }
 
+/// A window at rest that repaints what it shows without changing it (Muse Code 1.4.14 after a
+/// command it ran in the background was stopped: colour resets every 50 ms, T-1081, T-1139)
+/// prints all the time and shows the same: its screen is quiet, and the brief it began no
+/// turn on is given its Enter once, as any quiet window's is (T-1083's screen clock; T-1209).
+#[test]
+fn a_brief_a_window_that_repaints_at_rest_never_began_is_pressed_enter_once() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, true);
+    // It printed 40 ms ago, and what it shows has not changed for ten minutes.
+    context.host.set_snapshot(
+        json!({ "outputQuietMs": 40, "screenQuietMs": 600_000, "tail": ["Ready for the next step.", "❯ "] }),
+    );
+    let before = enters(&context);
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(enters(&context), before + 1, "its Enter, pressed once more");
+    assert_eq!(tiers.task(2).task.state, "working");
+}
+
 /// The way on: `cf task resume` sends its words into the same window, not a new one, and
 /// a window that begins on them works the task again.
 #[test]
