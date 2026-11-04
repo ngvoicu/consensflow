@@ -1138,9 +1138,10 @@ fn a_pause_whose_turn_a_refusal_for_quota_ended_before_any_look_presses_no_key()
 fn a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_nothing_into_the_turn_after(
 ) {
     // The chief pauses T-1 while its window works and goes on through the rounds, and
-    // finishes it at what the window said last: done with the pause's stop unpaid. The
-    // window, the human's, goes on with a turn of its own; the chief reopens T-1. The stop
-    // was asked of a turn that is over: nothing is pressed into this one (T-1199).
+    // finishes it at what the window said last: done with the pause's stop unpaid, and the
+    // window, the human's, still on that turn (bug 9's window, still on its turn after its
+    // result). The chief reopens T-1: what T-1 was asked before it was done is settled, and
+    // nothing is pressed into the turn; the words wait for its end (T-1199).
     let context = Context::new();
     let (project, _) = held_open(&context);
     context.adapter.busy("zeus");
@@ -1158,9 +1159,7 @@ fn a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_
     });
     let finished = context.finish_task(project, 1, "chief").unwrap();
     assert_eq!(finished.task.state, "done");
-    context.adapter.busy("zeus");
-    context.pass().unwrap();
-    its_own_turn(&context, "One more look at the parser");
+    context.adapter.with("zeus", |agent| agent.settled = false);
     context.pass().unwrap();
     context
         .ledger
