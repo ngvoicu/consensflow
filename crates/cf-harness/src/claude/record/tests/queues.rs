@@ -307,3 +307,33 @@ fn a_message_is_named_by_its_content_with_the_attributes_of_its_envelope_set_asi
         }
     }
 }
+
+#[test]
+fn a_removal_without_the_hop_chain_names_the_message_queued_with_it() {
+    // Claude Code 2.1.275 writes a message from another session on enqueue with a
+    // `hop-chain` attribute on its envelope and on remove without it, and it is still so
+    // in 2.1.304 (`results-held-at-the-gate`): matched by exact text, the entry was never
+    // cleared, and the lead read as a turn queued for ever, its results held at the gate.
+    let items = r#"[["u1","user","Hello",true,0],["m1","assistant","Hi",true,3]]"#;
+    let queued = r#"<cross-session-message from="s-9" hop-chain="s-1,s-9">Plan it</cross-session-message>"#;
+    let removed = r#"<cross-session-message from="s-9">Plan it</cross-session-message>"#;
+    for operation in ["remove", "popAll"] {
+        let read = once(&[
+            hello(),
+            queue("enqueue", json!(queued)),
+            queue(operation, json!(removed)),
+            answer("a1", "u1"),
+            duration("d1", "a1"),
+        ]);
+        assert_eq!(read, settled(items), "{operation}: the message is gone from the queue");
+    }
+    // Other words are another message, whatever envelope they come in.
+    let read = once(&[
+        hello(),
+        queue("enqueue", json!(queued)),
+        queue("remove", json!(removed.replace("Plan it", "Plan another"))),
+        answer("a1", "u1"),
+        duration("d1", "a1"),
+    ]);
+    assert_eq!(read, in_flight(items), "another message is not named");
+}

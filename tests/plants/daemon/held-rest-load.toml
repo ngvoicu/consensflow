@@ -1,0 +1,123 @@
+# The five test-only mends of `ci-pty-test-hang-and-pi-ack-race` (`6c59def`, `f61be62`, `6703c29`,
+# `0cc4902`, `8e52812c`) are bounds and waits inside tests: each was wrong only on a machine busy
+# enough, which no plant can make by itself. These plants put four of the bounds back to their old
+# values (T-979) and run the test again and again under a bounded CPU load (`tools/under-load.py`:
+# 28 burners, ended by their own alarm), so that a plant is caught when the old bound fails under it.
+# A run that did not fail in its rounds says MISSED: the machine was not busy enough, or the bound
+# is not what made the test fail. The other mends cannot be planted:
+#
+# - the watchdog of the PTY tests' lock (`6c59def`) names a test that hung and aborts the run; it
+#   changes nothing for a test that does not hang, and a test that hangs holding the lock cannot be
+#   written to end;
+# - the ConPTY tests' minute for PowerShell (`f61be62`) is met only by a PowerShell that takes more
+#   than 20 s to start, which GitHub's Windows runner did twice and zeewin2 has not;
+# - the Windows tests of a Git Bash script's sleep (`8e52812c`, T-375): its product change has its
+#   plants (`background.toml`, "background windows: …"), and the test-only part, waiting out the
+#   forked shell, is Windows' alone.
+#
+# Every name holds `held-rest load:`, so `npm run plants:daemon -- "held-rest load:"` runs them. A run
+# lasts what the family's limit allows (150 s of burners, rounds of at most 100 s), so a plant that is
+# not caught says only that no round of that many failed at that load; and the burners make the Mac
+# slow for everything else: run them one at a time, with nothing else building, and with the test
+# binaries built before (a `prepare` here only makes sure of them). Windows' own load tool is
+# `tools/windows-load.ps1`, for a ConPTY plant on zeewin2 if one is ever wanted.
+
+[run]
+rest-load-pi-extension = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "node", "--test", "--test-reporter=tap", "tests/pi-extension.test.mjs"]
+rest-load-pi-message = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "node", "--test", "--test-reporter=tap", "tests/pi-message.test.mjs"]
+rest-load-panes-input = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
+rest-load-panes-idle = ["python3", "-B", "tools/under-load.py", "--burners", "28", "--seconds", "150", "--runs", "20", "--stop-after", "1", "--run-limit", "100", "--", "cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::reader_activity_resets_idle_then_silence_increases_it"]
+
+# --- 0cc4902: the life of the records the Pi extension's tests write ---
+
+[[plant]]
+name = "held-rest load: the Pi extension's tests write their records with a one-second life"
+meant = "refuses a delivery addressed to a different native Pi session"
+platforms = ["macos", "linux"]
+runs = ["rest-load-pi-extension"]
+
+[[plant.edit]]
+file = "tests/pi-extension.test.mjs"
+find = "    ackTimeoutMs = 30_000,"
+replace = "    ackTimeoutMs = 1000,"
+
+# --- 6c59def: the move of an expired followup, after its acknowledgment ---
+
+[[plant]]
+name = "held-rest load: the Pi test reads the inbox once, not until the file has moved"
+meant = "moves an expired followup aside without sending"
+platforms = ["macos", "linux"]
+runs = ["rest-load-pi-message"]
+
+[[plant.edit]]
+file = "tests/pi-message.test.mjs"
+find = '''      // The acknowledgment is written before the file moves aside, and a pass
+      // the inbox watcher started may be the one doing it (a Windows runner,
+      // 2026-09-29): the move comes just after.
+      const deadline = Date.now() + 2_000
+      while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+'''
+replace = ""
+
+# --- 6703c29: the unanswered-input test sends 4,096 inputs without a retry ---
+
+[[plant]]
+name = "held-rest load: the unanswered-input test sends its 4,096 inputs once, whatever the queue holds"
+meant = "unanswered_page_input_is_bounded_until_a_new_page"
+platforms = ["macos", "linux"]
+runs = ["rest-load-panes-input"]
+prepare = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--no-run"]]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        // The pane's queue holds fewer jobs than the bound holds tickets, and
+        // its worker may lag on a busy machine: input the full queue refuses
+        // is sent again under the next number (a refused number is spent).
+        let mut sequence = 0;
+        let mut admitted = 0;
+        while admitted < MAX_PENDING_INPUT_TICKETS {
+            sequence += 1;
+            match inputs.enqueue_page(key.clone(), sequence, typed(), true) {
+                Ok(_) => admitted += 1,
+                Err(error) if error == "the pane's input queue is full" => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => panic!("refused: {error}"),
+            }
+        }
+        // The bound is checked before the queue: refused whatever the queue holds.
+        assert_eq!(
+            inputs.enqueue_page(key.clone(), sequence + 1, typed(), true),
+            Err("pane-input-ticket-capacity".to_string())
+        );
+'''
+replace = '''        for sequence in 1..=MAX_PENDING_INPUT_TICKETS as u64 {
+            inputs
+                .enqueue_page(key.clone(), sequence, typed(), true)
+                .expect("admitted");
+        }
+        assert_eq!(
+            inputs.enqueue_page(
+                key.clone(),
+                MAX_PENDING_INPUT_TICKETS as u64 + 1,
+                typed(),
+                true
+            ),
+            Err("pane-input-ticket-capacity".to_string())
+        );
+'''
+
+# --- 0cc4902: the pane's idle look before its child's first output ---
+
+[[plant]]
+name = "held-rest load: the idle test's child prints a quarter second after it starts"
+meant = "reader_activity_resets_idle_then_silence_increases_it"
+platforms = ["macos", "linux"]
+runs = ["rest-load-panes-idle"]
+prepare = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--no-run"]]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '&shell("/bin/sleep 1; printf x; /bin/sleep 1000"),'
+replace = '&shell("/bin/sleep 0.25; printf x; /bin/sleep 1000"),'

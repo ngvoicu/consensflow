@@ -1102,6 +1102,34 @@ mod tests {
         assert_eq!(long.dropped, 20);
     }
 
+    #[test]
+    fn what_a_window_printed_through_the_router_is_kept_to_its_bound_and_what_went_counted() {
+        // T-139: `Printed::push` held the bound, and the call that keeps what the router
+        // sees of a window gave it none: a window that printed for hours was kept whole.
+        let shared = Shared::default();
+        let (host, _host_lines, daemon, _daemon_lines) = sinks();
+        // A line of 100 bytes, 655 of them to a frame, so that a cut falls at a line's start.
+        let frame = format!("{}\r\n", "x".repeat(98)).repeat(655).into_bytes();
+        let frames = (KEPT + SLACK) / frame.len() + 2;
+        for seq in 1..=frames {
+            let printed = json!({
+                "v": 1, "id": format!("e-{seq}"), "kind": "evt", "op": "pane.output",
+                "body": {"id": "p1-zeus", "generation": 2, "seq": seq, "bytes": frame},
+            });
+            shared.route_host(&printed.to_string(), &host, &daemon);
+        }
+        let seen = shared.seen();
+        let printed = &seen.printed["p1-zeus"];
+        assert!(
+            (KEPT..=KEPT + SLACK).contains(&printed.kept.len()),
+            "kept {} bytes of {} printed",
+            printed.kept.len(),
+            frames * frame.len()
+        );
+        assert!(printed.dropped > 0, "and what went was counted");
+        assert!(printed.kept.starts_with(b"xxx"), "from a line's start");
+    }
+
     /// A `pane.write_paste` of the daemon's, numbered `id`, of `body`, and the host's
     /// answer to it.
     fn paste(id: &str, body: &str) -> (String, String) {
