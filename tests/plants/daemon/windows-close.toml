@@ -774,11 +774,11 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    run.len() >= 2
-        && run.iter().all(|row| row.len() >= BODY_ROW)'''
-replace = '''    run.len() >= 2
+find = '''    total >= LONG
+        && ((run.len() >= 2'''
+replace = '''    total >= LONG
         && false
-        && run.iter().all(|row| row.len() >= BODY_ROW)'''
+        && ((run.len() >= 2'''
 
 [[plant]]
 name = "windows close: a rule of equals signs is a key's padding"
@@ -1074,20 +1074,6 @@ replace = '''    if false {
     }'''
 
 [[plant]]
-name = "windows close: the rows of a run are not parted by a row of words"
-meant = "a_screen_with_no_secret_and_no_key_on_it_is_quoted_as_it_always_was"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/screen.rs"
-find = '''                return true;
-            }
-            run.clear();'''
-replace = '''                return true;
-            }
-            // not cleared'''
-
-[[plant]]
 name = "windows close: a capital after a small letter does not look encoded"
 meant = "rows_of_base64_and_nothing_else_withhold_the_screen"
 runs = ["engine-shown"]
@@ -1281,29 +1267,6 @@ replace = '''    false
         || BASIC_SCHEME'''
 
 [[plant]]
-name = "windows close: a Basic credential does not withhold a screen"
-meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''    PREFIXES.is_match(text)
-        || BASIC_SCHEME
-            .captures_iter(text)
-            .any(|found| found.get(1).is_some_and(|m| base64_credentials(m.as_str())))'''
-replace = '''    PREFIXES.is_match(text)'''
-
-[[plant]]
-name = "windows close: any word after Basic is a credential"
-meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''found.get(1).is_some_and(|m| base64_credentials(m.as_str()))'''
-replace = '''found.get(1).is_some()'''
-
-[[plant]]
 name = "windows close: a Basic credential of four characters is none"
 meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
 runs = ["engine-shown"]
@@ -1312,16 +1275,6 @@ runs = ["engine-shown"]
 file = "crates/cf-engine/src/shown/mask.rs"
 find = '''(?i)\bbasic\s+([A-Za-z0-9._~+/=-]{4,})'''
 replace = '''(?i)\bbasic\s+([A-Za-z0-9._~+/=-]{8,})'''
-
-[[plant]]
-name = "windows close: the sk, pk and rk kinds are not found"
-meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''(?:(?:sk|pk|rk)[-_]|gh[pousr]_|'''
-replace = '''(?:gh[pousr]_|'''
 
 [[plant]]
 name = "windows close: the gh kinds are not found"
@@ -1490,16 +1443,6 @@ find = '''\bnpm_[A-Za-z0-9]{12}'''
 replace = '''\bnpm_[A-Za-z0-9]{4}'''
 
 [[plant]]
-name = "windows close: the end of a word is the start of a token's prefix"
-meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''r"\b(?:(?:sk|pk|rk)[-_]|gh[pousr]_'''
-replace = '''r"(?:(?:sk|pk|rk)[-_]|gh[pousr]_'''
-
-[[plant]]
 name = "windows close: a tool's name is not masked"
 meant = "a_tool_without_a_command_is_its_name_and_a_file_is_never_said"
 runs = ["engine-shown"]
@@ -1523,3 +1466,185 @@ replace = '''    if let Some(target) = &call.target {
     }
     if tool.is_empty() {
         String::new()'''
+
+[[plant]]
+name = "windows close: a Basic credential does not withhold a screen"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        || BASIC_SCHEME.captures_iter(text).any(|found| {
+            found.get(1).is_some_and(|m| {
+                base64_credentials(m.as_str())
+                    && !m.as_str().chars().all(|c| c.is_ascii_uppercase())
+            })
+        })'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: any word after Basic is a credential"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''                base64_credentials(m.as_str())
+                    && !m.as_str().chars().all(|c| c.is_ascii_uppercase())'''
+replace = '''                true'''
+
+[[plant]]
+name = "windows close: a word of capitals after Basic is a credential"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''                    && !m.as_str().chars().all(|c| c.is_ascii_uppercase())
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: the sk kind is not found"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:sk[-_]|(?:pk|rk)_(?:live|test)_|gh[pousr]_|'''
+replace = '''(?:(?:pk|rk)_(?:live|test)_|gh[pousr]_|'''
+
+[[plant]]
+name = "windows close: the pk and rk kinds are not found"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:sk[-_]|(?:pk|rk)_(?:live|test)_|gh[pousr]_|'''
+replace = '''(?:sk[-_]|gh[pousr]_|'''
+
+[[plant]]
+name = "windows close: a pk or rk name is a key"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:pk|rk)_(?:live|test)_'''
+replace = '''(?:pk|rk)[-_]'''
+
+[[plant]]
+name = "windows close: the end of a word is the start of a token's prefix"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''r"\b(?:sk[-_]|(?:pk|rk)_(?:live|test)_|gh[pousr]_'''
+replace = '''r"(?:sk[-_]|(?:pk|rk)_(?:live|test)_|gh[pousr]_'''
+
+[[plant]]
+name = "windows close: the rows of a run are not parted by a row of words"
+meant = "a_screen_with_no_secret_and_no_key_on_it_is_quoted_as_it_always_was"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                return true;
+            }
+            run.clear();'''
+replace = '''                return true;
+            }
+            // not cleared'''
+
+[[plant]]
+name = "windows close: text in percent signs is not spelled out"
+meant = "text_in_percent_signs_is_looked_at_as_what_it_spells"
+runs = ["engine-shown", "engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    found.then(|| String::from_utf8_lossy(&spelled).into_owned())'''
+replace = '''    (found && false).then(|| String::from_utf8_lossy(&spelled).into_owned())'''
+
+[[plant]]
+name = "windows close: a URL's user and password in percent signs is not looked for"
+meant = "text_in_percent_signs_is_looked_at_as_what_it_spells"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            if names_a_secret(&spelled) || begins_a_token(&spelled) || has_url_credentials(&spelled)'''
+replace = '''            if names_a_secret(&spelled) || begins_a_token(&spelled)'''
+
+[[plant]]
+name = "windows close: a name in percent signs is not looked for"
+meant = "text_in_percent_signs_is_looked_at_as_what_it_spells"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            if names_a_secret(&spelled) || begins_a_token(&spelled) || has_url_credentials(&spelled)'''
+replace = '''            if begins_a_token(&spelled) || has_url_credentials(&spelled)'''
+
+[[plant]]
+name = "windows close: a token's prefix in percent signs is not looked for"
+meant = "text_in_percent_signs_is_looked_at_as_what_it_spells"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            if names_a_secret(&spelled) || begins_a_token(&spelled) || has_url_credentials(&spelled)'''
+replace = '''            if names_a_secret(&spelled) || has_url_credentials(&spelled)'''
+
+[[plant]]
+name = "windows close: the rows joined are not spelled out"
+meant = "text_in_percent_signs_is_looked_at_as_what_it_spells"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    for text in [&joined, &spaced] {'''
+replace = '''    for text in [&spaced] {'''
+
+[[plant]]
+name = "windows close: a letter among a percent sign's digits is none"
+meant = "text_in_percent_signs_is_looked_at_as_what_it_spells"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let low = char::from(*pair.get(1)?).to_digit(16)?;'''
+replace = '''    let low = char::from(*pair.get(1)?).to_digit(10)?;'''
+
+[[plant]]
+name = "windows close: rows narrower than twelve are no body"
+meant = "rows_of_base64_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            || (run.len() >= 3 && body.iter().all(|row| row.len() >= NARROW_ROW)))'''
+replace = '''            || false)'''
+
+[[plant]]
+name = "windows close: the last row of a body must be as long as the others"
+meant = "rows_of_base64_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        && ((run.len() >= 2 && body.iter().all(|row| row.len() >= BODY_ROW))'''
+replace = '''        && ((run.len() >= 2 && run.iter().all(|row| row.len() >= BODY_ROW))'''
+
+[[plant]]
+name = "windows close: the last row of a narrow body must be as long as the others"
+meant = "rows_of_base64_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            || (run.len() >= 3 && body.iter().all(|row| row.len() >= NARROW_ROW)))'''
+replace = '''            || (run.len() >= 3 && run.iter().all(|row| row.len() >= NARROW_ROW)))'''
+

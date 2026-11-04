@@ -45,6 +45,9 @@ use regex::Regex;
 /// What a hidden secret is replaced with.
 pub const MASK: &str = "[masked]";
 
+/// The user and password of a URL: `scheme://user:password@host`.
+const URL_USER_PASSWORD: &str = r"(?i)\b[a-z][a-z0-9+.-]*://([^\s/@:]+:[^\s/@]+)@";
+
 /// A pattern, which group of it is the secret (0 for all of it), and whether
 /// what that group matched is one.
 struct Rule {
@@ -104,11 +107,7 @@ fn a_long_or_numbered_value(found: &str) -> bool {
 static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     vec![
         // scheme://user:password@host
-        rule(
-            r"(?i)\b[a-z][a-z0-9+.-]*://([^\s/@:]+:[^\s/@]+)@",
-            1,
-            always,
-        ),
+        rule(URL_USER_PASSWORD, 1, always),
         // An email address: whose account it is.
         Rule {
             yields_to_url: true,
@@ -178,11 +177,12 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
 /// same kinds as the rule above, with the body cut to what is enough to tell the kind from a
 /// word. `npm_config_cache` and `hf_hub_download` are names, not tokens: their kinds need twelve
 /// characters in a row, and the others four, or a blank, or the end of the text, so that a
-/// prefix a window's wrap cut off the rest of is one too.
+/// prefix a window's wrap cut off the rest of is one too. Of Stripe's keys only the live and
+/// test shapes (`pk_live_…`, `rk_test_…`) count: `pk_users_id` is the name of a constraint.
 #[allow(clippy::expect_used)]
 static PREFIXES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
-        r"\b(?:(?:sk|pk|rk)[-_]|gh[pousr]_|github_pat_|glpat-|xox[abprs]-)(?:[A-Za-z0-9]{4}|\s|$)",
+        r"\b(?:sk[-_]|(?:pk|rk)_(?:live|test)_|gh[pousr]_|github_pat_|glpat-|xox[abprs]-)(?:[A-Za-z0-9]{4}|\s|$)",
         r"|\b(?:AKIA|ASIA)[A-Z0-9]{4}",
         r"|\bAIza[A-Za-z0-9_-]{4}",
         r"|\beyJ[A-Za-z0-9_-]{4}",
@@ -194,19 +194,32 @@ static PREFIXES: LazyLock<Regex> = LazyLock::new(|| {
     .expect("a pattern of the masker")
 });
 
-/// What follows `Basic` when it is base64's, as short as four characters.
+/// What follows `Basic` when it is base64's, as short as four characters, and no word of capitals
+/// alone (`Basic HTTP`, `Basic JSON`).
 #[allow(clippy::expect_used)]
 static BASIC_SCHEME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\bbasic\s+([A-Za-z0-9._~+/=-]{4,})").expect("a pattern of the masker")
 });
 
+#[allow(clippy::expect_used)]
+static URL_CREDENTIALS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(URL_USER_PASSWORD).expect("a pattern of the masker"));
+
+/// Whether `text` holds a URL with a user and a password in it.
+pub(crate) fn has_url_credentials(text: &str) -> bool {
+    URL_CREDENTIALS.is_match(text)
+}
+
 /// Whether `text` shows the beginning of a token of a kind with a known prefix (`sk-`, `ghp_`,
 /// `AKIA…`, a JWT's `eyJ…`) or of a `Basic` credential, whatever follows it.
 pub(crate) fn begins_a_token(text: &str) -> bool {
     PREFIXES.is_match(text)
-        || BASIC_SCHEME
-            .captures_iter(text)
-            .any(|found| found.get(1).is_some_and(|m| base64_credentials(m.as_str())))
+        || BASIC_SCHEME.captures_iter(text).any(|found| {
+            found.get(1).is_some_and(|m| {
+                base64_credentials(m.as_str())
+                    && !m.as_str().chars().all(|c| c.is_ascii_uppercase())
+            })
+        })
 }
 
 /// A run of forty letters and digits or more that is no number: it has a letter in it, in

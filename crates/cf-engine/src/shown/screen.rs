@@ -22,7 +22,8 @@
 //!   - a row of twelve characters or more that looks encoded by itself: a digit among letters,
 //!     a `+`, a `/`, an `=`, or a capital after a small letter;
 //!   - two rows in a row that both look encoded;
-//!   - two rows in a row or more that are twelve characters or more each and forty together;
+//!   - two rows in a row or more that are twelve characters or more each (the last may be
+//!     shorter) and forty together, or three rows or more of eight each (a narrower window);
 //!   - a row of one `=` or two, which is a key's last row whatever stands beside it.
 //! - **A value in groups.** `YWJj-ZGVm-ZGhp-…`, `deadbeef cafebabe feedface …`: four groups or
 //!   more of four characters or more of base64 or hex, each parted from the next by one blank,
@@ -30,18 +31,24 @@
 //!   of groups of one length, or of groups that each look encoded or are hex, is no sentence: a
 //!   sentence of four words does not have them all of one length, nor of letters and digits.
 //!
+//! - **Text in percent signs.** `https%3A%2F%2Falice%3Aswordfish%40example.test` has no `://` and
+//!   no `@` for the masker, and names nothing to a test of its words. What it spells out is looked
+//!   at as well ([`percent_decoded`]): a name, a token's beginning or a URL's user and password.
+//!
 //! A false alarm (a hash, a long identifier, a sentence of four-letter words) costs the quote of
 //! one screen; a miss costs a key.
 
-use super::mask::begins_a_token;
+use super::mask::{begins_a_token, has_url_credentials};
 use super::secret::names_a_secret;
 
 /// A row this long, of base64's characters alone, is a token or a key's body by itself.
 const LONG: usize = 40;
 
 /// A row this long that looks encoded is a key's body cropped by the window; rows this long,
-/// two or more in a row, are a key's body together once they reach [`LONG`].
+/// two or more in a row, are a key's body together once they reach [`LONG`]; and rows
+/// [`NARROW_ROW`] long, three or more in a row, where the window was narrower.
 const BODY_ROW: usize = 12;
+const NARROW_ROW: usize = 8;
 
 /// The groups of a value in groups: four characters or more each, four of them or more.
 const GROUP: usize = 4;
@@ -83,10 +90,47 @@ pub(super) fn withheld(tail: &[String]) -> Option<Withheld> {
     if names_a_secret(&joined) || begins_a_token(&joined) || begins_a_token(&spaced) {
         return Some(Withheld::Secret);
     }
+    // Text in percent signs says nothing to the tests above: what it spells is looked at too.
+    for text in [&joined, &spaced] {
+        if let Some(spelled) = percent_decoded(text) {
+            if names_a_secret(&spelled) || begins_a_token(&spelled) || has_url_credentials(&spelled)
+            {
+                return Some(Withheld::Secret);
+            }
+        }
+    }
     if holds_a_key(&rows) || grouped(&spaced) {
         return Some(Withheld::Key);
     }
     None
+}
+
+/// `text` with its `%XX` escapes spelled out, or none where it has none.
+fn percent_decoded(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut spelled: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut found = false;
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'%' {
+            if let Some(byte) = bytes.get(at + 1..at + 3).and_then(hex_byte) {
+                spelled.push(byte);
+                found = true;
+                at += 3;
+                continue;
+            }
+        }
+        spelled.push(bytes[at]);
+        at += 1;
+    }
+    found.then(|| String::from_utf8_lossy(&spelled).into_owned())
+}
+
+/// The byte two hex digits spell.
+fn hex_byte(pair: &[u8]) -> Option<u8> {
+    let high = char::from(*pair.first()?).to_digit(16)?;
+    let low = char::from(*pair.get(1)?).to_digit(16)?;
+    u8::try_from(high * 16 + low).ok()
 }
 
 /// A row without the frame a program drew round it, and the blanks beside the frame.
@@ -132,9 +176,14 @@ fn suspect(run: &[&str]) -> bool {
     {
         return true;
     }
-    run.len() >= 2
-        && run.iter().all(|row| row.len() >= BODY_ROW)
-        && run.iter().map(|row| row.len()).sum::<usize>() >= LONG
+    // The rows but the last are as long as the window was wide; the last is what is left.
+    let Some((_, body)) = run.split_last() else {
+        return false;
+    };
+    let total: usize = run.iter().map(|row| row.len()).sum();
+    total >= LONG
+        && ((run.len() >= 2 && body.iter().all(|row| row.len() >= BODY_ROW))
+            || (run.len() >= 3 && body.iter().all(|row| row.len() >= NARROW_ROW)))
 }
 
 /// A row of the padding of base64 alone: one `=` or two. A longer row of them is a rule that

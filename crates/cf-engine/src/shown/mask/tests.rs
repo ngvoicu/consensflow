@@ -315,7 +315,8 @@ fn the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_it
         "sk-abcd",
         "see sk-abcd efgh ijkl",
         "pk_live_abcd",
-        "rk-abcd",
+        "sk_live_abcd",
+        "rk_test_abcd",
         "ghp_abcd",
         "gho_abcd",
         "ghu_abcd",
@@ -349,6 +350,15 @@ fn the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_it
     // What begins like a kind and is a word or a name.
     for text in [
         "sk",
+        // Stripe's other keys are only the live and test ones; the rest are names.
+        "pk_users_id",
+        "pk_id",
+        "rk_orders",
+        "pk-abcd",
+        "rk-abcd",
+        // A word of capitals after Basic is no credential.
+        "Basic HTTP server",
+        "Basic JSON",
         "task-list",
         "disk-usage is high",
         "ask-me anything",

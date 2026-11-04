@@ -366,6 +366,12 @@ fn a_pause_note_the_ledger_holds_says_none_of_a_secret_split_grouped_framed_or_p
             "efgh ijkl",
             true,
         ),
+        // The same URL, written in percent signs.
+        (
+            vec!["https%3A%2F%2Falice%3Aswordfish%40example.test"],
+            "swordfish",
+            true,
+        ),
         // A name split over the physical rows of the window.
         (
             vec!["{\"api_", "key\": \"red", "green blue\"}"],
@@ -387,6 +393,18 @@ fn a_pause_note_the_ledger_holds_says_none_of_a_secret_split_grouped_framed_or_p
         (
             vec!["│ MIIEvQIBADANBgkq │", "│ hkiG9w0BAQEFAASC │"],
             "hkiG9w0B",
+            false,
+        ),
+        // A body of small letters in rows narrower than twelve.
+        (
+            vec![
+                "abcdefghijk",
+                "lmnopqrstuv",
+                "wxyzabcdefg",
+                "hijklmnopqr",
+                "stuv",
+            ],
+            "lmnopqrstuv",
             false,
         ),
         // A padding row beside a body of small letters.

@@ -192,6 +192,25 @@ fn rows_of_base64_and_nothing_else_withhold_the_screen() {
             vec!["abcdefghijklmnop", "qrstuvwxyzabcdef", "ghijklmnopqrstuv"],
         ),
         ("a hash", vec![hash]),
+        // Rows narrower than twelve, with what is left of the body on the last.
+        (
+            "a body of small letters in rows of eleven",
+            vec![
+                "abcdefghijk",
+                "lmnopqrstuv",
+                "wxyzabcdefg",
+                "hijklmnopqr",
+                "stuv",
+            ],
+        ),
+        (
+            "a body of small letters in rows of eight",
+            vec!["abcdefgh", "ijklmnop", "qrstuvwx", "yzabcdef", "ghijklmn"],
+        ),
+        (
+            "a body of small letters in rows of twenty and a short ending",
+            vec!["abcdefghijklmnopqrst", "uvwxyzabcdefghijklmn", "opqr"],
+        ),
         (
             "a body, a short ending",
             vec!["ZXhhbXBsZWV4YW1wbGVleGFtcGxlZXhh", "bXBsZQ=="],
@@ -607,7 +626,7 @@ fn a_token_prefix_withholds_the_screen_whatever_follows_it() {
     for token in [
         "sk-abcdefgh",
         "pk_live_abcdefgh",
-        "rk-abcd",
+        "rk_test_abcd",
         "ghp_abcdefgh",
         "gho_abcdefgh",
         "ghu_abcdefgh",
@@ -657,6 +676,9 @@ fn a_token_prefix_withholds_the_screen_whatever_follows_it() {
         "a task-based disk-usage check",
         "ASIAN markets",
         "pk_id of the users table is skipped",
+        "constraint pk_users_id failed",
+        "Basic HTTP server",
+        "Basic JSON output",
     ] {
         let said = note(&[row]);
         assert!(said.contains("its screen ended with"), "{row}: {said}");
@@ -1049,4 +1071,39 @@ fn the_ordinary_screens_stay_visible_and_the_few_that_are_withheld_are_counted()
         withheld += usize::from(was);
     }
     assert_eq!((withheld, cases.len()), (4, 19));
+}
+
+/// Text in percent signs says nothing to the masker (no `://`, no `@`) nor to a test of words:
+/// what it spells is looked at too (the re-check's boundary, and the obvious next shape of its
+/// credential URL).
+#[test]
+fn text_in_percent_signs_is_looked_at_as_what_it_spells() {
+    assert_withheld(
+        &[
+            &["https%3A%2F%2Falice%3Aswordfish%40example.test"],
+            &["https%3a%2f%2falice%3aswordfish%40example.test"],
+            &["https%3A%2F%2Falice%3Aswo", "rdfish%40example.test"],
+            &["GET /cb?u=https%3A%2F%2Falice%3Aswordfish%40example.test HTTP/1.1"],
+        ],
+        NAMED,
+        "swordfish",
+    );
+    for (rows, value) in [
+        (vec!["api%5Fkey%3Dred%20green%20blue"], "green blue"),
+        (vec!["password%3Dhunter22"], "hunter22"),
+        (vec!["sk%2Dabcdefgh"], "abcdefgh"),
+        (vec!["x=%2D%2Dtoken%3Dabc123"], "abc123"),
+    ] {
+        assert_withheld(&[&rows], NAMED, value);
+    }
+    // Percent signs that spell nothing secret, and ones that spell nothing at all.
+    for rows in [
+        vec!["file:///My%20Folder/a%2Fb.txt"],
+        vec!["GET /a%20b?q=100%25 HTTP/1.1"],
+        vec!["caf%C3%A9 au lait"],
+        vec!["50% done", "100%", "%zz and %4"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
 }
