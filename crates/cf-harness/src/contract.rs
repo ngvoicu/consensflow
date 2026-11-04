@@ -468,6 +468,11 @@ pub struct Dialog {
     /// The words it opens with: the line above its choices that asks, or else the nearest
     /// that says anything.
     pub question: String,
+    /// What it says right above those words, a line each: the one paragraph there, back to a
+    /// blank line or a rule drawn across it. A hook's reason for asking ("Hook tool.check
+    /// requires confirmation for this command: …", T-1198), the plugin an offer is of. None
+    /// where it says nothing more.
+    pub detail: Vec<String>,
     /// Its choices, in their order, without the numbers drawn before them.
     pub options: Vec<String>,
     /// Whether it waits for an answer by its words: [`Dialog::question`] ends in a question mark,
@@ -491,6 +496,19 @@ pub struct Decline {
     pub choice: String,
     /// The key that makes it, alone: a digit where the harness's list takes one.
     pub key: Vec<u8>,
+    /// How long after the note of the dialog nobody may have answered it before the key is
+    /// pressed, in milliseconds: none for the next look that still shows it (an offer that
+    /// writes nothing declined), some for a dialog that is the human's to answer first (a
+    /// hook's ask on a call, T-1198: ten minutes).
+    pub after_ms: Option<i64>,
+    /// What the window is told, as a message of the board's, once it rests after the press,
+    /// where the press ends its turn (Claude Code's "No" to a hook's ask aborts the turn and
+    /// tells the model to wait for the user): the words that send it on. None where the turn
+    /// goes on by itself.
+    pub then_tell: Option<String>,
+    /// What the dialog is, in the words of the note that it was pressed ("hook prompt on its
+    /// call").
+    pub what: String,
 }
 
 /// What a window's harness says of a dialog of its own being open, beside the screen

@@ -225,6 +225,17 @@ impl Records {
             .open(&self.transcript)
     }
 
+    /// Writes that the window waits on a dialog of its own, and why, as Claude Code 2.1.317
+    /// says it (`waiting`, `waitingFor`).
+    pub fn waiting(&self, pid: u32, why: &str) -> io::Result<()> {
+        make_folder_of(&self.status_file)?;
+        fs::write(
+            &self.status_file,
+            json!({ "pid": pid, "sessionId": self.session, "kind": "interactive", "status": "waiting", "waitingFor": why })
+                .to_string(),
+        )
+    }
+
     /// Writes the status the window is in: `idle` or `busy`.
     pub fn status(&self, pid: u32, value: &str) -> io::Result<()> {
         make_folder_of(&self.status_file)?;

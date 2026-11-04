@@ -116,6 +116,64 @@ const OFFERS_CLOSING: [&str; 2] = [LSP_OFFER, "Would you like to install it?"];
 const LSP_OFFER: &str = "Would you like to install this LSP plugin?";
 const LSP_DECLINE: &str = "No, not now";
 
+/// What Claude Code 2.1.317 asks where a PreToolUse hook answers "ask" for a call, its words of
+/// the hook above it ("Hook tool.check requires confirmation for this command: <the hook's
+/// reason> [plugin:…]"), and its choice that refuses the call (T-1198).
+const HOOK_QUESTION: &str = "Do you want to proceed?";
+const HOOK_SAYS: [&str; 2] = ["Hook ", "requires confirmation for this"];
+const HOOK_DECLINE: &str = "No";
+
+/// How long a hook's ask may wait for the human before ConsensFlow answers it "No", in
+/// milliseconds: ten minutes (the chief's decision of 2026-11-03, T-1198), or what
+/// `CONSENSFLOW_HOOK_ASK_MS` says where it says a number (the rig's cases).
+const HOOK_ASK_MS: i64 = 10 * 60_000;
+
+/// The decline of `dialog` where it is a hook's ask on a call: "No", by its digit, once nobody
+/// answered it for `after_ms`. "No" writes nothing, neither to the settings nor to
+/// `~/.claude.json` (2.1.317's `nOr`: `"no"` → `{behavior:"deny"}`, where only "Yes, and don't
+/// ask again" carries `permissionUpdates`), but a "No" with no words of the user's ends the
+/// turn (`cancelAndAbort` aborts it, and the model is told to stop and wait for the user), so
+/// the window is told once it rests to go on without the call, the hook's reason with it where
+/// the screen showed one. "Yes" is never chosen, of any hook's or permission's prompt.
+fn hook_ask_decline(dialog: &Dialog, after_ms: i64) -> Option<Decline> {
+    let says = dialog.detail.join(" ");
+    if dialog.question != HOOK_QUESTION || !HOOK_SAYS.iter().all(|words| says.contains(words)) {
+        return None;
+    }
+    let at = dialog
+        .options
+        .iter()
+        .position(|option| option == HOOK_DECLINE)?;
+    let no = u8::try_from(at + 1).ok().filter(|digit| *digit <= 9)?;
+    let span = if after_ms < 60_000 {
+        format!("{} seconds", after_ms / 1_000)
+    } else {
+        format!("{} minutes", after_ms / 60_000)
+    };
+    let reason = hook_reason(&says).map_or_else(String::new, |reason| {
+        format!(" The hook said: \u{201c}{reason}\u{201d}")
+    });
+    let then_tell = format!(
+        "A hook asked for confirmation of your last call, and nobody answered it within {span}, so ConsensFlow answered \u{201c}No\u{201d} for you: that call did not run.{reason} Go on without that call, or say in your result that you could not do the task without it."
+    );
+    Some(Decline {
+        choice: HOOK_DECLINE.to_owned(),
+        key: vec![b'0' + no],
+        after_ms: Some(after_ms),
+        then_tell: Some(then_tell),
+        what: "hook prompt on its call".to_owned(),
+    })
+}
+
+/// The hook's own reason in what a hook's ask says above its question: what follows the colon
+/// after "requires confirmation for this <call>", up to the hook's source in brackets.
+fn hook_reason(says: &str) -> Option<String> {
+    let after = &says[says.find(HOOK_SAYS[1])? + HOOK_SAYS[1].len()..];
+    let reason = after[after.find(':')? + 1..].trim();
+    let reason = reason.split(" [").next().unwrap_or(reason).trim();
+    (!reason.is_empty()).then(|| reason.to_owned())
+}
+
 /// The seconds after which Claude Code closes those offers by itself (`Zlt=30000`).
 const OFFER_CLOSES_AFTER_S: u32 = 30;
 
@@ -302,6 +360,11 @@ impl Adapter for ClaudeAdapter {
                         .map(str::to_owned),
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
+                    hook_ask_ms: self
+                        .env
+                        .text("CONSENSFLOW_HOOK_ASK_MS")
+                        .and_then(|ms| ms.parse().ok())
+                        .unwrap_or(HOOK_ASK_MS),
                 }),
             })
         })
@@ -376,6 +439,8 @@ impl Adapter for ClaudeAdapter {
 
 /// A Claude window, and what the engine told it of itself.
 struct ClaudeWindow {
+    /// How long a hook's ask waits for the human before it is answered "No" (`HOOK_ASK_MS`).
+    hook_ask_ms: i64,
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     statuses: String,
@@ -608,6 +673,9 @@ impl Window for ClaudeWindow {
     /// throwaway configuration (T-1192). Not its hint to install a plugin a command named:
     /// every answer to it but a cancel writes the plugin's name in `claudeCodeHints.plugin`.
     fn safe_decline(&self, dialog: &Dialog) -> Option<Decline> {
+        if let Some(decline) = hook_ask_decline(dialog, self.hook_ask_ms) {
+            return Some(decline);
+        }
         if dialog.question != LSP_OFFER {
             return None;
         }
@@ -619,6 +687,9 @@ impl Window for ClaudeWindow {
         Some(Decline {
             choice: LSP_DECLINE.to_owned(),
             key: vec![b'0' + digit],
+            after_ms: None,
+            then_tell: None,
+            what: "offer".to_owned(),
         })
     }
 

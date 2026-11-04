@@ -74,6 +74,22 @@ fn claude_codes_lsp_offer_as_a_live_window_drew_it_is_read_numbers_and_spinner_a
     );
     assert!(shown.dialog.asks);
     assert_eq!(shown.below.len(), 2);
+    // What it says above its question is its own paragraph, the plugin's: a conversation's lines
+    // above it, which change as the turn works, are none of it.
+    assert_eq!(
+        shown.dialog.detail,
+        [
+            "Plugin: clangd-lsp",
+            "Marketplace: claude-plugins-official",
+            "Triggered by: .c files",
+            "Description: C/C++ language server (clangd) for code intelligence"
+        ]
+    );
+    let below_work = format!("⏺ Writing probe_dialog.c (12s)\n{CLAUDE_LSP_LIVE}");
+    assert_eq!(
+        read(&lines(&below_work)).unwrap().dialog.detail,
+        shown.dialog.detail
+    );
 }
 
 #[test]
@@ -236,4 +252,75 @@ fn a_numbered_list_left_of_a_cursor_is_held_to_its_count() {
     // Numbers that do not follow the chosen one's are no choices of its list.
     let stray = lines(" Which?\n❭ 1 Yes\n3 No");
     assert_eq!(read(&stray), None);
+}
+
+/// Claude Code 2.1.317's ask of a plugin's PreToolUse hook on a Bash call, in a worker's window
+/// on the owner's kluris board (2026-11-03, T-1198, from the screenshot's text): the call's last
+/// lines, a rule, the hook's words in their frame, where its hooks are kept, the question, two
+/// choices and the hint of its keys. Its status said nothing of it; its window waited for good.
+pub(crate) const CLAUDE_HOOK_ASK: [&str; 16] = [
+    "│ \"`KLURIS_VERSION=3.2.2`\"); date(so)",
+    "│ PY",
+    "│ git status -s",
+    "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+    "│ Hook tool.check requires confirmation for this",
+    "│ command:",
+    "│ This call's input holds your account email",
+    "│ address, which may leave this machine. If nobody",
+    "│ asked to send it, go on without it.",
+    "│ [plugin:cc-plugin-privacy]",
+    "plugin hooks.json to update hooks",
+    "",
+    "Do you want to proceed?",
+    "\u{276f} 1. Yes",
+    "  2. No",
+    "",
+];
+
+#[test]
+fn a_hooks_ask_is_read_with_its_question_its_two_choices_and_the_hooks_own_words() {
+    let mut screen: Vec<String> = CLAUDE_HOOK_ASK
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect();
+    screen.push("Esc to cancel · Tab to amend".to_owned());
+    let shown = read(&screen).expect("the ask");
+    assert_eq!(shown.dialog.question, "Do you want to proceed?");
+    assert!(shown.dialog.asks);
+    assert_eq!(shown.dialog.options, ["Yes", "No"]);
+    assert_eq!(
+        shown.dialog.detail,
+        [
+            "Hook tool.check requires confirmation for this",
+            "command:",
+            "This call's input holds your account email",
+            "address, which may leave this machine. If nobody",
+            "asked to send it, go on without it.",
+            "[plugin:cc-plugin-privacy]",
+            "plugin hooks.json to update hooks",
+        ],
+        "the hook's words, back to the rule under the call"
+    );
+}
+
+#[test]
+fn a_dialogs_detail_stops_at_its_rule_and_at_ten_lines() {
+    let long: Vec<String> = (1..=14)
+        .map(|n| format!(" line {n}"))
+        .chain([
+            "Proceed?".to_owned(),
+            "❯ 1. Yes".to_owned(),
+            "  2. No".to_owned(),
+        ])
+        .collect();
+    let shown = read(&long).expect("the ask");
+    assert_eq!(shown.dialog.detail.len(), 10);
+    assert_eq!(shown.dialog.detail[0], "line 5");
+    assert_eq!(
+        read(&lines(" ⏺ Done.\n────────\n Proceed?\n❯ 1. Yes\n  2. No"))
+            .unwrap()
+            .dialog
+            .detail,
+        Vec::<String>::new()
+    );
 }

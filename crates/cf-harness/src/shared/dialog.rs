@@ -29,6 +29,9 @@ const FRAME: [char; 14] = [
 /// How many lines above its choices a dialog's words are looked for.
 const WORDS_ABOVE: usize = 8;
 
+/// How many lines of what a dialog says above its words are kept ([`Dialog::detail`]).
+const DETAIL_LINES: usize = 10;
+
 /// What a screen shows of a dialog: the dialog, and what the reader's caller judges it by.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Shown {
@@ -72,6 +75,14 @@ fn numbered(words: &str) -> (Option<u32>, &str) {
         }
     }
     (None, words)
+}
+
+/// Whether `line`, as drawn, is a rule across the screen: a run of four or more of a rule's
+/// characters (`─`, Claude Code's dashed `╌` between a call and a hook's words) and no words.
+fn rule_across(line: &str) -> bool {
+    const RULES: [char; 7] = ['─', '━', '═', '╌', '┄', '┈', '-'];
+    !line.chars().any(char::is_alphanumeric)
+        && line.chars().filter(|at| RULES.contains(at)).count() >= 4
 }
 
 /// Whether `line` is a dialog's hint of how it is answered, drawn under its choices: Enter, or
@@ -188,27 +199,50 @@ pub(crate) fn read(screen: &[String]) -> Option<Shown> {
     }
     // The words it opens with: the nearest line above the choices that asks, or else the
     // nearest that says anything.
-    let words: Vec<&str> = lines[first.saturating_sub(WORDS_ABOVE)..first]
-        .iter()
+    let near: Vec<usize> = (first.saturating_sub(WORDS_ABOVE)..first)
         .rev()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty())
+        .filter(|at| !lines[*at].trim().is_empty())
         .collect();
-    let question = words.iter().find(|line| asks(line));
+    let asked = near.iter().copied().find(|at| asks(&lines[*at]));
     let hinted = lines[last + 1..]
         .iter()
         .filter(|line| !line.trim().is_empty())
         .take(2)
         .any(|line| hints_an_answer(line));
-    let (question, asks) = match question {
-        Some(question) => ((*question).to_owned(), true),
-        None => ((*words.first()?).to_owned(), hinted),
+    let (said_at, asks) = match asked {
+        Some(at) => (at, true),
+        None => (*near.first()?, hinted),
     };
+    let question = lines[said_at].trim().to_owned();
+    // What it says right above its words, the lines of one paragraph, back to a blank line, a
+    // rule across it or [`DETAIL_LINES`] lines: a hook's own words of why it asks (T-1198), the
+    // plugin an offer is of. A conversation's lines above a dialog change as it works, and
+    // never count.
+    let mut detail: Vec<String> = Vec::new();
+    for at in (0..said_at).rev() {
+        if rule_across(&screen[at]) || detail.len() == DETAIL_LINES {
+            break;
+        }
+        let words = lines[at].trim();
+        if words.is_empty() {
+            // The blank lines between it and its words are passed over; one above them ends
+            // its paragraph, and what the conversation drew above is none of it.
+            if detail.is_empty() {
+                continue;
+            }
+            break;
+        }
+        if words.chars().any(char::is_alphanumeric) {
+            detail.push(words.to_owned());
+        }
+    }
+    detail.reverse();
     Some(Shown {
         dialog: Dialog {
             question,
             options,
             asks,
+            detail,
             prompt_below: false,
             closes_after_s: None,
         },

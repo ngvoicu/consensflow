@@ -130,3 +130,131 @@ fn a_survey_the_launch_turns_off_never_appears() -> Outcome {
     rig.close()?;
     Ok(())
 }
+
+/// Seen by the owner on 2026-11-03 about 19:1x, on 3.0.7-alpha.1 (T-1198): a plugin of the
+/// owner's (`cc-plugin-privacy`, which members keep) has a PreToolUse hook that answered "ask"
+/// for a worker's Bash call; Claude Code asks then even in full permission, and the window
+/// waited for good, nobody told. The stand-in Claude asks as Claude Code 2.1.317 drew it
+/// (`HOOK-ASK <seconds>`, its `offers`), its status waiting on a permission prompt. What the
+/// owner should have seen: the chief and the human told once, with the hook's own words, and
+/// nothing pressed in the window before its ten minutes (T-1198: the chief's decision).
+#[test]
+fn a_hooks_ask_mid_turn_is_told_once_with_the_hooks_own_words_and_nothing_is_pressed() -> Outcome {
+    let rig = Rig::start(config())?;
+    write_roster(&rig)?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    dispatched(&rig, &project, "HOOK-ASK 20 Reply with exactly: HOOK_OK")?;
+    rig.wait_for("the chief to be told of the hook's ask", secs(90), || {
+        Ok(!dialog_notes(&project, "chief")?.is_empty())
+    })?;
+    rig.wait_for("T-1 to be done", secs(90), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let told = dialog_notes(&project, "chief")?;
+    assert_eq!(told.len(), 1, "{told:?}");
+    let note = &told[0];
+    for words in [
+        "\u{201c}Do you want to proceed?\u{201d}",
+        "its choices \u{201c}Yes\u{201d}, \u{201c}No\u{201d}",
+        "Hook tool.check requires confirmation for this command:",
+        "If nobody asked to send it, go on without it.",
+        "[plugin:cc-plugin-privacy]",
+        "It is yours to answer in that window; if nobody does within 10 minutes, ConsensFlow answers \u{201c}No\u{201d} for it, which writes nothing, and tells it to go on without that call. It never answers yes.",
+    ] {
+        assert!(note.contains(words), "{words} in {note}");
+    }
+    assert_eq!(dialog_notes(&project, "human")?, told);
+    let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default();
+    let answers = files::read_string(&Path::new(config).join("offer-answers")).unwrap_or_default();
+    assert_eq!(answers, "hook:timeout\n", "nothing was pressed in the ask");
+    rig.close()?;
+    Ok(())
+}
+
+/// The same ask, nobody answering it (T-1198, the chief's decision of 2026-11-03): once its time
+/// is up (15 s here, `CONSENSFLOW_HOOK_ASK_MS`; ten minutes in the field) ConsensFlow answers
+/// "No", once, which writes nothing and ends the worker's turn as Claude Code's "No" does; the
+/// chief and the human hear it, and once the window rests the words that send it on go in, the
+/// hook's reason with them, and nothing else: no note of a cut turn. Its next turn's answer is
+/// the task's result.
+#[test]
+fn a_hooks_ask_nobody_answers_is_answered_no_and_the_worker_sent_on_to_its_result() -> Outcome {
+    let rig = Rig::start(config().var("CONSENSFLOW_HOOK_ASK_MS", "15000"))?;
+    write_roster(&rig)?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    dispatched(&rig, &project, "HOOK-ASK 600 Reply with exactly: HOOK_OK")?;
+    rig.wait_for(
+        "the chief to be told it answered the hook's ask",
+        secs(120),
+        || {
+            Ok(project.inbox("chief")?.iter().any(|m| {
+                m["body"]
+                    .as_str()
+                    .is_some_and(|body| body.starts_with("Nobody answered @worker"))
+            }))
+        },
+    )?;
+    rig.wait_for("T-1 to be done", secs(120), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let task = project.task(1)?;
+    let session = task["assignee"].as_str().unwrap_or_default().to_owned();
+    let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default();
+    let answers = files::read_string(&Path::new(config).join("offer-answers")).unwrap_or_default();
+    assert_eq!(answers, "hook:2\n", "\"No\", by its digit, once");
+    let pressed: Vec<String> = project
+        .inbox("chief")?
+        .into_iter()
+        .filter_map(|m| m["body"].as_str().map(str::to_owned))
+        .filter(|body| body.starts_with("Nobody answered @"))
+        .collect();
+    assert_eq!(
+        pressed,
+        [format!("Nobody answered @{session}'s hook prompt on its call in 15 seconds, so ConsensFlow answered \u{201c}No\u{201d} and told it to go on without that call.")]
+    );
+    // What went into the worker's window: its brief, and the words that sent it on, alone.
+    let given: Vec<String> = project
+        .inbox(&session)?
+        .into_iter()
+        .filter_map(|m| m["body"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(given.len(), 2, "{given:?}");
+    let sent_on = given
+        .iter()
+        .find(|body| body.starts_with("A hook asked for confirmation of your last call"))
+        .unwrap_or_else(|| panic!("the words that sent it on: {given:?}"));
+    assert!(
+        given.iter().any(|body| body.starts_with("HOOK-ASK ")),
+        "{given:?}"
+    );
+    assert!(
+        sent_on.contains("The hook said: \u{201c}This call's input holds your account email address, which may leave this machine. If nobody asked to send it, go on without it.\u{201d}"),
+        "{given:?}"
+    );
+    let notes: Vec<String> = ["chief", "human"]
+        .iter()
+        .map(|who| project.inbox(who))
+        .collect::<cf_e2e::Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["body"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        notes
+            .iter()
+            .all(|body| !body.contains("cut") && !body.contains("stop")),
+        "no note of a cut turn or of a stop: {notes:?}"
+    );
+    let result = task["messages"]
+        .as_array()
+        .and_then(|messages| messages.iter().find(|m| m["kind"] == "result"))
+        .and_then(|m| m["body"].as_str())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        result.starts_with("noted: "),
+        "its next turn's answer is the result: {task}"
+    );
+    rig.close()?;
+    Ok(())
+}

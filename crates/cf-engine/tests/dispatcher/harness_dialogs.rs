@@ -8,9 +8,13 @@
 //! its harness's list of safe declines is declined once the note of it has gone, by its one
 //! key, at a look that still shows it (T-1192); no other is ever pressed.
 
-use cf_engine::testing::{Context, DECLINED_OFFER, DECLINE_CHOICE, DIALOG_OPEN, TRUST_PROMPT};
+use cf_engine::testing::{
+    Context, DECLINED_OFFER, DECLINE_CHOICE, DIALOG_OPEN, HOOK_ASK_MS, HOOK_ASK_QUESTION,
+    HOOK_ASK_THEN, TRUST_PROMPT,
+};
 use cf_engine::ActivityState;
 use cf_harness::contract::Waiting;
+use cf_harness::records::Role;
 use serde_json::json;
 
 use crate::chiefs::to_human;
@@ -309,4 +313,157 @@ fn a_decline_whose_look_finds_another_dialog_where_its_harness_still_says_one_is
     context.host.set_snapshot(json!({ "tail": [" (drawing)"] }));
     passes(&context, 12, 1_000);
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}
+
+/// A hook's ask on a call, as Claude Code 2.1.317 drew it in a worker's window on the owner's
+/// kluris board (2026-11-03, T-1198): the hook's words, the question, "Yes" and "No".
+const HOOK_ASK: [&str; 9] = [
+    " Hook tool.check requires confirmation for this command:",
+    " This call's input holds your account email address. If nobody asked to send it, go on without it.",
+    " [plugin:cc-plugin-privacy]",
+    "",
+    "Do you want to proceed?",
+    "\u{276f} 1. Yes",
+    "  2. No",
+    "",
+    "Esc to cancel \u{b7} Tab to amend",
+];
+
+/// The messages handed to zeus's window, oldest first.
+fn given_zeus(context: &Context) -> Vec<String> {
+    crate::fixtures::given(context, "zeus")
+}
+
+/// Passes until zeus's hook ask is told, at most 20 s.
+fn until_told(context: &Context, tiers: &Tiers<'_>) {
+    let mut passed = 0;
+    while of_dialogs(&tiers.notes("chief")).is_empty() && passed < 20 {
+        passes(context, 1, 1_000);
+        passed += 1;
+    }
+}
+
+/// The notes to the chief that say ConsensFlow answered a hook's ask of zeus's.
+fn answered(tiers: &Tiers<'_>) -> Vec<String> {
+    tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|body| body.starts_with("Nobody answered @zeus"))
+        .collect()
+}
+
+#[test]
+fn a_hooks_ask_nobody_answers_is_answered_no_after_ten_minutes_and_its_window_sent_on_to_its_result(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context, &HOOK_ASK);
+    until_told(&context, &tiers);
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains(
+            "Above it, it says: \u{201c}Hook tool.check requires confirmation for this command:"
+        ),
+        "{}",
+        told[0]
+    );
+    assert!(
+        told[0].contains("It is yours to answer in that window; if nobody does within 10 minutes, ConsensFlow answers \u{201c}No\u{201d} for it, which writes nothing, and tells it to go on without that call. It never answers yes."),
+        "{}",
+        told[0]
+    );
+    assert_eq!(of_dialogs(&to_human(&context, tiers.project.id)), told);
+    // Nothing is pressed before its ten minutes.
+    passes(&context, 9, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(answered(&tiers), Vec::<String>::new());
+    passes(&context, 2, 60_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")], "\"No\", once");
+    let session = tiers.assignee(1);
+    assert_eq!(
+        answered(&tiers),
+        [format!("Nobody answered @{session}'s hook prompt on its call in 10 minutes, so ConsensFlow answered \u{201c}No\u{201d} and told it to go on without that call.")]
+    );
+    assert!(to_human(&context, tiers.project.id)
+        .iter()
+        .any(|body| body.starts_with("Nobody answered @zeus")));
+    // Claude Code's "No" ends the turn: its record says the user interrupted it, and its screen
+    // goes back to its prompt.
+    let marker = context
+        .adapter
+        .item(Role::User, "[Request interrupted by user for tool use]");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(marker.clone());
+        agent.settled = true;
+    });
+    context.host.set_snapshot(json!({ "tail": [TRUST_PROMPT] }));
+    let before = given_zeus(&context).len();
+    passes(&context, 6, 5_000);
+    // Only the words that send it on go in: no note that its turn was cut, no stop owed.
+    let given = given_zeus(&context);
+    assert_eq!(given.len(), before + 1, "{given:?}");
+    assert!(
+        given
+            .last()
+            .is_some_and(|words| words.contains(HOOK_ASK_THEN)),
+        "{given:?}"
+    );
+    assert_eq!(
+        keys_to(&context, &tiers),
+        [json!(b"2")],
+        "never pressed again"
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+    // Its next turn ends with its answer: the task's result.
+    context.adapter.answer("zeus", "Done, without the email");
+    passes(&context, 6, 5_000);
+    let task = tiers.task(1);
+    assert_eq!(task.task.state, "done", "{task:?}");
+    assert!(
+        task.messages
+            .iter()
+            .any(|message| message.kind == "result"
+                && message.body.contains("Done, without the email")),
+        "{task:?}"
+    );
+    let _ = (HOOK_ASK_MS, HOOK_ASK_QUESTION);
+}
+
+#[test]
+fn a_hooks_ask_a_human_answers_before_its_ten_minutes_is_never_pressed() {
+    let context = Context::new();
+    let tiers = at_work(&context, &HOOK_ASK);
+    until_told(&context, &tiers);
+    assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 1);
+    passes(&context, 5, 60_000);
+    // The human answers it in the window: the ask is gone, and the turn goes on.
+    context.host.set_snapshot(json!({ "tail": [TRUST_PROMPT] }));
+    let before = given_zeus(&context).len();
+    passes(&context, 12, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(answered(&tiers), Vec::<String>::new());
+    assert_eq!(
+        given_zeus(&context).len(),
+        before,
+        "no words of ConsensFlow's go in"
+    );
+}
+
+#[test]
+fn a_hooks_ask_whose_window_shows_another_dialog_at_its_ten_minutes_is_never_pressed() {
+    let context = Context::new();
+    let tiers = at_work(&context, &HOOK_ASK);
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some(DIALOG_OPEN.to_owned()),
+        });
+    });
+    until_told(&context, &tiers);
+    assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 1);
+    // The human answered it, and the window's next call asks a permission rule's question.
+    passes(&context, 5, 60_000);
+    context.host.set_snapshot(json!({ "tail": PROMPT }));
+    passes(&context, 8, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(answered(&tiers), Vec::<String>::new());
 }

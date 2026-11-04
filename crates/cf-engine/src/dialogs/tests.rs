@@ -7,6 +7,7 @@ use super::*;
 fn offer(closes_after_s: Option<u32>) -> Dialog {
     Dialog {
         question: "Would you like to install this LSP plugin?".to_owned(),
+        detail: Vec::new(),
         options: vec!["Yes, install".to_owned(), "No, not now".to_owned()],
         asks: true,
         prompt_below: false,
@@ -48,6 +49,9 @@ fn a_note_of_a_dialog_on_its_harnesss_list_says_it_is_declined_and_how() {
     let decline = Decline {
         choice: "No, not now".to_owned(),
         key: b"2".to_vec(),
+        after_ms: None,
+        then_tell: None,
+        what: "offer".to_owned(),
     };
     let body = told("zeus", Some(&offer(Some(30))), Some(&decline));
     assert!(
@@ -55,4 +59,24 @@ fn a_note_of_a_dialog_on_its_harnesss_list_says_it_is_declined_and_how() {
         "{body}"
     );
     assert!(!body.contains("presses nothing"), "{body}");
+}
+
+#[test]
+fn a_note_quotes_what_a_dialog_says_above_its_question() {
+    let hook = Dialog {
+        question: "Do you want to proceed?".to_owned(),
+        detail: vec![
+            "Hook tool.check requires confirmation for this".to_owned(),
+            "command:".to_owned(),
+        ],
+        options: vec!["Yes".to_owned(), "No".to_owned()],
+        asks: true,
+        prompt_below: false,
+        closes_after_s: None,
+    };
+    let body = told("zeus", Some(&hook), None);
+    assert!(
+        body.contains("its choices \u{201c}Yes\u{201d}, \u{201c}No\u{201d}. Above it, it says: \u{201c}Hook tool.check requires confirmation for this command:\u{201d}."),
+        "{body}"
+    );
 }

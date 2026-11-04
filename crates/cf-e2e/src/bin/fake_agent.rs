@@ -71,7 +71,8 @@
 //! A message with a line `LSP-OFFER <seconds>` offers to install an LSP plugin as its turn
 //! works, the dialog on its screen that long or until a digit answers it, and one with a line
 //! `SURVEY` draws
-//! the session survey unless the window's environment turns surveys off (`offers`).
+//! the session survey unless the window's environment turns surveys off; one with a line
+//! `HOOK-ASK <seconds>` asks as a plugin's hook asks for a call (`offers`).
 //!
 //! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
 //! or `<member> <milliseconds>` for that member's windows alone) continues by
@@ -883,6 +884,22 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     }
     if let Some(open) = offers::offer_in(text) {
         offers::offer(open).map_err(failed)?;
+    }
+    if let Some(open) = offers::hook_ask_in(text) {
+        if offers::hook_ask(records, pid, open).map_err(failed)? {
+            // Claude Code's "No" to a hook's ask, with no words of the user's, aborts the turn:
+            // the call is refused, the user's interrupt ends the turn, and no answer is written.
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "user",
+                        "message": { "role": "user", "content": [{ "type": "text", "text": "[Request interrupted by user for tool use]" }] },
+                    }),
+                )
+                .map_err(failed)?;
+            return records.status(pid, "idle").map_err(failed);
+        }
     }
     // What it did before it answers: the steps a worker's progress is, among them the call
     // that runs a job in the background or arms a monitor, and what it answers.

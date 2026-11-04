@@ -67,8 +67,9 @@ pub(crate) const SURE_LOOKS: u32 = 2;
 /// prompt a person in the window answers at once is not.
 pub(crate) const TELL_AFTER_MS: i64 = 2_000;
 
-/// The most characters of a dialog's words, or of one of its choices, a note quotes.
-const QUOTED_CHARS: usize = 200;
+/// The most characters of a dialog's words, of one of its choices, or of what it says above
+/// them, a note quotes.
+const QUOTED_CHARS: usize = 400;
 
 /// What the looks found of a window's dialogs.
 #[derive(Debug, Default)]
@@ -81,6 +82,10 @@ pub(crate) struct DialogWatch {
     open_since: Option<i64>,
     /// The words of the dialog the human was told of, until a look finds it gone.
     told: Option<String>,
+    /// When the note of it went, and the dialog as it was read then: a decline is pressed only
+    /// into that dialog, its words, what it says above them and its choices the same.
+    told_at: Option<i64>,
+    told_as: Option<Dialog>,
     /// The decline of the dialog told of, where it is on its harness's list of safe declines,
     /// and whether its key was pressed.
     decline: Option<Decline>,
@@ -187,16 +192,19 @@ impl Dispatcher {
                     ),
             }),
         });
-        let key = dialog
-            .as_ref()
-            .map_or_else(String::new, |dialog| dialog.question.clone());
+        // A dialog is told of by its words and what it says above them: another call's ask in
+        // the same words is another dialog.
+        let key = dialog.as_ref().map_or_else(String::new, |dialog| {
+            [dialog.detail.join(" "), dialog.question.clone()].join("\n")
+        });
         // Once a dialog: one its harness says is open stays the one told of until it closes,
         // whatever words a later look reads of it.
         let before = record.dialog.borrow().told.clone();
         if before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some())
         {
             if due {
-                self.decline(record, &pane, dialog.as_ref()).await;
+                self.decline(project, participant, record, &pane, dialog.as_ref())
+                    .await?;
             }
             return Ok(observed);
         }
@@ -209,6 +217,8 @@ impl Dispatcher {
             watch.told = Some(key);
             watch.decline = decline;
             watch.declined = false;
+            watch.told_at = Some(now);
+            watch.told_as.clone_from(&dialog);
         }
         self.tell_dialog(project, participant, &body)?;
         Ok(observed)
@@ -218,24 +228,82 @@ impl Dispatcher {
     /// harness's list, the note of it has gone, and `shown`, what this step's look read of the
     /// screen, is that dialog still with that choice: a look that finds it gone, or drawn
     /// otherwise, presses nothing.
-    async fn decline(&self, record: &Record, pane: &Pane, shown: Option<&Dialog>) {
-        let key = {
+    async fn decline(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        pane: &Pane,
+        shown: Option<&Dialog>,
+    ) -> Result<(), EngineError> {
+        let now = self.now();
+        let (key, decline) = {
             let watch = record.dialog.borrow();
             let Some(decline) = watch.decline.as_ref().filter(|_| !watch.declined) else {
-                return;
+                return Ok(());
             };
+            // A dialog that is the human's to answer first waits its time from the note.
+            let due = decline
+                .after_ms
+                .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after));
             let still = shown.is_some_and(|shown| {
-                watch.told.as_deref() == Some(shown.question.as_str())
-                    && shown.options.contains(&decline.choice)
+                watch.told_as.as_ref().is_some_and(|told| {
+                    told.question == shown.question
+                        && told.detail == shown.detail
+                        && told.options == shown.options
+                }) && shown.options.contains(&decline.choice)
             });
-            if !still {
-                return;
+            if !due {
+                return Ok(());
             }
-            decline.key.clone()
+            if !still {
+                return Ok(());
+            }
+            (decline.key.clone(), decline.clone())
         };
         record.dialog.borrow_mut().declined = true;
         let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": key });
         let _ = self.seams.host.request("pane.input", body).await;
+        let Some(words) = decline.then_tell else {
+            return Ok(());
+        };
+        // The press ended the window's turn: the words that send it on go in once it rests,
+        // as any message of the board's, and whoever gave its task and the human hear of it.
+        let number = self
+            .dialog_task(participant)?
+            .map(|thread| thread.task.number);
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: participant.handle.clone(),
+                task: number,
+                body: words,
+            },
+        )?;
+        let span = spoken(decline.after_ms.unwrap_or(0));
+        let body = format!(
+            "Nobody answered @{}'s {} in {span}, so ConsensFlow answered {} and told it to go on without that call.",
+            participant.handle,
+            decline.what,
+            quoted(&decline.choice)
+        );
+        self.tell_dialog(project, participant, &body)
+    }
+
+    /// The task of `participant`'s window whose giver hears of its dialogs: none for the chief's.
+    fn dialog_task(
+        &self,
+        participant: &ParticipantView,
+    ) -> Result<Option<cf_ledger::TaskThread>, EngineError> {
+        if participant.role == "chief" {
+            return Ok(None);
+        }
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, false)?)
     }
 
     /// The note of a dialog in `participant`'s window, `body`, to the human and to whoever gave
@@ -246,14 +314,7 @@ impl Dispatcher {
         participant: &ParticipantView,
         body: &str,
     ) -> Result<(), EngineError> {
-        let task = if participant.role == "chief" {
-            None
-        } else {
-            self.seams
-                .ledger
-                .borrow()
-                .active_task(participant.id, false)?
-        };
+        let task = self.dialog_task(participant)?;
         let number = task.as_ref().map(|thread| thread.task.number);
         let requester = task
             .as_ref()
@@ -282,8 +343,13 @@ pub(crate) fn told(handle: &str, dialog: Option<&Dialog>, decline: Option<&Decli
     let shows = match dialog {
         Some(dialog) => {
             let choices: Vec<String> = dialog.options.iter().map(|option| quoted(option)).collect();
+            let says = if dialog.detail.is_empty() {
+                String::new()
+            } else {
+                format!(" Above it, it says: {}.", quoted(&dialog.detail.join(" ")))
+            };
             format!(
-                "@{handle}'s window shows a dialog of its harness that waits for a key, not its prompt: {}, its choices {}.",
+                "@{handle}'s window shows a dialog of its harness that waits for a key, not its prompt: {}, its choices {}.{says}",
                 quoted(&dialog.question),
                 choices.join(", ")
             )
@@ -292,6 +358,18 @@ pub(crate) fn told(handle: &str, dialog: Option<&Dialog>, decline: Option<&Decli
             "@{handle}'s window shows a dialog of its harness that waits for a key, not its prompt; its screen shows no words ConsensFlow can read of it."
         ),
     };
+    if let Some(decline) = decline.filter(|decline| decline.after_ms.is_some()) {
+        let span = spoken(decline.after_ms.unwrap_or(0));
+        let then = if decline.then_tell.is_some() {
+            ", and tells it to go on without that call"
+        } else {
+            ""
+        };
+        return format!(
+            "{shows} The window waits on it, and nothing is typed into it meanwhile. It is yours to answer in that window; if nobody does within {span}, ConsensFlow answers {} for it, which writes nothing{then}. It never answers yes.",
+            quoted(&decline.choice)
+        );
+    }
     if let Some(decline) = decline {
         return format!(
             "{shows} ConsensFlow declines it for the window now, choosing {}, which writes nothing; nothing else is typed into the window meanwhile.",
@@ -306,6 +384,16 @@ pub(crate) fn told(handle: &str, dialog: Option<&Dialog>, decline: Option<&Decli
     format!(
         "{shows} The window waits on it, and nothing is typed into it meanwhile. ConsensFlow presses nothing in it: answer it in that window, or leave it.{closes}"
     )
+}
+
+/// A span of `ms` milliseconds in words: whole minutes, or seconds under one.
+fn spoken(ms: i64) -> String {
+    match (ms / 60_000, ms / 1_000) {
+        (0, 1) => "1 second".to_owned(),
+        (0, seconds) => format!("{seconds} seconds"),
+        (1, _) => "1 minute".to_owned(),
+        (minutes, _) => format!("{minutes} minutes"),
+    }
 }
 
 /// `words` in quotation marks, its secrets hidden, cut at [`QUOTED_CHARS`].

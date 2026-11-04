@@ -13,6 +13,13 @@
 //! folder: the digit, or `timeout` where nothing answered it), which Claude Code itself writes
 //! nowhere for "No, not now" (T-1192).
 //!
+//! A message with a line `HOOK-ASK <seconds>` makes the window ask, as its turn works, what
+//! Claude Code asks where a plugin's PreToolUse hook answers "ask" for a call (the screen of a
+//! worker on the owner's kluris board, 2026-11-03, T-1198): "Hook tool.check requires
+//! confirmation for this command: …", "Do you want to proceed?", `❯ 1. Yes`, `2. No`, its status
+//! `waiting` on a "permission prompt"; for that long, or until a digit answers it, written down
+//! after `hook:` in `offer-answers`.
+//!
 //! A message with a line `SURVEY` makes the window draw Claude Code's session survey under its
 //! prompt as its turn works ("How is Claude doing this session? (optional)", a digit a
 //! choice), unless its environment says `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`, as Claude Code
@@ -27,6 +34,7 @@ use std::time::Duration;
 
 use cf_e2e::process::own_var;
 
+use super::records::Records;
 use super::say;
 
 /// The word of a line that asks for the LSP offer, and of one that asks for the survey.
@@ -73,11 +81,47 @@ const SURVEY_LINES: &str =
 const PROMPT: &str =
     "\x1b[2J\x1b[H fake agent: the offer closed by itself · bypass permissions on\r\n";
 
+/// The ask of a plugin's PreToolUse hook on a Bash call, as Claude Code 2.1.317 drew it in a
+/// worker's window on the owner's kluris board (2026-11-03, T-1198, the screenshot's text).
+const HOOK_ASK: [&str; 18] = [
+    "",
+    "\u{2502} git status -s",
+    "\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}\u{254c}",
+    "\u{2502} Hook tool.check requires confirmation for this",
+    "\u{2502} command:",
+    "\u{2502} This call's input holds your account email",
+    "\u{2502} address, which may leave this machine. If nobody",
+    "\u{2502} asked to send it, go on without it.",
+    "\u{2502} [plugin:cc-plugin-privacy]",
+    "plugin hooks.json to update hooks",
+    "",
+    "Do you want to proceed?",
+    "\u{276f} 1. Yes",
+    "  2. No",
+    "",
+    "Esc to cancel \u{b7} Tab to amend",
+    "",
+    "",
+];
+
+/// The word of a line that asks for a hook's ask.
+const HOOK: &str = "HOOK-ASK ";
+
+/// How long the hook's ask stays where the message asks for it: its seconds.
+pub fn hook_ask_in(text: &str) -> Option<Duration> {
+    seconds_after(text, HOOK)
+}
+
 /// How long the offer stays where the message asks for it: its seconds.
 pub fn offer_in(text: &str) -> Option<Duration> {
+    seconds_after(text, OFFER)
+}
+
+/// The seconds a line of `text` says after `word`.
+fn seconds_after(text: &str, word: &str) -> Option<Duration> {
     text.lines().find_map(|line| {
         line.trim()
-            .strip_prefix(OFFER)
+            .strip_prefix(word)
             .and_then(|rest| rest.split_whitespace().next())
             .and_then(|seconds| seconds.parse().ok())
             .map(Duration::from_secs)
@@ -101,9 +145,27 @@ fn note(config: &Path, name: &str, line: &str) -> io::Result<()> {
 /// The offer, open `open`: the screen shows it while the turn is at work; then it closes by
 /// itself and the turn goes on.
 pub fn offer(open: Duration) -> io::Result<()> {
+    open_for(&DIALOG, "", open).map(|_| ())
+}
+
+/// The ask of a plugin's PreToolUse hook, open `open`: the screen shows it as Claude Code
+/// 2.1.317 drew it in a worker's window on 2026-11-03 (T-1198), and the window's status says it
+/// waits on a permission prompt; then it closes, as a person would answer it, and the turn goes
+/// on. How it was answered is written down with the offers', after `hook:`; true where it was
+/// answered "No" (`2`), which ends the turn in Claude Code: the model is told to stop and wait.
+pub fn hook_ask(records: &Records, pid: u32, open: Duration) -> io::Result<bool> {
+    records.waiting(pid, "permission prompt")?;
+    let answer = open_for(&HOOK_ASK, "hook:", open)?;
+    records.status(pid, "busy")?;
+    Ok(answer == Some(b'2'))
+}
+
+/// The dialog `lines`, open `open` or until a digit answers it, its answer written down after
+/// `tag`.
+fn open_for(lines: &[&str], tag: &str, open: Duration) -> io::Result<Option<u8>> {
     ANSWER.store(0, Ordering::SeqCst);
     OPEN.store(true, Ordering::SeqCst);
-    say(&format!("{}\r\n", DIALOG.join("\r\n")))?;
+    say(&format!("{}\r\n", lines.join("\r\n")))?;
     let step = Duration::from_millis(100);
     let mut waited = Duration::ZERO;
     while waited < open && ANSWER.load(Ordering::SeqCst) == 0 {
@@ -111,14 +173,16 @@ pub fn offer(open: Duration) -> io::Result<()> {
         waited += step;
     }
     OPEN.store(false, Ordering::SeqCst);
-    let answer = match ANSWER.swap(0, Ordering::SeqCst) {
+    let digit = ANSWER.swap(0, Ordering::SeqCst);
+    let answer = match digit {
         0 => "timeout".to_owned(),
         digit => char::from(digit).to_string(),
     };
     if let Some(config) = own_var("CLAUDE_CONFIG_DIR") {
-        note(Path::new(&config), ANSWERS, &answer)?;
+        note(Path::new(&config), ANSWERS, &format!("{tag}{answer}"))?;
     }
-    say(PROMPT)
+    say(PROMPT)?;
+    Ok((digit != 0).then_some(digit))
 }
 
 /// What is typed into the window's box, where an offer is open and it is a digit of one of its
