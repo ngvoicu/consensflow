@@ -213,9 +213,27 @@ impl Dispatcher {
         // The stop this pause asked is ConsensFlow's own: a window that ignores it with
         // nothing running is relaunched on its conversation (`stops`), as a pause's is not.
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
-        record.window.borrow_mut().stalled_stop = stop
-            .filter(|stop| stop.task_id == thread.task.id)
-            .map(|stop| (stop.task_id, stop.seq));
+        let generation = record
+            .window
+            .borrow()
+            .pane
+            .as_ref()
+            .map(|pane| pane.generation);
+        let stalled = match (stop, unbegun.message, generation) {
+            (Some(stop), Some(message), Some(generation)) if stop.task_id == thread.task.id => {
+                Some(crate::stops::Stalled {
+                    task_id: stop.task_id,
+                    number: stop.number,
+                    seq: stop.seq,
+                    message,
+                    item: Arc::clone(&unbegun.item),
+                    generation,
+                })
+            }
+            // A message with no header of ours is no delivery to give again: no relaunch.
+            _ => None,
+        };
+        record.window.borrow_mut().stalled = stalled;
         self.changed();
         Ok(())
     }
@@ -334,8 +352,9 @@ fn never_began(unbegun: &Unbegun, sent: i64, entered: i64, pressed: Pressed, now
         .map_or_else(|| "its latest message".to_owned(), |id| format!("m-{id}"));
     let again = pressed.said(&clock(entered));
     format!(
-        "its window began no turn on {message}: it went in at {} UTC and its record shows it with nothing after it, \
+        "{}{message}: it went in at {} UTC and its record shows it with nothing after it, \
          {again}, and nothing began by {} UTC",
+        cf_ledger::NEVER_BEGAN,
         clock(sent),
         clock(now)
     )

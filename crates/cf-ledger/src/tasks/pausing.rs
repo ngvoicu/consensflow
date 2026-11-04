@@ -23,7 +23,7 @@ use super::{
 };
 use crate::messages::{
     cancel_message, fold, join_pause_note, leave_pause_notes, note_pause, reconcile,
-    release_carried, tell_goes_on, transfer, withdraw_stale, Afterwards,
+    release_carried, take_back, tell_goes_on, transfer, withdraw_stale, Afterwards,
 };
 use crate::model::{self, sql_list, LedgerError, ACTIVE_TASK_STATES, HELD_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
@@ -94,8 +94,12 @@ fn pause_task_as(
             Some(author) => take_over_pause(store, &task, &author.handle)?,
             None => false,
         };
+        // A pause of the chief's or the human's that lands on a task ConsensFlow paused on its
+        // own, to go on by itself (held for quota, stalled for a brief never begun), takes it
+        // over: it asks its stop as any pause does, and the task goes on only by a resume.
+        let automatic = author.is_some() && !taken && paused_by_consensflow(store, &task)?;
         let pausable = [&["open", "queued"], &ACTIVE_TASK_STATES[..]].concat();
-        if !taken {
+        if !taken && !automatic {
             require_task_state(&task, &pausable, "pause")?;
         }
         if let Some(assignee) = task.assignee_id {
@@ -158,6 +162,138 @@ pub(crate) fn unmark_pause(
         )?;
         Ok(())
     })
+}
+
+/// How ConsensFlow's own pause of a task whose window began no turn on a message begins its
+/// reason (`never_began`): the stall a relaunch goes on from.
+pub const NEVER_BEGAN: &str = "its window began no turn on ";
+
+/// Whether `task` is paused by ConsensFlow on its own, to go on by itself: held for its
+/// member's quota or a busy model (`held_until`), or stalled for a message its window began
+/// no turn on (its last move to paused named nobody, for [`NEVER_BEGAN`]'s reason), and not
+/// with its project's suspension, which [`take_over_pause`] takes over. A tell or a pause of
+/// the chief's or the human's takes such a task over (T-1220's P1-1): their stop is asked,
+/// and the hold's time and the stall's relaunch are the task's no more. A task paused for a
+/// window that went away is no such task: its windows owe nothing, and a tell to it is told
+/// as it always was.
+pub(crate) fn paused_by_consensflow(store: &Store, task: &TaskRow) -> Result<bool, LedgerError> {
+    if task.state != "paused" {
+        return Ok(false);
+    }
+    let (held, with_project): (Option<String>, i64) = store.db.query_row(
+        "SELECT held_until, paused_with_project FROM task WHERE id = ?",
+        [task.id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if with_project != 0 {
+        return Ok(false);
+    }
+    if held.is_some() {
+        return Ok(true);
+    }
+    let last: Option<(Option<String>, Option<String>)> = store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.by'), json_extract(data, '$.because') FROM event
+             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)
+               AND json_extract(data, '$.task') = ?2 AND json_extract(data, '$.to') = 'paused'
+             ORDER BY id DESC LIMIT 1",
+            params![task.project_id, task.number],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(matches!(last, Some((None, Some(because))) if because.starts_with(NEVER_BEGAN)))
+}
+
+/// ConsensFlow relaunches the window of task T-`number` that began no turn on message
+/// `message_id`, which ConsensFlow's own pause stopped as stop `seq` (`never_began`): that
+/// very message, with what it carried, goes back to the window's keeping
+/// ([`take_back`]), and the task, in the hands of `participant_id` still, is queued for it,
+/// so that the window opened again is given it, once, and the task goes on by itself. Each
+/// condition is the stall's, asked in the write that does it, and a refusal leaves
+/// everything as it was: the task paused by that stall and no other (a newer pause, a tell,
+/// a hold, a resume each move it on), held by `participant_id`, its latest delivered task
+/// message `message_id`; and no delivery is relaunched twice (T-1220's P1-3, P2-5, P3-7).
+pub(crate) fn relaunch_stalled(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    participant_id: i64,
+    message_id: i64,
+    seq: i64,
+) -> Result<TaskView, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let refused = |why: String| LedgerError::refused_with("not-relaunched", why, 409);
+        if task.state != "paused" || task.stop_seq != seq {
+            return Err(refused(format!(
+                "T-{number} is {} at stop {}, not paused by the stall that asked stop {seq}",
+                task.state, task.stop_seq
+            )));
+        }
+        if task.assignee_id != Some(participant_id) {
+            return Err(refused(format!("T-{number} is held by another window now")));
+        }
+        if !paused_by_consensflow(store, &task)? {
+            return Err(refused(format!("T-{number} was paused by someone since")));
+        }
+        let held: Option<String> = store.db.query_row(
+            "SELECT held_until FROM task WHERE id = ?",
+            [task.id],
+            |row| row.get(0),
+        )?;
+        if held.is_some() {
+            return Err(refused(format!("T-{number} is held, and goes on by itself")));
+        }
+        let latest = crate::messages::last_pasted(store, participant_id, task.id)?;
+        if latest.as_ref().map(|message| message.id) != Some(message_id)
+            || latest.is_some_and(|message| message.kind != "task")
+        {
+            return Err(refused(format!(
+                "m-{message_id} is not the latest of T-{number}'s messages its window was given"
+            )));
+        }
+        if was_relaunched(store, project_id, message_id)? {
+            return Err(refused(format!("m-{message_id} was relaunched once already")));
+        }
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
+        take_back(
+            store,
+            message_id,
+            "its window began no turn on it, and ConsensFlow relaunched the window",
+        )?;
+        let task = store.task_row(project_id, number)?;
+        store.move_task(
+            &task,
+            "queued",
+            json!({
+                "by": null,
+                "message": message_id,
+                "because": format!("its window began no turn on m-{message_id}, and ConsensFlow relaunched it"),
+            }),
+        )?;
+        store.log(
+            project_id,
+            "task.relaunched",
+            json!({ "task": number, "message": message_id, "stop": seq }),
+        )?;
+        task_by_id(store, task.id)
+    })
+}
+
+/// Whether message `message_id` was relaunched once already (`relaunch_stalled`'s log).
+pub(crate) fn was_relaunched(
+    store: &Store,
+    project_id: i64,
+    message_id: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event WHERE project_id = ?1 AND kind = 'task.relaunched'
+               AND json_valid(data) AND json_extract(data, '$.message') = ?2",
+        )?
+        .exists(params![project_id, message_id])?)
 }
 
 /// The chief or the human (`by`) takes over the pause of a task its project's

@@ -251,7 +251,10 @@ impl Dispatcher {
         self.project_now(project.id)
     }
 
-    /// The human's Close: the project is suspended and every window of it goes.
+    /// The human's Close: the project is suspended and every window of it goes. It is the
+    /// human's own shutdown, no pause: a window kept because it ignored a pause's rounds goes
+    /// with the rest (T-1199: a pause never closes a window, and the Close and the app's quit
+    /// still close them all; the task stays paused for the project's Resume).
     pub async fn close_project(
         self: &Rc<Self>,
         project: i64,

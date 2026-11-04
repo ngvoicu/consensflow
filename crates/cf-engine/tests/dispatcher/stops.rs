@@ -1225,3 +1225,105 @@ fn a_pause_and_a_resume_whose_task_ends_at_a_turn_end_before_the_words_went_in_o
     assert_eq!(context.host.inputs().len(), pressed, "nothing pressed");
     assert!(context.host.killed().is_empty());
 }
+
+#[test]
+fn a_tell_to_a_task_held_for_quota_asks_its_stop_and_the_reset_resumes_nothing() {
+    // T-1220's P1-1: a tell to a held task records a stop as any tell does, and takes the
+    // task out of its hold: no resume at the quota's reset.
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    let resets_at = after(&context, 60_000);
+    context
+        .adapter
+        .quota("zeus", Some(exhausted(None, Some(&resets_at))));
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "paused", "held");
+    assert!(context.host.inputs().is_empty(), "a hold presses nothing");
+    let session = context.task(project, 1).task.assignee.unwrap();
+    context.tell(project, &session, 1, "Use the v2 grammar");
+    for _ in 0..2 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert!(
+        !context.host.inputs().is_empty(),
+        "the tell's stop is pressed into the turn at work"
+    );
+    // The reset: the task is the chief's now, and stays paused.
+    context.advance(120_000);
+    context.adapter.quota("zeus", None);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "paused",
+        "no resume of its own"
+    );
+}
+
+#[test]
+fn a_finish_and_a_reopen_between_two_looks_settle_the_stop_and_a_pause_after_is_owed() {
+    // T-1220's P2-4: the chief finishes T-1 and reopens it at once, with no look between;
+    // the old stop is settled by the finish, and a pause asked after the reopen is owed.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    assert_eq!(pressed, 1, "the pause's first round");
+    let item = context
+        .adapter
+        .item(Role::Assistant, "Half the parser, and the tests");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(item);
+        agent.settled = false;
+    });
+    context.finish_task(project, 1, "chief").unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        pressed,
+        "nothing pressed after the finish"
+    );
+    // The control: a pause asked now is owed, and pressed.
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs().len(),
+        pressed + 1,
+        "a new pause is pressed"
+    );
+}
+
+#[test]
+fn a_projects_close_closes_a_kept_window_as_the_humans_own_shutdown() {
+    // T-1199 round 3, the chief's 8: a pause never closes a window, but the human's Close of
+    // the project (and the app's quit) is no pause: it closes every window, a kept one too,
+    // and the task stays paused for the project's Resume.
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    let pane = ignored_three_rounds(&context, project);
+    context.pass().unwrap();
+    assert!(context.dispatcher.unstopped(zeus).is_some(), "kept");
+    assert!(context.host.killed().is_empty());
+    context.host.exits_showing(Some(0), None, None);
+    context.close_project(project).unwrap();
+    assert!(
+        context.host.killed().contains(&pane),
+        "the Close closes it, with every window of the project: {:?}",
+        context.host.killed()
+    );
+    assert_eq!(context.task(project, 1).task.state, "paused");
+}

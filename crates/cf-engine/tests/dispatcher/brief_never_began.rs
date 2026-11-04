@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use crate::fixtures::{given, native_of, Tiers};
 
 /// The kit's arrival window, and a moment past it.
-const PAST_ARRIVAL: i64 = 31_000;
+pub(crate) const PAST_ARRIVAL: i64 = 31_000;
 
 /// The Enters pressed into windows.
 fn enters(context: &Context) -> usize {
@@ -51,7 +51,11 @@ fn message_of(text: &str) -> i64 {
 /// goes once T-1 is accepted to a window opened again on the conversation, whose record
 /// shows its brief and which begins nothing on it (`at_rest` says how its reader reads it).
 /// T-2 is working. The id of its brief.
-fn a_follow_up_whose_window_never_begins(context: &Context, tiers: &Tiers, at_rest: bool) -> i64 {
+pub(crate) fn a_follow_up_whose_window_never_begins(
+    context: &Context,
+    tiers: &Tiers,
+    at_rest: bool,
+) -> i64 {
     let project = tiers.project.id;
     context.host.exits_showing(Some(0), None, None);
     tiers.open();
@@ -383,18 +387,21 @@ fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched
     );
     let last = given(&context, "zeus").pop().unwrap();
     assert!(
-        last.contains("relaunched it on its conversation. The brief again:")
-            && last.contains("Now the lexer"),
-        "the brief, again: {last}"
+        last.contains("· T-2 · task from @chief]") && last.contains("Now the lexer"),
+        "the very brief, again: {last}"
     );
     let told: Vec<String> = tiers
         .notes("chief")
         .into_iter()
         .filter(|note| note.contains("relaunched"))
         .collect();
-    assert_eq!(
-        told,
-        [format!("T-2's window (@{session}) began no turn on its brief and went on through the interrupt 3 times with nothing of its own running, so ConsensFlow relaunched it on its conversation and gave it the brief again. T-2 goes on by itself.")]
+    assert_eq!(told.len(), 1, "{told:#?}");
+    assert!(
+        told[0].starts_with(&format!("T-2's window (@{session}) began no turn on m-"))
+            && told[0].contains("so ConsensFlow relaunched it on its conversation and gave it m-")
+            && told[0].ends_with("again. T-2 goes on by itself."),
+        "{}",
+        told[0]
     );
     let all = [tiers.notes("chief"), tiers.notes("human")].concat();
     assert!(

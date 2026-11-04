@@ -36,7 +36,7 @@ use crate::model::{self, require_active, LedgerError, FINISHED_TASK_STATES, MAX_
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
 use crate::store::Store;
-use crate::tasks::{pause_task, take_over_pause};
+use crate::tasks::{pause_task, paused_by_consensflow, take_over_pause};
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
@@ -168,8 +168,10 @@ pub(crate) fn ask(
             };
             // A task paused already is paused for the tell all the same: one its
             // project's suspension paused is the teller's from now on.
+            // A task ConsensFlow paused on its own (held, stalled) is the teller's now: its
+            // stop is asked, and it goes on only by a resume (T-1220's P1-1).
             let task = store.task_row(project_id, number)?;
-            if task.state == "paused" {
+            if task.state == "paused" && !paused_by_consensflow(store, &task)? {
                 take_over_pause(store, &task, from)?;
             } else {
                 pause_task(store, project_id, number, Some(from), None)?;

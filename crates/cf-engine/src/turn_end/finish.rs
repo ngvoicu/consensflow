@@ -254,11 +254,20 @@ impl Dispatcher {
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
         );
+        // The stop the task was asked of its window, owed still, is settled by the finish:
+        // the task leaves the window's hands here, whatever look comes before a reopen.
+        let owed = self
+            .seams
+            .ledger
+            .borrow()
+            .stop_of(participant.id)?
+            .filter(|stop| stop.task_id == thread.task.id);
         let moved = self
             .seams
             .ledger
             .borrow_mut()
             .record_finished(project, number, &body)?;
+        self.settle_at_departure(record, owed.as_ref());
         record.held.borrow_mut().reset();
         self.changed();
         Ok(Finished {

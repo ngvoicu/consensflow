@@ -482,9 +482,11 @@ fn a_held_tasks_window_whose_own_turn_fails_or_is_refused_again_does_not_go_on()
 }
 
 #[test]
-fn a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_windows_own() {
-    // A tell goes in on its own, not carried by the words that resume the task:
-    // the window's answer to it is no turn of its own (T-95).
+fn a_tell_to_a_task_held_at_its_reset_takes_it_over_goes_in_on_its_own_and_no_resume_follows() {
+    // A tell goes in on its own, not carried by any words that resume the task: the window's
+    // answer to it is no turn of its own (T-95). And a tell to a held task takes the hold
+    // over (T-1220's P1-1, T-1199): the task is the teller's, and the daemon resumes nothing
+    // at the reset; it goes on by the chief's resume.
     let context = Context::new();
     let (tiers, session) = held_for_two_hours(&context);
     context.advance(2 * 3_600_000 + 60_000);
@@ -525,9 +527,10 @@ fn a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_w
     }
     assert_eq!(
         pasted_saying(&context, &session, "Resumed:"),
-        1,
-        "the words that resume it go in after the tell"
+        0,
+        "the hold is the teller's now: no resume of the daemon's"
     );
+    assert_eq!(tiers.task(1).task.state, "paused");
     let task = tiers.task(1);
     assert!(
         task.messages.iter().all(|m| m.kind != "result"),

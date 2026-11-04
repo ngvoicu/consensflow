@@ -294,10 +294,11 @@ pub(crate) struct WindowPart {
     /// pays the stop (`stops`). A later look that reads the message taken back takes it
     /// back then.
     pub(crate) paid_untaken: Option<Stop>,
-    /// The stop ConsensFlow's own pause asked of it for a brief it began no turn on
-    /// (`never_began`): its task and the sequence. A window that ignores every round of
-    /// that stop, running nothing, is relaunched on its conversation, never kept.
-    pub(crate) stalled_stop: Option<(i64, i64)>,
+    /// The stall ConsensFlow's own pause made of it for a message it began no turn on
+    /// (`never_began`): bound to that message, to its item in the record and to this window's
+    /// generation. A window that ignores every round of that stop, running nothing and still
+    /// on nothing, is relaunched (`stops`), never kept.
+    pub(crate) stalled: Option<crate::stops::Stalled>,
     /// The stop its last look found asked of it, and the one it was asked while its task
     /// was in its hands, once the task left them (done, accepted, or called off): a task
     /// that comes back with no stop asked since owes none of what it was asked before.
@@ -381,7 +382,7 @@ impl Default for WindowPart {
             trust_sure: false,
             stopped: None,
             paid_untaken: None,
-            stalled_stop: None,
+            stalled: None,
             seen_stop: None,
             left_stop: None,
             interrupted: None,
@@ -534,7 +535,7 @@ impl Dispatcher {
             window.hidden = false;
             window.settled = false;
             window.stopped = None;
-            window.stalled_stop = None;
+            window.stalled = None;
             window.seen_stop = None;
             window.left_stop = None;
             window.interrupted = None;
@@ -931,6 +932,11 @@ impl Dispatcher {
             part.owner = planned.owner;
             part.conversation = conversation_id;
             part.unproven = resumed_on.is_some() && !proven;
+        }
+        // A window relaunched for a message it began no turn on (`stops`) is told as it came
+        // back: on its conversation, or afresh where its harness held it no more.
+        if let Err(cause) = self.tell_relaunched(project, participant, record, resumed) {
+            self.write_down(&cause);
         }
         {
             let mut delivery = record.delivery.borrow_mut();
