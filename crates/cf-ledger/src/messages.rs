@@ -66,11 +66,11 @@ pub(crate) use paused_answers::{
     given as paused_answer_given, note as note_paused_answer, put_back as put_back_paused_answers,
     queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
 };
-pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{
-    join_pause_note, leave_pause_notes, note_pause, note_stall, say_again, warnings_on_their_way,
-    warnings_queued, Afterwards,
+    join_pause_note, leave_pause_notes, note_held_for_context, note_pause, note_stall, say_again,
+    warnings_on_their_way, warnings_queued, Afterwards,
 };
+pub use pauses::{MAY_STILL_RUN, NOT_PROVEN_GONE};
 pub use receipt::Read;
 pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
@@ -216,7 +216,8 @@ pub(crate) fn ask(
 
 /// The answer goes back to whoever asked; the one asked answers. A plain
 /// question's answer is delivered into the asker's window. A question with
-/// options is answered by choice (or by text, one line per question): that
+/// options is answered by choice (or by text: one line per question of an ask
+/// of several, any text for an ask of one, `require_choices`): that
 /// answer is read at once and never delivered, because the harness door
 /// that asked collects it and the tool call completes with it; the asker's
 /// task resumes here. A question on a task that is over (accepted, cancelled

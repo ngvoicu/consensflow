@@ -87,7 +87,7 @@ fn a_brief_from_a_file_is_posted_whole_as_written_and_the_reply_says_how_it_ends
     );
     assert!(
         printed.ends_with(
-            "\nSent: 10,863 characters, ending \"…and $(nothing else). ```rust fn main() {} ```\".\n"
+            "\nT-3: sent 10,863 characters, ending \"…and $(nothing else). ```rust fn main() {} ```\".\n"
         ),
         "{printed}"
     );
@@ -133,7 +133,7 @@ fn the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_
             "{args:?}"
         );
         assert!(
-            printed.ends_with("\nSent: 19 characters, ending \"Use the v2 grammar.\".\n"),
+            printed.ends_with("\nT-3: sent 19 characters, ending \"Use the v2 grammar.\".\n"),
             "{args:?}: {printed}"
         );
     }

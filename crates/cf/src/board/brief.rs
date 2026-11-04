@@ -5,7 +5,11 @@
 //! warned, and a brief went to the board cut at about 8.1k characters, which
 //! nothing `cf` was given showed. However the words came, the reply says how
 //! many characters went and how they end ([`sent`]): a brief cut short shows
-//! where.
+//! where. The line names its task (`T-3: sent 24 characters, …`): it is the
+//! last line of the reply, the one a harness that shows a command's tail keeps,
+//! and a chief that reads only it still learns which task it is about (the
+//! field report of 2026-10-26: after every `cf task add` the chief listed the
+//! board to learn the new task's number).
 //!
 //! The file is named by its bytes, as the system gave them, never by the text
 //! `cf` reads its words as: two names that read the same are two files. It is
@@ -177,10 +181,11 @@ fn not_a_file(file: &File) -> io::Result<Option<&'static str>> {
     })
 }
 
-/// What a reply says of the words it sent: how many characters, and the last
-/// few words, their spaces and line breaks as one space, after an ellipsis when
-/// there were more, each control character among them escaped.
-pub fn sent(text: &str) -> String {
+/// What a reply says of the words it sent to task `task` (its number): how many
+/// characters, and the last few words, their spaces and line breaks as one
+/// space, after an ellipsis when there were more, each control character among
+/// them escaped. It begins with the task, so that it stands alone.
+pub fn sent(task: impl std::fmt::Display, text: &str) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     let first = words.len().saturating_sub(LAST_WORDS);
     let mut last = words[first..].join(" ");
@@ -191,7 +196,7 @@ pub fn sent(text: &str) -> String {
         cut = true;
     }
     format!(
-        "Sent: {} characters, ending \"{}{}\".",
+        "T-{task}: sent {} characters, ending \"{}{}\".",
         grouped(text.chars().count()),
         if cut { "…" } else { "" },
         escaped(&last)
@@ -238,15 +243,15 @@ mod tests {
     #[test]
     fn the_reply_says_how_many_characters_went_and_how_they_end() {
         assert_eq!(
-            sent("Reply with exactly: ONE"),
-            "Sent: 23 characters, ending \"Reply with exactly: ONE\"."
+            sent(3, "Reply with exactly: ONE"),
+            "T-3: sent 23 characters, ending \"Reply with exactly: ONE\"."
         );
         // Lines and spaces are one space; the last eight words, after an ellipsis.
         let brief =
             "Write the parser.\n\nKeep the old tests,\n  and run them all before you answer.";
         assert_eq!(
-            sent(brief),
-            "Sent: 76 characters, ending \"…tests, and run them all before you answer.\"."
+            sent(3, brief),
+            "T-3: sent 76 characters, ending \"…tests, and run them all before you answer.\"."
         );
         // A brief that ends inside a fence shows it.
         let cut = format!(
@@ -254,27 +259,30 @@ mod tests {
             "x ".repeat(4_000)
         );
         assert_eq!(
-            sent(&cut),
-            "Sent: 8,050 characters, ending \"…```rust fn main() { let parser = Parser::new(\"."
+            sent(659, &cut),
+            "T-659: sent 8,050 characters, ending \"…```rust fn main() { let parser = Parser::new(\"."
         );
     }
 
     #[test]
     fn a_character_that_would_redraw_the_terminal_is_shown_escaped() {
         assert_eq!(
-            sent("DONE\u{1b}[1A\u{1b}[2K\u{7}\u{9b}2J \u{202e}enod"),
-            "Sent: 22 characters, ending \"DONE\\u{1b}[1A\\u{1b}[2K\\u{7}\\u{9b}2J \\u{202e}enod\"."
+            sent(3, "DONE\u{1b}[1A\u{1b}[2K\u{7}\u{9b}2J \u{202e}enod"),
+            "T-3: sent 22 characters, ending \"DONE\\u{1b}[1A\\u{1b}[2K\\u{7}\\u{9b}2J \\u{202e}enod\"."
         );
         assert_eq!(escaped("plain, «quoted» 漢字"), "plain, «quoted» 漢字");
     }
 
     #[test]
     fn characters_are_counted_as_people_count_them_and_a_long_last_word_is_cut() {
-        assert_eq!(sent("漢字 🙂"), "Sent: 4 characters, ending \"漢字 🙂\".");
+        assert_eq!(
+            sent(3, "漢字 🙂"),
+            "T-3: sent 4 characters, ending \"漢字 🙂\"."
+        );
         let long = format!("see {}", "y".repeat(200));
         assert_eq!(
-            sent(&long),
-            format!("Sent: 204 characters, ending \"…{}\".", "y".repeat(80))
+            sent(3, &long),
+            format!("T-3: sent 204 characters, ending \"…{}\".", "y".repeat(80))
         );
         assert_eq!(grouped(0), "0");
         assert_eq!(grouped(999), "999");

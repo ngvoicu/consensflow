@@ -183,8 +183,8 @@ runs = ["decided-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''        &["paused", "done"],'''
-replace = '''        &["paused"],'''
+find = '''        &["paused", "done", "failed"],'''
+replace = '''        &["paused", "failed"],'''
 
 [[plant]]
 name = "decided result: a cancel of a done task leaves its result queued for the chief"
@@ -215,5 +215,5 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''        &["paused", "done"],'''
-replace = '''        &["paused"],'''
+find = '''        &["paused", "done", "failed"],'''
+replace = '''        &["paused", "failed"],'''

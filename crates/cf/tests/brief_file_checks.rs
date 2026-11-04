@@ -294,7 +294,7 @@ fn the_reply_and_a_refusal_show_a_control_character_escaped_never_raw() {
     assert_eq!(code, Some(0));
     assert_eq!(bodies(&api), [words], "the words go as they were given");
     assert!(
-        printed.ends_with("\nSent: 15 characters, ending \"Stop\\u{1b}[2K\\u{1b}[GDONE\".\n"),
+        printed.ends_with("\nT-3: sent 15 characters, ending \"Stop\\u{1b}[2K\\u{1b}[GDONE\".\n"),
         "{printed:?}"
     );
     assert!(!printed.contains('\u{1b}'), "{printed:?}");

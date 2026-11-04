@@ -15,7 +15,7 @@ use cf_harness::records::Role;
 use cf_ledger::{MessageView, NewTask};
 use cf_proto::cf_word::CfWord;
 
-use crate::fixtures::Tiers;
+use crate::fixtures::{hold_notes, Tiers};
 
 /// T-1 for zeus's window, which has taken it in.
 fn working(context: &Context) -> Tiers<'_> {
@@ -70,6 +70,9 @@ fn the_chiefs_turn_ends(context: &Context) {
 #[test]
 fn pastes_no_result_into_a_chief_that_accepted_its_task_in_the_turn_the_result_waited_behind() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let tiers = working(&context);
     let result = finished_in_the_chiefs_turn(&context, &tiers);
 
@@ -108,6 +111,68 @@ fn pastes_no_result_into_a_chief_that_accepted_its_task_in_the_turn_the_result_w
             .iter()
             .any(|text| text.contains("task from @chief]\nNow the lexer")),
         "and the next task went on to its window"
+    );
+}
+
+/// The same, where the host proves nothing of the exit of the window that did T-1: the result is
+/// withdrawn all the same and the chief is given none to decide again, but T-2, a follow-up no
+/// window had, is held for the chief's word, not given to a window of zeus's unasked.
+#[test]
+fn pastes_no_result_into_a_chief_that_accepted_its_task_and_holds_the_next_task_the_window_closed_with_no_proof_on(
+) {
+    let context = Context::new();
+    let tiers = working(&context);
+    let result = finished_in_the_chiefs_turn(&context, &tiers);
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "chief")
+        .unwrap();
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Now the lexer".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    the_chiefs_turn_ends(&context);
+
+    let withdrawn = context.message(result.id);
+    assert_eq!(
+        (withdrawn.state.as_str(), withdrawn.reason.as_deref()),
+        ("cancelled", Some("T-1 was accepted"))
+    );
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains(&marker_of(result.id)) && !text.contains("Decide with")),
+        "the chief is given nothing to decide again: {:?}",
+        given(&context, "chief")
+    );
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word"
+    );
+    assert_eq!(hold_notes(&context, tiers.project.id, 2).len(), 1);
+    assert!(
+        given(&context, "zeus")
+            .iter()
+            .all(|text| !text.contains("Now the lexer")),
+        "and no window was given the next task unasked"
+    );
+
+    context.resume_task(tiers.project.id, 2, "Go on in a window of your own.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert!(
+        given(&context, "zeus")
+            .iter()
+            .any(|text| text.contains("Now the lexer")),
+        "sent on, it goes to a window"
     );
 }
 

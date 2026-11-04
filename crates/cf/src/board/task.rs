@@ -153,7 +153,6 @@ fn add(
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
     let brief = require_text(brief::brief_of(&words, given, input)?, ADD_USAGE)?;
-    let sent = brief::sent(&brief);
 
     let mut body = Map::new();
     if mine {
@@ -185,11 +184,13 @@ fn add(
     if let Some(before) = &before {
         body.insert("before".into(), json!(before));
     }
-    body.insert("body".into(), brief.into());
+    body.insert("body".into(), brief.clone().into());
 
     let created = board.post("/api/tasks", &Value::Object(body))?;
     let task = created.part("task")?;
     let number = js::text(task.get("number"));
+    // The new task's number is known only now, and the last line names it.
+    let sent = brief::sent(&number, &brief);
     // With human approval required, nothing moves until the human passes it on.
     let gated = if js::truthy(created.value().get("gated")) && !mine {
         " The human approves each message before it moves."
@@ -216,7 +217,7 @@ fn add(
         )
     } else if let Some(after) = after {
         format!(
-            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits}",
+            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits} If that window cannot go on in its conversation when T-{number} starts, T-{number} waits paused for your word (cf task edit T-{number}, then cf task resume T-{number}).",
             js::text(task.get("assignee"))
         )
     } else {
@@ -462,7 +463,7 @@ fn moved(
     }
     // What the words that send a window on say of themselves.
     let sent = if briefed && !text.is_empty() {
-        format!("\n{}", brief::sent(&text))
+        format!("\n{}", brief::sent(number, &text))
     } else {
         String::new()
     };
@@ -1064,7 +1065,7 @@ and 2 idle sessions (`cf task list --all`)";
         );
         assert_eq!(
             said,
-            "T-3 is on the board for a standard tester; it starts in a new window of one, and its result arrives in your inbox.\nSent: 7 characters, ending \"Run T-2\"."
+            "T-3 is on the board for a standard tester; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 7 characters, ending \"Run T-2\"."
         );
         // Beside the others, and with none of them it is a plain task.
         let (posted, _) = added(
@@ -1188,7 +1189,7 @@ and 2 idle sessions (`cf task list --all`)";
         // A new brief is words that give a window work: the reply says how they end (B6).
         assert_eq!(
             said,
-            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2\nSent: 17 characters, ending \"Parse the new way\"."
+            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2\nT-2: sent 17 characters, ending \"Parse the new way\"."
         );
         // Or on the standard input, as a heredoc gives it: its last newline is its own.
         let (posted, _) = edited(&["T-2", "-"], "Parse\nthe new way\n", &answer);
@@ -1214,7 +1215,7 @@ and 2 idle sessions (`cf task list --all`)";
             )]
         );
         assert!(
-            said.ends_with("\nSent: 17 characters, ending \"Parse the new way\"."),
+            said.ends_with("\nT-2: sent 17 characters, ending \"Parse the new way\"."),
             "{said}"
         );
     }
@@ -1462,7 +1463,7 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(posted, Some(json!({ "after": 3, "body": "Tests" })));
         assert_eq!(
             said,
-            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted.\nSent: 5 characters, ending \"Tests\"."
+            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted. If that window cannot go on in its conversation when T-5 starts, T-5 waits paused for your word (cf task edit T-5, then cf task resume T-5).\nT-5: sent 5 characters, ending \"Tests\"."
         );
     }
 

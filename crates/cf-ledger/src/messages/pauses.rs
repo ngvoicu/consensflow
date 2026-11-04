@@ -13,12 +13,19 @@
 //! they go when the task moves on, whichever way it does.
 //!
 //! But for a warning: a pause whose words say that its window's program could
-//! not be ended and may still run ([`MAY_STILL_RUN`]) warns of a program that
-//! outlives the pause, and whoever is told next opens a window beside it. When
+//! not be ended and may still run ([`MAY_STILL_RUN`]), or that its window closed
+//! with no proof its program was gone ([`NOT_PROVEN_GONE`]), warns of a program
+//! that outlives the pause, and whoever is told next opens a window beside it. When
 //! its note goes, the warning stays, in a note of its own. A note already on its
 //! way runs its course whatever its tasks do meanwhile (a cancel, a resume, a
 //! release, a reassignment), and only one that does not arrive says its warning
 //! again ([`withdrawn_on_its_way`]).
+//!
+//! A follow-up that cannot go on in the conversation of the task it follows is held
+//! for the chief's word, paused (`hold_for_context`), and its note is one of these
+//! ([`note_held_for_context`]), with a way on of its own: rewrite the brief if it counts on the
+//! window before, then send the task on. It is read, withdrawn when the task moves
+//! on, and its warning kept, as every other.
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
@@ -32,20 +39,53 @@ use crate::queue::{send, withdraw, Sent};
 use crate::store::Store;
 use crate::views::TaskRow;
 
-/// What a pause note says of a task: its number, why it stopped, and whether its
-/// member's harness is one this build opens no window on (`harness_gone`), so that no
-/// resume brings its window back.
+/// What a pause note says of a task: its number, why it stopped, and the way on.
 #[derive(Debug, PartialEq)]
 struct Paused {
     number: i64,
     because: String,
-    harness_gone: bool,
+    way: Way,
+}
+
+/// The way on a pause note gives.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Way {
+    /// Resume the task: its window comes back on its conversation.
+    Resume,
+    /// The member's harness is one this build opens no window on, so that no resume
+    /// brings its window back.
+    Gone,
+    /// The task is held for the chief's word: it was not given to a window of its own,
+    /// which would not remember the window before.
+    Held,
+}
+
+impl Way {
+    /// The way of a stall: its member's harness is gone or it is not.
+    fn of_stall(harness_gone: bool) -> Self {
+        if harness_gone {
+            Way::Gone
+        } else {
+            Way::Resume
+        }
+    }
 }
 
 /// What the words of a pause say of a window's program the pane host could not
 /// end, after naming the program: the engine writes them into the pause, and a
 /// pause that says them is one whose warning stays when its note goes.
 pub const MAY_STILL_RUN: &str = "could not be ended and may still run";
+
+/// What the words of a hold say of the window before, whose conversation a follow-up
+/// would have gone on in: it closed and the host did not prove its program gone, which
+/// may still write there. A pause that says them is one whose warning stays when its
+/// note goes, as for [`MAY_STILL_RUN`].
+pub const NOT_PROVEN_GONE: &str = "closed with no proof its program was gone";
+
+/// Whether the words of a pause warn of a program that outlives it.
+fn warns(because: &str) -> bool {
+    because.contains(MAY_STILL_RUN) || because.contains(NOT_PROVEN_GONE)
+}
 
 /// What follows the one task a note names.
 const ONE_TAIL: &str = "; its window comes back on its own conversation.";
@@ -61,18 +101,20 @@ fn clause(paused: &Paused) -> String {
         "T-{0} is paused: {1}. {2}",
         paused.number,
         paused.because,
-        way_on(paused.number, paused.harness_gone)
+        way_on(paused.number, paused.way)
     )
 }
 
 /// The way on a note gives for T-`number`, after why it stopped.
-fn way_on(number: i64, harness_gone: bool) -> String {
-    if harness_gone {
-        format!(
+fn way_on(number: i64, way: Way) -> String {
+    match way {
+        Way::Gone => format!(
             "Its member runs on a harness whose windows ConsensFlow cannot open: cancel it with cf task cancel T-{number} and add it again with cf task add once a member on another harness is on the staff, or finish it with cf task finish T-{number}"
-        )
-    } else {
-        format!("Resume it with: cf task resume T-{number} \"…\"")
+        ),
+        Way::Resume => format!("Resume it with: cf task resume T-{number} \"…\""),
+        Way::Held => format!(
+            "It does not go on in that conversation, and a window of its own would not remember it: if its brief counts on that, rewrite it with cf task edit T-{number} \"…\" first, then send it to a window of its own with: cf task resume T-{number} \"…\", or cancel it"
+        ),
     }
 }
 
@@ -81,11 +123,11 @@ fn way_on(number: i64, harness_gone: bool) -> String {
 /// back where any does.
 fn render(paused: &[Paused]) -> String {
     match paused {
-        [one] if one.harness_gone => format!("{}.", clause(one)),
-        [one] => format!("{}{ONE_TAIL}", clause(one)),
+        [one] if one.way == Way::Resume => format!("{}{ONE_TAIL}", clause(one)),
+        [one] => format!("{}.", clause(one)),
         many => {
             let mut lines: Vec<String> = many.iter().map(clause).collect();
-            if many.iter().any(|paused| !paused.harness_gone) {
+            if many.iter().any(|paused| paused.way == Way::Resume) {
                 lines.push(MANY_TAIL.to_owned());
             }
             lines.join("\n")
@@ -119,14 +161,16 @@ fn read(body: &str) -> Option<Vec<Paused>> {
 fn read_clause(text: &str) -> Option<Paused> {
     let (number, rest) = text.strip_prefix("T-")?.split_once(" is paused: ")?;
     let number: i64 = number.parse().ok()?;
-    [false, true].into_iter().find_map(|harness_gone| {
-        let because = rest.strip_suffix(&format!(". {}", way_on(number, harness_gone)))?;
-        Some(Paused {
-            number,
-            because: because.to_owned(),
-            harness_gone,
+    [Way::Resume, Way::Gone, Way::Held]
+        .into_iter()
+        .find_map(|way| {
+            let because = rest.strip_suffix(&format!(". {}", way_on(number, way)))?;
+            Some(Paused {
+                number,
+                because: because.to_owned(),
+                way,
+            })
         })
-    })
 }
 
 /// Tells `to` that T-`number` is paused and why: a note of the task alone,
@@ -140,10 +184,41 @@ pub(crate) fn note_pause(
     because: &str,
     harness_gone: bool,
 ) -> Result<MessageView, LedgerError> {
+    tell_paused(
+        store,
+        project_id,
+        to,
+        number,
+        because,
+        Way::of_stall(harness_gone),
+    )
+}
+
+/// Tells `to` that T-`number` is held for the chief's word, and why: the pause note of a
+/// follow-up that was not given a window of its own ([`Way::Held`]).
+pub(crate) fn note_held_for_context(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    because: &str,
+) -> Result<MessageView, LedgerError> {
+    tell_paused(store, project_id, to, number, because, Way::Held)
+}
+
+/// The note of a task paused, with the way on it gives.
+fn tell_paused(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    because: &str,
+    way: Way,
+) -> Result<MessageView, LedgerError> {
     let body = render(&[Paused {
         number,
         because: because.to_owned(),
-        harness_gone,
+        way,
     }]);
     send(
         store,
@@ -184,7 +259,7 @@ pub(crate) fn join_pause_note(
             paused.push(Paused {
                 number,
                 because: because.to_owned(),
-                harness_gone,
+                way: Way::of_stall(harness_gone),
             });
             paused.sort_by_key(|named| named.number);
             set(store, id, note.project_id, &paused)?;
@@ -341,7 +416,13 @@ pub(crate) fn tell_kept(
         let Some(named) = paused.iter_mut().find(|named| named.number == task.number) else {
             continue;
         };
-        named.because = with_kept(&named.because, message.id, why, held, named.harness_gone);
+        named.because = with_kept(
+            &named.because,
+            message.id,
+            why,
+            held,
+            named.way == Way::Gone,
+        );
         return set(store, id, task.project_id, &paused);
     }
     let requester = store.participant_row(task.requester_id)?.handle;
@@ -471,7 +552,7 @@ fn warning_in(body: &str, number: i64) -> Option<String> {
         .into_iter()
         .find(|paused| paused.number == number)
         .map(|paused| paused.because)
-        .filter(|because| because.contains(MAY_STILL_RUN))
+        .filter(|because| warns(because))
 }
 
 /// The warnings the pause notes of `task` alone still queued for its requester
@@ -562,7 +643,7 @@ pub(crate) fn withdrawn_on_its_way(
         return Ok(false);
     }
     for (task, because) in &gone {
-        if because.contains(MAY_STILL_RUN) {
+        if warns(because) {
             say_again(store, task, &moved_on(task), vec![because.clone()])?;
         }
     }
@@ -729,13 +810,20 @@ mod tests {
         Paused {
             number,
             because: because.to_owned(),
-            harness_gone: false,
+            way: Way::Resume,
         }
     }
 
     fn gone(number: i64, because: &str) -> Paused {
         Paused {
-            harness_gone: true,
+            way: Way::Gone,
+            ..paused(number, because)
+        }
+    }
+
+    fn held(number: i64, because: &str) -> Paused {
+        Paused {
+            way: Way::Held,
             ..paused(number, because)
         }
     }
@@ -787,6 +875,52 @@ mod tests {
     }
 
     #[test]
+    fn a_task_held_for_the_chiefs_word_is_told_the_way_on_that_rewrites_its_brief_and_no_window_comes_back(
+    ) {
+        let way = |number: i64| {
+            format!(
+                "It does not go on in that conversation, and a window of its own would not remember it: if its brief counts on that, rewrite it with cf task edit T-{number} \"…\" first, then send it to a window of its own with: cf task resume T-{number} \"…\", or cancel it"
+            )
+        };
+        assert_eq!(
+            render(&[held(2, "@zeus's window closed with no proof")]),
+            format!(
+                "T-2 is paused: @zeus's window closed with no proof. {}.",
+                way(2)
+            ),
+            "no window comes back on its own conversation: it has none yet"
+        );
+        assert_eq!(
+            render(&[held(2, "a"), held(4, "b")]),
+            format!("T-2 is paused: a. {}\nT-4 is paused: b. {}", way(2), way(4))
+        );
+        assert_eq!(
+            render(&[held(2, "a"), paused(3, "b")]),
+            format!(
+                "T-2 is paused: a. {}\nT-3 is paused: b. Resume it with: cf task resume T-3 \"…\"\n\
+                 Each window comes back on its own conversation.",
+                way(2)
+            ),
+            "the last line is for the windows that come back"
+        );
+    }
+
+    #[test]
+    fn a_pause_that_says_a_window_closed_with_no_proof_is_a_warning_as_one_that_says_it_may_still_run_is(
+    ) {
+        assert!(warns(
+            "@zeus's window closed, but its program could not be ended and may still run"
+        ));
+        assert!(warns(&format!(
+            "@zeus's window that worked on T-1 {NOT_PROVEN_GONE}, which may still write there"
+        )));
+        assert!(!warns(
+            "@zeus's harness holds nothing of the conversation of T-1 any more"
+        ));
+        assert!(!warns("@zeus's window is gone"));
+    }
+
+    #[test]
     fn what_is_written_reads_back() {
         for tasks in [
             vec![paused(1, "@zeus's window is gone")],
@@ -800,6 +934,15 @@ mod tests {
             vec![gone(1, "x"), gone(4, "y")],
             vec![gone(1, "x"), paused(2, "y"), gone(7, "z")],
             vec![paused(1, "x. Its member runs on: not this")],
+            vec![held(
+                2,
+                "@zeus's window that worked on T-1 closed with no proof",
+            )],
+            vec![held(2, "a"), paused(3, "b"), gone(5, "c")],
+            vec![
+                held(2, "x. Send it to a window of its own with: not this"),
+                held(4, "y"),
+            ],
         ] {
             assert_eq!(read(&render(&tasks)), Some(tasks));
         }

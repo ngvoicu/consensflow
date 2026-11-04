@@ -11,7 +11,10 @@
 //! stopped for nothing (it closes by itself when it holds nothing else, as after
 //! an acceptance, and stays while it holds a paused task). A task still at work is
 //! called off with every message of it still on its way withdrawn (`call_off`), a
-//! result an older build left among them. A task is not
+//! result an older build left among them. A task that failed is called off the
+//! same way, its window if one is left stopped like any other's, so the board need
+//! not keep for good a task nobody means to reopen or accept (T-675, the field
+//! report of 2026-10-26). A task is not
 //! called off while an open task waits for it (`require_unawaited`): what
 //! waits for a task is released when it is accepted, so the waiter would be
 //! blocked for good. A member's removal cancels the member's tasks whatever
@@ -330,14 +333,16 @@ fn require_result_received(store: &Store, task: &TaskRow, by: &str) -> Result<()
 /// a door refuses it only while it has a task in hand (`require_free`), and
 /// `--before` orders them by what each needs. A follow-up of a task still on its
 /// work is one of them: that task is among what it needs, and the window is
-/// given the follow-up once the task is accepted.
+/// given the follow-up once the task is accepted. A task needing nothing any more is
+/// one of them: `cf task edit T-n --needs -T-m` takes a need, the last included, from a
+/// task given to a window, which is then released as if the need had been accepted
+/// (T-798: it was found by the need rows it had, and with none was open for good).
 pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let waiting = store
         .db
         .prepare(
             "SELECT t.* FROM task t
        WHERE t.project_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL
-         AND EXISTS (SELECT 1 FROM task_need n WHERE n.task_id = t.id)
          AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
                          WHERE n.task_id = t.id AND d.state != 'accepted')
        ORDER BY t.id",
@@ -506,7 +511,8 @@ pub(crate) fn reopen_task(
 /// A task is called off, and whoever asked for it hears so in the same
 /// step, unless it cancelled the task itself: what was cancelled, and the
 /// window that was stopped when a member's had begun on it (the daemon
-/// stops that window on its next look). Whoever told the window words it
+/// stops that window on its next look). A task that failed is called off
+/// the same way: its window, if one is left, is stopped like any other's. Whoever told the window words it
 /// never had hears that they went, but the one who called the task off.
 /// Refused, `waited-for`, while an open or paused task waits for it. A task that
 /// is done is called off too, as a decision on its result (`call_off`): its
@@ -595,7 +601,7 @@ pub(crate) fn call_off(
     let cancellable = [
         &["open", "queued"],
         &ACTIVE_TASK_STATES[..],
-        &["paused", "done"],
+        &["paused", "done", "failed"],
     ]
     .concat();
     require_task_state(&task, &cancellable, "cancel")?;
@@ -801,8 +807,8 @@ pub(crate) fn waiting_for_it_of(
 /// when the task is accepted, so it would read "blocked by" it for good and
 /// nothing would tell anyone. Whoever cancels names the waiters to cancel
 /// first, or lets the task finish, or accepts it where it is done and has no
-/// finishing left; the human who declines its brief, which never started, passes
-/// it on.
+/// finishing left, or reopens or accepts it where it failed; the human who declines
+/// its brief, which never started, passes it on.
 fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<(), LedgerError> {
     let waiting = waiters(store, task)?;
     if waiting.is_empty() {
@@ -813,13 +819,15 @@ fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<()
         _ => ("wait", "them".to_owned()),
     };
     let number = task.number;
-    // What a done task has left to do is to be accepted, not to finish.
-    let says = match ending {
-        Ending::Cancelled if task.state == "done" => {
-            format!("accept T-{number}, or cancel {them} first")
-        }
-        Ending::Cancelled => format!("cancel {them} first, or let T-{number} finish"),
-        Ending::Declined => format!("cancel {them} first, or pass T-{number} on"),
+    // What a done task has left to do is to be accepted, not to finish; a failed one
+    // finishes only once it is reopened, or is accepted on what was checked.
+    let says = match (ending, task.state.as_str()) {
+        (Ending::Cancelled, "done") => format!("accept T-{number}, or cancel {them} first"),
+        (Ending::Cancelled, "failed") => format!(
+            "cancel {them} first, reopen T-{number} and let it finish, or accept it with what you checked"
+        ),
+        (Ending::Cancelled, _) => format!("cancel {them} first, or let T-{number} finish"),
+        (Ending::Declined, _) => format!("cancel {them} first, or pass T-{number} on"),
     };
     Err(LedgerError::refused_with(
         "waited-for",

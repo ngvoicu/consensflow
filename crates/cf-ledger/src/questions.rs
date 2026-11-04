@@ -103,8 +103,12 @@ fn bad_choices(why: &str) -> LedgerError {
 }
 
 /// The choices for a question with options: one list of picks per question,
-/// from explicit `choices` or from the text of `body`, one line per
-/// question, the labels matched regardless of case and free text kept as it is.
+/// from explicit `choices` or from the text of `body`, the labels matched
+/// regardless of case and free text kept as it is. An ask of several questions
+/// is answered one line each. An ask of one question is answered by any text:
+/// a label, or the answer's own words in as many lines as they take (a bulleted
+/// list is one answer, not one answer per bullet: T-637, the field report of
+/// 2026-10-26, where a chief's heredoc of several lines was refused).
 pub(crate) fn require_choices(
     questions: &[Question],
     choices: Option<&Value>,
@@ -118,18 +122,27 @@ pub(crate) fn require_choices(
                 None | Some(Value::Null) => String::new(),
                 body => js::text(body).into_owned(),
             };
-            text.split('\n')
+            let lines: Vec<&str> = text
+                .split('\n')
                 .map(js::trim)
                 .filter(|line| !line.is_empty())
-                .enumerate()
-                .map(|(at, line)| {
-                    if questions.get(at).is_some_and(|question| question.multiple) {
-                        Value::from(line.split(',').collect::<Vec<_>>())
-                    } else {
-                        Value::from(vec![line])
-                    }
-                })
-                .collect()
+                .collect();
+            if questions.len() == 1 && lines.len() > 1 {
+                // The one question's answer, whole: its lines are not answers of their own.
+                vec![Value::from(vec![js::trim(&text)])]
+            } else {
+                lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(at, line)| {
+                        if questions.get(at).is_some_and(|question| question.multiple) {
+                            Value::from(line.split(',').collect::<Vec<_>>())
+                        } else {
+                            Value::from(vec![line])
+                        }
+                    })
+                    .collect()
+            }
         }
     };
     if picks.len() != questions.len() {
@@ -190,8 +203,15 @@ fn pick_too_long(room: usize) -> LedgerError {
     ))
 }
 
+/// The refusal of an answer that does not answer each question once: it says how
+/// many questions the ask has and how they are answered.
 fn one_answer_each(questions: &[Question]) -> LedgerError {
-    bad_choices(&format!("one answer per question ({})", questions.len()))
+    bad_choices(&match questions.len() {
+        1 => "this ask has 1 question; give one answer to it, a label or your own words (any number of lines)".to_owned(),
+        count => format!(
+            "this ask has {count} questions; give one answer to each, one line each in the order asked (a label or your own words)"
+        ),
+    })
 }
 
 /// An answer by choice as text: each question's header and its picks.
@@ -268,6 +288,64 @@ mod tests {
         );
     }
 
+    /// An ask of one question with options, as a chief's `cf answer` meets it.
+    fn asked_once() -> Vec<Question> {
+        require_questions(&json!([
+            { "question": "Go on?", "header": "Go", "options": [
+                { "label": "Approve live tests" },
+                { "label": "Offline preparation only" },
+            ] },
+        ]))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_text_of_several_lines_is_the_one_answer_to_an_ask_of_one_question() {
+        let questions = asked_once();
+        let words =
+            "Approve live tests, but:\n- only on the cheap models\n- stop at the first red\n";
+        let body = json!(words);
+        let picks = require_choices(&questions, None, Some(&body)).unwrap();
+        assert_eq!(
+            picks,
+            [vec![
+                "Approve live tests, but:\n- only on the cheap models\n- stop at the first red"
+            ]],
+            "the lines are not answers of their own: the whole text is one"
+        );
+        assert_eq!(
+            render_choices(&questions, &picks),
+            "Go: Approve live tests, but:\n- only on the cheap models\n- stop at the first red"
+        );
+        // A label alone is still the label, matched whatever its case.
+        let body = json!(" offline preparation ONLY \n");
+        let picks = require_choices(&questions, None, Some(&body)).unwrap();
+        assert_eq!(picks, [vec!["Offline preparation only"]]);
+    }
+
+    #[test]
+    fn a_text_of_several_lines_to_an_ask_of_several_questions_is_still_one_line_each() {
+        let questions = asked();
+        let body = json!("left\nred\nblue");
+        let refused = require_choices(&questions, None, Some(&body)).unwrap_err();
+        assert_eq!(
+            refused.to_string(),
+            "answer: this ask has 2 questions; give one answer to each, one line each in the order asked (a label or your own words)"
+        );
+    }
+
+    #[test]
+    fn an_ask_of_one_question_with_no_words_says_how_it_is_answered() {
+        let questions = asked_once();
+        for body in [json!(""), json!(" \n ")] {
+            let refused = require_choices(&questions, None, Some(&body)).unwrap_err();
+            assert_eq!(
+                refused.to_string(),
+                "answer: this ask has 1 question; give one answer to it, a label or your own words (any number of lines)"
+            );
+        }
+    }
+
     #[test]
     fn refuses_choices_that_do_not_answer_each_question_once() {
         let questions = asked();
@@ -278,7 +356,7 @@ mod tests {
         };
         assert_eq!(
             refused(json!([["Left"]])),
-            "answer: one answer per question (2)"
+            "answer: this ask has 2 questions; give one answer to each, one line each in the order asked (a label or your own words)"
         );
         assert_eq!(
             refused(json!([["Left", "Right"], ["Red"]])),
