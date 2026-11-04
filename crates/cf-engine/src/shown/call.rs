@@ -8,7 +8,8 @@
 //! typed in a quoted string or a heredoc. The first version quoted what the masker and the
 //! secret-name test let through, and `curl -u alice:swordfish https://example.test` reached
 //! the ledger (the review of `a26e0848e`, P1). So the rule is the other way: a command is
-//! said when it is made of plain words (no quotes, no substitution, no heredoc), each of its
+//! said when it is made of plain words (no quotes, no parentheses or backticks, so no
+//! substitution, and no heredoc), each of its
 //! commands (split at `&&`, `||`, `;`, `|`, `&` and the end of a line) is a build, test,
 //! version-control or file tool the list below names, none takes a credential by its
 //! subcommand or an environment variable it was given, and neither the secret-name test, the
@@ -161,8 +162,6 @@ fn quotable_command(command: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || " \t\n_-./:=+,@%^~*?[]{}$|&;<>#!\\".contains(c));
     if !plain
         || command.contains("<<")
-        || command.contains("$(")
-        || command.contains("<(")
         || names_a_secret(command)
         || mask(command).count > 0
         || USER_IN_URL.is_match(command)

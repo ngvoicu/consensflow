@@ -55,6 +55,7 @@ fn a_command_that_carries_a_credential_is_left_out_whole() {
         // A URL's user, with or without a password, on any scheme and any tool.
         "git clone https://alice:swordfish@github.test/x/y.git",
         "git clone https://ghp_notarealtokenvalue@github.test/x/y.git",
+        "git clone https://swordfishvalue@localhost/x/y.git",
         "cargo install --git ssh://alice:swordfish@host/x",
         "psql postgres://alice:swordfish@db.test/app",
         // Flags that say what they carry.
@@ -107,7 +108,7 @@ fn a_command_that_cannot_be_told_safe_is_left_out_whole() {
         "cargo test; curl https://example.test/x",
         "cargo test & curl https://example.test/x",
         "cargo test `cat file`",
-        "cat > notes <<EOF\nthe code is swordfishvalue\nEOF",
+        "cat > notes <<EOF\nls swordfishvalue\nEOF",
         "python3 -c 'print(1)'",
         "node -e 1",
         "bash -c 'cargo test'",
@@ -175,7 +176,7 @@ fn a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_s
         "/home/me/api_key.txt",
         "src/ghp_abcdefghijklmnopqrstuvwxyz0123456789.txt",
         "https://alice:swordfish@example.test/x",
-        "https://swordfishvalue@example.test/x",
+        "https://swordfishvalue@localhost/x",
     ] {
         let said = words(&LastCall::on("Read", target));
         assert_eq!(

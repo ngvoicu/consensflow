@@ -620,7 +620,7 @@ runs = ["engine-windows"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''                let call = self.last_call_of(participant.id).await;'''
-replace = '''                let call = None::<String>;'''
+replace = '''                let call: Option<std::sync::Arc<cf_harness::records::LastCall>> = None;'''
 
 [[plant]]
 name = "windows close: a status above 128 names a signal on Windows"
@@ -1038,17 +1038,6 @@ runs = ["engine-shown"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/call.rs"
 find = '''        || command.contains("<<")
-'''
-replace = ''''''
-
-[[plant]]
-name = "windows close: a substitution in a command is plain"
-meant = "a_command_that_cannot_be_told_safe_is_left_out_whole"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/call.rs"
-find = '''        || command.contains("$(")
 '''
 replace = ''''''
 

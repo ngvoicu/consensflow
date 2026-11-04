@@ -723,7 +723,9 @@ fn a_secret_whose_value_goes_on_over_rows_withholds_the_whole_screen() {
         r#""credentials": {"#,
         "token: |",
     ] {
-        let screen = ["start", "ok", opening, "def", "ghi"];
+        let screen = [
+            "pad", "pad", "pad", "start", "ok", opening, "def", "ghi", "pad", "pad", "pad",
+        ];
         assert_eq!(
             shown(Some(1), None, Some(&screen)).after("gone"),
             format!("gone (exit code 1); {LEFT_OUT}"),
@@ -783,6 +785,10 @@ fn a_private_keys_block_is_left_out_whole_and_one_with_a_delimiter_missing_withh
         "bGluZSB0d28=",
     ];
     for screen in [&below[..], &open[..]] {
+        let mut padded = vec!["pad", "pad", "pad"];
+        padded.extend_from_slice(screen);
+        padded.extend(["pad", "pad", "pad"]);
+        let screen = &padded[..];
         assert_eq!(
             shown(Some(1), None, Some(screen)).after("gone"),
             format!("gone (exit code 1); {LEFT_OUT}"),

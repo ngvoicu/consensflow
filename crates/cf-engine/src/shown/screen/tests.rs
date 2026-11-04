@@ -18,6 +18,17 @@ fn note(screen: &[&str]) -> String {
     .after("gone")
 }
 
+/// `rows` between rows that name nothing, so that a screen withheld whole is told from one every
+/// row of which a row's reach took out (the review of `a26e0848e`: a short screen could not
+/// tell a verdict of "unknown" from a verdict of "prose", and plants that took the first for
+/// the second were missed).
+fn padded<'a>(rows: &[&'a str]) -> Vec<&'a str> {
+    let mut screen = vec!["pad one", "pad two", "pad three"];
+    screen.extend_from_slice(rows);
+    screen.extend(["pad four", "pad five", "pad six"]);
+    screen
+}
+
 /// Whether any six characters in a row of `value` are in `note`.
 fn leaks(note: &str, value: &str) -> bool {
     let chars: Vec<char> = value.chars().collect();
@@ -29,7 +40,7 @@ fn leaks(note: &str, value: &str) -> bool {
 /// Screens whose secret is `value`, and the note of each must hold none of it.
 fn assert_withheld_whole(screens: &[&[&str]], value: &str) {
     for screen in screens {
-        let said = note(screen);
+        let said = note(&padded(screen));
         assert_eq!(said, WHOLE, "{screen:?}");
         assert!(!leaks(&said, value), "{screen:?}");
     }
@@ -76,21 +87,24 @@ fn every_block_scalar_and_every_opener_withholds_the_screen() {
         "<<EOF",
         "&anchor",
         "!!binary |",
+        // A value of one word that ends in a backslash.
+        "abc\\",
     ] {
         for name in ["password", "secret", "api_key", "token", "DB_PASSWORD"] {
             let row = format!("{name}: {opener}");
-            let screen = [
-                "start",
-                "ok",
-                row.as_str(),
-                "  correct horse",
-                "  battery staple",
-                "  alpha bravo",
-                "end",
-            ];
-            let said = note(&screen);
-            assert_eq!(said, WHOLE, "{row}");
-            assert!(!said.contains("battery"), "{row}");
+            // The rows that follow are indented, as a block's are, or are not: a screen is
+            // not bound to show a block as YAML does.
+            for following in [
+                ["  correct horse", "  battery staple", "  alpha bravo"],
+                ["correct horse", "battery staple", "alpha bravo"],
+            ] {
+                let mut rows = vec!["start", "ok", row.as_str()];
+                rows.extend(following);
+                rows.push("end");
+                let said = note(&padded(&rows));
+                assert_eq!(said, WHOLE, "{row} / {following:?}");
+                assert!(!said.contains("battery"), "{row}");
+            }
         }
     }
 }
@@ -110,6 +124,9 @@ fn a_row_that_is_a_label_or_ends_at_the_name_withholds_the_screen() {
         "secret ->",
         "token=>",
         "Bearer",
+        // A row that ends on a mark that opens, and is not the name.
+        "Using the secret flag \\",
+        "see the token list [",
     ] {
         assert_withheld_whole(
             &[&["start", "ok", label, "", "hunter2hunter2 and more", "end"]],
@@ -148,6 +165,8 @@ fn a_value_that_goes_on_over_rows_withholds_the_screen() {
                 "end",
             ],
             &["start", "ok", "Authorization: Bearer abcdefgh", "end"],
+            // The rest of a row after a quote that closes.
+            &["start", "ok", "password: \"abc\" def ghi", "end"],
             // A sentence that opens a quote on the row and does not close it.
             &[
                 "start",
@@ -212,7 +231,7 @@ fn a_private_keys_block_is_taken_out_whole_and_one_with_a_delimiter_missing_with
             "done",
         ][..],
     ] {
-        let said = note(screen);
+        let said = note(&padded(screen));
         assert_eq!(said, WHOLE, "{screen:?}");
         assert!(!said.contains("MIIEow") && !said.contains("ZXhhbX") && !said.contains("b3Blbn"));
     }
