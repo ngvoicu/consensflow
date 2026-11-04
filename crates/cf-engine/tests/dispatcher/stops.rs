@@ -1133,3 +1133,96 @@ fn a_pause_whose_turn_a_refusal_for_quota_ended_before_any_look_presses_no_key()
     assert_eq!(context.dispatcher.unstopped(zeus), None);
     assert_eq!(context.task(project, 1).task.state, "paused");
 }
+
+#[test]
+fn a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_nothing_into_the_turn_after(
+) {
+    // The chief pauses T-1 while its window works and goes on through the rounds, and
+    // finishes it at what the window said last: done with the pause's stop unpaid. The
+    // window, the human's, goes on with a turn of its own; the chief reopens T-1. The stop
+    // was asked of a turn that is over: nothing is pressed into this one (T-1199).
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    assert_eq!(pressed, 1, "the pause's first round");
+    // A complete answer, and the window still at work after it.
+    let item = context
+        .adapter
+        .item(Role::Assistant, "Half the parser, and the tests");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(item);
+        agent.settled = false;
+    });
+    let finished = context.finish_task(project, 1, "chief").unwrap();
+    assert_eq!(finished.task.state, "done");
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    its_own_turn(&context, "One more look at the parser");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        pressed,
+        "nothing pressed after the finish"
+    );
+    assert!(context.host.killed().is_empty());
+    context.adapter.answer("zeus", "Looked");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        given_zeus(&context, "Fix the README"),
+        1,
+        "its words, after the turn"
+    );
+}
+
+#[test]
+fn a_pause_and_a_resume_whose_task_ends_at_a_turn_end_before_the_words_went_in_owe_nothing_to_a_reopen(
+) {
+    // The chief's question on T-1199: paused, then resumed, and the task done at a turn end
+    // before the resume's words went in. That turn end is a look at rest, which pays the
+    // stop: a reopen owes none of it.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    context.resume_task(project, 1, "Carry on");
+    context.adapter.answer("zeus", "Parser, finished");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let state = context.task(project, 1).task.state;
+    if state != "done" {
+        // Its words went in at that rest: answered, the task is done.
+        context.adapter.answer("zeus", "Parser, finished again");
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "done");
+    its_own_turn(&context, "One more look at the parser");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(context.host.inputs().len(), pressed, "nothing pressed");
+    assert!(context.host.killed().is_empty());
+}

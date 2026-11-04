@@ -34,7 +34,13 @@
 //! and once its work has ended and its turn is still at work, three fresh rounds are
 //! pressed, the turn's own safe point; one that runs nothing ConsensFlow can see is asked
 //! again every minute, three fresh rounds each time. Either pays the stop at rest when its
-//! turn ends, and what waits for it goes in then. Only a pause asks a stop: the chief's or
+//! turn ends, and what waits for it goes in then. One exception, which is no pause's: the
+//! stop ConsensFlow asked of a window that began no turn on its brief (`never_began`), which
+//! that window ignores running nothing, relaunches it on its conversation with the brief
+//! again, and the task goes on by itself (T-1130): nothing of a brief never begun can be
+//! lost. A stop a task was asked before it left the window's hands (done, accepted, called
+//! off) is settled when it comes back to them with no stop asked since: a reopen, a resume
+//! or a follow-up presses nothing for it. Only a pause asks a stop: the chief's or
 //! the human's, a tell's, ConsensFlow's own of a window that began nothing, or a project's
 //! Close; a hold for quota and a resume whose words never went in ask none (`cf_ledger`'s
 //! `pause`), and a reopen, a resume, a follow-up and an answer are words that wait for the
@@ -231,6 +237,10 @@ fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
     }
 }
 
+/// The words that resume a task whose window, relaunched on its conversation, began no
+/// turn on its brief: the brief follows them.
+const RELAUNCHED: &str = "Your window began no turn on this task's brief, so ConsensFlow relaunched it on its conversation. The brief again:";
+
 /// What a pause's `stop` is pressed for.
 fn pause_key(stop: &Stop) -> StopKey {
     StopKey::Pause {
@@ -330,6 +340,7 @@ impl Dispatcher {
             self.taken_back_since_paid(participant, record, observed)?;
         }
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        self.settle_since_it_left(record, stop.as_ref());
         if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
             let look = if look == Look::Work && past_its_turn(record, &stop, observed) {
                 Look::Rest
@@ -384,6 +395,37 @@ impl Dispatcher {
         match paid {
             Some(stop) => self.take_back(participant, &stop, observed),
             None => Ok(()),
+        }
+    }
+
+    /// A task that left the window's hands (done, accepted or called off: the ledger counts
+    /// none of its stops then) and comes back to them with no stop asked since (a reopen, a
+    /// resume of its result's follow-up) owes none of what it was asked before it left:
+    /// those were asked of turns that are over, and a stop left owed would press the turn the
+    /// window is on when the task comes back (T-1199: a stop owed when a task is finished by
+    /// the worker's `cf task done` or the chief's Finish). What the last look found is kept;
+    /// a stop asked since it left has a greater sequence, and is owed.
+    fn settle_since_it_left(&self, record: &Record, stop: Option<&Stop>) {
+        let settle = {
+            let mut part = record.window.borrow_mut();
+            match stop {
+                None => {
+                    if let Some(seen) = part.seen_stop.take() {
+                        part.left_stop = Some(seen);
+                    }
+                    false
+                }
+                Some(stop) => {
+                    let now = (stop.task_id, stop.seq);
+                    part.seen_stop = Some(now);
+                    part.left_stop.take() == Some(now)
+                }
+            }
+        };
+        if let Some(stop) = stop.filter(|_| settle) {
+            if self.owes(record, stop) {
+                self.pay(record, stop);
+            }
         }
     }
 
@@ -465,6 +507,18 @@ impl Dispatcher {
                         self.press(record).await;
                         return Ok(());
                     }
+                    // ConsensFlow's own stop of a brief the window never began: nothing of it
+                    // can be lost, and the window is relaunched on its conversation with the
+                    // brief again (T-1130), never kept for the human.
+                    (None, Kept::No) if self.stalled_for(record, stop) => {
+                        if self
+                            .relaunch_unbegun(project, participant, record, stop, rounds)
+                            .await?
+                        {
+                            return Ok(());
+                        }
+                        Kept::Ignored
+                    }
                     (None, Kept::No) => Kept::Ignored,
                 };
                 self.keep(record, key, stop.number, rounds, now);
@@ -474,6 +528,72 @@ impl Dispatcher {
                 self.say_kept(project, participant, stop, rounds, runs.as_deref())
             }
         }
+    }
+
+    /// Whether `stop` is the one ConsensFlow's own pause asked of the window for a brief it
+    /// began no turn on (`never_began`), and not a pause of the chief's or the human's.
+    fn stalled_for(&self, record: &Record, stop: &Stop) -> bool {
+        record.window.borrow().stalled_stop == Some((stop.task_id, stop.seq))
+    }
+
+    /// The window that began no turn on its brief ignored every round of ConsensFlow's
+    /// stop of it, running nothing: it is relaunched on its conversation, and the task, in
+    /// its hands still, is resumed with its brief again, so that it goes on by itself
+    /// (T-1130's mend, kept by T-1199). Its requester is told once, in words of a relaunch.
+    /// Whether it was relaunched: a window the host would not close is kept as any other.
+    async fn relaunch_unbegun(
+        self: &Rc<Self>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Rc<Record>,
+        stop: &Stop,
+        rounds: u32,
+    ) -> Result<bool, EngineError> {
+        if !self.retire(record).await? {
+            return Ok(false);
+        }
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(project.id, stop.number)?
+            .map(|thread| thread.task);
+        let Some(task) = task else {
+            return Ok(true);
+        };
+        let handle = &participant.handle;
+        let number = stop.number;
+        let gone_on = task.state == "paused" && {
+            let words = format!("{RELAUNCHED}\n\n{}", task.body);
+            match self
+                .seams
+                .ledger
+                .borrow_mut()
+                .resume_task(project.id, number, None, &words)
+            {
+                Ok(_) => true,
+                Err(cf_ledger::LedgerError::Refused(_)) => false,
+                Err(failed) => return Err(failed.into()),
+            }
+        };
+        let tail = if gone_on {
+            format!("T-{number} goes on by itself.")
+        } else {
+            format!("T-{number} is {}.", task.state)
+        };
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: task.requester.clone(),
+                task: Some(number),
+                body: format!(
+                    "T-{number}'s window (@{handle}) began no turn on its brief and went on through the interrupt {rounds} times with nothing of its own running, so ConsensFlow relaunched it on its conversation and gave it the brief again. {tail}"
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(true)
     }
 
     /// The window is at work and the task it was last given was cancelled:

@@ -26,9 +26,12 @@
 //!   at rest (Devin's, Muse's) pays it at once and is kept, and `cf task resume` sends its
 //!   words into it, where the brief is above them. One read in flight is pressed the stop's
 //!   rounds: a Claude Code reads at rest by the engine's own Escape (`by_press`) and is kept;
-//!   one that reads in flight still (Codex's, Pi's) is closed as any window that ignores a
-//!   pause's rounds, and the resume opens it again on its conversation. A stop paid with no
-//!   key would keep that window reading in flight, and no resume's words would go in.
+//!   one that reads in flight still (Codex's, Pi's), running nothing, is relaunched on its
+//!   conversation and its task resumed with its brief again, so that it goes on by itself
+//!   (`stops`: the stop is ConsensFlow's own, marked on the window, and nothing of a brief
+//!   never begun can be lost; a pause of the chief's or the human's never relaunches nor
+//!   closes a window, T-1199). A stop paid with no key would keep that window reading in
+//!   flight, and no words would go in.
 //!
 //! Limits. A window whose screen prints while it begins nothing (a status line that redraws
 //! by itself) is waited for until its screen is quiet for [`QUIET_MS`] at a look past its
@@ -207,6 +210,12 @@ impl Dispatcher {
             thread.task.number
         ));
         self.stall(project, &thread.task, &said, &because, None, false)?;
+        // The stop this pause asked is ConsensFlow's own: a window that ignores it with
+        // nothing running is relaunched on its conversation (`stops`), as a pause's is not.
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        record.window.borrow_mut().stalled_stop = stop
+            .filter(|stop| stop.task_id == thread.task.id)
+            .map(|stop| (stop.task_id, stop.seq));
         self.changed();
         Ok(())
     }
