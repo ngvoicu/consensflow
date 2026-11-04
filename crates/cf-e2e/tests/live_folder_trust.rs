@@ -121,7 +121,7 @@ use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, agents, ask, Harness, Installed, Log};
 use cf_e2e::process::Run;
 use cf_e2e::rig::Rig;
-use cf_e2e::{Error, Result};
+use cf_e2e::{files, Error, Result};
 use regex::Regex;
 use serde_json::json;
 
@@ -1246,18 +1246,30 @@ fn resumed(install: &Installed, stamp: &str, log: &Log, report: &Path) -> Result
 /// The notes to the human that speak of trusting the project's folder, which they
 /// name as the system names it.
 fn trust_notes(members: &Members) -> Result<Vec<String>> {
-    let folder = fs::canonicalize(members.folder())
-        .unwrap_or_else(|_| members.folder().to_path_buf())
-        .to_string_lossy()
-        .into_owned();
-    Ok(members
-        .project()
-        .inbox("human")?
+    let inbox = members.project().inbox("human")?;
+    let bodies: Vec<&str> = inbox
         .iter()
         .filter_map(|message| message["body"].as_str())
-        .filter(|body| body.contains("trust") && body.contains(&folder))
-        .map(str::to_owned)
-        .collect())
+        .collect();
+    Ok(trust_notes_in(&bodies, members.folder(), &|folder| {
+        fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
+    }))
+}
+
+/// The notes among `bodies` that speak of trusting `folder`, which they name as the product
+/// writes it ([`files::plain_name`] of what `canonical` says of it): on Windows the system's
+/// canonical name has a `\\?\` before the drive, which no note holds (T-1079).
+fn trust_notes_in(
+    bodies: &[&str],
+    folder: &Path,
+    canonical: &dyn Fn(&Path) -> PathBuf,
+) -> Vec<String> {
+    let named = files::plain_name(&canonical(folder).to_string_lossy());
+    bodies
+        .iter()
+        .filter(|body| body.contains("trust") && body.contains(&named))
+        .map(|body| (*body).to_owned())
+        .collect()
 }
 
 /// How long a worker's task has to be done.
@@ -1459,6 +1471,29 @@ mod tests {
             "~/.consensflow-candidate/live/{FOLDER}/1/claude/fresh"
         ))));
         assert!(!speaks_of_trust(&lines("an untrusted folder")));
+    }
+
+    #[test]
+    fn a_trust_note_is_found_by_the_folder_name_the_product_writes_on_windows_too() {
+        // Windows' `canonicalize` says `\\?\C:\…` of the folder; the note the product wrote
+        // names `C:\…` (zeewin2, 2026-11-01: three notes there, none found).
+        let folder = Path::new(r"C:\Users\me\live\asks-probe\1");
+        let canonical = |_: &Path| PathBuf::from(r"\\?\C:\Users\me\live\asks-probe\1");
+        let note = r"@worker's window asked whether to trust C:\Users\me\live\asks-probe\1; ConsensFlow answered yes, as the project's folder is trusted by choosing it.";
+        let other = r"@worker's window asked whether to trust C:\Users\me\live\asks-probe\2; ConsensFlow answered yes.";
+        let said = r"@worker finished C:\Users\me\live\asks-probe\1 and says nothing of it.";
+        assert_eq!(
+            trust_notes_in(&[note, other, said], folder, &canonical),
+            [note]
+        );
+        // Where the system's name is the plain one, as on a Mac, it is found as it was.
+        let mac = Path::new("/private/tmp/live/x");
+        let mac_note =
+            "@w's window asked whether to trust /private/tmp/live/x; ConsensFlow answered yes.";
+        assert_eq!(
+            trust_notes_in(&[mac_note], mac, &|folder| folder.to_path_buf()),
+            [mac_note]
+        );
     }
 
     #[test]

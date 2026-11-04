@@ -31,7 +31,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::ask;
-use cf_e2e::live::members::{find, member_as, stand_in_worker, Members, Plan, STAND_IN_WORKER};
+use cf_e2e::live::members::{
+    find, member_as, stand_in_worker, ticking_command, Members, Plan, STAND_IN_WORKER,
+};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, Harness, Log};
 use cf_e2e::{Error, Result};
@@ -54,8 +56,19 @@ const SECOND: &str = "worker-b";
 /// What the folder tells the chief.
 const BRIEF: &str = "This folder is an automated ConsensFlow test. When a ConsensFlow message arrives, reply with exactly one line, SEEN, and run no tools: decide nothing, answer no question with cf, accept nothing. When the human asks you something in this window, do what it asks.\n";
 
-/// The turn the chief is put in while the workers' messages come: a command of a minute.
-const WORK: &str = "Use your shell tool to run exactly this command in the foreground, and wait for it to finish: for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo tick $i; /bin/sleep 5; done . Then reply with exactly one line: WAITED.";
+/// The turn the chief is put in while the workers' messages come: a command of a minute, a tick
+/// every five seconds, Node's, which the shell of every machine runs (the loop it was, `for … do
+/// echo tick $i; /bin/sleep 5; done`, is no PowerShell's, T-1079).
+fn work() -> String {
+    format!(
+        "Use your shell tool to run exactly this command in the foreground, and wait for it to finish: {} . Then reply with exactly one line: WAITED.",
+        ticking_command(TICKS, TICK_SECONDS)
+    )
+}
+
+/// How many ticks the chief's command prints, and how many seconds apart.
+const TICKS: u64 = 12;
+const TICK_SECONDS: u64 = 5;
 
 /// How long words typed and not sent are held to hold the message.
 const HELD: Duration = Duration::from_secs(15);
@@ -191,7 +204,7 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
     }
     // The chief works: what the workers send waits behind its turn. The human asks for the
     // work as a human does, in words and then Enter, its own key.
-    says(&members, WORK)?;
+    says(&members, &work())?;
     find(
         log,
         "the chief to be at work",
@@ -304,6 +317,24 @@ mod tests {
 
     fn held(checks: &[Check]) -> Vec<bool> {
         checks.iter().map(|check| check.ok).collect()
+    }
+
+    #[test]
+    fn the_chiefs_minute_is_a_command_the_shell_of_every_machine_runs() {
+        // A POSIX loop and `/bin/sleep` are no PowerShell's, where a Codex window on Windows
+        // runs its commands (T-1079): Node's ticks, twelve of them five seconds apart.
+        let asked = work();
+        assert!(asked.contains("node -e \""), "{asked}");
+        assert!(asked.contains("n===12"), "{asked}");
+        assert!(asked.contains("},5000)"), "{asked}");
+        for unix_only in ["sleep", "for i in", "do echo", "done"] {
+            assert!(!asked.contains(unix_only), "{unix_only}: {asked}");
+        }
+        assert!(
+            asked.ends_with("Then reply with exactly one line: WAITED."),
+            "{asked}"
+        );
+        assert_eq!(TICKS * TICK_SECONDS, 60, "a turn of a minute");
     }
 
     #[test]
