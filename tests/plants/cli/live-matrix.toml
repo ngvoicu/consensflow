@@ -387,7 +387,7 @@ replace = '''                    .all(|word| true || message.contains(&named(jud
 
 [[plant]]
 name = "live matrix: a follow-up queued for its window at once is read as given no brief"
-meant = "field6_done_predecessor"
+meant = "field6_accepted_bypass"
 runs = ["matrix-control-field6"]
 
 [[plant.edit]]

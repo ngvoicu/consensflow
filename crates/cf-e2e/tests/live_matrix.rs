@@ -541,11 +541,6 @@ mod tests {
     }
 
     #[test]
-    fn field6_paused_holder() {
-        holds_but_its_known_reds("field6-paused-holder");
-    }
-
-    #[test]
     fn order_after_working() {
         holds_but_its_known_reds("order-after-working");
     }

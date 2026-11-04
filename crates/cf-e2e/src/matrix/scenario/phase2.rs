@@ -4,10 +4,12 @@
 //! daemon writes it), never what the chief says, so a step is over whether the product did the
 //! right thing or not, and the checks say which.
 //!
-//! On today's main some of field report 6's checks fail by design, until T-1118 (a follow-up of
-//! a done task waits for its acceptance), T-1122 (`cancel` takes a done task, and a refusal names
-//! the task that holds a window) and T-1128 (a window takes no follow-up while a task it did is
-//! done and undecided) land in I-7: those are [`Known`], said apart and never passed.
+//! Field report 6's checks hold since a3-1 (T-1177) brought T-1118 (a follow-up of a done task
+//! waits for its acceptance), T-1122 (`cancel` takes a done task, and a refusal names the task
+//! that holds a window) and T-1128 (a window takes no follow-up while a task it did is done and
+//! undecided); their [`Known`] marks are out. Its subcase of a done D and a paused P in one window
+//! is gone: T-1118 made that shape unreachable (the follow-up waits on the board, given to no
+//! window), and `field6-done-predecessor` and `field6-cancel-with-waiter` hold what is left of it.
 //!
 //! `cancel` is the control's planted red: the stand-in chief cancels the task it gave and asks
 //! to send it back, so every run of it ends red at once, with the product's refusal.
@@ -39,9 +41,6 @@ const NUDGE: &str = "Please run the command I gave last: the board does not show
 
 /// A real chief's deadline for one of these scenarios (the stand-ins' is the runner's own).
 const DEADLINE: Duration = Duration::from_secs(20 * 60);
-
-const T1122: &str =
-    "T-1122 (I-7): cancel takes a done task, and a refusal names the task holding the window";
 
 /// The task bound to `name`, the `nth`, as a stand-in's or a person's words name it.
 fn t(bindings: &Bindings, name: &str, nth: usize) -> String {
@@ -519,7 +518,8 @@ pub fn field6() -> Vec<Scenario> {
             },
             &[],
             &[],
-        ).ending(&["D"]),
+        )
+        .ending(&["D"]),
         // While F waits for D, cancelling D is refused (`waited-for`); F cancelled, D is.
         scenario(
             "field6-cancel-with-waiter",
@@ -549,7 +549,8 @@ pub fn field6() -> Vec<Scenario> {
             },
             &[],
             &[],
-        ).ending(&["D", "F"]),
+        )
+        .ending(&["D", "F"]),
         // A accepted; a newer D in A's window done and undecided; F added after A waits on the
         // board until D is accepted.
         scenario(
@@ -639,82 +640,5 @@ pub fn field6() -> Vec<Scenario> {
             &[],
             &[],
         ),
-        // The done D and the paused P in one window: sending D back is refused `session-busy`,
-        // naming P, paused; cancelling D keeps its result and leaves P paused. The shape is built
-        // through the follow-up door main leaves open (T-1118 closes it: then P waits on the
-        // board, and this subcase is to prove the shape unreachable instead).
-        scenario(
-            "field6-paused-holder",
-            vec![
-                done_without_work(),
-                Step {
-                    human: None,
-                    name: "P after D",
-                    asks: |bindings| {
-                        format!("Without accepting {}, give its window a follow-up with `cf task add --after {} \"Work for two minutes, then reply with exactly: P_DONE\"`, and tell me in one line when it is at work.", t(bindings, "D", 0), t(bindings, "D", 0))
-                    },
-                    stand_in: |bindings| {
-                        format!(
-                            "CF task add --after {} :: SLEEP 120 Reply with exactly: P_DONE",
-                            t(bindings, "D", 0)
-                        )
-                    },
-                    reached: |snapshot, bindings| is(snapshot, bindings, "P", 0, &["working"]),
-                },
-                Step {
-                    human: None,
-                    name: "pause P",
-                    asks: |bindings| {
-                        format!(
-                            "Pause it with `cf task pause {}`, and tell me in one line.",
-                            t(bindings, "P", 0)
-                        )
-                    },
-                    stand_in: |bindings| format!("CF task pause {}", t(bindings, "P", 0)),
-                    reached: |snapshot, bindings| is(snapshot, bindings, "P", 0, &["paused"]),
-                },
-                act!("reopen D", "reopen", "D", 1, "Once more."),
-                act!("cancel D", "cancel", "D", 1),
-            ],
-            &[
-                Bind {
-                    name: "D",
-                    is: Is::Pool("worker"),
-                    requester: "chief",
-                },
-                Bind {
-                    name: "P",
-                    is: Is::After("D"),
-                    requester: "chief",
-                },
-            ],
-            |judged| {
-                vec![
-                    oracle::chief_call(
-                        judged,
-                        "D",
-                        "reopen",
-                        0,
-                        Answered::Refused("session-busy", &["{P}", "paused"]),
-                    ),
-                    oracle::chief_call(judged, "D", "cancel", 0, Answered::Done),
-                    oracle::result_kept(judged, "D"),
-                    oracle::state(judged, "P", 0, &["paused"]),
-                ]
-            },
-            &[],
-            &[
-                Known {
-                    who: "D",
-                    what: "the chief's first reopen of it was refused with session-busy",
-                    until: T1122,
-                },
-                Known {
-                    who: "D",
-                    what: "the chief's first cancel of it was done",
-                    until: T1122,
-                },
-            ],
-        ).ending(&["D"]),
     ]
 }
