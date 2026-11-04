@@ -794,6 +794,42 @@ fn windows(members: &Members, evidence: &Evidence) -> Result {
         let last = lines[lines.len().saturating_sub(LAST_LINES)..].join("\n");
         evidence.text(&format!("windows/{id}.txt"), &format!("{last}\n"))?;
     }
+    // What each stand-in read of its terminal, read by read (when, how many bytes, and whether a
+    // paste's start or end or an Enter was in it; `fake_agent::terminal`): beside the host's
+    // input, it tells keys the host wrote and the window never read from keys never written.
+    if let Some(config) = members.rig().var("CLAUDE_CONFIG_DIR") {
+        if let Ok(entries) = std::fs::read_dir(Path::new(config).join("sessions")) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("input-") && name.ends_with(".jsonl") {
+                    if let Ok(trace) = std::fs::read_to_string(entry.path()) {
+                        evidence.text(&format!("stand-ins/{name}"), &trace)?;
+                    }
+                }
+            }
+        }
+    }
+    // Each window's input as the pane host holds it at the end: a paste in flight or one that
+    // failed, keys the human typed and did not send, and the human's last writes (how long ago,
+    // how many bytes, of what kinds; never a byte). A human's ask that never reached the chief's
+    // record on Windows left its screen with no sign of it, and nothing said whether the host
+    // still held it (zeewin2, T-1226).
+    for frame in members.rig().open_frames() {
+        let Some(id) = frame["id"].as_str() else {
+            continue;
+        };
+        let input = members
+            .rig()
+            .host(
+                "pane.snapshot",
+                json!({ "id": id, "generation": frame["generation"] }),
+            )
+            .unwrap_or_else(|failed| json!({ "unread": failed.to_string() }));
+        evidence.json(
+            &format!("windows/{id}-{}.input.json", frame["generation"]),
+            &input,
+        )?;
+    }
     Ok(())
 }
 

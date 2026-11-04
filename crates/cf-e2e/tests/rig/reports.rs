@@ -1145,9 +1145,9 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     let uploads = steps_with(&steps, "uses: actions/upload-artifact@");
     assert_eq!(
         uploads.len(),
-        3,
-        "one upload for the temp folder's reports, one for the live rigs' and one for the live \
-         matrix's: {uploads:?}"
+        5,
+        "one upload for the temp folder's reports, one for the live rigs', one for the checks job's \
+         live cases, and the live matrix's two, its rigs' reports and its evidence: {uploads:?}"
     );
     let upload_of = |path: &str| {
         uploads
@@ -1198,6 +1198,47 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
             );
         }
     }
+
+    // The checks job's live cases keep a failed rig's report and a failed matrix case's evidence
+    // (each window's screen and input, the stand-ins' reads, the records): uploaded whenever there
+    // is any, as a FLAKY case's first run passes the job (T-1226).
+    let checks_upload = upload_of("name: live-reports-checks-${{ matrix.os }}")?;
+    for line in [
+        "if: always()",
+        "if-no-files-found: ignore",
+        "retention-days: 7",
+        "app/src-tauri/target/live-reports/",
+        "evals/reports/live-matrix/",
+    ] {
+        assert!(
+            checks_upload.iter().any(|have| have == line),
+            "no `{line}`: {checks_upload:?}"
+        );
+    }
+    assert!(
+        checks_upload.iter().any(|line| pinned.is_match(line)),
+        "{checks_upload:?}"
+    );
+
+    // The live matrix's job keeps its cases' evidence whenever there is any, as the checks job
+    // keeps its live cases' (T-1226): the matrix runs in a job of its own (T-1207).
+    let matrix_evidence =
+        upload_of("name: matrix-evidence-${{ matrix.os }}-${{ strategy.job-index }}")?;
+    for line in [
+        "if: always()",
+        "if-no-files-found: ignore",
+        "retention-days: 7",
+        "path: evals/reports/live-matrix/",
+    ] {
+        assert!(
+            matrix_evidence.iter().any(|have| have == line),
+            "no `{line}`: {matrix_evidence:?}"
+        );
+    }
+    assert!(
+        matrix_evidence.iter().any(|line| pinned.is_match(line)),
+        "{matrix_evidence:?}"
+    );
 
     // The folder the step names is the one the rig keeps its reports in: Node's temp
     // folder, as the step asks it, is the Rust's, where there is a Node to ask.

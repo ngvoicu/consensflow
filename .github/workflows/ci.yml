@@ -103,6 +103,20 @@ jobs:
       - run: cargo test -p cf-bridge --features local
         timeout-minutes: 15
       - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
+      # What a failed live case kept: the rig's report of a case that could not close
+      # (target/live-reports), and a live matrix case's evidence (evals/reports/live-matrix:
+      # each window's last screen, the records, the ledger, the events), which a matrix test
+      # keeps only when it fails, a FLAKY case's first run too. Two field6 reds on Windows kept
+      # nothing to read (T-1226).
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-reports-checks-${{ matrix.os }}
+          path: |
+            app/src-tauri/target/live-reports/
+            evals/reports/live-matrix/
+          if-no-files-found: ignore
+          retention-days: 7
 
   workspace:
     strategy:
@@ -292,6 +306,17 @@ jobs:
         with:
           name: matrix-rig-reports-${{ matrix.os }}-${{ strategy.job-index }}
           path: ${{ env.MATRIX_RIG_TEMP }}/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      # A matrix case's evidence (evals/reports/live-matrix: each window's last screen and its
+      # input as the pane host held it, the stand-ins' reads, the records, the ledger, the
+      # events), which a case keeps only when it fails: uploaded whenever there is any, as a
+      # FLAKY case's first run passes the job (T-1226), from the job the matrix runs in.
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: matrix-evidence-${{ matrix.os }}-${{ strategy.job-index }}
+          path: evals/reports/live-matrix/
           if-no-files-found: ignore
           retention-days: 7
 

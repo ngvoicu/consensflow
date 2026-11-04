@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use cf_base::env::Env;
 use cf_base::json::from_slice_lossy;
@@ -65,7 +66,10 @@ pub(super) fn statuses(folder: &str) -> Vec<(u32, Status)> {
         if !is_status_file(&entry.file_name().to_string_lossy()) {
             continue;
         }
-        let Some((pid, status)) = fs::read(entry.path()).ok().and_then(|bytes| read(&bytes)) else {
+        let Some((pid, status)) = fs::read(entry.path())
+            .ok()
+            .and_then(|bytes| read(&bytes, written(&entry.path())))
+        else {
             continue;
         };
         match statuses.iter_mut().find(|(held, _)| *held == pid) {
@@ -95,7 +99,7 @@ pub(super) fn holders(folder: &str, session: &str) -> Option<Vec<u32>> {
         };
         let parked = from_slice_lossy(&bytes)
             .is_ok_and(|row| row.get("parkedJobId").is_some_and(|job| !job.is_null()));
-        match read(&bytes) {
+        match read(&bytes, written(&entry.path())) {
             Some((pid, status))
                 if status.session == session && !parked && !holders.contains(&pid) =>
             {
@@ -105,6 +109,15 @@ pub(super) fn holders(folder: &str, session: &str) -> Option<Vec<u32>> {
         }
     }
     Some(holders)
+}
+
+/// How much later than its status file's last write a process may have begun and still be the
+/// one that wrote it: the file's time and the process's are read from two clocks of the system.
+const SLACK: Duration = Duration::from_secs(2);
+
+/// When the file at `path` was last written, where the system says.
+fn written(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).and_then(|found| found.modified()).ok()
 }
 
 /// `<digits>.json`, the name Claude gives a status file.
@@ -126,11 +139,21 @@ fn is_status_file(name: &str) -> bool {
 /// failed the look on an object with a `toString` of its own; and JSON
 /// that holds a number past a double's range or nests past 127 levels says
 /// nothing, where Node read it.
-fn read(bytes: &[u8]) -> Option<(u32, Status)> {
+///
+/// A file last written (`written`) before the process now holding its number began is another
+/// program's number: the Claude that wrote it ended, as a window the host ended does, without
+/// taking its file away, and the system gave the number to a program begun since. Windows does
+/// so at once and to any program (T-1226: a window's record read as shared with the earlier
+/// window's Claude, and no answer of it taken for its task's result). Claude Code says the same
+/// of a number by when its process began (its own `procStart`, `procStartFt` on Windows).
+fn read(bytes: &[u8], written: Option<SystemTime>) -> Option<(u32, Status)> {
     let row = from_slice_lossy(bytes).ok()?;
     let session = row.get("sessionId")?.as_str()?.to_owned();
     let pid = process(row.get("pid")?)?;
     if !cf_process::alive(pid) {
+        return None;
+    }
+    if written.is_some_and(|written| cf_process::began_after(pid, written + SLACK)) {
         return None;
     }
     let state = match row.get("status")?.as_str()? {

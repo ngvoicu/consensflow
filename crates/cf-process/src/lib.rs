@@ -12,6 +12,7 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod alive;
+mod began;
 mod capture;
 mod child;
 mod cmd_word;
@@ -45,6 +46,7 @@ pub mod test_support;
 mod testing;
 
 pub use alive::alive;
+pub use began::began_after;
 pub use capture::{capture, capture_whole, CaptureFailed, Captured, LEFT_RUNNING};
 pub use child::{spawn, Child, Ender, Streams};
 pub use cmd_word::cmd_word;

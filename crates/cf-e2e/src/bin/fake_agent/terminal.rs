@@ -67,16 +67,32 @@ pub struct Keys {
 
 impl Keys {
     /// Puts the terminal in raw mode, as a TUI does, and starts reading it.
+    // The stand-in Devin's, which reads its terminal here too and keeps no trace.
+    #[allow(dead_code)]
     pub fn start() -> Self {
+        Self::start_tracing(None)
+    }
+
+    /// [`Keys::start`], noting each read in the file `trace`, where one is given: when it came,
+    /// how many bytes, and whether it held a paste's start or end or an Enter, never a byte of
+    /// it. A human's ask that never reached a stand-in's record on Windows left no sign of
+    /// whether its window read anything (zeewin2, T-1226).
+    pub fn start_tracing(trace: Option<std::path::PathBuf>) -> Self {
         raw_mode();
         let (read, incoming) = mpsc::channel::<Vec<u8>>();
         thread::spawn(move || {
             let mut chunk = [0_u8; 4096];
             let mut stdin = io::stdin().lock();
             while let Ok(read_now @ 1..) = stdin.read(&mut chunk) {
+                if let Some(trace) = &trace {
+                    noted(trace, &chunk[..read_now]);
+                }
                 if read.send(chunk[..read_now].to_vec()).is_err() {
                     return;
                 }
+            }
+            if let Some(trace) = &trace {
+                noted(trace, &[]);
             }
         });
         Self {
@@ -296,6 +312,27 @@ pub fn raw_mode() {
     terminal.control_chars[SpecialCharacterIndices::VMIN as usize] = 1;
     terminal.control_chars[SpecialCharacterIndices::VTIME as usize] = 0;
     let _ = tcsetattr(&stdin, SetArg::TCSADRAIN, &terminal);
+}
+
+/// One line of a window's read trace for `chunk` (an empty one: its input ended): when, how
+/// many bytes, and what kinds, appended to `trace`; a trace that cannot be written is let be.
+fn noted(trace: &std::path::Path, chunk: &[u8]) {
+    use std::io::Write;
+    let holds = |needle: &[u8]| chunk.windows(needle.len()).any(|at| at == needle);
+    let line = serde_json::json!({
+        "ms": jiff::Timestamp::now().as_millisecond(),
+        "len": chunk.len(),
+        "pasteStart": holds(b"\x1b[200~"),
+        "pasteEnd": holds(b"\x1b[201~"),
+        "enter": chunk.contains(&b'\r'),
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(trace)
+    {
+        let _ = writeln!(file, "{line}");
+    }
 }
 
 /// Puts the console on the standard input in raw mode with virtual terminal

@@ -15,6 +15,7 @@ matrix-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
 matrix-fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "reply::"]
 # The live suite's own tests, the controls among them, by name.
 matrix-control-end = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_cancelled"]
+matrix-kept-evidence = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_failed_case_keeps"]
 matrix-control-question = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_chiefs"]
 matrix-control-replay = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::a_red_runs_again"]
 matrix-control-core = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::the_core_flow"]
@@ -1015,3 +1016,36 @@ find = '''    chief_at_work
         && refusals'''
 replace = '''    (chief_at_work || true)
         && refusals'''
+
+# A failed matrix case keeps its evidence where CI uploads it (T-1226: two field6 reds on Windows
+# kept no screen).
+
+[[plant]]
+name = "live matrix: a failed case's evidence goes with its temporary folder"
+meant = "a_failed_case_keeps_its_evidence_where_ci_uploads_it_and_a_passed_one_does_not"
+runs = ["matrix-kept-evidence"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_matrix.rs"
+find = '''            if std::thread::panicking() {'''
+replace = '''            if false && std::thread::panicking() {'''
+
+[[plant]]
+name = "live matrix: the evidence keeps no window's input as the pane host held it"
+meant = "a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code"
+runs = ["matrix-control-end"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''            &format!("windows/{id}-{}.input.json", frame["generation"]),'''
+replace = '''            &format!("windows/{id}-{}.unread.json", frame["generation"]),'''
+
+[[plant]]
+name = "live matrix: a stand-in notes none of what it read of its terminal"
+meant = "a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code"
+runs = ["matrix-control-end"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/terminal.rs"
+find = '''                    noted(trace, &chunk[..read_now]);'''
+replace = '''                    let _ = trace;'''

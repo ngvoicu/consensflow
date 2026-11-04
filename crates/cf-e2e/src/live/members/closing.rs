@@ -486,6 +486,19 @@ mod tests {
         }
     }
 
+    /// The machine's processes are listed, this test's own among them, on every machine: on
+    /// Windows by its process table, as Git Bash's `ps` refused `-x` (T-1226).
+    #[test]
+    fn the_machines_processes_are_listed_with_this_test_among_them() {
+        let all = listing().expect("the machine's processes are listed");
+        let own = std::process::id();
+        assert!(
+            all.iter().any(|listed| listed.process.pid == own),
+            "{own} is not among {} processes",
+            all.len()
+        );
+    }
+
     #[test]
     fn a_listing_that_fails_as_the_shutdown_gives_up_says_why_and_what_the_last_look_that_could_saw(
     ) {
