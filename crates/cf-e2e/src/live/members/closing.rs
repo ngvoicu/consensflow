@@ -60,8 +60,37 @@ fn parsed(listing: &str) -> Vec<Listed> {
 /// The processes of the machine, with their groups, or why they could not be listed.
 type Listing = std::result::Result<Vec<Listed>, String>;
 
+/// The processes of the machine now, as Windows' process table lists them (the kit's own
+/// listing, [`super::ThisMachine`]): Git Bash's `ps` takes no `-x`, and every Windows run of
+/// the live matrix said its processes "could not be listed" (CI runs 41787972093 and
+/// 41792519144, T-1226). Windows has no process groups: each process is its own.
+#[cfg(windows)]
+fn listing() -> Listing {
+    use super::Machine;
+    super::ThisMachine
+        .processes()
+        .map(|all| listed_of(&all))
+        .map_err(|failed| format!("Windows' process table: {failed}"))
+}
+
+/// The processes of a table of the machine's, each its own group.
+#[cfg(any(windows, test))]
+fn listed_of(all: &[super::Running]) -> Vec<Listed> {
+    all.iter()
+        .map(|running| Listed {
+            process: Process {
+                pid: running.identity.pid,
+                ppid: running.ppid,
+                command: running.command.clone(),
+            },
+            group: running.identity.pid,
+        })
+        .collect()
+}
+
 /// The processes of the machine now, with their groups, as `ps` lists them: why it
 /// could not, on a machine with no `ps` or one that did not end well.
+#[cfg(not(windows))]
 fn listing() -> Listing {
     let ran = Run::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,command="])
@@ -420,6 +449,46 @@ mod tests {
         for pid in [900_001, 900_003, 900_004] {
             assert!(left.contains(&format!("{pid} (")), "{pid}: {failed}");
         }
+    }
+
+    /// The machine's processes are listed, this test's own among them, on every machine: on
+    /// Windows by its process table, as Git Bash's `ps` refused `-x` (T-1226).
+    #[test]
+    fn the_machines_processes_are_listed_with_this_test_among_them() {
+        let all = listing().expect("the machine's processes are listed");
+        let own = std::process::id();
+        assert!(
+            all.iter().any(|listed| listed.process.pid == own),
+            "{own} is not among {} processes",
+            all.len()
+        );
+    }
+
+    /// A process of Windows' table is listed with its parent and command line, each its own
+    /// group: Windows has none.
+    #[test]
+    fn a_process_of_the_table_is_listed_as_its_own_group() {
+        use crate::live::members::{Identity, Running};
+        let table = [Running {
+            identity: Identity {
+                pid: 4321,
+                started: 1,
+            },
+            ppid: 12,
+            command: "fake-agent.exe --worker".to_owned(),
+            exe: None,
+        }];
+        assert_eq!(
+            listed_of(&table),
+            [Listed {
+                process: Process {
+                    pid: 4321,
+                    ppid: 12,
+                    command: "fake-agent.exe --worker".to_owned(),
+                },
+                group: 4321,
+            }]
+        );
     }
 
     #[test]

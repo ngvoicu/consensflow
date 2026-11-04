@@ -73,8 +73,13 @@ const REQUEST: Duration = Duration::from_secs(10);
 /// How long the daemon and the pane host each have to end once their input has.
 const EXIT: Duration = Duration::from_secs(5);
 
-/// How long a process a window started has to be gone once the pane host is.
+/// How long a process a window started has to be gone once the pane host is. Windows takes
+/// longer to take an ended process out of its table on a busy runner, where every case of the
+/// live matrix found one left at 3 s (CI runs 41787972093 and 41792519144, T-1226).
+#[cfg(not(windows))]
 const GONE: Duration = Duration::from_secs(3);
+#[cfg(windows)]
+const GONE: Duration = Duration::from_secs(10);
 
 /// How long the router is given to read what the pane host wrote last, once the
 /// host has gone.
