@@ -252,6 +252,11 @@ fn a_screen_with_no_secret_and_no_key_on_it_is_quoted_as_it_always_was() {
             "Summary",
             "ok",
         ],
+        // Sentences with a digit in each are not rows of base64: they have blanks in them.
+        vec![
+            "compiled 3 crates in 4 seconds",
+            "finished 2 tests in 1 second",
+        ],
         // Two encoded-looking rows with prose between them are two rows, not a run.
         vec!["YQ==", "some words here", "Yg=="],
     ] {
