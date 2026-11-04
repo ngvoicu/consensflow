@@ -60,13 +60,14 @@
 //! lost: whoever gave the task is told it once, with the words, and Finish takes it as the
 //! result ([`paused`]).
 //!
-//! **A turn that ended with the worker's own question out** (T-1204; the field board's T-837):
-//! a member that asks with `cf ask` and goes on has its task `waiting` until the answer is
-//! delivered, which is at rest, so its turn ended on a task that takes no result, and the
-//! turn the answer began became the result, with the write-up it followed left in the record.
-//! Nothing is completed at that end (a member that asks and stops ends on a line about it),
-//! and the result, when it is recorded, begins with the words of those turns, each labelled
-//! ([`while_asking`]); Finish gives the same.
+//! **A turn that ended and was not the result** (T-1204; the field board's T-837 and T-1200
+//! of T-1219): the result is the final answer of the last turn, so a turn that ended with a
+//! complete answer which no result took, because its task waited for an answer to the worker's
+//! own question, because its end was held for work that runs, because Claude Code's queue held
+//! a notice that began the next turn the moment it ended, or because notes were on their way to
+//! the window, lost its words when the next message to the window came. Nothing is completed at
+//! that end, and the result, when it is recorded, begins with the words of those turns, each
+//! labelled with what it was written before ([`earlier_turns`]); Finish gives the same.
 //!
 //! **A window has one task** (`ownership`): no other task's message goes into a window
 //! once one task's has, whatever ended that task; so no later task's turn is woken by
@@ -90,7 +91,7 @@ use crate::role_change::answers_to_the_task;
 use crate::seams::{CommandsSeen, EngineError};
 
 use self::asks::asks_the_chief;
-use self::while_asking::with_earlier;
+use self::earlier_turns::with_earlier;
 
 /// What a result says of a turn that wrote nothing after its last tool call.
 pub(crate) const WITHOUT_ANSWER: &str = "(the agent ended its turn without a written answer)";
@@ -429,7 +430,7 @@ impl Dispatcher {
         }
         // The turns that ended with a question of the worker's out, whose words no result
         // took (T-1204): the result begins with them.
-        let earlier = self.written_while_asking(
+        let earlier = self.earlier_turns(
             &thread,
             participant,
             items,
@@ -1277,9 +1278,9 @@ pub(crate) fn pending_after_look(observed: &Observed, watching: Watching) -> Pen
 }
 
 mod asks;
+mod earlier_turns;
 mod finish;
 mod paused;
-mod while_asking;
 
 pub use finish::Finished;
 

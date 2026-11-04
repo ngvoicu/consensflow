@@ -176,7 +176,7 @@ fn a_write_up_with_the_question_unanswered_waits_and_is_in_the_result_once_it_is
 
 /// What each harness wrote on the way to its write-up and its reply, in the shape its
 /// record has it (`final_answer`'s): none of it is the turn's words but the last.
-fn on_the_way(context: &Context, harness: &str) -> Vec<Item> {
+pub(crate) fn on_the_way(context: &Context, harness: &str) -> Vec<Item> {
     let progress = |said: &str| {
         let mut item = context.adapter.item(Role::Assistant, said);
         item.complete = false;

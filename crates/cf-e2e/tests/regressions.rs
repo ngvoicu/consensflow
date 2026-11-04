@@ -71,6 +71,8 @@ mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_follow_up_whose_window_never_began_read_working_for_an_hour.rs"]
 mod a_follow_up_whose_window_never_began_read_working_for_an_hour;
+#[path = "regressions/a_held_workers_write_up_was_lost_when_its_jobs_end_woke_a_short_turn.rs"]
+mod a_held_workers_write_up_was_lost_when_its_jobs_end_woke_a_short_turn;
 #[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
 mod a_job_that_still_ran_was_taken_for_ended;
 #[path = "regressions/a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed.rs"]
