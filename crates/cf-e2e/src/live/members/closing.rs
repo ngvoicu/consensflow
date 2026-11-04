@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use super::shown;
 use crate::live::claude::Process;
+#[cfg(not(windows))]
 use crate::process::Run;
 use crate::rig::Rig;
 use crate::{Error, Result};
@@ -37,6 +38,7 @@ struct Listed {
 }
 
 /// The processes `ps -axo pid=,ppid=,pgid=,command=` listed, but for the listing's own.
+#[cfg(any(not(windows), test))]
 fn parsed(listing: &str) -> Vec<Listed> {
     listing
         .lines()
