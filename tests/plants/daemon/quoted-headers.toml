@@ -442,8 +442,8 @@ runs = ["engine-dispatcher-paste-shapes"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                && is_paste_of(&item.text, latest.id, first.as_deref())"
-replace = "                && item.text.starts_with(&crate::delivery_text::marker_of(latest.id))"
+find = "                && is_paste_of(&item.text, message.id, first.as_deref())"
+replace = "                && item.text.starts_with(&crate::delivery_text::marker_of(message.id))"
 
 [[plant]]
 name = "quoted header: a result of a fresh window is not found by its first message's text behind its brief, when its receipt's item is not in the record (T-810, T-812)"
@@ -452,8 +452,8 @@ runs = ["engine-dispatcher-first-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "        let first = self.brief_given_first(&latest)?;"
-replace = "        let first = self.brief_given_first(&latest)?.filter(|_| false);"
+find = "        let first = self.brief_given_first(message)?;"
+replace = "        let first = self.brief_given_first(message)?.filter(|_| false);"
 
 [[plant]]
 name = "quoted header: a paste behind the placeholders of its pictures is taken for none in the record of the conversation the window left (T-810)"
@@ -462,8 +462,8 @@ runs = ["engine-dispatcher-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "                .find(|item| item.role == Role::User && is_paste_of(&item.text, message.id, None))"
-replace = "                .find(|item| item.role == Role::User && item.text.starts_with(&marker_of(message.id)))"
+find = "                |item| item.role == Role::User && is_paste_of(&item.text, message.id, None),"
+replace = "                |item| item.role == Role::User && item.text.starts_with(&marker_of(message.id)),"
 
 [[plant]]
 name = "quoted header: a fresh window's first message is not found behind a brief whose blank lines Claude Code dropped with its picture's line (T-812)"

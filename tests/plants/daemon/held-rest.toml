@@ -408,5 +408,5 @@ runs = ["rest-engine-pending-agents"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "            if !told && watching != Watching::Waiting {"
-replace = "            if false && !told && watching != Watching::Waiting {"
+find = "            if to_tell && watching != Watching::Waiting {"
+replace = "            if false && to_tell && watching != Watching::Waiting {"

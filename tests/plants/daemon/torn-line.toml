@@ -333,8 +333,8 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = "        let words = with_lost(words_of(&run), &participant.handle, lost);\n"
-replace = "        let words = with_lost(words_of(&run), &participant.handle, lost.filter(|_| false));\n"
+find = "            with_lost(words_of(&run), &participant.handle, lost),\n            &earlier,\n"
+replace = "            with_lost(words_of(&run), &participant.handle, lost.filter(|_| false)),\n            &earlier,\n"
 
 [[plant]]
 name = "torn line: a finished task's turn is counted from the start of its record"
@@ -354,7 +354,10 @@ runs = ["engine-lost-lines"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
 find = """
-        let words = with_lost(words_of(&run), &participant.handle, lost);
+        let words = with_earlier(
+            with_lost(words_of(&run), &participant.handle, lost),
+            &earlier,
+        );
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
@@ -362,7 +365,7 @@ find = """
 replace = """
         let body = with_lost(
             with_leftovers(
-                words_of(&run),
+                with_earlier(words_of(&run), &earlier),
                 &leftovers(&participant.handle, pending, Some(by), observed.settled),
             ),
             &participant.handle,

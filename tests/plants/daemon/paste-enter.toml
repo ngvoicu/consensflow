@@ -522,8 +522,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "        let now = millis_since(self.clock.now(), self.started);"
-replace = "        let now = millis_since(Instant::now(), self.started);"
+find = "        let now = millis_since(self.clock.now(), self.started).saturating_add(1);"
+replace = "        let now = millis_since(Instant::now(), self.started).saturating_add(1);"
 
 [[plant]]
 name = "paste enter clock: a snapshot ages the human's writes at the machine's time"

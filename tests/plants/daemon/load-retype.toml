@@ -463,13 +463,13 @@ runs = ["engine-unknown-looks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        let receipt = latest.receipt.get("item").and_then(Value::as_str);'
+find = '        let receipt = message.receipt.get("item").and_then(Value::as_str);'
 replace = '        let receipt: Option<&str> = None;'
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                && is_paste_of(&item.text, latest.id, first.as_deref())"
-replace = "                && false && is_paste_of(&item.text, latest.id, first.as_deref())"
+find = "                && is_paste_of(&item.text, message.id, first.as_deref())"
+replace = "                && false && is_paste_of(&item.text, message.id, first.as_deref())"
 
 [[plant]]
 name = "load retype: the rig's look at how its stranger ended waits for the pipe a process it left holds"

@@ -526,10 +526,10 @@ find = '''
         Ok(items.iter().rposition(|item| {
             item.role == Role::User
                 && !item.compaction
-                && is_paste_of(&item.text, latest.id, first.as_deref())
+                && is_paste_of(&item.text, message.id, first.as_deref())
         }))'''
 replace = '''
-        let marker = crate::delivery_text::marker_of(latest.id);
+        let marker = crate::delivery_text::marker_of(message.id);
         let _ = (&first, is_paste_of);
         Ok(items
             .iter()
@@ -1755,12 +1755,12 @@ find = """
         let Some(latest) = latest else {
             return Ok(None);
         };
-        let receipt = latest.receipt.get("item").and_then(Value::as_str);"""
+        self.paste_of(&latest, items)"""
 replace = """
         let Some(latest) = latest.filter(|latest| latest.kind != "note") else {
             return Ok(None);
         };
-        let receipt = latest.receipt.get("item").and_then(Value::as_str);"""
+        self.paste_of(&latest, items)"""
 
 [[plant]]
 name = "turn-end-min engine: Finish takes the chief's own step"

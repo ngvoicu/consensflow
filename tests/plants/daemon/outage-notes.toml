@@ -41,8 +41,8 @@ runs = ["on-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = 'self.fail_task(project, &thread.task, &why.said, &why.key)?;'
-replace = 'self.fail_task(project, &thread.task, &why.said, "")?;'
+find = 'self.fail_task(project, participant.id, &thread.task, &why.said, &why.key)?;'
+replace = 'self.fail_task(project, participant.id, &thread.task, &why.said, "")?;'
 
 [[plant]]
 name = "outage notes: a failure joins no note before it"

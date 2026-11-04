@@ -273,12 +273,12 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
-      # nextest, as the workspace job installs it: built once, then the cache's (~/.cargo/bin).
-      - run: cargo install cargo-nextest --version 0.9.148 --locked
       # A case that fails is run once more, here and in no other step: on the runners each
       # run of a3-1's landing met another case's timing red that passed in the others (T-1177,
       # the chief's decision m-7388). One that passes the second time is FLAKY in the log, and
       # said; one that fails twice is red.
+      # nextest, as the workspace job installs it: built once, then the cache's (~/.cargo/bin).
+      - run: cargo install cargo-nextest --version 0.9.148 --locked
       - name: The live matrix on the stand-ins
         run: cargo nextest run -p cf-e2e --test live_matrix --no-fail-fast --test-threads 4 --retries 1 --partition count:${{ matrix.part }}
         timeout-minutes: 20
