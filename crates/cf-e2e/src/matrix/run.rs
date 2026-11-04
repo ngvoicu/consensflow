@@ -717,6 +717,27 @@ fn windows(members: &Members, evidence: &Evidence) -> Result {
         let last = lines[lines.len().saturating_sub(LAST_LINES)..].join("\n");
         evidence.text(&format!("windows/{id}.txt"), &format!("{last}\n"))?;
     }
+    // Each window's input as the pane host holds it at the end: a paste in flight or one that
+    // failed, keys the human typed and did not send, and the human's last writes (how long ago,
+    // how many bytes, of what kinds; never a byte). A human's ask that never reached the chief's
+    // record on Windows left its screen with no sign of it, and nothing said whether the host
+    // still held it (zeewin2, T-1226).
+    for frame in members.rig().open_frames() {
+        let Some(id) = frame["id"].as_str() else {
+            continue;
+        };
+        let input = members
+            .rig()
+            .host(
+                "pane.snapshot",
+                json!({ "id": id, "generation": frame["generation"] }),
+            )
+            .unwrap_or_else(|failed| json!({ "unread": failed.to_string() }));
+        evidence.json(
+            &format!("windows/{id}-{}.input.json", frame["generation"]),
+            &input,
+        )?;
+    }
     Ok(())
 }
 

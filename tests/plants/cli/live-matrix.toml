@@ -707,3 +707,13 @@ runs = ["matrix-kept-evidence"]
 file = "crates/cf-e2e/tests/live_matrix.rs"
 find = '''            if std::thread::panicking() {'''
 replace = '''            if false && std::thread::panicking() {'''
+
+[[plant]]
+name = "live matrix: the evidence keeps no window's input as the pane host held it"
+meant = "a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code"
+runs = ["matrix-control-end"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''            &format!("windows/{id}-{}.input.json", frame["generation"]),'''
+replace = '''            &format!("windows/{id}-{}.unread.json", frame["generation"]),'''

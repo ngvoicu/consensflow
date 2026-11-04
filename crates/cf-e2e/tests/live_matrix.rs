@@ -418,6 +418,36 @@ mod tests {
         );
         assert!(refused.ok, "{table}");
         assert!(check(&outcome, "advice", "it is cancelled").ok, "{table}");
+        // The evidence holds each window's input as the pane host held it at the end, beside its
+        // screen: for the chief's, a paste that went in and nothing of the human's left unsent.
+        let windows = outcome.evidence.folder.join("windows");
+        let chief = std::fs::read_dir(&windows)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .find(|path| {
+                path.file_name().is_some_and(|name| {
+                    let name = name.to_string_lossy();
+                    name.starts_with("p1-chief-") && name.ends_with(".input.json")
+                })
+            })
+            .unwrap_or_else(|| panic!("no input of the chief's in {}", windows.display()));
+        let input: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(chief).unwrap()).unwrap();
+        assert_eq!(
+            (&input["ok"], &input["unsent"], &input["pasteInFlight"]),
+            (
+                &serde_json::json!(true),
+                &serde_json::json!(false),
+                &serde_json::json!(false)
+            ),
+            "{input:#}"
+        );
+        assert!(
+            input["humanWrites"]
+                .as_array()
+                .is_some_and(|writes| !writes.is_empty()),
+            "the human's ask is among its writes: {input:#}"
+        );
         let events = std::fs::read_to_string(outcome.evidence.folder.join("events.jsonl")).unwrap();
         let answered: Vec<&str> = events
             .lines()
