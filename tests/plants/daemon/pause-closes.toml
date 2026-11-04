@@ -485,6 +485,16 @@ file = "crates/cf-engine/src/stops.rs"
 find = "            || observed.reading.as_deref().is_none_or(Reading::read_failed)"
 replace = "            || observed.reading.as_deref().is_some_and(|_| false)"
 
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = """        let Some(at) = items.iter().rposition(|item| item.id == stalled.item) else {
+            return Ok(false);
+        };"""
+replace = """        let at = items
+            .iter()
+            .rposition(|item| item.id == stalled.item)
+            .unwrap_or(items.len().saturating_sub(1));"""
+
 [[plant]]
 name = "pause closes: the relaunch looks nothing again after the host's answer"
 meant = "a_window_that_began_while_the_host_showed_its_screen_is_kept_and_never_relaunched"

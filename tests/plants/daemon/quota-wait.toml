@@ -384,15 +384,11 @@ find = """        if participant.role == "chief" || observed.failed || refused {
 replace = """        if participant.role == "chief" {
             let _ = refused;"""
 
-[[plant]]
-name = "quota wait: a tell answered while the words that resume the task wait is taken for a turn of the window's own"
-meant = "a_tell_to_a_task_held_at_its_reset_takes_it_over_goes_in_on_its_own_and_no_resume_follows"
-runs = ["quota-wait-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = "            item.role == Role::User && !item.compaction && header_id(&item.text).is_some()"
-replace = "            item.role == Role::User && !item.compaction && header_id(&item.text).is_some() && false"
+# Retired by T-1199's round 3 (T-1220's P1-1): "a tell answered while the words that resume
+# the task wait is taken for a turn of the window's own". A tell to a held task takes the hold
+# over now, and what else is sent to a held window waits with the hold and goes in with the
+# resume, so no paste of ConsensFlow's reaches a held window on its own: the guard in
+# `went_on_by_itself` stays, and no case can reach it.
 
 [[plant]]
 name = "quota wait: Codex's refusal borrows the reset of a window far from spent, a week's wait for a minute's limit"
