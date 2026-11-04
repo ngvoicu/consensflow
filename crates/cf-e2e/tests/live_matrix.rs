@@ -205,6 +205,94 @@ mod tests {
             .contains("takes none by name: claude"));
     }
 
+    /// A test's reports folder: a fresh temporary one, kept where a person reads a real run's
+    /// evidence (`app/src-tauri/target/live-reports`, which CI uploads) when the test fails:
+    /// each window's last screen, the records, the ledger, the events and the daemon's last lines
+    /// of the run that went red. Two reds of the field6 pair on GitHub's Windows runner kept
+    /// nothing of their windows (CI runs 41787972093 and 41792519144, T-1226).
+    struct Reports(tempfile::TempDir);
+
+    impl Reports {
+        fn new() -> Self {
+            Self(tempfile::tempdir().unwrap())
+        }
+
+        fn path(&self) -> &Path {
+            self.0.path()
+        }
+    }
+
+    impl Drop for Reports {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                let kept = checkout::path(REPORTS);
+                match copied_below(self.0.path(), &kept) {
+                    Ok(names) => eprintln!(
+                        "--- the failed case's evidence is kept in {}: {}",
+                        kept.display(),
+                        names.join(", ")
+                    ),
+                    Err(failed) => {
+                        eprintln!("--- the failed case's evidence could not be kept: {failed}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Copies what `from` holds into `to`, folders and all: the names of what it held.
+    fn copied_below(from: &Path, to: &Path) -> std::io::Result<Vec<String>> {
+        std::fs::create_dir_all(to)?;
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let target = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copied_below(&entry.path(), &target)?;
+            } else {
+                std::fs::copy(entry.path(), &target)?;
+            }
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    /// A case that fails keeps its reports folder where CI uploads it from; one that passes
+    /// keeps nothing there.
+    #[test]
+    fn a_failed_case_keeps_its_evidence_where_ci_uploads_it_and_a_passed_one_does_not() {
+        let unique = format!("t1226-kept-{}", std::process::id());
+        let kept = checkout::path(REPORTS).join(&unique);
+        let write = |reports: &Reports, unique: &str| {
+            let folder = reports.path().join(unique).join("windows");
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join("p1-worker.txt"), "the worker's last screen\n").unwrap();
+        };
+        {
+            let reports = Reports::new();
+            write(&reports, &unique);
+        }
+        assert!(
+            !kept.exists(),
+            "a passed case keeps nothing: {}",
+            kept.display()
+        );
+        let failed = std::thread::spawn({
+            let unique = unique.clone();
+            move || {
+                let reports = Reports::new();
+                write(&reports, &unique);
+                panic!("the case failed");
+            }
+        })
+        .join();
+        assert!(failed.is_err());
+        let screen = std::fs::read_to_string(kept.join("windows").join("p1-worker.txt"));
+        std::fs::remove_dir_all(&kept).ok();
+        assert_eq!(screen.unwrap(), "the worker's last screen\n");
+    }
+
     /// `scenario` on a board whose five positions the rig's stand-in plays, its evidence in
     /// `reports`.
     fn on_stand_ins(scenario: Scenario, reports: &Path) -> Outcome {
@@ -252,7 +340,7 @@ mod tests {
     /// the oracle reads the ledger and the records, and every check holds. No harness is covered.
     #[test]
     fn the_matrix_passes_its_scenario_on_the_rigs_stand_ins() {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let outcome = on_stand_ins(Scenario::named("smoke").unwrap(), reports.path());
         let table = report::table(&outcome.checks);
         assert!(
@@ -308,7 +396,7 @@ mod tests {
     /// the refusal's code is the daemon's (`api.answered`), in a line that holds no token.
     #[test]
     fn a_cancelled_task_ends_the_run_at_once_and_the_products_refusal_is_read_by_its_code() {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let mut scenario = Scenario::named("cancel").unwrap();
         // A run that went on past the cancelled task would end at this deadline, red for
         // another reason, and soon.
@@ -353,7 +441,7 @@ mod tests {
     #[test]
     fn a_cancelled_task_whose_chief_asks_to_send_it_back_late_is_read_for_the_refusal_before_the_run_ends(
     ) {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let mut scenario = Scenario::named("cancel")
             .unwrap()
             .with_vars(&[("CF_TEST_CF_GAP_MS", "5000")], &[]);
@@ -381,7 +469,7 @@ mod tests {
     #[test]
     fn a_cancelled_task_whose_chief_never_asks_to_send_it_back_ends_the_run_with_its_turn_red_for_the_call(
     ) {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let mut scenario = Scenario::named("cancel").unwrap();
         scenario.deadline = std::time::Duration::from_secs(90);
         scenario.steps[0].stand_in = |_| {
@@ -413,7 +501,7 @@ mod tests {
     /// tasks bound again by what they are; the red's own folder is left as it was.
     #[test]
     fn a_red_runs_again_alone_from_its_manifest_with_the_same_seats() {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let mut scenario = Scenario::named("cancel").unwrap();
         scenario.deadline = std::time::Duration::from_secs(90);
         let red = on_stand_ins(scenario, reports.path());
@@ -491,7 +579,7 @@ mod tests {
     /// door, and sees go in. Nothing reaches the milestone, so the run ends red at its deadline.
     #[test]
     fn a_chiefs_question_in_its_record_is_answered_through_the_humans_door_and_goes_in() {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let mut scenario = Scenario::named("smoke").unwrap();
         scenario.steps.truncate(1);
         scenario.steps[0].stand_in = |_| "Reply with exactly: Which-one?".to_owned();
@@ -535,7 +623,7 @@ mod tests {
     /// LMX-08, the core flow, on the stand-ins: every check holds.
     #[test]
     fn the_core_flow_holds_on_the_stand_ins() {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let outcome = on_stand_ins(Scenario::named("core").unwrap(), reports.path());
         let table = report::table(&outcome.checks);
         assert!(
@@ -557,7 +645,7 @@ mod tests {
     /// one still red (none passes unseen: a known red that holds is a red of its own, until its
     /// mark goes when I-7 lands).
     fn holds_but_its_known_reds(name: &str) {
-        let reports = tempfile::tempdir().unwrap();
+        let reports = Reports::new();
         let scenario = Scenario::named(name).unwrap();
         let marks = scenario.known.len();
         let outcome = on_stand_ins(scenario, reports.path());

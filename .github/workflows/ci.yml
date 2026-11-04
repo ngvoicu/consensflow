@@ -124,6 +124,17 @@ jobs:
       - run: cargo test -p cf-bridge --features local
         timeout-minutes: 15
       - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
+      # What a failed live case kept: the rig's report of a case that could not close, and a
+      # live matrix case's evidence (each window's last screen, the records, the ledger, the
+      # events), which a matrix test keeps there only when it fails, a FLAKY case's first run
+      # too. Two field6 reds on Windows kept nothing to read (T-1226).
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-reports-checks-${{ matrix.os }}
+          path: app/src-tauri/target/live-reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
   workspace:
     strategy:
