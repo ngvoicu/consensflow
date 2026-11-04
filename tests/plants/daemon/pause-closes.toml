@@ -641,14 +641,62 @@ find = """            || !untouched_since(&snapshot, self.now() - asked)
 replace = """            || !untouched_since(&snapshot, self.now() - asked)"""
 
 [[plant]]
-name = "pause closes: a replay is received by the copy that never began"
+name = "pause closes: every reader of an arrival takes a replay for the copy that never began"
+meant = "a_replay_into_a_conversation_that_kept_its_first_copy_is_received_as_the_new_one"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        .map_or(0, |at| at + 1);"
+replace = "        .map_or(0, |_| 0);"
+
+# T-1199's round 5 (T-1229's P2): each reader of an arrival keeps the boundary, by itself.
+
+[[plant]]
+name = "pause closes: the window's look takes a replay for the copy that never began"
 meant = "a_replay_into_a_conversation_that_kept_its_first_copy_is_received_as_the_new_one"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "            .map_or(0, |at| at + 1);"
-replace = "            .map_or(0, |_| 0);"
+find = """            observed.items(),
+            arrival_boundary(&message),"""
+replace = """            observed.items(),
+            None,"""
+
+[[plant]]
+name = "pause closes: the record a switched window left takes a replay for the copy that never began"
+meant = "a_switched_window_receives_its_replay_by_the_new_copy_in_the_record_it_left"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = """                &found.items,
+                arrival_boundary(&message),"""
+replace = """                &found.items,
+                None,"""
+
+[[plant]]
+name = "pause closes: ConsensFlow's copy of the conversation takes a replay for the copy that never began"
+meant = "a_restart_takes_no_replay_for_the_copy_that_never_began_and_the_resume_gives_it_once"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = """            &copied,
+            before,"""
+replace = """            &copied,
+            None,"""
+
+[[plant]]
+name = "pause closes: the harness's own record read with no window takes a replay for the copy that never began"
+meant = "a_restart_takes_no_replay_for_the_copy_that_never_began_and_the_resume_gives_it_once"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "        Ok(paste_in(&reading, message, first.as_deref(), before))"
+replace = "        Ok(paste_in(&reading, message, first.as_deref(), None))"
 
 [[plant]]
 name = "pause closes: the relaunch keeps no mark of the copy that never began"

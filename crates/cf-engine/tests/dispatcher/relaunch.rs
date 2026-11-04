@@ -673,3 +673,259 @@ fn a_pause_while_the_host_shows_the_screen_keeps_the_window() {
     assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
     assert_eq!(tiers.task(2).task.state, "paused");
 }
+
+/// T-1229's probe: the conversation keeps the stalled copy through the relaunch, and the
+/// reopened harness takes nothing of its first message, so the replay is on its way and in no
+/// record but as the old copy. The brief's message and the old copy's item.
+fn replay_dropped(context: &Context, tiers: &Tiers) -> (i64, String) {
+    context.adapter.resumes_records.set(true);
+    let brief = stalled(context, tiers);
+    let old = context.message(brief).receipt["item"]
+        .as_str()
+        .expect("received once")
+        .to_owned();
+    context.adapter.never_begins.set(None);
+    context.host.exits_showing(Some(0), None, None);
+    context.adapter.forgets_first_messages.set(true);
+    let kills = context.host.killed().len();
+    for _ in 0..8 {
+        context.advance(5_000);
+        context.pass().unwrap();
+        if context.host.killed().len() > kills && context.message(brief).state == "delivering" {
+            break;
+        }
+    }
+    assert_eq!(
+        context.message(brief).state,
+        "delivering",
+        "the replay on its way"
+    );
+    assert_eq!(context.message(brief).receipt["before"], old.as_str());
+    (brief, old)
+}
+
+/// The replay was not taken for the old copy: not delivered by it, the task not at work.
+fn not_taken_for_the_old_copy(context: &Context, tiers: &Tiers, brief: i64, old: &str) {
+    let message = context.message(brief);
+    assert_ne!(message.receipt["item"], old, "{:?}", message.receipt);
+    assert_ne!(message.state, "delivered", "{:?}", message.receipt);
+    assert_ne!(tiers.task(2).task.state, "working");
+}
+
+/// m-`brief`'s copies in zeus's record after the old copy `old`, where the record holds it
+/// (a conversation kept), else all (one opened afresh).
+fn given_after(context: &Context, brief: i64, old: &str) -> usize {
+    let marker = format!("m-{brief} · T-2 · task");
+    let items = context.adapter.agent("zeus").items;
+    let from = items
+        .iter()
+        .rposition(|item| &*item.id == old)
+        .map_or(0, |at| at + 1);
+    items[from..]
+        .iter()
+        .filter(|item| item.role == Role::User && item.text.contains(&marker))
+        .count()
+}
+
+/// m-`brief`'s copies among zeus's record's items of the user's.
+fn copies(context: &Context, brief: i64) -> usize {
+    given(context, "zeus")
+        .iter()
+        .filter(|text| text.contains(&format!("m-{brief} · T-2 · task")))
+        .count()
+}
+
+#[test]
+fn a_restart_takes_no_replay_for_the_copy_that_never_began_and_the_resume_gives_it_once() {
+    // T-1229's probe, the restart (`settle_after_restart`): the old copy is in the
+    // conversation's copied transcript and in its harness's own record, before the boundary.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (brief, old) = replay_dropped(&context, &tiers);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    not_taken_for_the_old_copy(&context, &tiers, brief, &old);
+    assert_eq!(
+        context.message(brief).state,
+        "queued",
+        "back for another try"
+    );
+    context.adapter.forgets_first_messages.set(false);
+    after.resume_project(tiers.project.id).unwrap();
+    for _ in 0..6 {
+        after.pass().unwrap();
+        context.advance(3_000);
+    }
+    let message = context.message(brief);
+    assert_eq!(message.state, "delivered");
+    assert_ne!(
+        message.receipt["item"],
+        old.as_str(),
+        "the new copy's receipt"
+    );
+    assert_eq!(
+        given_after(&context, brief, &old),
+        1,
+        "given once after the old copy"
+    );
+}
+
+#[test]
+fn a_projects_close_takes_no_replay_for_the_copy_that_never_began_and_the_resume_gives_it_once() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (brief, old) = replay_dropped(&context, &tiers);
+    context.close_project(tiers.project.id).unwrap();
+    context.settle();
+    not_taken_for_the_old_copy(&context, &tiers, brief, &old);
+    assert_eq!(
+        context.message(brief).state,
+        "queued",
+        "back for the Resume"
+    );
+    context.adapter.forgets_first_messages.set(false);
+    context.resume_project(tiers.project.id).unwrap();
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.advance(3_000);
+    }
+    let message = context.message(brief);
+    assert_eq!(message.state, "delivered");
+    assert_ne!(
+        message.receipt["item"],
+        old.as_str(),
+        "the new copy's receipt"
+    );
+    assert_eq!(
+        given_after(&context, brief, &old),
+        1,
+        "given once after the old copy"
+    );
+}
+
+#[test]
+fn a_window_that_exits_with_its_relaunch_on_its_way_fails_that_launch_and_takes_no_old_copy() {
+    // A control: a member's launch whose window ends by itself in an open project fails its
+    // first message, reading no record (`settle_gone`, T-1076), so the old copy proves nothing.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (brief, old) = replay_dropped(&context, &tiers);
+    context.exit("zeus");
+    context.settle();
+    not_taken_for_the_old_copy(&context, &tiers, brief, &old);
+}
+
+/// The stalled brief taken back to be given again while its window is still up (the ledger's
+/// `relaunch_stalled`, which the engine asks only once the window is retired): the next pass
+/// pastes it into that window, an ordinary paste, which the record shows after the old copy.
+/// What reads its arrival before any look confirms it is the reader under test: the
+/// brief's message and the old copy's item.
+fn replayed_into_the_open_window(context: &Context, tiers: &Tiers) -> (i64, String) {
+    let brief = stalled(context, tiers);
+    let old = context.message(brief).receipt["item"]
+        .as_str()
+        .expect("received once")
+        .to_owned();
+    let session = tiers.assignee(2);
+    let participant = tiers.id(&session);
+    let stop = context
+        .ledger
+        .borrow()
+        .stop_of(participant)
+        .unwrap()
+        .expect("the stall's stop");
+    context
+        .ledger
+        .borrow_mut()
+        .relaunch_stalled(tiers.project.id, 2, participant, brief, stop.seq, &old)
+        .unwrap();
+    context.adapter.never_begins.set(None);
+    // The window comes to rest, so a paste goes in.
+    context.adapter.answer("zeus", "Ready.");
+    for _ in 0..6 {
+        context.pass().unwrap();
+        if copies(context, brief) == 2 {
+            break;
+        }
+        context.advance(3_000);
+    }
+    assert_eq!(copies(context, brief), 2, "pasted after the old copy");
+    assert_eq!(
+        context.message(brief).state,
+        "delivering",
+        "no look confirmed it yet"
+    );
+    (brief, old)
+}
+
+/// The replay that went in was received by its own copy, the one after the old.
+fn received_by_the_new_copy(context: &Context, brief: i64, old: &str) {
+    let message = context.message(brief);
+    assert_eq!(message.state, "delivered", "{:?}", message.receipt);
+    let new = message.receipt["item"].as_str().expect("its receipt");
+    assert_ne!(new, old, "the new copy's receipt, not the old one's");
+}
+
+#[test]
+fn a_window_that_exits_with_its_replay_pasted_receives_it_by_the_new_copy() {
+    // The window ends before a look confirmed the paste: its end reads the copied transcript,
+    // then its harness's own record (`in_flight::arrived`), after the boundary.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (brief, old) = replayed_into_the_open_window(&context, &tiers);
+    context.exit("zeus");
+    context.settle();
+    received_by_the_new_copy(&context, brief, &old);
+}
+
+#[test]
+fn a_restart_with_a_replay_pasted_receives_it_by_the_new_copy() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (brief, old) = replayed_into_the_open_window(&context, &tiers);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    received_by_the_new_copy(&context, brief, &old);
+}
+
+#[test]
+fn a_switched_window_receives_its_replay_by_the_new_copy_in_the_record_it_left() {
+    // The paste waits in its harness's queue (Devin's, behind a turn) when the human switches
+    // the window to another conversation; the harness runs it in the conversation it left,
+    // whose record holds the old copy before it (`watch_left`).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (brief, old) = replayed_into_the_open_window(&context, &tiers);
+    let marker = format!("m-{brief} · T-2 · task");
+    let queued = context.adapter.with("zeus", |agent| {
+        let at = agent
+            .items
+            .iter()
+            .rposition(|item| item.role == Role::User && item.text.contains(&marker))
+            .expect("the replay");
+        agent.items.remove(at)
+    });
+    let left = native_of(&context, tiers.id(&tiers.assignee(2))).expect("its conversation");
+    context.adapter.switch_to("zeus", "native-elsewhere");
+    context.pass().unwrap();
+    context.settle();
+    assert_eq!(
+        context.message(brief).state,
+        "delivering",
+        "not in the look before the switch"
+    );
+    context.adapter.with("zeus", |agent| {
+        agent
+            .records
+            .get_mut(&left)
+            .expect("the record it left")
+            .push(queued)
+    });
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.settle();
+    }
+    received_by_the_new_copy(&context, brief, &old);
+}
