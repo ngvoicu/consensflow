@@ -949,7 +949,9 @@ mod tests {
         assert_eq!(ran(&bin.join("muse")), live, "live");
     }
 
-    /// The rig's Muse, run as a window runs it, with a program of 0.6 s in Muse's place.
+    /// The rig's Muse, run as a window runs it, with a program of 2 s in Muse's place: long
+    /// enough that a slow machine's repaints come many times (GitHub's macOS runner made 6 in
+    /// 0.6 s at 30 ms, CI run 41925722174).
     #[cfg(unix)]
     fn the_rigs_muse_run(repaint_ms: Option<&str>) -> crate::process::Ran {
         let dir = tempfile::tempdir().unwrap();
@@ -958,7 +960,7 @@ mod tests {
             version: "9.9.9".to_owned(),
             stand_in: None,
         };
-        files::write_executable(&install.binary, "#!/bin/sh\nsleep 0.6\n").unwrap();
+        files::write_executable(&install.binary, "#!/bin/sh\nsleep 2\n").unwrap();
         super::write_stand_in(
             dir.path(),
             &install,
@@ -987,7 +989,7 @@ mod tests {
             .stdout
             .matches("\x1b[39m\x1b[49m\x1b[59m\x1b[0m")
             .count();
-        assert!(times >= 10, "{times} repaints in 0.6 s at 30 ms: {ran}");
+        assert!(times >= 10, "{times} repaints in 2 s at 30 ms: {ran}");
         assert!(!ran.timed_out, "{ran}");
         assert!(!ran.held, "it went on after Muse was gone: {ran}");
         let ran = the_rigs_muse_run(None);
