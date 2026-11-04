@@ -130,7 +130,7 @@ fn a_look_names_the_record_it_read() {
 /// `no-waiting-for-input-marker`: a pane waiting on its own question dialog showed Working for
 /// ever. `dialog_waiting` is what says it waits, with its reason, for the harnesses whose record
 /// shows the dialog open (the adapters' own cases: `reads_its_own_question_dialog_still_open_as_
-/// waiting` of Devin and OpenCode, and Claude's `resumed`).
+/// waiting` of Devin's, and Claude's `resumed`).
 #[test]
 fn a_dialog_of_its_own_still_open_is_a_window_waiting_and_nothing_else_is() {
     let mut record = Record::new();

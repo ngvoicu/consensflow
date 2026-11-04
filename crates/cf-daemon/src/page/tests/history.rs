@@ -731,5 +731,8 @@ fn a_page_of_a_list_is_at_most_half_the_frame_the_bridge_carries() {
     // bound raised past the frame passes them as it passes itself. It is half the frame:
     // what the page reads beside a list (a refresh asks for several) stays clear of it.
     let frame = cf_bridge::local::DEFAULT_MAX_FRAME_BYTES;
-    assert!(PAGE_BYTES * 2 <= frame, "{PAGE_BYTES} bytes a page, {frame} a frame");
+    assert!(
+        PAGE_BYTES * 2 <= frame,
+        "{PAGE_BYTES} bytes a page, {frame} a frame"
+    );
 }
