@@ -80,8 +80,10 @@ runs = ["ledger-pause-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    if harness_gone {\n"
-replace = "    if false {\n"
+find = '''fn way_on(number: i64, way: Way) -> String {
+    match way {'''
+replace = '''fn way_on(number: i64, way: Way) -> String {
+    match if way == Way::Gone { Way::Resume } else { way } {'''
 
 [[plant]]
 name = "harness gone: a pause note of a gone harness is not read back"
@@ -139,3 +141,15 @@ find = '''            held,
             named.way == Way::Gone,'''
 replace = '''            held,
             false,'''
+
+# The stall's way is `Way::of_stall` since T-1208 round 2 (a note's way is an enum, not a flag): the
+# unit tests of `pauses` build `Way::Gone` themselves, so this one is run through the engine.
+[[plant]]
+name = "harness gone: a stall on a gone harness is given the way of a window that comes back"
+meant = "words_told_to_the_window_of_a_task_paused_on_a_harness_with_no_adapter_are_said_to_reach_nothing_not_to_wait_for_a_resume"
+runs = ["engine-no-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "        if harness_gone {\n            Way::Gone"
+replace = "        if false {\n            Way::Gone"

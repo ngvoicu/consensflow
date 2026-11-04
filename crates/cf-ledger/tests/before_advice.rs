@@ -327,6 +327,65 @@ fn a_follow_up_is_not_told_to_edit_its_needs_which_it_cannot_but_to_pause_and_re
 }
 
 #[test]
+fn a_task_given_by_name_is_not_told_to_edit_its_needs_which_it_cannot_but_to_pause_and_resume_it() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    // A task for zeus by name, with no tier to wait on the board in: queued for his window.
+    let by_name = ledger
+        .create_task(
+            1,
+            &NewTask {
+                from: "chief".into(),
+                to: Some("zeus".into()),
+                body: "Review".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("a task by name")
+        .task
+        .number;
+    assert_eq!(state(&ledger, by_name), "queued");
+
+    let refusal = refused_before(&mut ledger, by_name as u64).to_string();
+    assert!(
+        refusal.contains("pause T-1 now (cf task pause T-1)")
+            && refusal.contains("cf task resume T-1")
+            && !refusal.contains("cf task edit"),
+        "{refusal}"
+    );
+    // The edit the advice for a tier names is refused for it, in the ledger's words ...
+    let fix = ledger
+        .create_task(1, &task("Fix first"))
+        .expect("the new task")
+        .task
+        .number;
+    let edit = ledger
+        .edit_task_with(
+            1,
+            by_name,
+            "chief",
+            &TaskEdit {
+                needs: Some(Links::Change {
+                    add: vec![fix],
+                    remove: Vec::new(),
+                }),
+                ..TaskEdit::default()
+            },
+        )
+        .expect_err("a task given by name has no pool to wait on the board in");
+    assert_eq!(edit.code(), Some("invalid-transition"));
+    assert!(edit.to_string().contains("given by name"), "{edit}");
+    // ... and what the refusal names works.
+    ledger
+        .pause_task(1, by_name, Some("chief"), None)
+        .expect("the pause the refusal named works");
+    ledger
+        .resume_task(1, by_name, Some("chief"), "The fix is in: go on.")
+        .expect("the resume the refusal named works");
+    assert_eq!(state(&ledger, by_name), "queued");
+}
+
+#[test]
 fn the_chiefs_own_step_is_told_to_finish_it_later_or_add_it_again_and_both_work() {
     let dir = tempfile::tempdir().expect("a folder");
     let mut ledger = ledger_in(&dir);
