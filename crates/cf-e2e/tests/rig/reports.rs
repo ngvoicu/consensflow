@@ -1139,8 +1139,8 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     let uploads = steps_with(&steps, "uses: actions/upload-artifact@");
     assert_eq!(
         uploads.len(),
-        2,
-        "one upload for the temp folder's reports and one for the live rigs': {uploads:?}"
+        3,
+        "one upload for the temp folder's reports, one for the live rigs' and one for the checks job's live cases: {uploads:?}"
     );
     let upload_of = |path: &str| {
         uploads
@@ -1184,6 +1184,27 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
             );
         }
     }
+
+    // The checks job's live cases keep a failed rig's report and a failed matrix case's evidence
+    // (each window's screen and input, the stand-ins' reads, the records): uploaded whenever there
+    // is any, as a FLAKY case's first run passes the job (T-1226).
+    let checks_upload = upload_of("name: live-reports-checks-${{ matrix.os }}")?;
+    for line in [
+        "if: always()",
+        "if-no-files-found: ignore",
+        "retention-days: 7",
+        "app/src-tauri/target/live-reports/",
+        "evals/reports/live-matrix/",
+    ] {
+        assert!(
+            checks_upload.iter().any(|have| have == line),
+            "no `{line}`: {checks_upload:?}"
+        );
+    }
+    assert!(
+        checks_upload.iter().any(|line| pinned.is_match(line)),
+        "{checks_upload:?}"
+    );
 
     // The folder the step names is the one the rig keeps its reports in: Node's temp
     // folder, as the step asks it, is the Rust's, where there is a Node to ask.

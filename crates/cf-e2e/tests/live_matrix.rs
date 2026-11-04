@@ -448,6 +448,17 @@ mod tests {
                 .is_some_and(|writes| !writes.is_empty()),
             "the human's ask is among its writes: {input:#}"
         );
+        // And what the stand-ins read of their terminals: the chief read the human's paste.
+        let traces: Vec<String> = std::fs::read_dir(outcome.evidence.folder.join("stand-ins"))
+            .unwrap()
+            .filter_map(|entry| std::fs::read_to_string(entry.ok()?.path()).ok())
+            .collect();
+        assert!(
+            traces.iter().any(|trace| trace
+                .lines()
+                .any(|line| line.contains("\"pasteStart\":true"))),
+            "{traces:#?}"
+        );
         let events = std::fs::read_to_string(outcome.evidence.folder.join("events.jsonl")).unwrap();
         let answered: Vec<&str> = events
             .lines()

@@ -321,7 +321,11 @@ fn run(
     }
     // Its terminal is read from the start, raw, as a TUI reads it: the question
     // before the prompt takes its keys from the same reader.
-    let mut keys = Keys::start();
+    let mut keys = Keys::start_tracing(Some(
+        Path::new(&config)
+            .join("sessions")
+            .join(format!("input-{pid}.jsonl")),
+    ));
     let answer = trust::ask(Path::new(&config), asking, &mut keys, || {
         if !grows {
             return Ok(());
