@@ -447,7 +447,9 @@ mod tests {
     /// no longer lands the integrations. The programs the step names are found by
     /// running its own words over the folder, so a suite added there, or a name its
     /// pattern misses, is held here; and it asks for no ignored case, which only the
-    /// `live` command runs on the real harnesses. Run where `sh` is (the words are the
+    /// `live` command runs on the real harnesses. The live matrix is the one suite it leaves
+    /// out: it has a step of its own ([`ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side`]),
+    /// and a suite named by both would run twice. Run where `sh` is (the words are the
     /// workflow's bash); Windows reads the same file.
     #[cfg(unix)]
     #[test]
@@ -500,11 +502,75 @@ mod tests {
             .filter(|name| name.starts_with("live_"))
             .collect();
         suites.sort_unstable();
+        assert!(
+            suites.iter().any(|suite| suite == MATRIX),
+            "crates/cf-e2e/tests holds the live matrix"
+        );
+        suites.retain(|suite| suite != MATRIX);
         assert!(!suites.is_empty(), "crates/cf-e2e/tests holds live suites");
         assert_eq!(
             programs, suites,
-            "the step names every live suite, and only those"
+            "the step names every live suite but the matrix, and only those"
         );
+    }
+
+    /// The live matrix's program, which CI runs in a step of its own.
+    const MATRIX: &str = "live_matrix";
+
+    /// The live matrix on the rig's stand-ins has a step of its own in CI's checks job, on both
+    /// platforms, with its own limit (T-1184): its cases are the longest of the live suites
+    /// (963 s on the Mac and 1,001 s on Windows, one at a time), which the general step's limit
+    /// would not hold. Its cases take turns in one process (`cf_e2e::serial`), so the step runs
+    /// them under nextest, each a process of its own and a board of its own (a home, a daemon,
+    /// its ports), several at once; never the ignored case, which is the real harnesses'.
+    #[test]
+    fn ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side() {
+        let jobs = jobs(&workflow());
+        let (_, checks) = jobs
+            .iter()
+            .find(|(id, _)| id == "checks")
+            .expect("ci.yml has no checks job");
+        assert_eq!(listed(checks, "os"), ["macos-latest", "windows-latest"]);
+        let program = format!("--test {MATRIX}");
+        let named: Vec<usize> = (0..checks.len())
+            .filter(|at| checks[*at].contains(&program))
+            .collect();
+        let [at] = named[..] else {
+            panic!("one line of the checks job names {program}, not {named:?}: {checks:?}")
+        };
+        let run = checks[at]
+            .strip_prefix("run: ")
+            .unwrap_or_else(|| panic!("the matrix's step is one command: {}", checks[at]));
+        let words: Vec<&str> = run.split_whitespace().collect();
+        assert_eq!(
+            words[..5],
+            ["cargo", "nextest", "run", "-p", "cf-e2e"],
+            "nextest runs the matrix, a process a case: {run}"
+        );
+        assert!(
+            words.contains(&"--no-fail-fast") && !run.contains("ignored"),
+            "every case runs, and no live one: {run}"
+        );
+        let threads = words
+            .iter()
+            .position(|word| *word == "--test-threads")
+            .and_then(|at| words.get(at + 1)?.parse::<usize>().ok())
+            .unwrap_or_else(|| panic!("the step bounds how many cases run at once: {run}"));
+        assert!(
+            (2..=8).contains(&threads),
+            "the cases run side by side, a few at once: {run}"
+        );
+        assert!(
+            checks[at - 1] == "- name: The live matrix on the stand-ins"
+                && checks[at + 1].starts_with("timeout-minutes: "),
+            "the matrix's step is named and has a limit of its own: {:?}",
+            &checks[at - 1..=at + 1]
+        );
+        let installed = checks
+            .iter()
+            .position(|line| line.starts_with("- run: cargo install cargo-nextest "))
+            .expect("the checks job installs nextest");
+        assert!(installed < at, "nextest is installed before the step");
     }
 
     /// A suite run with the shard's variable set is that shard: a shard it cannot be is

@@ -20,7 +20,12 @@
 //! - A line `CF <words>` runs any other `cf` with those words as they stand
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
-//!   verbs, as it would type them.
+//!   verbs, as it would type them. Each such line of a message is run, in order
+//!   (a chief that accepts three tasks in one turn: the matrix's stand-in chief).
+//! - A line `WRITE <file> :: <text>` is a worker that changes a file: it writes the
+//!   text (`\n` in it a line break, and one at its end) to the file, a path below the
+//!   window's folder, and answers `wrote <file>` (the matrix's stand-in worker, whose
+//!   change the scenario's checker reads).
 //! - A result delivered to the chief's window started with `CF_TEST_ACCEPT_RESULTS`
 //!   set is accepted, `cf task accept` of the task its envelope (its first line, the
 //!   result's header) names, and nothing else in it is done: a chief that takes its
@@ -86,6 +91,10 @@
 //!   message that calls a tool, before its answer, and `CLAUDE-JOB [--silent] <seconds>
 //!   <words> :: <report>` a turn that starts a job in the background as Claude Code does,
 //!   whose end wakes the window with a turn that answers the report (`steps` says how).
+//! - A line `MODEL-BUSY` is a turn its provider refuses for a moment, its model overloaded:
+//!   Claude's 529 record, as fake Codex's `MODEL-BUSY` is its `server_overloaded`; a line
+//!   `MODEL-GONE` one it refuses for good, Claude's 400 record. Only the message that says it
+//!   is refused: what comes after it is answered.
 //! - A task saying `QUOTA-OUT` is refused with a 429, Claude's way, by the
 //!   window whose participant `CF_TEST_QUOTA_OUT` names, for as long as the
 //!   file `CF_TEST_QUOTA_FILE` names is there when it is set (taking it away is
@@ -187,6 +196,10 @@ pub enum Reply {
     Text(String),
     /// The provider refuses it: Claude writes the refusal as a record.
     Refused,
+    /// The provider refuses it with an error of its API, which Claude writes as a record: a
+    /// 529 for a model overloaded for a moment (`MODEL-BUSY`), a 400 for one it refuses for
+    /// good (`MODEL-GONE`).
+    ApiError(u16),
     /// An Escape stopped the turn before it answered.
     Stopped,
     /// The turn works through these steps, a pause after each (an Escape in one of them
@@ -198,15 +211,35 @@ pub enum Reply {
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
 /// ConsensFlow installed there. What it printed and said, trimmed.
 fn run_cf(words: &[String]) -> String {
-    match Run::new("cf")
-        .args(words)
-        .inheriting_env()
-        .unlimited()
-        .run()
-    {
+    let path = own_var("PATH").unwrap_or_default();
+    let extensions = own_var("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned());
+    let cf = first_on_path("cf", &path, &extensions).unwrap_or_else(|| "cf".into());
+    match Run::new(cf).args(words).inheriting_env().unlimited().run() {
         Ok(ran) => ran.output().trim().to_owned(),
         Err(failed) => failed.to_string(),
     }
+}
+
+/// The first `name` in the folders of `path`, as a shell finds a command: on Windows with each
+/// of the extensions `extensions` names (`PATHEXT`). A program started by its bare name on
+/// Windows is looked for first in the folder of the program that starts it, which no shell
+/// does: this stand-in's is cargo's `target\debug`, where another tree's build of `cf` may be
+/// (zeewin2, T-1186: a3-1's `cf`, with T-1110's fix, ran for a tree without it).
+fn first_on_path(name: &str, path: &str, extensions: &str) -> Option<std::path::PathBuf> {
+    let extensions: Vec<&str> = if cfg!(windows) {
+        extensions
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .collect()
+    } else {
+        vec![""]
+    };
+    std::env::split_paths(path).find_map(|folder| {
+        extensions
+            .iter()
+            .map(|extension| folder.join(format!("{name}{extension}")))
+            .find(|file| file.is_file())
+    })
 }
 
 /// Claude's question tool: the settings' PreToolUse hook answers, or the
@@ -351,6 +384,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
     static SAVED: OnceLock<Regex> = OnceLock::new();
+    static WRITE: OnceLock<Regex> = OnceLock::new();
     static LONG: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
     static SAY: OnceLock<Regex> = OnceLock::new();
@@ -557,19 +591,26 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             dispatched.join(" | ")
         )));
     }
-    if let Some(verb) = pattern::once(&VERB, r"(?m)^CF (.+)$").captures(text) {
-        let mut parts = verb[1].split(" :: ");
-        let mut words: Vec<String> = parts
-            .next()
-            .unwrap_or_default()
-            .split(' ')
-            .map(str::to_owned)
-            .collect();
-        let said: Vec<&str> = parts.collect();
-        if !said.is_empty() {
-            words.push(said.join(" :: "));
-        }
-        return Ok(Reply::Text(format!("ran cf: {}", run_cf(&words))));
+    let verbs: Vec<String> = verbs(text, pattern::once(&VERB, r"(?m)^CF (.+)$"))
+        .iter()
+        .map(|words| run_cf(words))
+        .collect();
+    if !verbs.is_empty() {
+        return Ok(Reply::Text(format!("ran cf: {}", verbs.join(" | "))));
+    }
+    if let Some(write) = pattern::once(&WRITE, r"(?m)^WRITE (\S+) :: (.*)$").captures(text) {
+        let folder = std::env::current_dir().map_err(|failed| failed.to_string())?;
+        return written_in(&folder, &write[1], &write[2]).map(Reply::Text);
+    }
+    // A model refused for a moment (a 529, Anthropic's overloaded), as fake Codex's
+    // `MODEL-BUSY` is its server_overloaded: the live matrix's field report 4 (T-1112).
+    if text.lines().any(|line| line.trim() == "MODEL-BUSY") {
+        return Ok(Reply::ApiError(529));
+    }
+    // A model its provider refuses for good (a 400): a turn that fails however it is waited
+    // for, the live matrix's field report 5 (T-1113).
+    if text.lines().any(|line| line.trim() == "MODEL-GONE") {
+        return Ok(Reply::ApiError(400));
     }
     if refused(text, window, pattern::once(&REFUSED, "QUOTA-OUT")) {
         return Ok(Reply::Refused);
@@ -624,6 +665,48 @@ fn saved_in(folder: &Path, names: &str, words: &str) -> Result<String, String> {
     }
     lines.push(words.to_owned());
     Ok(lines.join("\n"))
+}
+
+/// A worker's change: `text` (each `\n` in it a line break, and a line break at its end)
+/// written to `name`, a path below `folder`, which is answered as `wrote <name>`. A name
+/// that leaves the folder (absolute, or with `..`) is refused: the stand-in writes only
+/// in the project it works in.
+fn written_in(folder: &Path, name: &str, text: &str) -> Result<String, String> {
+    let relative = Path::new(name);
+    let inside = relative
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)));
+    if !inside {
+        return Err(format!(
+            "WRITE {name}: not a path below the window's folder"
+        ));
+    }
+    let path = folder.join(relative);
+    std::fs::write(&path, format!("{}\n", text.replace("\\n", "\n")))
+        .map_err(|failed| format!("WRITE {name}: {failed}"))?;
+    Ok(format!("wrote {name}"))
+}
+
+/// The words of `cf` each `CF` line of `text` asks for, in the order of the lines
+/// (`line` is the pattern of one): its words as they stand, and what follows a ` :: `
+/// as one last word, spaces and all.
+fn verbs(text: &str, line: &Regex) -> Vec<Vec<String>> {
+    let each = line.captures_iter(text);
+    each.map(|verb| {
+        let mut parts = verb[1].split(" :: ");
+        let mut words: Vec<String> = parts
+            .next()
+            .unwrap_or_default()
+            .split(' ')
+            .map(str::to_owned)
+            .collect();
+        let said: Vec<&str> = parts.collect();
+        if !said.is_empty() {
+            words.push(said.join(" :: "));
+        }
+        words
+    })
+    .collect()
 }
 
 /// The words of `cf task add` each `DISPATCH` line of `text` asks for, in the
@@ -721,6 +804,27 @@ mod tests {
     }
 
     #[test]
+    fn a_message_with_a_line_model_busy_is_refused_for_a_moment_and_the_next_is_answered() {
+        let busy = reply_to(
+            "[ConsensFlow m-4 \u{b7} T-1 \u{b7} task from @chief]\nMODEL-BUSY",
+            &window(),
+        );
+        assert_eq!(busy, Ok(Reply::ApiError(529)));
+        let gone = reply_to(
+            "[ConsensFlow m-4 \u{b7} T-1 \u{b7} task from @chief]\nMODEL-GONE",
+            &window(),
+        );
+        assert_eq!(gone, Ok(Reply::ApiError(400)));
+        let next = reply_to("Resumed: Go on where you stopped.", &window());
+        assert!(matches!(next, Ok(Reply::Text(_))), "{next:?}");
+        // Words that only name it are no refusal.
+        assert!(matches!(
+            reply_to("Say MODEL-BUSY to me", &window()),
+            Ok(Reply::Text(_))
+        ));
+    }
+
+    #[test]
     fn a_message_that_asks_for_a_word_is_answered_with_it() {
         let reply = reply_to("Reply with exactly: WORKER_OK", &window());
         assert_eq!(text(reply), "WORKER_OK");
@@ -764,6 +868,43 @@ mod tests {
         assert!(saved_in(&folder.path().join("none"), "a.png", "x")
             .unwrap_err()
             .starts_with("SAVED a.png: "));
+    }
+
+    #[test]
+    fn a_worker_writes_its_change_below_its_folder_and_answers_the_file() {
+        let folder = tempfile::tempdir().unwrap();
+        assert_eq!(
+            written_in(folder.path(), "greet.cjs", "a();\\nb();").unwrap(),
+            "wrote greet.cjs"
+        );
+        assert_eq!(
+            std::fs::read_to_string(folder.path().join("greet.cjs")).unwrap(),
+            "a();\nb();\n"
+        );
+        for outside in ["../x.cjs", "/tmp/x.cjs", "a/../../x.cjs"] {
+            let refused = written_in(folder.path(), outside, "x").unwrap_err();
+            assert!(
+                refused.starts_with(&format!("WRITE {outside}: ")),
+                "{refused}"
+            );
+        }
+        assert!(!folder.path().join("../x.cjs").exists());
+    }
+
+    #[test]
+    fn each_cf_line_of_a_message_is_run_in_order_with_its_last_word_whole() {
+        let line = Regex::new(r"(?m)^CF (.+)$").unwrap();
+        assert_eq!(
+            verbs(
+                "CF task accept T-1\nnoise\nCF tell T-2 :: Stop now :: please",
+                &line
+            ),
+            [
+                vec!["task", "accept", "T-1"],
+                vec!["tell", "T-2", "Stop now :: please"],
+            ]
+        );
+        assert!(verbs("no verb here", &line).is_empty());
     }
 
     #[test]
@@ -818,6 +959,32 @@ mod tests {
             ["Step 1 of 3", "Step 2 of 3", "Step 3 of 3"]
         );
         assert_eq!(answer, "Reply with exactly: REPORT");
+    }
+
+    /// `cf` is the first on the window's `PATH`, as a shell finds it, and none elsewhere is.
+    #[test]
+    fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
+        let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let file = |folder: &tempfile::TempDir| {
+            folder
+                .path()
+                .join(if cfg!(windows) { "cf.EXE" } else { "cf" })
+        };
+        std::fs::write(file(&second), "").unwrap();
+        let path = std::env::join_paths([first.path(), second.path()]).unwrap();
+        let path = path.to_str().unwrap();
+        let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
+        assert_eq!(
+            found.canonicalize().unwrap(),
+            file(&second).canonicalize().unwrap()
+        );
+        std::fs::write(file(&first), "").unwrap();
+        let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
+        assert_eq!(
+            found.canonicalize().unwrap(),
+            file(&first).canonicalize().unwrap()
+        );
+        assert_eq!(first_on_path("cf", "", ".EXE"), None);
     }
 
     #[test]

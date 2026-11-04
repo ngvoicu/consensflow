@@ -208,3 +208,96 @@ async fn a_body_is_read_only_where_a_route_reads_one() {
         );
     }
 }
+
+/// The context of `scene`, with the tooling's look at the API switched on or off.
+fn tooling(scene: &Scene, on: bool) -> Rc<context::Context> {
+    let given = &scene.context;
+    Rc::new(context::Context {
+        ledger: Rc::clone(&given.ledger),
+        credentials: Rc::clone(&given.credentials),
+        kick: Rc::clone(&given.kick),
+        finish: Rc::clone(&given.finish),
+        closing: given.closing.clone(),
+        roster: Rc::clone(&given.roster),
+        log: Rc::clone(&given.log),
+        trace: Rc::clone(&given.trace),
+        tooling_calls: on,
+    })
+}
+
+/// The lines of the trace of `context` that are the tooling's look at the API.
+fn answered_lines(context: &context::Context) -> Vec<(String, Value)> {
+    std::fs::read_to_string(context.trace.file())
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let parsed: Value = serde_json::from_str(line).ok()?;
+            (parsed["kind"] == calls::ANSWERED).then(|| (line.to_owned(), parsed))
+        })
+        .collect()
+}
+
+/// T-1152 (T-1133's design, section 2): a test that seats a real chief tells what the chief's
+/// own `cf` asked and how the daemon answered it, a refusal's code among it, though `cf` says a
+/// refusal in words. Only a daemon the tooling started so writes it, and never the token.
+#[tokio::test]
+async fn a_tooling_daemon_writes_each_window_request_it_answered_with_its_refusal_code_and_no_token(
+) {
+    let scene = scene();
+    let target = format!("/api/questions/{}", scene.question.id);
+    let on = tooling(&scene, true);
+    for (token, status) in [(&scene.chief, 403), (&scene.zeus, 200)] {
+        let answered = handle(
+            &on,
+            &screens(),
+            request(Method::GET, &target, Some(token), ""),
+        )
+        .await;
+        assert_eq!(said(answered).0, status);
+    }
+    // A request with no token is nobody's, and is not written.
+    let _ = handle(&on, &screens(), request(Method::GET, &target, None, "")).await;
+    let lines = answered_lines(&on);
+    let data: Vec<&Value> = lines.iter().map(|(_, parsed)| &parsed["data"]).collect();
+    assert_eq!(
+        data,
+        [
+            &json!({ "participant": "chief", "role": "chief", "method": "GET", "path": target, "status": 403, "error": "not-your-question", "message": format!("m-{} was asked by @zeus", scene.question.id) }),
+            &json!({ "participant": "zeus", "role": "worker", "method": "GET", "path": target, "status": 200, "error": null, "message": null }),
+        ]
+    );
+    for (line, parsed) in &lines {
+        assert_eq!(parsed["project"], scene.project.id);
+        assert!(parsed["at"].is_string(), "{line}");
+        assert!(
+            !line.contains(scene.chief.as_str()) && !line.contains(scene.zeus.as_str()),
+            "{line}"
+        );
+    }
+
+    // A daemon the tooling did not start writes none.
+    let quiet = crate::testing::scene();
+    let off = tooling(&quiet, false);
+    let _ = handle(
+        &off,
+        &screens(),
+        request(Method::GET, &target, Some(&quiet.chief), ""),
+    )
+    .await;
+    assert!(answered_lines(&off).is_empty());
+}
+
+#[test]
+fn the_tooling_look_is_switched_on_by_its_variable_set_to_one_and_by_nothing_else() {
+    use std::ffi::OsStr;
+    assert_eq!(calls::TOOLING_API_CALLS, "CONSENSFLOW_TOOLING_API_CALLS");
+    assert!(calls::switched_on(Some(OsStr::new("1"))));
+    for other in [
+        None,
+        Some(OsStr::new("")),
+        Some(OsStr::new("0")),
+        Some(OsStr::new("yes")),
+    ] {
+        assert!(!calls::switched_on(other), "{other:?}");
+    }
+}

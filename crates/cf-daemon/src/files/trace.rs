@@ -2,7 +2,9 @@
 //! per change of a window's activity and per error nobody caught, appended as
 //! it happens, for whoever watches the daemon from outside (a tail, a reviewer
 //! reading along). The ledger's own log stays the record; this is its running
-//! copy. Append-only, one previous file kept once it passes its limit, as the
+//! copy. A daemon a test starts with `CONSENSFLOW_TOOLING_API_CALLS=1` also writes an
+//! `api.answered` line for each request a window's token answered ([`crate::api::calls`]): the
+//! app never sets it. Append-only, one previous file kept once it passes its limit, as the
 //! daemon's log does, and never a reason for the daemon to fail.
 //! [`Trace::forget`] drops a deleted project's lines from both files: a project
 //! deleted leaves no trace but the line that says it was.
@@ -69,6 +71,20 @@ impl Trace {
                 project: event.project,
                 kind: event.kind.clone(),
                 data: event.data.clone(),
+            },
+        });
+    }
+
+    /// A line of the tooling's own (`kind`, of `project`, with `data`) at the time now: what
+    /// only a test switches on ([`crate::api::calls`]), in the shape of an event's line.
+    pub fn tooling(&self, project: i64, kind: &str, data: Value) {
+        let at = iso(self.clock.borrow_mut().now_ms());
+        self.write(&TraceLine {
+            at,
+            what: Traced::Event {
+                project,
+                kind: kind.to_owned(),
+                data,
             },
         });
     }

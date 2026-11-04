@@ -558,11 +558,19 @@ fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
         .read_to_end(&mut bytes)
         .map_err(|cause| Failure::Failed(format!("cannot read standard input ({cause})")))?;
     let text = String::from_utf8_lossy(&bytes);
+    let text = without_byte_order_mark(&text);
     let text = text
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(&text);
+        .unwrap_or(text);
     Ok(text.to_owned())
+}
+
+/// `text` without the byte order mark it may begin with, which is no part of the words: Windows
+/// PowerShell 5.1 puts one before what it pipes to a program, and Notepad at the start of a file
+/// it saves as UTF-8.
+pub(super) fn without_byte_order_mark(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
 /// `{ body }`, the request most commands send.

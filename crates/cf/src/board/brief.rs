@@ -23,7 +23,7 @@ use std::path::Path;
 use cf_daemon::api::body::MAX_JSON_BYTES;
 
 use super::words::{quoted, Split};
-use super::{text_of, Failure};
+use super::{text_of, without_byte_order_mark, Failure};
 
 /// The flag that names a file to read the words from.
 pub const FILE: &str = "--file";
@@ -84,10 +84,11 @@ pub fn brief_of(
     let bytes =
         read_brief(path).map_err(|why| Failure::Failed(format!("cannot read {shown}{why}")))?;
     let text = String::from_utf8_lossy(&bytes);
+    let text = without_byte_order_mark(&text);
     let text = text
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(&text);
+        .unwrap_or(text);
     Ok(text.to_owned())
 }
 
