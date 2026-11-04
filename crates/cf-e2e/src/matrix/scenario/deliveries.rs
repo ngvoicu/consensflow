@@ -399,7 +399,7 @@ pub fn deliveries() -> Vec<Scenario> {
                     .count();
                 vec![
                     Check::new("A", "its window asked the chief one question", asked.len() == 1, format!("{} question(s)", asked.len())),
-                    Check::new("chief", "the chief answered it with cf answer while it waited", answers == 1, format!("{answers} answer call(s)")),
+                    Check::new("chief", "the chief answered it with `cf answer` while it waited", answers == 1, format!("{answers} answer call(s)")),
                     Check::new(
                         "A",
                         "the question it answered was never typed into the chief's window",
