@@ -45,8 +45,8 @@ use cf_proto::specs::Variant;
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, FirstMessage, Held, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Readiness, Records, Skill, Used, Window, Work,
+    Adapter, Admission, Agent, FirstMessage, Held, Launch, LaunchId, Observed, Over, Pane,
+    PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -322,6 +322,10 @@ impl Adapter for CodexAdapter {
             folder,
             paths::global_specmint(env, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Codex, &self.services.env, Some(*specs), id).map(|_| ())
     }
 }
 

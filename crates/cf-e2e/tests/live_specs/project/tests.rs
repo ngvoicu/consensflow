@@ -50,6 +50,7 @@ fn the_roster_is_the_chief_s_harness_on_its_cheap_model_and_the_stand_in_worker_
 #[test]
 fn the_page_is_asked_to_turn_specs_on_with_the_folder_and_the_variant_and_says_so_back() {
     let settings = Settings {
+        apply: Apply::default(),
         folder: "docs/specs".to_owned(),
         variant: Chosen {
             name: "tdd",
@@ -65,4 +66,15 @@ fn the_page_is_asked_to_turn_specs_on_with_the_folder_and_the_variant_and_says_s
         settings.view(),
         json!({ "on": true, "folder": "docs/specs", "variant": "tdd" })
     );
+}
+
+#[test]
+fn the_specs_reach_a_running_chief_unless_the_run_asks_for_the_launch() {
+    assert_eq!(Apply::named(None), Ok(Apply::Now));
+    assert_eq!(Apply::named(Some("")), Ok(Apply::Now));
+    assert_eq!(Apply::named(Some(" now ")), Ok(Apply::Now));
+    assert_eq!(Apply::named(Some("launch")), Ok(Apply::Launch));
+    let refused = Apply::named(Some("later")).unwrap_err();
+    assert!(refused.contains("not later"), "{refused}");
+    assert_eq!(Apply::default(), Apply::Now);
 }

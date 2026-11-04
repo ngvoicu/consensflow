@@ -4715,12 +4715,68 @@ test('saves the specs on Enter in the folder and adds nobody to the staff', asyn
   expect(await calls(page, 'member.roles')).toEqual([])
 })
 
+/** The model's first project with its chief's window closed. */
+function chiefClosed() {
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.role === 'chief').pane = null
+  return data
+}
+
+test('a project whose chief has no window open says its specs reach the chief at its next launch, and the chief is told now where it has one', async ({
+  page,
+}) => {
+  await open(page, chiefClosed())
+  const specs = await openSpecs(page)
+  await specs.mode.selectOption('on')
+  await specs.save.click()
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(1)
+  await expect(specs.note).toHaveText('Saved: the chief is told at its next launch.')
+  await specs.mode.selectOption('off')
+  await specs.save.click()
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(2)
+  await expect(specs.note).toHaveText(
+    'Specs are off in this project: the chief is told at its next launch.',
+  )
+  // Its window opens (Resume): the same save now says it is told now.
+  await page.evaluate(() => {
+    const chief = window.__model.boards[1].lanes.find((lane) => lane.participant.role === 'chief')
+    chief.pane = { id: 'p1-chief', generation: 6 }
+  })
+  await specs.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await openSpecs(page)
+  await again.mode.selectOption('on')
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(3)
+  await expect(again.note).toHaveText('Saved: the chief is told now.')
+})
+
+test('the rules for the staff say the chief is told now where its window is open, and every window gets them when it next starts', async ({
+  page,
+}) => {
+  await open(page, chiefClosed())
+  const section = await rulesGroup(page)
+  await section.rules.fill(STAFF_RULES)
+  await section.save.click()
+  await expect.poll(() => calls(page, 'project.rules')).toHaveLength(1)
+  await expect(page.locator('#status')).toHaveText(
+    'The rules for the staff are saved: each window of the staff is given them when it next starts.',
+  )
+  await section.rules.fill('')
+  await section.save.click()
+  await expect.poll(() => calls(page, 'project.rules')).toHaveLength(2)
+  await expect(page.locator('#status')).toHaveText(
+    'The project has no rules for the staff now: windows that start from now on are given none.',
+  )
+})
+
 test('a project follows the app’s setting for specs until it says on or off, and the dialog says when a change takes hold', async ({
   page,
 }) => {
   await open(page)
   const specs = await openSpecs(page)
-  await expect(specs.group).toContainText('A change reaches the chief when it next starts')
+  await expect(specs.group).toContainText(
+    'A change reaches the chief as soon as it is at rest if its window is open, else when it next starts',
+  )
   // It says nothing: it follows what the human set for every project (Settings, Specs).
   await expect(specs.mode).toHaveValue('follow')
   await expect(specs.mode.locator('option:checked')).toHaveText(/^Follow the app's setting/)
@@ -4745,10 +4801,9 @@ test('a project follows the app’s setting for specs until it says on or off, a
   await expect
     .poll(() => calls(page, 'project.specs'))
     .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: 'tdd' }])
-  await expect(specs.note).toHaveText('Saved: the specs reach the chief when it next starts.')
-  await expect(page.locator('#status')).toHaveText(
-    'Saved: the specs reach the chief when it next starts.',
-  )
+  // The chief of this board has a window open: it is told now, at its rest.
+  await expect(specs.note).toHaveText('Saved: the chief is told now.')
+  await expect(page.locator('#status')).toHaveText('Saved: the chief is told now.')
   // The board is drawn again and the dialog shows what the daemon keeps.
   await expect(specs.mode).toHaveValue('on')
   await expect(specs.folder).toHaveValue('docs/specs')
@@ -4761,9 +4816,7 @@ test('a project follows the app’s setting for specs until it says on or off, a
   await specs.save.click()
   await expect.poll(async () => (await calls(page, 'project.specs')).length).toBe(2)
   expect((await calls(page, 'project.specs'))[1]).toMatchObject({ project: 1, on: false })
-  await expect(specs.note).toHaveText(
-    'Specs are off in this project: the chief is told so when it next starts.',
-  )
+  await expect(specs.note).toHaveText('Specs are off in this project: the chief is told now.')
   await expect(specs.mode).toHaveValue('off')
 
   // Back to following the app's setting: it says none of the three.
@@ -5026,7 +5079,7 @@ test('saves the rules for the staff as written, by their own Save, shows what th
     .toEqual([{ project: 1, rules: `  ${STAFF_RULES}\n\n` }])
   await expect(section.rules).toHaveValue(STAFF_RULES)
   await expect(page.locator('#status')).toHaveText(
-    'The rules for the staff are saved: each window of the project is given them when it next starts.',
+    'The rules for the staff are saved: the chief is told now, and each window of the staff is given them when it next starts.',
   )
   // No other section saved with them.
   for (const operation of ['wakeup.set', 'project.specs', 'project.gate']) {
@@ -5041,7 +5094,7 @@ test('saves the rules for the staff as written, by their own Save, shows what th
   await expect.poll(() => calls(page, 'project.rules')).toHaveLength(2)
   expect((await calls(page, 'project.rules'))[1]).toEqual({ project: 1, rules: '' })
   await expect(page.locator('#status')).toHaveText(
-    'The project has no rules for the staff now: windows that start from now on are given none.',
+    'The project has no rules for the staff now: the chief is told now, and windows that start from now on are given none.',
   )
 })
 
@@ -7893,7 +7946,10 @@ async function leftWithSavesOnTheirWay(page, words, { next = false } = {}) {
 test('Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it', async ({
   page,
 }) => {
-  await open(page, twoWithOwnSettings())
+  // foundry's chief has no window open, harbour's has: what the save says is harbour's.
+  const data = twoWithOwnSettings()
+  data.boards[2].lanes.find((lane) => lane.participant.role === 'chief').pane = null
+  await open(page, data)
   const left = await leftWithSavesOnTheirWay(page, 'Harbour: anything left?', { next: true })
   const { calling, specs, dialog } = left
   // harbour's answers come now: nothing of them is in foundry's dialog.
@@ -7902,9 +7958,9 @@ test('Project settings: a save answered after the dialog was left for another pr
     'Wake-up calls are on: the chief is asked every 3 hours.',
   )
   await letGo(page, 'project.specs')
-  await expect(page.locator('#status')).toHaveText(
-    'Saved: the specs reach the chief when it next starts.',
-  )
+  // harbour's chief has a window open: it is told now, though the dialog was left for foundry's
+  // (whose chief has none) before the daemon answered.
+  await expect(page.locator('#status')).toHaveText('Saved: the chief is told now.')
   await settled(page)
   expect(await shownIn(dialog)).toEqual(FOUNDRYS)
   await expect(specs.locator('.specs-note')).toBeHidden()

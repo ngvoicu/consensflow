@@ -84,6 +84,18 @@ pub(crate) fn closed_and_resumed(
     rig: &Rig,
     project: &Project,
 ) -> Result<(Value, Value), Box<dyn Error>> {
+    closed_and_resumed_after(rig, project, || Ok(()))
+}
+
+/// [`closed_and_resumed`], with `between` done once the project is closed and before it is
+/// resumed: a human who changes a setting of the chief's role while its window is open has
+/// it told in a note at its rest (T-1182), so a case about the launch that takes the change
+/// changes it while the project is closed.
+pub(crate) fn closed_and_resumed_after(
+    rig: &Rig,
+    project: &Project,
+    between: impl FnOnce() -> Result<(), Box<dyn Error>>,
+) -> Result<(Value, Value), Box<dyn Error>> {
     let before = windows_of(rig, project)
         .into_iter()
         .next()
@@ -94,6 +106,7 @@ pub(crate) fn closed_and_resumed(
         Ok(project.lane("chief")?["pane"].is_null())
     })?;
     assert_eq!(state(project)?, "suspended");
+    between()?;
 
     let resumed = rig.page("project.resume", json!({ "project": project.id() }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
@@ -169,7 +182,7 @@ const SECTION: &str = "## This project's specs";
 #[cfg(unix)]
 const REPLACES: &str = "replace the ones you were given then";
 
-/// The same chief, given specs by the human before its Close. A Codex thread keeps
+/// The same chief, given specs by the human while the project is closed. A Codex thread keeps
 /// the instructions it began with, so a chief that is resumed is told a role that
 /// changed in a note (`codex_role_on_resume`): but this one has no thread to resume,
 /// its window is opened afresh, and it begins with the role as it is now, once, on
@@ -203,13 +216,14 @@ fn a_codex_chief_that_never_had_a_turn_is_opened_afresh_with_the_role_it_has_now
         0,
         "its first window began with specs off"
     );
-    let said = rig.page(
-        "project.specs",
-        json!({ "project": project.id(), "on": true, "folder": "docs/specs", "variant": "tdd" }),
-    )?;
-    assert_eq!(said["ok"], true, "{said}");
-
-    let (before, again) = closed_and_resumed(&rig, &project)?;
+    let (before, again) = closed_and_resumed_after(&rig, &project, || {
+        let said = rig.page(
+            "project.specs",
+            json!({ "project": project.id(), "on": true, "folder": "docs/specs", "variant": "tdd" }),
+        )?;
+        assert_eq!(said["ok"], true, "{said}");
+        Ok(())
+    })?;
 
     assert_eq!(resumed_on(&again), None, "there was no thread to resume");
     assert_eq!(before["argv"].to_string().matches(SECTION).count(), 0);

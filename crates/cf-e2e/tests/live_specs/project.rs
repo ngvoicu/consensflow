@@ -28,10 +28,37 @@ The workers here are scripted: a worker does no work and answers a task with exa
 \n\
 When you need to ask the human something, ask in plain text, all your questions in one message: do not use a question dialog. Nothing in this project needs research: where a skill asks for some, say there is none and go on.\n";
 
+/// How the specs reach the chief once the human has turned them on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Apply {
+    /// While its window is open: the chief is told at its next rest, in a note, and no
+    /// window is opened (T-1182).
+    #[default]
+    Now,
+    /// At its next launch: the project is closed and resumed, and the window is launched
+    /// with the section of specs.
+    Launch,
+}
+
+impl Apply {
+    /// What `--apply` names: `now` or `launch`, and `now` where it names none.
+    pub fn named(word: Option<&str>) -> std::result::Result<Self, String> {
+        match word.map(str::trim) {
+            None | Some("" | "now") => Ok(Self::Now),
+            Some("launch") => Ok(Self::Launch),
+            Some(other) => Err(format!(
+                "--apply is now (the chief is told while its window is open) or launch (the project is closed and resumed), not {other}"
+            )),
+        }
+    }
+}
+
 /// What a project's specs are set to, which the human does on the page
 /// (`project.specs`) once the project is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
+    /// How they reach the chief.
+    pub apply: Apply,
     /// The specs folder, relative to the project's folder, with slashes.
     pub folder: String,
     /// The variant the chief plans with.

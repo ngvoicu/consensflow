@@ -33,7 +33,9 @@ use super::index;
 use super::launch;
 use super::paths;
 use super::window::{MuseWindow, CLEAR_INPUT};
-use crate::contract::{Adapter, FirstMessage, Input, Launch, Prepared, Records, Skill, Used, Work};
+use crate::contract::{
+    Adapter, FirstMessage, Input, Launch, LaunchId, Prepared, Records, Skill, Specs, Used, Work,
+};
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::Services;
@@ -258,6 +260,10 @@ impl Adapter for MuseAdapter {
             folder,
             specmint::installed(&roots, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Muse, self.env(), Some(*specs), id).map(|_| ())
     }
 }
 

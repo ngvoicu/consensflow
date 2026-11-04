@@ -32,7 +32,9 @@
 //! (`quota_accounts`), and a window whose turn is over, which no stop interrupts
 //! or closes (`nothing_to_stop`), and a read of a window that fails or comes too late, which is
 //! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`), and
-//! the window's own `cf` every text typed into it starts its commands with (`window_cf`).
+//! the window's own `cf` every text typed into it starts its commands with (`window_cf`), and a
+//! setting the chief's role is built from that the human changes under its open window, which it is
+//! told at its rest (`role_news`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -114,6 +116,7 @@ mod resumed_at_work_claims;
 mod retired_agents;
 mod review;
 mod role_change;
+mod role_news;
 mod schedules;
 mod separate_callbacks;
 mod servers;

@@ -192,6 +192,7 @@ impl Context {
         let roles = Rc::new(FakeRoles {
             recorder: recorder.clone(),
             rewritten: RefCell::new(String::new()),
+            with_staff: Cell::new(false),
             cf: RefCell::new(CfWord::bare()),
         });
         let trace = Rc::new(FakeTrace {

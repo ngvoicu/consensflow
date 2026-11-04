@@ -41,8 +41,10 @@ export class StaffRules {
   /**
    * `group` is the fieldset. `page.project()` is the project the dialog is for,
    * not the one the page shows, `page.daemon` asks the daemon, `page.act` runs a
-   * change and redraws the page, `page.note` tells the human what came of it and
-   * `page.report` says a refusal on the status line.
+   * change and redraws the page, `page.note` tells the human what came of it,
+   * `page.report` says a refusal on the status line and `page.chiefRunning()` says
+   * whether the chief of that project has a window open: it is told of a change as
+   * soon as it is at rest, every other window when it next starts.
    */
   constructor(group, page) {
     this.#text = group.querySelector('[name="staff-rules"]')
@@ -84,6 +86,9 @@ export class StaffRules {
    */
   #saved() {
     const project = this.#page.project()
+    // Asked now, for the project the dialog is for: the board may show another by the time
+    // the daemon answers.
+    const told = this.#page.chiefRunning() ? 'the chief is told now, and ' : ''
     const rules = this.#text.value
     return this.#page.act(async () => {
       try {
@@ -91,8 +96,8 @@ export class StaffRules {
         if (this.#page.project() === project) this.show(answer.project)
         this.#page.note(
           answer.project.staffRules === undefined
-            ? 'The project has no rules for the staff now: windows that start from now on are given none.'
-            : 'The rules for the staff are saved: each window of the project is given them when it next starts.',
+            ? `The project has no rules for the staff now: ${told}windows that start from now on are given none.`
+            : `The rules for the staff are saved: ${told}each window of the staff is given them when it next starts.`,
         )
       } catch (cause) {
         const words = cause instanceof Error ? cause.message : String(cause)

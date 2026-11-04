@@ -1032,6 +1032,7 @@ export class ProjectSettingsDialog {
         act: page.act,
         note: page.note,
         report: page.report,
+        chiefRunning: () => this.#chiefRunning(),
       },
       page.specs,
     )
@@ -1044,6 +1045,7 @@ export class ProjectSettingsDialog {
       act: page.act,
       note: page.note,
       report: page.report,
+      chiefRunning: () => this.#chiefRunning(),
     })
     this.#compaction = new ClaudeCompaction(dialog.querySelector('.claude-compaction'), {
       project: () => (dialog.open ? this.#project : null),
@@ -1110,6 +1112,21 @@ export class ProjectSettingsDialog {
       })
     })
     dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
+  }
+
+  /**
+   * Whether the chief of the project the dialog is for has a window open now, as the board
+   * the page shows says it where that board is the project's, else as the dialog's own board
+   * did when it opened. A chief with a window open is told of a change of its specs or of the
+   * rules for the staff as soon as it is at rest; one without has it in the launch that opens
+   * its window.
+   */
+  #chiefRunning() {
+    const shown = this.#page.board()
+    const board = shown?.project.id === this.#project ? shown : this.#board
+    return (board?.lanes ?? []).some(
+      (lane) => lane.participant.role === 'chief' && lane.pane !== null,
+    )
   }
 
   /**

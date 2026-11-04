@@ -90,7 +90,8 @@ impl Ledger {
     }
 
     /// What the project says of specs: whether they are on, the folder and the
-    /// Specmint variant, all three at once. It applies at the chief's next launch.
+    /// Specmint variant, all three at once. A chief whose window is open is told at its
+    /// next rest, and any other takes it at its next launch.
     pub fn set_specs(&mut self, id: i64, change: &SpecsChange) -> Result<ProjectView, LedgerError> {
         specs::set_specs(&mut self.store, id, change)
     }

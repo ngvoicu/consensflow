@@ -81,9 +81,9 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Used, Waiting, Window,
-    Work,
+    Adapter, Admission, FirstMessage, Held, Input, Launch, LaunchId, Observed, Over, Pane,
+    PaneHost, Prepared, Question, Readiness, Records, ServersChosen, Skill, Specs, Trusts, Used,
+    Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Boundary, Options, Reading, Settlement};
@@ -341,6 +341,10 @@ impl Adapter for ClaudeAdapter {
             folder,
             paths::global_specmint(&self.env, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Claude, &self.env, Some(*specs), id).map(|_| ())
     }
 }
 

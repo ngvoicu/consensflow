@@ -10,9 +10,12 @@
 //! end of every text of its windows, the chief's and every member's
 //! ([`with_staff_rules`]). A harness that keeps the instructions a conversation
 //! began with is given a text that changed since in a message of its own, which
-//! says it in full (`role_change`).
+//! says it in full (`role_change`). A chief whose window is open when its specs or the
+//! staff's rules change is told in a note of the section that changed (`news`, and
+//! `role_news` for when).
 
 mod member;
+pub(crate) mod news;
 mod skill;
 mod specs;
 

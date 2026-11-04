@@ -31,6 +31,7 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::ownership::Kept;
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
+use crate::role_news::{NewsPart, Told};
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
@@ -234,6 +235,9 @@ pub(crate) struct WindowPart {
     /// way or given up, is no business of that exit's (`in_flight`).
     pub(crate) launches: u64,
     pub(crate) launch_id: Option<LaunchId>,
+    /// What a chief's window was told of its role, and what waits to tell it of a setting the
+    /// human changed since (`role_news`).
+    pub(crate) news: NewsPart,
     /// The window's token, for its `cf`.
     pub(crate) token: Option<String>,
     /// A kill is on its way.
@@ -374,6 +378,7 @@ impl Default for WindowPart {
             opening: None,
             launches: 0,
             launch_id: None,
+            news: NewsPart::default(),
             token: None,
             retiring: false,
             kill_taken: None,
@@ -516,6 +521,9 @@ struct Planned {
     /// instructions of its conversations: what a conversation this launch starts
     /// is recorded as begun with.
     first_instructions: Option<String>,
+    /// What a chief's window is told of its role by this launch, for the notes that tell it
+    /// of a setting changed since (`role_news`): none for a member's.
+    told: Option<Told>,
     /// The task whose work the window holds (`ownership`): its first message's, or
     /// the one its conversation was last given where it goes on with one.
     owner: Option<i64>,
@@ -552,6 +560,7 @@ impl Dispatcher {
             window.interrupted = None;
             window.unstopped = None;
             window.owner = None;
+            window.news = NewsPart::default();
             window.conversation = None;
             window.unproven = false;
             window.told_waiting = None;
@@ -935,6 +944,7 @@ impl Dispatcher {
             part.paid_untaken = None;
             record.quota.borrow_mut().drifts_told.clear();
             part.launch_id = Some(launch_id);
+            part.news = NewsPart::launched(planned.told.clone());
             part.token = Some(token);
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
@@ -1211,6 +1221,10 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
+        // What a chief is told of its role by this launch, which a note tells it the change of
+        // when the human changes it while the window is open (`role_news`).
+        let told = (participant.role == "chief")
+            .then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));
         // The folder the window works in, as the system names it.
         let directory = workspace(project);
         // The program of the last window on its conversation was proven gone: nothing
@@ -1278,6 +1292,7 @@ impl Dispatcher {
             owed: text.filter(|_| delivered),
             prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
+            told,
             owner,
         }))
     }

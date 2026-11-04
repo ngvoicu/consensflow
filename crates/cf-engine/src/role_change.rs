@@ -20,6 +20,13 @@
 //! specs turned on, a member added to the staff or a release that rewrote a text
 //! would never reach a conversation that is resumed. The engine says it itself.
 //!
+//! A chief whose window is open when its specs or the rules for its staff change is told
+//! of the change at its next rest, on every harness, in a note of that section alone
+//! (`role_news`). That note is a note of a role too: it carries the role text the
+//! conversation holds once it is in, recorded in the write that confirms its delivery,
+//! so a resume that finds it equal to the role now says nothing, and one that finds
+//! it different says the whole role as below.
+//!
 //! The ledger records the role text each such conversation was last told. A
 //! launch that resumes one whose text now differs has a note from ConsensFlow
 //! written: the new text in full, said plainly to replace the earlier one. The
@@ -396,6 +403,9 @@ impl Dispatcher {
             &role.instructions,
         )?;
         record.delivery.borrow_mut().greeting = Some(note.id);
+        // It says the role as it is now: what a note of a setting's change would say
+        // is said already (`role_news`).
+        self.told_by_greeting(project, participant, record, &role);
         self.changed();
         Ok(())
     }
@@ -439,7 +449,7 @@ impl Dispatcher {
     /// Whether what a launch or a switch put ahead of `record`'s queue (its prelude) is
     /// not done with: its replacement still owed ([`Dispatcher::owed`], a failed one
     /// included, which the next look settles), or the message it displaced still to go.
-    fn prelude_waits(&self, record: &Record) -> Result<bool, EngineError> {
+    pub(crate) fn prelude_waits(&self, record: &Record) -> Result<bool, EngineError> {
         if self.owed(record)?.is_some() {
             return Ok(true);
         }

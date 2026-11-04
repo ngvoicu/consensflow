@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use cf_engine::seams::Adapters;
-use cf_harness::contract::{Adapter, FirstMessage, Launch, Prepared, Skill, Work};
+use cf_harness::contract::{Adapter, FirstMessage, Launch, LaunchId, Prepared, Skill, Specs, Work};
 use cf_harness::testing::fake_executable;
 use cf_ledger::{open_ledger, Ledger, Options};
 use cf_proto::models::{Freshness, ModelChoice, ModelListing};
@@ -43,6 +43,10 @@ impl Adapter for Listing {
     }
 
     fn specmint(&self, _variant: Variant, _folder: &str) -> Result<Skill, String> {
+        unreachable!("a list is read with no window")
+    }
+
+    fn place_specmint(&self, _specs: &Specs<'_>, _id: &LaunchId) -> Result<(), String> {
         unreachable!("a list is read with no window")
     }
 
