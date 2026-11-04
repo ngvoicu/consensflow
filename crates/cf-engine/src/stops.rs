@@ -604,8 +604,8 @@ impl Dispatcher {
     /// Whether the window is still the stall's, as `observed` shows it: the window of the
     /// stall's generation, nothing being pasted into it, no dialog of its own, its record read
     /// and its own, nothing in it after the message (no word of an answer since, T-1220's
-    /// P1-2), no job or agent of its harness's running (T-1223's P1-1); and in the ledger the
-    /// task paused at the stall's stop, in its hands, the message its latest.
+    /// P1-2); and in the ledger the task paused at the stall's stop, in its hands, the message
+    /// its latest. What it runs is [`Dispatcher::close_would_end`]'s to say.
     fn still_unbegun(
         &self,
         participant: &ParticipantView,
@@ -628,10 +628,6 @@ impl Dispatcher {
             || observed.shared
             || observed.reading.as_deref().is_none_or(Reading::read_failed)
         {
-            return Ok(false);
-        }
-        let pending = observed.pending();
-        if pending.jobs > 0 || pending.agents > 0 {
             return Ok(false);
         }
         let items = observed.items();

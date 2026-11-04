@@ -647,3 +647,29 @@ fn a_replay_the_reopened_harness_drops_is_not_received_and_nothing_says_it_went_
     assert_ne!(tiers.task(2).task.state, "working");
     assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
 }
+
+#[test]
+fn a_pause_while_the_host_shows_the_screen_keeps_the_window() {
+    // After the last look, before the kill, every check of the ledger is asked again: the
+    // human's pause that comes as the host answers the screen keeps the window, never retired;
+    // its own stop is asked of it afresh.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    stalled(&context, &tiers);
+    let killed = context.host.killed().len();
+    let ledger = std::rc::Rc::clone(&context.ledger);
+    let project = tiers.project.id;
+    *context.host.on_request.borrow_mut() = Some(std::rc::Rc::new(
+        move |op: &str, body: &serde_json::Value| {
+            if op == "pane.snapshot" && body.get("tail").is_none() {
+                let _ = ledger
+                    .borrow_mut()
+                    .pause_task(project, 2, Some("human"), None);
+            }
+        },
+    ));
+    rounds(&context);
+    assert_eq!(context.host.killed().len(), killed, "kept, never retired");
+    assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
+    assert_eq!(tiers.task(2).task.state, "paused");
+}
