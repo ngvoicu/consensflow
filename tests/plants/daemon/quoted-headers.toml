@@ -55,7 +55,7 @@ replace = "        |item| item.role == Role::User && item.text.contains(&marker_
 
 [[plant]]
 name = "quoted header: ConsensFlow's copy of a window, read as it ends, has a header quoted in the human's words taken for the paste"
-meant = "a_window_that_ends_takes_no_header_quoted_in_its_copy_for_the_paste"
+meant = "a_window_that_ends_takes_a_header_quoted_in_its_copy_after_the_hand_over_for_arrived_unproven"
 runs = ["engine-dispatcher-quoted-headers"]
 
 [[plant.edit]]
