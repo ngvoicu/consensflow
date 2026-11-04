@@ -403,7 +403,7 @@ mod tests {
         );
         let other = item(Role::Tool, "412 GiB in 9 trees", true);
         let words = item(Role::Assistant, "Asked.", true);
-        assert!(ended_on_asking(&[words.clone()]), "no tool ran");
+        assert!(ended_on_asking(std::slice::from_ref(&words)), "no tool ran");
         assert!(ended_on_asking(&[
             other.clone(),
             asked.clone(),
