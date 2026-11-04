@@ -95,12 +95,22 @@ mod tests {
             .get(&key)
             .map(|pane| pane.process_tree.clone())
             .expect("its tree");
-        let sleeper = tree
-            .members()
-            .expect("a look")
-            .into_iter()
-            .find(|member| member.program == "sleep")
-            .expect("the sleep");
+        // The shell starts the sleep after the window opens: on a slow machine a look at once
+        // comes before it (GitHub's macOS runner, CI run 41918915905), so the look is made
+        // again, for five seconds at most.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let sleeper = loop {
+            let found = tree
+                .members()
+                .expect("a look")
+                .into_iter()
+                .find(|member| member.program == "sleep");
+            if let Some(found) = found {
+                break found;
+            }
+            assert!(std::time::Instant::now() < deadline, "the sleep");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
         assert_eq!(table.pane_holding(sleeper.key.pid), Some(key.clone()));
         assert_eq!(table.pane_holding(std::process::id()), None);
 

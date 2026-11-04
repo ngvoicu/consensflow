@@ -101,7 +101,9 @@ export class HistoryViewer {
     }
     this.#find.value = ''
     const once = this.#shown.formerly
-    this.#formerly.textContent = once ? `once @${once}, before members were named by their model` : ''
+    this.#formerly.textContent = once
+      ? `once @${once}, before members were named by their model`
+      : ''
     this.#formerly.hidden = !once
     this.#body.replaceChildren(element('p', 'history-note', 'Reading the history…'))
     if (!this.#dialog.open) this.#dialog.showModal()

@@ -54,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 14] = [
+const BY_HAND: [(&str, &str, &str); 18] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -134,6 +134,27 @@ const BY_HAND: [(&str, &str, &str); 14] = [
         "crates/cf-e2e/tests/live_muse_reads.rs",
         "XDG_DATA_HOME",
         "the same reads' data folder, a throwaway holding a copy of the model catalog alone",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "CLAUDE_CONFIG_DIR",
+        "it sets no home: with `--keep` it copies what the run's own window recorded, from the folder \
+         the kit gave that window under this variable (`members.rig().var`)",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "CODEX_HOME",
+        "the same copy of the records, for another harness",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "PI_CODING_AGENT_DIR",
+        "the same copy of the records, for another harness",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "XDG_DATA_HOME",
+        "the same copy of the records, for another harness",
     ),
 ];
 
