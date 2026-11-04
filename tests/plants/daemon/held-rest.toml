@@ -105,8 +105,10 @@ runs = ["rest-engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = "Your result is the final message of your turn: ConsensFlow collects it and"
-replace = "Your result is a one-line summary of your turn: ConsensFlow collects it and"
+find = '''Your result is the final message of your turn: ConsensFlow collects
+it and'''
+replace = '''Your result is a one-line summary of your turn: ConsensFlow collects
+it and'''
 
 # --- the Pi channel's grace (ci-pi-ack-timeout-race) ---
 

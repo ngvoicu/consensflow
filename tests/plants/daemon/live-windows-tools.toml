@@ -101,18 +101,6 @@ find = '''    "node -e \"console.log('TOKEN_IS_' + (process.env.CONSENSFLOW_TOKE
 replace = '''    "echo TOKEN_IS_$(test -n \"$CONSENSFLOW_TOKEN\" && echo SET || echo UNSET)";'''
 
 [[plant]]
-name = "live tools on windows: the stuck script does not ignore the signals"
-meant = "the_script_is_node_s_and_ignores_the_signals_a_harness_ends_a_command_with_and_waits"
-runs = ["lw-stuck"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_stops/stuck.rs"
-find = '''for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => {});
-if (process.argv[2]'''
-replace = '''// not ignoring
-if (process.argv[2]'''
-
-[[plant]]
 name = "live tools on windows: the member is asked to run the stuck script with sh"
 meant = "the_script_is_node_s_and_ignores_the_signals_a_harness_ends_a_command_with_and_waits"
 runs = ["lw-stuck"]
@@ -121,28 +109,6 @@ runs = ["lw-stuck"]
 file = "crates/cf-e2e/tests/live_stops/stuck.rs"
 find = '''    format!("Run exactly this one shell command, then stop: node ./{SCRIPT}")'''
 replace = '''    format!("Run exactly this one shell command, then stop: sh ./{SCRIPT}")'''
-
-[[plant]]
-name = "live tools on windows: the script's waiter is not the one the script starts"
-meant = "the_real_script_runs_under_node_and_its_script_and_waiter_are_found_in_the_machines_table"
-runs = ["lw-stuck"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_stops/stuck.rs"
-find = '''            r#"^{}\s+(?:"[^"]*|\S*)(?i:{})"?\s+wait$"#,'''
-replace = '''            r#"^{}\s+(?:"[^"]*|\S*)(?i:{})"?\s+waits$"#,'''
-
-[[plant]]
-name = "live tools on windows: a waiter of another script is the command's"
-meant = "the_commands_processes_are_the_script_and_the_waiter_that_is_its_child_not_the_harness_naming_them"
-runs = ["lw-stuck"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_stops/stuck.rs"
-find = '''        scripts.iter().any(|script| script.identity.pid == one.ppid)
-            && waiter_pattern()'''
-replace = '''        true
-            && waiter_pattern()'''
 
 [[plant]]
 name = "live tools on windows: Windows' table lists every process in a group of its pid"

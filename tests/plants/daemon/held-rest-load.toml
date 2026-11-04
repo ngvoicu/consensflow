@@ -67,7 +67,7 @@ name = "held-rest load: the unanswered-input test sends its 4,096 inputs once, w
 meant = "unanswered_page_input_is_bounded_until_a_new_page"
 platforms = ["macos", "linux"]
 runs = ["rest-load-panes-input"]
-prepare = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--no-run"]]
+prepare = [["cargo", "build", "--offline", "-p", "cf-panes", "--tests"]]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
@@ -115,7 +115,7 @@ name = "held-rest load: the idle test's child prints a quarter second after it s
 meant = "reader_activity_resets_idle_then_silence_increases_it"
 platforms = ["macos", "linux"]
 runs = ["rest-load-panes-idle"]
-prepare = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--no-run"]]
+prepare = [["cargo", "build", "--offline", "-p", "cf-panes", "--tests"]]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
