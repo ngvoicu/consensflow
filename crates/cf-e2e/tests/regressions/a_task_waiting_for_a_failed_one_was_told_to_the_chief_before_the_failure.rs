@@ -19,7 +19,6 @@
 //! What the owner should have seen: the chief is sent one note for T-1, the failure first,
 //! and the task that waits for it named after the failure, in the same note.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -40,7 +39,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The notes ConsensFlow wrote the chief that name T-1 or T-2, in the order they were

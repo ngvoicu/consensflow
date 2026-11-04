@@ -631,7 +631,7 @@ fn a_task_in_a_folder_whose_name_is_not_ascii_goes_from_its_brief_to_its_result(
             { "id": "muse-worker", "kind": "muse", "model": "muse-spark-1.3", "effort": "minimal", "workTier": "standard" },
         ],
     });
-    cf_e2e::files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     project.add_member("muse-worker")?;
     rig.tell(

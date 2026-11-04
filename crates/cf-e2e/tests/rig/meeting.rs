@@ -4,7 +4,6 @@
 //! `cf inbox`; the Stop lets it go, a member's question first. The app's quit ends a
 //! meeting, and what it held goes in after the human's Resume.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig, OPEN};
 use serde_json::{json, Value};
 
@@ -25,7 +24,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker-b", "kind": "claude-code", "model": "fake" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The human starts (`on`) or stops a meeting, as the page does.
