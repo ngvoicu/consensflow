@@ -243,7 +243,7 @@ impl Context {
         let handle = thread.task.assignee.clone().expect("its window's session");
         let participant = self.id(project.id, &handle);
         self.dispatcher
-            .fail_task(&project, participant, &thread.task, because)
+            .fail_task(&project, participant, &thread.task, because, "")
     }
 
     /// The human hides a session's terminal (`hideWindow`).

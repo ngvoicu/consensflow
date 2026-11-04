@@ -289,7 +289,14 @@ impl Transcript {
         }
         if let Some((call, job)) = &record.job {
             let watch = self.monitors.remove(&self.keys.of(call.as_ref()));
-            self.jobs.started(Arc::clone(job), watch);
+            // When the record says it was written: a time that does not parse names none.
+            let at_ms = record
+                .at
+                .as_ref()
+                .and_then(Value::as_str)
+                .and_then(time::parse);
+            self.jobs
+                .started(Arc::clone(&job.id), watch, at_ms, job.limit_ms);
         }
         if let Some((call, job)) = &record.stopped {
             if self.task_stops.remove(&self.keys.of(call.as_ref())) {

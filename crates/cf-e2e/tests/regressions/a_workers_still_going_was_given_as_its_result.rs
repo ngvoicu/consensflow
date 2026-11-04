@@ -123,8 +123,17 @@ fn a_worker_that_left_a_job_running_goes_on_until_the_jobs_end_wakes_it_and_its_
         ["note", "result"],
         "the chief was told it goes on, and then given the result, and nothing was said of anything ended: {thread:?}"
     );
-    assert!(thread[0].1.starts_with("T-1 goes on in the background: @"));
-    assert!(thread[0].1.contains("1 background job"), "{}", thread[0].1);
+    assert!(thread[0]
+        .1
+        .starts_with("T-1 is still working in the background (1 command"));
+    assert!(
+        thread[0].1.contains(
+            "); its result comes when it ends. `cf task finish T-1` takes what it said last now."
+        ),
+        "{}",
+        thread[0].1
+    );
+    assert!(thread[0].1.ends_with(GOING), "{}", thread[0].1);
     assert_eq!(
         thread[1].1, REPORT,
         "the final answer of the turn the job's end woke, and none of what the turn before said"

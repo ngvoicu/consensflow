@@ -10,13 +10,14 @@
 //! What the chief should have seen: the task stays working while the run and its monitor
 //! run, each of the monitor's events wakes a turn that is no result, nothing is ended and
 //! the window stays, the turn the run's end wakes leaves the monitor alone running, which
-//! the chief is told again (a hold's count that fell, Astraeus on 136a7158), and the turn
-//! the monitor's end wakes gives the result, once.
+//! the chief is not told (a hold's count that falls was told again until T-1181: the
+//! first note said the result comes when they end, and it does), and the turn the
+//! monitor's end wakes gives the result, once.
 //!
-//! The monitor ends once the case lets it (`Job::let_its_monitor_end`), after the chief was
-//! told the monitor alone runs: with the monitor ending half a second after the run, CI's
-//! macOS runner saw that turn at rest twice (8504697f) and the case, which expected it never
-//! seen, failed, while every run here missed it.
+//! The monitor ends once the case lets it (`Job::let_its_monitor_end`), after the worker's
+//! lane shows the monitor alone is held for: with the monitor ending half a second after
+//! the run, CI's macOS runner saw that turn at rest twice (8504697f) and the case, which
+//! expected it never seen, failed, while every run here missed it.
 //!
 //! The stand-in writes what Claude Code 2.1.305 writes (`CLAUDE-MONITOR` of the fake agent,
 //! the shapes of `monitor-wait.jsonl`, a live run's): the job's start, the monitor's
@@ -87,17 +88,13 @@ fn a_worker_that_armed_monitor_on_its_run_goes_on_until_the_monitor_ends_and_its
         "its window stays"
     );
 
-    // The run ends by itself: the turn its end wakes leaves the monitor alone running, and
-    // the chief is told again, by that count, with what the turn said.
+    // The run ends by itself: the turn its end wakes leaves the monitor alone running, which
+    // the worker's lane shows (it is held for 1 job now), and the chief is told nothing.
     rig.wait_for("the run to end by itself", secs(60), || Ok(run.finished()))?;
     rig.wait_for(
-        "the chief to be told the monitor alone runs",
+        "the worker's lane to show the monitor alone",
         secs(60),
-        || {
-            Ok(told(&project)?
-                .iter()
-                .any(|(kind, body)| kind == "note" && body.contains(MONITOR_WATCHES)))
-        },
+        || Ok(project.lane("worker")?["held"]["jobs"] == 1),
     )?;
     assert_eq!(project.task(1)?["state"], "working");
 
@@ -108,26 +105,26 @@ fn a_worker_that_armed_monitor_on_its_run_goes_on_until_the_monitor_ends_and_its
     })?;
     let thread = told(&project)?;
     let kinds: Vec<&str> = thread.iter().map(|(kind, _)| kind.as_str()).collect();
-    assert_eq!(kinds, ["note", "note", "result"], "{thread:?}");
+    assert_eq!(kinds, ["note", "result"], "{thread:?}");
     assert!(
         thread[0]
             .1
-            .contains("ended its turn with 2 background jobs running"),
-        "the run and its monitor: {}",
+            .starts_with("T-1 is still working in the background (1 command")
+            && thread[0]
+                .1
+                .contains("; 1 monitor); its result comes when they end.")
+            && thread[0]
+                .1
+                .ends_with(&format!("What it said:\n\n{WATCHING}")),
+        "the run and its monitor, told once: {}",
         thread[0].1
     );
     assert!(
-        thread[1].1.starts_with("T-1 goes on in the background: @")
-            && thread[1]
-                .1
-                .contains("ended its turn with 1 background job running")
-            && thread[1]
-                .1
-                .ends_with(&format!("What it said:\n\n{MONITOR_WATCHES}")),
-        "the monitor alone: {}",
-        thread[1].1
+        !thread[0].1.contains(MONITOR_WATCHES),
+        "and nothing said of the monitor alone: {}",
+        thread[0].1
     );
-    assert_eq!(thread[2].1, REPORT);
+    assert_eq!(thread[1].1, REPORT);
     assert!(!run.released(), "the run ran to its end, and none ended it");
     rig.close()?;
     Ok(())

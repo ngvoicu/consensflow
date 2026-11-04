@@ -19,6 +19,7 @@ use std::io::{self, Read, Write};
 
 use cf_board::{Board, BoardError};
 use cf_proto::cf_word::CfWord;
+use cf_proto::questions::ASKED_THEN_END_THE_TURN;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
@@ -368,9 +369,10 @@ fn ask(
     )?;
     let message = posted(board, "/api/questions", body_of(question))?;
     let text = format!(
-        "m-{} asked @{}. The answer arrives as a message; end your turn now.",
+        "m-{} asked @{}. {}",
         js::text(message.get("id")),
-        js::text(message.get("recipient"))
+        js::text(message.get("recipient")),
+        ASKED_THEN_END_THE_TURN
     );
     Ok(Said::new(message, text))
 }

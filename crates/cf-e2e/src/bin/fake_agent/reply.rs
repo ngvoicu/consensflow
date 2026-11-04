@@ -215,7 +215,7 @@ pub enum Reply {
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
 /// ConsensFlow installed there. What it printed and said, trimmed.
-fn run_cf(words: &[String]) -> String {
+pub fn run_cf(words: &[String]) -> String {
     let path = own_var("PATH").unwrap_or_default();
     let extensions = own_var("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned());
     let cf = first_on_path("cf", &path, &extensions).unwrap_or_else(|| "cf".into());

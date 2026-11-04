@@ -79,14 +79,22 @@ impl Ledger {
     }
 
     /// The chief or the human takes what the worker said last as the task's result: of a
-    /// task at work, or of a paused one.
+    /// task at work, or of a paused one. `left` is how many background jobs and agents its
+    /// window was counted running ([`Ledger::left_running`]).
     pub fn record_finished(
         &mut self,
         project_id: i64,
         number: i64,
         body: &str,
+        left: (usize, usize),
     ) -> Result<TaskMoved, LedgerError> {
-        tasks::record_finished(&mut self.store, project_id, number, body)
+        tasks::record_finished(&mut self.store, project_id, number, body, left)
+    }
+
+    /// The jobs and agents the window of a task finished by the chief or the human was counted
+    /// running then, which the close after its accept ends: `(0, 0)` for any other result.
+    pub fn left_running(&self, project_id: i64, number: i64) -> Result<(i64, i64), LedgerError> {
+        tasks::left_running(&self.store, project_id, number)
     }
 
     /// A coordinator accepts a task's result.
@@ -414,7 +422,21 @@ impl Ledger {
         number: i64,
         reason: &str,
     ) -> Result<TaskView, LedgerError> {
-        tasks::give_up_task(&mut self.store, project_id, number, reason)
+        tasks::give_up_task(&mut self.store, project_id, number, reason, "")
+    }
+
+    /// [`Ledger::give_up_task`] of a task whose failure said what `cause` says (what the
+    /// engine tells one outage from the next by: a hash of it, never the words or the screen,
+    /// which the ledger and its log do not keep): its requester is told in one note of the
+    /// windows that failed alike while it has still to be given the first.
+    pub fn give_up_task_for_cause(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        reason: &str,
+        cause: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::give_up_task(&mut self.store, project_id, number, reason, cause)
     }
 
     /// What the note that tells `requester` that task `number` failed adds of the tasks it asked

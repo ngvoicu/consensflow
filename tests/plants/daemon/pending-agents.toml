@@ -235,7 +235,7 @@ runs = ["engine-dispatcher-pending-agents"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                self.tell_it_goes_on(project, participant, &thread, &said, &words)?;'
+find = '                self.tell_it_goes_on(project, &thread, &said, &words)?;'
 replace = '                let _ = (&thread, &words, &said);'
 
 [[plant]]
@@ -348,7 +348,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                self.tell_it_goes_on(project, participant, &thread, &said, &words)?;'
+find = '                self.tell_it_goes_on(project, &thread, &said, &words)?;'
 replace = '                let _ = (&thread, &words, &said);'
 
 [[plant]]

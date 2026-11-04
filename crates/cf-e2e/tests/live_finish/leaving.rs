@@ -663,7 +663,7 @@ fn observe(
 /// The chief of `number` was told its worker goes on in the background: the task is
 /// held for what its turn left running.
 fn goes_on(members: &Members, number: i64) -> Fallible<bool> {
-    let opening = format!("T-{number} goes on in the background: ");
+    let opening = format!("T-{number} is still working in the background");
     Ok(members.inbox(Some(members.chief()))?.iter().any(|message| {
         message["kind"] == "note"
             && message["body"]

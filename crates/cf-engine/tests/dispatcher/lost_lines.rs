@@ -457,7 +457,7 @@ fn a_held_turn_that_lost_a_line_says_so_in_the_note_that_it_goes_on_and_is_not_t
     let held: Vec<String> = tiers
         .notes("chief")
         .into_iter()
-        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .filter(|note| note.starts_with("T-1 is still working in the background"))
         .collect();
     assert_eq!(held.len(), 1, "{held:?}");
     assert!(

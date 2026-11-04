@@ -1,0 +1,254 @@
+# The note a held task's requester is given (3.0.7-alpha.4 fixes, T-1181; the field boards of
+# 2026-10-26 and 2026-11-02): kluris' T-104 and T-105 sent their chief about ten "goes on in the
+# background" notes while they waited for Windows runs, T-298 twelve in 1 h 46, and each woke the
+# chief for a turn with nothing to do; one chief could not read a note of a monitor that "said its
+# time ran out at 11:38:54 UTC; … is over once no command of … runs in its window, once nothing else
+# of it is pending". The rules:
+#
+# - a task that goes on in the background is told to its requester once, and its result when it
+#   comes: a job that ends or begins, a monitor's notice, what a look at the window found are told
+#   no more (`turn_end`, `Told`);
+# - the one change told after the first note is a hold nothing but Finish ends (every job left is a
+#   monitor that said it ended and has no command of the window to look for, or the host cannot
+#   see the window's commands): told once more, in the words of that, and not again;
+# - the note is plain: what runs by kind and count (commands, agents, monitors), what the harness's
+#   reader knows of a command (since when it runs, and that a time limit moved it into the
+#   background: the field board's T-299 had one run 100 minutes with its worker none the wiser),
+#   that the result comes when they end, and the one other choice, to take what the worker said
+#   last now (`running_said`);
+# - Claude Code's reader keeps when each command began and the limit that moved it
+#   (`toolUseResult.timedOutAfterMs` beside `backgroundTaskId`), and its reading says its
+#   commands as it says its monitors (`claude::record::jobs`, `Record::commands`).
+#
+# One plant takes one rule out; a test of it fails. The other plants of the note's rules are in
+# `turn-end-min`, `pending-agents` and `torn-line`. Every name holds `hold notes:`, so
+# `npm run plants:daemon -- "hold notes:"` runs them all.
+
+[run]
+hn-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+hn-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "hold_notes::"]
+
+# --- the reader: a command's start and the limit that moved it ---
+
+[[plant]]
+name = "hold notes: the reader keeps no start for a command"
+meant = "a_command_that_was_asked_to_run_in_the_background_began_when_its_record_was_written"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "        let since = at.map(|at| at.saturating_sub(limit_ms.unwrap_or(0)));"
+replace = "        let since: Option<i64> = at.map(|_| 0).filter(|_| false);"
+
+[[plant]]
+name = "hold notes: a command a time limit moved is taken to have begun when its record was written"
+meant = "a_command_a_time_limit_moved_into_the_background_began_that_limit_before_its_record"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "        let since = at.map(|at| at.saturating_sub(limit_ms.unwrap_or(0)));"
+replace = "        let since = at;"
+
+[[plant]]
+name = "hold notes: the reader keeps no limit for a command"
+meant = "a_command_a_time_limit_moved_to_the_background_is_told_by_the_limit_and_when_it_began"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "                limit_ms: job.limit_ms,"
+replace = "                limit_ms: None,"
+
+[[plant]]
+name = "hold notes: a monitor is told as a command"
+meant = "a_command_that_runs_is_told_by_when_it_began_and_a_monitor_is_none_of_them"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = "            .filter(|job| job.state == State::Running && job.watch.is_none())"
+replace = "            .filter(|job| job.state == State::Running)"
+
+[[plant]]
+name = "hold notes: the reader does not read the limit a result says moved a command"
+meant = "a_command_a_time_limit_moved_to_the_background_is_told_by_the_limit_and_when_it_began"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '        let limit_ms = field(result, "timedOutAfterMs")'
+replace = '        let limit_ms = field(result, "timedOutAfterMsX")'
+
+[[plant]]
+name = "hold notes: a limit that is not a positive number moved a command"
+meant = "a_monitor_is_no_command_and_a_limit_that_is_no_positive_number_moved_nothing"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = "            .filter(|limit| *limit > 0);"
+replace = "            .filter(|_| true);"
+
+[[plant]]
+name = "hold notes: the limit a result says is dropped from the fields the reader keeps"
+meant = "a_command_a_time_limit_moved_to_the_background_is_told_by_the_limit_and_when_it_began"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '    ("timedOutAfterMs", &Keep::Scalar),'
+replace = ""
+
+[[plant]]
+name = "hold notes: a record's time is not the time a command began"
+meant = "a_command_that_was_asked_to_run_in_the_background_began_when_its_record_was_written"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+            self.jobs
+                .started(Arc::clone(&job.id), watch, at_ms, job.limit_ms);'''
+replace = '''
+            self.jobs
+                .started(Arc::clone(&job.id), watch, None, job.limit_ms);'''
+
+[[plant]]
+name = "hold notes: the reading says none of the commands that run"
+meant = "a_command_a_time_limit_moved_to_the_background_is_told_by_the_limit_and_when_it_began"
+runs = ["hn-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = "        record.commands = self.jobs.commands();"
+replace = ""
+
+[[plant]]
+name = "hold notes: the engine is given none of the commands a reading says"
+meant = "the_note_names_the_commands_what_is_known_of_them_and_when_the_result_comes"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = "            Some(Reading::Known(record)) => record.commands.clone(),"
+replace = "            Some(Reading::Known(_)) => Vec::new(),"
+
+# --- the engine: once for a hold, and once more for one nothing but Finish ends ---
+
+[[plant]]
+name = "hold notes: a held task is told at every turn its window ends"
+meant = "a_held_task_whose_jobs_and_monitors_come_and_go_tells_its_chief_once_and_then_the_result"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
+replace = "                    Some(told) if told.task == hold.task => { let _ = told; true }"
+
+[[plant]]
+name = "hold notes: a held task is told again when the number of its jobs changes"
+meant = "a_held_task_whose_jobs_and_monitors_come_and_go_tells_its_chief_once_and_then_the_result"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
+replace = "                    Some(told) if told.task == hold.task => (stuck && !told.stuck) || hold.jobs != 1,"
+
+[[plant]]
+name = "hold notes: a hold nothing but Finish ends is told once more no more"
+meant = "a_hold_that_turns_into_one_nothing_ends_but_finish_is_told_once_more_and_no_third_time"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
+replace = "                    Some(told) if told.task == hold.task => { let _ = told; false }"
+
+[[plant]]
+name = "hold notes: a hold nothing but Finish ends is told at every turn"
+meant = "a_hold_that_turns_into_one_nothing_ends_but_finish_is_told_once_more_and_no_third_time"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
+replace = "                    Some(told) if told.task == hold.task => stuck,"
+
+[[plant]]
+name = "hold notes: a hold nothing but Finish ends is told to be an ordinary one at its first note"
+meant = "a_hold_that_cannot_end_by_itself_at_its_first_note_is_told_so_in_that_one_note"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        && pending.total() == pending.noticed"
+replace = "        && false"
+
+# --- the note's words ---
+
+[[plant]]
+name = "hold notes: the note counts the monitors among the commands"
+meant = "the_note_says_the_kinds_apart_a_day_apart_and_a_bare_count_where_the_reader_cannot_say"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    let commands = held.pending.jobs - monitors;"
+replace = "    let commands = held.pending.jobs;"
+
+[[plant]]
+name = "hold notes: the note names no agent that runs"
+meant = "the_note_says_the_kinds_apart_a_day_apart_and_a_bare_count_where_the_reader_cannot_say"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    if held.pending.agents > 0 {"
+replace = "    if false {"
+
+[[plant]]
+name = "hold notes: the note names the newest start of the commands, not the oldest"
+meant = "the_note_says_the_kinds_apart_a_day_apart_and_a_bare_count_where_the_reader_cannot_say"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    if let Some(since) = known.iter().filter_map(|command| command.since).min() {"
+replace = "    if let Some(since) = known.iter().filter_map(|command| command.since).max() {"
+
+[[plant]]
+name = "hold notes: the note says a time limit in seconds, whole minutes or not"
+meant = "the_note_names_the_commands_what_is_known_of_them_and_when_the_result_comes"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "    if ms % 60_000 == 0 {"
+replace = "    if false {"
+
+[[plant]]
+name = "hold notes: the note leaves out the day of a start that is not today's"
+meant = "the_note_says_the_kinds_apart_a_day_apart_and_a_bare_count_where_the_reader_cannot_say"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        (Some(day), Some(hour)) if now.get(..10) == Some(day) => format!(\"{hour} UTC\"),"
+replace = "        (Some(_), Some(hour)) => format!(\"{hour} UTC\"),"
+
+[[plant]]
+name = "hold notes: the note leaves out that a time limit moved a command"
+meant = "the_note_names_the_commands_what_is_known_of_them_and_when_the_result_comes"
+runs = ["hn-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+    let moved: Vec<i64> = known
+        .iter()
+        .filter_map(|command| command.limit_ms)
+        .collect();'''
+replace = '''
+    let moved: Vec<i64> = Vec::new();'''

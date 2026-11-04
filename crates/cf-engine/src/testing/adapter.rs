@@ -26,7 +26,7 @@ use cf_harness::contract::{
     Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
     Readiness, Skill, Trusts, TurnLeft, Used, Waiting, Window, Work,
 };
-use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_harness::records::{Command, Item, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
@@ -49,6 +49,9 @@ pub struct FakeAgent {
     pub pending: Pending,
     /// The monitors among those jobs, as the reading says them.
     pub monitors: Vec<Monitor>,
+    /// The commands among those jobs, as the reading says them (Claude Code's reader says
+    /// when each began and whether a time limit moved it into the background).
+    pub commands: Vec<Command>,
     /// The lines of its record torn and passed over, by their places (the reading says so).
     pub lost: Vec<usize>,
     /// Its reading says the record each item is of, as every harness's but
@@ -497,6 +500,7 @@ impl FakeAdapter {
             agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
             agent.took_back = false;
             agent.at_prompt = false;
         });
@@ -514,6 +518,7 @@ impl FakeAdapter {
             agent.at_prompt = true;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
         });
     }
 
@@ -535,6 +540,19 @@ impl FakeAdapter {
     ) {
         self.answer_leaving(handle, text, pending);
         self.with(handle, |agent| agent.monitors = monitors);
+    }
+
+    /// The agent answers, and its turn ends with `pending` still running, `commands` among
+    /// it as the reading says them.
+    pub fn answer_leaving_commands(
+        &self,
+        handle: &str,
+        text: &str,
+        pending: Pending,
+        commands: Vec<Command>,
+    ) {
+        self.answer_leaving(handle, text, pending);
+        self.with(handle, |agent| agent.commands = commands);
     }
 
     /// The agent answers, and its turn ends with a background agent still running.
@@ -573,6 +591,7 @@ impl FakeAdapter {
             agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
             agent.took_back = false;
             agent.at_prompt = false;
         });
@@ -595,6 +614,7 @@ impl FakeAdapter {
             agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
             agent.took_back = false;
             agent.at_prompt = false;
         });
@@ -709,6 +729,7 @@ impl FakeAdapter {
             agent.at_prompt = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
         });
     }
 
@@ -788,6 +809,7 @@ impl FakeAdapter {
             agent.settled = true;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
         });
     }
 
@@ -938,6 +960,7 @@ impl FakeAdapter {
                 agent.settled = self.never_begins.get().unwrap_or(false);
                 agent.pending = Pending::default();
                 agent.monitors.clear();
+                agent.commands.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
                 agent.failure = None;
@@ -1083,6 +1106,7 @@ impl Asked {
             settled: true,
             pending: Pending::default(),
             monitors: Vec::new(),
+            commands: Vec::new(),
             lost,
             says_places: fake.says_places.get(),
             waiting: None,

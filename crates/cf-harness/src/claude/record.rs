@@ -506,6 +506,7 @@ impl Answer for Transcript {
             noticed: self.jobs.noticed_count(),
         };
         record.monitors = self.jobs.monitors();
+        record.commands = self.jobs.commands();
         record.lines.put_back = self.put_back && settlement == Settlement::Settled;
         record.lines.held_by_notices = settlement == Settlement::InFlight && self.held_by_notices();
         Ok(record)

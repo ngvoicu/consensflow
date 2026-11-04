@@ -53,6 +53,7 @@ fn record(items: Vec<Item>, settlement: Settlement, in_flight: bool) -> Record {
         settlement,
         pending: Default::default(),
         monitors: Vec::new(),
+        commands: Vec::new(),
         lines: Box::default(),
     }
 }

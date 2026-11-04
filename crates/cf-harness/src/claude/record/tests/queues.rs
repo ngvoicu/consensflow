@@ -342,3 +342,45 @@ fn a_removal_without_the_hop_chain_names_the_message_queued_with_it() {
     ]);
     assert_eq!(read, in_flight(items), "another message is not named");
 }
+
+/// T-1200 (2026-11-04, T-1219): a job's notification queued while the turn was still at work keeps
+/// the end of its write-up in flight, with no job pending, until it is taken and its turn has ended;
+/// the engine then took no result of the write-up and held nothing. With the queue's two records
+/// taken out of the same record the turn reads at rest.
+#[test]
+fn a_notification_queued_while_the_turn_was_at_work_keeps_the_end_of_its_write_up_in_flight() {
+    let notice = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>";
+    let woken = having(
+        user("u2", json!("a1"), json!(notice)),
+        json!({ "promptSource": "system", "turnOrigin": "task_notification" }),
+    );
+    let (write_up, last) = (done("a1", "u1", "m1"), done("a2", "u2", "m2"));
+    let queued = vec![
+        hello(),
+        queue("enqueue", json!(notice)),
+        write_up.clone(),
+        duration("d1", "a1"),
+    ];
+    assert_eq!(
+        settlement_of(&queued),
+        Settlement::InFlight,
+        "the write-up ended with the notice queued"
+    );
+    let mut taken = queued.clone();
+    taken.extend([
+        queue("dequeue", Value::Null),
+        woken.clone(),
+        last.clone(),
+        duration("d2", "a2"),
+    ]);
+    assert_eq!(
+        settlement_of(&taken),
+        Settlement::Settled,
+        "and at rest once the turn it began has ended"
+    );
+    assert_eq!(
+        settlement_of(&[hello(), write_up, duration("d1", "a1")]),
+        Settlement::Settled,
+        "the same turn without the queue's records"
+    );
+}

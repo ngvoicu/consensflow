@@ -592,6 +592,7 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         settlement,
         pending: Default::default(),
         monitors: Vec::new(),
+        commands: Vec::new(),
         lines: Box::default(),
     }))
 }

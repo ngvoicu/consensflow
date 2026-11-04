@@ -113,6 +113,12 @@ pub struct Record {
     /// Code's): said only where there are any, and no reading Node wrote has them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<Monitor>,
+    /// The commands among the jobs pending (the jobs that are no monitors), as the
+    /// harness's record says them: when each began and whether a time limit moved it into
+    /// the background (Claude Code's reader). A reader that cannot say leaves it empty and
+    /// the count of `pending.jobs` stands. Never said: no reading Node wrote has it.
+    #[serde(skip)]
+    pub commands: Vec<Command>,
     /// Where the record's lines stand: those torn and passed over, the record each item
     /// began in, and what the last of them leave in the harness's input box. Never said:
     /// no reading Node wrote has it.
@@ -193,6 +199,20 @@ pub struct Monitor {
     pub called: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<Notice>,
+}
+
+/// A command a turn started in the background that its harness has said no end of: its
+/// task's id, when it began running (milliseconds since the epoch, where the record says a
+/// time), and the time limit it passed where that is what moved it into the background.
+/// A command run in the background from its call began when the call returned. A command
+/// that was run in the foreground with a time limit and passed it is moved by Claude Code
+/// (`toolUseResult.timedOutAfterMs`) and goes on running: it began that limit before the
+/// record that says so (T-1181; the field board's T-299, whose worker did not notice).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Command {
+    pub id: Arc<str>,
+    pub since: Option<i64>,
+    pub limit_ms: Option<i64>,
 }
 
 /// What a monitor watches, as the call that armed it says.
@@ -306,6 +326,7 @@ impl Record {
             settlement: Settlement::Unknown,
             pending: Pending::default(),
             monitors: Vec::new(),
+            commands: Vec::new(),
             lines: Box::default(),
         }
     }

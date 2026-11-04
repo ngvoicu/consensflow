@@ -591,7 +591,7 @@ const ENDED: &str =
 fn held_notes(tiers: &Tiers<'_>) -> usize {
     told(tiers)
         .iter()
-        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .filter(|note| note.starts_with("T-1 is still working in the background"))
         .count()
 }
 

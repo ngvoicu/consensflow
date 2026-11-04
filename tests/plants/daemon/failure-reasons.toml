@@ -43,13 +43,13 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-            let because = self
-                .why_it_failed(participant, record, observed)
-                .await?
-                .said;
+            let why = self.why_it_failed(participant, record, observed).await?;
 '''
 replace = '''
-            let because = format!("@{}'s harness reported a failure", participant.handle);
+            let why = crate::deliveries::Why {
+                said: format!("@{}'s harness reported a failure", participant.handle),
+                key: String::new(),
+            };
 '''
 
 [[plant]]
@@ -953,12 +953,12 @@ runs = ["failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-            let because = self
-                .why_it_failed(participant, record, observed)
-                .await?
-                .said;'''
+            let why = self.why_it_failed(participant, record, observed).await?;'''
 replace = '''
-            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+            let why = crate::deliveries::Why {
+                said: format!("@{}'s harness reported a failure", participant.handle),
+                key: String::new(),
+            };'''
 
 [[plant]]
 name = "failure reason: a quotation of the task's latest header is taken for its paste, and a failed turn there told as the task's"

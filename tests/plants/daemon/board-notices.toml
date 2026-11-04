@@ -49,8 +49,8 @@ replace = "        if false {"
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        if given_up {\n            let words = failed(told.waiting_for_the_reopen(None));"
-replace = "        if given_up && false {\n            let words = failed(told.waiting_for_the_reopen(None));"
+find = "        if given_up {\n            outage::tell_failure("
+replace = "        if given_up && false {\n            outage::tell_failure("
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
