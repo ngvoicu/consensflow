@@ -545,6 +545,39 @@ file = "crates/cf-panes/src/arbiter.rs"
 find = "            let now = self.clock.now();\n            state.paste.idle(now);"
 replace = "            let now = Instant::now();\n            state.paste.idle(now);"
 
+# The rules of the Enter's wait itself, which the 22 converted tests hold at exact moments: the
+# window's quiet, the floor of its pace, the most.
+
+[[plant]]
+name = "paste enter: a paste's Enter goes without the window's quiet after its echo"
+meant = "a_pastes_enter_waits_for_the_window_to_finish_echoing_it"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))"
+replace = "                || (since >= self.least_ms && echoed.is_some())"
+
+[[plant]]
+name = "paste enter: a paste's Enter goes before the window could have read the paste"
+meant = "a_humans_enter_waits_at_least_as_long_as_the_window_takes_to_read_the_paste"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))"
+replace = "                || echoed.is_some_and(|quiet| quiet >= self.quiet_ms)"
+
+[[plant]]
+name = "paste enter: a paste's Enter goes at half the most"
+meant = "a_paste_nothing_echoes_gets_its_enter_at_the_most"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            if since >= self.most_ms"
+replace = "            if since >= self.most_ms / 2"
+
 # --- a paste's time to be answered (T-1127, second part). `pane.write_paste` had the bridge's
 # 30 s whatever the pane host holds a delivery's Enter for: into a window like Muse's on Windows
 # (a second and 2 ms a character at the most), a brief of 14,500 characters or more was cut off
