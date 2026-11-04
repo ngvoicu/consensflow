@@ -2137,6 +2137,49 @@ mod tests {
         })
     }
 
+    /// [`drawing`], timed from the paste: the window's prints come `prints` after the first write
+    /// it is given, read off `observed` (which the handle gives back), and it then prints for
+    /// `printing`. A window draws in answer to what it was given, and a printer timed from its
+    /// own start draws at the wrong moment where a sleep overshoots (GitHub's macOS runners, CI
+    /// runs 41767889064 and 41772376690: a 10 ms sleep woke past `drawn_after_ms`).
+    fn drawing_after_the_paste(
+        arbiter: &InputArbiter,
+        key: &PaneKey,
+        silent: SilentPaste,
+        observed: mpsc::Receiver<RecordedWrite>,
+        prints: &[Duration],
+        printing: Duration,
+    ) -> thread::JoinHandle<mpsc::Receiver<RecordedWrite>> {
+        let clock = arbiter
+            .register_with(key, Some(silent))
+            .expect("register pane");
+        let prints = prints.to_vec();
+        thread::spawn(move || {
+            let pasted = observed.recv().expect("the paste was written").at;
+            for at in prints {
+                let due = pasted + at;
+                // A short wait spins: a sleep of a few milliseconds can wake tens of them late.
+                if at < Duration::from_millis(50) {
+                    while Instant::now() < due {
+                        std::hint::spin_loop();
+                    }
+                } else {
+                    thread::sleep(due.saturating_duration_since(Instant::now()));
+                }
+                clock.note(true);
+            }
+            let drawn = Instant::now();
+            loop {
+                clock.note(true);
+                if drawn.elapsed() >= printing {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            observed
+        })
+    }
+
     /// How long after the first of `records` its second was written.
     fn between(records: &[RecordedWrite]) -> Duration {
         records[1].at.duration_since(records[0].at)
@@ -2223,11 +2266,18 @@ mod tests {
         let key = PaneKey::new("pasted-and-drawn", 1);
         let (writer, observed) = RecordingWriter::new(None);
         let arbiter = InputArbiter::new(EnterTiming::fixed(0));
-        let printer = drawing(&arbiter, &key, DRAWS, &[], Duration::from_millis(50));
+        let printer = drawing_after_the_paste(
+            &arbiter,
+            &key,
+            DRAWS,
+            observed,
+            &[],
+            Duration::from_millis(50),
+        );
         arbiter
             .write_typed_via(writer.as_ref(), &key, HUMAN_PASTE)
             .expect("the human's paste");
-        printer.join().expect("printer");
+        let observed = printer.join().expect("printer");
         thread::sleep(Duration::from_millis(400));
         observed.try_iter().for_each(drop);
 
@@ -2252,16 +2302,18 @@ mod tests {
     #[test]
     fn a_print_at_once_after_the_paste_is_not_its_draw_and_the_enter_waits_for_the_draw() {
         let key = PaneKey::new("first-key-answered", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
+        let (writer, observed) = RecordingWriter::new(None);
         let arbiter = InputArbiter::new(EnterTiming::fixed(0));
         let silent = SilentPaste {
             drawn_after_ms: 50,
             ..DRAWS
         };
-        let printer = drawing(
+        // The answer to the first key comes 10 ms after the paste, the draw 600 ms on.
+        let printer = drawing_after_the_paste(
             &arbiter,
             &key,
             silent,
+            observed,
             &[Duration::from_millis(10), Duration::from_millis(600)],
             Duration::ZERO,
         );
