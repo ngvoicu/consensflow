@@ -361,6 +361,7 @@ pub(super) fn settled(session: &str) -> Record {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         }],
         in_flight: false,
         asking: false,
@@ -377,6 +378,7 @@ pub(super) fn settled(session: &str) -> Record {
         monitors: Vec::new(),
         commands: Vec::new(),
         lines: Box::default(),
+        beside: Vec::new(),
     }
 }
 

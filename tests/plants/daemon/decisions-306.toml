@@ -230,8 +230,8 @@ runs = ["daemon-depth"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task/pages.rs"
-find = "                    .filter(|item| item.text.to_lowercase().contains(&needle))"
-replace = "                    .filter(|item| !needle.is_empty() || item.text.is_empty())"
+find = "                            .any(|said| said.to_lowercase().contains(&needle))"
+replace = "                            .any(|said| !needle.is_empty() || said.is_empty())"
 
 [[plant]]
 name = "transcript pages: a search looks for its words in their own case"

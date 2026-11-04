@@ -94,6 +94,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             monitors: Vec::new(),
             commands: Vec::new(),
             lines: Box::default(),
+            beside: Vec::new(),
         }),
     }
 }

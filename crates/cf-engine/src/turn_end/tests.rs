@@ -12,6 +12,7 @@ fn item(text: &str, commentary: bool) -> Item {
         commentary,
         synthetic: false,
         compaction: false,
+        detail: None,
     }
 }
 

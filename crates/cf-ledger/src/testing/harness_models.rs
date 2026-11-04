@@ -120,14 +120,14 @@ mod tests {
         let before = rusqlite::Connection::open_in_memory().unwrap();
         migrate(&before, &MIGRATIONS[..30]).unwrap();
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        migrate(&db, &MIGRATIONS).unwrap();
+        migrate(&db, &MIGRATIONS[..31]).unwrap();
         let after = participant_sql(&db);
         assert!(after.contains(super::COLUMN_LINES), "{after}");
         assert!(!after.contains("tier_chosen"), "{after}");
         super::undo_migration_0031(&db).unwrap();
         assert_eq!(participant_sql(&db), participant_sql(&before));
         db.execute_batch("PRAGMA user_version = 30").unwrap();
-        migrate(&db, &MIGRATIONS).unwrap();
+        migrate(&db, &MIGRATIONS[..31]).unwrap();
         assert_eq!(participant_sql(&db), after);
     }
 }

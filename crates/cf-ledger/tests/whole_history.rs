@@ -13,6 +13,8 @@ mod bounds;
 mod ceilings;
 #[path = "whole_history/deleting.rs"]
 mod deleting;
+#[path = "whole_history/drawn.rs"]
+mod drawn;
 #[path = "whole_history/healing.rs"]
 mod healing;
 #[path = "whole_history/load.rs"]

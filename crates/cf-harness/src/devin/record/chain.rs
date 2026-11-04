@@ -24,6 +24,7 @@ use serde_json::Value;
 
 use super::store::{Row, Store};
 use crate::shared::record::calls::{describe, LastCall};
+use crate::shared::record::drawn::{self, Detail, Kind, Status};
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{Item, Role};
 use crate::shared::record::sqlite::{text_of, Cell};
@@ -36,6 +37,9 @@ pub(super) struct Chain {
     /// The last tool call an assistant's message of the chain makes, as a line
     /// (`calls::describe`).
     pub(super) last_call: Option<Arc<LastCall>>,
+    /// The items only the history shows (an assistant's thinking), each with the place
+    /// among the entries it stands before.
+    pub(super) beside: Vec<(usize, Item)>,
 }
 
 /// A message of the chain as its item, with what its completeness rests on.
@@ -66,6 +70,9 @@ impl Chain {
         let mut last_call = None;
         let mut chain = ancestors(store)?;
         chain.reverse();
+        let mut beside = Vec::new();
+        // What the history draws of each call an assistant made, by its id.
+        let mut calls: HashMap<String, Detail> = HashMap::new();
         for row in with_cut_users(store, chain)? {
             let message = row.message()?;
             follow(&mut asking, message, row, &mut keys)?;
@@ -103,6 +110,33 @@ impl Chain {
                 .filter(|at| !at.is_null())
                 .cloned()
                 .or_else(|| row.created_at.as_ref().map(Cell::json));
+            let detail = match role {
+                Role::Assistant => {
+                    remember_calls(message, &mut calls);
+                    if let Some(thought) = thinking(message.get("thinking")) {
+                        let id = Arc::from(format!("{id}:thinking"));
+                        let detail = Detail::of(Kind::Thinking);
+                        beside.push((
+                            entries.len(),
+                            drawn::beside_item(id, Role::Custom, &thought, at.clone(), detail),
+                        ));
+                    }
+                    None
+                }
+                Role::Tool => {
+                    let mut detail = message
+                        .get("tool_call_id")
+                        .and_then(Value::as_str)
+                        .and_then(|call| calls.get(call))
+                        .cloned()
+                        .unwrap_or_else(|| Detail::of(Kind::Tool));
+                    ran(metadata("extensions"), &mut detail);
+                    Some(Arc::new(detail))
+                }
+                // The summary Devin's compactor begins a chain with: a compaction's.
+                Role::Custom if summary(message) => Some(Arc::new(Detail::of(Kind::Compaction))),
+                _ => None,
+            };
             entries.push(Entry {
                 item: Item {
                     id: Arc::from(id.as_str()),
@@ -113,6 +147,7 @@ impl Chain {
                     commentary: false,
                     synthetic: false,
                     compaction: false,
+                    detail,
                 },
                 request: request.clone(),
                 native: if role == Role::Assistant {
@@ -145,7 +180,70 @@ impl Chain {
             entries,
             asking: asking != Key::Null,
             last_call,
+            beside,
         })
+    }
+}
+
+/// What an assistant's `thinking` says, where it says anything: its text, or the texts of
+/// its parts.
+fn thinking(thought: Option<&Value>) -> Option<String> {
+    let said = match thought? {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                Value::String(text) => Some(text.as_str()),
+                part => ["text", "thinking"]
+                    .into_iter()
+                    .find_map(|name| part.get(name).and_then(Value::as_str)),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        part => ["text", "thinking"]
+            .into_iter()
+            .find_map(|name| part.get(name).and_then(Value::as_str))?
+            .to_owned(),
+    };
+    (!js::trim(&said).is_empty()).then_some(said)
+}
+
+/// How a tool's call ran, as Devin 3000.11 says it beside its answer (`metadata.extensions`):
+/// the time it took (`chisel/tool_call_timing.duration_ms`), and how it ended: failed where
+/// a command's exit code is not 0 (`chisel/terminal_output.exit.exit_code`; Devin's own
+/// `chisel/tool_result_meta.success` is true for it) or where Devin says it did not succeed,
+/// else well. An answer that says neither says nothing of it.
+fn ran(extensions: Option<&Value>, detail: &mut Detail) {
+    let at = |path: &[&str]| {
+        path.iter()
+            .try_fold(extensions?, |value, name| value.get(name))
+    };
+    detail.took_ms = at(&["chisel/tool_call_timing", "duration_ms"]).and_then(Value::as_u64);
+    let code = at(&["chisel/terminal_output", "exit", "exit_code"]).and_then(Value::as_i64);
+    let success = at(&["chisel/tool_result_meta", "success"]).and_then(Value::as_bool);
+    detail.status = match (code, success) {
+        (Some(code), _) if code != 0 => Some(Status::Failed),
+        (_, Some(false)) => Some(Status::Failed),
+        (Some(_), _) | (_, Some(true)) => Some(Status::Ok),
+        (None, None) => None,
+    };
+}
+
+/// The calls an assistant's message makes (`tool_calls`), each by its id with what the
+/// history draws of it: its tool's name and its header ([`drawn::guess`]).
+fn remember_calls(message: &Value, calls: &mut HashMap<String, Detail>) {
+    let Some(Value::Array(made)) = message.get("tool_calls") else {
+        return;
+    };
+    for call in made {
+        let (Some(id), Some(name)) = (
+            call.get("id").and_then(Value::as_str),
+            call.get("name").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let header = drawn::guess(name, call.get("arguments"));
+        calls.insert(id.to_owned(), drawn::tool(name, header, None));
     }
 }
 

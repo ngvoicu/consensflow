@@ -320,7 +320,7 @@ replace = '''
 
 [[plant]]
 name = "harness models: the history viewer says nothing of the name a renamed member had"
-meant = "says on its page line the name a member had before members were named by their model"
+meant = "says beside its title the name a member had before members were named by their model"
 runs = ["hm-page-history"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

@@ -218,12 +218,13 @@ impl Ledger {
                     "SELECT t.conversation_id, t.item_id, t.seq, t.role, t.text, t.complete, t.at, t.copied_at, {}
                      FROM transcript t JOIN conversation c ON c.id = t.conversation_id
                      JOIN participant p ON p.id = c.participant_id
-                     WHERE p.project_id = ?1 ORDER BY t.conversation_id, t.seq",
+                     WHERE p.project_id = ?1{} ORDER BY t.conversation_id, t.seq",
                     if has_column(db, "transcript", "compaction") {
                         "t.compaction"
                     } else {
                         "0"
-                    }
+                    },
+                    crate::measure::words_only(db)?
                 ),
                 id,
                 |row| {

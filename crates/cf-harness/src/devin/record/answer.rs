@@ -39,6 +39,7 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     record.asking = chain.asking;
     record.last_call.clone_from(&chain.last_call);
     record.lines.lost = wires.lost();
+    record.beside = chain.beside.clone();
     record.items = chain
         .entries
         .iter()

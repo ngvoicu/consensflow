@@ -128,7 +128,12 @@ fn noisy(mut record: Value) -> Value {
         if let Some(Value::Array(blocks)) = message.get_mut("content") {
             for block in blocks {
                 if let Value::Object(block) = block {
-                    add(block, &["caller", "signature", "thinking", "is_error"]);
+                    add(
+                        block,
+                        // A call's `input` and `name`, a thinking block's words and a
+                        // result's `is_error` are read (what the history draws of them).
+                        &["caller", "signature"],
+                    );
                 }
             }
         }
@@ -157,6 +162,7 @@ fn variant(projected: &Projected) -> &'static str {
         Projected::User(_) => "user",
         Projected::Output(_) => "output",
         Projected::Boundary(_) => "boundary",
+        Projected::Compacted(_) => "compacted",
     }
 }
 
@@ -275,6 +281,7 @@ fn what_nothing_reads_of_a_record_changes_neither_how_it_waits_nor_the_reading()
         "user",
         "output",
         "boundary",
+        "compacted",
     ];
     assert_eq!(
         seen,

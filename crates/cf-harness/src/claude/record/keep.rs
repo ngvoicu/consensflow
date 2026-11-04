@@ -13,14 +13,19 @@
 use cf_base::json::Keep;
 
 /// What a call's input says that is read: a Monitor's, what it is called and what it
-/// watches, a command or a socket (an object, kept as an empty one: that it is one); and
-/// what any call works on, which the last call of the transcript is told by
-/// (`crate::shared::record::calls`).
+/// watches, a command or a socket (an object, kept as an empty one: that it is one); what
+/// any call works on, which the last call of the transcript is told by
+/// (`crate::shared::record::calls`); and what the history heads the call's block with
+/// (`project::called`): the file a call reads, edits or writes and the lines it reads, what it
+/// searches for or fetches.
 static INPUT: Keep = Keep::Members(&[
     ("command", &Keep::Scalar),
     ("description", &Keep::Scalar),
     ("ws", &Keep::Scalar),
     ("file_path", &Keep::Scalar),
+    ("notebook_path", &Keep::Scalar),
+    ("offset", &Keep::Scalar),
+    ("limit", &Keep::Scalar),
     ("pattern", &Keep::Scalar),
     ("url", &Keep::Scalar),
     ("query", &Keep::Scalar),
@@ -31,13 +36,15 @@ static INPUT: Keep = Keep::Members(&[
 /// The model a `fallback` block names on either side (`from`, `to`).
 static SIDE: Keep = Keep::Members(&[("model", &Keep::Scalar)]);
 
-/// A block of a message's content: its type, the text it says, the ids that
+/// A block of a message's content: its type, the text it says, what a thinking block says
+/// (the history's alone), the ids that
 /// open and close a call, the tool a call is of and what of its input is read, whether a
 /// result is an error, what a result holds (all of it: it is the item's text), and the
 /// two models of a `fallback` block (T-816).
 static BLOCK: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("text", &Keep::Scalar),
+    ("thinking", &Keep::Scalar),
     ("id", &Keep::Scalar),
     ("name", &Keep::Scalar),
     ("input", &INPUT),
@@ -74,13 +81,29 @@ static ATTACHMENT: Keep = Keep::Members(&[
 /// (`timedOutAfterMs`), the monitor a Monitor call armed and its time (which says it
 /// is one), and the job a TaskStop call stopped. A tool whose result is text, or a list,
 /// says none.
+/// And what the history draws of the run: how long it took, and the hunks of the change an
+/// edit made.
 static TOOL_USE_RESULT: Keep = Keep::Members(&[
     ("backgroundTaskId", &Keep::Scalar),
     ("timedOutAfterMs", &Keep::Scalar),
     ("taskId", &Keep::Scalar),
     ("timeoutMs", &Keep::Scalar),
     ("task_id", &Keep::Scalar),
+    ("durationMs", &Keep::Scalar),
+    ("structuredPatch", &Keep::Items(&HUNK)),
 ]);
+
+/// A hunk of an edit's change: where it stands on each side, and its lines.
+static HUNK: Keep = Keep::Members(&[
+    ("oldStart", &Keep::Scalar),
+    ("oldLines", &Keep::Scalar),
+    ("newStart", &Keep::Scalar),
+    ("newLines", &Keep::Scalar),
+    ("lines", &Keep::Items(&Keep::Scalar)),
+]);
+
+/// What a compaction's boundary says it compacted from.
+static COMPACTED: Keep = Keep::Members(&[("preTokens", &Keep::Scalar)]);
 
 /// Where a user's record or a message brought into a turn came from, by its kind
 /// (`task-notification`, `human`).
@@ -118,4 +141,5 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("pendingBackgroundAgentCount", &Keep::Scalar),
     ("pendingWorkflowCount", &Keep::Scalar),
     ("preventedContinuation", &Keep::Scalar),
+    ("compactMetadata", &COMPACTED),
 ]);

@@ -36,13 +36,13 @@
 //! it ([`TAIL_BYTES`]), never the whole of it.
 
 use cf_proto::ledger::{
-    HistoryFrom, HistoryItem, HistoryKey, HistoryRead, HistoryRow, MessageOpening, Scanned,
-    TextCut, TextPart,
+    HistoryFrom, HistoryItem, HistoryKey, HistoryRead, HistoryRow, ItemDetail, MessageOpening,
+    Scanned, TextCut, TextPart,
 };
 use rusqlite::types::ValueRef;
 use rusqlite::{params, OptionalExtension, Params, Row, Statement, StatementStatus};
 
-use super::transcripts::PART_TAIL;
+use super::transcripts::{HEADER_MAX, NAME_MAX, PART_TAIL};
 use super::ID_SHOWN;
 use crate::model::{quoted, LedgerError};
 use crate::openings::{opening_of, text_of};
@@ -68,8 +68,14 @@ pub const HISTORY_FIND_MAX: usize = 1_000;
 
 /// The most bytes a row's fields hold besides its text: its id as a page shows
 /// it ([`ID_SHOWN`] characters and "…") and its time, as a store keeps one (its
-/// role is one of four words).
-const ROW_FIELDS: usize = 4 * ID_SHOWN + 3 + 64;
+/// role is one of four words), and what the history draws of it ([`DRAWN_FIELDS`]).
+const ROW_FIELDS: usize = 4 * ID_SHOWN + 3 + 64 + DRAWN_FIELDS;
+
+/// The most bytes what the history draws of an item holds in its head (migration 0032): a
+/// call's header ([`HEADER_MAX`] characters) and its tool's name ([`NAME_MAX`]), its kind
+/// and its status (a word each), the time it took and a compaction's tokens (a number
+/// each). The change an edit made is read apart, and charged as a part is.
+const DRAWN_FIELDS: usize = 4 * HEADER_MAX + 4 * NAME_MAX + 2 * 16 + 2 * 20;
 
 /// The most of a message's body its delivery's line reads: the line says its
 /// first line, cut at 160 characters, which this holds behind any blank lines
@@ -107,7 +113,10 @@ const TAIL_BYTES: usize = 4 * PART_TAIL;
 fn rows_from(tools: bool, newest_first: bool, with_it: bool) -> String {
     format!(
         "SELECT item AS row_id, role, bytes, parts, id_shown, complete, at, compaction, revision,
-         octet_length(id_shown) + ifnull(octet_length(at), 0) AS field_bytes
+         kind, name, header, status, took, tokens, diff_bytes,
+         octet_length(id_shown) + ifnull(octet_length(at), 0) + ifnull(octet_length(kind), 0)
+           + ifnull(octet_length(name), 0) + ifnull(octet_length(header), 0)
+           + ifnull(octet_length(status), 0) AS field_bytes
        FROM transcript_head INDEXED BY {}
        WHERE conversation_id = ?1{} AND item {}{} ?2 ORDER BY item {}",
         if tools {
@@ -156,6 +165,9 @@ const PART_SIZE: &str =
 /// Part `?2` of the item at row `?1`, its text: read past the part's end alone
 /// ([`PART_TAIL`] characters).
 const PART_TEXT: &str = "SELECT text FROM transcript_part WHERE item = ?1 AND part = ?2";
+
+/// The change an edit made of the item at row `?1`, whose head says it made one.
+const DIFF_TEXT: &str = "SELECT text FROM transcript_diff WHERE item = ?1";
 
 /// The end of part `?2` of the item at row `?1`, which its row holds before its text.
 const PART_END: &str = "SELECT tail FROM transcript_part WHERE item = ?1 AND part = ?2";
@@ -408,7 +420,8 @@ impl Reading<'_> {
             };
             self.scanned.rows += 1;
             self.scanned.fields += row.get::<_, i64>("field_bytes")?.unsigned_abs() as usize;
-            let met = Met {
+            let diff_bytes = row.get::<_, i64>("diff_bytes")?.unsigned_abs() as usize;
+            let mut met = Met {
                 key: HistoryKey {
                     conversation: id,
                     row: row.get("row_id")?,
@@ -421,11 +434,26 @@ impl Reading<'_> {
                     complete: row.get::<_, i64>("complete")? == 1,
                     at: text_or_none(row.get_ref("at")?),
                     compaction: row.get::<_, i64>("compaction")? == 1,
+                    detail: drawn_of(row)?,
                 },
                 revision: row.get("revision")?,
                 bytes: row.get::<_, i64>("bytes")?.unsigned_abs() as usize,
                 parts: row.get::<_, i64>("parts")?.unsigned_abs() as usize,
             };
+            if diff_bytes > 0 {
+                // The change an edit made, from its own row: charged as a part is.
+                if !self.may(PART_COST + diff_bytes) {
+                    break;
+                }
+                self.scanned.parts += 1;
+                let diff = self.one(DIFF_TEXT, [met.key.row], |row| {
+                    Ok(text_of(row.get_ref(0)?.as_bytes()?))
+                })?;
+                self.scanned.bytes += diff.as_ref().map_or(0, String::len);
+                if let Some(detail) = &mut met.item.detail {
+                    detail.diff = diff;
+                }
+            }
             let from_part = within
                 .filter(|place| place.row == met.key.row)
                 .map_or(0, |place| place.part);
@@ -482,6 +510,16 @@ impl Reading<'_> {
     /// (the end of the part before the first it reads, where it goes on inside
     /// the item, read by itself: [`TAIL_BYTES`]). Says whether the read goes on.
     fn search(&mut self, met: Met, from_part: usize, needle: &str) -> Result<bool, LedgerError> {
+        // A call's header, read with its head, holds the words: it is shown as a read
+        // with no search shows it (chief-harness CHF-20), its text not searched.
+        let header = met
+            .item
+            .detail
+            .as_ref()
+            .and_then(|drawn| drawn.header.as_deref());
+        if from_part == 0 && header.is_some_and(|header| folded(header).contains(needle)) {
+            return self.show(met);
+        }
         if self.part_bytes(&met, 0)?.is_none() {
             if !self.may(met.bytes) {
                 return Ok(false);
@@ -621,6 +659,27 @@ fn long_row(met: Met, text: String, from: usize) -> HistoryRow {
             revision: met.revision,
         }),
     }
+}
+
+/// What the history draws of the item a head `row` says besides its words: none where it
+/// says no kind (an item copied before migration 0032, or of which its reader said nothing
+/// more than its role does). The change an edit made is read apart.
+fn drawn_of(row: &Row<'_>) -> rusqlite::Result<Option<ItemDetail>> {
+    let Some(kind) = text_or_none(row.get_ref("kind")?) else {
+        return Ok(None);
+    };
+    let count = |name: &str| -> rusqlite::Result<Option<u64>> {
+        Ok(row.get::<_, Option<i64>>(name)?.map(i64::unsigned_abs))
+    };
+    Ok(Some(ItemDetail {
+        kind,
+        name: text_or_none(row.get_ref("name")?),
+        header: text_or_none(row.get_ref("header")?),
+        status: text_or_none(row.get_ref("status")?),
+        took_ms: count("took")?,
+        tokens: count("tokens")?,
+        diff: None,
+    }))
 }
 
 /// The steps SQLite's machine took for `statement` since they were last counted.
@@ -867,6 +926,7 @@ mod tests {
             (PART_TEXT.into(), vec![part.into()]),
             (PART_END.into(), vec![part.into()]),
             (ROW_TEXT.into(), vec![by_row("transcript")]),
+            (DIFF_TEXT.into(), vec![by_row("transcript_diff")]),
             (PART_HEAD.into(), vec![by_row("h"), by_row("c")]),
             (
                 MESSAGE_FIELDS.into(),

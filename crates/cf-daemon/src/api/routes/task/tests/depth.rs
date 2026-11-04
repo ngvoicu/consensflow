@@ -119,3 +119,34 @@ async fn a_search_keeps_the_items_that_say_its_words_in_any_case_and_pages_them(
     let (_, said) = get(&scene, &scene.chief, &route).await;
     assert_eq!((said.get("page"), ids(&said).len()), (None, 10));
 }
+
+#[tokio::test]
+async fn a_search_finds_a_call_by_its_header_and_counts_it_among_the_items() {
+    // What the readers say of a call since chief-harness CHF-15 (T-486): a search finds
+    // the command a tool's item ran, which its output need not say.
+    let scene = scene();
+    let number = working_task(&scene);
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let project = ledger.project(scene.project.id).unwrap().unwrap();
+        let zeus = project
+            .participants
+            .iter()
+            .find(|p| p.handle == "zeus")
+            .unwrap();
+        let conversation = ledger.start_conversation(zeus.id, "claude-code").unwrap();
+        let items = [
+            json!({ "id": "i1", "role": "assistant", "text": "Checking", "complete": true }),
+            json!({ "id": "i2", "role": "tool", "text": "nothing to commit", "complete": true,
+                "detail": { "kind": "tool", "name": "Bash", "header": "$ git status", "status": "ok" } }),
+            json!({ "id": "i3", "role": "tool", "text": "a git status of its own", "complete": true }),
+        ];
+        ledger.copy_transcript(conversation.id, &items, 0).unwrap();
+    }
+    let route = format!("{number}/transcript?find=GIT%20STATUS");
+    let (status, said) = get(&scene, &scene.chief, &route).await;
+    assert_eq!(status, 200);
+    assert_eq!([&said["found"], &said["total"]], [&json!(2), &json!(3)]);
+    assert_eq!(ids(&said), ["i2", "i3"]);
+    assert_eq!(said["items"][0]["header"], "$ git status");
+}

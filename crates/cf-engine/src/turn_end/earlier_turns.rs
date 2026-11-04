@@ -390,6 +390,7 @@ mod tests {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         }
     }
 

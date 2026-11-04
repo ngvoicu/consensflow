@@ -437,6 +437,7 @@ mod tests {
             complete: true,
             at: None,
             compaction: false,
+            detail: None,
         }
     }
 

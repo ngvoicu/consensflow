@@ -791,6 +791,8 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 }
 .transcript-more, .story-more { font-size: 12px; color: var(--muted); }
 .transcript-more { margin: 0 0 8px; }
+.transcript-item[data-compaction="true"] { border-color: var(--amber); }
+.transcript-item[data-compaction="true"] > .transcript-head { color: var(--amber); }
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
 /* The live windows. */
@@ -1117,38 +1119,152 @@ button.registry-row:hover:not(:disabled) { border-color: var(--seafoam-dim); }
 .progress-fill { display: block; height: 100%; border-radius: 3px; background: var(--seafoam); }
 .progress-words { font: 11.5px var(--mono); color: var(--muted); }
 
-/* The history viewer: a participant's conversations in one column, headed each, as the specs
-   viewer is laid out (its head, a line under it, then what it shows, and Close in reach). */
-dialog.history-viewer { width: min(980px, calc(100vw - 48px)); }
-dialog.history-viewer[open] { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
-.history-head { grid-row: 1; display: flex; align-items: baseline; gap: 12px; padding: 16px 22px 12px; border-bottom: 1px solid var(--line-soft); }
-.history-title { margin: 0; font-size: 17px; font-weight: 650; }
-.history-hint { grid-row: 2; margin: 0; padding: 6px 22px; border-bottom: 1px solid var(--line-soft); font-size: 11.5px; color: var(--muted); }
-.history-bar { grid-row: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 22px; border-bottom: 1px solid var(--line-soft); }
-.history-search { display: flex; gap: 6px; }
-.history-search input {
-  width: 260px;
-  padding: 5px 9px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--ink);
-  color: var(--foam);
+/* The history viewer: one stream, drawn to the approved mock (chief-harness CHF-20,
+   history-dark.png and history-light.png) in its own colours, dark or light as the system
+   is: the app's own page is dark only, so the viewer alone follows the system. Its words
+   are in a monospace the Mac has (SF Mono, Menlo) or Windows has (Cascadia, Consolas). */
+dialog.history-viewer {
+  --history-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  --history-surface: #1e2124;
+  --history-field: #2a2e32;
+  --history-line: #34383c;
+  --history-words: #e6e8ea;
+  --history-quiet: #b0b5ba;
+  --history-thinking: #a3a8ae;
+  --history-prompt: #1f4a63;
+  --history-ok: #2a4a35;
+  --history-failed: #6e2828;
+  --history-grey: #34383c;
+  --history-compaction: #3e2e5c;
+  --history-path: #d4a5f0;
+  --history-range: #ebb050;
+  --history-heading: #f2b134;
+  --history-marker: #e06c9f;
+  --history-code: #b98cf5;
+  --history-removed: #f7a097;
+  --history-added: #81e08f;
+  --history-refusal: #ff8a80;
+  width: min(1100px, calc(100vw - 48px));
+  border-color: var(--history-line);
+  background: var(--history-surface);
+  color: var(--history-words);
 }
-.history-switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--foam); }
-.history-switch input { margin: 0; accent-color: var(--seafoam); }
-.history-page { font: 11px var(--mono); color: var(--muted); }
-.history-bar .quiet-button:disabled { opacity: .45; cursor: default; }
-.history-body { grid-row: 4; min-height: 0; overflow: auto; padding: 14px 28px 28px; display: grid; align-content: start; gap: 22px; background: var(--deep); }
-dialog.history-viewer .dialog-actions { grid-row: 5; }
-/* A part of a long item: which, and the way to read it whole. */
-.history-cut { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--amber); }
-.history-cut .quiet-button { padding: 2px 9px; font: 12px var(--ui); }
-:is(.history-note, .history-refusal) { margin: 0; font-size: 13px; color: var(--muted); }
-.history-refusal { color: var(--buoy); }
-.transcript-item[data-compaction="true"] { border-color: var(--amber); }
-.transcript-item[data-compaction="true"] > .transcript-head { color: var(--amber); }
-.history-delivery > summary { font: 12px var(--mono); color: var(--sky); cursor: pointer; }
-.history-delivery[open] > summary { margin-bottom: 4px; }
+@media (prefers-color-scheme: light) {
+  dialog.history-viewer {
+    color-scheme: light;
+    --history-surface: #f6f5f1;
+    --history-field: #e8e7e2;
+    --history-line: #d6d5cf;
+    --history-words: #222426;
+    --history-quiet: #5b5f63;
+    --history-thinking: #686c70;
+    --history-prompt: #d6e6f0;
+    --history-ok: #dcebd9;
+    --history-failed: #f2d4d4;
+    --history-grey: #e4e4e1;
+    --history-compaction: #e6dcf2;
+    --history-path: #6f42c1;
+    --history-range: #825700;
+    --history-heading: #825700;
+    --history-marker: #3b5bdb;
+    --history-code: #8250df;
+    --history-removed: #b42318;
+    --history-added: #166b2e;
+    --history-refusal: #b42318;
+  }
+}
+dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
+.history-head { grid-row: 1; display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px 26px; }
+.history-title { margin: 0; font: 600 24px/1.2 var(--ui); }
+/* The name a member had before members were named by their model (harness-models). */
+.history-formerly { font: 13px var(--ui); color: var(--history-quiet); }
+.history-search input {
+  width: 270px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--history-field);
+  color: var(--history-words);
+  font: 14px var(--ui);
+}
+.history-search input::placeholder { color: var(--history-quiet); opacity: 1; }
+.history-search input:focus-visible { outline: 2px solid var(--history-path); outline-offset: 0; }
+.history-icon {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--history-words);
+  font: 20px/1 var(--ui);
+  cursor: pointer;
+}
+.history-icon:hover { background: var(--history-field); }
+.history-body {
+  grid-row: 2;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 26px 22px;
+  font: 13.5px/1.55 var(--history-mono);
+  overflow-wrap: anywhere;
+  /* The viewer keeps what is in view as an earlier page comes in above it, in every
+     engine alike: Chromium's own anchoring would move it again, and WebKit has none. */
+  overflow-anchor: none;
+}
+.history-body:focus-visible { outline: none; }
+.history-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.history-item { margin: 0; }
+/* Blocks: the human's words and ConsensFlow's deliveries blue, a call by how it stands, a
+   compaction violet. The agent's words and thinking sit on the stream itself. */
+.history-item:is([data-kind="prompt"], [data-kind="tool"], [data-kind="compaction"]) { padding: 9px 16px; }
+.history-item[data-kind="prompt"] { background: var(--history-prompt); }
+.history-item[data-kind="tool"] { background: var(--history-grey); }
+.history-item[data-kind="tool"][data-status="ok"] { background: var(--history-ok); }
+.history-item[data-kind="tool"][data-status="failed"] { background: var(--history-failed); }
+.history-item[data-kind="compaction"] { background: var(--history-compaction); }
+.history-item :is(pre, p) { margin: 0; font: inherit; white-space: pre-wrap; }
+.history-item[data-kind="prompt"] .history-text + .history-text { margin-top: 8px; }
+.history-item .history-thinking { font-style: italic; color: var(--history-thinking); }
+.history-item[data-kind="notice"] { color: var(--history-quiet); }
+.history-call { font-weight: 700; }
+.history-call .history-path,
+.history-item[data-kind="compaction"] .history-call { color: var(--history-path); }
+.history-call .history-range { color: var(--history-range); }
+.history-took, .history-quiet { color: var(--history-quiet); }
+.history-diff-row { white-space: pre-wrap; }
+.history-diff-row[data-sign="removed"] { color: var(--history-removed); }
+.history-diff-row[data-sign="added"] { color: var(--history-added); }
+.history-diff-row[data-sign="place"] { color: var(--history-quiet); }
+/* A quiet row a click acts on: the earlier history, an output's earlier lines, a summary,
+   the rest of a long item. */
+.history-row {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--history-quiet);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.history-row:hover { text-decoration: underline; }
+.history-row:disabled { cursor: default; text-decoration: none; opacity: .6; }
+.history-earlier-row { padding: 2px 0 4px; }
+/* The agent's words, as markdown, in the mock's colours. */
+.history-markdown :is(p, ul, ol, pre, blockquote, .md-table) { margin: 0 0 6px; }
+.history-markdown > :last-child { margin-bottom: 0; }
+.history-markdown .md-heading { margin: 4px 0 6px; color: var(--history-heading); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.history-markdown :is(ul, ol) { padding-left: 2ch; }
+.history-markdown ul > li { list-style: none; }
+.history-markdown ul > li::before { content: "- "; margin-left: -2ch; color: var(--history-marker); }
+.history-markdown li::marker { color: var(--history-marker); }
+.history-markdown code { font: inherit; color: var(--history-code); }
+.history-markdown pre { padding: 2px 0 2px 2ch; color: var(--history-words); white-space: pre-wrap; }
+.history-markdown pre code { color: inherit; }
+.history-markdown blockquote { padding-left: 2ch; border-left: 2px solid var(--history-line); color: var(--history-quiet); }
+.history-markdown a, .history-markdown .md-link { color: var(--history-path); }
+:is(.history-note, .history-refusal) { margin: 8px 0; font: 13px var(--ui); color: var(--history-quiet); }
+.history-refusal { color: var(--history-refusal); }
 
 @media (max-width: 760px) {
   .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }

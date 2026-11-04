@@ -1013,3 +1013,80 @@ pub(super) fn page_cost(ledger: &Ledger, project: i64, from: HistoryFrom) -> i32
     page();
     fetched(ledger)
 }
+
+#[test]
+fn a_search_finds_a_calls_header_as_it_finds_its_output_a_long_output_by_its_header_too() {
+    // chief-harness CHF-20: the viewer's search matches a call's header and its output.
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    let call = |id: &str, header: &str, text: &str| {
+        let mut said = item(id, "tool", text);
+        said["detail"] =
+            json!({ "kind": "tool", "name": "Bash", "header": header, "status": "ok" });
+        said
+    };
+    ledger
+        .copy_transcript(
+            conversation,
+            &[
+                item("u-1", "user", "Run the tests"),
+                call("t-1", "$ npm test", "PASS 12 tests"),
+                call("t-2", "$ ls", "npm test.log"),
+                call(
+                    "t-3",
+                    "read src/Filter.ts:1-3",
+                    "export function normalize() {}",
+                ),
+                // An output long enough to be kept in parts: found by its header alone.
+                call("t-4", "$ cargo build", &"x".repeat(HISTORY_PART - 10)),
+                item("a-1", "assistant", "Done"),
+            ],
+            0,
+        )
+        .expect("copied");
+    let found = |find: &str| {
+        let read = ledger
+            .read_history(
+                project,
+                "chief",
+                &ask(HistoryFrom::Newest, Some(find), true, ROOM),
+            )
+            .expect("a search");
+        (
+            ids(&read),
+            read.entries
+                .iter()
+                .map(|row| row.cut.is_some())
+                .collect::<Vec<_>>(),
+        )
+    };
+    // In any case, in the header of one call and the output of another (newest first).
+    assert_eq!(found("NPM TEST").0, ["t-2", "t-1"]);
+    assert_eq!(found("src/filter.ts").0, ["t-3"]);
+    // The long one is shown as a read without a search shows it: from its start.
+    let read = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, None, true, ROOM),
+        )
+        .expect("a read");
+    let shown = read
+        .entries
+        .iter()
+        .find(|row| row.item.id == "t-4")
+        .expect("t-4");
+    assert_eq!(
+        found("Cargo Build"),
+        (vec!["t-4".to_owned()], vec![shown.cut.is_some()])
+    );
+    // The tools' outputs left out, no call is found by its header either.
+    let read = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, Some("npm test"), false, ROOM),
+        )
+        .expect("a search");
+    assert!(ids(&read).is_empty(), "{:?}", ids(&read));
+}

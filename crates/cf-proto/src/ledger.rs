@@ -217,6 +217,34 @@ pub struct HistoryItem {
     /// item copied before the mark (migration 0020) is a plain `user` one.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub compaction: bool,
+    /// What the history draws of it besides its words, where its reader said it: none for
+    /// an item copied before the copy kept it (migration 0032), which draws as a plain one,
+    /// of its role.
+    #[serde(flatten)]
+    pub detail: Option<ItemDetail>,
+}
+
+/// What the history draws of an item besides its words (chief-harness CHF-16): its kind
+/// (`prompt`, `text`, `thinking`, `tool`, `compaction`, `notice`); for a tool's call its
+/// name, its header (256 characters at most), how it stands (`running`, `ok`, `failed`),
+/// how long it took in milliseconds and the change it made as diff lines; for a compaction
+/// the tokens it compacted from. Each said only where its reader said it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDetail {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub took_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
 }
 
 /// An earlier conversation of the chief, with its copied items in order.
@@ -345,6 +373,10 @@ pub struct TranscriptItem {
     /// A compaction's summary, as in [`HistoryItem`]: said only when true.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub compaction: bool,
+    /// What its reader said of it besides its words, as in [`HistoryItem`], but the change
+    /// an edit made, which a task's transcript never shows.
+    #[serde(flatten)]
+    pub detail: Option<ItemDetail>,
 }
 
 /// What a task's windows wrote: how many items in all, and the last ones asked for.
@@ -835,6 +867,7 @@ mod tests {
                 complete: true,
                 at: None,
                 compaction: false,
+                detail: None,
             }],
         };
         assert_eq!(
@@ -852,6 +885,7 @@ mod tests {
             complete: true,
             at: None,
             compaction,
+            detail: None,
         };
         assert_eq!(
             serde_json::to_string(&item(true)).unwrap(),

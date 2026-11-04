@@ -23,6 +23,7 @@ use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
 use crate::shared::quota::{account_refusal, busy_refusal, spent_extra_usage, Refusal};
 use crate::shared::record::calls::{describe, LastCall};
+use crate::shared::record::drawn::{self, Action};
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -59,6 +60,10 @@ pub(super) enum Projected {
     Output(Arc<str>),
     /// A boundary record that ends the turn of the answer before it.
     Boundary(Boundary),
+    /// Claude Code's record that it compacted the conversation (`compact_boundary`), and the
+    /// tokens it compacted from where it says (`compactMetadata.preTokens`): what the history
+    /// draws of the summary that follows it.
+    Compacted(Option<u64>),
 }
 
 /// A record that ends the turn of the answer before it.
@@ -97,6 +102,9 @@ pub(super) struct Assistant {
     pub(super) uuid: Option<Arc<str>>,
     /// The text of the message's content.
     pub(super) text: String,
+    /// What its `thinking` blocks say, those that say anything, in order: the history's
+    /// alone, never the message's text.
+    pub(super) thinking: Vec<String>,
     /// The tool calls and results of the content, in order.
     pub(super) blocks: Vec<Block>,
     /// The last tool call of the main conversation the content makes, as a line
@@ -131,9 +139,10 @@ pub(super) struct Assistant {
 /// A block of an assistant's content that opens or closes a call.
 #[derive(Debug, PartialEq)]
 pub(super) enum Block {
-    /// A `tool_use` or `server_tool_use`, by the id it says, and what call of the main
-    /// conversation it is, where the reader reads its result.
-    Use(Option<Value>, Call),
+    /// A `tool_use` or `server_tool_use`, by the id it says, what call of the main
+    /// conversation it is, where the reader reads its result, and what the history draws of
+    /// it ([`Called`]).
+    Use(Option<Value>, Call, Called),
     /// A `tool_result` or `advisor_tool_result`.
     Result(ToolResult),
 }
@@ -147,12 +156,20 @@ pub(super) enum Call {
     Other,
 }
 
+/// What the history draws of a call: its tool's name, and its header ([`drawn::header`]).
+#[derive(Debug, PartialEq)]
+pub(super) struct Called {
+    pub(super) name: Arc<str>,
+    pub(super) header: Arc<str>,
+}
+
 /// The result of a tool in a block: the call it answers, as the block says
-/// it, and its text.
+/// it, its text, and whether it says it is an error (`is_error`).
 #[derive(Debug, PartialEq)]
 pub(super) struct ToolResult {
     pub(super) call: Option<Value>,
     pub(super) text: Result<String, String>,
+    pub(super) failed: bool,
 }
 
 /// A user's record.
@@ -199,6 +216,18 @@ pub(super) struct User {
     /// The record is a `/model` (or `/fast`) the human typed at the prompt, of the main
     /// conversation.
     pub(super) model_command: bool,
+    /// What the record says of its tool's run besides its result (`toolUseResult`): how
+    /// long it took and the change it made, for the history to draw.
+    pub(super) ran: Ran,
+}
+
+/// What a user's record says of a tool's run besides its result (`toolUseResult`), which
+/// is one tool's: how long it took (`durationMs`, which few tools write) and the change an
+/// edit made (`structuredPatch`), as diff lines.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Ran {
+    pub(super) took_ms: Option<u64>,
+    pub(super) diff: Option<String>,
 }
 
 /// A user's record of a `/compact` typed at Claude's prompt.
@@ -270,6 +299,77 @@ fn tool_result(block: &Value) -> ToolResult {
     ToolResult {
         call: said(block.get("tool_use_id")),
         text: claude_tool_text(block.get("content")),
+        failed: block.get("is_error") == Some(&Value::Bool(true)),
+    }
+}
+
+/// What the history draws of a `tool_use` block: its tool's name (`tool` where it names
+/// none), and its header, from what its input says by the tool it is.
+fn called(block: &Value) -> Called {
+    let name = block
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("tool");
+    let input = block.get("input");
+    let says = |member: &str| field(input, member).and_then(Value::as_str);
+    let number = |member: &str| field(input, member).and_then(Value::as_u64);
+    let action = match name {
+        "Bash" => Action::Shell(says("command").unwrap_or_default()),
+        "Read" => Action::Read {
+            path: says("file_path").unwrap_or_default(),
+            from: number("offset"),
+            lines: number("limit"),
+        },
+        "Edit" | "MultiEdit" => Action::Edit(says("file_path").unwrap_or_default()),
+        "NotebookEdit" => Action::Edit(says("notebook_path").unwrap_or_default()),
+        "Write" => Action::Write(says("file_path").unwrap_or_default()),
+        _ => Action::Other {
+            name,
+            about: [
+                "command",
+                "file_path",
+                "pattern",
+                "query",
+                "url",
+                "description",
+            ]
+            .into_iter()
+            .find_map(says),
+        },
+    };
+    Called {
+        name: Arc::from(name),
+        header: drawn::header(action),
+    }
+}
+
+/// What a user's record says of its tool's run besides its result: `durationMs` where it is
+/// a count, and `structuredPatch`'s hunks as diff lines where it holds any.
+fn ran(record: &Value) -> Ran {
+    let result = record.get("toolUseResult");
+    let took_ms = field(result, "durationMs").and_then(Value::as_u64);
+    let hunks = match field(result, "structuredPatch") {
+        Some(Value::Array(hunks)) => hunks.as_slice(),
+        _ => &[],
+    };
+    let mut diff = Vec::new();
+    for hunk in hunks {
+        let number = |name: &str| hunk.get(name).and_then(Value::as_u64).unwrap_or(0);
+        diff.push(format!(
+            "@@ -{},{} +{},{} @@",
+            number("oldStart"),
+            number("oldLines"),
+            number("newStart"),
+            number("newLines")
+        ));
+        if let Some(Value::Array(lines)) = hunk.get("lines") {
+            diff.extend(lines.iter().filter_map(Value::as_str).map(str::to_owned));
+        }
+    }
+    Ran {
+        took_ms,
+        diff: (!diff.is_empty()).then(|| diff.join("\n")),
     }
 }
 
@@ -381,9 +481,11 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let blocks = blocks(content)
         .iter()
         .filter_map(|block| match kind(block) {
-            Some("tool_use" | "server_tool_use") => {
-                Some(Block::Use(said(block.get("id")), call(block, main, made)))
-            }
+            Some("tool_use" | "server_tool_use") => Some(Block::Use(
+                said(block.get("id")),
+                call(block, main, made),
+                called(block),
+            )),
             Some("advisor_tool_result" | "tool_result") => Some(Block::Result(tool_result(block))),
             _ => None,
         })
@@ -420,8 +522,16 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let rate_limited = status == Some(429.0)
         || record.get("error").and_then(Value::as_str) == Some("rate_limit")
         || spent;
+    let thinking = self::blocks(content)
+        .iter()
+        .filter(|block| kind(block) == Some("thinking"))
+        .filter_map(|block| block.get("thinking").and_then(Value::as_str))
+        .filter(|thinking| !js::trim(thinking).is_empty())
+        .map(str::to_owned)
+        .collect();
     Projected::Assistant(Box::new(Assistant {
         at: timestamp(record),
+        thinking,
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
         blocks,
@@ -506,6 +616,7 @@ fn user(record: &Value, session: &str) -> Projected {
             .then(|| stopped(record, content))
             .flatten(),
         model_command,
+        ran: ran(record),
     }))
 }
 
@@ -678,6 +789,9 @@ fn system(record: &Value, session: &str) -> Projected {
         {
             boundary(record, None)
         }
+        Some("compact_boundary") if of_main_conversation(record, session) => Projected::Compacted(
+            field(record.get("compactMetadata"), "preTokens").and_then(Value::as_u64),
+        ),
         _ => Projected::Other,
     }
 }

@@ -3,6 +3,7 @@
 //! completion that names no answer, and the records Node's reader threw on.
 
 mod answers;
+mod drawn;
 mod harness_words;
 mod last_call;
 mod refusals;

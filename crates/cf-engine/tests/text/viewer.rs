@@ -48,6 +48,7 @@ fn row(conversation: i64, seq: i64, role: &str, text: &str) -> HistoryRow {
             complete: true,
             at: Some(format!("2026-10-1{conversation}T10:{seq:02}:00.000Z")),
             compaction: role == "summary",
+            detail: None,
         },
         cut: None,
     }
@@ -347,5 +348,37 @@ fn the_first_item_fits_a_page_whatever_it_holds() {
     assert_eq!(
         (item.id.as_str(), item.at.as_deref()),
         (cut.as_str(), Some(cut.as_str()))
+    );
+}
+
+#[test]
+fn says_what_the_history_draws_of_an_item_and_nothing_of_one_its_reader_said_nothing_more_of() {
+    // What the readers say of an item besides its words (chief-harness CHF-16): a call's
+    // header, end, time and change, a thinking's kind; none for an item copied before.
+    let mut call = row(1, 1, "tool", "ls: no-such-folder: No such file");
+    call.item.detail = Some(cf_proto::ledger::ItemDetail {
+        kind: "tool".into(),
+        name: Some("Bash".into()),
+        header: Some("$ ls no-such-folder".into()),
+        status: Some("failed".into()),
+        took_ms: Some(1_200),
+        tokens: None,
+        diff: None,
+    });
+    let mut thought = row(1, 0, "custom", "The file first.");
+    thought.item.detail = Some(cf_proto::ledger::ItemDetail {
+        kind: "thinking".into(),
+        ..Default::default()
+    });
+    let rows = vec![call, thought, row(0, 9, "user", "go")];
+    let shown = serde_json::to_value(page(&read(rows, None), HistoryFrom::Newest)).unwrap();
+    assert_eq!(
+        shown["items"],
+        json!([
+            { "conversation": 0, "row": 9, "id": "0-9", "role": "user", "text": "go", "complete": true, "at": "2026-10-10T10:09:00.000Z" },
+            { "conversation": 1, "row": 100, "id": "1-0", "role": "custom", "text": "The file first.", "complete": true, "at": "2026-10-11T10:00:00.000Z", "kind": "thinking" },
+            { "conversation": 1, "row": 101, "id": "1-1", "role": "tool", "text": "ls: no-such-folder: No such file", "complete": true, "at": "2026-10-11T10:01:00.000Z",
+              "kind": "tool", "name": "Bash", "header": "$ ls no-such-folder", "status": "failed", "tookMs": 1_200 },
+        ])
     );
 }

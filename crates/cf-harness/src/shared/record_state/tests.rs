@@ -40,6 +40,7 @@ fn reading_of(record: &Value) -> Option<Reading> {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         });
     }
     read.in_flight = fields.get("inFlight") == Some(&json!(true));

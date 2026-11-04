@@ -30,6 +30,7 @@ mod clear;
 mod commands;
 mod compaction;
 mod companions;
+mod drawn;
 mod fields;
 mod final_answer;
 mod interrupts;

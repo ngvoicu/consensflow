@@ -45,7 +45,7 @@ mod wake_ups;
 pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
     DeletedProject, EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead,
-    HistoryRow, Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView,
+    HistoryRow, ItemDetail, Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView,
     MessageOpening, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
     RemovedMember, Resume, Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited,
     TaskMoved, TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView,

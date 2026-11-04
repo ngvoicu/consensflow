@@ -105,6 +105,20 @@ fn the_muse_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
 }
 
 #[test]
+fn the_history_items_fixtures_hold_no_folder_no_address_and_no_id_of_an_account() {
+    // The live chiefs' records the readers' history is held to (T-728), of Claude Code,
+    // Codex, Pi and Muse Code.
+    let folder = folder("history-items");
+    for name in ["claude.jsonl", "codex.jsonl", "pi.jsonl", "muse.jsonl"] {
+        let text = fs::read_to_string(folder.join(name)).unwrap();
+        for (pattern, _) in PERSONAL {
+            let found = Regex::new(pattern).unwrap();
+            assert!(!found.is_match(&text), "{name} matches {pattern}");
+        }
+    }
+}
+
+#[test]
 fn what_the_check_looks_for_is_what_a_transcript_that_was_not_scrubbed_has() {
     // A check is none if what it looks for is found nowhere.
     for (pattern, sample) in PERSONAL {

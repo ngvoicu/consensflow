@@ -82,6 +82,7 @@ use self::work::Work;
 use super::paths::transcript;
 use super::version::{self, Version};
 use crate::shared::record::cache::Look;
+use crate::shared::record::drawn::{beside_item, Detail, Kind};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::reading::ModelMoved;
@@ -126,6 +127,11 @@ struct Log {
     env: Env,
     /// The model the window answers from, and the move away from it that nobody asked for.
     models: Models,
+    /// The items only the history shows (thinking, a call still running), each with the
+    /// place among the items it stands before, and whether a call's result came since.
+    beside: Vec<(usize, Item, bool)>,
+    /// Each call still running among them, by its id: its place among them.
+    running: HashMap<Arc<str>, usize>,
 }
 
 /// What the log said of the model.
@@ -176,6 +182,8 @@ impl Log {
             provisional: Provisional::default(),
             env,
             models: Models::default(),
+            beside: Vec::new(),
+            running: HashMap::new(),
         }
     }
 
@@ -364,6 +372,22 @@ impl Log {
             }
             Some("goal_run_binding") => self.work.goal_bound(field(event, "record")),
             Some("inbox_item_drained") => self.work.drained(event),
+            // The model's thinking, as Muse commits what of it is readable: the history's alone.
+            Some("reasoning_committed") => {
+                let text = text();
+                if !text.trim().is_empty() {
+                    let id = native_id(field(event, "message_id"), "muse reasoning", seq)
+                        .map_err(Stop::Failed)?;
+                    let id = Arc::from(format!("{id}:thinking"));
+                    self.beside(beside_item(
+                        id,
+                        Role::Custom,
+                        &text,
+                        Some(at.clone()),
+                        Detail::of(Kind::Thinking),
+                    ));
+                }
+            }
             Some("context_compaction_installed") => {
                 let replacement = field(event, "replacement");
                 let summary = field(replacement, "text")
@@ -377,6 +401,13 @@ impl Log {
                         native_id(record.get("id"), "muse record", seq).map_err(Stop::Failed)?;
                     let place = self.add(id, Role::Custom, summary.to_owned(), at);
                     self.items[place].item.compaction = true;
+                    let tokens = ["tokens_before", "input_tokens_before", "pre_tokens"]
+                        .into_iter()
+                        .find_map(|name| field(event, name).and_then(Value::as_u64));
+                    self.items[place].item.detail = Some(Arc::new(Detail {
+                        tokens,
+                        ..Detail::of(Kind::Compaction)
+                    }));
                 }
             }
             // Provisional (the binary's strings): the task a tool call put in the
@@ -394,8 +425,16 @@ impl Log {
                         }
                     }
                 }
-                for (id, role, text) in self.held.event(kind, &run, record, event, seq)? {
-                    self.add(id, role, text, at);
+                let said = self.held.event(kind, &run, record, event, seq)?;
+                if kind == "assistant_tool_calls_committed" {
+                    self.calls_made(event, at);
+                }
+                for (id, role, text, detail) in said {
+                    self.answered(&id);
+                    let place = self.add(id, role, text, at);
+                    if detail.is_some() {
+                        self.items[place].item.detail = detail.map(Arc::new);
+                    }
                 }
             }
             None => {}
@@ -465,6 +504,50 @@ impl Log {
         self.models.named(to);
     }
 
+    /// An item only the history shows, where it stands: after the items so far.
+    fn beside(&mut self, item: Item) {
+        self.beside.push((self.items.len(), item, false));
+    }
+
+    /// The calls a run's record made: each running beside the items until its result is
+    /// one, as the history draws it.
+    fn calls_made(&mut self, event: Option<&Value>, at: &Value) {
+        let made: Vec<Arc<str>> = field(event, "tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|call| {
+                ["call_id", "id"]
+                    .into_iter()
+                    .find_map(|name| call.get(name).and_then(Value::as_str))
+                    .filter(|id| !id.is_empty())
+                    .map(Arc::from)
+            })
+            .collect();
+        for id in made {
+            if self.places.contains_key(&id) || self.running.contains_key(&id) {
+                continue;
+            }
+            let Some(detail) = self
+                .held
+                .running()
+                .find(|(call, _)| **call == id)
+                .map(|(_, detail)| detail.clone())
+            else {
+                continue;
+            };
+            self.running.insert(Arc::clone(&id), self.beside.len());
+            self.beside(beside_item(id, Role::Tool, "", Some(at.clone()), detail));
+        }
+    }
+
+    /// The call `id` names has its result: it runs beside the items no more.
+    fn answered(&mut self, id: &str) {
+        if let Some(place) = self.running.remove(id) {
+            self.beside[place].2 = true;
+        }
+    }
+
     /// The item `id` names, added, or brought up to date: its text the latest the log
     /// gave it, its time the latest record's, its role the one it was first given.
     fn add(&mut self, id: Arc<str>, role: Role, text: String, at: &Value) -> usize {
@@ -486,6 +569,7 @@ impl Log {
                 commentary: false,
                 compaction: false,
                 synthetic: false,
+                detail: None,
             },
             began: self.reading,
         });
@@ -644,6 +728,12 @@ impl Answer for Log {
         let mut record = Record::new();
         record.items = self.items.iter().map(|kept| kept.item.clone()).collect();
         record.lines.places = Some(self.items.iter().map(|kept| kept.began).collect());
+        record.beside = self
+            .beside
+            .iter()
+            .filter(|(_, _, answered)| !answered)
+            .map(|(place, item, _)| (*place, item.clone()))
+            .collect();
         record.in_flight = in_flight;
         record.asking = latest.is_some_and(|(run, _)| self.held.asking(run));
         record.last_call = self.held.last_call().cloned();

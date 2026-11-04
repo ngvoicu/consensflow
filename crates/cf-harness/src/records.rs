@@ -32,6 +32,7 @@ pub use crate::shared::quota::{Level, Quota};
 pub use crate::shared::record::boundary::Boundary;
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::calls::LastCall;
+pub use crate::shared::record::drawn::{Detail, Kind, Status, Timeline};
 pub use crate::shared::record::reading::{
     Command, End, Item, Lines, ModelMoved, Monitor, Notice, Pending, Reading, Record, Role,
     Settlement, Source,

@@ -6,6 +6,7 @@
 //! `provisional`'s.
 
 mod background;
+mod drawn;
 mod live;
 mod pasted;
 mod provisional;

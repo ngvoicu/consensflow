@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::shared::quota::Quota;
 use crate::shared::record::calls::LastCall;
+use crate::shared::record::drawn::{Detail, Kind};
 
 /// A look's reading: what the record says, or that it could not say, with
 /// the reason (`{unknown: true, reason}`).
@@ -140,6 +141,12 @@ pub struct Record {
     /// no reading Node wrote has it.
     #[serde(skip)]
     pub lines: Box<Lines>,
+    /// The items only the history shows (a model's thinking, a call still running, a
+    /// compaction no item says), each with the place among [`Record::items`] it stands
+    /// before ([`Timeline`](crate::shared::record::drawn::Timeline)): no reader of the conversation's words comes to one.
+    /// Never said: no reading Node wrote has them.
+    #[serde(skip)]
+    pub beside: Vec<(usize, Item)>,
 }
 
 /// A harness that moved a window's model on its own: from the model the window answered
@@ -346,6 +353,7 @@ impl Record {
             monitors: Vec::new(),
             commands: Vec::new(),
             lines: Box::default(),
+            beside: Vec::new(),
         }
     }
 }
@@ -409,6 +417,29 @@ pub struct Item {
     /// `isCompactSummary`): the harness's own, and no message of the user's. Never
     /// said: a reading is the one Node wrote, which read it as the user's.
     pub compaction: bool,
+    /// What the history draws of it besides its words ([`Detail`]): none where its reader
+    /// says nothing more of it than its role does ([`Item::kind`]). Never said: a reading is
+    /// the one Node wrote.
+    pub detail: Option<Arc<Detail>>,
+}
+
+impl Item {
+    /// What it is, as the history draws it: what its detail says, else what its role says
+    /// (a compaction's summary is a compaction's).
+    pub fn kind(&self) -> Kind {
+        if let Some(detail) = &self.detail {
+            return detail.kind;
+        }
+        if self.compaction {
+            return Kind::Compaction;
+        }
+        match self.role {
+            Role::User => Kind::Prompt,
+            Role::Assistant => Kind::Text,
+            Role::Tool => Kind::Tool,
+            Role::Custom => Kind::Notice,
+        }
+    }
 }
 
 impl Serialize for Item {
@@ -496,6 +527,7 @@ mod tests {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         });
         record.items.push(Item {
             id: Arc::from("msg_2"),
@@ -506,6 +538,7 @@ mod tests {
             commentary: true,
             synthetic: false,
             compaction: false,
+            detail: None,
         });
         // A compaction's summary is the user's item it was to Node.
         record.items.push(Item {
@@ -517,6 +550,7 @@ mod tests {
             commentary: false,
             synthetic: false,
             compaction: true,
+            detail: None,
         });
         record.settlement = Settlement::InFlight;
         assert_eq!(

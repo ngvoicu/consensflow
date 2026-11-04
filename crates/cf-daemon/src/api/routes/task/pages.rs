@@ -3,7 +3,7 @@
 //! (the field report of 2026-10-15, B7: `--last 400` never reached the window
 //! that overwrote a file, as no request reaches past the newest 50). Pages are of
 //! [`PER_PAGE`] items, counted from the newest: page 1 holds the newest, page 2
-//! the ones before them, each oldest first. A search keeps the items whose text
+//! the ones before them, each oldest first. A search keeps the items whose text (or a call's header)
 //! holds its words, in any case, and pages those. `?last=` with neither reads as
 //! it always did.
 
@@ -51,7 +51,17 @@ impl<'a> Asked<'a> {
                 transcript
                     .items
                     .into_iter()
-                    .filter(|item| item.text.to_lowercase().contains(&needle))
+                    .filter(|item| {
+                        // A call is found by its header too: the command it ran, the file.
+                        let header = item
+                            .detail
+                            .as_ref()
+                            .and_then(|detail| detail.header.as_deref());
+                        [Some(item.text.as_str()), header]
+                            .into_iter()
+                            .flatten()
+                            .any(|said| said.to_lowercase().contains(&needle))
+                    })
                     .collect()
             }
         };
