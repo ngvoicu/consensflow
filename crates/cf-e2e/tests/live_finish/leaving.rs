@@ -259,6 +259,19 @@ pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
                 without_a_terminal(&left.escaped)
             ));
         }
+    } else if expect == Expect::OwnSession && listed_then_left_for_a_session_of_its_own(left) {
+        // The same limit, where a look of the host's fell while the job's shell still tied it to
+        // the window: the host listed it, then the shell ended and left it in a session of its
+        // own, which the close did not find. Where it is after the close decides, not whether
+        // a look saw it on its way out (GitHub's macOS runner, CI runs 41772376690 and
+        // 41781145403).
+        if !left.notes.is_empty() {
+            problems.push(format!(
+                "the chief was told of work the window closed with ({}), while the command the agent detached, which the host listed before its shell ended, went on running after the window closed in a session of its own, which the close found nothing of: {}",
+                left.notes.join(" | "),
+                left.escaped.join("; ")
+            ));
+        }
     } else {
         if !left.alive.is_empty() {
             let still: Vec<String> = left
@@ -302,6 +315,21 @@ fn strays_matter(who: Who) -> bool {
 /// window: where it expects the known macOS limit, and something ran on.
 fn looks_for_its_own_orphans(expect: Expect, left: &Left) -> bool {
     expect == Expect::OwnSession && !left.escaped.is_empty()
+}
+
+/// Whether every process the host listed that still ran once the task was done is, after the
+/// window's close, in a session of its own ([`in_a_session_of_its_own`]): a job the host saw
+/// while its shell tied it to the window, which then left with the shell. A listed process
+/// still tied to the window (one with a terminal, or a living parent), or none left running,
+/// is no such job.
+fn listed_then_left_for_a_session_of_its_own(left: &Left) -> bool {
+    !left.alive.is_empty()
+        && in_a_session_of_its_own(left)
+        && left.alive.iter().all(|pid| {
+            left.escaped
+                .iter()
+                .any(|line| line.starts_with(&format!("{pid} ")))
+        })
 }
 
 /// Whether what the host never listed (`judge` asks only of a command it did not list and that
@@ -362,6 +390,11 @@ pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
         Ok(()) if left.listed.is_empty() => format!(
             "T-1 done after {} s; the harness ended the command with its tool call: the host never listed it, and nothing of it runs on the machine",
             secs(left.took)
+        ),
+        Ok(()) if listed_then_left_for_a_session_of_its_own(left) => format!(
+            "T-1 done after {} s; the agent detached the command into a session of its own, the known limit on a Mac: the host listed it before its shell ended, the window's close left it running and the chief was told nothing; still running: {}; the run ends what it can prove its own",
+            secs(left.took),
+            left.escaped.join("; ")
         ),
         Ok(()) => format!(
             "T-1 done after {} s{}; the command ({}) was ended by the window's close and the chief told: {}",

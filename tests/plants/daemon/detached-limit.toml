@@ -22,6 +22,7 @@
 dl-descent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
 dl-leaving = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "leaving::tests::"]
 dl-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "stand_in::a_stand_in_that_plays_pi"]
+dl-listed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "stand_in::a_detached_job_the_host_listed"]
 
 # What is expected of whom.
 
@@ -361,3 +362,53 @@ platforms = ["macos"]
 file = "crates/cf-e2e/src/live/members/descent/native.rs"
 find = '''libc::PROC_PIDVNODEPATHINFO,'''
 replace = '''libc::PROC_PIDTBSDINFO,'''
+
+# A job the host listed before its shell ended (CI runs 41772376690 and 41781145403 on GitHub's
+# macOS runner; the chief's decision of 2026-11-04, m-7377): where it is after the close decides.
+# The stand-in's shell lingers 2.5 s there (`CF_TEST_DETACH_LINGER_MS`), so the host lists it.
+
+[[plant]]
+name = "detached limit: a job the host listed is never the limit"
+meant = "a_detached_job_the_host_listed_before_its_shell_ended_holds_the_case_as_the_known_limit_too"
+runs = ["dl-listed"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    } else if expect == Expect::OwnSession && listed_then_left_for_a_session_of_its_own(left) {'''
+replace = '''    } else if false {'''
+
+[[plant]]
+name = "detached limit: a listed job still in the window's session passes as the limit"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    !left.alive.is_empty()
+        && in_a_session_of_its_own(left)
+        && left.alive'''
+replace = '''    !left.alive.is_empty()
+        && left.alive'''
+
+[[plant]]
+name = "detached limit: one listed job in a session of its own lets another pass"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        && left.alive.iter().all(|pid| {'''
+replace = '''        && left.alive.iter().any(|pid| {'''
+
+[[plant]]
+name = "detached limit: a listed job gone unsaid passes as the limit"
+meant = "the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever"
+runs = ["dl-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    !left.alive.is_empty()
+        && in_a_session_of_its_own(left)'''
+replace = '''    true
+        && in_a_session_of_its_own(left)'''

@@ -498,6 +498,30 @@ fn a_command_that_escaped_into_a_session_of_its_own_fails_the_case_as_it_was_and
     );
 }
 
+/// The host's look fell while the job's shell still tied it to the window: it listed the job,
+/// which then left with its shell into a session of its own that the close did not find (GitHub's
+/// macOS runner, CI runs 41772376690 and 41781145403). Where the job is after the close decides:
+/// it is the same limit, and the chief told nothing false.
+#[test]
+fn a_job_the_host_listed_before_its_shell_ended_is_the_limit_where_it_ran_on_in_a_session_of_its_own(
+) {
+    let mut left = in_a_session_of_its_own();
+    left.listed = vec![proc(99998, "sleep 4711"), proc(99997, "/bin/sh -c nohup")];
+    left.alive = vec![99998];
+    assert_eq!(judge(&left, Expect::OwnSession), Ok(()));
+    assert!(
+        judge(&left, Expect::Ended).is_err(),
+        "only where the limit is expected"
+    );
+    assert_eq!(
+        summary(&left, &judge(&left, Expect::OwnSession)),
+        "T-1 done after 20.0 s; the agent detached the command into a session of its own, the known limit on a Mac: the host listed it before its shell ended, the window's close left it running and the chief was told nothing; still running: 99998 sleep 4711 (parent 1, group 99997, terminal ??); the run ends what it can prove its own"
+    );
+    // A chief told of work the job outlived is told what the close did not do.
+    left.notes = vec![CLOSED.to_owned()];
+    assert!(judge(&left, Expect::OwnSession).is_err());
+}
+
 #[test]
 fn the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the_chief_are_held_as_ever(
 ) {
@@ -514,9 +538,21 @@ fn the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the
         .escaped
         .push(standing("99999 1 99997 ttys004 sleep 4711").unwrap());
     one_of_two_in_the_window.after_close = Some(one_of_two_in_the_window.escaped.clone());
-    let mut listed = limit();
-    listed.listed = vec![proc(99998, "sleep 4711")];
-    listed.alive = vec![99998];
+    // Listed while its shell still tied it to the window, and in the window's session after the
+    // close: no limit.
+    let mut listed_still_tied = limit();
+    listed_still_tied.listed = vec![proc(99998, "sleep 4711")];
+    listed_still_tied.alive = vec![99998];
+    listed_still_tied.escaped = vec![standing("99998 1 99997 ttys004 sleep 4711").unwrap()];
+    listed_still_tied.after_close = Some(listed_still_tied.escaped.clone());
+    // Listed, and gone with no sign of where: what the close did is unknown, and nobody was told.
+    let mut listed_gone = limit();
+    listed_gone.listed = vec![proc(99998, "sleep 4711")];
+    listed_gone.alive.clear();
+    // Listed, and another process of it still runs that is not the one in a session of its own.
+    let mut listed_and_another = limit();
+    listed_and_another.listed = vec![proc(99998, "sleep 4711"), proc(99996, "sleep 4711")];
+    listed_and_another.alive = vec![99998, 99996];
     let mut told = limit();
     told.notes = vec![CLOSED.to_owned()];
     let mut ended_unsaid = limit();
@@ -540,7 +576,15 @@ fn the_limit_is_expected_only_of_the_shape_it_is_and_the_task_the_result_and_the
             "one of two is in the window's session",
             one_of_two_in_the_window,
         ),
-        ("the host listed it", listed),
+        (
+            "the host listed it, and it is in the window's session after the close",
+            listed_still_tied,
+        ),
+        ("the host listed it, and it is gone unsaid", listed_gone),
+        (
+            "the host listed another process of it that runs on outside the limit",
+            listed_and_another,
+        ),
         ("the chief was told of work, which this job was not", told),
         ("the close ended it, unsaid", ended_unsaid),
         ("the window had not closed", window_open),
