@@ -145,7 +145,7 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "            timing.wait(&output, at);"
+find = "            timing.wait(self.clock.as_ref(), &output, at);"
 replace = "            drop((output, at, timing));"
 
 [[plant]]
@@ -155,7 +155,7 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                        state.human_pasted = Some((Instant::now(), timing));"
+find = "                        state.human_pasted = Some((self.clock.now(), timing));"
 replace = "                        let _ = timing;"
 
 [[plant]]
@@ -166,12 +166,12 @@ runs = ["paste-enter-arbiter"]
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
 find = """
-    fn wait(&self, output: &OutputClock, pasted: Instant) {
+    fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         loop {"""
 replace = """
-    fn wait(&self, output: &OutputClock, pasted: Instant) {
+    fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         let _ = pasted;
-        let pasted = Instant::now();
+        let pasted = clock.now();
         loop {"""
 
 [[plant]]
@@ -232,7 +232,7 @@ runs = ["paste-enter-console"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "            timing.wait(&output, at);"
+find = "            timing.wait(self.clock.as_ref(), &output, at);"
 replace = "            drop((output, at, timing));"
 
 [[plant]]
@@ -352,8 +352,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                state.paste.feed(bytes, Instant::now())"
-replace = "                {\n                    state.paste = PasteWatch::default();\n                    state.paste.feed(bytes, Instant::now())\n                }"
+find = "                state.paste.feed(bytes, self.clock.now())"
+replace = "                {\n                    state.paste = PasteWatch::default();\n                    state.paste.feed(bytes, self.clock.now())\n                }"
 
 [[plant]]
 name = "paste enter: the characters of a paste before its last write are dropped"
@@ -498,8 +498,85 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "            state.paste.idle(Instant::now());"
+find = "            state.paste.idle(now);"
 replace = "            let _ = &state.paste;"
+
+# --- the arbiter reads its clock (T-1231). The hold's tests ran a stand-in window's printer on a
+# thread, and a thread a loaded runner woke late printed at the wrong moment: they now run on a
+# clock that moves only when a test moves it, and these plants take the clock out of a rule. ---
+
+[[plant]]
+name = "paste enter clock: a paste's wait reads the machine's time, not the clock's"
+meant = "a_machine_that_stalls_before_every_look_and_every_print_moves_no_moment_of_the_wait"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            let now = clock.now();\n            let since = millis_since(now, pasted);"
+replace = "            let now = Instant::now();\n            let since = millis_since(now, pasted);"
+
+[[plant]]
+name = "paste enter clock: a pane's output is stamped at the machine's time"
+meant = "a_print_at_once_after_the_paste_is_not_its_draw_and_the_enter_waits_for_the_draw"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "        let now = millis_since(self.clock.now(), self.started);"
+replace = "        let now = millis_since(Instant::now(), self.started);"
+
+[[plant]]
+name = "paste enter clock: a snapshot ages the human's writes at the machine's time"
+meant = "a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte_of_them"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                    ago_ms: millis_since(now, written.at),"
+replace = "                    ago_ms: millis_since(Instant::now(), written.at),"
+
+[[plant]]
+name = "paste enter clock: the human's writes are stamped at the machine's time"
+meant = "the_human_s_keys_alone_start_the_quiet_the_pacing_waits_on"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            let now = self.clock.now();\n            state.paste.idle(now);"
+replace = "            let now = Instant::now();\n            state.paste.idle(now);"
+
+# The rules of the Enter's wait itself, which the 22 converted tests hold at exact moments: the
+# window's quiet, the floor of its pace, the most.
+
+[[plant]]
+name = "paste enter: a paste's Enter goes without the window's quiet after its echo"
+meant = "a_pastes_enter_waits_for_the_window_to_finish_echoing_it"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))"
+replace = "                || (since >= self.least_ms && echoed.is_some())"
+
+[[plant]]
+name = "paste enter: a paste's Enter goes before the window could have read the paste"
+meant = "a_humans_enter_waits_at_least_as_long_as_the_window_takes_to_read_the_paste"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))"
+replace = "                || echoed.is_some_and(|quiet| quiet >= self.quiet_ms)"
+
+[[plant]]
+name = "paste enter: a paste's Enter goes at half the most"
+meant = "a_paste_nothing_echoes_gets_its_enter_at_the_most"
+runs = ["paste-enter-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            if since >= self.most_ms"
+replace = "            if since >= self.most_ms / 2"
 
 # --- a paste's time to be answered (T-1127, second part). `pane.write_paste` had the bridge's
 # 30 s whatever the pane host holds a delivery's Enter for: into a window like Muse's on Windows

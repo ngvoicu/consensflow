@@ -288,7 +288,7 @@ runs = ["panes-lib-snapshot"]
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
 find = """            if pasted {
-                state.pasted = Some(Instant::now());
+                state.pasted = Some(self.clock.now());
             }"""
 replace = ""
 
