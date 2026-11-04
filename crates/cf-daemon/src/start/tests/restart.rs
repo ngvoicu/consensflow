@@ -715,3 +715,57 @@ async fn the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first
         })
         .await;
 }
+
+/// A macOS privacy dialog the host names over the bridge (`pane.tcc`) reaches the engine as the
+/// real daemon wires it, and the human is told in the project (T-1194): a process of the app's
+/// that no window holds, here, which is told to the human alone. And the host's word that it
+/// cannot read the log of those dialogs (`pane.tcc_unreadable`) is written in the daemon's log.
+#[tokio::test]
+async fn a_privacy_dialog_the_host_tells_reaches_the_engine_and_the_human_is_told_in_the_project() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let (ledger, project) = ledger_before_the_start(root.path());
+            ledger.close().unwrap();
+            let (options, app, _opened) = app_that_opens_windows(root.path());
+            let daemon = start(environment(root.path()), options).await.unwrap();
+            app.event(
+                "pane.tcc",
+                json!({ "service": "MediaLibrary", "pid": 31000, "program": "find" }),
+            );
+            app.event(
+                "pane.tcc_unreadable",
+                json!({ "said": "log: Must be admin to run 'stream' command" }),
+            );
+            assert_eq!(ask(&app, "ping", json!({})).await, json!({ "ok": true }));
+            let inbox = ask(
+                &app,
+                "inbox.get",
+                json!({ "project": project, "participant": "human" }),
+            )
+            .await;
+            let bodies: Vec<String> = inbox["messages"]
+                .as_array()
+                .unwrap_or(&Vec::new())
+                .iter()
+                .filter_map(|message| message["body"].as_str().map(str::to_owned))
+                .collect();
+            assert!(
+                bodies.iter().any(|body| body.contains(
+                    "A process of ConsensFlow's that no window holds (`find`, process 31000) waits on a macOS permission dialog"
+                )),
+                "{bodies:?}"
+            );
+            assert!(
+                bodies
+                    .iter()
+                    .any(|body| body.contains("cannot read the Mac's log of privacy dialogs")),
+                "{bodies:?}"
+            );
+            let log = log_lines(&daemon.parts.home).join("\n");
+            assert!(log.contains("privacy dialogs cannot be read"), "{log}");
+            daemon.stop("SIGTERM");
+            daemon.finished().await;
+        })
+        .await;
+}

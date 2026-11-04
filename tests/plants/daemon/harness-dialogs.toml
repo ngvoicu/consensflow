@@ -1,0 +1,351 @@
+# A dialog of a harness's own that waits for a key mid-session, in a window nobody watches, went
+# unseen (field, 3.0.6, 2026-10-26, T-1183): Claude Code offered a worker's window to install an
+# LSP plugin, and the chief never heard of it. The engine reads such a dialog off the window's
+# screen (`crates/cf-engine/src/dialogs.rs`), by its shape (`crates/cf-harness/src/shared/
+# dialog.rs`) or where the harness's status says one is open (Claude Code's, `claude/adapter.rs`
+# `dialog_sign`), holds a window only its screen shows one in, and tells whoever gave its task
+# and the human once; it presses nothing. Claude Code's surveys and Codex's nudge and install
+# offers are turned off for each launch alone (`claude/adapter.rs` `QUIET`, `codex/adapter.rs`
+# `OFFERS`).
+#
+# The tests are the engine's `crates/cf-engine/tests/dispatcher/harness_dialogs.rs`, the
+# reader's `crates/cf-harness/src/shared/dialog/tests.rs`, Claude's window's
+# `crates/cf-harness/tests/launch/claude/dialogs.rs`, the launch pins of `tests/launch/claude.rs`
+# and `codex.rs`, and the case
+# `crates/cf-e2e/tests/regressions/a_harness_dialog_in_a_workers_window_went_unseen.rs`, whose
+# stand-in Claude draws the offer as Claude Code 2.1.317 drew it in a live member's window. The
+# case builds the native `cf` from the sources as they are planted, so its plants say `builds`.
+# Every name holds `harness dialogs`, so `cargo xtask plants daemon "harness dialogs"` runs them
+# all.
+
+[run]
+hd-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "harness_dialogs::"]
+hd-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::dialog"]
+hd-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::"]
+hd-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::"]
+hd-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_harness_dialog_in_a_workers_window_went_unseen::"]
+
+[[plant]]
+name = "harness dialogs: the engine never watches a window's screen for one, and nobody is told"
+meant = "a_dialog_its_harness_says_is_open_is_told_once_to_the_tasks_giver_and_the_human"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """
+        let observed = self
+            .watch_dialog(project, participant, record, observed)
+            .await?;"""
+replace = """
+        let observed = observed;"""
+
+[[plant]]
+name = "harness dialogs: the stand-in Claude's LSP offer mid-turn is told to nobody, as 3.0.6 told nobody"
+meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human_then_declined"
+runs = ["hd-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """
+        let observed = self
+            .watch_dialog(project, participant, record, observed)
+            .await?;"""
+replace = """
+        let observed = observed;"""
+
+[[plant]]
+name = "harness dialogs: Claude Code's window whose status says busy is taken for one with no dialog, and its offer goes unseen"
+meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human_then_declined"
+runs = ["hd-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            None => DialogSign::Screen,"
+replace = "            None => DialogSign::Shut,"
+
+[[plant]]
+name = "harness dialogs: Claude's window reads no wait as no dialog, where its screen is to tell"
+meant = "a_dialog_its_status_says_is_open_is_one_of_claude_codes_and_its_question_tools_is_the_windows_own"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            None => DialogSign::Screen,"
+replace = "            None => DialogSign::Shut,"
+
+[[plant]]
+name = "harness dialogs: Claude's question tool, the window's own question, is taken for a dialog of Claude Code's"
+meant = "a_dialog_its_status_says_is_open_is_one_of_claude_codes_and_its_question_tools_is_the_windows_own"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            Some(Waiting { reason }) if reason.as_deref() == Some(status::QUESTION_TOOL) => {"
+replace = "            Some(Waiting { reason }) if reason.as_deref() == Some(\"no such reason\") => {"
+
+[[plant]]
+name = "harness dialogs: Claude Code's offers to install a plugin are not known to close by themselves"
+meant = "its_offer_to_install_an_lsp_plugin_is_read_with_its_choices_and_closes_by_itself"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            .then_some(OFFER_CLOSES_AFTER_S);"
+replace = "            .then_some(OFFER_CLOSES_AFTER_S)\n            .filter(|_| false);"
+
+[[plant]]
+name = "harness dialogs: a dialog read by its shape counts at no look, and the window is never held for it"
+meant = "a_dialog_only_its_screen_shows_holds_the_window_and_is_told_once"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "pub(crate) const SURE_LOOKS: u32 = 2;"
+replace = "pub(crate) const SURE_LOOKS: u32 = u32::MAX;"
+
+[[plant]]
+name = "harness dialogs: one look at a dialog's shape counts, a redraw caught halfway too"
+meant = "a_dialog_only_its_screen_shows_holds_the_window_and_is_told_once"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "pub(crate) const SURE_LOOKS: u32 = 2;"
+replace = "pub(crate) const SURE_LOOKS: u32 = 1;"
+
+[[plant]]
+name = "harness dialogs: a window only its screen shows a dialog in is not held, and a paste would answer it"
+meant = "a_dialog_only_its_screen_shows_holds_the_window_and_is_told_once"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        observed.waiting = Some(Waiting {"
+replace = "        let _not_held = Some(Waiting {"
+
+[[plant]]
+name = "harness dialogs: whoever gave the window's task is not told, only the human"
+meant = "a_dialog_its_harness_says_is_open_is_told_once_to_the_tasks_giver_and_the_human"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        for to in requester.into_iter().chain([\"human\".to_owned()]) {"
+replace = "        for to in requester.into_iter().filter(|_| false).chain([\"human\".to_owned()]) {"
+
+[[plant]]
+name = "harness dialogs: a dialog is told again at every look while it stays"
+meant = "a_dialog_its_harness_says_is_open_is_told_once_to_the_tasks_giver_and_the_human"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        if before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some())"
+replace = "        if false && (before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some()))"
+
+[[plant]]
+name = "harness dialogs: the window's own question tool is taken for a dialog of its harness"
+meant = "the_windows_own_question_is_no_dialog_of_its_harness"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        if starting || observed.unnamed || observed.switched.is_some() || sign == DialogSign::Shut {"
+replace = "        if starting || observed.unnamed || observed.switched.is_some() {"
+
+[[plant]]
+name = "harness dialogs: choices a conversation lists above the prompt are taken for a dialog"
+meant = "choices_a_conversation_lists_above_the_prompt_are_no_dialog"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "                .filter(|dialog| sign == DialogSign::Open || (dialog.asks && !dialog.prompt_below));"
+replace = "                .filter(|dialog| sign == DialogSign::Open || dialog.asks);"
+
+[[plant]]
+name = "harness dialogs: a dialog that went is never told of again when it comes back"
+meant = "a_dialog_that_goes_and_comes_again_is_told_again"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "                watch.told = None;"
+replace = "                let _kept = ();"
+
+[[plant]]
+name = "harness dialogs: choices numbered out of their order are read as a dialog"
+meant = "choices_numbered_out_of_their_order_are_no_dialog"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "        if !counted {"
+replace = "        if false && !counted {"
+
+[[plant]]
+name = "harness dialogs: an input box that holds lines under its rule is read as a dialog"
+meant = "an_empty_input_box_and_a_box_that_holds_words_are_no_dialog"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "    if first == at && first > 0 && is_rule(&screen[first - 1]) {"
+replace = "    if false && first == at && first > 0 && is_rule(&screen[first - 1]) {"
+
+[[plant]]
+name = "harness dialogs: a footer drawn where a choice would be is read as one"
+meant = "an_empty_input_box_and_a_box_that_holds_words_are_no_dialog"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Equal if words.starts_with(char::is_alphanumeric) => {"
+replace = "            std::cmp::Ordering::Equal => {"
+
+[[plant]]
+name = "harness dialogs: a choice's description drawn further in is read as a choice"
+meant = "a_choices_description_drawn_further_in_is_no_choice"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Greater => Some(None),"
+replace = "            std::cmp::Ordering::Greater => Some(Some(words.trim_end().to_owned())),"
+
+[[plant]]
+name = "harness dialogs: Claude Code's windows start with its surveys on"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "const QUIET: [(&str, &str); 1] = [(\"CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY\", \"1\")];"
+replace = "const QUIET: [(&str, &str); 1] = [(\"CLAUDE_CODE_SURVEYS_PLANTED\", \"1\")];"
+
+[[plant]]
+name = "harness dialogs: the stand-in Claude draws its survey, which no launch turned off"
+meant = "a_survey_the_launch_turns_off_never_appears"
+runs = ["hd-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "const QUIET: [(&str, &str); 1] = [(\"CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY\", \"1\")];"
+replace = "const QUIET: [(&str, &str); 1] = [(\"CLAUDE_CODE_SURVEYS_PLANTED\", \"1\")];"
+
+[[plant]]
+name = "harness dialogs: Codex's windows start with its nudge and install offers on"
+meant = "codex::runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["hd-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "            args.extend(OFFERS.map(str::to_owned));"
+replace = "            let _offers = OFFERS;"
+
+# T-1192: the list of safe declines (Claude Code's LSP offer, "No, not now", by its digit),
+# pressed once after the note, at a look that still shows the dialog; and Devin's dialog read.
+
+[[plant]]
+name = "harness dialogs: the stand-in Claude's LSP offer is never declined, and closes by itself against the owner's count"
+meant = "an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_human_then_declined"
+runs = ["hd-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        let _ = self.seams.host.request(\"pane.input\", body).await;"
+replace = "        let _ = body;"
+
+[[plant]]
+name = "harness dialogs: a dialog on the list is never declined"
+meant = "an_offer_on_the_list_is_told_then_declined_once_by_its_one_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "        let _ = self.seams.host.request(\"pane.input\", body).await;"
+replace = "        let _ = body;"
+
+[[plant]]
+name = "harness dialogs: a decline is pressed again at every look while the dialog stays"
+meant = "an_offer_on_the_list_is_told_then_declined_once_by_its_one_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "            let Some(decline) = watch.decline.as_ref().filter(|_| !watch.declined) else {"
+replace = "            let Some(decline) = watch.decline.as_ref() else {"
+
+[[plant]]
+name = "harness dialogs: a decline whose look finds the dialog gone presses its key all the same"
+meant = "a_decline_whose_look_finds_another_dialog_where_its_harness_still_says_one_is_open_presses_nothing"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "            if !still {"
+replace = "            if false && !still {"
+
+[[plant]]
+name = "harness dialogs: the note of a declined offer says nothing of the decline"
+meant = "an_offer_on_the_list_is_told_then_declined_once_by_its_one_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = "    if let Some(decline) = decline {"
+replace = "    if let Some(decline) = decline.filter(|_| false) {"
+
+[[plant]]
+name = "harness dialogs: Claude's list declines any dialog that offers \"No, not now\""
+meant = "its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_no_not_now"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "        if dialog.question != LSP_OFFER {"
+replace = "        if dialog.question.is_empty() {"
+
+[[plant]]
+name = "harness dialogs: Claude's decline presses the digit of another choice"
+meant = "its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_no_not_now"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            key: vec![b'0' + digit],"
+replace = "            key: vec![b'1' + digit - digit],"
+
+[[plant]]
+name = "harness dialogs: Devin's cursor is no cursor, and its dialog goes unread"
+meant = "devins_dialog_of_a_call_is_read_by_its_cursor_its_numbers_and_the_hint_of_its_keys"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "const CURSORS: [char; 7] = ['❯', '›', '❭', '▶', '►', '→', '>'];"
+replace = "const CURSORS: [char; 7] = ['❯', '›', '❯', '▶', '►', '→', '>'];"
+
+[[plant]]
+name = "harness dialogs: a numbered list drawn left of its cursor, as Devin draws it, is cut at the cursor"
+meant = "devins_dialog_of_a_call_is_read_by_its_cursor_its_numbers_and_the_hint_of_its_keys"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Less if numbers_its_choices && numbered(&words).0.is_some() => {"
+replace = "            std::cmp::Ordering::Less if false && numbers_its_choices => {"
+
+[[plant]]
+name = "harness dialogs: a hint of a dialog's keys says nothing of its waiting for an answer"
+meant = "devins_dialog_of_a_call_is_read_by_its_cursor_its_numbers_and_the_hint_of_its_keys"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "        .any(|line| hints_an_answer(line));"
+replace = "        .any(|line| hints_an_answer(line) && line.is_empty());"

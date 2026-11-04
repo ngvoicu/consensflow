@@ -42,6 +42,7 @@ use crate::chief_model::held_for_no_default;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
 use crate::pacing;
+use crate::privacy::PrivacyState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
@@ -116,6 +117,8 @@ pub struct Dispatcher {
     pub(crate) computer_use: ComputerUseState,
     /// What the passes keep of the steps they went on without (`steps`).
     pub(crate) steps: StepsState,
+    /// What was told of macOS privacy dialogs raised in the app's name (`privacy`).
+    pub(crate) privacy: PrivacyState,
 }
 
 impl Dispatcher {
@@ -135,6 +138,7 @@ impl Dispatcher {
             trust: TrustState::default(),
             computer_use: ComputerUseState::default(),
             steps: StepsState::default(),
+            privacy: PrivacyState::default(),
         })
     }
 
@@ -1254,6 +1258,16 @@ impl Dispatcher {
                 return Ok(());
             }
         };
+        // A dialog of its harness's that waits for a key is told of, and one only its screen
+        // shows holds the window as one its harness says it waits on (`dialogs`).
+        let observed = self
+            .watch_dialog(project, participant, record, observed)
+            .await?;
+        // A command of the window that waits on a macOS privacy dialog holds it (`privacy`).
+        let observed = self.watch_privacy(record, observed).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
         record.delivery.borrow_mut().lost = observed.lost().len();
         // Which look this is, for a rest to be read over looks that follow each other.
         let looked = self.looked(record);
@@ -1809,6 +1823,16 @@ impl Dispatcher {
             }
         };
         record.hold.act(&*self.seams.spawn, work).await;
+    }
+
+    /// The record whose window has the pane `pane`, if one does (not the records of
+    /// participants forgotten while their window was open).
+    pub(crate) fn record_of_pane(&self, pane: &Pane) -> Option<Rc<Record>> {
+        self.records
+            .borrow()
+            .values()
+            .find(|record| record.window.borrow().pane.as_ref() == Some(pane))
+            .cloned()
     }
 
     /// What failed apart from any pass or request is written down.

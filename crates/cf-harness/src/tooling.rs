@@ -310,7 +310,9 @@ fn claude_settings(question: &Value) -> Result<Value, String> {
         &launch,
         board_questions,
         compaction,
-        &cf
+        &cf,
+        // A question that names no folder gets the file Node wrote: no folder is denied.
+        question.get("directory").and_then(Value::as_str),
     )?))
 }
 

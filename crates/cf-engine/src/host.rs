@@ -11,6 +11,7 @@
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::panes::SilentPaste;
+use serde_json::Value;
 
 /// What a pane is opened with (`pane.open`): the window's pane, the folder its
 /// program starts in, the program and its arguments, the environment the
@@ -66,4 +67,16 @@ pub trait EngineHost: PaneHost {
     /// It is a read of the screen and changes nothing: the Node traces, which hold every
     /// call of the host the engine makes, have none of it, so a fake writes none down.
     fn quiet<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Option<f64>, HostError>>;
+    /// What `pane`'s screen shows now: the host's `pane.snapshot` of its last
+    /// [`cf_proto::panes::TAIL_LINES`] lines, as it answers it. The engine's look for a dialog
+    /// of the window's harness that waits for a key (`Dispatcher::watch_dialog`, T-1183). A
+    /// read of the screen that changes nothing, which the Node traces have none of, as
+    /// [`EngineHost::quiet`].
+    fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>>;
+    /// How many alerts of the system's notification centre are on the Mac's screen now (a
+    /// macOS privacy dialog raised in the app's name is one): none said where the host does
+    /// not say (a Windows host, an older one, a Mac with no window server). The engine's look
+    /// at whether the dialog a window waits on is still up (`Dispatcher::watch_privacy`, T-1194).
+    /// A read that changes nothing, which the Node traces have none of, as [`EngineHost::screen`].
+    fn alerts(&self) -> Work<'_, Result<Option<usize>, HostError>>;
 }

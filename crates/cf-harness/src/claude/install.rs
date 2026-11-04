@@ -43,6 +43,7 @@ pub(crate) fn settings(
     board_questions: bool,
     compaction: Option<u32>,
     pane_cf: &str,
+    directory: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let root = launch_folder("claude", env, launch)?;
     let said = |error: FileError| error.to_string();
@@ -76,9 +77,59 @@ pub(crate) fn settings(
     if let Some(window) = compaction {
         file["autoCompactWindow"] = json!(window);
     }
+    // On a Mac, the two libraries that no coding task needs and that macOS asks about in the
+    // app's name (T-1194). Nothing on Windows, where the file is as it always was.
+    let reads = directory.map_or_else(Vec::new, |directory| private_reads(env, directory));
+    if !reads.is_empty() {
+        file["permissions"]["deny"] = json!(reads);
+    }
     let text = js::stringify(&file);
     write_file(Path::new(&settings), text.as_bytes(), 0o600).map_err(said)?;
     Ok(vec!["--settings".to_owned(), settings])
+}
+
+/// The reads Claude's tools are denied in a window's settings file on a Mac (T-1194): the Apple
+/// Music library and the Photos libraries. Touching either raises a macOS dialog in the app's
+/// name on the Mac's screen, and the command waits until someone answers there. Claude Code
+/// applies a deny rule in the permission mode the windows run in, to its Read, Grep and Glob and
+/// to the path commands of a Bash call that name the folder; a walk that starts above it (`find
+/// ~`) is not stopped by it. A project that lives in one of them is not denied its own folder.
+/// Nothing is denied on Windows. Never in the owner's own settings: the file is the launch's.
+pub(crate) fn private_reads(env: &Env, directory: &str) -> Vec<&'static str> {
+    if env.on_windows() {
+        return Vec::new();
+    }
+    let home = env
+        .path("HOME")
+        .map(|home| home.to_string_lossy().trim_end_matches('/').to_owned());
+    let in_music = home.as_deref().is_some_and(|home| {
+        let real = cf_base::file::real_path(Path::new(home))
+            .to_string_lossy()
+            .into_owned();
+        [home, real.as_str()]
+            .iter()
+            .any(|home| within(directory, &format!("{home}/Music")))
+    });
+    let in_photos = directory
+        .split('/')
+        .any(|part| part.ends_with(".photoslibrary"));
+    let mut reads = Vec::new();
+    if !in_music {
+        reads.extend(["Read(~/Music)", "Read(~/Music/**)"]);
+    }
+    if !in_photos {
+        reads.extend([
+            "Read(~/Pictures/*.photoslibrary)",
+            "Read(~/Pictures/*.photoslibrary/**)",
+        ]);
+    }
+    reads
+}
+
+/// Whether `folder` is `inside` or a folder in it.
+fn within(folder: &str, inside: &str) -> bool {
+    let folder = folder.trim_end_matches('/');
+    folder == inside || folder.starts_with(&format!("{inside}/"))
 }
 
 /// Writes the window's role and says how Claude loads it: the role's folder

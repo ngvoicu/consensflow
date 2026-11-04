@@ -820,6 +820,142 @@ async fn an_exit_that_panics_is_written_down_and_the_bridge_goes_on() {
 }
 
 #[tokio::test]
+async fn a_privacy_dialog_the_host_names_is_told_where_it_is_read_and_one_that_names_none_is_not() {
+    LocalSet::new()
+        .run_until(async {
+            let Worked { spawn, .. } = worked();
+            let (daemon, app) = bridge_pair_over(&spawn);
+            let heard = Rc::new(RefCell::new(Vec::new()));
+            let told = Rc::clone(&heard);
+            let _watching = watch_privacy(&daemon, spawn, move |event| told.borrow_mut().push(event));
+            daemon.on("ping", |_, _| async { Ok(json!({ "ok": true })) });
+            app.event(
+                "pane.tcc",
+                json!({ "id": "p1-zeus", "generation": 2, "service": "MediaLibrary", "pid": 22913, "program": "ls" }),
+            );
+            // A process no window holds says no window.
+            app.event(
+                "pane.tcc",
+                json!({ "service": "Photos", "pid": 7, "program": "find" }),
+            );
+            app.event(
+                "pane.tcc_unreadable",
+                json!({ "said": "log: Must be admin to run 'stream' command" }),
+            );
+            // None of these names a dialog.
+            for body in [
+                json!({}),
+                json!({ "pid": 1, "program": "ls" }),
+                json!({ "service": "Photos", "program": "ls" }),
+                json!({ "service": "Photos", "pid": "7", "program": "ls" }),
+                json!({ "service": "Photos", "pid": -1, "program": "ls" }),
+                json!(null),
+            ] {
+                app.event("pane.tcc", body);
+            }
+            app.event("pane.tcc_unreadable", json!({ "said": 7 }));
+            app.request("ping", json!({}), Some(Duration::from_secs(5)))
+                .await
+                .unwrap();
+            let events = heard.borrow().clone();
+            assert_eq!(
+                events,
+                [
+                    PrivacyEvent::Prompt(TccPrompt {
+                        id: Some("p1-zeus".to_owned()),
+                        generation: Some(2),
+                        service: "MediaLibrary".to_owned(),
+                        pid: 22913,
+                        program: "ls".to_owned(),
+                    }),
+                    PrivacyEvent::Prompt(TccPrompt {
+                        id: None,
+                        generation: None,
+                        service: "Photos".to_owned(),
+                        pid: 7,
+                        program: "find".to_owned(),
+                    }),
+                    PrivacyEvent::Unreadable(TccUnreadable {
+                        id: None,
+                        generation: None,
+                        said: "log: Must be admin to run 'stream' command".to_owned(),
+                    }),
+                ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_privacy_dialog_that_panics_is_written_down_and_the_bridge_goes_on() {
+    LocalSet::new()
+        .run_until(async {
+            let Worked { home, spawn } = worked();
+            let (daemon, app) = bridge_pair_over(&spawn);
+            let _watching = watch_privacy(&daemon, spawn, |_| panic!("a bug in a dialog"));
+            daemon.on("ping", |_, _| async { Ok(json!({ "ok": true })) });
+            app.event(
+                "pane.tcc",
+                json!({ "service": "Photos", "pid": 7, "program": "find" }),
+            );
+            let answered = app
+                .request("ping", json!({}), Some(Duration::from_secs(5)))
+                .await;
+            assert_eq!(
+                answered.unwrap(),
+                json!({ "ok": true }),
+                "the reader went on"
+            );
+            let log = std::fs::read_to_string(home.path().join("daemon.log")).unwrap();
+            assert!(
+                log.contains("error a privacy dialog's word failed"),
+                "{log}"
+            );
+            assert!(log.contains("panic: a bug in a dialog"), "{log}");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn the_alerts_on_screen_are_asked_of_the_host_and_a_host_that_cannot_count_says_none() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let answers = Rc::new(RefCell::new(vec![
+                json!({ "ok": true, "alerts": 2 }),
+                json!({ "ok": true, "alerts": 0 }),
+                json!({ "ok": true, "alerts": null }),
+                json!({ "ok": true }),
+                json!({ "ok": true, "alerts": "two" }),
+                json!({ "ok": true, "alerts": -1 }),
+            ]));
+            let next = Rc::clone(&answers);
+            let asked = Rc::new(RefCell::new(Vec::new()));
+            let heard = Rc::clone(&asked);
+            app.on("pane.alerts", move |_, body| {
+                heard.borrow_mut().push(body);
+                let answer = next.borrow_mut().remove(0);
+                async move { Ok(answer) }
+            });
+            let host = host_over(&daemon);
+            let mut said = Vec::new();
+            for _ in 0..6 {
+                said.push(host.alerts().await.unwrap());
+            }
+            assert_eq!(said, [Some(2), Some(0), None, None, None, None]);
+            assert_eq!(*asked.borrow(), vec![json!({}); 6]);
+            // A host that knows no such look refuses it: not a count.
+            let (daemon, _app) = bridge_pair();
+            let older = host_over(&daemon);
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(5), older.alerts()).await,
+                Ok(Ok(None))
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_answer_read() {
     LocalSet::new()
         .run_until(async {

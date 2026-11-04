@@ -80,6 +80,23 @@ const WINDOW: [&str; 4] = [
     "allow_login_shell=false",
 ];
 
+/// Codex's offers to switch or install something, which wait in a window for a key nobody
+/// there presses, turned off for the window's launch alone (T-1183, read from Codex 0.166.0):
+/// the nudge near a rate limit to switch to a cheaper model ("Switch to … for lower credit
+/// usage?", `notice.hide_rate_limit_model_nudge`), the model's suggestion to install a plugin
+/// (`tool_suggest`), and the offer to install the MCP servers a skill names
+/// (`skill_mcp_dependency_install`). The features go as configuration, never as `--disable`,
+/// which refuses to start on a Codex that has no such feature; a key Codex does not know is
+/// passed over. What the owner has installed and configured stays as it is.
+const OFFERS: [&str; 6] = [
+    "-c",
+    "notice.hide_rate_limit_model_nudge=true",
+    "-c",
+    "features.tool_suggest=false",
+    "-c",
+    "features.skill_mcp_dependency_install=false",
+];
+
 /// Why a message waits while the broker names no thread or cannot take one: a
 /// refusal there would spend the message's attempts in seconds (an answer to a
 /// Codex worker was lost that way), so it is held.
@@ -225,6 +242,7 @@ impl Adapter for CodexAdapter {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
             }
             args.extend(WINDOW.map(str::to_owned));
+            args.extend(OFFERS.map(str::to_owned));
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),

@@ -1,0 +1,58 @@
+//! What a note of a harness's dialog says.
+
+use cf_harness::contract::{Decline, Dialog};
+
+use super::*;
+
+fn offer(closes_after_s: Option<u32>) -> Dialog {
+    Dialog {
+        question: "Would you like to install this LSP plugin?".to_owned(),
+        options: vec!["Yes, install".to_owned(), "No, not now".to_owned()],
+        asks: true,
+        prompt_below: false,
+        closes_after_s,
+    }
+}
+
+#[test]
+fn a_note_names_the_window_the_question_its_choices_and_that_nothing_is_pressed() {
+    assert_eq!(
+        told("zeus-amber-pine", Some(&offer(Some(30))), None),
+        "@zeus-amber-pine's window shows a dialog of its harness that waits for a key, not its prompt: \u{201c}Would you like to install this LSP plugin?\u{201d}, its choices \u{201c}Yes, install\u{201d}, \u{201c}No, not now\u{201d}. The window waits on it, and nothing is typed into it meanwhile. ConsensFlow presses nothing in it: answer it in that window, or leave it. Its harness closes it by itself 30 s after it opened."
+    );
+    // A dialog not known to close says nothing of it.
+    assert!(!told("zeus", Some(&offer(None)), None).contains("closes it by itself"));
+}
+
+#[test]
+fn a_dialog_whose_words_the_screen_did_not_show_is_told_of_still() {
+    assert_eq!(
+        told("chief", None, None),
+        "@chief's window shows a dialog of its harness that waits for a key, not its prompt; its screen shows no words ConsensFlow can read of it. The window waits on it, and nothing is typed into it meanwhile. ConsensFlow presses nothing in it: answer it in that window, or leave it."
+    );
+}
+
+#[test]
+fn a_quote_hides_a_token_and_is_cut() {
+    let token = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ";
+    let quote = quoted(&format!("Use the key {token}?"));
+    assert!(!quote.contains(token), "{quote}");
+    let long = "word ".repeat(100);
+    let cut = quoted(&long);
+    assert!(cut.ends_with("…\u{201d}"), "{cut}");
+    assert_eq!(cut.chars().count(), QUOTED_CHARS + 3);
+}
+
+#[test]
+fn a_note_of_a_dialog_on_its_harnesss_list_says_it_is_declined_and_how() {
+    let decline = Decline {
+        choice: "No, not now".to_owned(),
+        key: b"2".to_vec(),
+    };
+    let body = told("zeus", Some(&offer(Some(30))), Some(&decline));
+    assert!(
+        body.ends_with("ConsensFlow declines it for the window now, choosing \u{201c}No, not now\u{201d}, which writes nothing; nothing else is typed into the window meanwhile."),
+        "{body}"
+    );
+    assert!(!body.contains("presses nothing"), "{body}");
+}

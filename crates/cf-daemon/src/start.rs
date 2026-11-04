@@ -52,7 +52,7 @@ use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
 use crate::files::{Log, Trace};
-use crate::host::{daemon_bridge, watch_exits, BridgeHost};
+use crate::host::{daemon_bridge, watch_exits, watch_privacy, BridgeHost, PrivacyEvent};
 use crate::machine;
 use crate::models::ModelLists;
 use crate::page::{self, Page};
@@ -475,6 +475,13 @@ async fn run(
     let exiting = Rc::clone(&dispatcher);
     watch_exits(&bridge, Rc::clone(&spawn), move |pane| {
         exiting.pane_exited(pane)
+    });
+    // A macOS privacy dialog raised in the app's name for a window's process, which the host
+    // reads from the system's log, is told to the human and to whoever gave the window's task.
+    let privacy = Rc::clone(&dispatcher);
+    watch_privacy(&bridge, Rc::clone(&spawn), move |event| match event {
+        PrivacyEvent::Prompt(prompt) => privacy.privacy_prompt(prompt),
+        PrivacyEvent::Unreadable(unreadable) => privacy.privacy_unreadable(unreadable),
     });
     errors.spawn("the bridge's task failed", connection);
 

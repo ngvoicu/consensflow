@@ -2,7 +2,7 @@
 //! together and stopped in order, over the pane handlers and the same drain
 //! the headless helper runs.
 
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,6 +20,7 @@ use cf_panes::headless::{reap_all, ENTER, MAX_FRAME_BYTES};
 use cf_panes::input_queue::InputQueue;
 use cf_panes::output_hub::OutputHub;
 use cf_panes::pane_handlers::register_pane_handlers;
+use cf_panes::privacy::{watch_privacy_dialogs, PrivacyWatch};
 use cf_panes::pty::{PaneTable, CLOSE_GRACE};
 use cf_proto::bridge::Role;
 
@@ -35,6 +36,11 @@ const SHUTDOWN_REAP: Duration = CLOSE_GRACE.saturating_add(Duration::from_secs(5
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
 
 type PageEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
+
+/// The watch of the system's privacy dialogs (T-1194), for as long as the app runs: on a Mac a
+/// dialog raised in the app's name for a window's process is told to the daemon, which tells
+/// the human and whoever gave the window's task. Held here so that it stops with the app.
+static PRIVACY: OnceLock<PrivacyWatch> = OnceLock::new();
 
 pub struct AppRuntime {
     pub(crate) panes: Arc<PaneTable>,
@@ -85,6 +91,14 @@ impl AppRuntime {
             })
         };
         daemon.start(starter, Arc::clone(&panes), DAEMON_RESTART);
+        // Its events go to whichever bridge the daemon has when it is told one.
+        let telling = Arc::clone(&daemon);
+        match watch_privacy_dialogs(Arc::clone(&panes), move || telling.bridge()) {
+            Ok(watch) => {
+                let _ = PRIVACY.set(watch);
+            }
+            Err(why) => eprintln!("consensflow: the watch of privacy dialogs did not start: {why}"),
+        }
         Self {
             panes,
             daemon,
@@ -100,6 +114,9 @@ impl AppRuntime {
     }
 
     pub(crate) fn begin_shutdown(&self) -> bool {
+        if let Some(watch) = PRIVACY.get() {
+            watch.stop();
+        }
         let Some((daemon, bridge)) = self.daemon.stop() else {
             return false;
         };

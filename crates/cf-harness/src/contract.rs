@@ -460,6 +460,54 @@ pub enum Question {
     Servers(Option<&'static [u8]>),
 }
 
+/// A dialog of a window's harness that waits for a key and is not its prompt, as its screen
+/// shows it ([`Window::dialog`]): an offer to install or enable something, a permission prompt
+/// its full-permission mode does not cover, a survey, a choice at a usage limit (T-1183).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dialog {
+    /// The words it opens with: the line above its choices that asks, or else the nearest
+    /// that says anything.
+    pub question: String,
+    /// Its choices, in their order, without the numbers drawn before them.
+    pub options: Vec<String>,
+    /// Whether it waits for an answer by its words: [`Dialog::question`] ends in a question mark,
+    /// or a hint under its choices says how to answer them (Devin's "↵ confirm").
+    pub asks: bool,
+    /// Whether the harness's prompt is drawn below its choices ([`Window::shows_prompt`]): the
+    /// choices are then words of the conversation, or of the box.
+    pub prompt_below: bool,
+    /// The seconds after which the harness closes it by itself where nobody answers it, where
+    /// it is known to (Claude Code's offers to install a plugin: 30 s).
+    pub closes_after_s: Option<u32>,
+}
+
+/// A choice of a harness's dialog that ConsensFlow may make in a window nobody watches
+/// ([`Window::safe_decline`]): a decline that writes nothing, neither to the owner's
+/// configuration nor to the window's settings, shown so from the harness's own code and on a
+/// throwaway configuration (T-1192).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Decline {
+    /// The choice, in the dialog's words.
+    pub choice: String,
+    /// The key that makes it, alone: a digit where the harness's list takes one.
+    pub key: Vec<u8>,
+}
+
+/// What a window's harness says of a dialog of its own being open, beside the screen
+/// ([`Window::dialog_sign`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogSign {
+    /// It says one of its dialogs is open, that waits for a key and is not the window's own
+    /// question tool (Claude Code's status `waiting`, `waitingFor` "dialog open" or "permission
+    /// prompt"): the screen says which.
+    Open,
+    /// It says none is, or the one open is the window's own question tool, which is the
+    /// board's or the human's to answer.
+    Shut,
+    /// It says nothing either way: only the screen can tell.
+    Screen,
+}
+
 /// A window open on its harness.
 pub trait Window {
     /// Its pane opened, the window's own process `pid` when the host knew it.
@@ -546,6 +594,31 @@ pub trait Window {
     /// none, and from a harness that draws no such status (the default).
     fn compacting(&self, _screen: &[String]) -> bool {
         false
+    }
+    /// What the window's harness says of a dialog of its own being open, by the look
+    /// `observed`: the window's own question tool, where it waits on one, is no such dialog
+    /// (the default: a window that waits says so of its own question), and a harness that says
+    /// nothing leaves it to the screen.
+    fn dialog_sign(&self, observed: &Observed) -> DialogSign {
+        if observed.waiting.is_some() {
+            DialogSign::Shut
+        } else {
+            DialogSign::Screen
+        }
+    }
+    /// The dialog of its harness the window's last lines `screen` show, where they show one by
+    /// its shape (a line of choices with the harness's cursor on one, and the words above them),
+    /// and whether its prompt is drawn below the choices. None where they show none.
+    fn dialog(&self, screen: &[String]) -> Option<Dialog> {
+        crate::shared::dialog::read(screen).map(|shown| Dialog {
+            prompt_below: self.shows_prompt(&shown.below),
+            ..shown.dialog
+        })
+    }
+    /// The decline ConsensFlow makes of `dialog`, where it is on the harness's list of safe
+    /// declines: none for any other (the default), which is never pressed.
+    fn safe_decline(&self, _dialog: &Dialog) -> Option<Decline> {
+        None
     }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
