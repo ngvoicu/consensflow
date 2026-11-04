@@ -116,7 +116,14 @@ pub fn seat_fields() -> Vec<Scenario> {
             vec![run!(
                 "A",
                 "task add --tier standard :: BACKGROUND 600 Reply with exactly: LEFT_IT",
-                |snapshot, bindings| answered(snapshot, bindings, "A", 0) && crate::matrix::run::settled(snapshot)
+                // The board settles once the result is in, which can be before the window's close
+                // says what it ended: on Unix the run waits for that note too (T-1190), and its
+                // deadline makes a note that never comes a red of the check below.
+                |snapshot, bindings| answered(snapshot, bindings, "A", 0)
+                    && crate::matrix::run::settled(snapshot)
+                    && (cfg!(windows) || snapshot.chief_inbox.iter().any(|message| {
+                        message["body"].as_str().is_some_and(|body| body.contains("which its close ended"))
+                    }))
             )],
             A,
             |judged| {
