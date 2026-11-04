@@ -12,7 +12,9 @@ use cf_ledger::{
 
 fn member(agent: &str, roles: &[&str], tier: &str) -> NewMember {
     NewMember {
-        agent: agent.into(),
+        model: None,
+        effort: None,
+        model_name: Some(agent.into()),
         harness: "claude-code".into(),
         designer: false,
         roles: roles.iter().map(|role| (*role).to_owned()).collect(),
@@ -29,6 +31,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
             chief: NewChief {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
+                effort: None,
             },
             staff,
             gate: false,

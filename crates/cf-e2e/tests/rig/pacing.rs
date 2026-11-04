@@ -4,7 +4,6 @@
 //! seconds, which no variable here shortens) since its last turn. The look that let each
 //! go is in its `delivery.begun`.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -24,7 +23,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker-b", "kind": "claude-code", "model": "fake" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The daemon's events of `kind` for the message `id`.

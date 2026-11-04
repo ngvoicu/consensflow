@@ -24,6 +24,7 @@ use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 
 use crate::at_work::OnWork;
+use crate::chief_model::ChiefRuns;
 use crate::deliveries::Delivering;
 use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
@@ -34,7 +35,7 @@ use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
 use crate::role_news::{NewsPart, Told};
 use crate::runtime::{begin, caught, returning};
-use crate::seams::{EngineError, SavedAgent};
+use crate::seams::EngineError;
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::stops::{Interrupted, Unstopped};
@@ -216,6 +217,9 @@ pub(crate) struct Relaunch {
 
 /// The record's window part.
 pub(crate) struct WindowPart {
+    /// A chief that needs an edit (T-1202) whose harness's record was read and named no
+    /// model: it is held, and its record not read again, until the human switches it.
+    pub(crate) no_model_in_record: bool,
     /// The harness's window on its launch (the adapter's `launch` bag).
     pub(crate) window: Option<Rc<dyn Window>>,
     /// The keys that interrupt a turn in it (its adapter's `interrupt`).
@@ -370,6 +374,7 @@ pub(crate) struct Abandoned {
 impl Default for WindowPart {
     fn default() -> Self {
         Self {
+            no_model_in_record: false,
             window: None,
             keys: None,
             input: Input::Channel,
@@ -658,6 +663,29 @@ impl Dispatcher {
         if !self.end_abandoned(record).await? {
             return Ok(());
         }
+        // A chief the update could not tell the model of (T-1202) opens on no default,
+        // whichever way its launch was asked for: it takes the model its harness's record
+        // names, and opens on that, its row read again; with none, nothing is begun, and
+        // what waits for it stays queued for Switch chief
+        // ([`Dispatcher::chief_model_from_record`]).
+        let resolved;
+        let participant = if participant.role == "chief" && participant.needs_edit {
+            if !self.chief_model_from_record(participant, record).await? {
+                return Ok(());
+            }
+            let now = self.known_project(participant.project_id)?;
+            let Some(chief) = now
+                .participants
+                .into_iter()
+                .find(|chief| chief.id == participant.id)
+            else {
+                return Ok(());
+            };
+            resolved = chief;
+            &resolved
+        } else {
+            participant
+        };
         record.window.borrow_mut().launches += 1;
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never
@@ -1040,8 +1068,7 @@ impl Dispatcher {
     }
 
     /// The launch's plan, from its adapter, with its first message begun:
-    /// none where the participant's saved agent is gone (the human hears
-    /// it) or the launch is over before its window is made
+    /// none where the launch is over before its window is made
     /// ([`Dispatcher::launch_over`]), or why the launch failed. `conversation` is
     /// the chief's, which was looked into before its first message was chosen.
     /// `role` is the text the window starts with where it was asked for already
@@ -1062,6 +1089,12 @@ impl Dispatcher {
         role: Option<RoleText>,
         prelude: Option<Prelude>,
     ) -> Result<Option<Planned>, EngineError> {
+        // A member the update could not run on what it ran on (T-1202) opens no window on
+        // its harness's default: its work goes back to the board, and the human hears why.
+        if participant.role != "chief" && participant.needs_edit {
+            self.needs_an_edit(record, project, participant, delivering)?;
+            return Ok(None);
+        }
         // A first message withdrawn while the launch waited (a continuation whose
         // task moved on, the ledger's) opens no window: the launch is over, and
         // what waits now is the next pass's.
@@ -1192,25 +1225,13 @@ impl Dispatcher {
         } else {
             participant
         };
-        // A member runs on its saved agent's model, read now; one the human
-        // has deleted from their agents must not fall back to a harness default.
-        // A chief runs on no saved agent: on what its harness's record says it ran
-        // on last, or the model picked for it (CHF-05).
-        let chief = if participant.role == "chief" {
-            Some(self.chief_runs(participant, &*adapter, resume).await)
+        // A member runs on its own harness, model and effort (harness-models). A chief
+        // runs on what its harness's record says it ran on last, or the model and effort
+        // picked for it (CHF-05).
+        let runs = if participant.role == "chief" {
+            self.chief_runs(participant, &*adapter, resume).await
         } else {
-            None
-        };
-        let saved: Option<SavedAgent> = match participant.agent.as_deref() {
-            _ if chief.is_some() => None,
-            None => None,
-            Some(name) => match self.seams.roster.agent(name)? {
-                Some(saved) => Some(saved),
-                None => {
-                    self.without_saved_agent(record, project, participant, name, delivering)?;
-                    return Ok(None);
-                }
-            },
+            ChiefRuns::picked(participant)
         };
         // A session plays the role of the task it was started for; a member
         // or the chief its own.
@@ -1252,9 +1273,10 @@ impl Dispatcher {
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
-            agent: match &chief {
-                Some(chief) => chief.agent(),
-                None => saved.as_ref().map(SavedAgent::agent),
+            agent: if participant.role == "chief" {
+                runs.agent()
+            } else {
+                Some(runs.member_agent(participant.designer))
             },
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
@@ -1272,8 +1294,8 @@ impl Dispatcher {
         let prepared = returning(adapter.prepare(&launch))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
-        if let Some(chief) = &chief {
-            self.chief_launched(participant, chief)?;
+        if participant.role == "chief" {
+            self.chief_launched(participant, &runs)?;
         }
         Ok(Some(Planned {
             window: prepared.window,
@@ -1337,30 +1359,6 @@ impl Dispatcher {
         };
         self.give_back(first.message, because)?;
         Ok(false)
-    }
-
-    /// A member whose saved agent the human has deleted does not open: its work
-    /// goes back to the board, and a session's window the human opened, with
-    /// nothing to deliver, says why it did not come.
-    fn without_saved_agent(
-        &self,
-        record: &Rc<Record>,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        agent: &str,
-        delivering: Option<&Delivering>,
-    ) -> Result<(), EngineError> {
-        self.without_agent(project, participant, delivering.cloned())?;
-        if delivering.is_none() {
-            self.launch_failed(
-                record,
-                project,
-                participant,
-                None,
-                &self.gone_because(agent),
-            )?;
-        }
-        Ok(())
     }
 
     /// A window the host did not open: its token and files go, and the
@@ -1496,6 +1494,28 @@ impl Dispatcher {
     /// the human hears why once. Where a role was to be said first, a member's
     /// failing message is the one it went ahead of, and the note that says the
     /// role is withdrawn with it; a chief's stays in its queue (`role_change`).
+    /// A member that needs an edit does not open: its tiered work goes back to the board
+    /// for another member, what was on its way to it fails so its requester hears why,
+    /// and a session's window the human opened, with nothing to deliver, says why it did
+    /// not come.
+    fn needs_an_edit(
+        &self,
+        record: &Rc<Record>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        delivering: Option<&Delivering>,
+    ) -> Result<(), EngineError> {
+        let because = crate::scheduler::needs_an_edit_because(
+            participant.member.as_deref().unwrap_or(&participant.handle),
+            participant.agent.as_deref(),
+        );
+        self.release_its_work(project, participant, &because, delivering.cloned())?;
+        if delivering.is_none() {
+            self.launch_failed(record, project, participant, None, &because)?;
+        }
+        Ok(())
+    }
+
     /// A participant forgotten while it launched hears nothing and settles
     /// nothing.
     pub(crate) fn launch_failed(

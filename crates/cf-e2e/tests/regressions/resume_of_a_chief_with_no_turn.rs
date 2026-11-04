@@ -28,7 +28,6 @@ use std::error::Error;
 use std::thread::sleep;
 
 #[cfg(unix)]
-use cf_e2e::files;
 #[cfg(unix)]
 use cf_e2e::live::trace::Trace;
 use cf_e2e::rig::{Project, Rig};
@@ -149,7 +148,7 @@ fn a_codex_chief_that_never_had_a_turn_comes_back_on_the_resume_and_the_project_
         "schemaVersion": 1,
         "agents": [{ "id": "codex-chief", "kind": "codex", "model": "fake" }],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open(&rig, "codex-chief", json!({}))?;
     wait_for_the_chief(&rig, &project)?;
 
@@ -197,7 +196,7 @@ fn a_codex_chief_that_never_had_a_turn_is_opened_afresh_with_the_role_it_has_now
         "schemaVersion": 1,
         "agents": [{ "id": "codex-chief", "kind": "codex", "model": "fake" }],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open(&rig, "codex-chief", json!({}))?;
     wait_for_the_chief(&rig, &project)?;
     // A Codex window's role is the file its environment names, which goes with it.

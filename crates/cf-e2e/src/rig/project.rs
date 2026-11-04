@@ -23,9 +23,10 @@ impl<'a> Project<'a> {
     }
 
     /// Opens a project in the rig's workspace with its chief on the harness and the
-    /// model of the saved agent `agent` ([`chief_of`]), as the New project dialog picks
-    /// them. `more` is added to the request (`gate`, `staff`). The daemon's answer is a
-    /// refusal when it says it is not `ok`.
+    /// model of the stand-in `agent` ([`chief_of`]), as the New project dialog picks
+    /// them. `more` is added to the request (`gate`, `staff`, each member of the staff a
+    /// stand-in by its name, `{agent, roles}`, sent as its harness, model, effort and
+    /// tier: [`member_body`]). The daemon's answer is a refusal when it says it is not `ok`.
     pub fn open(rig: &'a Rig, agent: &str, more: Value) -> Result<Self> {
         let (harness, model) = chief_of(rig, agent)?;
         let mut request =
@@ -36,6 +37,13 @@ impl<'a> Project<'a> {
                     .map(|(name, value)| (name.clone(), value.clone())),
             );
         }
+        if let Some(Value::Array(staff)) = request.get_mut("staff") {
+            for member in staff.iter_mut() {
+                if let Some(name) = member["agent"].as_str().map(str::to_owned) {
+                    *member = member_body(rig, &name, member.get("roles").cloned())?;
+                }
+            }
+        }
         let opened = rig.page("project.open", request)?;
         let id = refused(&opened, "project.open")?["project"]["id"]
             .as_i64()
@@ -44,7 +52,7 @@ impl<'a> Project<'a> {
     }
 
     /// Opens a project as the New project dialog opens one: with the staff
-    /// (`members`: an agent and its role each) and the approval setting
+    /// (`members`: a stand-in and its role each) and the approval setting
     /// (`gate`, when given) together.
     pub fn open_with_staff(
         rig: &'a Rig,
@@ -69,12 +77,13 @@ impl<'a> Project<'a> {
         self.id
     }
 
-    /// Adds the agent `agent` to the staff, as the human does: the daemon's
-    /// answer, which holds the `member` added.
+    /// Adds the stand-in `agent` to the staff, as the human does in Add member: its
+    /// harness, model, effort and tier ([`member_body`]). The daemon's answer, which holds
+    /// the `member` added.
     pub fn add_member(&self, agent: &str) -> Result<Value> {
-        let added = self
-            .rig
-            .page("member.add", json!({ "project": self.id, "agent": agent }))?;
+        let mut body = member_body(self.rig, agent, None)?;
+        body["project"] = json!(self.id);
+        let added = self.rig.page("member.add", body)?;
         refused(&added, "member.add").cloned()
     }
 
@@ -119,8 +128,7 @@ impl<'a> Project<'a> {
         Ok(answer["messages"].as_array().cloned().unwrap_or_default())
     }
 
-    /// The tier of each agent of the staff, by the agent's id, as the board
-    /// shows them.
+    /// The tier of each member of the staff, by its handle, as the board shows them.
     pub fn tiers(&self) -> Result<BTreeMap<String, String>> {
         let board = self.board()?;
         Ok(board["lanes"]
@@ -128,9 +136,10 @@ impl<'a> Project<'a> {
             .map(|lanes| {
                 lanes
                     .iter()
+                    .filter(|lane| lane["participant"]["member"].is_null())
                     .filter_map(|lane| {
                         Some((
-                            lane["participant"]["agent"].as_str()?.to_owned(),
+                            lane["participant"]["handle"].as_str()?.to_owned(),
                             lane["participant"]["tier"].as_str()?.to_owned(),
                         ))
                     })
@@ -140,42 +149,96 @@ impl<'a> Project<'a> {
     }
 }
 
-/// Writes the roster of four agents of the stand-in `claude`, as the tiered
-/// cases use: the chief, two workers on one model and a checker on another (a
-/// reviewer, or a tester, as the case staffs it).
+/// Writes the stand-ins of the stand-in `claude` the tiered cases use: the chief, two
+/// workers on one model and a checker on another (a reviewer, or a tester, as the case
+/// staffs it).
 pub fn write_staff(rig: &Rig) -> Result<()> {
     let agent = |id: &str, model: &str| json!({ "id": id, "kind": "claude-code", "model": model });
-    let roster = json!({
-        "schemaVersion": 1,
+    rig.stand_ins(&json!({
         "agents": [
             agent("chief", "fake-chief"),
             agent("worker", "fake"),
             agent("worker2", "fake"),
             agent("checker", "fake-2"),
         ],
-    });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    }))
 }
 
-/// The harness and the model of the saved agent `agent`, as the roster the rig wrote has
-/// it, else the catalog's ready-made one: what a case picks a chief by, as the New project
-/// and Switch chief dialogs pick a harness and a model (CHF-07). A chief runs on no saved
-/// agent; the cases name one to say which harness and model.
+/// The stand-in a case named `agent`, as the rig's stand-ins have it ([`Rig::stand_ins`]),
+/// else one of the few the cases name without writing them: `maia` (Codex, GPT-6 Astra at
+/// medium) and `pygmalion` (an image designer on Codex's default).
+fn stand_in(rig: &Rig, agent: &str) -> Result<Value> {
+    let text = files::read_string(&rig.stand_ins_file()).unwrap_or_default();
+    let written: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if let Some(row) = written["agents"].as_array().and_then(|rows| {
+        rows.iter()
+            .find(|row| row["id"] == agent || row["name"] == agent)
+    }) {
+        return Ok(row.clone());
+    }
+    match agent {
+        "maia" => {
+            Ok(json!({ "id": "maia", "kind": "codex", "model": "gpt-6-astra", "effort": "medium" }))
+        }
+        "pygmalion" => {
+            Ok(json!({ "id": "pygmalion", "kind": "codex", "designer": true, "workTier": "light" }))
+        }
+        _ => Err(Error::Daemon(format!(
+            "no stand-in {agent} in the rig's stand-ins"
+        ))),
+    }
+}
+
+/// The harness and the model of the stand-in `agent` ([`stand_in`]): what a case picks a
+/// chief by, as the New project and Switch chief dialogs pick a harness and a model
+/// (CHF-07).
 pub fn chief_of(rig: &Rig, agent: &str) -> Result<(String, String)> {
-    let catalog =
-        cf_catalog::Catalog::bundled().map_err(|failed| Error::Daemon(failed.to_string()))?;
-    let roster = cf_catalog::Roster::new(&catalog, rig.home().join("agents.json"));
-    let row = roster
-        .agent_row(agent)
-        .map_err(|failed| Error::Daemon(failed.message))?
-        .ok_or_else(|| Error::Daemon(format!("no agent {agent} in the rig's roster")))?;
-    let harness = row
-        .kind()
+    let row = stand_in(rig, agent)?;
+    let harness = row["kind"]
+        .as_str()
         .ok_or_else(|| Error::Daemon(format!("{agent} names no harness")))?;
-    Ok((harness.to_owned(), row.model().unwrap_or(agent).to_owned()))
+    Ok((
+        harness.to_owned(),
+        row["model"].as_str().unwrap_or(agent).to_owned(),
+    ))
 }
 
-/// `more` with a chief's harness and model in it: those of the saved agent `agent`
+/// The models a stand-in agent runs on (`fake`, `fake-2`, `fake-chief`), which a real
+/// harness has none of: a member on one is asked for by its own name instead.
+const STAND_IN_MODELS: [&str; 3] = ["fake", "fake-2", "fake-chief"];
+
+/// The member the stand-in `agent` is, as Add member and New project ask for one: its
+/// harness, its tier (`standard` where it names none), its effort (Pi's thinking), and its
+/// model. A member of the stand-in harness runs every model alike: its model is the
+/// stand-in's name, which the harness, never read, takes at its word and names the member
+/// by, so its handle is `agent`. A member of a real harness runs its real model, and is
+/// named as its harness names that model. `roles` where they are given.
+pub fn member_body(rig: &Rig, agent: &str, roles: Option<Value>) -> Result<Value> {
+    let row = stand_in(rig, agent)?;
+    let model = row["model"]
+        .as_str()
+        .filter(|model| !STAND_IN_MODELS.contains(model))
+        .unwrap_or(agent);
+    let mut body = json!({
+        "harness": row["kind"],
+        "model": model,
+        "tier": row.get("workTier").filter(|tier| !tier.is_null()).cloned().unwrap_or(json!("standard")),
+    });
+    if let Some(effort) = ["effort", "thinking"]
+        .into_iter()
+        .find_map(|key| row.get(key).filter(|effort| !effort.is_null()))
+    {
+        body["effort"] = effort.clone();
+    }
+    if let Some(roles) = roles {
+        body["roles"] = roles;
+    } else if row["designer"] == true {
+        body["roles"] = json!(["designer"]);
+    }
+    Ok(body)
+}
+
+/// `more` with a chief's harness and model in it: those of the stand-in `agent`
 /// ([`chief_of`]), as New project and Switch chief send them.
 pub fn chief_body(rig: &Rig, agent: &str, more: Value) -> Result<Value> {
     let (harness, model) = chief_of(rig, agent)?;

@@ -18,7 +18,6 @@
 //! the board said only that the harness reported a failure; the second case fails a turn
 //! in the shape of those records, `cyber_policy` and the filter's words).
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -45,7 +44,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The notes ConsensFlow wrote the chief that say T-1 failed.

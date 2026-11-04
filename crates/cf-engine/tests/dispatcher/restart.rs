@@ -178,9 +178,11 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
     // the viewer's 0020, the Resume's 0021 and 0022, 0023 of the conversation a
     // paste went into, the exit proof's 0024, the meeting's 0025, the staff's rules'
     // 0026, the model lists' 0027, the chief's model's 0028, 0029, which took the
-    // history's heading indexes out, and 0030, a member's tier the human chose).
+    // history's heading indexes out, 0030, a member's tier the human chose, and 0031, a
+    // member's own model).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0031(&db).unwrap();
         cf_ledger::testing::undo_migration_0030(&db).unwrap();
         cf_ledger::testing::undo_migration_0029(&db).unwrap();
         cf_ledger::testing::undo_migration_0028(&db).unwrap();

@@ -361,7 +361,7 @@ fn what_the_app_says_for_every_project_reaches_a_chief_whose_project_follows_it_
     let following = project_on(&context, "claude-code");
     let chief = at_rest(&context, &following);
     // The human turns specs on for every project, in a folder of its own.
-    *context.roster.app_specs.borrow_mut() = AppSpecs {
+    *context.app_settings.app_specs.borrow_mut() = AppSpecs {
         on: true,
         folder: Some("docs/specs".to_owned()),
         variant: Some(Variant::Core),
@@ -377,7 +377,7 @@ fn what_the_app_says_for_every_project_reaches_a_chief_whose_project_follows_it_
     assert!(notes[0].contains(DOCS_SKILL), "{}", notes[0]);
     rests(&context, &following);
     // The app turns them off again: the project that follows is told.
-    *context.roster.app_specs.borrow_mut() = AppSpecs::default();
+    *context.app_settings.app_specs.borrow_mut() = AppSpecs::default();
     passes(&context);
     assert_eq!(told(&context, chief).len(), 2);
     rests(&context, &following);
@@ -385,7 +385,7 @@ fn what_the_app_says_for_every_project_reaches_a_chief_whose_project_follows_it_
     // A project that says off is told nothing of what the app says.
     says(&context, following.id, Some(false), "", None);
     passes(&context);
-    *context.roster.app_specs.borrow_mut() = AppSpecs {
+    *context.app_settings.app_specs.borrow_mut() = AppSpecs {
         on: true,
         folder: None,
         variant: None,
@@ -548,7 +548,9 @@ fn a_member_added_to_the_staff_is_no_news_to_a_running_chief() {
         .add_member(
             project.id,
             &cf_ledger::NewMember {
-                agent: "athena".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("athena".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["advisor".to_owned()],
@@ -763,7 +765,7 @@ fn a_change_that_one_look_finds_and_the_next_does_not_is_told_to_nobody() {
     // What the app says is read from a file at each look, and a read that fails reads as
     // specs off: a look that finds the app saying "on" and the next that finds it saying
     // nothing is no change to tell a chief of.
-    *context.roster.app_specs.borrow_mut() = AppSpecs {
+    *context.app_settings.app_specs.borrow_mut() = AppSpecs {
         on: true,
         folder: None,
         variant: None,
@@ -773,7 +775,7 @@ fn a_change_that_one_look_finds_and_the_next_does_not_is_told_to_nobody() {
         role_notes(&context, chief).is_empty(),
         "one look is not enough"
     );
-    *context.roster.app_specs.borrow_mut() = AppSpecs::default();
+    *context.app_settings.app_specs.borrow_mut() = AppSpecs::default();
     passes(&context);
     assert!(role_notes(&context, chief).is_empty());
     assert!(context.adapter.specmint_placed.borrow().is_empty());
@@ -838,7 +840,9 @@ fn a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_th
         .add_member(
             project.id,
             &cf_ledger::NewMember {
-                agent: "athena".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("athena".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["advisor".to_owned()],

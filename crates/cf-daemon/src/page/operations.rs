@@ -1,6 +1,6 @@
 //! The table of the page's operations: which function serves which. An
 //! operation is read and begun in its first poll, in the order its frame came:
-//! each arm reads the saved agents and the body, makes its one call on the
+//! each arm reads the body, makes its one call on the
 //! ledger or the engine, and answers; none waits before it makes it.
 
 use cf_proto::page::PageOperation;
@@ -31,7 +31,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::ProjectRules => projects::rules(page, body).await,
         PageOperation::ProjectCompaction => projects::compaction(page, body).await,
         // The agents and the staff.
-        PageOperation::AgentsList => staff::agents(page).await,
+        PageOperation::HarnessesMissing => staff::missing(page).await,
         PageOperation::StaffLast => staff::last(page).await,
         PageOperation::ChiefSwitch => staff::switch_chief(page, body).await,
         PageOperation::MemberAdd => staff::add(page, body).await,

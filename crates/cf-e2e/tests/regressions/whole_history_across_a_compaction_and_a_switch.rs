@@ -20,7 +20,6 @@
 //! compacted while it is idle (as Claude Code 2.1 writes it), the human switches
 //! it to a Codex agent, and the new chief works again.
 
-use cf_e2e::files;
 use cf_e2e::rig::{chief_body, Project, Rig};
 use serde_json::{json, Value};
 
@@ -80,7 +79,7 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
             { "id": "codex-chief", "kind": "codex", "model": "fake" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open(&rig, "chief", json!({}))?;
 
     // The chief works, and Claude Code compacts its conversation while it is idle.

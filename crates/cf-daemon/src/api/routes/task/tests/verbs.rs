@@ -896,7 +896,9 @@ fn hera_joins(scene: &crate::testing::Scene) {
         .add_member(
             scene.project.id,
             &cf_ledger::NewMember {
-                agent: "hera".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("hera".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],

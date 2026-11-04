@@ -14,29 +14,13 @@ fn home_with_claude() -> cf_e2e::Result<ScratchHome> {
 }
 
 #[test]
-fn roster_edits_setup_and_diagnostic_reads_leave_role_files_and_old_manifests_alone() -> Outcome {
+fn setup_and_diagnostic_reads_leave_role_files_and_old_manifests_alone() -> Outcome {
     let home = home_with_claude()?;
     let role = role_file(&home);
     files::write(&role, "role canary")?;
     let manifest = home.consensflow().join("skills-manifest.json");
     files::write(&manifest, r#"{"files":{}}"#)?;
-    for args in [
-        &[
-            "agent",
-            "add",
-            "mine",
-            "--harness",
-            "claude",
-            "--model",
-            "example",
-        ][..],
-        &["agent", "edit", "mine", "--effort", "high"],
-        &["agent", "list", "--json"],
-        &["catalog"],
-        &["doctor"],
-        &["setup"],
-        &["agent", "remove", "mine"],
-    ] {
+    for args in [&["doctor"][..], &["setup"]] {
         let ran = home.cf(args)?;
         assert_eq!(ran.code, Some(0), "{}", ran.stderr);
         assert_eq!(

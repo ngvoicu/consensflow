@@ -17,16 +17,6 @@ engine-no-adapter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", 
 ledger-pause-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses"]
 
 [[plant]]
-name = "harness gone: an agent of a kind the build does not run is listed as supported"
-meant = "an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_moves_off_it"
-runs = ["rig-regression-harness-gone"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/roster/views.rs"
-find = "            unsupported: harness.is_none(),\n"
-replace = "            unsupported: false,\n"
-
-[[plant]]
 name = "harness gone: a member on a harness with no adapter is taken for free"
 meant = "an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_moves_off_it"
 runs = ["rig-regression-harness-gone"]

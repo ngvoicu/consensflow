@@ -1,13 +1,12 @@
 //! `cf doctor`: what ConsensFlow sees on this machine, a line each: the
-//! version, the home, the harnesses, the agents, the roles, what the terminal
+//! version, the home, the harnesses, the roles, what the terminal
 //! command runs, and the hooks an older version left in Claude Code's settings.
 //! It reads and writes nothing of its own, and the words after it are no
 //! matter, but the one that asks for its usage (`--help`, `-h`), which `run`
 //! answers before it gets here.
 //!
-//! A line is said as soon as it is known, so what stops it later (a file of
-//! agents that cannot be read, or a command that cannot) is said after the
-//! lines before it, as Node said it.
+//! A line is said as soon as it is known, so what stops it later (a command
+//! that cannot be read) is said after the lines before it, as Node said it.
 
 use std::io::Write;
 
@@ -15,7 +14,7 @@ use cf_base::env::Env;
 use cf_harness::claude::stale_hooks;
 use cf_launcher::{runtime, Places};
 
-use super::{agents_saved, harness_ids, home, own_cf, Done, Stop};
+use super::{harness_ids, home, own_cf, Done, Stop};
 
 pub(super) fn run(env: &Env, out: &mut dyn Write) -> Done {
     // Before a line is said: there is no home to name.
@@ -30,7 +29,6 @@ pub(super) fn run(env: &Env, out: &mut dyn Write) -> Done {
         found.join(", ")
     };
     writeln!(out, "harnesses:    {harnesses}")?;
-    writeln!(out, "agents:       {}", agents_saved(env)?)?;
     writeln!(
         out,
         "roles:        bundled chief, worker, reviewer and advisor; prepared when a window launches"

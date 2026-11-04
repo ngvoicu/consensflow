@@ -176,7 +176,7 @@ async function open(page, data = model()) {
     const placeOf = (it) => it && { conversation: it.conversation, row: it.row }
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'agents.list': () => answer({ agents: [], missing: [] }),
+      'harnesses.missing': () => answer({ missing: [] }),
       'board.get': () => answer({ board: window.__model.board }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // The daemon's pages: the most recent, the one before a place or the one after it,
@@ -402,6 +402,37 @@ test.describe('the history viewer', () => {
     await expect(session.locator('.history-title')).toHaveText('History')
     const theirs = await session.textContent()
     for (const name of ['Pi', 'zeus', 'amber-pine']) expect(theirs).not.toContain(name)
+  })
+
+  test('says on its page line the name a member had before members were named by their model', async ({
+    page,
+  }) => {
+    // The migration named @zeus by its model: its row and its window's keep the old name.
+    const data = model()
+    const [, , member, session] = data.board.lanes
+    Object.assign(member.participant, { handle: 'opus-high' })
+    Object.assign(session.participant, {
+      handle: 'opus-high-amber-pine',
+      member: 'opus-high',
+    })
+    data.histories['opus-high-amber-pine'] = data.histories['zeus-amber-pine']
+    await open(page, data)
+    await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+    await page.getByRole('button', { name: "Show @opus-high · amber-pine's terminal" }).click()
+    await page
+      .locator('#stage .terminal-card[data-handle="opus-high-amber-pine"]')
+      .getByRole('button', {
+        name: "Read everything kept of @opus-high · amber-pine's conversations",
+      })
+      .click()
+    const viewer = page.getByRole('dialog', { name: 'History', exact: true })
+    await expect(viewer.locator('.history-page')).toHaveText(
+      'The most recent · once @zeus, before members were named by their model',
+    )
+    // The chief's agent was only what it ran on: its page line says no name.
+    await viewer.getByRole('button', { name: 'Close' }).click()
+    const chief = await openChief(page)
+    await expect(chief.locator('.history-page')).toHaveText('The most recent')
   })
 
   test("labels items as the task drawer does, a compaction's summary as one, and shows every text as text", async ({

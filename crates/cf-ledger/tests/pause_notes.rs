@@ -25,7 +25,9 @@ fn world() -> World {
         open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
     let staff = ["zeus", "diana", "athena"]
         .map(|agent| NewMember {
-            agent: agent.into(),
+            model: None,
+            effort: None,
+            model_name: Some(agent.into()),
             harness: "claude-code".into(),
             designer: false,
             roles: vec!["worker".into()],
@@ -39,6 +41,7 @@ fn world() -> World {
             chief: NewChief {
                 harness: "claude-code".into(),
                 model: None,
+                effort: None,
             },
             staff,
             gate: false,

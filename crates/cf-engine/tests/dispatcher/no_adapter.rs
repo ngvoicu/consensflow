@@ -30,7 +30,9 @@ fn on_pi(context: &Context, project: &ProjectView) {
         .add_member(
             project.id,
             &NewMember {
-                agent: "hera".to_owned(),
+                model: Some("muse-spark".to_owned()),
+                effort: None,
+                model_name: Some("hera".to_owned()),
                 harness: "pi".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],
@@ -122,6 +124,7 @@ fn opens_no_project_member_or_chief_on_it() {
             SwitchTo {
                 harness: "pi".to_owned(),
                 model: "leto".to_owned(),
+                effort: None,
             },
             SwitchWhen::Now,
             false,

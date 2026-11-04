@@ -7,18 +7,6 @@
 # The suites give the native cf no Node beside it, and one that did not
 # answer the verb would say it is no command.
 [[plant]]
-name = "dispatch: the catalog is an unknown command, seen by the suites of the CLI"
-meant = "runs_the_native_cf"
-runs = ["clis"]
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/mod.rs"
-find = '''
-        Some("catalog") => catalog::run(rest, out),
-'''
-replace = ""
-
-[[plant]]
 name = "dispatch: setup and doctor are answered as unknown commands"
 meant = "with_no_folder_to_keep_the_agents_in_a_verb_that_needs_it_says_so"
 runs = ["units", "process"]
@@ -113,5 +101,5 @@ runs = ["clis"]
 
 [[plant.edit]]
 file = "crates/cf/src/standalone/usage.txt"
-find = "doctor                                    Inspect runtime, roster and bundled roles"
+find = "doctor                                    Inspect runtime, harnesses and bundled roles"
 replace = ""

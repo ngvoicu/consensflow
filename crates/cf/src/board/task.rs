@@ -325,8 +325,13 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
         }
         kept.push(lane);
         if !lane_tasks.is_empty() {
+            // A lane on a harness says the model and effort it runs on (harness-models).
+            let runs_on = match lane.get("runsOn").and_then(Value::as_str) {
+                Some(runs_on) => format!(", {runs_on}"),
+                None => String::new(),
+            };
             lines.push(format!(
-                "@{} ({})",
+                "@{} ({}{runs_on})",
                 js::text(lane.get("handle")),
                 js::text(lane.get("role"))
             ));
@@ -1063,6 +1068,25 @@ and 2 idle sessions (`cf task list --all`)";
                 .contains("finish it with: /x/bin/cf task done T-4 \"what you did\""),
             "{}",
             said.text
+        );
+    }
+
+    /// A lane on a harness says in its head the model and effort it runs on, after its role
+    /// (harness-models); a lane that says none is as it was.
+    #[test]
+    fn a_lane_s_head_says_the_model_and_effort_it_runs_on() {
+        let mut opus = lane(
+            "opus-high",
+            "worker",
+            &[card(2, "working", Some("opus-high"))],
+        );
+        opus["runsOn"] = json!("Opus · high");
+        let plain = lane("zeus", "worker", &[card(3, "working", Some("zeus"))]);
+        let text = listed(&[], &json!([opus, plain]));
+        let heads: Vec<&str> = text.lines().filter(|line| line.starts_with('@')).collect();
+        assert_eq!(
+            heads,
+            ["@opus-high (worker, Opus · high)", "@zeus (worker)"]
         );
     }
 

@@ -24,7 +24,7 @@ use crate::deliveries::Delivering;
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::seams::{EngineError, SavedAgent};
+use crate::seams::EngineError;
 
 /// What the note to the human says of an account refused again as soon as its
 /// task went on.
@@ -406,8 +406,8 @@ impl Dispatcher {
     }
 
     /// Why a member is not free, the first reason that holds for it: on a
-    /// harness whose windows open, its agent saved, not out of quota, not
-    /// low on it; none when it is free.
+    /// harness whose windows open, not out of quota, not low on it; none when
+    /// it is free.
     fn why_not_free(&self, candidate: &Candidate) -> Option<String> {
         let member = &candidate.member;
         let harness = member.harness.as_deref().unwrap_or("null");
@@ -417,28 +417,11 @@ impl Dispatcher {
                 member.handle, member.handle
             ));
         }
-        let agent = member.agent.as_deref();
-        match agent.map_or(Some(None), |name| self.saved_agent(name)) {
-            None => {
-                return Some(format!(
-                    "@{}'s agent cannot be read (your agents file needs fixing: see Agents)",
-                    member.handle
-                ));
-            }
-            Some(None) => {
-                let agent = agent.unwrap_or("null");
-                return Some(match self.seams.roster.retired(agent) {
-                    Some(why) => format!(
-                        "@{} has no agent any more ({agent} left the catalog: {why}; remove @{} from the staff and add another agent)",
-                        member.handle, member.handle
-                    ),
-                    None => format!(
-                        "@{} has no agent any more ({agent} is not among your agents: define it, or remove the member)",
-                        member.handle
-                    ),
-                });
-            }
-            Some(Some(_)) => {}
+        if member.needs_edit {
+            return Some(needs_an_edit_because(
+                &member.handle,
+                member.agent.as_deref(),
+            ));
         }
         if self.out(member.out_until.as_deref()) {
             let until = member.out_until.as_deref().unwrap_or_default();
@@ -1447,44 +1430,6 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// A member whose agent is gone from the human's agents runs on no
-    /// default: its tiered work goes back to the board for another member,
-    /// with whatever was on its way to it withdrawn, and a request given to
-    /// it by name fails so the requester hears why.
-    pub(crate) fn without_agent(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        delivering: Option<Delivering>,
-    ) -> Result<(), EngineError> {
-        let agent = participant.agent.as_deref().unwrap_or("null");
-        let because = self.gone_because(agent);
-        let tiered: Vec<TaskCard> = self
-            .active_work(project, participant)?
-            .into_iter()
-            .filter(|task| task.pool.is_some())
-            .collect();
-        for task in &tiered {
-            self.seams
-                .ledger
-                .borrow_mut()
-                .release_task(project.id, task.number, &because)?;
-        }
-        match delivering {
-            Some(delivering) => self.settle_failure(
-                delivering,
-                &format!(
-                    "{because}: {}",
-                    self.member_remedy(agent, &participant.handle)
-                ),
-                false,
-            )?,
-            None if !tiered.is_empty() => self.changed(),
-            None => {}
-        }
-        Ok(())
-    }
-
     /// A held task's window that went on with it by itself, in a turn of its own
     /// that got through: Claude Code continues once its limit resets, or the
     /// human typed into it (T-95). That turn begins with a user's words that are
@@ -1558,6 +1503,35 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// A member that runs nothing now: its tiered work goes back to the board for another
+    /// member with `because`, and what was on its way to it (`delivering`) fails, so its
+    /// requester hears why.
+    pub(crate) fn release_its_work(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        because: &str,
+        delivering: Option<Delivering>,
+    ) -> Result<(), EngineError> {
+        let tiered: Vec<TaskCard> = self
+            .active_work(project, participant)?
+            .into_iter()
+            .filter(|task| task.pool.is_some())
+            .collect();
+        for task in &tiered {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .release_task(project.id, task.number, because)?;
+        }
+        match delivering {
+            Some(delivering) => self.settle_failure(delivering, because, false)?,
+            None if !tiered.is_empty() => self.changed(),
+            None => {}
+        }
+        Ok(())
+    }
+
     /// The work a participant holds and has not finished: queued, working or waiting.
     fn active_work(
         &self,
@@ -1574,45 +1548,6 @@ impl Dispatcher {
             .into_iter()
             .filter(|task| matches!(task.state.as_str(), "queued" | "working" | "waiting"))
             .collect())
-    }
-
-    /// Why `agent` is gone, as a task taken back or a launch says it: a
-    /// ready-made agent the catalog no longer carries says why it went; any
-    /// other is no longer among the human's agents.
-    pub(crate) fn gone_because(&self, agent: &str) -> String {
-        match self.seams.roster.retired(agent) {
-            Some(why) => format!("{agent} left the catalog: {why}"),
-            None => format!("{agent} is no longer among your agents"),
-        }
-    }
-
-    /// What the human does about a member whose agent is gone: picks another
-    /// agent for one the catalog no longer carries, or adds theirs back.
-    fn member_remedy(&self, agent: &str, handle: &str) -> String {
-        if self.seams.roster.retired(agent).is_some() {
-            format!("remove @{handle} from the staff and add another agent")
-        } else {
-            format!("add it back under Agents, or remove @{handle} from the staff")
-        }
-    }
-
-    /// A member whose saved agent the human has since deleted. Never a chief, which runs on
-    /// a harness and a model, not on a saved agent (CHF-04): one from before that named an
-    /// agent reads its record as every chief does.
-    pub(crate) fn agent_gone(&self, participant: &ParticipantView) -> bool {
-        participant.role != "chief"
-            && participant
-                .agent
-                .as_deref()
-                .is_some_and(|name| matches!(self.saved_agent(name), Some(None)))
-    }
-
-    /// A saved agent as the roster has it now: its row, or none when it is
-    /// gone. While the human's agents file cannot be read it is not known:
-    /// nobody counts as free for new work, and nobody's agent as gone, so no
-    /// work is taken back for a typo.
-    fn saved_agent(&self, name: &str) -> Option<Option<SavedAgent>> {
-        self.seams.roster.agent(name).ok()
     }
 
     /// A deleted project's open tasks wait for nobody now: what their
@@ -1645,6 +1580,15 @@ fn rank<'a>(mut free: Vec<&'a Candidate>, candidates: &[Candidate]) -> Vec<&'a C
         )
     });
     free
+}
+
+/// Why a member that needs an edit (T-1202), `handle`, runs nothing: the update could not
+/// tell what its agent (`agent`) ran on, and it runs on no default.
+pub(crate) fn needs_an_edit_because(handle: &str, agent: Option<&str>) -> String {
+    format!(
+        "@{handle} needs an edit: the update could not tell what it ran on ({} is in no catalog and no agents file); edit it under Project settings, or remove it",
+        agent.unwrap_or("its agent")
+    )
 }
 
 #[cfg(test)]

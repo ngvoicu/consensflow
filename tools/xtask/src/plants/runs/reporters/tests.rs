@@ -35,7 +35,6 @@ fn a_command_is_reported_by_the_runner_of_its_tests() {
         &["cargo", "xtask", "app", "test", "file_drop"][..],
         &["cargo", "xtask", "app", "test"],
         &["cargo", "xtask", "test", "clis", "--offline"],
-        &["cargo", "xtask", "test", "agents", "--offline"],
     ] {
         assert_eq!(of(suite), Reporter::Nextest, "{suite:?}");
     }
@@ -163,18 +162,8 @@ fn a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folder_with
         [r#"TAURI_CONFIG=Some("{\"bundle\":{\"resources\":null}}")"#]
     );
     let (words, cwd, vars) =
-        under_nextest_for(&["cargo", "xtask", "test", "agents", "--offline"], &context);
-    assert_eq!(
-        words,
-        [
-            "-p",
-            "cf-e2e",
-            "--test",
-            "daemon",
-            "agents_proof::",
-            "--offline"
-        ]
-    );
+        under_nextest_for(&["cargo", "xtask", "test", "clis", "--offline"], &context);
+    assert_eq!(words, ["-p", "cf-e2e", "--test", "cli", "--offline"]);
     assert_eq!(cwd, Path::new("/checkout"));
     assert!(vars.is_empty());
     if cfg!(target_os = "macos") {

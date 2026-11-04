@@ -15,6 +15,9 @@ fn chief(model: Option<&str>, launched: Option<&str>) -> ParticipantView {
         agent: None,
         harness: Some("claude-code".into()),
         model: model.map(str::to_owned),
+        effort: None,
+        model_name: None,
+        needs_edit: false,
         launched_model: launched.map(str::to_owned),
         gone_model: None,
         ran_on: None,
@@ -106,5 +109,39 @@ fn a_pi_chiefs_thinking_is_what_the_record_says_and_never_an_effort() {
             effort: None,
             thinking: Some("low".into()),
         }
+    );
+}
+
+/// The effort the human picked for a chief (harness-models: New project and Switch chief pick
+/// a harness, a model and its effort) is what its launch asks for: Claude Code's and Codex's
+/// as the effort, Pi's as its thinking, and none for Devin, whose model is the exact id it
+/// lists for the effort.
+#[test]
+fn the_effort_picked_for_a_chief_is_its_launch_s_pi_s_its_thinking_and_devin_s_none() {
+    let picked = |harness: &str, model: &str| {
+        let mut chief = chief(Some(model), None);
+        chief.harness = Some(harness.to_owned());
+        chief.effort = Some("high".to_owned());
+        ChiefRuns::of(&chief, None)
+    };
+    assert_eq!(
+        picked("claude-code", "claude-opus-5-5"),
+        runs(Some("claude-opus-5-5"), Some("high"))
+    );
+    assert_eq!(
+        picked("codex", "gpt-6-astra"),
+        runs(Some("gpt-6-astra"), Some("high"))
+    );
+    assert_eq!(
+        picked("pi", "anthropic/claude-opus-5-5"),
+        ChiefRuns {
+            model: Some("anthropic/claude-opus-5-5".into()),
+            effort: None,
+            thinking: Some("high".into()),
+        }
+    );
+    assert_eq!(
+        picked("devin", "claude-opus-5-5-high"),
+        runs(Some("claude-opus-5-5-high"), None)
     );
 }

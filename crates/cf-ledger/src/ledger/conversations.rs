@@ -111,6 +111,17 @@ impl Ledger {
         conversations::history_read(&mut self.store, project_id, page, find, tools)
     }
 
+    /// A chief that needs an edit runs on the model and effort its harness's record names,
+    /// and needs none (T-1202).
+    pub fn chief_ran_on(
+        &mut self,
+        participant_id: i64,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Result<(), LedgerError> {
+        conversations::chief_ran_on(&mut self.store, participant_id, model, effort)
+    }
+
     /// The chief's launch asked its harness for `model`; none for the harness's own default.
     pub fn chief_launched(
         &mut self,

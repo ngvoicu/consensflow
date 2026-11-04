@@ -27,9 +27,12 @@ fn project(ledger: &mut Ledger) -> i64 {
             chief: NewChief {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
+                effort: None,
             },
             staff: vec![NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "claude-code".into(),
                 designer: false,
                 roles: vec!["worker".into()],

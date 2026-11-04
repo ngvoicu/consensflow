@@ -128,6 +128,7 @@ pub(crate) fn members(
                     taken: row.get("taken")?,
                     sessions: row.get("sessions")?,
                     out_until: row.get("out_until")?,
+                    needs_edit: row.get::<_, i64>("needs_edit")? == 1,
                 },
             ))
         })?

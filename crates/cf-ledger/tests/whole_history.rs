@@ -92,6 +92,7 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             chief: NewChief {
                 harness: "claude-code".into(),
                 model: Some("ares".into()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -177,6 +178,7 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
             &ChiefSwitch {
                 harness: "codex".into(),
                 model: "maia".into(),
+                effort: None,
                 cut: false,
             },
         )
@@ -237,7 +239,9 @@ fn a_member_s_conversations_with_nothing_copied_show_nothing_and_an_unknown_hand
         .add_member(
             project.id,
             &NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "pi".into(),
                 designer: false,
                 roles: vec!["worker".into()],
@@ -259,6 +263,7 @@ fn a_member_s_conversations_with_nothing_copied_show_nothing_and_an_unknown_hand
             &ChiefSwitch {
                 harness: "codex".into(),
                 model: "maia".into(),
+                effort: None,
                 cut: false,
             },
         )

@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 mod conversations;
+pub mod handles;
 mod ledger;
 mod meeting;
 mod messages;
@@ -29,6 +30,7 @@ mod page_reads;
 mod projects;
 mod questions;
 mod queue;
+mod saved_agents;
 mod schema;
 mod specs;
 mod staff;
@@ -47,7 +49,7 @@ pub use cf_proto::ledger::{
     MessageOpening, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
     RemovedMember, Resume, Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited,
     TaskMoved, TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView,
-    TextCut, TextPart, TierChange,
+    TextCut, TextPart,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{

@@ -130,12 +130,13 @@ fn told_of_specs(role: &str) -> bool {
     role.contains("This project's specs") || role.contains("Specmint")
 }
 
-/// The agents file with the human's preference that specs are on for every project.
+/// The app's settings file with the human's word that specs are on for every project.
 fn turn_specs_on_for_every_project(rig: &Rig) -> Outcome {
     let file = rig.home().join("agents.json");
-    let mut roster: Value = serde_json::from_str(&files::read_string(&file)?)?;
-    roster["preferences"] = json!({ "ownHarnessOnly": false, "specs": true });
-    files::write(&file, format!("{roster}\n"))?;
+    files::write(
+        &file,
+        format!("{}\n", json!({ "preferences": { "specs": true } })),
+    )?;
     Ok(())
 }
 

@@ -1,11 +1,10 @@
 //! What the app says of specs for every project that does not say otherwise,
 //! which Settings has a place for: whether they are on, and the folder and the
-//! Specmint variant a project uses when it names none. Kept in the agents file
-//! beside the human's choice about the roster ([`cf_catalog::Roster::app_specs`]),
-//! and the human's alone, as a project's own word is: the page is the app's, and
-//! neither the agents' API nor the screens' route of the roster's choice says or
-//! takes them. A change reaches a chief whose window is open at its next rest, in a
-//! note, and any other chief at its next launch, which reads them as they are then.
+//! Specmint variant a project uses when it names none. Kept in the app's
+//! settings file ([`crate::app_settings`]), and the human's alone, as a project's own
+//! word is: the page is the app's, and the agents' API neither says nor takes them. A change
+//! reaches a chief whose window is open at its next rest, in a note, and any other chief at its
+//! next launch, which reads them as they are then.
 //!
 //! The page is answered what it draws from, whatever it asked: the raw word of
 //! the app (what Settings shows and edits), what a project that names none then
@@ -15,13 +14,23 @@
 use cf_proto::specs::{AppSpecs, Bundled};
 use serde_json::json;
 
-use super::agents::saved;
 use super::body::{Body, Fields, Said};
 use super::Page;
 
+/// The app's settings file of the home the page's daemon runs on.
+pub(super) fn settings(page: &Page) -> Result<crate::app_settings::SettingsFile, Said> {
+    crate::app_settings::settings_path(&page.env)
+        .map(crate::app_settings::SettingsFile::new)
+        .ok_or_else(|| {
+            Said::from(
+                "ConsensFlow has no folder to keep its things in: set CONSENSFLOW_HOME, or HOME",
+            )
+        })
+}
+
 /// `specs.get`.
 pub(super) async fn get(page: &Page) -> Result<Fields, Said> {
-    let app = saved(&page.env)?.roster().app_specs()?;
+    let app = settings(page)?.app_specs()?;
     answered(&app, &cf_harness::bundled_specmint())
 }
 
@@ -29,7 +38,7 @@ pub(super) async fn get(page: &Page) -> Result<Fields, Said> {
 /// and `variant` as text or `null` to name none again; a part it leaves out is
 /// as it was. Each is checked as a project's own is, and a refusal keeps none.
 pub(super) async fn set(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
-    let app = saved(&page.env)?.roster().set_app_specs(body.json())?;
+    let app = settings(page)?.set_app_specs(body.json())?;
     answered(&app, &cf_harness::bundled_specmint())
 }
 

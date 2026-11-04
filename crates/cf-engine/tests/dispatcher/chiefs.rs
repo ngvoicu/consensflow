@@ -30,6 +30,7 @@ pub fn to(harness: &str, agent: &str) -> SwitchTo {
     SwitchTo {
         harness: harness.to_owned(),
         model: model.to_owned(),
+        effort: None,
     }
 }
 

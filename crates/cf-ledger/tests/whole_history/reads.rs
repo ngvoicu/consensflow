@@ -548,7 +548,9 @@ fn a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_
         .add_member(
             project,
             &NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "pi".into(),
                 designer: false,
                 roles: vec!["worker".into()],

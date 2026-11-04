@@ -47,7 +47,9 @@ fn history(
             .add_member(
                 project.id,
                 &NewMember {
-                    agent: "zeus".into(),
+                    model: None,
+                    effort: None,
+                    model_name: Some("zeus".into()),
                     harness: "pi".into(),
                     designer: false,
                     roles: vec!["worker".into()],

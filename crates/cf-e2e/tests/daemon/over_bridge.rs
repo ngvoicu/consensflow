@@ -57,19 +57,15 @@ fn host(frame: &Value) -> Value {
 }
 
 impl OverBridge {
-    /// Starts a daemon on a home with `agents` in its roster, and a Claude to be
-    /// found on `PATH`, and only it: no real harness is ever in reach.
-    pub fn start(agents: &[Value]) -> Result<Self> {
+    /// Starts a daemon on a home with a Claude to be found on `PATH`, and only it: no real
+    /// harness is ever in reach.
+    pub fn start() -> Result<Self> {
         let home = Home::new()?;
         for folder in [home.consensflow(), home.workspace()] {
             files::make_dir(&folder)?;
         }
         // Never run: the test is the pane host, and answers each window's opening itself.
         home.window_stand_in("claude", Path::new(AGENT))?;
-        files::write(
-            &home.consensflow().join("agents.json"),
-            json!({ "schemaVersion": 1, "agents": agents }).to_string(),
-        )?;
         let mut daemon = home.daemon()?;
         let handle = daemon.handle(WITHIN)?;
 
@@ -286,7 +282,7 @@ mod tests {
     #[test]
     fn a_wait_that_gives_up_names_what_it_waited_for_and_what_the_daemon_did_meanwhile() -> Outcome
     {
-        let d = OverBridge::start(&[])?;
+        let d = OverBridge::start()?;
         let Err(gave_up) = d.wait::<()>(Duration::from_millis(50), "opened the chief", || None)
         else {
             panic!("a wait for what never comes found it");

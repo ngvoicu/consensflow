@@ -24,6 +24,7 @@ fn project(rig: &Rig, name: &str) -> i64 {
             chief: NewChief {
                 harness: "claude-code".into(),
                 model: Some("ares".into()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -38,7 +39,9 @@ fn project(rig: &Rig, name: &str) -> i64 {
         .add_member(
             id,
             &NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "pi".into(),
                 designer: false,
                 roles: vec!["worker".into()],
@@ -136,6 +139,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                     &ChiefSwitch {
                         harness: "codex".into(),
                         model: "maia".into(),
+                        effort: None,
                         cut: false,
                     },
                 )
@@ -356,6 +360,7 @@ async fn the_history_is_one_stream_of_items_oldest_first_across_three_conversati
                     &ChiefSwitch {
                         harness: "codex".into(),
                         model: "maia".into(),
+                        effort: None,
                         cut: false,
                     },
                 )

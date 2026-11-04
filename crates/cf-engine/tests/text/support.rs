@@ -7,8 +7,8 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use cf_base::refusal::Refusal;
-use cf_catalog::{WorkTier, WORK_TIERS};
 use cf_engine::roles::StaffRow;
+use cf_proto::agents::{WorkTier, WORK_TIERS};
 use cf_proto::ledger::{
     ChiefConversation, ConversationView, HistoryItem, MessageView, ParticipantView, ProjectView,
     TaskView,
@@ -201,6 +201,9 @@ pub fn seat(harness: Option<&str>, model: Option<&str>) -> ParticipantView {
         agent: None,
         harness: harness.map(str::to_owned),
         model: model.map(str::to_owned),
+        effort: None,
+        model_name: None,
+        needs_edit: false,
         launched_model: None,
         gone_model: None,
         ran_on: None,
@@ -227,6 +230,9 @@ pub fn participant_of(row: &Value) -> ParticipantView {
         agent: text(row, "agent"),
         harness: text(row, "harness"),
         model: text(row, "model"),
+        effort: text(row, "effort"),
+        model_name: text(row, "modelName"),
+        needs_edit: false,
         launched_model: text(row, "launchedModel"),
         gone_model: None,
         ran_on: None,
@@ -359,6 +365,7 @@ pub fn unknown(_: i64) -> Result<Option<MessageView>, Refusal> {
 pub fn staff_row_of(row: &Value) -> StaffRow {
     StaffRow {
         name: row["name"].as_str().unwrap().to_owned(),
+        model: text(row, "model").unwrap_or_else(|| MODEL_SHOWN.to_owned()),
         roles: texts(row, "roles"),
         work_tier: row
             .get("workTier")
@@ -367,10 +374,14 @@ pub fn staff_row_of(row: &Value) -> StaffRow {
     }
 }
 
-/// A member of the staff, the way a test says it.
+/// What a test's member runs on, as the staff table shows it, where its row says none.
+pub const MODEL_SHOWN: &str = "Opus · high";
+
+/// A member of the staff, the way a test says it, on [`MODEL_SHOWN`].
 pub fn staff_row(name: &str, roles: &[&str], work_tier: WorkTier) -> StaffRow {
     StaffRow {
         name: name.to_owned(),
+        model: MODEL_SHOWN.to_owned(),
         roles: roles.iter().map(|role| (*role).to_owned()).collect(),
         work_tier: Some(work_tier),
     }

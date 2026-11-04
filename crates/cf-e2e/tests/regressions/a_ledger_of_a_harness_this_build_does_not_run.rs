@@ -3,16 +3,14 @@
 //! ConsensFlow 3.0.7 took a harness out (T-566, the removal's RMOC-19) with no
 //! code for the state an older build left of it (the owner's rule: none for old state).
 //! What such an install holds is the harness's word: in the ledger, on its chief, on a
-//! member with a task, and on the conversations whose transcripts were copied; in
-//! `agents.json`, on agents of the human's own. Whatever the word, the build reads it as
-//! it reads any kind it does not run.
+//! member with a task, and on the conversations whose transcripts were copied. Whatever
+//! the word, the build reads it as it reads any kind it does not run.
 //!
 //! What should be: the app starts and the board opens; History reads the transcripts;
 //! the member's task is paused, with the reason and the way out (cancel and add it again,
 //! or finish it: no resume opens its window), and the member is said not to be free: it
 //! runs on a harness whose windows ConsensFlow cannot open, and is to leave the staff;
-//! Switch chief moves the project off the chief's harness and the new chief works; the
-//! agents of the human's own on that harness are unsupported and hidden.
+//! Switch chief moves the project off the chief's harness and the new chief works.
 //!
 //! The case makes that install on the rig: a project of the stand-in Claude, a chief
 //! that answered and a worker at work on T-1, closed with its home kept. Then its words
@@ -20,7 +18,6 @@
 
 use std::path::Path;
 
-use cf_e2e::files;
 use cf_e2e::rig::{chief_body, Project, Rig};
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -58,7 +55,7 @@ fn tier(added: &Value) -> &str {
 }
 
 /// The home under `root` as an older build that ran [`GONE`] left it: the chief, the
-/// worker and their conversations on it, and the agents of the human's own that ran them.
+/// worker and their conversations on it.
 fn written_by_an_older_build(root: &Path) -> Outcome {
     let home = root.join("consensflow");
     let ledger = Connection::open(home.join("consensflow.db"))?;
@@ -74,15 +71,6 @@ fn written_by_an_older_build(root: &Path) -> Outcome {
         [GONE],
     )?;
     ledger.close().map_err(|(_, failed)| failed)?;
-    let roster = json!({
-        "schemaVersion": 1,
-        "agents": [
-            { "id": "chief", "kind": GONE, "model": "fake-chief" },
-            { "id": "worker", "kind": GONE, "model": "fake" },
-            { "id": "next", "kind": "claude-code", "model": "fake-chief" },
-        ],
-    });
-    files::write(&home.join("agents.json"), format!("{roster:#}\n"))?;
     Ok(())
 }
 
@@ -91,14 +79,13 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
 ) -> Outcome {
     let mut rig = Rig::start(config())?;
     let roster = json!({
-        "schemaVersion": 1,
         "agents": [
             { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
             { "id": "next", "kind": "claude-code", "model": "fake-chief" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster:#}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let id = project.id();
     let added = project.add_member("worker")?;
@@ -184,22 +171,6 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
                 .is_some_and(|reason| reason.contains(&cannot))),
         "{task}"
     );
-    // The agents of the human's own on it are kept, unsupported and hidden.
-    let agents = rig.page("agents.list", json!({}))?;
-    for name in ["chief", "worker"] {
-        let agent = agents["agents"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|agent| agent["name"] == name)
-            .ok_or("an agent of the human's own is gone")?;
-        assert_eq!(
-            (&agent["harness"], &agent["unsupported"], &agent["hidden"]),
-            (&json!(GONE), &json!(true), &json!(true)),
-            "{agent}"
-        );
-    }
-
     // Switch chief takes the project off the harness, and the new chief works.
     let switched = rig.page(
         "chief.switch",

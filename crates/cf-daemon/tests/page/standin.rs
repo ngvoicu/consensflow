@@ -192,12 +192,14 @@ impl Seam {
                         .note(format!("answered, where Node refused: {}", said["refusal"]));
                     return;
                 }
-                let ours = serde_json::to_value(value).unwrap_or(Value::Null);
-                let theirs = if said["result"].get("$undefined").is_some() {
+                let mut ours = serde_json::to_value(value).unwrap_or(Value::Null);
+                let mut theirs = if said["result"].get("$undefined").is_some() {
                     Value::Null
                 } else {
                     said["result"].clone()
                 };
+                cf_ledger::testing::hold_apart_what_members_run_on(&mut ours);
+                cf_ledger::testing::hold_apart_what_members_run_on(&mut theirs);
                 if let Some(why) = differs("the answer", ours.to_string(), theirs.to_string()) {
                     self.notes.note(why);
                 }
@@ -228,8 +230,10 @@ fn project_json(request: &NewProject) -> Value {
         .staff
         .iter()
         .map(|member| {
+            // Node's member named its ready-made agent, its handle: this one's name of
+            // its model, which a trace's request gave it ([`super::player`]).
             json!({
-                "agent": member.agent,
+                "agent": member.model_name.clone().or_else(|| member.model.clone()),
                 "harness": member.harness,
                 "designer": member.designer,
                 "tier": member.tier,
@@ -310,6 +314,7 @@ impl Engine for Standin {
         let switch = ChiefSwitch {
             harness: to.harness,
             model: to.model,
+            effort: None,
             cut: false,
         };
         let answered = seam

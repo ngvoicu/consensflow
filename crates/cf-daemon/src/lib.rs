@@ -31,6 +31,7 @@
 #![forbid(unsafe_code)]
 
 pub mod api;
+pub mod app_settings;
 pub mod cli;
 pub mod computer_use;
 pub mod console;
@@ -41,7 +42,6 @@ pub mod machine;
 pub mod models;
 pub mod page;
 pub mod pass;
-pub mod roster;
 pub mod screens;
 pub mod seams;
 pub mod start;

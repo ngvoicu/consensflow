@@ -266,17 +266,6 @@ file = "crates/cf-engine/src/resume.rs"
 find = '''matches!(task.state.as_str(), "working" | "waiting")'''
 replace = '''matches!(task.state.as_str(), "working")'''
 
-[[plant]]
-name = "start suspended: a Resume opens the window of a member whose agent is gone"
-meant = "after_a_release_drops_the_agent_of_a_working_member_a_restart_sends_its_task_back_to_the_board"
-runs = ["engine-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/resume.rs"
-find = '''            .filter(|(participant, _)| !self.agent_gone(participant))
-'''
-replace = ""
-
 # --- the engine: the note of a cut turn ---
 
 [[plant]]

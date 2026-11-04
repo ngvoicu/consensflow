@@ -188,7 +188,9 @@ fn a_member_out_until_a_time_is_kept_and_logged_out_until_it_as_a_store_keeps_on
         .add_member(
             project.id,
             &NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "pi".into(),
                 designer: false,
                 roles: vec!["worker".into()],
@@ -715,6 +717,7 @@ fn every_field_and_part_a_read_goes_through_is_charged_as_what_it_is() {
             &ChiefSwitch {
                 harness: "codex".into(),
                 model: "maia".into(),
+                effort: None,
                 cut: false,
             },
         )

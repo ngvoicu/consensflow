@@ -29,6 +29,8 @@ use cf_proto::ledger::SwitchedFrom;
 pub struct SwitchTo {
     pub harness: String,
     pub model: String,
+    /// The effort the chief runs its model at; none for its harness's own.
+    pub effort: Option<String>,
 }
 
 /// A switch waiting for the end of the chief's turn: whether the human wanted
@@ -344,6 +346,7 @@ impl Dispatcher {
             &ChiefSwitch {
                 harness: to.harness,
                 model: to.model,
+                effort: to.effort,
                 cut,
             },
         )?;

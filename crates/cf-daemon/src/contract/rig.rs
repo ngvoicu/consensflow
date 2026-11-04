@@ -13,10 +13,9 @@ use std::future::Future;
 use std::rc::Rc;
 
 use cf_base::env::Env;
-use cf_base::refusal::Refusal;
 use cf_bridge::local::Bridge;
 use cf_engine::runtime::{begin, Begun, Spawn};
-use cf_engine::seams::{Adapters, Limits, Roster, SavedAgent, Seams};
+use cf_engine::seams::{Adapters, AppSettings, Limits, Seams};
 use cf_engine::testing::{
     CountingLaunchIds, FakeAdapter, FakeAdapters, FakeBackground, FakeRecords, Recorder,
 };
@@ -109,19 +108,10 @@ fn boxed(end: impl AsyncRead + AsyncWrite + Unpin + 'static) -> Ends {
     (Box::new(read), Box::new(write))
 }
 
-/// Every agent is saved, on a model of its own.
-struct AnyAgent;
+/// An app that says nothing of specs.
+struct NoSettings;
 
-impl Roster for AnyAgent {
-    fn agent(&self, _name: &str) -> Result<Option<SavedAgent>, Refusal> {
-        Ok(Some(SavedAgent {
-            model: Some("a-model".to_owned()),
-            effort: None,
-            thinking: None,
-            designer: false,
-        }))
-    }
-}
+impl AppSettings for NoSettings {}
 
 /// What makes the time the engine reads, given the executor's spawn.
 type Timing = Box<dyn FnOnce(&Rc<DaemonSpawn>) -> Rc<dyn Time>>;
@@ -243,7 +233,7 @@ impl Rig {
                 WindowEnv::new(&env, "http://127.0.0.1:1", "/bundle/bin")
                     .with_cf("/bundle/bin/cf", cfg!(windows)),
             ),
-            roster: Rc::new(AnyAgent),
+            app_settings: Rc::new(NoSettings),
             roles: Rc::new(RoleTexts::new(env.clone(), "/bundle/bin/cf".to_owned())),
             trace: Rc::new(Trace::new(home)),
             log: Rc::new(Log::new(home)),
@@ -301,13 +291,13 @@ impl Rig {
         }
     }
 
-    /// A project of a chief (`apollo`) and a worker for each of `workers`,
-    /// its chief's window open.
+    /// A project of a chief and a worker for each of `workers`, named by them and on a
+    /// model of its own, its chief's window open.
     pub async fn open_project(&mut self, workers: &[&str]) -> ProjectView {
         let staff: Vec<Value> = workers
             .iter()
             .map(|agent| {
-                json!({ "agent": agent, "harness": "claude-code", "role": "worker", "tier": "standard" })
+                json!({ "modelName": agent, "model": "a-model", "harness": "claude-code", "role": "worker", "tier": "standard" })
             })
             .collect();
         let request = NewProject::from_json(&json!({

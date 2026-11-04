@@ -52,8 +52,7 @@ const state = {
   // specs folder holding a file, read after its board and never waited for. The daemon stops at
   // the first file, and remembers it for a moment.
   specsPresent: null,
-  agents: [],
-  /** The harnesses not installed here, as `agents.list` said them last. */
+  /** The harnesses not installed here, as `harnesses.missing` said them last. */
   missing: [],
   /** What the app says of specs for every project and the Specmint it bundles, as last read. */
   specs: null,
@@ -94,13 +93,9 @@ async function daemon(operation, body = {}) {
   return result
 }
 
-/**
- * The saved agents, read again: what the board says members run, and what the pickers offer;
- * and the harnesses not installed here, which Add member offers none of.
- */
-async function readAgents() {
-  const { agents, missing = [] } = await daemon('agents.list')
-  state.agents = agents
+/** The harnesses not installed here, read again: Add member and the chief's pickers offer none of them. */
+async function readMissing() {
+  const { missing = [] } = await daemon('harnesses.missing')
   state.missing = missing
 }
 
@@ -147,7 +142,7 @@ function daemonStatus({ available, cause, retrying }) {
   daemonDown.hidden = available
   if (available) {
     placeDaemonDown()
-    if (wasDown) void act(readAgents)
+    if (wasDown) void act(readMissing)
     return
   }
   daemonDown.replaceChildren(
@@ -570,11 +565,10 @@ function render() {
     board.render({
       board: state.board,
       inbox: state.inbox,
-      agents: state.agents,
       shows: (participant) => terminals.shows(participant.projectId, participant.handle),
     })
   }
-  terminals.render(state.board, { focused: state.focus, agents: state.agents })
+  terminals.render(state.board, { focused: state.focus })
 }
 
 // Deleting a project is confirmed in a dialog that names it.
@@ -789,13 +783,11 @@ inboxButton.addEventListener('click', () => {
 })
 
 // Project settings (the staff, human approval, wake-up calls and specs), for the project
-// asked for: drawn from its board while the board shown is its, and from the agents as the
-// page has them now; opening it reads the agents again. The button asks for the project
-// the board shows.
+// asked for: drawn from its board while the board shown is its; opening it reads again which
+// harnesses are installed. The button asks for the project the board shows.
 const projectSettings = new ProjectSettingsDialog($('#project-settings-dialog'), {
   board: () => state.board,
   selected: () => state.selected,
-  agents: () => state.agents,
   missing: () => state.missing,
   specs: () => state.specs,
   readSpecs,
@@ -815,24 +807,18 @@ projectSettingsButton.addEventListener('click', () =>
  */
 async function openSettings(id) {
   if (!(await showProject(id))) return
-  await readAgents()
+  await readMissing()
   await projectSettings.open(id)
 }
 
-// New project: the native folder picker first, then the saved agent the chief
-// runs on and the project's settings: the staff (the last project's ticked
-// already), human approval, wake-up calls and specs, which the project starts
-// with. The agents it reads are the page's too, and the project it starts is
-// shown.
+// New project: the native folder picker first, then the chief's harness, model and effort
+// and the project's settings: the staff (the last project's there already), human approval,
+// wake-up calls and specs, which the project starts with. The project it starts is shown.
 const newProject = new NewProjectDialog($('#new-project-dialog'), {
-  agents: () => state.agents,
   specs: () => state.specs,
   readSpecs,
   daemon,
   act,
-  onAgents: (agents) => {
-    state.agents = agents
-  },
   onStart: (project) => {
     state.selected = project.id
     state.focus = 'chief'
@@ -868,14 +854,13 @@ const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
   },
 })
 
-// The agents screens are the daemon's own pages, each framed in a dialog of
-// its own at the address and token the app hands the page. A key pressed in a
-// frame never reaches the dialog around it, so a screen hands Escape up.
-// Closing one gives the focus back to the Settings button (its dialog closed
-// as the screen opened) and reads the agents again: a model or a tier may
-// have changed on it. Asked as the app starts, a screen's address waits for the
-// daemon's start: the status line says so, and one screen is asked for at a
-// time, so clicks meanwhile queue nothing (T-978).
+// The harnesses screen is the daemon's own page, framed in a dialog of its own at
+// the address and token the app hands the page. A key pressed in a frame never
+// reaches the dialog around it, so the screen hands Escape up. Closing it gives the
+// focus back to the Settings button (its dialog closed as the screen opened) and
+// reads again which harnesses are installed: one may have been on it. Asked as the
+// app starts, a screen's address waits for the daemon's start: the status line says
+// so, and one screen is asked for at a time, so clicks meanwhile queue nothing (T-978).
 const settingsButton = $('#settings-button')
 const settingsDialog = $('#settings-dialog')
 settingsButton.addEventListener('click', () => settingsDialog.showModal())
@@ -896,15 +881,10 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
       try {
         const screen = await invoke('agents_screen', { page })
         if (screen?.ok !== true) {
-          throw new Error(screen?.error ?? 'The agents screens are not available.')
+          throw new Error(screen?.error ?? 'The harnesses screen is not available.')
         }
-        // A screen opened before keeps what the human left on it, its filters
-        // and drafts, and is told the agents may have changed since.
-        if (frame.src === screen.url) {
-          frame.contentWindow.postMessage('consensflow:refresh-agents', new URL(screen.url).origin)
-        } else {
-          frame.src = screen.url
-        }
+        // A screen opened before keeps what the human left on it.
+        if (frame.src !== screen.url) frame.src = screen.url
         dialog.showModal()
       } finally {
         clearTimeout(saying)
@@ -921,7 +901,7 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
   })
   dialog.addEventListener('close', () => {
     settingsButton.focus()
-    void act(readAgents)
+    void act(readMissing)
   })
 }
 
@@ -1015,7 +995,7 @@ async function start() {
     await invoke('subscribe_output', { onOutput: channel })
   }
   try {
-    await readAgents()
+    await readMissing()
   } catch (cause) {
     report(cause)
   }

@@ -743,12 +743,15 @@ pub mod members {
     use serde_json::{json, Value};
 
     use super::{kind, records};
-    use crate::files;
     use crate::rig::{Project, Rig};
     use crate::Result;
 
     /// The worker's agent, as the roster names it.
     pub const WORKER: &str = "muse-worker";
+
+    /// The handle the Muse worker has on the staff: named by its model and effort as Muse
+    /// runs them (spec harness-models), not by the stand-in's name.
+    pub const WORKER_HANDLE: &str = "muse-spark-1-3-minimal";
 
     /// The worker of the echo rig's cases: the live tests' model and effort.
     pub fn echo_worker() -> Value {
@@ -767,9 +770,14 @@ pub mod members {
             "schemaVersion": 1,
             "agents": [{ "id": "chief", "kind": "claude-code", "model": "fake-chief" }, worker],
         });
-        files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+        rig.stand_ins(&roster)?;
         let project = Project::open(rig, "chief", json!({}))?;
-        project.add_member(WORKER)?;
+        let added = project.add_member(WORKER)?;
+        if added["member"]["handle"] != WORKER_HANDLE {
+            return Err(crate::Error::Daemon(format!(
+                "the Muse worker is not @{WORKER_HANDLE}: {added}"
+            )));
+        }
         Ok(project)
     }
 
@@ -792,7 +800,7 @@ pub mod members {
 
     /// The worker's window, as the board names its pane.
     pub fn pane_of(project: &Project<'_>) -> Result<Value> {
-        Ok(project.lane(WORKER)?["pane"].clone())
+        Ok(project.lane(WORKER_HANDLE)?["pane"].clone())
     }
 
     /// Waits until the worker's window is in its turn: the board says it works, and its
@@ -806,7 +814,7 @@ pub mod members {
                     .count()
                     >= runs
             });
-            Ok(begun && project.lane(WORKER)?["activity"]["state"] == "working")
+            Ok(begun && project.lane(WORKER_HANDLE)?["activity"]["state"] == "working")
         })
     }
 

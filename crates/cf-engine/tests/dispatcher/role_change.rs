@@ -476,7 +476,6 @@ fn a_chief_that_still_names_a_deleted_agent_is_told_its_changed_role_all_the_sam
         )
         .unwrap();
     });
-    context.roster.gone.borrow_mut().insert("diana".to_owned());
     specs(&context, project.id, true);
     context.resume_project(project.id).unwrap();
     let notes = replacements(&context, chief);

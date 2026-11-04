@@ -1,15 +1,15 @@
-//! The agents the catalog lists and the roster shows, as they cross to the CLI,
-//! the API and the page: each shape with its fields in the order the Node code
-//! built them, so its JSON reads as it did.
+//! The harnesses ConsensFlow runs and the work tiers a member is given work by, as
+//! they cross to the CLI, the API and the page. A member is a harness, a model it
+//! lists, an effort and a tier (spec `harness-models`): no catalog of agents, no
+//! saved agent of the human's own.
 
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::cf_word::Shell;
 
-/// A CLI ConsensFlow runs agents on, in the order Node's roster listed them.
+/// A CLI ConsensFlow runs members on, in the order the page lists them.
 /// The page, the CLI and the launcher speak these names; the store and the
-/// roster speak in kinds (`claude-code`). Kinds the build does not run
+/// ledger speak in kinds (`claude-code`). Kinds the build does not run
 /// (`image`, `kimi`) are no harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -24,7 +24,7 @@ pub enum Harness {
 }
 
 impl Harness {
-    /// Every harness, in the order the page and the roster list them.
+    /// Every harness, in the order the page lists them.
     pub const ALL: [Harness; 5] = [
         Harness::Claude,
         Harness::Codex,
@@ -52,7 +52,7 @@ impl Harness {
             .find(|harness| harness.as_str() == name)
     }
 
-    /// The harness behind a kind: the store and the roster speak in kinds
+    /// The harness behind a kind: the store and the ledger speak in kinds
     /// (`claude-code`), the launcher needs the CLI to find the binary. None for
     /// a kind the build does not run (`image`, `kimi`), and for a CLI's own
     /// name (`claude`).
@@ -60,7 +60,7 @@ impl Harness {
         Self::ALL.into_iter().find(|harness| harness.kind() == kind)
     }
 
-    /// The payload's word for it (`claude-code`), as the store and the roster say it.
+    /// The payload's word for it (`claude-code`), as the store and the ledger say it.
     pub fn kind(self) -> &'static str {
         match self {
             Harness::Claude => "claude-code",
@@ -233,8 +233,8 @@ fn same_name(one: &str, other: &str) -> bool {
     }
 }
 
-/// The work an agent suits, from the most serious to the lightest: what a
-/// task finds an agent by.
+/// The work a member is given, from the most serious to the lightest: what a
+/// task finds a member by. The human picks it for each member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkTier {
@@ -245,7 +245,7 @@ pub enum WorkTier {
 }
 
 impl WorkTier {
-    /// The tier's own word (`critical`), as the roster saves it.
+    /// The tier's own word (`critical`), as the ledger keeps it.
     pub fn as_str(self) -> &'static str {
         match self {
             WorkTier::Critical => "critical",
@@ -263,108 +263,42 @@ pub struct WorkTierInfo {
     pub description: &'static str,
 }
 
-/// What a model and the road to it are called, and the work its agent suits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Profile {
-    /// The model's identity (`gpt-6-astra`): one key for it on every road.
-    pub model_key: String,
-    pub model_label: String,
-    /// The road to the model (`Codex login`, `OpenRouter · API`).
-    pub route_label: String,
-    pub work_tier: WorkTier,
+impl WorkTier {
+    /// The tier a word names (`critical`); none for any other word.
+    pub fn from_word(word: &str) -> Option<WorkTier> {
+        WORK_TIERS.into_iter().find(|tier| tier.as_str() == word)
+    }
 }
 
-/// A ready-made agent as its harness's list shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CatalogEntry {
-    /// The preset's name: the agent's handle.
-    pub name: String,
-    /// An image agent; said only when true.
-    #[serde(skip_serializing_if = "is_false")]
-    pub designer: bool,
-    pub model: String,
-    /// The effort the preset names (Pi's `thinking` when it has no `effort`);
-    /// said only when it is not empty.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// The one-line headline (`Claude Code Fable 5.1 MAX`).
-    pub description: String,
-    /// The preset's own paragraph, for the card that wants it.
-    pub detail: String,
-    pub profile: Profile,
-    /// Provenance, as a row an older build saved names its entry.
-    pub preset: String,
-}
+/// The tiers in the order the pickers and the chief's text list them, the most
+/// serious first.
+pub const WORK_TIERS: [WorkTier; 4] = [
+    WorkTier::Critical,
+    WorkTier::Complex,
+    WorkTier::Standard,
+    WorkTier::Light,
+];
 
-/// What a lookup by name answers (`catalogEntry`): the entry, then the
-/// harness whose list it is in.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct FoundEntry {
-    #[serde(flatten)]
-    pub entry: CatalogEntry,
-    pub harness: Harness,
-}
-
-/// An agent of the roster as the page and the CLI list it. A key JavaScript
-/// leaves `undefined` is not written by `JSON.stringify`, so a field the row
-/// did not have is none and skipped: a row with no `id` has no `name`, one with
-/// no `kind` no `harness`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentView {
-    /// The row's `id`: the agent's handle.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// The CLI's own name (`claude`) for a kind the build runs, else the kind
-    /// as the row names it (`kimi`): text, not a [`Harness`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub harness: Option<String>,
-    /// An image agent; said only when the row's `designer` is `true` itself.
-    #[serde(skip_serializing_if = "is_false")]
-    pub designer: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// The tier the human chose for the agent, when they chose one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub work_tier: Option<WorkTier>,
-    /// The effort under the key the row's kind reads (Pi's `thinking`, every
-    /// other kind's `effort`); said only when it is not empty.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// The row's own description, whatever JSON it holds: said when truthy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<Value>,
-    /// Provenance, as a row an older build saved names its entry.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preset: Option<String>,
-    /// An agent the human defined: the catalog's have none.
-    #[serde(skip_serializing_if = "is_false")]
-    pub custom: bool,
-    pub profile: Profile,
-    /// A kind the build does not run (`kimi`): the row is kept, never launched.
-    #[serde(skip_serializing_if = "is_false")]
-    pub unsupported: bool,
-    /// Kept out of the list the human sees: a Claude or OpenAI model through
-    /// Pi or Devin, while they keep to their own harnesses. Said by
-    /// `listAgents` alone, and last.
-    #[serde(skip_serializing_if = "is_false")]
-    pub hidden: bool,
-}
-
-/// What the human chose about the roster, kept in the file beside their own
-/// agents, as the Agents screen and the CLI read it. What they say of specs for
-/// every project is kept in the same place of the file and is no choice about
-/// the roster: the page alone says it (`cf_proto::specs::AppSpecs`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Preferences {
-    /// Claude and OpenAI models reached through Pi or Devin are hidden.
-    pub own_harness_only: bool,
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
+/// How `tier` reads: its label and what it is for.
+pub const fn work_tier_info(tier: WorkTier) -> WorkTierInfo {
+    match tier {
+        WorkTier::Critical => WorkTierInfo {
+            label: "Critical work",
+            description: "Important reviews, architecture, hard problems and important questions. No coding or routine advice.",
+        },
+        WorkTier::Complex => WorkTierInfo {
+            label: "Complex work",
+            description: "Demanding implementation, investigation, planning and substantial reviews.",
+        },
+        WorkTier::Standard => WorkTierInfo {
+            label: "Standard work",
+            description: "Feature work, tests, research, planning and ordinary reviews.",
+        },
+        WorkTier::Light => WorkTierInfo {
+            label: "Light work",
+            description: "Bounded fixes, lookups and routine tasks; verify the model is suitable.",
+        },
+    }
 }
 
 /// The words Devin writes after the level in a model's id, each a variant of the family
@@ -426,29 +360,6 @@ impl<'a> DevinModel<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    fn muse() -> Profile {
-        Profile {
-            model_key: "muse-spark-1.3".into(),
-            model_label: "Muse Spark 1.3".into(),
-            route_label: "OpenRouter · API".into(),
-            work_tier: WorkTier::Light,
-        }
-    }
-
-    fn entry() -> CatalogEntry {
-        CatalogEntry {
-            name: "eos".into(),
-            designer: false,
-            model: "openrouter/meta/muse-spark-1.3".into(),
-            effort: Some("xhigh".into()),
-            description: "Pi Muse Spark 1.3 XHIGH".into(),
-            detail: "Collaborative coding and task breakdown.".into(),
-            profile: muse(),
-            preset: "eos".into(),
-        }
-    }
 
     #[test]
     fn only_codex_on_windows_runs_its_commands_in_powershell() {
@@ -618,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn the_harnesses_are_listed_as_the_roster_lists_them() {
+    fn the_harnesses_are_listed_as_the_page_lists_them() {
         let names: Vec<_> = Harness::ALL.into_iter().map(Harness::as_str).collect();
         assert_eq!(names, ["claude", "codex", "pi", "devin", "muse"]);
     }
@@ -661,137 +572,17 @@ mod tests {
     }
 
     #[test]
-    fn a_profile_writes_its_fields_in_the_order_the_catalog_builds_them() {
+    fn the_tiers_go_from_the_most_serious_and_each_word_names_its_own() {
         assert_eq!(
-            serde_json::to_string(&muse()).unwrap(),
-            r#"{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"}"#
+            WORK_TIERS.map(WorkTier::as_str),
+            ["critical", "complex", "standard", "light"]
         );
-    }
-
-    #[test]
-    fn an_entry_writes_its_fields_in_the_order_the_catalog_builds_them() {
-        assert_eq!(
-            serde_json::to_string(&entry()).unwrap(),
-            concat!(
-                r#"{"name":"eos","model":"openrouter/meta/muse-spark-1.3","effort":"xhigh","#,
-                r#""description":"Pi Muse Spark 1.3 XHIGH","#,
-                r#""detail":"Collaborative coding and task breakdown.","#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"},"#,
-                r#""preset":"eos"}"#
-            )
-        );
-    }
-
-    #[test]
-    fn an_entry_says_designer_after_its_name_only_when_true_and_effort_only_when_named() {
-        let image = CatalogEntry {
-            designer: true,
-            effort: None,
-            ..entry()
-        };
-        let written = serde_json::to_string(&image).unwrap();
-        assert!(
-            written.starts_with(r#"{"name":"eos","designer":true,"model":"#),
-            "{written}"
-        );
-        assert!(!written.contains("\"effort\""), "{written}");
-        let plain = serde_json::to_string(&entry()).unwrap();
-        assert!(!plain.contains("designer"), "{plain}");
-    }
-
-    #[test]
-    fn a_lookup_answers_the_entry_with_its_harness_after_the_preset() {
-        let found = FoundEntry {
-            entry: entry(),
-            harness: Harness::Pi,
-        };
-        let written = serde_json::to_string(&found).unwrap();
-        assert!(
-            written.ends_with(r#""preset":"eos","harness":"pi"}"#),
-            "{written}"
-        );
-        assert!(
-            written.starts_with(r#"{"name":"eos","model":"#),
-            "{written}"
-        );
-    }
-
-    fn bare() -> AgentView {
-        AgentView {
-            name: None,
-            harness: None,
-            designer: false,
-            model: None,
-            work_tier: None,
-            effort: None,
-            description: None,
-            preset: None,
-            custom: false,
-            profile: muse(),
-            unsupported: false,
-            hidden: false,
+        for tier in WORK_TIERS {
+            assert_eq!(WorkTier::from_word(tier.as_str()), Some(tier));
+            assert!(!work_tier_info(tier).label.is_empty());
         }
-    }
-
-    #[test]
-    fn a_view_writes_its_fields_in_the_order_the_roster_builds_them() {
-        let view = AgentView {
-            name: Some("mine".into()),
-            harness: Some("kimi".into()),
-            designer: true,
-            model: Some("moonshot-ai/kimi-k3".into()),
-            work_tier: Some(WorkTier::Complex),
-            effort: Some("high".into()),
-            description: Some(json!("Mine")),
-            preset: Some("mine".into()),
-            custom: true,
-            unsupported: true,
-            hidden: true,
-            ..bare()
-        };
-        assert_eq!(
-            serde_json::to_string(&view).unwrap(),
-            concat!(
-                r#"{"name":"mine","harness":"kimi","designer":true,"model":"moonshot-ai/kimi-k3","#,
-                r#""workTier":"complex","effort":"high","description":"Mine","preset":"mine","custom":true,"#,
-                r#""profile":{"modelKey":"muse-spark-1.3","modelLabel":"Muse Spark 1.3","routeLabel":"OpenRouter · API","workTier":"light"},"#,
-                r#""unsupported":true,"hidden":true}"#
-            )
-        );
-    }
-
-    #[test]
-    fn a_view_of_a_row_with_nothing_to_say_writes_its_profile_alone() {
-        // `JSON.stringify` leaves out what is `undefined`: a row with no `id`, `kind` or
-        // `model` has no `name`, `harness` or `model`, and the flags are said only when set.
-        let written = serde_json::to_string(&bare()).unwrap();
-        assert!(
-            written.starts_with(r#"{"profile":{"modelKey":"#),
-            "{written}"
-        );
-        assert!(written.ends_with(r#""workTier":"light"}}"#), "{written}");
-    }
-
-    #[test]
-    fn a_view_keeps_the_description_as_the_json_the_row_held() {
-        for description in [json!(5), json!(true), json!([]), json!({}), json!("text")] {
-            let view = AgentView {
-                description: Some(description.clone()),
-                ..bare()
-            };
-            let written = serde_json::to_value(&view).unwrap();
-            assert_eq!(written["description"], description);
-        }
-    }
-
-    #[test]
-    fn preferences_write_the_one_choice_about_the_roster_and_nothing_of_specs() {
-        for (own_harness_only, written) in [
-            (true, r#"{"ownHarnessOnly":true}"#),
-            (false, r#"{"ownHarnessOnly":false}"#),
-        ] {
-            let preferences = Preferences { own_harness_only };
-            assert_eq!(serde_json::to_string(&preferences).unwrap(), written);
+        for word in ["", "Critical", "heavy", " light"] {
+            assert_eq!(WorkTier::from_word(word), None, "{word:?}");
         }
     }
 }

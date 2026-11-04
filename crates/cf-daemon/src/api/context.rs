@@ -13,7 +13,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
-use cf_catalog::AgentRow;
 use cf_engine::Finished;
 use cf_harness::contract::Work;
 use cf_ledger::Ledger;
@@ -21,15 +20,6 @@ use tokio::sync::watch;
 
 use super::credentials::Credentials;
 use crate::files::{Log, Trace};
-
-/// The saved agents, as the API reads one row of them (`roster`): its model
-/// and its effort. An agent the human deleted has none; an agents file that
-/// cannot be read is why there is none to give.
-pub trait AgentRows {
-    /// `agent`'s row: none for one the human deleted, a refusal where the
-    /// agents file cannot be read.
-    fn row(&self, agent: &str) -> Result<Option<AgentRow>, Refusal>;
-}
 
 /// Whether the daemon is stopping: a door still waiting for an answer is
 /// answered at once, and no new wait begins.
@@ -91,7 +81,6 @@ pub struct Context {
     /// What the engine makes of a task the chief asks to finish ([`Finishing`]).
     pub finish: Rc<Finishing>,
     pub closing: Closing,
-    pub roster: Rc<dyn AgentRows>,
     pub log: Rc<Log>,
     pub trace: Rc<Trace>,
     /// Whether each request a window's token answered is written to the trace for the

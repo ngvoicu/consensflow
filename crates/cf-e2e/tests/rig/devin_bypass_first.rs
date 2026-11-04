@@ -11,7 +11,6 @@
 //! stand-in Devin stores the command with the prompt where `FAKE_DEVIN_STORES_COMMANDS`
 //! says so.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::{json, Value};
 
@@ -40,7 +39,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "devin-worker", "kind": "devin", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The message of `participant`'s inbox whose words hold `words`, as it is now.

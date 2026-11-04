@@ -86,7 +86,7 @@
 //! A role too long for one message (more than 16,000 units: a chief's at any staff,
 //! with specs on or not, on the real text, each command of which names the window's
 //! `cf` by its whole path, T-1049; a staff of more than 24 rows without specs, two
-//! roles to a row, before that path; it was 37 and 65 before the chief's rules for
+//! roles to a row, before that path, and before each row named its model, harness-models; it was 37 and 65 before the chief's rules for
 //! smaller contexts, T-1009, 2 and 30 before the sentence on the staff's rules,
 //! T-1012, and 0 and 27 before the words the critical review asked back, T-1074) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`),
@@ -101,15 +101,17 @@
 //! by the write that confirms the delivery (`confirm_delivery`), in the conversation
 //! it was made in. `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 195
-//! rows with specs on, 223 without, on the same text (its bytes are the bound).
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 133
+//! rows with specs on, 152 without, two roles and a model to a row, on the same text (its
+//! bytes are the bound; 195 and 223 before the model column, harness-models).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 29 rows (58 without specs) is read whole,
-//! a staff of 25 with 212 bytes and 55 lines to spare.
+//! the most rules and a staff of up to 19 rows (39 without specs) is read whole,
+//! a staff of 19 with 57 bytes and 61 lines to spare (29 and 58 before the model column; a
+//! staff of 25 with the most rules is now told in part and not read whole).
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).
@@ -309,9 +311,9 @@ impl Dispatcher {
             .adapters
             .adapter(harness)
             .filter(|adapter| adapter.keeps_first_instructions());
-        // A launch that cannot go (no adapter, an agent the human deleted) says
-        // why in its own step, which asks for the text again where this could not.
-        let Some(adapter) = kept.filter(|_| !self.agent_gone(participant)) else {
+        // A launch that cannot go (no adapter) says why in its own step, which asks for
+        // the text again where this could not.
+        let Some(adapter) = kept else {
             return apart(first);
         };
         let Ok(role) = self.role_text(project, participant, &*adapter) else {

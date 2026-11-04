@@ -36,7 +36,12 @@ pub fn compare(what: &str, actual: &Value, expected: &Value) -> Option<String> {
             json!({ "error": ours["message"] }),
             json!({ "error": theirs["message"] }),
         ),
-        _ => (actual.clone(), expected.clone()),
+        _ => {
+            let (mut actual, mut expected) = (actual.clone(), expected.clone());
+            cf_ledger::testing::hold_apart_what_members_run_on(&mut actual);
+            cf_ledger::testing::hold_apart_what_members_run_on(&mut expected);
+            (actual, expected)
+        }
     };
     differs(what, actual.to_string(), expected.to_string())
 }

@@ -95,7 +95,7 @@ impl Dispatcher {
 
     /// What `project` says of specs for `participant` now: none for any member, and
     /// none for a chief whose project has them off. What the app says (whether, the
-    /// folder and the variant) is asked of the roster unless the project says off,
+    /// folder and the variant) is read from the app's settings unless the project says off,
     /// which nothing the app says could change. A running chief is told when this
     /// changes under it ([`Dispatcher::tell_role_news`]).
     pub(crate) fn specs_setting(
@@ -110,14 +110,14 @@ impl Dispatcher {
         let app = if says_off {
             AppSpecs::default()
         } else {
-            self.seams.roster.app_specs()
+            self.seams.app_settings.app_specs()
         };
         project.specs_setting(&app)
     }
 
     /// The specs `participant`'s launch is given in `project`: none for any
     /// member, and none for a chief whose project has them off. What the app
-    /// says (whether, the folder and the variant) is asked of the roster unless
+    /// says (whether, the folder and the variant) is read from its settings unless
     /// the project says off, which nothing the app says could change.
     pub(crate) fn chief_specs(
         &self,

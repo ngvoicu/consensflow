@@ -15,9 +15,12 @@ fn request() -> NewProject {
         chief: NewChief {
             harness: "claude-code".to_owned(),
             model: Some("apollo".to_owned()),
+            effort: None,
         },
         staff: vec![NewMember {
-            agent: "zeus".to_owned(),
+            model: None,
+            effort: None,
+            model_name: Some("zeus".to_owned()),
             harness: "claude-code".to_owned(),
             designer: false,
             roles: vec!["worker".to_owned()],
@@ -98,6 +101,7 @@ fn a_pane_and_a_waiting_switch_are_written_as_the_dispatcher_writes_them() {
     let to = SwitchTo {
         harness: "codex".to_owned(),
         model: "diana".to_owned(),
+        effort: None,
     };
     assert_eq!(
         switch_value(&to).to_string(),

@@ -221,6 +221,7 @@ async fn a_message_that_is_no_question_or_is_of_another_project_is_not_answered(
             chief: cf_ledger::NewChief {
                 harness: "claude-code".to_owned(),
                 model: Some("mybuilder".to_owned()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,

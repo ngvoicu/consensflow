@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use cf_base::env::Env;
 use cf_base::file::{read_file_sync, FileError};
-use cf_catalog::{WorkTier, WORK_TIERS};
+use cf_proto::agents::{WorkTier, WORK_TIERS};
 use cf_proto::cf_word::CfWord;
 use cf_proto::ledger::ProjectView;
 
@@ -46,6 +46,8 @@ const CARD: &str = "CONSENSFLOW_EVAL_CHIEF_CARD";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaffRow {
     pub name: String,
+    /// The model it runs on as its harness names it, with its effort (`Opus · high`).
+    pub model: String,
     pub roles: Vec<String>,
     /// None for a tier no work tier is called: the ledger holds four, or none.
     pub work_tier: Option<WorkTier>,
@@ -66,17 +68,22 @@ pub enum RoleError {
     Card(#[from] FileError),
 }
 
-/// A project's staff as its chief reads it: each member's name, roles and
-/// tier, sessions left out.
+/// A project's staff as its chief reads it: each member's name, the model it runs on,
+/// its roles and its tier, sessions left out, and a participant on no harness, which no
+/// window could open on.
 pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
     project
         .participants
         .iter()
         .filter(|member| {
-            member.role != "chief" && member.agent.is_some() && member.member_id.is_none()
+            member.role != "chief"
+                && member.role != "human"
+                && member.harness.is_some()
+                && member.member_id.is_none()
         })
         .map(|member| StaffRow {
             name: member.handle.clone(),
+            model: cf_ledger::handles::runs_on(member),
             roles: member.roles.clone(),
             work_tier: member.tier.as_deref().and_then(work_tier),
         })
@@ -98,8 +105,8 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
 /// and a chief given none reads what it always did.
 ///
 /// Kept from Node: the chief's text is `chief.md` with the staff table put in
-/// where JavaScript's `replace` would also read `$&` and the like in it. A
-/// member's name is an agent id, and holds none.
+/// where JavaScript's `replace` would also read `$&` and the like in it, which the
+/// models' names a table holds may have: `replacen` reads none.
 pub fn role_instructions(
     env: &Env,
     role: &str,

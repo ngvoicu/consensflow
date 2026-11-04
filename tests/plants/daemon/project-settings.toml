@@ -364,8 +364,10 @@ runs = ["page-board-empty"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "add the agents this project may use under Project settings."
-replace = "add the agents this project may use under Staff."
+find = '''
+add the members this project may use under Project settings.'''
+replace = '''
+add the members this project may use under Staff.'''
 
 [[plant]]
 name = "project settings: the wake-up calls are saved with the approval's tick"
@@ -544,11 +546,13 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/app.js"
-find = '''  if (!(await showProject(id))) return
-  await readAgents()
+find = '''
+  if (!(await showProject(id))) return
+  await readMissing()
   await projectSettings.open(id)
 '''
-replace = '''  await readAgents()
+replace = '''
+  await readMissing()
   await projectSettings.open(state.board.project.id)
 '''
 
@@ -675,8 +679,14 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "      if (picked === null) return\n      const project = this.#project\n"
-replace = "      if (picked === null) return\n      const project = page.board().project.id\n"
+find = '''
+      const { modelName, ...picked } = values
+      const project = this.#project
+'''
+replace = '''
+      const { modelName, ...picked } = values
+      const project = page.board().project.id
+'''
 
 [[plant]]
 name = "project settings: a member is removed from the project the board shows"

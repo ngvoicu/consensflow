@@ -307,10 +307,13 @@ fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
     }
 }
 
-/// The roster a fresh rig starts with: a chief and a worker, on the stand-in.
-pub(super) fn write_roster(root: &Path) -> Result<()> {
+/// The file of the stand-ins a case seats, in the rig's folder beside the home: the case's
+/// own, which the daemon never reads ([`super::Rig::stand_ins`]).
+pub const STAND_INS: &str = "stand-ins.json";
+
+/// The stand-ins a fresh rig starts with: a chief and a worker, on the stand-in.
+pub(super) fn write_stand_ins(root: &Path) -> Result<()> {
     let roster = json!({
-        "schemaVersion": 1,
         "agents": [
             { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
@@ -320,10 +323,7 @@ pub(super) fn write_roster(root: &Path) -> Result<()> {
         text: roster.to_string(),
         source,
     })?;
-    files::write(
-        &root.join("consensflow").join("agents.json"),
-        format!("{text}\n"),
-    )
+    files::write(&root.join(STAND_INS), format!("{text}\n"))
 }
 
 #[cfg(test)]
@@ -618,12 +618,11 @@ mod tests {
             .path()
             .join("home/.claude/projects/integration")
             .is_dir());
-        write_roster(root.path()).unwrap();
-        let roster: Value = serde_json::from_str(
-            &files::read_string(&root.path().join("consensflow/agents.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(roster["schemaVersion"], 1);
+        write_stand_ins(root.path()).unwrap();
+        let roster: Value =
+            serde_json::from_str(&files::read_string(&root.path().join(STAND_INS)).unwrap())
+                .unwrap();
+        assert!(!root.path().join("consensflow/agents.json").exists());
         assert_eq!(roster["agents"][0]["id"], "chief");
         assert_eq!(roster["agents"][1]["model"], "fake");
     }

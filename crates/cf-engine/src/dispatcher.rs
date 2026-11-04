@@ -1216,10 +1216,6 @@ impl Dispatcher {
         if participant.role == "chief" {
             return Ok(());
         }
-        // A member whose agent is gone must not wait for a window that will not open.
-        if self.agent_gone(participant) {
-            return self.without_agent(project, participant, None);
-        }
         // A member's session is its task's: with the window gone and nothing due to it, nobody is doing the work.
         let task = self
             .seams

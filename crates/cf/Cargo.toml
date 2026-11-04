@@ -10,7 +10,6 @@ publish = false
 cf-base.workspace = true
 cf-board.workspace = true
 # The ready-made agents and the roster: the standalone verbs `catalog` and `agent`.
-cf-catalog.workspace = true
 cf-codex-session.workspace = true
 cf-daemon.workspace = true
 cf-harness.workspace = true

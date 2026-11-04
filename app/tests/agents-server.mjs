@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { assertBuilt, NATIVE_CF } from '../../tests/choice.mjs'
@@ -6,39 +6,9 @@ import { fakeExecutable, windowsEnv } from '../../tests/helpers.mjs'
 
 const INSTALLED = ['claude', 'codex', 'pi', 'devin']
 
-/** `cf` of this checkout's build (`npm run build:cf`), run with the environment `env` gives. */
-function cf(args, env) {
-  assertBuilt()
-  return execFileSync(NATIVE_CF, args, {
-    env: { ...windowsEnv(), ...env },
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-}
-
-/** Saves an agent of the human's own in the home `env` gives, as `cf agent add` does. */
-export function addAgent({ name, harness, model, effort, designer, description }, env) {
-  const flags = ['--harness', harness, '--model', model]
-  if (effort !== undefined) flags.push('--effort', effort)
-  if (description !== undefined) flags.push('--description', description)
-  if (designer === true) flags.push('--designer')
-  cf(['agent', 'add', name, ...flags], env)
-}
-
-/** The agents the human sees in the home `env` gives, the catalog's and their own, as `cf agent list --json` has them. */
-export function listAgents(env) {
-  return JSON.parse(cf(['agent', 'list', '--json'], env)).agents
-}
-
-/** The catalog's agents by harness, as `cf catalog --json` has them. */
-export function catalog(env) {
-  return JSON.parse(cf(['catalog', '--json'], env)).catalog
-}
-
 /**
- * The agents screens the way the daemon serves them: Agents, one list of the
- * catalog's agents (with the human's edits on them) and the agents defined by
- * hand, and Harnesses, behind the API, opened with the UI token. The daemon is
+ * The daemon's screen the way it serves it: Harnesses, behind the API, opened with the UI
+ * token (the saved agents' screen is no more). The daemon is
  * the native `cf ui` of this checkout, on the home `env` gives. A harness named
  * in `installed` is a stand-in on its PATH that says it is 1.2.3, and
  * `runs(harness)` counts how often it was run. The feeds that say what the
@@ -50,7 +20,7 @@ export async function agentsServer(env, { installed = INSTALLED } = {}) {
   mkdirSync(env.CONSENSFLOW_HOME, { recursive: true })
   // A harness's version is asked in the human's home.
   mkdirSync(env.HOME, { recursive: true })
-  // The pickers offer only agents on an installed harness: stand-ins on PATH.
+  // The harnesses installed here: stand-ins on PATH.
   mkdirSync(env.PATH, { recursive: true })
   const logs = join(dirname(env.PATH), 'runs')
   mkdirSync(logs, { recursive: true })

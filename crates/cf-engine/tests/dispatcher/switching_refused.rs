@@ -145,11 +145,6 @@ fn opens_a_chief_whatever_became_of_the_saved_agents_and_tells_the_human_nothing
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
         .unwrap();
     context.close_project(project.id).unwrap();
-    context
-        .roster
-        .gone
-        .borrow_mut()
-        .insert("astraeus".to_owned());
     let opened = context.host.opened().len();
     context.resume_project(project.id).unwrap();
     assert_eq!(

@@ -216,7 +216,9 @@ fn a_task_open_behind_one_that_failed_or_was_called_off_is_the_chiefs_to_settle(
         .add_member(
             w.project.id,
             &NewMember {
-                agent: "hermes".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("hermes".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],
@@ -314,9 +316,12 @@ fn work_on_its_way_in_another_project_holds_nothing_back() {
             chief: NewChief {
                 harness: "claude-code".to_owned(),
                 model: Some("apollo".to_owned()),
+                effort: None,
             },
             staff: vec![NewMember {
-                agent: "zeus".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],

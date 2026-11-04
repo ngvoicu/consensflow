@@ -15,12 +15,29 @@ pub struct ParticipantView {
     pub project_id: i64,
     pub handle: String,
     pub role: String,
+    /// The ready-made agent a participant from before the models were the harnesses' own
+    /// ran on (spec `harness-models`): the name it had, which history shows. None for
+    /// every participant since.
     pub agent: Option<String>,
     pub harness: Option<String>,
-    /// A chief's: the model picked for it, which it runs on where its record names none
-    /// (CHF-04). Said only where there is one.
+    /// The model it runs on, as its harness takes it (Pi's `provider/id`, Devin's exact
+    /// `model_uid`): a member's, and the chief's, which it runs on where its record names
+    /// none (CHF-04). None for a member on its harness's default. Said only where there is
+    /// one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The effort it runs its model at. Said only where there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// What its harness's list calls its model (`Opus`): what it is shown as, with its
+    /// effort. Said only where there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    /// A member from before the models were the harnesses' own whose agent the update
+    /// could not resolve (T-1202): it keeps the name it had and runs on nothing until the
+    /// human edits it. Said only where it is so.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub needs_edit: bool,
     /// A chief's: the model its last launch asked its harness for, read from its record
     /// or picked; none where it left it to the harness's default. Not said: the board
     /// says it of the chief's lane.
@@ -122,15 +139,6 @@ pub struct EventView {
     pub data: Value,
 }
 
-/// What a member's tier became when the roster's catalog moved its model.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct TierChange {
-    pub project: i64,
-    pub handle: String,
-    pub from: Option<String>,
-    pub to: String,
-}
-
 /// A member who left the staff, and the tasks cancelled with it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RemovedMember {
@@ -138,11 +146,17 @@ pub struct RemovedMember {
     pub cancelled: Vec<i64>,
 }
 
-/// A member of the newest project's staff, as a new project starts from it.
+/// A member of the newest project's staff, as a new project starts from it: the harness,
+/// the model, the effort and the tier it runs on, and its roles.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StaffMember {
-    pub agent: Option<String>,
     pub harness: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub model_name: Option<String>,
+    pub designer: bool,
+    pub tier: Option<String>,
     pub role: String,
     pub roles: Vec<String>,
 }
@@ -162,6 +176,10 @@ pub struct MemberView {
     /// How many of its windows have a task on their hands now.
     pub sessions: i64,
     pub out_until: Option<String>,
+    /// Whether the update could not tell what it runs on (T-1202): it takes no task until
+    /// the human edits it. Said only where it is so.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub needs_edit: bool,
 }
 
 /// A member an open task may go to, and whether the task was taken from it.
@@ -717,6 +735,9 @@ mod tests {
             agent: Some("zeus".into()),
             harness: Some("pi".into()),
             model: None,
+            effort: None,
+            model_name: None,
+            needs_edit: false,
             launched_model: None,
             gone_model: None,
             ran_on: None,
@@ -750,6 +771,9 @@ mod tests {
             agent: None,
             harness: Some("pi".into()),
             model: Some("openrouter/anthropic/claude-fable-5".into()),
+            effort: None,
+            model_name: None,
+            needs_edit: false,
             launched_model: Some("openai/gpt-6-luna".into()),
             gone_model: None,
             ran_on: None,
@@ -783,6 +807,7 @@ mod tests {
                 taken: 2,
                 sessions: 1,
                 out_until: None,
+                needs_edit: false,
             },
             had_it: true,
         };

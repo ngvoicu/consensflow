@@ -7,7 +7,7 @@ mod pools;
 mod quota;
 mod sessions;
 
-use cf_proto::ledger::{ParticipantView, RemovedMember, StaffMember, TierChange};
+use cf_proto::ledger::{ParticipantView, RemovedMember, StaffMember};
 use rusqlite::{params, params_from_iter, OptionalExtension};
 use serde_json::json;
 
@@ -29,18 +29,18 @@ pub(crate) use sessions::{
 };
 
 /// A participant joining a project: its handle, its role or its roles (the
-/// first leading), the agent and harness it runs on, and its tier.
+/// first leading), the harness, model and effort it runs on, the name its harness
+/// gives the model, and its tier.
 pub(crate) struct NewParticipant<'a> {
     pub(crate) handle: &'a str,
     pub(crate) role: Option<&'a str>,
     pub(crate) roles: &'a [&'static str],
-    pub(crate) agent: Option<&'a str>,
     pub(crate) harness: Option<&'a str>,
+    pub(crate) model: Option<&'a str>,
+    pub(crate) effort: Option<&'a str>,
+    pub(crate) model_name: Option<&'a str>,
     pub(crate) designer: bool,
     pub(crate) tier: Option<&'a str>,
-    /// Whether the tier is the human's (T-1143): one the start's following of the agents'
-    /// tiers passes by.
-    pub(crate) tier_chosen: bool,
 }
 
 impl<'a> NewParticipant<'a> {
@@ -50,11 +50,32 @@ impl<'a> NewParticipant<'a> {
             handle: role,
             role: Some(role),
             roles: &[],
-            agent: None,
             harness,
+            model: None,
+            effort: None,
+            model_name: None,
             designer: false,
             tier: None,
-            tier_chosen: false,
+        }
+    }
+
+    /// A member of the staff: named by its model ([`crate::handles`]), which the caller
+    /// made its handle.
+    pub(crate) fn member(
+        handle: &'a str,
+        roles: &'a [&'static str],
+        member: &'a NewMember,
+    ) -> Self {
+        Self {
+            handle,
+            role: None,
+            roles,
+            harness: Some(&member.harness),
+            model: member.model.as_deref(),
+            effort: member.effort.as_deref(),
+            model_name: member.model_name.as_deref(),
+            designer: member.designer,
+            tier: Some(&member.tier),
         }
     }
 }
@@ -87,18 +108,19 @@ pub(crate) fn add_participant(
     }
     let at = store.at();
     store.db.execute(
-        "INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, tier_chosen, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO participant (project_id, handle, role, roles, harness, model, effort, model_name, designer, tier, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             project_id,
             joining.handle,
             role,
             json!(joining.roles).to_string(),
-            joining.agent,
             joining.harness,
+            joining.model,
+            joining.effort,
+            joining.model_name,
             i64::from(joining.designer),
             joining.tier,
-            i64::from(joining.tier_chosen),
             at,
         ],
     )?;
@@ -113,116 +135,66 @@ pub(crate) fn add_participant(
     participant_view(&store.participant_row(id)?)
 }
 
-/// A member joins the staff, or rejoins it in the roles, harness, designer
-/// flag and tier given now; `tier_chosen` where the tier is the human's (T-1143), which
-/// [`refresh_member_tiers`] then passes by.
+/// A member joins the staff under a handle made from its model ([`crate::handles`]). One
+/// that left the staff comes back as itself where it ran on the same harness, model, effort
+/// and designer flag: under the handle it had, in the tier and the roles given now. A member
+/// is known by what it runs on, never by its name: another whose name a departed member's
+/// would be joins under a handle of its own.
 pub(crate) fn add_member(
     store: &mut Store,
     project_id: i64,
     member: &NewMember,
-    tier_chosen: bool,
 ) -> Result<ParticipantView, LedgerError> {
     let roles = member.check()?;
     store.write(|store| {
         let left = store
             .db
             .query_row(
-                "SELECT * FROM participant WHERE project_id = ? AND handle = ? AND left_at IS NOT NULL",
-                params![project_id, member.agent],
-                |row| row.get::<_, i64>("id"),
+                "SELECT id, handle FROM participant
+                 WHERE project_id = ? AND left_at IS NOT NULL AND member_id IS NULL
+                   AND role NOT IN ('human', 'chief')
+                   AND harness = ? AND model IS ? AND effort IS ? AND designer = ?
+                 ORDER BY id DESC LIMIT 1",
+                params![
+                    project_id,
+                    member.harness,
+                    member.model,
+                    member.effort,
+                    i64::from(member.designer)
+                ],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let Some(id) = left else {
+        let Some((id, handle)) = left else {
+            let handle = member.handle(store, project_id)?;
             return add_participant(
                 store,
                 project_id,
-                NewParticipant {
-                    handle: &member.agent,
-                    role: None,
-                    roles: &roles,
-                    agent: Some(&member.agent),
-                    harness: Some(&member.harness),
-                    designer: member.designer,
-                    tier: Some(&member.tier),
-                    tier_chosen,
-                },
+                NewParticipant::member(&handle, &roles, member),
             );
         };
         store.db.execute(
-            "UPDATE participant SET role = ?, roles = ?, harness = ?, designer = ?, tier = ?,
-           tier_chosen = ?, left_at = NULL
+            "UPDATE participant SET role = ?, roles = ?, harness = ?, model = ?, effort = ?,
+           model_name = ?, designer = ?, tier = ?, left_at = NULL
          WHERE id = ?",
             params![
                 roles[0],
                 json!(roles).to_string(),
                 member.harness,
+                member.model,
+                member.effort,
+                member.model_name,
                 i64::from(member.designer),
                 member.tier,
-                i64::from(tier_chosen),
                 id
             ],
         )?;
         store.log(
             project_id,
             "member.added",
-            json!({ "handle": member.agent, "roles": roles, "harness": member.harness, "rejoined": true }),
+            json!({ "handle": handle, "roles": roles, "harness": member.harness, "rejoined": true }),
         )?;
         participant_view(&store.participant_row(id)?)
-    })
-}
-
-/// Members follow the roster: each active member's tier (and its
-/// sessions') becomes what its saved agent has now, since the app's catalog
-/// may have moved the model. Says which members changed; an agent the
-/// roster no longer has (`tier_of` answers none) leaves its member as it is,
-/// and so does a tier the human chose (`tier_chosen`, T-1143): the human picked it
-/// for a model the catalog's rules may not know, and only the human changes it.
-pub(crate) fn refresh_member_tiers(
-    store: &mut Store,
-    mut tier_of: impl FnMut(&str) -> Option<String>,
-) -> Result<Vec<TierChange>, LedgerError> {
-    store.write(|store| {
-        let members = store
-            .db
-            .prepare(
-                "SELECT id, project_id, handle, agent, tier FROM participant
-         WHERE agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL AND role != 'chief'
-           AND tier_chosen = 0
-         ORDER BY id",
-            )?
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>("id")?,
-                    row.get::<_, i64>("project_id")?,
-                    row.get::<_, String>("handle")?,
-                    row.get::<_, String>("agent")?,
-                    row.get::<_, Option<String>>("tier")?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut changed = Vec::new();
-        for (id, project, handle, agent, from) in members {
-            let Some(to) = tier_of(&agent) else { continue };
-            if from.as_deref() == Some(to.as_str()) {
-                continue;
-            }
-            store.db.execute(
-                "UPDATE participant SET tier = ? WHERE id = ? OR member_id = ?",
-                params![to, id, id],
-            )?;
-            store.log(
-                project,
-                "member.tier",
-                json!({ "handle": handle, "from": from, "to": to }),
-            )?;
-            changed.push(TierChange {
-                project,
-                handle,
-                from,
-                to,
-            });
-        }
-        Ok(changed)
     })
 }
 
@@ -251,11 +223,7 @@ pub(crate) fn set_roles<S: AsRef<str>>(
             .copied()
             .filter(|role| !held.iter().any(|kept| kept == role))
             .collect();
-        model::require_fitting_roles(
-            member.agent.as_deref().unwrap_or_default(),
-            member.designer == 1,
-            &gained,
-        )?;
+        model::require_fitting_roles(handle, member.designer == 1, &gained)?;
         store.db.execute(
             "UPDATE participant SET role = ?, roles = ? WHERE id = ?",
             params![roles[0], json!(roles).to_string(), member.id],
@@ -269,27 +237,30 @@ pub(crate) fn set_roles<S: AsRef<str>>(
     })
 }
 
-/// What Edit member changes of a member (T-1143): the saved agent it runs on (its harness,
-/// model and effort), whether that agent draws, and the tier the human chose for it.
+/// What Edit member changes of a member (T-1143): the harness, the model and the effort
+/// it runs on, the name its harness gives the model, and the tier the human chose.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemberEdit {
-    pub agent: String,
     pub harness: String,
-    pub designer: bool,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub model_name: Option<String>,
     pub tier: String,
 }
 
-/// A member runs on another saved agent from its next window, in the tier the human chose
-/// (T-1143), and so do its sessions: a window open now keeps what it runs on. Its handle,
-/// roles and work stay. The roles it holds must fit the agent.
+/// A member runs on another harness, model, effort or tier from its next window (T-1143),
+/// and so do its sessions: a window open now keeps what it runs on. Its handle, roles,
+/// designer flag and work stay.
 pub(crate) fn edit_member(
     store: &mut Store,
     project_id: i64,
     handle: &str,
     edit: &MemberEdit,
 ) -> Result<ParticipantView, LedgerError> {
-    model::require_agent_id(&edit.agent, &model::COORDINATOR_HANDLES)?;
     model::require_harness(&edit.harness)?;
+    if let Some(model) = &edit.model {
+        model::require_model_id(model)?;
+    }
     model::require_tier(&edit.tier)?;
     store.write(|store| {
         let member = store.participant_by_handle(project_id, handle)?;
@@ -302,16 +273,15 @@ pub(crate) fn edit_member(
                 409,
             ));
         }
-        let held: Vec<String> = serde_json::from_str(&member.roles)?;
-        let held: Vec<&str> = held.iter().map(String::as_str).collect();
-        model::require_fitting_roles(&edit.agent, edit.designer, &held)?;
         store.db.execute(
-            "UPDATE participant SET agent = ?, harness = ?, designer = ?, tier = ?, tier_chosen = 1
+            "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, tier = ?,
+                    needs_edit = 0
              WHERE id = ? OR member_id = ?",
             params![
-                edit.agent,
                 edit.harness,
-                i64::from(edit.designer),
+                edit.model,
+                edit.effort,
+                edit.model_name,
                 edit.tier,
                 member.id,
                 member.id
@@ -322,8 +292,8 @@ pub(crate) fn edit_member(
             "member.edited",
             json!({
                 "handle": handle,
-                "from": { "agent": member.agent, "harness": member.harness, "tier": member.tier },
-                "to": { "agent": edit.agent, "harness": edit.harness, "tier": edit.tier },
+                "from": { "harness": member.harness, "model": member.model, "effort": member.effort, "tier": member.tier },
+                "to": { "harness": edit.harness, "model": edit.model, "effort": edit.effort, "tier": edit.tier },
             }),
         )?;
         participant_view(&store.participant_row(member.id)?)
@@ -461,27 +431,32 @@ pub(crate) fn last_staff(store: &Store) -> Result<Vec<StaffMember>, LedgerError>
     let rows = store
         .db
         .prepare(&format!(
-            "SELECT agent, harness, role, roles FROM participant
+            "SELECT harness, model, effort, model_name, designer, tier, role, roles FROM participant
        WHERE project_id = (SELECT MAX(project_id) FROM participant WHERE {member})
          AND {member}
        ORDER BY id"
         ))?
         .query_map([], |row| {
             Ok((
-                row.get::<_, Option<String>>("agent")?,
-                row.get::<_, Option<String>>("harness")?,
-                row.get::<_, String>("role")?,
+                StaffMember {
+                    harness: row.get("harness")?,
+                    model: row.get("model")?,
+                    effort: row.get("effort")?,
+                    model_name: row.get("model_name")?,
+                    designer: row.get::<_, i64>("designer")? == 1,
+                    tier: row.get("tier")?,
+                    role: row.get("role")?,
+                    roles: Vec::new(),
+                },
                 row.get::<_, String>("roles")?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     rows.into_iter()
-        .map(|(agent, harness, role, roles)| {
+        .map(|(member, roles)| {
             Ok(StaffMember {
-                agent,
-                harness,
-                role,
                 roles: serde_json::from_str(&roles)?,
+                ..member
             })
         })
         .collect()

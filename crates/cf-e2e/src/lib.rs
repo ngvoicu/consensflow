@@ -25,9 +25,8 @@
 //! - [`rig`] is the daemon and the pane host together, with stand-in agents in
 //!   the windows, driven as the page and the app drive them. A case that returns
 //!   [`Outcome`] lets the rigs it started know that it failed.
-//! - [`daemon_log`] reads a daemon's log; [`agents_proof`] holds a daemon's
-//!   agents screens to what they must do; [`http`] asks a daemon's API. (The
-//!   packaged smoke uses all three, on the daemon the built app chose.)
+//! - [`daemon_log`] reads a daemon's log; [`http`] asks a daemon's API. (The
+//!   packaged smoke uses both, on the daemon the built app chose.)
 //! - [`live`] is what the opt-in live tests share (its own doc lists its parts):
 //!   the machine's own harnesses (Claude Code, Pi, Devin and Codex),
 //!   the rig whose windows run them, a real harness's window opened as the app
@@ -56,7 +55,7 @@
 //! `tests/live_<name>.rs`, each of which spends the machine's quota and runs
 //! only when asked for: `live_paste` a real window taking what the daemon
 //! pastes into it, `live_interrupt` its interrupt at an idle window,
-//! `live_agent` a catalog agent answering as its model, `live_asks` Claude
+//! `live_asks` Claude
 //! stopping for a removal it should, `live_input_box` what clears its input
 //! box, `live_terminal` Devin's terminal on Windows, `live_door` a member's
 //! question received once at the door of its harness, `live_harnesses` the Admin
@@ -100,7 +99,6 @@
 // terminal keeps of what its reader has not read (`terminal`).
 #![deny(unsafe_code)]
 
-pub mod agents_proof;
 mod bundle;
 pub mod cf;
 pub mod checkout;

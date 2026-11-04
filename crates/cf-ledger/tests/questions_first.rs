@@ -21,9 +21,12 @@ fn ledger() -> (tempfile::TempDir, Ledger, i64, i64) {
             chief: NewChief {
                 harness: "claude-code".to_owned(),
                 model: Some("claude-sonnet-5-5".to_owned()),
+                effort: None,
             },
             staff: vec![NewMember {
-                agent: "zeus".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],

@@ -625,7 +625,7 @@
         "body": null
       }
     ],
-    "stdout": "No agents are on this project staff yet; the human adds them in the app.\n",
+    "stdout": "No members are on this project's staff yet; the human adds them in the app.\n",
     "stderr": "",
     "code": 0
   },
@@ -639,7 +639,7 @@
     "replies": [
       {
         "status": 200,
-        "text": "{\"members\":[{\"handle\":\"zeus\",\"roles\":[\"worker\"],\"tier\":\"standard\"},{\"handle\":\"athena\",\"roles\":[\"advisor\",\"reviewer\"],\"tier\":\"critical\"}]}"
+        "text": "{\"members\":[{\"handle\":\"opus-high\",\"role\":\"worker\",\"roles\":[\"worker\"],\"tier\":\"standard\",\"harness\":\"claude-code\",\"harnessName\":\"Claude Code\",\"model\":\"claude-opus-5-5\",\"modelName\":\"Opus\",\"effort\":\"high\"},{\"handle\":\"codex-default\",\"role\":\"advisor\",\"roles\":[\"advisor\",\"reviewer\"],\"tier\":\"critical\",\"harness\":\"codex\",\"harnessName\":\"Codex\",\"model\":null,\"modelName\":\"Codex default\",\"effort\":null}]}"
       }
     ],
     "requests": [
@@ -650,7 +650,7 @@
         "body": null
       }
     ],
-    "stdout": "@zeus · worker · standard\n@athena · advisor+reviewer · critical\n",
+    "stdout": "@opus-high · Opus · high (Claude Code, claude-opus-5-5) · worker · standard\n@codex-default · Codex default (Codex, its default model) · advisor+reviewer · critical\n",
     "stderr": "",
     "code": 0
   },

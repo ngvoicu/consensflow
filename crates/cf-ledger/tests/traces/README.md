@@ -121,7 +121,7 @@ recording whose `assignTask` answer holds those words, departs at that call and 
 `DEPARTED`; the recording is not rewritten.
 
 A chief is a harness and a model (T-729, migration 0028): Node's chief ran on a saved
-agent. `tools/move_chief_model_goldens.py ledger` moved what that changes, and nothing
+agent. T-729's move (its tool went once every recording was moved, T-1202) moved what that changes, and nothing
 else: a request names the chief's `model` in its `agent`'s place (the agent's name, as
 no roster is here), the chief a call of the trace made or switched names no agent and
 says its model after its harness, in answers and in its row (`agent` and

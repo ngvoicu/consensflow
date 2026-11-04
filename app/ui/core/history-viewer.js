@@ -15,7 +15,8 @@ const READS_OF_A_CHANGING_ITEM = 3
  *
  * One column, oldest above: one timeline of the items of every conversation,
  * titled History, with no heading, harness, model or name anywhere in it
- * (chief-harness, CHF-11). Each item says the conversation and row it stands
+ * (chief-harness, CHF-11), but the name a member had before the members were named by
+ * their model (harness-models): its row keeps it, and the page line says it. Each item says the conversation and row it stands
  * at, which only the reads use. Its items are labelled as the task drawer
  * labels them, a compaction's summary as one. A delivery ConsensFlow made to this
  * participant shows as its line, as `cf history` says it, and opens on a click
@@ -81,6 +82,7 @@ export class HistoryViewer {
     this.#shown = {
       project: participant.projectId,
       handle: participant.handle,
+      formerly: formerly(participant),
       older: null,
       newer: null,
     }
@@ -140,7 +142,11 @@ export class HistoryViewer {
     const stopped = find
       ? 'the search stopped here to stay quick: Older searches further back'
       : 'the read stopped here to stay quick: Older reads further back'
-    this.#status.textContent = partial ? `${where}; ${stopped}` : where
+    const once = this.#shown?.formerly
+    const said = partial ? `${where}; ${stopped}` : where
+    this.#status.textContent = once
+      ? `${said} · once @${once}, before members were named by their model`
+      : said
     this.#newer.disabled = newer === null
     this.#older.disabled = older === null
   }
@@ -262,4 +268,14 @@ function clock(iso) {
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return String(iso)
   return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}`
+}
+
+/**
+ * The name a member, or a window of one, went by before the members were named by their
+ * model (harness-models): the ready-made agent its row still names, where its handle is no
+ * longer that name. None for the chief, whose agent was only what it ran on.
+ */
+function formerly(participant) {
+  if (participant.role === 'chief' || !participant.agent) return null
+  return (participant.member ?? participant.handle) === participant.agent ? null : participant.agent
 }

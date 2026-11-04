@@ -22,7 +22,8 @@ const GIVEN: [&str; 4] = ["queued", "working", "waiting", "paused"];
 /// `GET /api/tasks`: the tasks no lane has (`open`: those waiting for a
 /// member, those paused, called off or failed before any member had them, and
 /// those of a member who left the staff), and each participant's lane with the
-/// tasks on it.
+/// tasks on it, and, for one that runs on a harness, its model and effort as the page
+/// shows them (`runsOn`: `Opus · high`, spec harness-models).
 pub(super) async fn list(
     context: &Context,
     caller: &Caller,
@@ -57,11 +58,16 @@ pub(super) async fn list(
             .iter()
             .map(summary)
             .collect::<Result<Vec<_>, _>>()?;
-        lanes.push(json!({
+        let mut entry = json!({
             "handle": lane.participant.handle,
             "role": lane.participant.role,
             "tasks": tasks,
-        }));
+        });
+        let participant = &lane.participant;
+        if participant.harness.is_some() {
+            entry["runsOn"] = json!(cf_ledger::handles::runs_on(participant));
+        }
+        lanes.push(entry);
     }
     Ok(Answer::ok(json!({ "open": open, "lanes": lanes })))
 }

@@ -21,8 +21,8 @@ use crate::views::conversation_view;
 
 pub use chief::ChiefSwitch;
 pub(crate) use chief::{
-    chief_gone, chief_history, chief_launched, chief_open_work, history_read, last_switch,
-    switch_chief,
+    chief_gone, chief_history, chief_launched, chief_open_work, chief_ran_on, history_read,
+    last_switch, switch_chief,
 };
 pub(crate) use history::{message_opening, read_history, read_history_part};
 pub use history::{

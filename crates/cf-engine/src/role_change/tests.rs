@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use cf_base::env::Env;
 use cf_base::role_read::role_read_whole;
-use cf_catalog::WorkTier;
 use cf_ledger::{STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
+use cf_proto::agents::WorkTier;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -150,6 +150,7 @@ fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> Strin
     let staff: Vec<StaffRow> = (0..rows)
         .map(|at| StaffRow {
             name: format!("member-{at}"),
+            model: "GPT-6.1-Sol · xhigh".to_owned(),
             roles: vec!["worker".to_owned(), "reviewer".to_owned()],
             work_tier: Some(WorkTier::Standard),
         })
@@ -190,9 +191,11 @@ fn printed_by_cf(note: &MessageView) -> String {
 /// it is read.
 #[test]
 fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
+    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 19, the
+    // most a model column for each member leaves room for (harness-models).
     let most = the_most_rules();
-    for rules in [None, Some(most.as_str())] {
-        told_whole_or_told_and_read(&a_chiefs_role_with(25, true, rules));
+    for (rows, rules) in [(25, None), (19, Some(most.as_str()))] {
+        told_whole_or_told_and_read(&a_chiefs_role_with(rows, true, rules));
     }
 }
 
@@ -248,13 +251,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        195,
-        "docs: read to 195 rows with specs on"
+        133,
+        "docs: read to 133 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),
-        223,
-        "docs: read to 223 rows without"
+        152,
+        "docs: read to 152 rows without"
     );
     // With the most rules for the staff the ledger takes.
     let most = the_most_rules();
@@ -272,13 +275,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     };
     assert_eq!(
         rows_with_the_most(true),
-        29,
-        "docs: read to 29 rows with specs on and the most rules"
+        19,
+        "docs: read to 19 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_with_the_most(false),
-        58,
-        "docs: read to 58 rows without specs and the most rules"
+        39,
+        "docs: read to 39 rows without specs and the most rules"
     );
 }
 
