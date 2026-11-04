@@ -17,7 +17,12 @@
 # read as the window ends, ConsensFlow's copy of it read so, a message that quotes the header after a
 # blank line) and `paste_shapes.rs` (Claude's wrapper, its images' placeholders, the brief a fresh
 # window is given first, at a look and at a start), and the rule's own, `delivery_text::tests` in
-# `crates/cf-engine/src/delivery_text.rs`. The images' shape is shown on the rig by the case
+# `crates/cf-engine/src/delivery_text.rs`. A brief that names a picture by its path on a line of its own is
+# attached as any paste's is (T-681), its line left out of the record: the first message behind it is the paste
+# all the same (T-812, Calliope's P3-1 of T-803; `first_delivered.rs`, `delivery_text::tests`); and the two
+# paths of the image-paste fix that had no case, a stale withheld Enter whose paste held a placeholder
+# (`stale_box.rs`) and `delivered_at`'s fallback (`paste_shapes.rs`, `first_delivered.rs`), are T-810's.
+# The images' shape is shown on the rig by the case
 # `a_result_that_starts_with_an_image_path_was_pasted_three_times` (the stand-in Claude makes
 # attachments as Claude Code does: `images` in `fake_agent`), and on the real Claude Code by
 # `cargo xtask live image-paste`.
@@ -31,6 +36,9 @@ engine-lib-delivery-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--
 engine-lib-ask = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::ask::"]
 fake-agent-images = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "images::"]
 fake-agent-designer = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "designer"]
+engine-dispatcher-first-delivered = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "first_delivered::"]
+engine-dispatcher-stale-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stale_box::"]
+engine-dispatcher-slow-records = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slow_records::"]
 rig-image-paste = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_that_starts_with_an_image_path_was_pasted_three_times::"]
 
 [[plant]]
@@ -178,8 +186,8 @@ runs = ["engine-dispatcher-paste-shapes", "engine-lib-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
-replace = "    let behind = first.and_then(|_| None::<&str>);"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|_| None::<&str>).filter(|_: &&str| attached < usize::MAX);"
 
 [[plant]]
 name = "quoted header: a look is told nothing of the brief a launch's first message went in behind"
@@ -331,3 +339,218 @@ runs = ["fake-agent-designer"]
 file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
 find = '''        lines.push(path.display().to_string());'''
 replace = '''        lines.insert(0, path.display().to_string());'''
+
+# A brief that names a picture (T-812, Calliope's P3-1 of T-803; T-810): the paste a fresh window is
+# given is the brief and the message in one, so Claude Code attaches the picture the brief names and
+# leaves its line out of the record. The brief is matched line by line, and a line of it that ends with
+# the name of an image file may be missing once for each placeholder the item begins with.
+
+[[plant]]
+name = "quoted header: a fresh window's first message behind a brief whose picture line Claude Code left out is taken for none (T-812)"
+meant = "the_first_message_of_a_fresh_window_is_its_paste_behind_a_brief_whose_pictures_claude_attached"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if attached > 0 && names_an_image(line) {"
+replace = "        } else if false && names_an_image(line) {"
+
+[[plant]]
+name = "quoted header: a fresh window's first message behind a brief with a picture is pasted again when the launch's time is up (T-812)"
+meant = "the_first_message_of_a_fresh_window_given_behind_a_brief_that_names_a_picture_is_confirmed_once"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if attached > 0 && names_an_image(line) {"
+replace = "        } else if false && names_an_image(line) {"
+
+[[plant]]
+name = "quoted header: a reopening given a fresh window behind a brief with a picture is pasted again when the launch's time is up (T-812)"
+meant = "a_reopening_given_a_fresh_window_behind_a_brief_that_names_a_picture_is_confirmed_once"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if attached > 0 && names_an_image(line) {"
+replace = "        } else if false && names_an_image(line) {"
+
+[[plant]]
+name = "quoted header: a fresh window's first message behind a brief with a picture is found by neither the receipt nor its text (T-812)"
+meant = "a_result_is_taken_from_a_fresh_window_whose_first_message_the_record_shows_by_its_text_behind_a_brief_with_a_picture"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if attached > 0 && names_an_image(line) {"
+replace = "        } else if false && names_an_image(line) {"
+
+[[plant]]
+name = "quoted header: a line missing from a fresh window's record of its brief is a picture Claude attached though no placeholder says so (T-812)"
+meant = "the_first_message_of_a_fresh_window_is_its_paste_behind_a_brief_whose_pictures_claude_attached"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if attached > 0 && names_an_image(line) {"
+replace = "        } else if names_an_image(line) {"
+
+[[plant]]
+name = "quoted header: any line of a brief may be missing from the record of a fresh window's paste, not only a picture's (T-812)"
+meant = "the_first_message_of_a_fresh_window_is_its_paste_behind_a_brief_whose_pictures_claude_attached"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "            .any(|image| kind.eq_ignore_ascii_case(image))"
+replace = "            .any(|image| kind.eq_ignore_ascii_case(image) || true)"
+
+[[plant]]
+name = "quoted header: a picture whose file name is in capitals is no picture to a fresh window's brief (T-812)"
+meant = "the_first_message_of_a_fresh_window_is_its_paste_behind_a_brief_whose_pictures_claude_attached"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "            .any(|image| kind.eq_ignore_ascii_case(image))"
+replace = "            .any(|image| kind == *image)"
+
+[[plant]]
+name = "quoted header: the brief behind the placeholders is matched whole, the picture's line and all, as the window was given it (T-812)"
+meant = "a_fresh_windows_record_behind_a_brief_with_a_picture_is_the_message_as_claude_writes_it"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+
+[[plant]]
+name = "quoted header: a paste the human sent from the box behind the placeholders of its pictures is taken for none, and pasted again beside it (T-810)"
+meant = "words_that_name_a_picture_which_the_human_sent_from_the_box_are_taken_for_arrived_behind_their_placeholder"
+runs = ["engine-dispatcher-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                .find(|(_, text)| is_paste_of(text, stale.message, first.as_deref()))"
+replace = "                .find(|(_, text)| text.starts_with(&marker_of(stale.message)))"
+
+[[plant]]
+name = "quoted header: a result is not found by the text of its paste behind the placeholders of the pictures in it, when its receipt's item is not in the record (T-810)"
+meant = "a_worker_resumed_with_words_that_name_a_picture_has_its_answer_taken_though_its_record_moved_the_ids_of_its_items"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                && is_paste_of(&item.text, latest.id, first.as_deref())"
+replace = "                && item.text.starts_with(&crate::delivery_text::marker_of(latest.id))"
+
+[[plant]]
+name = "quoted header: a result of a fresh window is not found by its first message's text behind its brief, when its receipt's item is not in the record (T-810, T-812)"
+meant = "a_result_is_taken_from_a_fresh_window_whose_first_message_the_record_shows_by_its_text_behind_a_brief_with_a_picture"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        let first = self.brief_given_first(&latest)?;"
+replace = "        let first = self.brief_given_first(&latest)?.filter(|_| false);"
+
+[[plant]]
+name = "quoted header: a paste behind the placeholders of its pictures is taken for none in the record of the conversation the window left (T-810)"
+meant = "confirms_a_paste_taken_in_a_conversation_the_human_left_when_its_record_shows_it_behind_the_placeholders_of_its_pictures"
+runs = ["engine-dispatcher-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "                .find(|item| item.role == Role::User && is_paste_of(&item.text, message.id, None))"
+replace = "                .find(|item| item.role == Role::User && item.text.starts_with(&marker_of(message.id)))"
+
+[[plant]]
+name = "quoted header: a fresh window's first message is not found behind a brief whose blank lines Claude Code dropped with its picture's line (T-812)"
+meant = "the_first_message_of_a_fresh_window_is_its_paste_behind_a_brief_whose_pictures_claude_attached"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if handled && line.trim().is_empty() {"
+replace = "        } else if false && line.trim().is_empty() {"
+
+[[plant]]
+name = "quoted header: a fresh window's first message behind a brief with a picture is pasted again, Claude Code having dropped the blank lines (T-812)"
+meant = "the_first_message_of_a_fresh_window_given_behind_a_brief_that_names_a_picture_is_confirmed_once"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if handled && line.trim().is_empty() {"
+replace = "        } else if false && line.trim().is_empty() {"
+
+[[plant]]
+name = "quoted header: a blank line may be missing from the record of a brief whose pictures were never attached (T-812)"
+meant = "the_first_message_of_a_fresh_window_is_its_paste_behind_a_brief_whose_pictures_claude_attached"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        } else if handled && line.trim().is_empty() {"
+replace = "        } else if line.trim().is_empty() {"
+
+[[plant]]
+name = "quoted header: a fresh window's first message behind a brief with a picture is matched against the brief whole, as before T-812, and pasted again (T-812)"
+meant = "the_first_message_of_a_fresh_window_given_behind_a_brief_that_names_a_picture_is_confirmed_once"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+
+[[plant]]
+name = "quoted header: a reopening given a fresh window behind a brief with a picture is matched against the brief whole, as before T-812, and pasted again (T-812)"
+meant = "a_reopening_given_a_fresh_window_behind_a_brief_that_names_a_picture_is_confirmed_once"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+
+[[plant]]
+name = "quoted header: a result of a fresh window is not found by its first message's text, the brief matched whole as before T-812 (T-812)"
+meant = "a_result_is_taken_from_a_fresh_window_whose_first_message_the_record_shows_by_its_text_behind_a_brief_with_a_picture"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+
+[[plant]]
+name = "quoted header: a launch's first message the human sent from the box behind its brief is taken for none, the box emptied again and the note it carried left withdrawn (T-812)"
+meant = "a_first_message_of_a_fresh_window_the_human_sent_from_its_box_behind_the_brief_is_never_pasted_again"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                .find(|(_, text)| is_paste_of(text, stale.message, first.as_deref()))"
+replace = "                .find(|(_, text)| is_paste_of(text, stale.message, None))"
+
+[[plant]]
+name = "quoted header: a first message that names a picture behind a brief that names none is matched against the brief whole and pasted again (T-812)"
+meant = "a_first_message_that_names_a_picture_behind_a_brief_that_names_none_is_confirmed_once"
+runs = ["engine-dispatcher-first-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+
+[[plant]]
+name = "quoted header: the picture a message names, behind a brief with the blank line Claude Code dropped, is matched against the brief whole (T-812)"
+meant = "a_picture_the_message_names_leaves_the_brief_before_it_matched_as_it_was"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));"
+replace = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"

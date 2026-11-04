@@ -54,11 +54,32 @@ pub(crate) fn human_sends(context: &Context, handle: &str, text: &str) {
     });
 }
 
+/// The same where the window attaches the images a paste names (Claude Code): its record
+/// shows the paste behind the placeholders of its pictures, and the harness's own item
+/// for their sources after it.
+pub(crate) fn human_sends_pictures(context: &Context, handle: &str, text: &str) {
+    let mut given = context.adapter.recorded_as_sent(handle, text);
+    let answer = context.adapter.item(Role::Assistant, "ok");
+    context.adapter.with(handle, |agent| {
+        agent.items.append(&mut given);
+        agent.items.push(answer);
+        agent.settled = true;
+    });
+}
+
 /// T-1's words to go on, carrying the chief's note, sat unsent in zeus's box, and
 /// the chief paused T-1 again while the Enter for them looked at the screen,
 /// taking the note back: no key went, the words went back to their queue, and the
 /// paste stays in the box (round 11's sequence). The words, and the note.
 fn carrier_withheld(context: &Context) -> (Tiers<'_>, MessageView, MessageView) {
+    carrier_withheld_saying(context, "Carry on")
+}
+
+/// The same, the words to go on being `words`.
+fn carrier_withheld_saying<'a>(
+    context: &'a Context,
+    words: &str,
+) -> (Tiers<'a>, MessageView, MessageView) {
     let tiers = at_work(context);
     let project = tiers.project.id;
     context.pause_task(project, 1);
@@ -68,7 +89,7 @@ fn carrier_withheld(context: &Context) -> (Tiers<'_>, MessageView, MessageView) 
         agent.arrive = false;
     });
     let note = note(context, project, "zeus-amber-pine", "Use tabs");
-    context.resume_task(project, 1, "Carry on");
+    context.resume_task(project, 1, words);
     let words = tiers.task(1).messages.last().cloned().expect("the words");
     for _ in 0..2 {
         context.pass().unwrap();
@@ -112,6 +133,54 @@ fn words_the_human_sent_from_the_box_are_taken_for_arrived_and_never_pasted_agai
         context.pass().unwrap();
     }
     assert_eq!(said(&context, ZEUS, &words.body), 1, "the words went once");
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(
+        context.message(withdrawn.id).state,
+        "delivered",
+        "the note went in the paste the human sent"
+    );
+    assert_eq!(
+        times_handed(&context, SEAM, again.id),
+        1,
+        "the new words go"
+    );
+    assert_eq!(clears(&context), 0, "nothing pressed into an empty box");
+}
+
+/// T-810, the stale withheld Enter of a paste that held a picture: the words to go on name
+/// one by its path, the window attaches it, and the human sent the paste from the box. The
+/// window's record shows the words behind the placeholder, the path gone; they are taken for
+/// arrived, never pasted again, and the box is pressed no key.
+#[test]
+fn words_that_name_a_picture_which_the_human_sent_from_the_box_are_taken_for_arrived_behind_their_placeholder(
+) {
+    let context = Context::new();
+    context.adapter.attaches_images.set(true);
+    context.adapter.drops_blanks.set(true);
+    let (tiers, words, withdrawn) =
+        carrier_withheld_saying(&context, "Carry on\n/work/images/desk.png");
+    let sent = pasted(&context, ZEUS, words.id);
+    assert!(sent.contains("/work/images/desk.png"), "{sent}");
+    human_sends_pictures(&context, "zeus-amber-pine", &sent);
+    let record = context.adapter.agent("zeus-amber-pine").items;
+    assert!(
+        record
+            .iter()
+            .any(|item| item.text.starts_with("[Image #1][ConsensFlow m-")
+                && !item.text.contains("desk.png")),
+        "the record keeps the words behind the placeholder: {record:?}"
+    );
+    context.pass().unwrap();
+
+    let again = resumed_again(&context, &tiers);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        times_handed(&context, SEAM, words.id),
+        1,
+        "the words went once"
+    );
     assert_eq!(context.message(words.id).state, "delivered");
     assert_eq!(
         context.message(withdrawn.id).state,

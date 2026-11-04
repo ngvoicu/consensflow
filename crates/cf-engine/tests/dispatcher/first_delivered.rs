@@ -17,7 +17,8 @@ use cf_proto::trace::{Traced, WindowEvent};
 use serde_json::json;
 
 use crate::chiefs::{handoffs_of, to};
-use crate::withheld_enter::times_handed;
+use crate::stale_box::{human_sends_pictures, pasted};
+use crate::withheld_enter::{clears, enter_again_with, note, times_handed};
 
 const SEAM: &str = "adapter:claude-code";
 
@@ -934,4 +935,280 @@ fn a_brief_whose_pictures_were_attached_is_kept_when_its_window_takes_it_back_at
         Some("@zeus stopped before a word of its answer and took it back out of its conversation")
     );
     context.close();
+}
+
+/// zeus's fresh window on T-1, whose brief names a picture: the window went and its
+/// harness kept nothing of the conversation, and the chief resumed the task with `words`.
+/// A fresh window is given the brief it received ahead of its first message, in the one
+/// paste (`launch_text`). The id of the words.
+fn resumed_on_a_fresh_window(context: &Context, project: i64, words: &str) -> i64 {
+    context.adapter.holds_nothing("zeus");
+    context.exit("zeus");
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    context.resume_task(project, 1, words);
+    context
+        .task(project, 1)
+        .messages
+        .last()
+        .expect("the words")
+        .id
+}
+
+/// What zeus's window recorded of the paste that holds `message`, the user's item.
+fn recorded_paste(context: &Context, message: i64) -> String {
+    context
+        .adapter
+        .agent("zeus")
+        .items
+        .iter()
+        .find(|item| item.role == Role::User && item.text.contains(&marker_of(message)))
+        .map(|item| item.text.to_string())
+        .expect("the window recorded the paste")
+}
+
+/// Zeus's window records a paste as Claude Code 2.1.314 to 2.1.317 does (its paste handler,
+/// read in the binary): the pictures out of it and its blank lines dropped, and the rest of
+/// the words behind the placeholders, bare or, `wrapped`, as a long paste is.
+fn records_as_claude_does(context: &Context, wrapped: bool) {
+    context.adapter.drops_blanks.set(true);
+    context.adapter.wraps_pastes.set(wrapped);
+}
+
+/// How the record of a paste begins that is the brief of message `brief` behind one
+/// placeholder.
+fn behind_a_placeholder(brief: i64, wrapped: bool) -> String {
+    if wrapped {
+        format!("[Image #1]\n\n<pasted_content id=\"b118\">\n[ConsensFlow m-{brief} ")
+    } else {
+        format!("[Image #1][ConsensFlow m-{brief} ")
+    }
+}
+
+#[test]
+fn the_first_message_of_a_fresh_window_given_behind_a_brief_that_names_a_picture_is_confirmed_once()
+{
+    // T-812 (Calliope's P3-1 of T-803; T-681 made the brief a paste): Claude Code attaches
+    // the picture the brief names by its path and leaves the line out of its record, with
+    // every blank line, so the brief at the head of the record is no longer the text the
+    // window was given. The message behind it is its paste all the same: confirmed at the
+    // first look, not pasted again when the launch's time has gone, and its task not failed.
+    for wrapped in [false, true] {
+        let context = delivered();
+        records_as_claude_does(&context, wrapped);
+        let (project, brief) = at_work_on_a_brief_with_a_picture(&context);
+        let words = resumed_on_a_fresh_window(&context, project, "Go on");
+        passes(&context, 3);
+        let recorded = recorded_paste(&context, words);
+        assert!(
+            recorded.starts_with(&behind_a_placeholder(brief, wrapped)),
+            "the brief behind its placeholder (wrapped: {wrapped}): {recorded:?}"
+        );
+        assert!(
+            !recorded.contains("desk.png"),
+            "its line gone: {recorded:?}"
+        );
+        let words_of_it = recorded
+            .split_once("<pasted_content id=\"b118\">")
+            .map_or(recorded.as_str(), |(_, inner)| inner);
+        assert!(
+            !words_of_it.contains("\n\n"),
+            "and no blank line in the words: {recorded:?}"
+        );
+        assert_eq!(times_handed(&context, SEAM, words), 1, "handed once");
+        assert_eq!(
+            context.message(words).state,
+            "delivered",
+            "and seen (wrapped: {wrapped})"
+        );
+        // Past the launch's time (180 s) nothing is given up, pasted again or failed.
+        wait(&context, 200);
+        assert_eq!(times_handed(&context, SEAM, words), 1, "pasted once");
+        assert_eq!(context.message(words).state, "delivered");
+        assert_ne!(context.task(project, 1).task.state, "failed");
+        context.close();
+    }
+}
+
+#[test]
+fn a_reopening_given_a_fresh_window_behind_a_brief_that_names_a_picture_is_confirmed_once() {
+    // The same for a reopening (T-812): T-1 was done and its window gone with its
+    // conversation; the chief sends it back, and a fresh window is given the brief ahead of
+    // the words.
+    for wrapped in [false, true] {
+        let context = delivered();
+        records_as_claude_does(&context, wrapped);
+        let (project, brief) = at_work_on_a_brief_with_a_picture(&context);
+        context.adapter.answer("zeus", "Parser done");
+        passes(&context, 3);
+        assert_eq!(context.task(project, 1).task.state, "done");
+        context.adapter.holds_nothing("zeus");
+        context.exit("zeus");
+        context
+            .ledger
+            .borrow_mut()
+            .reopen_task(project, 1, "chief", "Handle empty input too")
+            .unwrap();
+        let words = context
+            .task(project, 1)
+            .messages
+            .last()
+            .expect("the words")
+            .id;
+        passes(&context, 3);
+        let recorded = recorded_paste(&context, words);
+        assert!(
+            recorded.starts_with(&behind_a_placeholder(brief, wrapped)) && !recorded.contains("desk.png"),
+            "the brief behind its placeholder, its picture's line gone (wrapped: {wrapped}): {recorded:?}"
+        );
+        assert_eq!(times_handed(&context, SEAM, words), 1, "handed once");
+        assert_eq!(
+            context.message(words).state,
+            "delivered",
+            "and seen (wrapped: {wrapped})"
+        );
+        wait(&context, 200);
+        assert_eq!(times_handed(&context, SEAM, words), 1, "pasted once");
+        assert_ne!(context.task(project, 1).task.state, "failed");
+        context.close();
+    }
+}
+
+#[test]
+fn a_result_is_taken_from_a_fresh_window_whose_first_message_the_record_shows_by_its_text_behind_a_brief_with_a_picture(
+) {
+    // `delivered_at`'s fallback (T-810, with T-812): the item the receipt names is not in the
+    // record read (a harness whose ids moved, a copy read again), so the first message is
+    // found by its text, behind the brief the window was given first. The answer after it
+    // is the task's result.
+    for wrapped in [false, true] {
+        let context = delivered();
+        records_as_claude_does(&context, wrapped);
+        let (project, _brief) = at_work_on_a_brief_with_a_picture(&context);
+        let words = resumed_on_a_fresh_window(&context, project, "Go on");
+        passes(&context, 3);
+        assert_eq!(
+            context.message(words).state,
+            "delivered",
+            "(wrapped: {wrapped})"
+        );
+        context.adapter.with("zeus", |agent| {
+            let paste = agent
+                .items
+                .iter_mut()
+                .find(|item| item.role == Role::User && item.text.contains(&marker_of(words)))
+                .expect("the paste");
+            paste.id = "moved".into();
+        });
+        context.adapter.answer("zeus", "Parser, finished");
+        passes(&context, 3);
+        let task = context.task(project, 1);
+        assert_eq!(task.task.state, "done", "(wrapped: {wrapped})");
+        let results: Vec<String> = task
+            .messages
+            .into_iter()
+            .filter(|message| message.kind == "result")
+            .map(|message| message.body)
+            .collect();
+        assert_eq!(results, ["Parser, finished"]);
+        context.close();
+    }
+}
+
+#[test]
+fn a_first_message_of_a_fresh_window_the_human_sent_from_its_box_behind_the_brief_is_never_pasted_again(
+) {
+    // The stale withheld Enter (`stale_box.rs`) of a launch's first message: a fresh window's
+    // paste is the brief and the message in one, so the item the human's Enter makes in the
+    // record begins with the brief's header and not with the message's. The proof of a paste
+    // the human sent from the box must know the brief too, or the box, emptied by the human,
+    // is emptied again and the message pasted over (T-812's class, `deliveries`' stale check).
+    let context = delivered();
+    records_as_claude_does(&context, false);
+    let (project, _brief) = at_work_on_a_brief_with_a_picture(&context);
+    // The fresh window is held not ready until the test lets it go, so that it can first be
+    // set to take a paste and record none.
+    let ready = Rc::new(Cell::new(false));
+    let asked = Rc::clone(&ready);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(if asked.get() {
+            Readiness::Ready
+        } else {
+            Readiness::Held(Held::Because("starting".to_owned()))
+        })
+    }));
+    // The chief's note to zeus waits for the resume and rides in the words that resume T-1.
+    context.adapter.holds_nothing("zeus");
+    context.exit("zeus");
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    let withdrawn = note(&context, project, "zeus", "Use tabs");
+    context.resume_task(project, 1, "Go on");
+    let words = context
+        .task(project, 1)
+        .messages
+        .last()
+        .expect("the words")
+        .id;
+    passes(&context, 2);
+    context.adapter.with("zeus", |agent| agent.arrive = false);
+    ready.set(true);
+    passes(&context, 2);
+    assert_eq!(context.message(words).state, "delivering");
+    assert_eq!(times_handed(&context, SEAM, words), 1, "handed once");
+    // Ten seconds on, the Enter pressed once more looks at the screen, and the chief pauses
+    // T-1 meanwhile: no key goes, and the paste stays in the box.
+    let pane = context.host.last("zeus").expect("its window").pane.id;
+    enter_again_with(&context, &pane, || context.pause_task(project, 1));
+    assert_eq!(context.message(words).state, "queued", "taken back");
+    assert_eq!(context.message(withdrawn.id).state, "cancelled");
+    // The human presses Enter on what the box holds: the brief and the message, in one.
+    let sent = pasted(&context, &pane, words);
+    human_sends_pictures(&context, "zeus", &sent);
+    context.pass().unwrap();
+    // The chief resumes T-1: nothing is pressed into the emptied box, and the words the
+    // human sent are not pasted again.
+    context.adapter.with("zeus", |agent| agent.arrive = true);
+    context.resume_task(project, 1, "Go on again");
+    passes(&context, 4);
+    assert_eq!(times_handed(&context, SEAM, words), 1, "pasted once");
+    assert_eq!(context.message(words).state, "delivered", "and seen");
+    assert_eq!(
+        context.message(withdrawn.id).state,
+        "delivered",
+        "the note went in the paste the human sent"
+    );
+    assert_eq!(clears(&context), 0, "nothing pressed into an empty box");
+    context.close();
+}
+
+#[test]
+fn a_first_message_that_names_a_picture_behind_a_brief_that_names_none_is_confirmed_once() {
+    // The other way round (T-812): the picture is the message's, the brief names none. Claude
+    // attaches it from the one paste and drops every blank line of it, the one between the
+    // brief and the message too, so the brief at the head of the record is the brief less its
+    // trailing blank line.
+    for wrapped in [false, true] {
+        let context = delivered();
+        context.adapter.attaches_images.set(true);
+        records_as_claude_does(&context, wrapped);
+        let (project, brief) = briefed(&context);
+        passes(&context, 3);
+        assert_eq!(context.message(brief).state, "delivered");
+        let words = resumed_on_a_fresh_window(&context, project, "Go on\n/work/images/desk.png");
+        passes(&context, 3);
+        let recorded = recorded_paste(&context, words);
+        assert!(
+            recorded.starts_with(&behind_a_placeholder(brief, wrapped)) && !recorded.contains("desk.png"),
+            "the brief behind the placeholder of the message's picture (wrapped: {wrapped}): {recorded:?}"
+        );
+        assert_eq!(times_handed(&context, SEAM, words), 1, "handed once");
+        assert_eq!(
+            context.message(words).state,
+            "delivered",
+            "and seen (wrapped: {wrapped})"
+        );
+        wait(&context, 200);
+        assert_eq!(times_handed(&context, SEAM, words), 1, "pasted once");
+        assert_ne!(context.task(project, 1).task.state, "failed");
+        context.close();
+    }
 }

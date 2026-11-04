@@ -379,3 +379,49 @@ fn a_worker_resumed_with_words_that_name_a_picture_ends_its_turn_with_its_answer
         .collect();
     assert_eq!(results, ["Parser, finished"]);
 }
+
+#[test]
+fn a_worker_resumed_with_words_that_name_a_picture_has_its_answer_taken_though_its_record_moved_the_ids_of_its_items(
+) {
+    // T-810, `delivered_at`'s fallback: the receipt names the item the paste was seen as, and
+    // that id is not in the record read at the turn's end (a harness whose ids moved, or a
+    // copy read again). The paste is then found by its text, behind Claude Code's
+    // placeholders; the answer after it is the task's result.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.attaches_images.set(true);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project.id, 1);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.resume_task(project.id, 1, WITH_A_PICTURE);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.with("zeus", |agent| {
+        let at = agent.items.len() - 2;
+        assert!(agent.items[at]
+            .text
+            .starts_with("[Image #1][ConsensFlow m-"));
+        agent.items[at].id = "moved".into();
+    });
+    context.adapter.answer("zeus", "Parser, finished");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+    let results: Vec<String> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect();
+    assert_eq!(results, ["Parser, finished"]);
+}
