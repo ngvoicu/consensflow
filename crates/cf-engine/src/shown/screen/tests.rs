@@ -828,9 +828,7 @@ fn a_value_in_groups_withholds_the_screen() {
         ),
         ("four groups, the fewest", vec!["abcd efgh ijkl mnop"]),
         ("digits", vec!["1234-5678-9012-3456"]),
-        ("underscores", vec!["abcd_efgh_ijkl_mnop"]),
-        ("colons", vec!["abcd:efgh:ijkl:mnop"]),
-        ("dots", vec!["abcd.efgh.ijkl.mnop"]),
+        ("dashes of four", vec!["abcd-efgh-ijkl-mnop"]),
         ("slashes in the groups", vec!["ab/c d/ef g/hi j/kl m/no"]),
         ("hex words", vec!["dead beef cafe babe"]),
         (
@@ -859,10 +857,6 @@ fn a_value_in_groups_withholds_the_screen() {
             "groups in a frame",
             vec!["│ YWJj-ZGVm-ZGhp-amts │", "│ bWpv-cHFy-cHRu-dndv │"],
         ),
-        (
-            "the groups of a full IPv6 address",
-            vec!["2001:0db8:85a3:0000:0000:8a2e:0370:7334"],
-        ),
     ] {
         assert_eq!(note(&rows), KEY, "{label}: {rows:?}");
     }
@@ -872,8 +866,21 @@ fn a_value_in_groups_withholds_the_screen() {
         vec!["abcd efgh ijkl"],
         vec!["abcd efgh ijkl and more"],
         vec!["abcd  efgh  ijkl  mnop"],
+        // Groups parted by anything but a blank or a `-` are no run: snake_case names, paths,
+        // addresses (over 5,610 windows of real output, any one character withheld 4.8% of
+        // them, most of them `cargo test` names, and blanks and `-` alone 1.5%).
+        vec!["abcd_efgh_ijkl_mnop"],
+        vec!["test shown::tests::a_host_shut_down_with_windows_open_tells_the_exit ... ok"],
+        vec!["abcd:efgh:ijkl:mnop"],
+        vec!["abcd.efgh.ijkl.mnop"],
+        vec!["2001:0db8:85a3:0000:0000:8a2e:0370:7334"],
         vec!["abcd efgh ijk lmno pqrs"],
         vec!["the and for are not"],
+        // The rest of a path the window wrapped is a row of base64's characters: slashes alone
+        // do not make it look encoded.
+        vec!["tests/dispatcher"],
+        vec!["upport/revisiond", "var/log/system/daemon"],
+        vec!["see the log in", "var/log/system/daemon", "for the cause"],
         vec!["Compiling consensflow engine library for target platform"],
         vec!["the quick brown foxes jumped over lazy dogs"],
         vec!["PATH=/usr/bin HOME=/root LANG=C TERM=xterm"],

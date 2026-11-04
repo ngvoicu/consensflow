@@ -20,16 +20,19 @@
 //!   `/`, no blank in them; `=` for padding):
 //!   - a row of forty characters or more by itself, in any case (a hash, a token, a key's body);
 //!   - a row of twelve characters or more that looks encoded by itself: a digit among letters,
-//!     a `+`, a `/`, an `=`, or a capital after a small letter;
+//!     a `+`, an `=`, or a capital after a small letter (not a `/` alone: `var/log/system/daemon`,
+//!     the rest of a path the window wrapped, is a row of base64's characters too);
 //!   - two rows in a row that both look encoded;
 //!   - two rows in a row or more that are twelve characters or more each (the last may be
 //!     shorter) and forty together, or three rows or more of eight each (a narrower window);
 //!   - a row of one `=` or two, which is a key's last row whatever stands beside it.
 //! - **A value in groups.** `YWJj-ZGVm-ZGhp-…`, `deadbeef cafebabe feedface …`: four groups or
-//!   more of four characters or more of base64 or hex, each parted from the next by one blank,
-//!   `-`, or any one character that is none of them, in a row or over rows ([`grouped`]). A run
-//!   of groups of one length, or of groups that each look encoded or are hex, is no sentence: a
-//!   sentence of four words does not have them all of one length, nor of letters and digits.
+//!   more of four characters or more of base64 or hex, each parted from the next by one blank
+//!   or one `-`, in a row or over rows ([`grouped`]). A run of groups of one length, or of groups
+//!   that each look encoded or are hex, is no sentence: a sentence of four words seldom has them
+//!   all of one length, nor of letters and digits. (Any one character between groups, `_` and
+//!   `:` among them, was tried over 5,610 windows of real output: 4.8% were withheld, most of
+//!   them the snake_case names of `cargo test`; blanks and `-` alone withhold 1.5%.)
 //!
 //! - **Text in percent signs.** `https%3A%2F%2Falice%3Aswordfish%40example.test` has no `://` and
 //!   no `@` for the masker, and names nothing to a test of its words. What it spells out is looked
@@ -201,10 +204,10 @@ fn is_base64_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='
 }
 
-/// Whether a row of base64's characters says by them that it is not a word: it has a `+`, a
-/// `/` or an `=`, a digit among letters, or a capital after a small letter.
+/// Whether a row of base64's characters says by them that it is not a word: it has a `+` or an
+/// `=`, a digit among letters, or a capital after a small letter. Not a `/`: it is a path's.
 fn looks_encoded(row: &str) -> bool {
-    if row.contains(['+', '/', '=']) {
+    if row.contains(['+', '=']) {
         return true;
     }
     let letters = row.chars().any(|c| c.is_ascii_alphabetic());
@@ -218,20 +221,19 @@ fn looks_encoded(row: &str) -> bool {
 }
 
 /// Whether `text` has a value in groups: a run of [`GROUPS`] groups or more of [`GROUP`]
-/// characters or more of base64's, each parted from the next by exactly one character that is
-/// none of them. A run counts where its groups are all of one length, or each is hex or looks
-/// encoded (a digit among letters, a `+`, a capital after a small letter): the text of a
-/// sentence has neither.
+/// characters or more of base64's, each parted from the next by exactly one blank or one `-`. A
+/// run counts where its groups are all of one length, or each is hex or looks encoded (a digit
+/// among letters, a `+`, a capital after a small letter): the text of a sentence has neither.
 fn grouped(text: &str) -> bool {
     let mut run: Vec<&str> = Vec::new();
-    for (token, gap) in tokens(text) {
+    for (token, parted_by) in tokens(text) {
         if token.len() < GROUP {
             run.clear();
             continue;
         }
-        // A group goes on the run when one character parts it from the last; any other gap
-        // (none at the start of the text, two blanks, a word between) begins a run again.
-        if gap != 1 {
+        // A group goes on the run when one blank or one `-` parts it from the last; any other
+        // gap (none at the start of the text, two blanks, a word between, `_`) begins a run.
+        if !matches!(parted_by, Some(' ' | '-')) {
             run.clear();
         }
         run.push(token);
@@ -247,25 +249,28 @@ fn grouped(text: &str) -> bool {
     false
 }
 
-/// The tokens of `text`, the longest runs of base64's characters, each with how many characters
-/// that are none of them lie before it (since the last token, or the start of the text).
-fn tokens(text: &str) -> Vec<(&str, usize)> {
+/// The tokens of `text`, the longest runs of base64's characters, each with the one character
+/// that parts it from the token before where exactly one does (none at the start of the text,
+/// none where two or more do).
+fn tokens(text: &str) -> Vec<(&str, Option<char>)> {
     let mut found = Vec::new();
-    let mut open: Option<(usize, usize)> = None;
-    let mut gap = 0;
+    let mut open: Option<(usize, Option<char>)> = None;
+    let mut between: Option<char> = None;
+    let mut count = 0;
     for (at, c) in text.char_indices() {
         if is_base64_char(c) {
-            open.get_or_insert((at, gap));
+            open.get_or_insert((at, if count == 1 { between } else { None }));
             continue;
         }
-        if let Some((from, before)) = open.take() {
-            found.push((&text[from..at], before));
-            gap = 0;
+        if let Some((from, parted_by)) = open.take() {
+            found.push((&text[from..at], parted_by));
+            count = 0;
         }
-        gap += 1;
+        count += 1;
+        between = Some(c);
     }
-    if let Some((from, before)) = open {
-        found.push((&text[from..], before));
+    if let Some((from, parted_by)) = open {
+        found.push((&text[from..], parted_by));
     }
     found
 }

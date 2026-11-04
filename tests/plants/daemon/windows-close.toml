@@ -813,7 +813,7 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if row.contains(['+', '/', '=']) {
+find = '''    if row.contains(['+', '=']) {
         return true;
     }'''
 replace = '''    if false {
@@ -1126,12 +1126,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if gap != 1 {
-            run.clear();
-        }'''
-replace = '''        if false {
-            run.clear();
-        }'''
+find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
+replace = '''        if false {'''
 
 [[plant]]
 name = "windows close: a short token does not part a run"
@@ -1243,16 +1239,6 @@ runs = ["engine-shown"]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''    if holds_a_key(&rows) || grouped(&spaced) {'''
 replace = '''    if holds_a_key(&rows) || rows.iter().any(|row| grouped(row)) {'''
-
-[[plant]]
-name = "windows close: the characters between groups are counted as none"
-meant = "a_value_in_groups_withholds_the_screen"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        gap += 1;'''
-replace = '''        gap = 1;'''
 
 [[plant]]
 name = "windows close: no token's beginning withholds a screen"
@@ -1648,3 +1634,54 @@ file = "crates/cf-engine/src/shown/screen.rs"
 find = '''            || (run.len() >= 3 && body.iter().all(|row| row.len() >= NARROW_ROW)))'''
 replace = '''            || (run.len() >= 3 && run.iter().all(|row| row.len() >= NARROW_ROW)))'''
 
+[[plant]]
+name = "windows close: two characters between groups part them like one"
+meant = "a_value_in_groups_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        count += 1;
+        between = Some(c);'''
+replace = '''        count = 1;
+        between = Some(c);'''
+
+[[plant]]
+name = "windows close: a blank does not part groups"
+meant = "a_value_in_groups_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
+replace = '''        if !matches!(parted_by, Some('-')) {'''
+
+[[plant]]
+name = "windows close: a dash does not part groups"
+meant = "a_value_in_groups_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
+replace = '''        if !matches!(parted_by, Some(' ')) {'''
+
+[[plant]]
+name = "windows close: any one character parts groups"
+meant = "a_value_in_groups_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
+replace = '''        if parted_by.is_none() {'''
+
+[[plant]]
+name = "windows close: a slash alone makes a row look encoded"
+meant = "a_value_in_groups_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    if row.contains(['+', '=']) {'''
+replace = '''    if row.contains(['+', '/', '=']) {'''
