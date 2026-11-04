@@ -182,8 +182,9 @@ find = "            Some(place) => (place.row, place.part > 0),"
 replace = "            Some(place) => (place.row - place.row + i64::MAX, place.part > 0),"
 
 [[plant]]
-name = "session viewer: pages go in the order of the items' places in their record, which a copy made again moves, so an item comes twice"
-meant = "a_record_that_shrank_copied_again_with_a_shown_item_changed_repeats_nothing_and_skips_nothing"
+name = "session viewer: pages go in the order of the items' places in their record, which a copy made again moves, so an item is skipped"
+# Since T-1118 a copy moves an item only to a later place: one not shown yet is what it skips.
+meant = "an_item_not_shown_yet_that_a_copy_made_again_moved_on_comes_once_where_it_was_first_copied"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]

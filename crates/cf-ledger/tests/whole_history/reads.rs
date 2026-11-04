@@ -178,6 +178,39 @@ fn a_record_that_shrank_copied_again_with_a_shown_item_changed_repeats_nothing_a
 }
 
 #[test]
+fn an_item_not_shown_yet_that_a_copy_made_again_moved_on_comes_once_where_it_was_first_copied() {
+    // A copy never moves an item to an earlier place, but it may move one to a later
+    // place (T-1118): the record holds it further on than it was copied. An item the
+    // most recent page has not shown moves on so, its text changed; Older then goes on
+    // from that page and comes to it where it was first copied, not past it.
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    ledger
+        .copy_transcript(conversation, &items(21, 100), 0)
+        .expect("copied");
+    let first = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, None, false, 8 * 760),
+        )
+        .expect("read");
+    let shown = ids(&first);
+    assert_eq!(shown.first().map(String::as_str), Some("i-20"));
+    assert!(shown.len() > 2 && shown.len() < 18, "{shown:?}");
+    let mut moved = items(21, 100).remove(3);
+    moved["text"] = json!("i-3, changed");
+    ledger
+        .copy_transcript(conversation, &[moved], 25)
+        .expect("copied again");
+    let rest = older(&ledger, project, &first, None, 30);
+    let mut every: Vec<String> = shown.into_iter().chain(rest).collect();
+    every.reverse();
+    let expected: Vec<String> = (0..21).map(|at| format!("i-{at}")).collect();
+    assert_eq!(every, expected, "each item once, where it was first copied");
+}
+
+#[test]
 fn an_item_copied_into_another_s_place_stands_where_it_was_first_copied_neither_repeated_nor_skipped(
 ) {
     let dir = tempfile::tempdir().expect("a folder");
