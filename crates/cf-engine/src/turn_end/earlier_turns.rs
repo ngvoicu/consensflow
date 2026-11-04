@@ -161,6 +161,66 @@ fn message_of<'a>(thread: &'a TaskThread, item: &Item) -> Option<&'a MessageView
         })
 }
 
+/// A turn of the record that ended with a complete answer and was followed by a message to the
+/// window: its final run of words, the items it wrote (since the message before it), and the place
+/// of the message that followed.
+struct Ended<'a> {
+    words: Vec<&'a Item>,
+    turn: &'a [Item],
+    at: usize,
+}
+
+/// The turns of `items` from `from` that ended with a complete answer and were followed by a
+/// message to the member, in order. The walk is [`answers_to_the_task`]'s: a message to the member
+/// or a tool's output ends the run of words before it, a compaction's summary is none of them, and
+/// a message that says the role (`replacements`), and the turn on it, are none of the task's. Words
+/// after the last complete one (the step that stopped for a tool) are the next turn's.
+///
+/// [`answers_to_the_task`]: crate::role_change::answers_to_the_task
+fn ended_turns<'a>(items: &'a [Item], from: usize, replacements: &[i64]) -> Vec<Ended<'a>> {
+    let mut ended = Vec::new();
+    let mut of_the_role = false;
+    let mut run: Vec<&Item> = Vec::new();
+    let mut complete = 0;
+    let mut began = from;
+    for (at, item) in items.iter().enumerate().skip(from) {
+        if item.compaction {
+            continue;
+        }
+        match item.role {
+            Role::User => {
+                of_the_role =
+                    header_id(&item.text).is_some_and(|message| replacements.contains(&message));
+                if of_the_role {
+                    continue;
+                }
+                if complete > 0 {
+                    ended.push(Ended {
+                        words: run[..complete].to_vec(),
+                        turn: &items[began..at],
+                        at,
+                    });
+                }
+                run.clear();
+                complete = 0;
+                began = at + 1;
+            }
+            Role::Tool if !of_the_role => {
+                run.clear();
+                complete = 0;
+            }
+            Role::Assistant if !of_the_role => {
+                run.push(item);
+                if item.complete {
+                    complete = run.len();
+                }
+            }
+            _ => {}
+        }
+    }
+    ended
+}
+
 impl Dispatcher {
     /// The turns of `participant`'s window since the latest message of `thread`'s task pasted
     /// into it that ended with a complete answer which no result took, in order, as the record
@@ -201,85 +261,36 @@ impl Dispatcher {
             })
             .map(|message| message.id)
             .collect();
-        // The walk is `answers_to_the_task`'s: a message to the member, or a tool's output,
-        // ends the run of words before it; a message that says the role, and the turn on it,
-        // are none of the task's.
         let mut earlier: Vec<Earlier> = Vec::new();
-        let mut of_the_role = false;
-        let mut run: Vec<&Item> = Vec::new();
-        let mut complete = 0;
-        let mut began = floor + 1;
-        for (at, item) in items.iter().enumerate().skip(floor + 1) {
-            if item.compaction {
-                continue;
-            }
-            match item.role {
-                Role::User => {
-                    of_the_role = header_id(&item.text)
-                        .is_some_and(|message| replacements.contains(&message));
-                    if of_the_role {
-                        continue;
-                    }
-                    if complete > 0 {
-                        let ended = &run[..complete];
-                        let why = match message_of(thread, item) {
-                            Some(message) => match message
-                                .reply_to
-                                .filter(|asked| own.contains(asked))
-                            {
-                                Some(question) if message.kind == "answer" => Why::Answer(question),
-                                _ if message.kind == "note" => Why::Note(message.id),
-                                _ => Why::Message(message.id, message.kind.clone()),
-                            },
-                            None => match header_id(&item.text) {
-                                Some(id) => Why::Message(id, String::new()),
-                                None => Why::Notice,
-                            },
-                        };
-                        self.keep_earlier(
-                            thread,
-                            participant,
-                            &items[began..at],
-                            ended,
-                            why,
-                            last,
-                            &mut earlier,
-                        );
-                    }
-                    run.clear();
-                    complete = 0;
-                    began = at + 1;
-                }
-                Role::Tool if !of_the_role => {
-                    run.clear();
-                    complete = 0;
-                }
-                Role::Assistant if !of_the_role => {
-                    run.push(item);
-                    if item.complete {
-                        complete = run.len();
-                    }
-                }
-                _ => {}
-            }
+        for ended in ended_turns(items, floor + 1, replacements) {
+            let why = match message_of(thread, &items[ended.at]) {
+                Some(message) => match message.reply_to.filter(|asked| own.contains(asked)) {
+                    Some(question) if message.kind == "answer" => Why::Answer(question),
+                    _ if message.kind == "note" => Why::Note(message.id),
+                    _ => Why::Message(message.id, message.kind.clone()),
+                },
+                None => match header_id(&items[ended.at].text) {
+                    Some(id) => Why::Message(id, String::new()),
+                    None => Why::Notice,
+                },
+            };
+            self.keep_earlier(thread, participant, &ended, why, last, &mut earlier);
         }
         Ok(earlier)
     }
 
-    /// The words of the turn `ended` (the final run of `turn`, the items it wrote), which the
-    /// message of `why` followed, added to `earlier` unless they are not to be kept (see above).
-    #[allow(clippy::too_many_arguments)]
+    /// The words of the turn `ended`, which the message of `why` followed, added to `earlier`
+    /// unless they are not to be kept (see above).
     fn keep_earlier(
         &self,
         thread: &TaskThread,
         participant: &ParticipantView,
-        turn: &[Item],
-        ended: &[&Item],
+        ended: &Ended<'_>,
         why: Why,
         last: &str,
         earlier: &mut Vec<Earlier>,
     ) {
-        let words = words_of(ended);
+        let words = words_of(&ended.words);
         // The question ConsensFlow raised from these words has them first, a line of a record
         // lost in the turn after them where there was one, and the line that says how to finish.
         let finish_line = with_finish_line(String::new(), &participant.handle, thread.task.number);
@@ -292,7 +303,7 @@ impl Dispatcher {
         let short = words.chars().count() <= WRAPPER_CHARS;
         let a_line_about_the_wait = short
             && match &why {
-                Why::Answer(_) => ended_on_asking(turn),
+                Why::Answer(_) => ended_on_asking(ended.turn),
                 Why::Note(_) | Why::Message(..) | Why::Notice => true,
             };
         if words == WITHOUT_ANSWER
@@ -368,25 +379,30 @@ mod tests {
         );
     }
 
-    /// A turn ended on its question when its last tool output is `cf ask`'s, or it ran no tool.
-    #[test]
-    fn a_turn_ended_on_its_question_when_the_last_output_of_a_tool_is_cf_asks_or_there_is_none() {
-        let item = |role: Role, text: &str| Item {
+    /// An item of a record, numbered by its text.
+    fn item(role: Role, text: &str, complete: bool) -> Item {
+        Item {
             id: text.into(),
             role,
             text: text.into(),
-            complete: true,
+            complete,
             at: None,
             commentary: false,
             synthetic: false,
             compaction: false,
-        };
+        }
+    }
+
+    /// A turn ended on its question when its last tool output is `cf ask`'s, or it ran no tool.
+    #[test]
+    fn a_turn_ended_on_its_question_when_the_last_output_of_a_tool_is_cf_asks_or_there_is_none() {
         let asked = item(
             Role::Tool,
             "m-4 asked @chief. The answer arrives as a message; end your turn now.",
+            true,
         );
-        let other = item(Role::Tool, "412 GiB in 9 trees");
-        let words = item(Role::Assistant, "Asked.");
+        let other = item(Role::Tool, "412 GiB in 9 trees", true);
+        let words = item(Role::Assistant, "Asked.", true);
         assert!(ended_on_asking(&[words.clone()]), "no tool ran");
         assert!(ended_on_asking(&[
             other.clone(),
@@ -396,6 +412,64 @@ mod tests {
         assert!(
             !ended_on_asking(&[asked, other, words]),
             "it went on after asking"
+        );
+    }
+
+    /// The words of each turn the walk found, and the place of the message that followed it.
+    fn found(items: &[Item], replacements: &[i64]) -> Vec<(String, usize)> {
+        ended_turns(items, 0, replacements)
+            .iter()
+            .map(|ended| (words_of(&ended.words), ended.at))
+            .collect()
+    }
+
+    /// A message to the member ends the turn before it, a tool's output the run of words, a role's
+    /// note and the turn on it are none of the task's, a compaction's summary is no message, and a
+    /// turn with no complete answer, or only steps after it, has none or just the complete ones.
+    #[test]
+    fn the_turns_that_ended_are_the_complete_runs_before_a_message_to_the_member() {
+        let user = |text: &str| item(Role::User, text, true);
+        let said = |text: &str| item(Role::Assistant, text, true);
+        let step = |text: &str| item(Role::Assistant, text, false);
+        let tool = || item(Role::Tool, "output", true);
+        let role = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\nYou are the worker";
+        let mut summary = user("A summary of the conversation");
+        summary.compaction = true;
+        let items = [
+            user("[ConsensFlow m-1 · T-1 · task from @chief]\nBrief"),
+            step("Reading"),
+            tool(),
+            said("First write-up"),
+            summary,
+            step("Going on"),
+            tool(),
+            said("Second write-up"),
+            step("a step that stopped for a tool"),
+            user("<task-notification>b1 ended</task-notification>"),
+            said("Cut"),
+            user(role),
+            said("The turn on the role"),
+            user("[ConsensFlow m-5 · T-1 · note from @chief]\nAlso"),
+            step("Half a thought"),
+            user("typed"),
+            said("Last"),
+        ];
+        assert_eq!(
+            found(&items, &[9]),
+            [
+                ("Second write-up".to_owned(), 9),
+                ("Cut".to_owned(), 13),
+            ],
+            "the tool's output ended the first write-up's run; the role's note and its turn are none; \
+             a turn with only a step has no end; the last turn is the result's, not found"
+        );
+        // Without the role's id the note is a message, and the turn on it a turn.
+        assert_eq!(
+            found(&items, &[])
+                .iter()
+                .map(|(_, at)| *at)
+                .collect::<Vec<_>>(),
+            [9, 11, 13]
         );
     }
 }
