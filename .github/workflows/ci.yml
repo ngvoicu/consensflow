@@ -23,7 +23,8 @@
 # workspace's tests 10 to 11 on macOS and 16 to 18 on Windows, Playwright 4 on
 # macOS, the setup and the staging 2 to 4, and the rest 3. Now:
 #   checks         the Node tests, the CLI's and the app's tests, cf-e2e's own and
-#                  its live suites' offline cases, clippy, and cf-bridge's;
+#                  its live suites' offline cases, the live matrix on the stand-ins in a
+#                  step of its own (T-1184), clippy, and cf-bridge's;
 #   workspace      the workspace's tests, whole (its limit below says why);
 #   daemons        the daemons' suites in six shards, a sixth of their cases
 #                  each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs);
@@ -80,13 +81,32 @@ jobs:
       # harness, which cargo test runs without --ignored: each suite's own oracle, its
       # readers of a harness's records and its rules. Their cases on the real harnesses
       # are `cargo xtask live`'s alone, before a release. The programs are the files
-      # there, whichever there are; until T-1161 no job ran them, and the local gate
-      # that did no longer lands the integrations (suites.rs holds this step).
+      # there, whichever there are, but the live matrix, which has the step below; until
+      # T-1161 no job ran them, and the local gate that did no longer lands the
+      # integrations (suites.rs holds this step).
       - name: The offline cases of every live suite
         run: |
-          tests=$(ls crates/cf-e2e/tests | sed -n 's/^\(live_[a-z0-9_]*\)\.rs$/--test \1/p' | tr '\n' ' ')
+          tests=$(ls crates/cf-e2e/tests | sed -n '/^live_matrix\.rs$/!s/^\(live_[a-z0-9_]*\)\.rs$/--test \1/p' | tr '\n' ' ')
           cargo test -p cf-e2e --no-fail-fast $tests
         timeout-minutes: 30
+      # nextest, for the live matrix's step, as the workspace job installs it: built once,
+      # then the cache's (~/.cargo/bin).
+      - run: cargo install cargo-nextest --version 0.9.148 --locked
+      # The live matrix on the rig's stand-ins (tests/live_matrix.rs): every scenario of a
+      # board, and the field reports' known reds, each marked until the task whose fix
+      # turns it green (T-1168, T-1173). One at a time its cases took 963 s on a Mac and
+      # 1,001 s on Windows (T-1173), which the step above could not hold beside its own
+      # 8 and 6.5 minutes, so it has a step and a limit of its own (T-1184). Its cases take
+      # turns in one process (cf_e2e::serial); nextest runs each in a process of its own,
+      # each on a board of its own (a home, a daemon, its ports), 4 at a time: the runners
+      # have 3 processors (macOS) and 4 (Windows), and a case mostly waits on its board.
+      # Its 40 cases took 468 to 494 s 4 at a time on a Mac and 474 s on Windows (T-1186;
+      # 31 took 256 to 316 s, T-1184). The limit is
+      # set with a margin over that until CI's own runs read it (`cargo xtask ci-times
+      # --step "The live matrix"`); suites.rs holds this step, ci_times' tests its limit.
+      - name: The live matrix on the stand-ins
+        run: cargo nextest run -p cf-e2e --test live_matrix --no-fail-fast --test-threads 4
+        timeout-minutes: 20
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The harnesses' crate as the daemon builds it, without the test kit

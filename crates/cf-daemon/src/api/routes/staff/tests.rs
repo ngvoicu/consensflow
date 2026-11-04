@@ -46,6 +46,7 @@ fn reading(scene: &Scene, file: &str) -> (Rc<Context>, Rc<Asked>, tempfile::Temp
         roster: Rc::clone(&asked) as Rc<dyn AgentRows>,
         log: Rc::clone(&scene.context.log),
         trace: Rc::clone(&scene.context.trace),
+        tooling_calls: false,
     });
     (context, asked, home)
 }

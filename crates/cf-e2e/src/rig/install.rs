@@ -726,6 +726,91 @@ mod tests {
         muse_in(bin, weekly)
     }
 
+    /// T-1152 (the live matrix's board 0, 2026-11-03): one rig seats a live Muse and Devin. Devin's
+    /// home of the run's own moves `XDG_DATA_HOME` for the whole rig, its daemon too, and the
+    /// daemon finds a fresh Muse window's session in the data folder that variable names. The
+    /// launcher gave Muse the rig's own folder whatever the window had, so the daemon read
+    /// another folder (Devin's, whose `muse` was a link to the person's own), never found the
+    /// window's session, and failed its task. Muse writes where the daemon reads, and neither
+    /// is the person's.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_muse_beside_devin_writes_its_sessions_where_the_daemon_reads_them_and_not_in_the_persons(
+    ) {
+        use crate::rig::HarnessHome;
+        let (bin, person, root) = (
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+        );
+        let (config_home, data_home) = (
+            person.path().join(".config"),
+            person.path().join(".local").join("share"),
+        );
+        files::write(
+            &data_home.join("devin").join("credentials.toml"),
+            "key = 1\n",
+        )
+        .unwrap();
+        files::write(&config_home.join("devin").join("config.json"), "{}\n").unwrap();
+        files::write(&data_home.join("muse").join("session-index.db"), "theirs").unwrap();
+        files::write(&config_home.join("muse").join("settings.json"), "{}\n").unwrap();
+        let install = muse_at(bin.path(), person.path(), 50);
+        // The machine's Muse, as the launcher runs it: it notes the data folder it was given.
+        let noted = root.path().join("noted");
+        let answer = files::read_string(&install.binary).unwrap();
+        files::write_executable(
+            &install.binary,
+            answer.replacen(
+                "|| exit 9",
+                &format!(
+                    "|| {{ printf '%s' \"$XDG_DATA_HOME\" > '{}'; exit 0; }}",
+                    noted.display()
+                ),
+                1,
+            ),
+        )
+        .unwrap();
+        let devin =
+            crate::live::isolation::Isolation::devin(person.path(), &config_home, &data_home)
+                .made_in(root.path());
+        let given = Config::new("/the/stand-in").muse_live(install, person.path());
+        let fake_bin = write_fake_install(root.path(), &given).unwrap();
+        let homes = devin.vars().unwrap();
+        let env = environment(root.path(), &fake_bin, &given, &homes);
+        // What the daemon reads a Muse window's sessions by, and what the product's launch adds
+        // to the window (`XDG_DATA_HOME` by its real path, where it is reached through a link).
+        let daemon = files::real_path(Path::new(var(&env, "XDG_DATA_HOME")));
+        let mut window = env.clone();
+        window.retain(|(name, _)| name != "XDG_DATA_HOME");
+        window.push((
+            "XDG_DATA_HOME".to_owned(),
+            daemon.to_string_lossy().into_owned(),
+        ));
+        let ran = crate::process::Run::new(own_commands(root.path(), &given).join("muse"))
+            .vars(window)
+            .run()
+            .unwrap();
+        assert_eq!(ran.code, Some(0), "{ran}");
+        let written = files::read_string(&noted).unwrap();
+        assert_eq!(
+            files::real_path(Path::new(&written)),
+            daemon,
+            "Muse writes its sessions where the daemon reads them"
+        );
+        let muse_data = daemon.join("muse");
+        assert_ne!(
+            files::real_path(&muse_data),
+            files::real_path(&data_home.join("muse")),
+            "the folder is not the person's own"
+        );
+        assert!(
+            !muse_data.join("session-index.db").exists(),
+            "nothing of the person's Muse is reached there"
+        );
+        devin.finish().unwrap();
+    }
+
     /// T-1076, at T-1123's share: every rig that runs the machine's Muse live asks its
     /// allowance as it writes the launcher, so no case starts on an allowance that is used
     /// up: on a week at its end the rig is refused and its windows find no Muse to run;
