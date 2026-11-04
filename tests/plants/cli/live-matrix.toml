@@ -667,3 +667,29 @@ runs = ["matrix-fake-agent-reply"]
 file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
 find = """    std::env::split_paths(path).find_map(|folder| {"""
 replace = """    std::env::split_paths(path).collect::<Vec<_>>().into_iter().rev().find_map(|folder| {"""
+
+# The control's end waits for the refusal it reads (CI run 41798142126 on GitHub's macOS runner;
+# the chief's decision of 2026-11-04, m-7388): a stand-in chief slow between its commands
+# (`CF_TEST_CF_GAP_MS`) is read for its late reopen, and one that never asks ends with its turn.
+
+[[plant]]
+name = "live matrix: a cancelled task ends the run before the refusal the scenario reads"
+meant = "a_cancelled_task_whose_chief_asks_to_send_it_back_late_is_read_for_the_refusal_before_the_run_ends"
+runs = ["matrix-control-end"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''                    !refusal_to_come(&snapshot, scenario.refusals, name, *number)'''
+replace = '''                    !refusal_to_come(&snapshot, scenario.refusals, name, *number) || true'''
+
+[[plant]]
+name = "live matrix: a cancelled task waits for a refusal that never comes after the chief's turn"
+meant = "a_cancelled_task_whose_chief_never_asks_to_send_it_back_ends_the_run_with_its_turn_red_for_the_call"
+runs = ["matrix-control-end"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''    chief_at_work
+        && refusals'''
+replace = '''    (chief_at_work || true)
+        && refusals'''

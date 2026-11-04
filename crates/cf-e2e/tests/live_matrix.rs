@@ -346,6 +346,69 @@ mod tests {
         );
     }
 
+    /// The same control where the stand-in chief is slow between its commands, as a loaded
+    /// runner makes it: the run saw the task cancelled before the chief asked to send it back,
+    /// ended, and read no refusal (GitHub's macOS runner, CI run 41798142126). The run waits for
+    /// the call the scenario reads, and still ends long before its deadline.
+    #[test]
+    fn a_cancelled_task_whose_chief_asks_to_send_it_back_late_is_read_for_the_refusal_before_the_run_ends(
+    ) {
+        let reports = tempfile::tempdir().unwrap();
+        let mut scenario = Scenario::named("cancel")
+            .unwrap()
+            .with_vars(&[("CF_TEST_CF_GAP_MS", "5000")], &[]);
+        scenario.deadline = std::time::Duration::from_secs(90);
+        let outcome = on_stand_ins(scenario, reports.path());
+        let table = report::table(&outcome.checks);
+        let step = check(&outcome, "steps", "step 1 (advice) was reached");
+        assert!(!step.ok, "{table}");
+        assert_eq!(step.detail, "T-1, the advice task, is cancelled", "{table}");
+        let refused = check(
+            &outcome,
+            "advice",
+            "the chief's first reopen of it was refused with invalid-transition",
+        );
+        assert!(refused.ok, "{table}");
+        assert!(
+            outcome.elapsed.as_secs() < 60,
+            "ended once the call was answered: {} s",
+            outcome.elapsed.as_secs()
+        );
+    }
+
+    /// A chief that cancels the task and never asks to send it back: the run ends once its turn
+    /// does, and the refusal the scenario reads is red, saying no call came.
+    #[test]
+    fn a_cancelled_task_whose_chief_never_asks_to_send_it_back_ends_the_run_with_its_turn_red_for_the_call(
+    ) {
+        let reports = tempfile::tempdir().unwrap();
+        let mut scenario = Scenario::named("cancel").unwrap();
+        scenario.deadline = std::time::Duration::from_secs(90);
+        scenario.steps[0].stand_in = |_| {
+            "CF task add --advice --tier standard :: SLEEP 60 Reply with exactly: ADVICE_OK\nCF task cancel T-1"
+                .to_owned()
+        };
+        let outcome = on_stand_ins(scenario, reports.path());
+        let table = report::table(&outcome.checks);
+        let step = check(&outcome, "steps", "step 1 (advice) was reached");
+        assert_eq!(step.detail, "T-1, the advice task, is cancelled", "{table}");
+        let refused = check(
+            &outcome,
+            "advice",
+            "the chief's first reopen of it was refused with invalid-transition",
+        );
+        assert!(!refused.ok, "{table}");
+        assert_eq!(
+            refused.detail, "the chief made 0 call(s) of POST /api/tasks/1/reopen",
+            "{table}"
+        );
+        assert!(
+            outcome.elapsed.as_secs() < 60,
+            "ended with the chief's turn: {} s",
+            outcome.elapsed.as_secs()
+        );
+    }
+
     /// LMX-07: a red's manifest runs again alone, in a fresh project with the same seats, its
     /// tasks bound again by what they are; the red's own folder is left as it was.
     #[test]

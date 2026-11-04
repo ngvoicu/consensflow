@@ -21,7 +21,9 @@
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
 //!   verbs, as it would type them. Each such line of a message is run, in order
-//!   (a chief that accepts three tasks in one turn: the matrix's stand-in chief).
+//!   (a chief that accepts three tasks in one turn: the matrix's stand-in chief),
+//!   `CF_TEST_CF_GAP_MS` milliseconds apart where that is set (a chief slow between
+//!   two commands, as a loaded machine makes it).
 //! - A line `WRITE <file> :: <text>` is a worker that changes a file: it writes the
 //!   text (`\n` in it a line break, and one at its end) to the file, a path below the
 //!   window's folder, and answers `wrote <file>` (the matrix's stand-in worker, whose
@@ -594,9 +596,18 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             dispatched.join(" | ")
         )));
     }
+    let gap = own_var("CF_TEST_CF_GAP_MS")
+        .and_then(|ms| ms.parse::<u64>().ok())
+        .map(Duration::from_millis);
     let verbs: Vec<String> = verbs(text, pattern::once(&VERB, r"(?m)^CF (.+)$"))
         .iter()
-        .map(|words| run_cf(words))
+        .enumerate()
+        .map(|(index, words)| {
+            if let Some(gap) = gap.filter(|_| index > 0) {
+                thread::sleep(gap);
+            }
+            run_cf(words)
+        })
         .collect();
     if !verbs.is_empty() {
         return Ok(Reply::Text(format!("ran cf: {}", verbs.join(" | "))));

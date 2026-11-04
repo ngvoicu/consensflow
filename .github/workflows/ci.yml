@@ -104,8 +104,12 @@ jobs:
       # 31 took 256 to 316 s, T-1184). The limit is
       # set with a margin over that until CI's own runs read it (`cargo xtask ci-times
       # --step "The live matrix"`); suites.rs holds this step, ci_times' tests its limit.
+      # A case that fails is run once more, here and in no other step: on the runners each
+      # run of a3-1's landing met another case's timing red that passed in the others (T-1177,
+      # the chief's decision m-7388). One that passes the second time is FLAKY in the log, and
+      # said; one that fails twice is red.
       - name: The live matrix on the stand-ins
-        run: cargo nextest run -p cf-e2e --test live_matrix --no-fail-fast --test-threads 4
+        run: cargo nextest run -p cf-e2e --test live_matrix --no-fail-fast --test-threads 4 --retries 1
         timeout-minutes: 20
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings

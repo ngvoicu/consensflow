@@ -560,6 +560,23 @@ mod tests {
             (2..=8).contains(&threads),
             "the cases run side by side, a few at once: {run}"
         );
+        // A case red once on a runner runs once more, and only here: every other step is
+        // strict (T-1177, m-7388).
+        let retries = words
+            .iter()
+            .position(|word| *word == "--retries")
+            .and_then(|at| words.get(at + 1).copied());
+        assert_eq!(retries, Some("1"), "a red case runs once more: {run}");
+        let retrying: Vec<String> = workflow()
+            .lines()
+            .filter(|line| line.contains("--retries") || line.contains("NEXTEST_RETRIES"))
+            .map(|line| line.trim().to_owned())
+            .collect();
+        assert_eq!(
+            retrying,
+            [format!("run: {run}")],
+            "no step but the matrix's runs a case again"
+        );
         assert!(
             checks[at - 1] == "- name: The live matrix on the stand-ins"
                 && checks[at + 1].starts_with("timeout-minutes: "),

@@ -176,6 +176,57 @@ fn a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_
     Ok(())
 }
 
+/// The same limit where the host's look falls while the job's shell still ties it to the window:
+/// the host lists the job, and then the shell ends and leaves it in a session of its own, which
+/// the close does not find. On GitHub's macOS runner a look fell inside the stand-in's 0.3 s
+/// (CI runs 41772376690 and 41781145403); here the shell lingers 2.5 s, so that the host, which
+/// looks once a second, lists it every time. Where the job is after the close decides, not
+/// whether a look saw it on its way out.
+#[cfg(unix)]
+#[test]
+fn a_detached_job_the_host_listed_before_its_shell_ended_holds_the_case_as_the_known_limit_too(
+) -> Result {
+    let log = Log::new("live finish test");
+    let plan = leaving::plan(Who::StandIn).with_var("CF_TEST_DETACH_LINGER_MS", "2500");
+    let brief = leaving::stand_in_brief(true);
+    let finished = leaving::run_asked(
+        Who::StandIn,
+        &plan,
+        Path::new(FAKE_AGENT),
+        &brief,
+        leaving::Expect::OwnSession,
+        &log,
+    )?;
+    let text = finished.case.text();
+    // The widened gap did what it is for: the host listed the job, and the run held it to the
+    // limit as one it listed. (The line of what the host listed is cut, and a runner's longer
+    // paths cut it before the job's words: CI run 41787972093.)
+    assert!(
+        text.contains("the host listed it before its shell ended"),
+        "the host listed the job, and the limit took it as one it listed: {text}"
+    );
+    assert!(
+        finished.case.held(),
+        "{text}\n\nthe first thing wrong: {}",
+        finished.summary
+    );
+    assert!(
+        text.contains(
+            "ok   the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing: T-1 done "
+        ),
+        "{text}"
+    );
+    assert!(text.contains(", terminal ??)"), "{text}");
+    assert!(!text.contains("FAIL"), "{text}");
+    let job = process_after(&text, "still running: ").expect("the line names the job's process");
+    let gone = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        !cf_e2e::process::is_alive(job)
+    });
+    assert!(gone, "the job {job} is left running: {text}");
+    Ok(())
+}
+
 #[test]
 fn a_run_that_expects_the_limit_of_a_job_the_close_ends_holds_it_to_the_ending_and_lets_nothing_pass(
 ) -> Result {

@@ -518,17 +518,17 @@ pub fn in_a_shell_as(program: &Path, words: Vec<OsString>, detach: Detach) -> Re
             Detach::Apart => {
                 let itself = std::env::current_exe().map_err(|failed| failed.to_string())?;
                 Ok(Run::new(itself)
-                    .args([SESSION, "/bin/sh", "-c", shell_script(true)])
+                    .args([SESSION, "/bin/sh", "-c", &shell_script(true)])
                     .arg(program)
                     .args(words))
             }
             Detach::Here => Ok(Run::new("/bin/sh")
-                .args(["-c", shell_script(true)])
+                .args(["-c", &shell_script(true)])
                 .arg(program)
                 .args(words)
                 .own_group()),
             Detach::No => Ok(Run::new("/bin/sh")
-                .args(["-c", shell_script(false)])
+                .args(["-c", &shell_script(false)])
                 .arg(program)
                 .args(words)
                 .own_group()),
@@ -548,12 +548,22 @@ const IN_PLACE: &str = "exec \"$0\" \"$@\"";
 /// window's marker (`CF_PANE_PROCESS_OWNER`, which the pane host puts in the
 /// environment of everything a window starts) is not there to find it by: the
 /// detached job is started without it.
+///
+/// The shell lingers 0.3 s after it detaches the job, or as many milliseconds as
+/// `CF_TEST_DETACH_LINGER_MS` says: a case that must see the host list the job while its shell
+/// still ties it to the window (the host looks once a second) sets it longer.
 #[cfg(any(unix, test))]
-fn shell_script(detached: bool) -> &'static str {
+fn shell_script(detached: bool) -> String {
     if detached {
-        "unset CF_PANE_PROCESS_OWNER; nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep 0.3"
+        let linger = cf_e2e::process::own_var("CF_TEST_DETACH_LINGER_MS")
+            .and_then(|ms| ms.parse::<u64>().ok())
+            .unwrap_or(300);
+        format!(
+            "unset CF_PANE_PROCESS_OWNER; nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep {}",
+            linger as f64 / 1000.0
+        )
     } else {
-        "\"$0\" \"$@\"; exit $?"
+        "\"$0\" \"$@\"; exit $?".to_owned()
     }
 }
 

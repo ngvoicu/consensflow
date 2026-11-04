@@ -21,7 +21,7 @@ use super::human::{Bounds, Driver, LOOK};
 use super::machine::{Next, Observation, Steps};
 use super::observe::{self, Bindings, Snapshot};
 use super::oracle::{self, Answered, Judged, Records};
-use super::scenario::{Known, Scenario};
+use super::scenario::{Known, Refused, Scenario};
 use super::seating::{self, Role, Seating};
 
 /// How many lines of each window's screen the evidence keeps.
@@ -535,7 +535,9 @@ fn steps(
                 elapsed: driver.bounds.elapsed(),
                 turns: snapshot.total_turns(driver.asks_in()),
                 reached: (step.reached)(&snapshot, &bindings),
-                ended: ended(&snapshot, &bindings, scenario.ends),
+                ended: ended(&snapshot, &bindings, scenario.ends).filter(|(name, number, _)| {
+                    !refusal_to_come(&snapshot, scenario.refusals, name, *number)
+                }),
                 question: question.clone(),
                 settled: settled(&snapshot),
                 progress: progress(&snapshot),
@@ -593,6 +595,29 @@ pub fn ended(
                     .then(|| ((*name).to_owned(), *number, state.to_owned()))
             })
         })
+}
+
+/// Whether the end of the task bound to `name` (number `number`) waits for a refusal the
+/// scenario reads of it: one of `refusals` is of that task, the chief has made no answered call
+/// of its action on it yet, and the chief's turn still runs. The stand-in chief that cancels a
+/// task and then asks to send it back may be seen with the task cancelled before its second
+/// command (GitHub's macOS runner, CI run 41798142126): the run waits for the call, or for the
+/// chief's turn to end, and a call that never came is red as ever.
+pub fn refusal_to_come(snapshot: &Snapshot, refusals: &[Refused], name: &str, number: i64) -> bool {
+    let chief_at_work = !snapshot.lanes.iter().any(|lane| {
+        lane["participant"]["handle"] == "chief" && lane["activity"]["state"] == "idle"
+    });
+    let calls = observe::calls(&snapshot.events);
+    chief_at_work
+        && refusals
+            .iter()
+            .filter(|refused| refused.task == name)
+            .any(|refused| {
+                let path = format!("/api/tasks/{number}/{}", refused.action);
+                !calls.iter().any(|call| {
+                    call.participant == "chief" && call.method == "POST" && call.path == path
+                })
+            })
 }
 
 /// Whether the board is at rest: the chief idle, no window at work or starting, and nothing

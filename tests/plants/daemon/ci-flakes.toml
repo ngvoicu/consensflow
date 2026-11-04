@@ -40,6 +40,7 @@ stop-busy = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", 
 daemon-lib-stop-open = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::a_pass_that_never_ends"]
 stand-in-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "trust::"]
 xtask-suites-ci = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "--", "suites::tests::ci_puts"]
+xtask-suites-matrix = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "--", "suites::tests::ci_runs_the_live_matrix"]
 panes-keys = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::"]
 
 [[plant]]
@@ -288,3 +289,27 @@ runs = ["panes-keys"]
 file = "crates/cf-panes/src/pty/conpty.rs"
 find = '''Self::load("conpty.dll").or_else(|| Self::load("kernel32.dll"))'''
 replace = '''Self::load("kernel32.dll")'''
+
+# The live matrix's step runs a red case once more, and no other step does (T-1177, m-7388).
+
+[[plant]]
+name = "ci flakes: the live matrix's step runs no red case again"
+meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+runs = ["xtask-suites-matrix"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''--test-threads 4 --retries 1'''
+replace = '''--test-threads 4'''
+
+[[plant]]
+name = "ci flakes: another step runs a red case again"
+meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+runs = ["xtask-suites-matrix"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''      - run: cargo test -p cf-bridge --features local
+'''
+replace = '''      - run: cargo test -p cf-bridge --features local -- --retries 1
+'''
