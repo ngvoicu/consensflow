@@ -486,15 +486,10 @@ replace = """        let at = items
             .rposition(|item| item.id == stalled.item)
             .unwrap_or(items.len().saturating_sub(1));"""
 
-[[plant]]
-name = "pause closes: the relaunch looks nothing again after the host's answer"
-meant = "a_window_that_began_while_the_host_showed_its_screen_is_kept_and_never_relaunched"
-runs = ["engine-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = "        if self.forgotten(record) || !self.still_unbegun(participant, record, stalled, &fresh)? {"
-replace = "        if self.forgotten(record) || fresh.failed && fresh.shared {"
+# Retired by T-1199's round 4: "the relaunch looks nothing again after the host's answer". The
+# record's fresh read is asked of the stall once, with every other check, after the host's last
+# answer (the screen): that check's plant is "the relaunch kills on checks asked before the
+# host's last answer", and the check that came between the two reads is gone.
 
 [[plant]]
 name = "pause closes: the relaunch retires a window whose task was resumed since"

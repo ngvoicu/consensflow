@@ -700,14 +700,12 @@ impl Dispatcher {
         let (Some(pane), Some(window)) = (pane, window) else {
             return Ok(Relaunch::Not);
         };
-        // The record read afresh: the window may have begun since the look.
+        // The record read afresh: the window may have begun since the look. It is asked of
+        // the stall once the screen is read, with every other check.
         let asked = self.now();
         let Ok(fresh) = window.observe().await else {
             return Ok(Relaunch::Not);
         };
-        if self.forgotten(record) || !self.still_unbegun(participant, record, stalled, &fresh)? {
-            return Ok(Relaunch::Not);
-        }
         // What it runs, as the host and its harness say it now.
         if self.close_would_end(record, &fresh).await.is_some() {
             return Ok(Relaunch::Not);
