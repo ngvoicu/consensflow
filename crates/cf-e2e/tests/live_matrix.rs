@@ -206,7 +206,7 @@ mod tests {
     }
 
     /// A test's reports folder: a fresh temporary one, kept where a person reads a real run's
-    /// evidence (`app/src-tauri/target/live-reports`, which CI uploads) when the test fails:
+    /// evidence (`evals/reports/live-matrix`, which CI uploads) when the test fails:
     /// each window's last screen, the records, the ledger, the events and the daemon's last lines
     /// of the run that went red. Two reds of the field6 pair on GitHub's Windows runner kept
     /// nothing of their windows (CI runs 41787972093 and 41792519144, T-1226).
