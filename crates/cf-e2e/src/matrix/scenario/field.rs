@@ -16,17 +16,7 @@ use crate::matrix::observe::{Bind, Is};
 use crate::matrix::oracle::{self, Answered, Judged};
 
 use super::kit::{answered, brief_after, called, is, run, scenario, since, since_call};
-use super::{Extra, Known, Scenario, Step};
-
-const T1108: &str =
-    "T-1108 (wt/tier-fallback, I-7): a task whose tier was left goes to the nearest";
-const T1111: &str =
-    "T-1111 (wt/accept-failed, I-7): a failed task is accepted on the words of what was checked";
-const T1112: &str = "T-1112 (wt/transient-model-errors, I-7): a busy model waits and tries again, and fails nothing";
-const T1113: &str =
-    "T-1113 (wt/board-notices, I-7): a failure is told once, before what waits on it";
-const T1130: &str = "T-1130 (wt/brief-never-began, accepted, in no integration yet): a brief its window never began pauses its task";
-const T1117: &str = "T-1117 (wt/pause-keeps-work, I-7): a pause keeps a window that runs work";
+use super::{Extra, Scenario, Step};
 
 /// The chief's notes (from nobody) whose words hold `words`, oldest first.
 fn notes_with<'a>(judged: &'a Judged, words: &str) -> Vec<&'a serde_json::Value> {
@@ -220,23 +210,7 @@ pub fn field() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "T",
-                    what: "it is done",
-                    until: T1108,
-                },
-                Known {
-                    who: "T",
-                    what: "it went to the standard tester",
-                    until: T1108,
-                },
-                Known {
-                    who: "T",
-                    what: "the board logged that it changed its tier",
-                    until: T1108,
-                },
-            ],
+            &[],
         )
         .with_extra(&[Extra {
             agent: "matrix-tester-complex",
@@ -272,28 +246,7 @@ pub fn field() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "A",
-                    what: "the chief's first accept of it was done",
-                    until: T1111,
-                },
-                Known {
-                    who: "A",
-                    what: "it is accepted",
-                    until: T1111,
-                },
-                Known {
-                    who: "B",
-                    what: "it is done",
-                    until: T1111,
-                },
-                Known {
-                    who: "B",
-                    what: "its brief went in after the A was accepted",
-                    until: T1111,
-                },
-            ],
+            &[],
         )
         .ending(&["A"])
         .with_vars(WORKER_FAILS, &[]),
@@ -338,23 +291,7 @@ pub fn field() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "A",
-                    what: "it is done",
-                    until: T1112,
-                },
-                Known {
-                    who: "A",
-                    what: "it never failed",
-                    until: T1112,
-                },
-                Known {
-                    who: "A",
-                    what: "the chief was told its model is busy",
-                    until: T1112,
-                },
-            ],
+            &[],
         )
         .ending(&["A"]),
         // 5: A fails in a turn with B waiting on it; the chief is told of the failure once, first.
@@ -402,18 +339,7 @@ pub fn field() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "A",
-                    what: "the first note of its failure says it failed",
-                    until: T1113,
-                },
-                Known {
-                    who: "A",
-                    what: "one note tells its failure and what waits on it",
-                    until: T1113,
-                },
-            ],
+            &[],
         )
         .ending(&["A"]),
         // 7: B's window never begins its brief (still in its prompt's hooks).
@@ -465,18 +391,7 @@ pub fn field() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "B",
-                    what: "it is paused",
-                    until: T1130,
-                },
-                Known {
-                    who: "B",
-                    what: "the chief was told its window began no turn",
-                    until: T1130,
-                },
-            ],
+            &[],
         )
         .with_vars(&[], &[("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", "15000")]),
         // A pause of a turn that ignores it while a job of its runs: the window is kept.
@@ -530,18 +445,7 @@ pub fn field() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "A",
-                    what: "its window, which runs a job, is kept",
-                    until: T1117,
-                },
-                Known {
-                    who: "A",
-                    what: "the chief was told the window is kept for its work",
-                    until: T1117,
-                },
-            ],
+            &[],
         ),
     ]
 }

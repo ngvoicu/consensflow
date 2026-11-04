@@ -8,13 +8,7 @@ use crate::matrix::observe::{self, Bind, Is};
 use crate::matrix::oracle::{self, Answered, Judged};
 
 use super::kit::{answered, called, is, result_says, run, scenario};
-use super::{Known, Scenario, Step};
-
-const T1122: &str =
-    "T-1122 (wt/decide-a-done-task in wt/board-cli-reports, I-7): cancel takes a done task";
-const T1139: &str =
-    "T-1139 (wt/resume-shows-working, I-7): a resumed task shows working while its window works";
-const T1119: &str = "T-1119 (wt/questions-not-results, I-7): cf task finish takes a waiting task";
+use super::{Scenario, Step};
 
 const ONE: &[Bind] = &[Bind {
     name: "A",
@@ -227,7 +221,7 @@ pub fn interrupts() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[Known { who: "A", what: "it showed working within 5 s of the chief's resume", until: T1139 }],
+            &[],
         ),
         // Cancel of an open, a working, a paused and a done task.
         scenario(
@@ -268,10 +262,7 @@ pub fn interrupts() -> Vec<Scenario> {
                 checks
             },
             &[],
-            &[
-                Known { who: "D", what: "the chief's first cancel of it was done", until: T1122 },
-                Known { who: "D", what: "it is cancelled", until: T1122 },
-            ],
+            &[],
         ).ending(&["O", "W", "P", "D"]),
         // Edit of an open task: the brief its window is given is the edited one.
         scenario(
@@ -345,10 +336,7 @@ pub fn interrupts() -> Vec<Scenario> {
                 checks
             },
             &[],
-            &[
-                Known { who: "Q", what: "the chief's first finish of it was done", until: T1119 },
-                Known { who: "Q", what: "it is done", until: T1119 },
-            ],
+            &[],
         ),
     ]
 }

@@ -10,10 +10,7 @@ use crate::matrix::oracle::{self, Answered};
 use super::kit::{
     answered, brief_after, called, is, needs, result_says, run, same_window, scenario,
 };
-use super::{Known, Scenario, Step};
-
-/// The work whose landing turns field report 2's known reds green.
-const T1110: &str = "T-1110 (wt/cf-repeated-flags, I-7): every --needs given is kept";
+use super::{Scenario, Step};
 
 /// The scenarios of LMX-09.
 pub fn order() -> Vec<Scenario> {
@@ -89,10 +86,7 @@ pub fn order() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known { who: "C", what: "it needs A and B", until: T1110 },
-                Known { who: "C", what: "its brief went in after the A was accepted", until: T1110 },
-            ],
+            &[],
         ),
         // A waits for W; B is added --before A, so A waits for B too, and goes in only when both
         // are accepted.

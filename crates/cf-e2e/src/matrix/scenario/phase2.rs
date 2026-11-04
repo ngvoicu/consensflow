@@ -40,12 +40,8 @@ const NUDGE: &str = "Please run the command I gave last: the board does not show
 /// A real chief's deadline for one of these scenarios (the stand-ins' is the runner's own).
 const DEADLINE: Duration = Duration::from_secs(20 * 60);
 
-/// The work whose landing turns field report 6's known reds green.
-const T1118: &str = "T-1118 (I-7): a follow-up of a done task waits for its acceptance";
 const T1122: &str =
     "T-1122 (I-7): cancel takes a done task, and a refusal names the task holding the window";
-const T1128: &str =
-    "T-1128 (I-7): a window takes no follow-up while a task it did is done and undecided";
 
 /// The task bound to `name`, the `nth`, as a stand-in's or a person's words name it.
 fn t(bindings: &Bindings, name: &str, nth: usize) -> String {
@@ -477,18 +473,7 @@ pub fn field6() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "F",
-                    what: "it is open",
-                    until: T1118,
-                },
-                Known {
-                    who: "F",
-                    what: "no window was given its brief",
-                    until: T1118,
-                },
-            ],
+            &[],
         ),
         // D's acceptance releases F, which then goes into the window that did D once.
         scenario(
@@ -518,11 +503,7 @@ pub fn field6() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[Known {
-                who: "F",
-                what: "its brief went in after the D was accepted",
-                until: T1118,
-            }],
+            &[],
         ),
         // With nothing waiting for it, a done D is cancelled, not accepted, and its result kept.
         scenario(
@@ -537,18 +518,7 @@ pub fn field6() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "D",
-                    what: "the chief's first cancel of it was done",
-                    until: T1122,
-                },
-                Known {
-                    who: "D",
-                    what: "it is cancelled",
-                    until: T1122,
-                },
-            ],
+            &[],
         ).ending(&["D"]),
         // While F waits for D, cancelling D is refused (`waited-for`); F cancelled, D is.
         scenario(
@@ -578,33 +548,7 @@ pub fn field6() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "D",
-                    what: "the chief's first cancel of it was refused with waited-for",
-                    until: T1118,
-                },
-                Known {
-                    who: "F",
-                    what: "the chief's first cancel of it was done",
-                    until: T1118,
-                },
-                Known {
-                    who: "F",
-                    what: "it is cancelled",
-                    until: T1118,
-                },
-                Known {
-                    who: "D",
-                    what: "the chief's second cancel of it was done",
-                    until: T1122,
-                },
-                Known {
-                    who: "D",
-                    what: "it is cancelled",
-                    until: T1122,
-                },
-            ],
+            &[],
         ).ending(&["D", "F"]),
         // A accepted; a newer D in A's window done and undecided; F added after A waits on the
         // board until D is accepted.
@@ -693,11 +637,7 @@ pub fn field6() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[Known {
-                who: "after A",
-                what: "its brief went in after the after A was accepted",
-                until: T1128,
-            }],
+            &[],
         ),
         // The done D and the paused P in one window: sending D back is refused `session-busy`,
         // naming P, paused; cancelling D keeps its result and leaves P paused. The shape is built

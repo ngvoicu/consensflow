@@ -7,10 +7,7 @@ use crate::matrix::observe::{Bind, Is};
 use crate::matrix::oracle::{self, Judged};
 
 use super::kit::{answered, is, run, scenario};
-use super::{Known, Scenario, Step};
-
-const T1119: &str =
-    "T-1119 (wt/questions-not-results, I-7): a turn that ends asking is a question, not a result";
+use super::{Scenario, Step};
 
 /// The chief's messages of `kind` from a session of the window that has the task bound to `name`.
 fn from_window<'a>(judged: &'a Judged, name: &str, kind: &str) -> Vec<&'a serde_json::Value> {
@@ -90,11 +87,7 @@ pub fn questions() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known { who: "A", what: "it is waiting", until: T1119 },
-                Known { who: "A", what: "its last words reached the chief as a question", until: T1119 },
-                Known { who: "A", what: "they are no result", until: T1119 },
-            ],
+            &[],
         ),
         // The chief asks an advisor; the advisor's answer comes back as the advice task's result.
         scenario(

@@ -19,10 +19,7 @@ use crate::matrix::observe::{self, Bind, Is, Snapshot};
 use crate::matrix::oracle::{self, Judged};
 
 use super::kit::{answered, is, run, scenario, since};
-use super::{Known, Scenario, Step};
-
-const T1118: &str = "T-1118 (wt/board-cli-reports, a3-1): the transcript is whole and in order, and a title follows its task's scope";
-const T1113: &str = "T-1113 (wt/board-notices, a3-1): a chief that waits on the human is not nudged again and again";
+use super::{Scenario, Step};
 
 /// The results of the task `number` that reached the chief's inbox.
 fn results(snapshot: &Snapshot, number: Option<i64>) -> usize {
@@ -142,18 +139,7 @@ pub fn reports() -> Vec<Scenario> {
             &[Bind { name: "A", is: Is::Pool("worker"), requester: "chief" }],
             transcript_checks,
             &[],
-            &[
-                Known {
-                    who: "A",
-                    what: "the last two items of its transcript are the brief it was sent back with and its answer",
-                    until: T1118,
-                },
-                Known {
-                    who: "A",
-                    what: "its whole transcript is in the order its window wrote it",
-                    until: T1118,
-                },
-            ],
+            &[],
         )
         .with_vars(&[("CF_TEST_RESUMED_ANEW", "matrix-worker")], &[]),
         // T-1118 item 3: A done; its scope grew, and the chief gives it a title that says so.
@@ -203,10 +189,7 @@ pub fn reports() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known { who: "A", what: "its title is the one the chief gave it", until: T1118 },
-                Known { who: "A", what: "its history keeps the title it had", until: T1118 },
-            ],
+            &[],
         ),
         // Field report 5's nudges (T-1113): A done and undecided; the chief puts the decision to
         // the human in a note, which nobody reads; the human turns the wake-up calls on, a minute
@@ -284,14 +267,7 @@ pub fn reports() -> Vec<Scenario> {
                 ]
             },
             &[],
-            &[
-                Known {
-                    who: "chief",
-                    what: "no second call came while its note to the human was unread, before three were skipped",
-                    until: T1113,
-                },
-                Known { who: "chief", what: "a call was skipped for its unread note, and the skip logged", until: T1113 },
-            ],
+            &[],
         )
         .waiting(std::time::Duration::from_secs(360)),
     ]
