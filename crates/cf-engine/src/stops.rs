@@ -65,6 +65,7 @@ use cf_base::js;
 use cf_harness::contract::{Observed, Over};
 use cf_harness::records::{Reading, Role};
 use cf_ledger::{LedgerError, NewNote, ParticipantView, ProjectView, Stop};
+use serde_json::Value;
 
 use crate::background::close_would_end;
 use crate::delivery_text::marker_of;
@@ -80,6 +81,29 @@ const ROUND_EVERY_MS: i64 = 3_000;
 /// How often a window that ignored every round, running nothing ConsensFlow can see, is
 /// asked again to stop: three fresh rounds.
 const KEPT_EVERY_MS: i64 = 60_000;
+/// Whether the host's look at a window's screen, the last before its kill, shows it untouched
+/// for longer than `span` ms (since the record's fresh read was asked): no paste on its way,
+/// none of the human's words unsent, no key of the human's, nothing printed. A host that says
+/// nothing of what the window printed gives no such evidence (T-1223's P1-1).
+fn untouched_since(snapshot: &Value, span: i64) -> bool {
+    if js::truthy(snapshot.get("unsent")) || js::truthy(snapshot.get("pasteInFlight")) {
+        return false;
+    }
+    let span = span.max(0) as f64;
+    let quiet = snapshot.get("outputQuietMs").and_then(Value::as_f64);
+    if !quiet.is_some_and(|quiet| quiet > span) {
+        return false;
+    }
+    let keys = snapshot.get("humanWrites").and_then(Value::as_array);
+    !keys.is_some_and(|keys| {
+        keys.iter().any(|key| {
+            key.get("agoMs")
+                .and_then(Value::as_f64)
+                .is_none_or(|ago| ago <= span)
+        })
+    })
+}
+
 /// How often a window kept running its work is asked again what it runs.
 const RECHECK_EVERY_MS: i64 = 10_000;
 
@@ -578,8 +602,8 @@ impl Dispatcher {
     /// Whether the window is still the stall's, as `observed` shows it: the window of the
     /// stall's generation, nothing being pasted into it, no dialog of its own, its record read
     /// and its own, nothing in it after the message (no word of an answer since, T-1220's
-    /// P1-2); and in the ledger the task paused at the stall's stop, in its hands, the message
-    /// its latest.
+    /// P1-2), no job or agent of its harness's running (T-1223's P1-1); and in the ledger the
+    /// task paused at the stall's stop, in its hands, the message its latest.
     fn still_unbegun(
         &self,
         participant: &ParticipantView,
@@ -602,6 +626,10 @@ impl Dispatcher {
             || observed.shared
             || observed.reading.as_deref().is_none_or(Reading::read_failed)
         {
+            return Ok(false);
+        }
+        let pending = observed.pending();
+        if pending.jobs > 0 || pending.agents > 0 {
             return Ok(false);
         }
         let items = observed.items();
@@ -631,15 +659,20 @@ impl Dispatcher {
     }
 
     /// The window that began no turn on a message ignored every round of ConsensFlow's
-    /// stop of it, running nothing. It is relaunched where it still is the stall's, as
-    /// [`Dispatcher::still_unbegun`] asks before anything, again after the host's look at its
-    /// screen (which holds none of the human's words unsent, and answers) and after a fresh
-    /// look at its record; and where that message was never relaunched before (one relaunch
-    /// for a delivery, T-1220's P3-7). Then the window is retired, and the ledger, in one
-    /// write that asks every condition of the stall again (a newer pause, a tell, a hold or a
-    /// resume since, T-1220's P1-3), gives that very message back to the window's keeping and
-    /// queues the task for it: the window opened again is given it, as it was, once
-    /// (T-1220's P2-5, P2-6), and its requester is told as it comes back
+    /// stop of it, running nothing. It is relaunched only on evidence taken after the last
+    /// await before its kill (T-1223's P1-1), and where that message was never relaunched
+    /// before (one relaunch for a delivery, T-1220's P3-7): its record read afresh, still the
+    /// stall's ([`Dispatcher::still_unbegun`]); nothing it runs that a close would end, as the
+    /// host and its harness say after that read; and last the host's look at its screen,
+    /// which has printed nothing, taken no key of the human's and no paste, and holds none of
+    /// the human's words unsent, since that read was asked ([`untouched_since`]). Between
+    /// that look and the kill nothing is awaited, and every check of the window and the
+    /// ledger is asked again. Where any of it cannot be had, the window is kept, as any window
+    /// that ignores a pause, and the human told so. Then the window is retired, and the
+    /// ledger, in one write that asks every condition of the stall again (a newer pause, a
+    /// tell, a hold or a resume since, T-1220's P1-3), gives that very message back to the
+    /// window's keeping and queues the task for it: the window opened again is given it, as
+    /// it was, once (T-1220's P2-5, P2-6), and its requester is told once it has arrived
     /// ([`Dispatcher::tell_relaunched`]). A ledger that refuses leaves the task as it is,
     /// and the requester is told so.
     async fn relaunch_unbegun(
@@ -669,19 +702,28 @@ impl Dispatcher {
         let (Some(pane), Some(window)) = (pane, window) else {
             return Ok(Relaunch::Not);
         };
-        // A screen the host does not show, or the human's words typed and not sent: kept.
-        let snapshot = self.snapshot_now(&pane, false).await;
-        let Some(snapshot) = snapshot.filter(serde_json::Value::is_object) else {
-            return Ok(Relaunch::Not);
-        };
-        if js::truthy(snapshot.get("unsent")) || self.forgotten(record) {
-            return Ok(Relaunch::Not);
-        }
-        // Looked at again, after the host's answer: the window may have begun meanwhile.
+        // The record read afresh: the window may have begun since the look.
+        let asked = self.now();
         let Ok(fresh) = window.observe().await else {
             return Ok(Relaunch::Not);
         };
         if self.forgotten(record) || !self.still_unbegun(participant, record, stalled, &fresh)? {
+            return Ok(Relaunch::Not);
+        }
+        // What it runs, as the host and its harness say it now.
+        if self.close_would_end(record, &fresh).await.is_some() {
+            return Ok(Relaunch::Not);
+        }
+        // Last, the screen: untouched since the fresh read was asked, or kept. Nothing is
+        // awaited after it before the kill.
+        let snapshot = self.snapshot_now(&pane, false).await;
+        let Some(snapshot) = snapshot.filter(Value::is_object) else {
+            return Ok(Relaunch::Not);
+        };
+        if self.forgotten(record)
+            || !untouched_since(&snapshot, self.now() - asked)
+            || !self.still_unbegun(participant, record, stalled, &fresh)?
+        {
             return Ok(Relaunch::Not);
         }
         if !self.retire(record).await? {

@@ -395,10 +395,13 @@ fn a_window_that_began_while_the_host_showed_its_screen_is_kept_and_never_relaun
     stalled(&context, &tiers);
     let killed = context.host.killed().len();
     let adapter = std::rc::Rc::clone(&context.adapter);
+    let host = std::rc::Rc::clone(&context.host);
     *context.host.on_request.borrow_mut() = Some(std::rc::Rc::new(
         move |op: &str, body: &serde_json::Value| {
             // The relaunch's own look at the screen asks for no tail.
             if op == "pane.snapshot" && body.get("tail").is_none() {
+                // What begins prints: the host's answer says so, of the screen as it is now.
+                host.set_snapshot(json!({ "outputQuietMs": 0 }));
                 let item = adapter.item(Role::Assistant, "Starting on the lexer");
                 adapter.with("zeus", |agent| {
                     if !agent
@@ -417,42 +420,51 @@ fn a_window_that_began_while_the_host_showed_its_screen_is_kept_and_never_relaun
     assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
 }
 
-/// `change` is made of zeus's window while the host answers the relaunch's own look at its
-/// screen (the only one that asks for no tail): what the window is after the stall, once the
-/// look that kept nothing from the relaunch is past.
-fn during_the_relaunchs_look(
+/// `change` is made of zeus's window (its record, through the fake adapter, or its screen,
+/// through the fake host) as the relaunch reads its record afresh: the look that comes after
+/// the round's own ask of what the window runs (`left_running`), whatever the order of the
+/// relaunch's other steps. Made as the read is asked, it is in what the read answers; and
+/// the host's answers after it say it.
+fn during_the_fresh_read(
     context: &Context,
-    change: impl Fn(&cf_engine::testing::FakeAdapter) + 'static,
+    change: impl Fn(&cf_engine::testing::FakeAdapter, &cf_engine::testing::FakeHost) + 'static,
 ) {
+    let background = std::rc::Rc::clone(&context.background);
     let adapter = std::rc::Rc::clone(&context.adapter);
-    *context.host.on_request.borrow_mut() = Some(std::rc::Rc::new(
-        move |op: &str, body: &serde_json::Value| {
-            if op == "pane.snapshot" && body.get("tail").is_none() {
-                change(&adapter);
-            }
-        },
-    ));
+    let host = std::rc::Rc::clone(&context.host);
+    let seen = std::cell::Cell::new(background.left_asked().len());
+    let made = std::cell::Cell::new(false);
+    let _ = context.adapter.observe_holds.hold(move |_| {
+        let asked = background.left_asked().len();
+        let fresh = asked > seen.get();
+        seen.set(asked);
+        if fresh && !made.get() {
+            made.set(true);
+            change(&adapter, &host);
+        }
+        false
+    });
 }
 
 #[test]
-fn a_window_whose_record_cannot_be_read_after_the_hosts_answer_is_kept_and_never_relaunched() {
+fn a_window_whose_record_cannot_be_read_afresh_is_kept_and_never_relaunched() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     stalled(&context, &tiers);
     let killed = context.host.killed().len();
-    during_the_relaunchs_look(&context, |adapter| adapter.unread("zeus", true));
+    during_the_fresh_read(&context, |adapter, _| adapter.unread("zeus", true));
     rounds(&context);
     assert_eq!(context.host.killed().len(), killed, "kept, never retired");
     assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
 }
 
 #[test]
-fn a_window_showing_a_dialog_of_its_own_after_the_hosts_answer_is_kept_and_never_relaunched() {
+fn a_window_showing_a_dialog_of_its_own_when_read_afresh_is_kept_and_never_relaunched() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     stalled(&context, &tiers);
     let killed = context.host.killed().len();
-    during_the_relaunchs_look(&context, |adapter| {
+    during_the_fresh_read(&context, |adapter, _| {
         adapter.with("zeus", |agent| {
             agent.waiting = Some(cf_harness::contract::Waiting {
                 reason: Some("Allow this command?".to_owned()),
@@ -462,4 +474,107 @@ fn a_window_showing_a_dialog_of_its_own_after_the_hosts_answer_is_kept_and_never
     rounds(&context);
     assert_eq!(context.host.killed().len(), killed, "kept, never retired");
     assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
+}
+
+/// The relaunch asked of a stalled window whose `change` comes as said: kept, never retired.
+fn kept_through(context: &Context, tiers: &Tiers, change: impl FnOnce(&Context)) {
+    stalled(context, tiers);
+    let killed = context.host.killed().len();
+    change(context);
+    rounds(context);
+    kept(context, tiers, killed);
+}
+
+#[test]
+fn a_job_begun_while_the_host_shows_the_screen_keeps_the_window() {
+    // T-1223's P1-1, its first probe: the harness starts a job of its own as the host answers
+    // the relaunch's look at the screen. A job begun prints its line: the screen says so.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    kept_through(&context, &tiers, |context| {
+        let adapter = std::rc::Rc::clone(&context.adapter);
+        let host = std::rc::Rc::clone(&context.host);
+        *context.host.on_request.borrow_mut() = Some(std::rc::Rc::new(
+            move |op: &str, body: &serde_json::Value| {
+                if op == "pane.snapshot" && body.get("tail").is_none() {
+                    adapter.with("zeus", |agent| agent.pending.jobs = 1);
+                    host.set_snapshot(json!({ "outputQuietMs": 0 }));
+                }
+            },
+        ));
+    });
+}
+
+#[test]
+fn a_job_begun_while_its_record_is_read_afresh_keeps_the_window() {
+    // The job is in the record the relaunch reads afresh (`pending.jobs`): work a kill ends.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    kept_through(&context, &tiers, |context| {
+        during_the_fresh_read(context, |adapter, _| {
+            adapter.with("zeus", |agent| agent.pending.jobs = 1);
+        });
+    });
+}
+
+#[test]
+fn the_humans_words_typed_while_its_record_is_read_afresh_keep_the_window() {
+    // T-1223's P1-1, its second probe: the screen held none of the human's words unsent until
+    // the record's fresh read, and holds some once it is answered.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    kept_through(&context, &tiers, |context| {
+        during_the_fresh_read(context, |_, host| {
+            host.set_snapshot(json!({ "outputQuietMs": 600_000, "unsent": true }));
+        });
+    });
+}
+
+#[test]
+fn a_window_that_printed_while_its_record_was_read_afresh_is_kept() {
+    // The screen is the last look before the kill: it has printed nothing since the record's
+    // fresh read was asked, or the window is kept.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    kept_through(&context, &tiers, |context| {
+        during_the_fresh_read(context, |_, host| {
+            host.set_snapshot(json!({ "outputQuietMs": 0 }));
+        });
+    });
+}
+
+#[test]
+fn a_key_the_human_pressed_while_its_record_was_read_afresh_keeps_the_window() {
+    // Any key of the human's since the record's fresh read was asked, sent or not.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    kept_through(&context, &tiers, |context| {
+        during_the_fresh_read(context, |_, host| {
+            host.set_snapshot(json!({
+                "outputQuietMs": 600_000,
+                "humanWrites": [{ "agoMs": 0, "length": 1, "classes": ["control"] }],
+            }));
+        });
+    });
+}
+
+#[test]
+fn a_paste_on_its_way_into_the_window_keeps_it() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    kept_through(&context, &tiers, |context| {
+        during_the_fresh_read(context, |_, host| {
+            host.set_snapshot(json!({ "outputQuietMs": 600_000, "pasteInFlight": true }));
+        });
+    });
+}
+
+#[test]
+fn a_screen_that_says_nothing_of_its_output_keeps_the_window() {
+    // No evidence the window printed nothing since: none to retire it on.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    kept_through(&context, &tiers, |context| {
+        during_the_fresh_read(context, |_, host| host.set_snapshot(json!({})));
+    });
 }
