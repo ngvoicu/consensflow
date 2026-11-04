@@ -30,7 +30,6 @@
 
 use std::time::Duration;
 
-#[cfg(unix)]
 use cf_e2e::live::members::{descending_from, Identity, Machine, ThisMachine};
 use cf_e2e::rig::{Config, Held, Project, Rig, OPEN};
 #[cfg(unix)]

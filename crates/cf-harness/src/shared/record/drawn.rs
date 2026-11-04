@@ -108,11 +108,11 @@ impl Detail {
 }
 
 /// The most characters a header holds.
-pub const HEADER_MAX: usize = 256;
+pub(crate) const HEADER_MAX: usize = 256;
 
 /// What a call does, as its header says it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action<'a> {
+pub(crate) enum Action<'a> {
     /// A command a shell runs: `$ cmd`.
     Shell(&'a str),
     /// A file read, from a line and for some lines where the call says: `read path:from-to`.
@@ -134,7 +134,7 @@ pub enum Action<'a> {
 
 /// The header of a call that does `action`: its first line, and "…" where it says more
 /// than a line or more than [`HEADER_MAX`] characters.
-pub fn header(action: Action<'_>) -> Arc<str> {
+pub(crate) fn header(action: Action<'_>) -> Arc<str> {
     let said = match action {
         Action::Shell(command) => format!("$ {command}"),
         Action::Read { path, from, lines } => match (from, lines) {
@@ -178,7 +178,7 @@ fn one_line(text: &str, max: usize) -> String {
 /// as some harnesses write it), for a harness whose tools are not this module's to know by
 /// name: a call that gives a command is a shell's; one named for reading, editing or
 /// writing a file and that names one is that; any other is its name and what it was given.
-pub fn guess(name: &str, arguments: Option<&Value>) -> Arc<str> {
+pub(crate) fn guess(name: &str, arguments: Option<&Value>) -> Arc<str> {
     let parsed;
     let arguments = match arguments {
         Some(Value::String(text)) => {
@@ -277,7 +277,7 @@ fn shell_words(words: &[Value]) -> String {
 }
 
 /// A tool's detail: its name and header, how it stands, and what else its record says.
-pub fn tool(name: &str, header: Arc<str>, status: Option<Status>) -> Detail {
+pub(crate) fn tool(name: &str, header: Arc<str>, status: Option<Status>) -> Detail {
     Detail {
         name: Some(Arc::from(name)),
         header: Some(header),
@@ -288,14 +288,14 @@ pub fn tool(name: &str, header: Arc<str>, status: Option<Status>) -> Detail {
 
 /// The time between two of a record's times, in milliseconds since the epoch: none where
 /// either is none or the second comes first.
-pub fn took(called: Option<i64>, returned: Option<i64>) -> Option<u64> {
+pub(crate) fn took(called: Option<i64>, returned: Option<i64>) -> Option<u64> {
     let (called, returned) = (called?, returned?);
     u64::try_from(returned.checked_sub(called)?).ok()
 }
 
 /// An item only the history shows: of `role` as no reader of the conversation's words takes
 /// one, with `detail`.
-pub fn beside_item(
+pub(crate) fn beside_item(
     id: Arc<str>,
     role: Role,
     text: &str,

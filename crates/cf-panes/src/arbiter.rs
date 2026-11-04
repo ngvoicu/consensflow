@@ -1453,11 +1453,14 @@ mod tests {
         observed: mpsc::Sender<RecordedWrite>,
         /// The simulated clock its writes are stamped from, where a test has one.
         clock: Option<Arc<SimClock>>,
-        /// The window behind the pane, where a test plays one: its output clock, and the moments
-        /// it prints at, after the first write it is given.
-        /// Whether those prints change what its screen shows.
-        window: Mutex<Option<(Arc<OutputClock>, Vec<Duration>, bool)>>,
+        /// The window behind the pane, where a test plays one: its output clock, the moments it
+        /// prints at, after the first write it is given, and whether those prints change what its
+        /// screen shows.
+        window: Mutex<Option<PlayedWindow>>,
     }
+
+    /// A window a test plays behind a pane ([`RecordingWriter::window`]).
+    type PlayedWindow = (Arc<OutputClock>, Vec<Duration>, bool);
 
     struct GatedRecordingWriter {
         attempts: AtomicUsize,

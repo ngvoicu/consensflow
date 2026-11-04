@@ -6,8 +6,6 @@
 //! for a delivery. A tell or a pause takes the task out of its hands. Where any of that fails,
 //! the window is kept as any window that ignores a pause, and nothing is relaunched.
 
-use std::rc::Rc;
-
 use cf_engine::testing::{Context, Gate};
 use cf_harness::records::Role;
 use serde_json::json;
@@ -962,7 +960,7 @@ fn a_relaunchs_retirement_is_never_said_to_be_a_signal_from_outside_consensflow(
         "queued",
         "given back, its window still to go"
     );
-    let host = Rc::clone(&context.host);
+    let host = std::rc::Rc::clone(&context.host);
     context.run(async move { host.exited(retired).await });
     for _ in 0..3 {
         context.pass().unwrap();
