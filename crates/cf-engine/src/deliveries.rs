@@ -2017,14 +2017,19 @@ impl Dispatcher {
     pub(crate) fn fail_task(
         &self,
         project: &ProjectView,
+        participant: i64,
         task: &TaskView,
         because: &str,
     ) -> Result<(), EngineError> {
+        // The stop the window was asked for the task is settled by the give-up, which takes
+        // the task out of its hands (T-1223's P2-4).
+        let owed = self.owed_at_departure(participant, task.number)?;
         // The ledger tells the requester, with the words that went (T-437).
         self.seams
             .ledger
             .borrow_mut()
             .give_up_task(project.id, task.number, because)?;
+        self.settled_at_departure(participant, owed);
         Ok(())
     }
 

@@ -303,6 +303,11 @@ pub(crate) struct WindowPart {
     /// pays the stop (`stops`). A later look that reads the message taken back takes it
     /// back then.
     pub(crate) paid_untaken: Option<Stop>,
+    /// The stall ConsensFlow's own pause made of it for a message it began no turn on
+    /// (`never_began`): bound to that message, to its item in the record and to this window's
+    /// generation. A window that ignores every round of that stop, running nothing and still
+    /// on nothing, is relaunched (`stops`), never kept.
+    pub(crate) stalled: Option<crate::stops::Stalled>,
     /// The rounds the stop it owes has had.
     pub(crate) interrupted: Option<Interrupted>,
     /// The stop it ignored in every round, while it lasts.
@@ -383,6 +388,7 @@ impl Default for WindowPart {
             trust_sure: false,
             stopped: None,
             paid_untaken: None,
+            stalled: None,
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
@@ -533,6 +539,7 @@ impl Dispatcher {
             window.hidden = false;
             window.settled = false;
             window.stopped = None;
+            window.stalled = None;
             window.interrupted = None;
             window.unstopped = None;
             window.owner = None;
@@ -929,6 +936,10 @@ impl Dispatcher {
             part.conversation = conversation_id;
             part.unproven = resumed_on.is_some() && !proven;
         }
+        // A window relaunched for a message it began no turn on (`stops`) came back: on its
+        // conversation, or afresh where its harness held it no more. It is told once that
+        // message has arrived.
+        self.relaunched_back(record, resumed);
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
@@ -1066,15 +1077,29 @@ impl Dispatcher {
             match self.kept_apart(project, participant, found, before.as_ref(), first)? {
                 Kept::On(conversation) => conversation,
                 Kept::Held => {
-                    // The task is paused, a stop the launch did not capture: the message it
-                    // began goes back to wait for the chief's word, and the launch is over.
-                    self.launch_over(
+                    // The task is held for the chief's word, which asks no stop (T-1199): the
+                    // message the launch began goes back to wait for that word by hand, as
+                    // `launch_over` gives back only a message a new stop took, and the launch
+                    // is over.
+                    if self.launch_over(
                         record,
                         participant,
                         delivering,
                         stop,
                         "its task waits for the chief's word: the conversation it follows cannot be gone on in",
-                    )?;
+                    )? {
+                        return Ok(None);
+                    }
+                    if let Some(delivering) = delivering {
+                        self.give_back(
+                            delivering.message,
+                            "its task waits for the chief's word: the conversation it follows cannot be gone on in",
+                        )?;
+                        self.seams
+                            .ledger
+                            .borrow_mut()
+                            .launch_called_off(delivering.message)?;
+                    }
                     return Ok(None);
                 }
             }

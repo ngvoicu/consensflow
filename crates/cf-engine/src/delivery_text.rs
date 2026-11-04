@@ -217,6 +217,35 @@ const PASTED: &str = "pasted_content";
 /// line. The attachments' sources are the next item of the record, which holds no header.
 const IMAGE: &str = "[Image #";
 
+/// The item a message taken back to be given again must come after to have arrived: the one
+/// its window's record held the copy that never began at (its receipt's `before`, written by
+/// a stall's relaunch). None for any other message.
+pub(crate) fn arrival_boundary(message: &MessageView) -> Option<&str> {
+    message
+        .receipt
+        .get("before")
+        .and_then(serde_json::Value::as_str)
+}
+
+/// The first of `rows`, in their order, that is the paste of a message (`is_paste`) and comes
+/// after its boundary (`before`, [`arrival_boundary`]) where `rows` hold that item (`id`);
+/// where they do not (a conversation opened afresh), any. The one rule every reader of an
+/// arrival keeps, the window's look, the record a switched window left, ConsensFlow's copy
+/// of the conversation and its harness's own record (a restart, a window's end, a Close):
+/// the copy that never began proves nothing of the delivery after it (T-1223's P2-2,
+/// T-1229's P2), and nor would the last copy that matches.
+pub(crate) fn arrived_among<'a, T>(
+    rows: &'a [T],
+    before: Option<&str>,
+    id: impl Fn(&T) -> &str,
+    is_paste: impl Fn(&T) -> bool,
+) -> Option<&'a T> {
+    let from = before
+        .and_then(|before| rows.iter().rposition(|row| id(row) == before))
+        .map_or(0, |at| at + 1);
+    rows[from..].iter().find(|row| is_paste(row))
+}
+
 /// Whether `text`, an item of what a window was given, is the paste of the
 /// message `message_id`, which proves it arrived: the message's own header begins
 /// it, as ConsensFlow pastes it, the lines of the window's text

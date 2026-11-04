@@ -257,6 +257,10 @@ const DEPARTED: &[(&str, &str)] = &[
         CHIEF_ON_NO_AGENT,
     ),
     (
+        "brings a tell to a task whose window is gone on that window's own conversation, still paused",
+        "the chief's tell takes over the pause ConsensFlow made when the window went, as the chief's own (a move to paused by the chief), and asks its stop of whatever window holds the task by then, where Node's left the pause ConsensFlow's (T-1199, T-1223's P2-3: a window the human brought back was never stopped for the tell)",
+    ),
+    (
         "gives a member on it no work, says why, and every pass goes on",
         "the note that T-1 waits for a free worker names the way out for a member on a harness ConsensFlow cannot open (`remove @hera from the staff and add a member on another harness`), where Node's named none (T-569, from Calliope's review of T-566)",
     ),

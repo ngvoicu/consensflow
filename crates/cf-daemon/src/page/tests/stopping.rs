@@ -77,7 +77,7 @@ async fn a_lane_has_unstopped_while_its_window_ignores_a_stop_and_in_no_other_la
 }
 
 #[tokio::test]
-async fn a_lane_whose_window_was_closed_for_a_stop_it_ignored_has_no_unstopped() {
+async fn a_lane_whose_kept_window_the_human_closes_has_no_unstopped() {
     LocalSet::new()
         .run_until(async {
             let (_home, env) = home_with("[]");
@@ -95,6 +95,14 @@ async fn a_lane_whose_window_was_closed_for_a_stop_it_ignored_has_no_unstopped()
                 context.pass().unwrap();
                 context.advance(3_100);
             }
+            // A pause never closes a window (T-1199): the one that ignored every round is
+            // kept, and its lane says so; the human's Close of the project closes it, and
+            // its lane says nothing of the stop then.
+            let zeus = lane(&app, project, "zeus").await;
+            assert_ne!(zeus["activity"]["state"], "closed", "{zeus}");
+            assert!(zeus.get("unstopped").is_some(), "{zeus}");
+            context.host.exits_showing(Some(0), None, None);
+            context.close_project(project).unwrap();
             let zeus = lane(&app, project, "zeus").await;
             assert_eq!(zeus["activity"]["state"], "closed", "{zeus}");
             assert_eq!(zeus.get("unstopped"), None, "{zeus}");

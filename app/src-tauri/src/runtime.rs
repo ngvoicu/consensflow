@@ -130,6 +130,8 @@ impl AppRuntime {
             }
         });
         let spent = waited.elapsed();
+        // The quit is the human's own shutdown, no pause: every window goes, one kept for a
+        // pause it ignored too (T-1199: a pause never closes a window; this does).
         let panes = Arc::clone(&self.panes);
         let reaped = finish_before_deadline(SHUTDOWN_REAP, move || reap_all(&panes));
         let inputs = Arc::clone(&self.inputs);

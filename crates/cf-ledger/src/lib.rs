@@ -73,6 +73,6 @@ pub use projects::{
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;
-pub use tasks::resumed_in_vain;
 pub use tasks::{reopen_or_accept, NewTask, RESUME_WORDS};
+pub use tasks::{resumed_in_vain, NEVER_BEGAN};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

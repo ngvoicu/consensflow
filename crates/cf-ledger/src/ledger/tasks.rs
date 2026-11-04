@@ -123,6 +123,40 @@ impl Ledger {
         tasks::pause_task(&mut self.store, project_id, number, by, because)
     }
 
+    /// ConsensFlow relaunches the window of T-`number` that began no turn on message
+    /// `message_id`, stopped by its own stop `seq`: that message goes back to the window's
+    /// keeping and the task is queued for it, or nothing moves where anything of the stall
+    /// changed (`not-relaunched`).
+    pub fn relaunch_stalled(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        participant_id: i64,
+        message_id: i64,
+        seq: i64,
+        item: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::relaunch_stalled(
+            &mut self.store,
+            project_id,
+            number,
+            participant_id,
+            message_id,
+            seq,
+            item,
+        )
+    }
+
+    /// Whether T-`number` was relaunched in its window: a message of it reached that window.
+    pub fn task_relaunched(&self, project_id: i64, number: i64) -> Result<bool, LedgerError> {
+        tasks::task_relaunched(&self.store, project_id, number)
+    }
+
+    /// Whether message `message_id` was relaunched once already.
+    pub fn was_relaunched(&self, project_id: i64, message_id: i64) -> Result<bool, LedgerError> {
+        tasks::was_relaunched(&self.store, project_id, message_id)
+    }
+
     /// ConsensFlow pauses a worker's task whose window it closed itself; in a
     /// suspended project, the human's Resume of the project resumes it. Says which
     /// stop the pause is ([`Ledger::unmark_pause`]).

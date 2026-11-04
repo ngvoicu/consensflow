@@ -260,7 +260,7 @@ impl Dispatcher {
         let mut told = Vec::new();
         for note in waiting {
             let shown = self
-                .recorded_paste_of(participant.id, note.id, None)
+                .recorded_paste_of(participant.id, note.id, None, None)
                 .await?;
             if let Some(item) = shown {
                 let begun = self.seams.ledger.borrow_mut().begin_delivery(note.id)?;

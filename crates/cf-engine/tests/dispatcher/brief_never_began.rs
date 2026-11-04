@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use crate::fixtures::{given, native_of, Tiers};
 
 /// The kit's arrival window, and a moment past it.
-const PAST_ARRIVAL: i64 = 31_000;
+pub(crate) const PAST_ARRIVAL: i64 = 31_000;
 
 /// The Enters pressed into windows.
 fn enters(context: &Context) -> usize {
@@ -51,7 +51,11 @@ fn message_of(text: &str) -> i64 {
 /// goes once T-1 is accepted to a window opened again on the conversation, whose record
 /// shows its brief and which begins nothing on it (`at_rest` says how its reader reads it).
 /// T-2 is working. The id of its brief.
-fn a_follow_up_whose_window_never_begins(context: &Context, tiers: &Tiers, at_rest: bool) -> i64 {
+pub(crate) fn a_follow_up_whose_window_never_begins(
+    context: &Context,
+    tiers: &Tiers,
+    at_rest: bool,
+) -> i64 {
     let project = tiers.project.id;
     context.host.exits_showing(Some(0), None, None);
     tiers.open();
@@ -364,11 +368,14 @@ fn a_brief_a_channel_harness_never_began_is_pressed_nothing_and_its_task_paused(
     );
 }
 
-/// A window read in flight that never began, whose pause's rounds it ignored too, is closed by
-/// them, as a pause closes any such: the resume opens a window on its conversation, and the
-/// task works again there, its brief above the resume's words.
+/// A window read in flight that never began, whose rounds of ConsensFlow's own stop it ignored
+/// too, running nothing, is relaunched on its conversation (T-1130's mend, kept by T-1199):
+/// nothing of a brief never begun can be lost. The task, in its hands still, is resumed with
+/// its brief again and goes on there by itself, and its requester is told of a relaunch,
+/// never of a close.
 #[test]
-fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_resumes_on_its_conversation() {
+fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched_on_its_conversation_and_goes_on_by_itself(
+) {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     a_follow_up_whose_window_never_begins(&context, &tiers, false);
@@ -383,20 +390,83 @@ fn a_task_paused_for_a_brief_its_window_read_in_flight_never_began_resumes_on_it
     assert_eq!(tiers.task(2).task.state, "paused");
     let session = tiers.assignee(2);
     let native = native_of(&context, tiers.id(&session));
+    let killed = context.host.killed().len();
+    context.adapter.never_begins.set(None);
+    context.host.exits_showing(Some(0), None, None);
     for _ in 0..6 {
         context.advance(5_000);
         context.pass().unwrap();
     }
-    context.adapter.never_begins.set(None);
-    context.resume_task(tiers.project.id, 2, "Begin it now");
-    for _ in 0..4 {
+    assert_eq!(context.host.killed().len(), killed + 1, "relaunched");
+    for _ in 0..3 {
         context.pass().unwrap();
     }
-    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(tiers.task(2).task.state, "working", "it goes on by itself");
     assert_eq!(tiers.assignee(2), session, "the same session");
     assert_eq!(
         native_of(&context, tiers.id(&session)),
         native,
         "on the same conversation"
     );
+    let last = given(&context, "zeus").pop().unwrap();
+    assert!(
+        last.contains("· T-2 · task from @chief]") && last.contains("Now the lexer"),
+        "the very brief, again: {last}"
+    );
+    let told: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.contains("relaunched"))
+        .collect();
+    assert_eq!(told.len(), 1, "{told:#?}");
+    assert!(
+        told[0].starts_with(&format!("T-2's window (@{session}) began no turn on m-"))
+            && told[0].contains("so ConsensFlow relaunched it on its conversation and gave it m-")
+            && told[0].ends_with("again. T-2 goes on by itself."),
+        "{}",
+        told[0]
+    );
+    let all = [tiers.notes("chief"), tiers.notes("human")].concat();
+    assert!(
+        all.iter()
+            .all(|note| !note.contains("closed it") && !note.contains("did not stop")),
+        "{all:#?}"
+    );
+}
+
+/// The chief's pause of a task whose window never began its brief is a pause: the window that
+/// ignores its rounds is kept and told, never relaunched; only ConsensFlow's own stop of a
+/// brief never begun relaunches.
+#[test]
+fn the_chiefs_pause_of_a_window_that_never_began_its_brief_keeps_it_and_relaunches_nothing() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, false);
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 600_000, "screenQuietMs": 600_000 }));
+    let killed = context.host.killed().len();
+    let opened = context.host.opened().len();
+    context.pause_task(tiers.project.id, 2);
+    for _ in 0..10 {
+        context.advance(5_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.host.killed().len(), killed, "kept");
+    assert_eq!(context.host.opened().len(), opened, "nothing relaunched");
+    assert!(context
+        .dispatcher
+        .unstopped(tiers.id(&tiers.assignee(2)))
+        .is_some());
+    assert_eq!(tiers.task(2).task.state, "paused");
+    let kept: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.contains("did not stop"))
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:#?}");
+    assert!(tiers
+        .notes("chief")
+        .iter()
+        .all(|note| !note.contains("relaunched")));
 }

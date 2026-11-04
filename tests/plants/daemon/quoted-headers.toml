@@ -40,8 +40,8 @@ runs = ["engine-dispatcher-quoted-headers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "            item.role == Role::User && is_paste_of(&item.text, message.id, first.as_deref())"
-replace = "            item.role == Role::User && item.text.contains(&crate::delivery_text::marker_of(message.id))"
+find = "            |item| item.role == Role::User && is_paste_of(&item.text, message.id, first.as_deref()),"
+replace = "            |item| item.role == Role::User && item.text.contains(&crate::delivery_text::marker_of(message.id)),"
 
 [[plant]]
 name = "quoted header: a window's record, read as it ends, has a header quoted in the human's words taken for the paste"
@@ -50,18 +50,18 @@ runs = ["engine-dispatcher-quoted-headers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        .find(|item| item.role == Role::User && is_paste_of(&item.text, message, first))"
-replace = "        .find(|item| item.role == Role::User && item.text.contains(&marker_of(message)))"
+find = "        |item| item.role == Role::User && is_paste_of(&item.text, message, first),"
+replace = "        |item| item.role == Role::User && item.text.contains(&marker_of(message)),"
 
 [[plant]]
 name = "quoted header: ConsensFlow's copy of a window, read as it ends, has a header quoted in the human's words taken for the paste"
-meant = "a_window_that_ends_takes_no_header_quoted_in_its_copy_for_the_paste"
+meant = "a_window_that_ends_takes_a_header_quoted_in_its_copy_after_the_hand_over_for_arrived_unproven"
 runs = ["engine-dispatcher-quoted-headers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "            .find(|(_, text)| is_paste_of(text, message.id, first.as_deref()));"
-replace = "            .next();"
+find = "            |(_, text)| is_paste_of(text, message.id, first.as_deref()),"
+replace = "            |_| true,"
 
 [[plant]]
 name = "quoted header: a header a message's words quote is the paste of the message it names"

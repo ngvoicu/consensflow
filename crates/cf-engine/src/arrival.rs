@@ -96,7 +96,7 @@ use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::deliveries::{Delivering, Enter, Uncleared, Unread};
-use crate::delivery_text::{header_shape, is_paste_of, marker_of};
+use crate::delivery_text::{arrival_boundary, arrived_among, header_shape, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -180,9 +180,16 @@ impl Dispatcher {
         } else {
             None
         };
-        let arrived = observed.items().iter().find(|item| {
-            item.role == Role::User && is_paste_of(&item.text, message.id, first.as_deref())
-        });
+        // A message taken back to be given again (a stall's relaunch) is received only by a
+        // copy after the one its window's record held (its receipt's `before`): the old copy a
+        // conversation kept proves nothing of the new delivery (T-1223's P2-2). Where the
+        // record holds the old copy no more (a conversation opened afresh), any copy is new.
+        let arrived = arrived_among(
+            observed.items(),
+            arrival_boundary(&message),
+            |item| &item.id,
+            |item| item.role == Role::User && is_paste_of(&item.text, message.id, first.as_deref()),
+        );
         let Some(arrived) = arrived else {
             return Ok(false);
         };
@@ -195,6 +202,8 @@ impl Dispatcher {
         let receipt = json!({ "item": &*arrived.id });
         self.confirm_delivered(&message, &receipt)?;
         record.delivery.borrow_mut().delivering = None;
+        // A relaunched window given its message again: its requester is told now, not before.
+        self.tell_relaunched(record, &message)?;
         self.changed();
         Ok(true)
     }
@@ -820,10 +829,12 @@ impl Dispatcher {
             _ => None,
         };
         let arrived = found.and_then(|found| {
-            found
-                .items
-                .iter()
-                .find(|item| item.role == Role::User && is_paste_of(&item.text, message.id, None))
+            arrived_among(
+                &found.items,
+                arrival_boundary(&message),
+                |item| &item.id,
+                |item| item.role == Role::User && is_paste_of(&item.text, message.id, None),
+            )
         });
         if let Some(arrived) = arrived {
             self.confirm_delivered(&message, &json!({ "item": &*arrived.id }))?;

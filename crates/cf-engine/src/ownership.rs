@@ -230,9 +230,14 @@ impl Dispatcher {
         // No task message of it ever reached a window: it is a follow-up, and what its brief
         // counts on is the window it follows. A task a window had (resumed, sent back) was
         // given to a window knowingly.
+        // A relaunch took its message back to give it again (`stops`): it was in a window.
         let never_in_a_window = !waiting.messages.iter().any(|message| {
             message.kind == "task" && matches!(message.state.as_str(), "delivered" | "read")
-        });
+        }) && !self
+            .seams
+            .ledger
+            .borrow()
+            .task_relaunched(project.id, number)?;
         if waiting.task.state == "queued" && never_in_a_window {
             // The pause and its note are one step of the ledger: the note is a pause note,
             // which a task that moves on while it is being delivered withdraws.

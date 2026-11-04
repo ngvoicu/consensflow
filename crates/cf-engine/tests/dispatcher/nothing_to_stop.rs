@@ -420,7 +420,7 @@ fn a_task_held_for_its_job_whose_next_turn_is_refused_presses_no_key_and_goes_on
 }
 
 #[test]
-fn a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task() {
+fn a_window_kept_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     context.create_task(
@@ -439,25 +439,25 @@ fn a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_
     rounds(&context);
     context.host.exits_showing(Some(0), None, None);
     context.pass().unwrap();
-    assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
+    assert!(context.host.killed().is_empty(), "a hung turn is kept");
     assert_eq!(
         closes_told(&context, project.id),
-        ["@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed."],
+        [KEPT[0]],
         "one note, in the human's words, and none to the chief"
     );
 }
 
-/// What the human and the chief read of a window closed for a stop it ignored, its
-/// task still paused.
-const CLOSED: [&str; 2] = [
-    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
-    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+/// What the human and the chief read of a window kept for a stop it ignored, running
+/// nothing ConsensFlow can see, its task still paused.
+const KEPT: [&str; 2] = [
+    "@zeus did not stop for T-1: its turn went on through the interrupt 3 times, and ConsensFlow can see nothing it runs: the host lists no work of its turn, and its harness no job or agent, so its harness may be hung (in a model request, or a tool it does not name). ConsensFlow keeps the window open and T-1 paused, closes nothing, and interrupts the turn again every minute. To end it now, delete @zeus's session.",
+    "T-1's window (@zeus) did not stop: its turn went on through the interrupt, and ConsensFlow can see nothing it runs (the host lists no work of its turn, its harness no job or agent): its harness may be hung. ConsensFlow keeps the window open and T-1 paused, closes nothing, and interrupts the turn again every minute; until then what it writes is not taken as T-1's result. `cf task resume T-1 \"…\"` gives the window your words once its turn ends; only the human can end it sooner, by deleting its session.",
 ];
 
 #[test]
-fn the_human_whose_pause_closed_a_chief_given_tasks_window_is_told_too_once() {
-    // The chief gave the task and hears of the close; the human paused it, and their
-    // own act closed the window and ended its work (the chief's call on T-644).
+fn the_human_whose_pause_kept_a_chief_given_tasks_window_is_told_too_once() {
+    // The chief gave the task and hears that the window is kept; the human paused it, and
+    // is told too: only the human can end it (the chief's call on T-644, T-1199).
     let context = Context::new();
     let project = working(&context);
     context.adapter.busy("zeus");
@@ -465,12 +465,12 @@ fn the_human_whose_pause_closed_a_chief_given_tasks_window_is_told_too_once() {
     rounds(&context);
     context.host.exits_showing(Some(0), None, None);
     context.pass().unwrap();
-    assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
-    assert_eq!(closes_told(&context, project), CLOSED, "one note to each");
+    assert!(context.host.killed().is_empty(), "a hung turn is kept");
+    assert_eq!(closes_told(&context, project), KEPT, "one note to each");
 }
 
 #[test]
-fn the_chief_whose_tell_closed_a_human_given_tasks_window_is_told_too_once() {
+fn the_chief_whose_tell_kept_a_human_given_tasks_window_is_told_too_once() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     context.create_task(
@@ -489,10 +489,6 @@ fn the_chief_whose_tell_closed_a_human_given_tasks_window_is_told_too_once() {
     rounds(&context);
     context.host.exits_showing(Some(0), None, None);
     context.pass().unwrap();
-    assert_eq!(context.host.killed().len(), 1, "a hung turn is closed");
-    assert_eq!(
-        closes_told(&context, project.id),
-        CLOSED,
-        "one note to each"
-    );
+    assert!(context.host.killed().is_empty(), "a hung turn is kept");
+    assert_eq!(closes_told(&context, project.id), KEPT, "one note to each");
 }

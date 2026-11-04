@@ -226,6 +226,26 @@ impl Context {
         self.run(finishing)
     }
 
+    /// ConsensFlow gives T-`number` up `because` its window's turn failed, as a look at a failed
+    /// turn does (`fail_task`): the give-up alone, at a moment a test chooses.
+    pub fn give_up_task(
+        &self,
+        project: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<(), EngineError> {
+        let project = self.dispatcher.known_project(project)?;
+        let thread = self
+            .ledger
+            .borrow()
+            .task(project.id, number)?
+            .expect("the task");
+        let handle = thread.task.assignee.clone().expect("its window's session");
+        let participant = self.id(project.id, &handle);
+        self.dispatcher
+            .fail_task(&project, participant, &thread.task, because)
+    }
+
     /// The human hides a session's terminal (`hideWindow`).
     pub fn hide_window(
         &self,

@@ -36,6 +36,9 @@ pub(crate) struct Record {
     /// The latest message of its working task, where its record shows nothing after it
     /// (`never_began`).
     pub(crate) never_began: RefCell<Option<Unbegun>>,
+    /// A relaunch of its window for a message it began no turn on, to be told once the
+    /// window is opened again, as it opens (`stops`).
+    pub(crate) relaunching: RefCell<Option<crate::stops::Relaunching>>,
 }
 
 impl Record {
@@ -51,6 +54,7 @@ impl Record {
             pending_switch: RefCell::new(None),
             held: RefCell::new(HeldPart::default()),
             never_began: RefCell::new(None),
+            relaunching: RefCell::new(None),
         })
     }
 }
