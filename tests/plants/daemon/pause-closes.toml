@@ -26,7 +26,13 @@
 #   its task is not resumed; or a pause's stop relaunches a window as the stall's does;
 # - a stop owed when its task left the window's hands is owed again when it comes back
 #   (the chief's Finish of a paused task, then its reopen), or the stop a look found is
-#   never kept;
+#   never kept, or the Finish settles nothing (T-1220's P2-4);
+# - T-1220's round: a tell or a pause takes no held or stalled task over (quota's reset,
+#   the relaunch); the relaunch is asked nothing again (a word of an answer since, unsent
+#   words, a screen or a record unread, a dialog, a look after the host's answer, a
+#   resumed task, a newer pause in the ledger's write); its message is relaunched twice;
+#   its note says nothing of a conversation lost; the kept note promises a task in another
+#   window's hands, or says nothing of a second stall;
 # - the live suite's cases against the stand-in agent (`crates/cf-e2e/tests/live_stops/
 #   midturn/`) read the lane over the stop, at whatever look the first came (T-403), and a
 #   close is read from the pane host's closes of the window, never from a note's words
@@ -56,11 +62,15 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                    (None, Kept::No) => Kept::Ignored,"
-replace = """                    (None, Kept::No) => {
+find = """
+                        Kept::Ignored
+                    }
+                };"""
+replace = """
                         self.retire(record).await?;
                         return Ok(());
-                    }"""
+                    }
+                };"""
 
 [[plant]]
 name = "pause closes: a window that ignores every round is closed, on the rig"
@@ -70,11 +80,15 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                    (None, Kept::No) => Kept::Ignored,"
-replace = """                    (None, Kept::No) => {
+find = """
+                        Kept::Ignored
+                    }
+                };"""
+replace = """
                         self.retire(record).await?;
                         return Ok(());
-                    }"""
+                    }
+                };"""
 
 [[plant]]
 name = "pause closes: a window that stopped is closed at rest"
@@ -243,11 +257,15 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                    (None, Kept::No) => Kept::Ignored,"
-replace = """                    (None, Kept::No) => {
+find = """
+                        Kept::Ignored
+                    }
+                };"""
+replace = """
                         self.retire(record).await?;
                         return Ok(());
-                    }"""
+                    }
+                };"""
 
 [[plant]]
 name = "pause closes: a program told to stall is never stopped"
@@ -303,8 +321,8 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                    (None, Kept::No) if self.stalled_for(record, stop) => {"
-replace = "                    (None, Kept::No) if false && self.stalled_for(record, stop) => {"
+find = "                        if let Some(stalled) = self.stalled_for(record, stop) {"
+replace = "                        if let Some(stalled) = self.stalled_for(record, stop).filter(|_| false) {"
 
 [[plant]]
 name = "pause closes: a pause's stop relaunches a window as the stall's does"
@@ -313,8 +331,13 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "        record.window.borrow().stalled_stop == Some((stop.task_id, stop.seq))"
-replace = "        record.window.borrow().stalled_stop.is_some() || stop.seq > 0"
+find = "            .filter(|stalled| stalled.task_id == stop.task_id && stalled.seq == stop.seq)"
+replace = "            .filter(|stalled| stalled.task_id == stop.task_id)"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        if ledger.stop_of(participant.id)? != Some(stop) {"
+replace = "        if ledger.stop_of(participant.id)?.map(|now| now.task_id) != Some(stop.task_id) {"
 
 [[plant]]
 name = "pause closes: the stall's stop goes unmarked"
@@ -323,18 +346,22 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/never_began.rs"
-find = "            .filter(|stop| stop.task_id == thread.task.id)"
-replace = "            .filter(|_| false)"
+find = "            (Some(stop), Some(message), Some(generation)) if stop.task_id == thread.task.id => {"
+replace = "            (Some(stop), Some(message), Some(generation)) if false && stop.task_id == thread.task.id => {"
 
 [[plant]]
-name = "pause closes: the relaunch gives no brief again"
-meant = "a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched_on_its_conversation_and_goes_on_by_itself"
+name = "pause closes: the relaunch gives the window nothing again"
+meant = "a_relaunched_window_is_told_on_its_conversation_once_the_window_is_back"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = '            let words = format!("{RELAUNCHED}\n\n{}", task.body);'
-replace = '            let words = format!("{RELAUNCHED}{}", "");'
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """        take_back(
+            store,
+            message_id,
+            "its window began no turn on it, and ConsensFlow relaunched the window",
+        )?;"""
+replace = """        let _ = take_back;"""
 
 [[plant]]
 name = "pause closes: a relaunched window's task is not resumed"
@@ -342,9 +369,14 @@ meant = "a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_rela
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/stops.rs"
-find = '        let gone_on = task.state == "paused" && {'
-replace = '        let gone_on = task.state == "no such state" && {'
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """            return Err(refused(format!("m-{message_id} was relaunched once already")));
+        }"""
+replace = """            return Err(refused(format!("m-{message_id} was relaunched once already")));
+        }
+        if message_id > 0 {
+            return task_by_id(store, task.id);
+        }"""
 
 [[plant]]
 name = "pause closes: a stop owed when its task left the window's hands is owed again when it comes back"
@@ -365,3 +397,202 @@ runs = ["engine-dispatcher"]
 file = "crates/cf-engine/src/stops.rs"
 find = "                    part.seen_stop = Some(now);"
 replace = "                    part.seen_stop = None;"
+
+[[plant]]
+name = "pause closes: a tell takes no held or stalled task over"
+meant = "a_tell_to_a_task_held_for_quota_asks_its_stop_and_the_reset_resumes_nothing"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "            if task.state == \"paused\" && !paused_by_consensflow(store, &task)? {"
+replace = "            if task.state == \"paused\" && !paused_by_consensflow(store, &task).map(|_| false)? {"
+
+[[plant]]
+name = "pause closes: a tell takes no stalled task over, and its window is relaunched"
+meant = "a_tell_after_the_stall_takes_the_task_out_of_its_relaunch"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "            if task.state == \"paused\" && !paused_by_consensflow(store, &task)? {"
+replace = "            if task.state == \"paused\" && !paused_by_consensflow(store, &task).map(|_| false)? {"
+
+[[plant]]
+name = "pause closes: a pause takes no held task over"
+meant = "a_tell_or_a_pause_of_a_held_task_asks_a_stop_and_ends_the_hold"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        let automatic = author.is_some() && !taken && paused_by_consensflow(store, &task)?;"
+replace = "        let automatic = author.is_some() && !taken && paused_by_consensflow(store, &task)? && false;"
+
+[[plant]]
+name = "pause closes: a pause takes no stalled task over, and its window is relaunched"
+meant = "a_pause_after_the_stall_takes_the_task_out_of_its_relaunch"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        let automatic = author.is_some() && !taken && paused_by_consensflow(store, &task)?;"
+replace = "        let automatic = author.is_some() && !taken && paused_by_consensflow(store, &task)? && false;"
+
+[[plant]]
+name = "pause closes: a held task is not ConsensFlow's own pause"
+meant = "a_tell_to_a_task_held_for_quota_asks_its_stop_and_the_reset_resumes_nothing"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """    if held.is_some() {
+        return Ok(true);
+    }
+    let last"""
+replace = """    let _ = held;
+    let last"""
+
+[[plant]]
+name = "pause closes: the relaunch looks for no word of an answer since the stall"
+meant = "a_window_that_began_its_turn_after_the_stall_is_kept_and_never_relaunched"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        if items[at + 1..].iter().any(|item| item.role != Role::Custom) {"
+replace = "        if items[at + 1..].iter().any(|item| item.role != Role::Custom) && false {"
+
+[[plant]]
+name = "pause closes: the relaunch sends the human's unsent words with the window"
+meant = "a_window_holding_the_humans_unsent_words_is_kept_and_never_relaunched"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        if js::truthy(snapshot.get(\"unsent\")) || self.forgotten(record) {"
+replace = "        if self.forgotten(record) {"
+
+[[plant]]
+name = "pause closes: the relaunch retires a window whose screen the host does not show"
+meant = "a_window_whose_screen_cannot_be_read_is_kept_and_never_relaunched"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        let Some(snapshot) = snapshot.filter(serde_json::Value::is_object) else {"
+replace = "        let Some(snapshot) = snapshot.or(Some(serde_json::Value::Null)) else {"
+
+[[plant]]
+name = "pause closes: the relaunch retires a window showing a dialog of its own"
+meant = "a_window_showing_a_dialog_of_its_own_is_kept_and_never_relaunched"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = """        if record.delivery.borrow().delivering.is_some()
+            || observed.waiting.is_some()
+            || observed.failed"""
+replace = """        if record.delivery.borrow().delivering.is_some()
+            || observed.failed"""
+
+[[plant]]
+name = "pause closes: the relaunch retires a window whose record is unread"
+meant = "a_window_whose_record_cannot_be_read_is_kept_and_never_relaunched"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "            || observed.reading.as_deref().is_none_or(Reading::read_failed)"
+replace = "            || observed.reading.as_deref().is_some_and(|_| false)"
+
+[[plant]]
+name = "pause closes: the relaunch looks nothing again after the host's answer"
+meant = "a_window_that_began_while_the_host_showed_its_screen_is_kept_and_never_relaunched"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        if self.forgotten(record) || !self.still_unbegun(participant, record, stalled, &fresh)? {"
+replace = "        if self.forgotten(record) || fresh.failed && fresh.shared {"
+
+[[plant]]
+name = "pause closes: the relaunch retires a window whose task was resumed since"
+meant = "a_resume_after_the_stall_moves_its_delivery_and_nothing_is_relaunched"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        Ok(paused && latest.is_some_and(|message| message.id == stalled.message))"
+replace = "        Ok(latest.is_some_and(|message| message.id == stalled.message || paused))"
+
+[[plant]]
+name = "pause closes: the ledger's relaunch resumes a newer pause"
+meant = "a_relaunch_whose_task_was_paused_again_while_its_window_closed_resumes_nothing"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if task.state != \"paused\" || task.stop_seq != seq {"
+replace = "        if task.state != \"paused\" {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """        if !paused_by_consensflow(store, &task)? {
+            return Err(refused(format!("T-{number} was paused by someone since")));
+        }"""
+replace = """        let _ = paused_by_consensflow;"""
+
+[[plant]]
+name = "pause closes: a message is relaunched twice"
+meant = "a_delivery_that_stalls_again_after_its_relaunch_is_kept_and_the_human_told_what_to_do"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "            .was_relaunched(project.id, stalled.message)?"
+replace = "            .was_relaunched(project.id, stalled.message)?\n            && stalled.seq < 0"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if was_relaunched(store, project_id, message_id)? {"
+replace = "        if was_relaunched(store, project_id, message_id)? && seq < 0 {"
+
+[[plant]]
+name = "pause closes: the relaunch's note says on its conversation for a window opened afresh"
+meant = "a_relaunch_on_a_conversation_its_harness_lost_gives_the_brief_once_and_says_it_opened_afresh"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        let how = if resumed {"
+replace = "        let how = if resumed || !resumed {"
+
+[[plant]]
+name = "pause closes: the chief's Finish settles nothing"
+meant = "a_finish_and_a_reopen_between_two_looks_settle_the_stop_and_a_pause_after_is_owed"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "        self.settle_at_departure(record, owed.as_ref());"
+replace = "        let _ = owed;"
+
+[[plant]]
+name = "pause closes: the kept note promises a task in another window's hands"
+meant = "a_kept_windows_notes_say_what_its_task_is_as_they_are_told"
+runs = ["engine-lib-stops"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        Some(_) if !ours => Some(\"elsewhere\"),"
+replace = "        Some(_) if !ours && ours => Some(\"elsewhere\"),"
+
+[[plant]]
+name = "pause closes: the kept note says nothing of a second stall"
+meant = "a_delivery_that_stalls_again_after_its_relaunch_is_kept_and_the_human_told_what_to_do"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "    match again {"
+replace = "    match again.filter(|_| false) {"

@@ -124,8 +124,8 @@ replace = "                    (None, Kept::Ignored) => {"
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
-find = "                    (None, Kept::No) => Kept::Ignored,"
-replace = "                    (None, _) => Kept::Ignored,"
+find = "                    (None, Kept::No) => {"
+replace = "                    (None, _) => {"
 
 [[plant]]
 name = "pause keeps work: the chief is told again at each look"

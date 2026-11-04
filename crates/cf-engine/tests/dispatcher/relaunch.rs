@@ -412,3 +412,34 @@ fn a_resume_after_the_stall_moves_its_delivery_and_nothing_is_relaunched() {
     assert_eq!(context.host.killed().len(), killed, "kept, never retired");
     assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
 }
+
+#[test]
+fn a_window_that_began_while_the_host_showed_its_screen_is_kept_and_never_relaunched() {
+    // Asked again after every awaited host call (T-1220's P1-2): the window's first words
+    // come while the host answers the look at its screen that comes before the retirement.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    stalled(&context, &tiers);
+    let killed = context.host.killed().len();
+    let adapter = std::rc::Rc::clone(&context.adapter);
+    *context.host.on_request.borrow_mut() = Some(std::rc::Rc::new(
+        move |op: &str, body: &serde_json::Value| {
+            // The relaunch's own look at the screen asks for no tail.
+            if op == "pane.snapshot" && body.get("tail").is_none() {
+                let item = adapter.item(Role::Assistant, "Starting on the lexer");
+                adapter.with("zeus", |agent| {
+                    if !agent
+                        .items
+                        .iter()
+                        .any(|known| &*known.text == "Starting on the lexer")
+                    {
+                        agent.items.push(item);
+                    }
+                });
+            }
+        },
+    ));
+    rounds(&context);
+    assert_eq!(context.host.killed().len(), killed, "kept, never retired");
+    assert_eq!(relaunch_notes(&tiers), Vec::<String>::new());
+}
