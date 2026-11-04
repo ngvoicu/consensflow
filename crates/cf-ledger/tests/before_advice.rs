@@ -24,7 +24,7 @@ fn ledger_in(dir: &tempfile::TempDir) -> Ledger {
             name: "app".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("apollo".into()),
+                model: Some("apollo".into()),
             },
             staff: vec![NewMember {
                 agent: "zeus".into(),
