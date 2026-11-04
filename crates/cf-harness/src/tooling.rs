@@ -11,6 +11,7 @@
 //! |---|---|---|
 //! | `records` | `kind`, `session`, `env`: what the harness's own record of the conversation says | `{reading, settled}`: the reading as [`records::answers`] writes it, and whether the window's turn is over, as the dispatcher reads it |
 //! | `turn_cut` | `kind`, `session`, `env`: the record of a conversation whose window is closed, as the human's Resume reads it | `{cut, began, words}`: whether its turn was cut ([`Records::turn_cut`](crate::contract::Records::turn_cut)), null where the record cannot tell, and of a cut turn when the message that began it came and its words, where the record holds it |
+//! | `claude_prefixes` | `session`, `text`: a Claude Code transcript, whole | `[{lines, reading}]`: the product's reading of the first `lines` lines of it, for each number of lines from 1, as `records` writes a reading with its items left out. The long run's watch keeps a Claude reader of its own, and `crates/cf-evals/tests/long_run/parity.rs` holds it to this one, prefix by prefix |
 //! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
@@ -51,6 +52,7 @@
 mod launch;
 mod models;
 mod muse;
+mod prefixes;
 mod readiness;
 mod session;
 
@@ -77,6 +79,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
     match text(question, "op")? {
         "records" => read_record(question),
         "turn_cut" => turn_cut(question),
+        "claude_prefixes" => prefixes::claude_prefixes(question),
         "start" => start(question),
         "window_text" => Ok(json!(window_text(text(question, "text")?))),
         "console_text" => Ok(json!(console_text(text(question, "text")?))),
@@ -102,7 +105,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "models" => models::models(question),
         "last_used" => models::last_used(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent, codex_agent_types, models and last_used"
+            "the question asks for {other}, which is none of records, turn_cut, claude_prefixes, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent, codex_agent_types, models and last_used"
         )),
     }
 }

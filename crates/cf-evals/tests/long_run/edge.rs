@@ -195,7 +195,7 @@ fn takes_part(line: &str) -> bool {
 /// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
 /// accepted as the pane host's is), a cut it does not know the word of, and whether a
 /// text it lists reaches the run's output at all. It reads lines, not meaning.
-const TAKEN: [(&str, &str, &str); 59] = [
+const TAKEN: [(&str, &str, &str); 62] = [
     (
         "long_run/stalls.rs",
         "self.prober.take(listed, pid, others, label)",
@@ -243,12 +243,17 @@ const TAKEN: [(&str, &str, &str); 59] = [
     ),
     (
         "long_run/invariants/deliveries.rs",
-        ".find(&text[start..])",
+        "pattern::once(&IMAGES, PLACEHOLDERS).find(&text[start..]),",
         "where a delivery begins in a prompt, read and never said",
     ),
     (
         "long_run/invariants/deliveries.rs",
-        "let inner = &text[start + tag.end()..];",
+        "after(start, pattern::once(&TAG, PASTED).find(&text[start..]))",
+        "the same",
+    ),
+    (
+        "long_run/invariants/deliveries.rs",
+        "let inner = &text[from + found.end()..];",
         "the same",
     ),
     (
@@ -350,6 +355,16 @@ const TAKEN: [(&str, &str, &str); 59] = [
         "long_run/record.rs",
         ".lines()",
         "a record's lines, each an entry of its own",
+    ),
+    (
+        "long_run/record.rs",
+        "let mut lines = rest.split('\\n');",
+        "a notification's head, read for the ids and the status of the jobs it names: no words of it kept or shown",
+    ),
+    (
+        "long_run/record.rs",
+        "let (tag, rest) = line.strip_prefix('<')?.split_once('>')?;",
+        "the same: a field of the head, its tag and its value, read",
     ),
     (
         "long_run/invariants/work.rs",

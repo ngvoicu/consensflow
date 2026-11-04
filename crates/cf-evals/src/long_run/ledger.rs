@@ -85,6 +85,10 @@ pub struct Item {
     /// When the harness wrote it, and when the daemon copied it.
     pub at: Option<String>,
     pub copied_at: String,
+    /// Whether the daemon's copy marks it as the summary a compaction wrote in the user's
+    /// place (`compaction`, migration 0020): for every harness whose record the watch does
+    /// not read, the one word there is of it. A ledger older than the column says none.
+    pub compaction: bool,
 }
 
 impl Item {
@@ -210,10 +214,17 @@ impl Ledger {
             )?,
             items: rows(
                 db,
-                "SELECT t.conversation_id, t.item_id, t.seq, t.role, t.text, t.complete, t.at, t.copied_at
-                 FROM transcript t JOIN conversation c ON c.id = t.conversation_id
-                 JOIN participant p ON p.id = c.participant_id
-                 WHERE p.project_id = ?1 ORDER BY t.conversation_id, t.seq",
+                &format!(
+                    "SELECT t.conversation_id, t.item_id, t.seq, t.role, t.text, t.complete, t.at, t.copied_at, {}
+                     FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+                     JOIN participant p ON p.id = c.participant_id
+                     WHERE p.project_id = ?1 ORDER BY t.conversation_id, t.seq",
+                    if has_column(db, "transcript", "compaction") {
+                        "t.compaction"
+                    } else {
+                        "0"
+                    }
+                ),
                 id,
                 |row| {
                     Ok(Item {
@@ -225,6 +236,7 @@ impl Ledger {
                         complete: row.get::<_, i64>(5)? == 1,
                         at: row.get(6)?,
                         copied_at: row.get(7)?,
+                        compaction: row.get::<_, i64>(8)? == 1,
                     })
                 },
             )?,
@@ -308,6 +320,17 @@ impl Ledger {
 }
 
 /// The rows `sql` selects for the project `project`, each made by `row`.
+/// Whether the table `table` of `db` has the column `column`: a ledger recorded before a
+/// migration does not.
+fn has_column(db: &Connection, table: &str, column: &str) -> bool {
+    db.prepare(&format!("PRAGMA table_info({table})"))
+        .and_then(|mut info| {
+            info.query_map([], |row| row.get::<_, String>(1))?
+                .collect::<std::result::Result<Vec<_>, _>>()
+        })
+        .is_ok_and(|names| names.iter().any(|name| name == column))
+}
+
 fn rows<T>(
     db: &Connection,
     sql: &str,

@@ -201,6 +201,7 @@ pub fn play(
     watch: &mut dyn Watch,
     disruption: Disruption,
     target: &Target,
+    recompact: bool,
     with: &With,
 ) -> Result<Outcome> {
     let mut hand = Hand {
@@ -215,6 +216,7 @@ pub fn play(
             kill(&mut hand, handle, *task, with.hold)
         }
         (Disruption::Compact, _) => compact(&mut hand),
+        (Disruption::Restart, _) if recompact => restart_after_compacting(&mut hand),
         (Disruption::Restart, _) => restart(&mut hand, None),
         (Disruption::DevinCut, Target::Window { handle, task }) => {
             restart(&mut hand, Some((handle, *task)))
@@ -458,9 +460,16 @@ fn compact(hand: &mut Hand<'_>) -> Result<Outcome> {
             evidence: failed,
         });
     }
+    // The chief came to rest, or its record goes on after the compaction with a turn of its own
+    // (T-1069, `10:compact`: it had begun phase 3's work by the time the wait asked whether
+    // its window was idle): what the wait is for is a chief the compaction holds working, and
+    // one that went on is held by nothing.
+    let mut went_on = false;
     let rested = hand.wait(|hand| {
-        Ok(lane_of(&hand.stage.board()?, "chief")
-            .is_some_and(|lane| lane["activity"]["state"] == "idle"))
+        let idle = lane_of(&hand.stage.board()?, "chief")
+            .is_some_and(|lane| lane["activity"]["state"] == "idle");
+        went_on = !idle && hand.watch.last().is_some_and(went_on_after_compacting);
+        Ok(idle || went_on)
     })?;
     if !rested {
         // The Mac's 2-hour run of 2026-10-19: a chief that reads working for good after
@@ -482,9 +491,42 @@ fn compact(hand: &mut Hand<'_>) -> Result<Outcome> {
             evidence: failed,
         });
     }
+    let then = if went_on {
+        "the chief went on to a turn of its own"
+    } else {
+        "it came to rest"
+    };
     Ok(Outcome::Played(format!(
-        "{said}; its record says it compacted, and it came to rest"
+        "{said}; its record says it compacted, and {then}"
     )))
+}
+
+/// Whether the chief's record goes on after its compaction: no longer ends in it, a turn of
+/// its own having begun.
+fn went_on_after_compacting(look: &Look) -> bool {
+    chief_record(look).is_some_and(|record| !record.ends_in_compaction())
+}
+
+/// A5's setup: the compaction typed into the idle chief again, and the app quit and started
+/// again at once, while the chief's record ends in it, so that the Resume reads an idle
+/// compaction as the field's A5 did. Where the chief had a turn again before the restart there
+/// is no shape to read, and the app is not quit for it: the restart waits for the next moment.
+fn restart_after_compacting(hand: &mut Hand<'_>) -> Result<Outcome> {
+    let compacted = match compact(hand)? {
+        Outcome::Played(said) => said,
+        other => return Ok(other),
+    };
+    if hand.watch.last().is_some_and(went_on_after_compacting) {
+        return Ok(Outcome::Missed(
+            "the chief had a turn after the compaction again before the restart".to_owned(),
+        ));
+    }
+    match restart(hand, None)? {
+        Outcome::Played(said) => Ok(Outcome::Played(format!(
+            "the chief had had a turn since its compaction, so it was compacted again first, for A5's shape ({compacted}); then {said}"
+        ))),
+        other => Ok(other),
+    }
 }
 
 /// The record of the chief's newest conversation the look has.
