@@ -203,6 +203,23 @@ fn rows_of_base64_and_nothing_else_withhold_the_screen() {
                 "stuv",
             ],
         ),
+        // Widths that differ, as a wrapped screen's rows do not (the groups of one length are
+        // the groups rule's): three rows or more of eight, and the last what is left.
+        (
+            "a body of small letters in rows of ten, eleven, twelve and nine",
+            vec![
+                "abcdefghij",
+                "klmnopqrstu",
+                "vwxyzabcdefg",
+                "hijklmnop",
+                "qrs",
+            ],
+        ),
+        // Two rows, the first thirty-five long and the second what is left.
+        (
+            "a body of small letters in two rows",
+            vec!["abcdefghijklmnopqrstuvwxyzabcdefghi", "jklmn"],
+        ),
         (
             "a body of small letters in rows of eight",
             vec!["abcdefgh", "ijklmnop", "qrstuvwx", "yzabcdef", "ghijklmn"],

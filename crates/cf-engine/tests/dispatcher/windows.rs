@@ -407,6 +407,18 @@ fn a_pause_note_the_ledger_holds_says_none_of_a_secret_split_grouped_framed_or_p
             "lmnopqrstuv",
             false,
         ),
+        // The same body in rows of differing widths.
+        (
+            vec![
+                "abcdefghij",
+                "klmnopqrstu",
+                "vwxyzabcdefg",
+                "hijklmnop",
+                "qrs",
+            ],
+            "klmnopqrstu",
+            false,
+        ),
         // A padding row beside a body of small letters.
         (vec!["abcdefghijklmnopqrstuvw", "="], "abcdefghij", false),
     ] {
