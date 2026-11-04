@@ -55,6 +55,7 @@ mod close_when_drawn;
 mod close_while_delivering;
 mod closed_given_nothing;
 mod closing;
+mod codex_role_replay;
 mod compacting;
 mod compaction_window;
 mod computer_use;

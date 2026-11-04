@@ -18,6 +18,7 @@
 [run]
 bnb-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "brief_never_began::"]
 bnb-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_follow_up_whose_window_never_began"]
+bnb-codex-role = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "codex_role_replay::"]
 
 [[plant]]
 name = "brief never began: a turn that came to nothing is not watched, and its task stays working for good (main's shape)"
@@ -136,3 +137,19 @@ find = '''            .get(SCREEN_QUIET_MS)
 replace = '''            .get("outputQuietMs")
             .and_then(Value::as_f64)
             .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS && SCREEN_QUIET_MS != "");'''
+
+# T-1232's P3 (T-1190): a stalled Codex session whose role text changed is relaunched with the
+# role first, and the replay of its brief goes after the role's note as an ordinary paste.
+
+[[plant]]
+name = "brief never began: a Codex relaunch with a new role gives the stalled brief as its launch's own message"
+meant = "a_codex_window_that_exits_with_its_replay_after_a_new_role_receives_it_by_the_new_copy"
+runs = ["bnb-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                Some(displaced) => {
+                    self.give_back(displaced.message, "its window is told its role first")?;
+                    None
+                }'''
+replace = '''                Some(_) => begun,'''
