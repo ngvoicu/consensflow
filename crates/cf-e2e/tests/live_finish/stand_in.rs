@@ -198,14 +198,12 @@ fn a_detached_job_the_host_listed_before_its_shell_ended_holds_the_case_as_the_k
         &log,
     )?;
     let text = finished.case.text();
-    // The widened gap did what it is for: the host listed the job itself, not only its shell.
-    let listed = text
-        .lines()
-        .find(|line| line.contains("the host listed the command's processes: "))
-        .unwrap_or_default();
+    // The widened gap did what it is for: the host listed the job, and the run held it to the
+    // limit as one it listed. (The line of what the host listed is cut, and a runner's longer
+    // paths cut it before the job's words: CI run 41787972093.)
     assert!(
-        listed.contains("--background-job"),
-        "the host listed the job: {text}"
+        text.contains("the host listed it before its shell ended"),
+        "the host listed the job, and the limit took it as one it listed: {text}"
     );
     assert!(
         finished.case.held(),
