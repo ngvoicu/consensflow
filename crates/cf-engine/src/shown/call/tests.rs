@@ -198,44 +198,47 @@ fn a_command_whose_first_word_is_not_a_listed_program_is_the_tool_alone() {
     }
 }
 
-/// A tool that was given text of its own is the tool's name alone, and a file is said, masked,
-/// unless its name names a secret or is token-shaped.
+/// A tool that was given text of its own is the tool's name alone, and so is a tool that works
+/// on a file: no path is ever said (the re-check T-1224 read a token split by blanks, a key's
+/// body of twelve characters and a percent-encoded URL out of the paths a note quoted).
 #[test]
-fn a_tool_without_a_command_is_its_name_and_a_file_is_quoted_unless_it_names_a_secret() {
+fn a_tool_without_a_command_is_its_name_and_a_file_is_never_said() {
     assert_eq!(
         words(&LastCall::tool("exec")),
         "; its last tool call was exec"
     );
-    assert_eq!(
-        words(&LastCall::on("Read", "crates/cf-engine/src/shown.rs")),
-        "; its last tool call was: \"Read crates/cf-engine/src/shown.rs\""
-    );
     for target in [
+        "crates/cf-engine/src/shown.rs",
+        "/tmp/sk-abcd efgh ijkl mnop qrst uvwx yz12 3456.txt",
+        "/tmp/hkiG9w0BAQEFAASC.txt",
+        "/tmp/https%3A%2F%2Falice%3Aswordfish%40example.test.json",
         "/home/me/.config/secrets.toml",
         "/home/me/.aws/credentials",
-        "/home/me/api_key.txt",
         "src/ghp_abcdefghijklmnopqrstuvwxyz0123456789.txt",
         "https://alice:swordfish@example.test/x",
         "https://swordfishvalue@localhost/x",
     ] {
-        assert_eq!(
-            words(&LastCall::on("Read", target)),
-            "; its last tool call was Read",
-            "{target}"
-        );
+        for tool in ["Read", "Edit", "Write", "NotebookEdit"] {
+            assert_eq!(
+                words(&LastCall::on(tool, target)),
+                format!("; its last tool call was {tool}"),
+                "{tool} {target}"
+            );
+        }
     }
-    // A file is said whole up to the note's bound, then cut with a mark.
-    let long = format!("src/{}lib.rs", "a/".repeat(150));
-    let said = words(&LastCall::on("Read", &long));
-    let quoted = said
-        .strip_prefix("; its last tool call was: \"")
-        .and_then(|rest| rest.strip_suffix('"'))
-        .unwrap_or_else(|| panic!("{said}"));
+    // A tool's name is cut to the bound a name has, with a mark.
+    let said = words(&LastCall::tool(&format!(
+        "mcp__server__{}",
+        "tool_".repeat(30)
+    )));
+    let name = said
+        .strip_prefix("; its last tool call was ")
+        .unwrap_or_default();
+    assert_eq!(name.chars().count(), TOOL_CHARS, "{said}");
     assert!(
-        quoted.starts_with("Read src/a/a/a/") && quoted.ends_with('\u{2026}'),
-        "{quoted}"
+        name.starts_with("mcp__server__tool_") && name.ends_with('\u{2026}'),
+        "{said}"
     );
-    assert_eq!(quoted.chars().count(), CALL_CHARS);
     // A tool whose name is a token is masked like any word of a note.
     assert_eq!(
         words(&LastCall::tool(concat!(

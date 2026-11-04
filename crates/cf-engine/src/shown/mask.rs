@@ -28,6 +28,12 @@
 //!   no digit: forty letters and digits or more with a letter in them, in any case, or a
 //!   run of that length with a `+` in it or `=` at its end.
 //!
+//! **A token's prefix is enough to withhold a screen** ([`begins_a_token`], T-1205 round 4):
+//! `sk-abcd efgh …` is a key whose body the rules above never see whole, because the window
+//! wrapped it, put blanks in it or decorated it. So a screen that shows the beginning of a token
+//! of a known kind, with a few characters of its body or none, is withheld whole, and no guess is
+//! made of where the token ends.
+//!
 //! **The spans of every rule are found in the text as it was**, joined where they overlap
 //! or touch, and replaced once (T-823): no part of a value is left to a rule that comes
 //! after the one that took the first part of it.
@@ -167,6 +173,41 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         rule(r"[A-Za-z0-9+/]{39,}={0,2}", 0, is_base64_marked),
     ]
 });
+
+/// Where a token of a kind with a known prefix begins, with a few characters of its body: the
+/// same kinds as the rule above, with the body cut to what is enough to tell the kind from a
+/// word. `npm_config_cache` and `hf_hub_download` are names, not tokens: their kinds need twelve
+/// characters in a row, and the others four, or a blank, or the end of the text, so that a
+/// prefix a window's wrap cut off the rest of is one too.
+#[allow(clippy::expect_used)]
+static PREFIXES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"\b(?:(?:sk|pk|rk)[-_]|gh[pousr]_|github_pat_|glpat-|xox[abprs]-)(?:[A-Za-z0-9]{4}|\s|$)",
+        r"|\b(?:AKIA|ASIA)[A-Z0-9]{4}",
+        r"|\bAIza[A-Za-z0-9_-]{4}",
+        r"|\beyJ[A-Za-z0-9_-]{4}",
+        r"|\bnpm_[A-Za-z0-9]{12}",
+        r"|\bhf_[A-Za-z0-9]{12}",
+        r"|\bya29\.[A-Za-z0-9._-]{12}",
+        r"|\bSG\.[A-Za-z0-9_-]{8}",
+    ))
+    .expect("a pattern of the masker")
+});
+
+/// What follows `Basic` when it is base64's, as short as four characters.
+#[allow(clippy::expect_used)]
+static BASIC_SCHEME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bbasic\s+([A-Za-z0-9._~+/=-]{4,})").expect("a pattern of the masker")
+});
+
+/// Whether `text` shows the beginning of a token of a kind with a known prefix (`sk-`, `ghp_`,
+/// `AKIA…`, a JWT's `eyJ…`) or of a `Basic` credential, whatever follows it.
+pub(crate) fn begins_a_token(text: &str) -> bool {
+    PREFIXES.is_match(text)
+        || BASIC_SCHEME
+            .captures_iter(text)
+            .any(|found| found.get(1).is_some_and(|m| base64_credentials(m.as_str())))
+}
 
 /// A run of forty letters and digits or more that is no number: it has a letter in it, in
 /// any case. A run of small letters alone was taken for a word, and the review of `860010398`

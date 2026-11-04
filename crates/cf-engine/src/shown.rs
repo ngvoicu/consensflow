@@ -33,15 +33,21 @@
 //! off, an assignment wrapped over rows of one word. Guessing the extent failed both times,
 //! and the base's rule stands in alpha.2. Quoting a row next to a secret, where the extent is
 //! *proven*, is later work (`issues/per-line-quoting-of-a-screen-next-to-a-secret.md` in the
-//! brain). The rows are also looked at together for a key with no name and no delimiter in view
-//! ([`screen`]): rows of base64 and nothing else withhold the screen.
+//! brain). The rows are also looked at together, without the frame a program draws round them,
+//! and as one text (the re-check T-1224 read passwords out of the ledger that a test of one row
+//! at a time did not see): a name or a token's beginning the window's wrap cut in two is whole at
+//! the join; the beginning of a token of a known kind (`sk-`, `ghp_`) withholds the screen
+//! whatever follows it; so do a key with no name and no delimiter in view (rows of base64 and
+//! nothing else, a lone padding row `=`) and a value in groups (`YWJj-ZGVm-…`). All in
+//! [`screen`].
 //!
 //! **How the program ended** is said as the host said it: its signal where it sent one, and a
 //! status above 128 as consistent with the signal it names (143 SIGTERM, 137 SIGKILL,
 //! [`signalled`]), no more; whether ConsensFlow sent it is said only from what the engine
 //! recorded ([`Part`]). **What the window was doing** is the last tool call its record shows,
 //! said before its screen: the tool, and for a shell call the first word of the command where
-//! it is a program the list names, never more of the command ([`Shown::with_last_call`]).
+//! it is a program the list names, never more of the command, and never the file a tool worked
+//! on ([`Shown::with_last_call`]).
 //!
 //! **A program the host could not end** (`survivor`) is said in place of how it
 //! ended: it may still run ([`Shown::outlived`]). Nothing waits for it: a window
@@ -69,7 +75,6 @@ use mask::mask;
 pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
-use secret::names_a_secret;
 
 /// The most lines of a screen a note quotes: the last ones.
 const QUOTE_LINES: usize = 6;
@@ -251,18 +256,22 @@ impl Shown {
         let Some(tail) = &self.tail else {
             return said;
         };
-        // The base's rule (the lead's decision of round 5), and the review of `860010398`: where
-        // the extent of a secret cannot be proven the whole screen goes, and no row beside a
-        // secret is ever quoted. Every line the host sent is looked at, not only those the quote
-        // would keep: a value that goes on over a line keeps no name on the line it ends on.
-        if tail.iter().any(|line| names_a_secret(line)) {
-            said.push_str("; its last screen lines named a secret, so they are left out");
-            return said;
-        }
-        // Rows of base64 with no name and no delimiter in view: a key cropped by the window.
-        if screen::holds_a_key(tail) {
-            said.push_str("; its last screen lines held what may be a key, so they are left out");
-            return said;
+        // The base's rule (the lead's decision of round 5), and the reviews of `860010398` and
+        // `4aeb48564`: where the extent of a secret cannot be proven the whole screen goes, and
+        // no row beside a secret is ever quoted. Every line the host sent is looked at, not only
+        // those the quote would keep, and the rows together as well as one by one (`screen`).
+        match screen::withheld(tail) {
+            Some(screen::Withheld::Secret) => {
+                said.push_str("; its last screen lines named a secret, so they are left out");
+                return said;
+            }
+            Some(screen::Withheld::Key) => {
+                said.push_str(
+                    "; its last screen lines held what may be a key, so they are left out",
+                );
+                return said;
+            }
+            None => {}
         }
         match Quote::of(tail, Keep::Last) {
             None if self.pasted => said.push_str("; its screen showed nothing of its own"),

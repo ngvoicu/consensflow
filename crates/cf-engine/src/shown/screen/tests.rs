@@ -587,3 +587,466 @@ fn the_twenty_four_screens_of_the_reviews_leak_nothing() {
         }
     }
 }
+
+// ---- The re-check of `4aeb48564` (T-1224): split, framed and grouped secrets, and the padding row.
+
+/// Every kind of token the masker knows by its beginning, with a few characters of its body: the
+/// screen is withheld whatever follows, and so with the body in groups or wrapped over rows.
+#[test]
+fn a_token_prefix_withholds_the_screen_whatever_follows_it() {
+    // The re-check's: the masker took `sk-abcdefghijkl` and left the rest of the row.
+    assert_withheld(
+        &[
+            &["sk-abcdefghijkl mnopqrstuvwx yz1234"],
+            &["sk-abcd efgh ijkl mnop qrst uvwx yz12 3456"],
+        ],
+        NAMED,
+        "mnopqrstuvwx",
+    );
+    // Each kind, short, in the middle of a row, framed.
+    for token in [
+        "sk-abcdefgh",
+        "pk_live_abcdefgh",
+        "rk-abcd",
+        "ghp_abcdefgh",
+        "gho_abcdefgh",
+        "ghu_abcdefgh",
+        "ghs_abcdefgh",
+        "ghr_abcdefgh",
+        "github_pat_abcdefgh",
+        "glpat-abcdefgh",
+        "xoxb-abcdefgh",
+        "xoxp-abcdefgh",
+        "AKIAABCDEFGH",
+        "ASIAABCDEFGH",
+        "AIzaabcdefgh",
+        "eyJhbGciOiJIUzI1",
+        "npm_abcdefghijkl",
+        "hf_abcdefghijkl",
+        "ya29.abcdefghijkl",
+        "SG.abcdefgh",
+    ] {
+        for row in [
+            token.to_owned(),
+            format!("cloned with {token} and then"),
+            format!("│ {token} │"),
+        ] {
+            let said = note(&[row.as_str()]);
+            assert_eq!(said, NAMED, "{row}");
+        }
+    }
+    // The prefix at the end of a row, its body on the next: whole at the join.
+    for rows in [
+        vec!["gone to the disk", "sk-abcdefgh"],
+        vec!["the key is sk-", "abcdefgh"],
+        vec!["token ghp_", "abcdefgh", "next"],
+        vec!["s", "k-abcdefgh"],
+        vec!["see AKIA", "ABCDEFGH"],
+        vec!["Basic", "YTpi"],
+    ] {
+        assert_eq!(note(&rows), NAMED, "{rows:?}");
+    }
+    // `Basic` with the base64 of `a:b`; a word after it is no credential.
+    assert_eq!(note(&["Basic YTpi"]), NAMED);
+    assert!(note(&["Basic setup"]).contains("its screen ended with"));
+    // Names that begin like a kind, and are not one.
+    for row in [
+        "npm_config_cache=/tmp/npm",
+        "hf_hub_download(repo)",
+        "SG.Assert(x)",
+        "a task-based disk-usage check",
+        "ASIAN markets",
+        "pk_id of the users table is skipped",
+    ] {
+        let said = note(&[row]);
+        assert!(said.contains("its screen ended with"), "{row}: {said}");
+    }
+}
+
+/// A name the window's wrap cut in two is whole at the join of the rows, as is a framed one.
+#[test]
+fn a_name_the_window_split_over_rows_is_found_at_the_join() {
+    // The re-check's: each row alone names nothing, and the value was quoted.
+    assert_withheld(
+        &[
+            &["{\"api_", "key\": \"red", "green blue\"}"],
+            &["{\"api_", "key\": \"red", "green blue\"}", "}"],
+        ],
+        NAMED,
+        "green blue",
+    );
+    for (rows, value) in [
+        (vec!["pass", "word: correct horse"], "correct horse"),
+        (vec!["export MYSQL_PW", "D=hunter22 now"], "hunter22"),
+        (
+            vec!["Author", "ization: Bear", "er abcd1234 gone"],
+            "abcd1234",
+        ),
+        (vec!["the private", "key is below"], "below"),
+        (vec!["an API", "key set to blue-sky-one"], "blue-sky-one"),
+        (vec!["a credent", "ial of red green blue"], "red green blue"),
+        (
+            vec!["│ {\"api_ │", "│ key\": \"red │", "│ green blue\"} │"],
+            "green blue",
+        ),
+        (
+            vec!["{\"api_", "", "key\": \"red", "green blue\"}"],
+            "green blue",
+        ),
+    ] {
+        assert_withheld(&[&rows], NAMED, value);
+    }
+    // The join of the rows makes a word of two, and a row alone is a word still.
+    assert_eq!(note(&["auth", "or", "next"]), NAMED);
+    // A screen whose rows only end and begin like words is quoted.
+    for rows in [
+        vec!["the cargo test", "ran in a minute"],
+        vec!["see the author", "list for details"],
+        vec!["the sec", "ond run"],
+    ] {
+        assert!(
+            note(&rows).contains("its screen ended with"),
+            "{rows:?}: {}",
+            note(&rows)
+        );
+    }
+}
+
+/// What a program draws round its output is no part of a row: the bars and the box edges at its
+/// ends, and the blanks beside them.
+#[test]
+fn the_frame_a_program_draws_round_its_rows_is_no_part_of_them() {
+    // The re-check's: the two-row key crop, each row between bars.
+    for (left, right) in [
+        ("│", "│"),
+        ("┃", "┃"),
+        ("║", "║"),
+        ("|", "|"),
+        ("│ ", " │"),
+        ("| ", "   |"),
+        ("│", ""),
+        ("", "│"),
+    ] {
+        let rows = [
+            format!("{left} MIIEvQIBADANBgkq {right}"),
+            format!("{left} hkiG9w0BAQEFAASC {right}"),
+        ];
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        assert_eq!(note(&rows), KEY, "{rows:?}");
+    }
+    // In a box, with its corners and rules.
+    assert_eq!(
+        note(&[
+            "┌──────────────────┐",
+            "│ MIIEvQIBADANBgkq │",
+            "│ hkiG9w0BAQEFAASC │",
+            "└──────────────────┘",
+        ]),
+        KEY
+    );
+    assert_eq!(
+        note(&[
+            "╭──────────────────╮",
+            "║ YQ==             ║",
+            "║ Yg==             ║",
+            "╰──────────────────╯",
+        ]),
+        KEY
+    );
+    // A row between a box's own edges.
+    assert_eq!(
+        note(&["├─ MIIEvQIBADANBgkq ─┤", "├─ hkiG9w0BAQEFAASC ─┤"]),
+        KEY
+    );
+    // A short row between bars, and the padding.
+    assert_eq!(note(&["│ abcdefghijklmnopqrstuvw │", "│ = │"]), KEY);
+    // A framed screen with nothing in it is quoted, its frame and all.
+    for rows in [
+        vec!["┌────┐", "│ ok │", "└────┘"],
+        vec!["| src/lib.rs | 3 +++ |", "| 1 file changed |"],
+        vec!["╭───────╮", "│ ready │", "╰───────╯"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+}
+
+/// A value in groups, parted by one blank or one `-`, whatever the groups hold.
+#[test]
+fn a_value_in_groups_withholds_the_screen() {
+    for (label, rows) in [
+        (
+            "the re-check's: base64 groups parted by dashes",
+            vec!["YWJj-ZGVm-ZGhp-amts-bWpv-cHFy-cHRu-dndv"],
+        ),
+        (
+            "the re-check's: hex groups parted by blanks",
+            vec!["deadbeef cafebabe feedface abcdefab deadbeef cafebabe feedface abcdefab"],
+        ),
+        (
+            "the re-check's: letters in groups of four",
+            vec!["abcd efgh ijkl mnop qrst uvwx yz12 3456"],
+        ),
+        ("four groups, the fewest", vec!["abcd efgh ijkl mnop"]),
+        ("digits", vec!["1234-5678-9012-3456"]),
+        ("underscores", vec!["abcd_efgh_ijkl_mnop"]),
+        ("colons", vec!["abcd:efgh:ijkl:mnop"]),
+        ("dots", vec!["abcd.efgh.ijkl.mnop"]),
+        ("slashes in the groups", vec!["ab/c d/ef g/hi j/kl m/no"]),
+        ("hex words", vec!["dead beef cafe babe"]),
+        (
+            "hex groups of differing lengths",
+            vec!["deadbeef cafe feedface abcdef"],
+        ),
+        (
+            "groups with a plus, of differing lengths",
+            vec!["ab+cd e+fghi jk+lmn o+pqr"],
+        ),
+        (
+            "groups of differing lengths that each have letters and digits",
+            vec!["a1b2c3 d4e5f6g7 h8i9 j0k1l2"],
+        ),
+        (
+            "groups of differing lengths that each have a capital after a small letter",
+            vec!["aBcDe fGhIjKl mNoPq rStUvWxY"],
+        ),
+        (
+            "the groups in the middle of a row",
+            vec!["key part YWJj ZGVm ZGhp amts end"],
+        ),
+        ("groups wrapped over rows", vec!["abcd efgh", "ijkl mnop"]),
+        ("a group to a row", vec!["abcd", "efgh", "ijkl", "mnop"]),
+        (
+            "groups in a frame",
+            vec!["│ YWJj-ZGVm-ZGhp-amts │", "│ bWpv-cHFy-cHRu-dndv │"],
+        ),
+        (
+            "the groups of a full IPv6 address",
+            vec!["2001:0db8:85a3:0000:0000:8a2e:0370:7334"],
+        ),
+    ] {
+        assert_eq!(note(&rows), KEY, "{label}: {rows:?}");
+    }
+    // Not a run: three groups, two blanks, a word of three letters between, groups of
+    // differing lengths that are words, and the lists a screen shows.
+    for rows in [
+        vec!["abcd efgh ijkl"],
+        vec!["abcd efgh ijkl and more"],
+        vec!["abcd  efgh  ijkl  mnop"],
+        vec!["abcd efgh ijk lmno pqrs"],
+        vec!["the and for are not"],
+        vec!["Compiling consensflow engine library for target platform"],
+        vec!["the quick brown foxes jumped over lazy dogs"],
+        vec!["PATH=/usr/bin HOME=/root LANG=C TERM=xterm"],
+        vec!["src/foo tests/bar docs/baz crates/qux"],
+        vec!["twelve that looks encoded"],
+        vec!["   Compiling cf-engine v3.0.7-alpha.2 (/Users/me/consensflow/crates/cf-engine)"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+    // The cost, stated: four words of one length, and a list of camel-case names, are a run.
+    for rows in [
+        vec!["this will work like that"],
+        vec!["ParseFailure LexerMismatch SyntaxError TypeMismatch"],
+    ] {
+        assert_eq!(note(&rows), KEY, "{rows:?}");
+    }
+}
+
+/// A row of one `=` or two is a key's last row, whatever stands beside it and whatever the row
+/// before it is: a body of small letters has no shape of its own.
+#[test]
+fn a_lone_padding_row_withholds_the_screen_whatever_stands_beside_it() {
+    // The re-check's: the concatenation is base64, and the note printed the 23-character body.
+    for (label, rows) in [
+        ("the re-check's", vec!["abcdefghijklmnopqrstuvw", "="]),
+        ("two signs", vec!["abcdefghijklmnopqrstuvw", "=="]),
+        ("a short body", vec!["abc", "="]),
+        ("padding first", vec!["=", "some words"]),
+        ("padding last", vec!["still working", "=="]),
+        ("padding alone", vec!["="]),
+        ("in a frame", vec!["│ abcdefghijklmnopqrstuvw │", "│ == │"]),
+    ] {
+        assert_eq!(note(&rows), KEY, "{label}: {rows:?}");
+        let between = padded(&rows);
+        assert_eq!(note(&between), KEY, "{label}: {between:?}");
+    }
+    // A longer row of `=` is a rule, which is chrome, as is a framed one.
+    for rows in [
+        vec!["Summary", "=======", "ok"],
+        vec!["Summary", "===", "ok"],
+        vec!["╞═══════╡", "ok"],
+        vec!["│ ═══ │", "ok"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+}
+
+/// The screens of an ordinary day: which are withheld, and so which are not. The re-check
+/// (T-1224) tried eleven and four were withheld: a Rust syntax error saying "unexpected token",
+/// a bare full hash, a bare identifier and an encoded-looking row. The same four are withheld
+/// here, and no other of these.
+#[test]
+fn the_ordinary_screens_stay_visible_and_the_few_that_are_withheld_are_counted() {
+    // (what it is, its rows, whether the note withholds it)
+    let cases: Vec<(&str, Vec<&str>, bool)> = vec![
+        (
+            "cargo build",
+            vec![
+                "   Compiling cf-proto v3.0.7-alpha.2 (/Users/me/consensflow/crates/cf-proto)",
+                "   Compiling cf-engine v3.0.7-alpha.2 (/Users/me/consensflow/crates/cf-engine)",
+                "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.20s",
+                "     Running unittests src/lib.rs (target/debug/deps/cf_engine-1a2b3c4d5e6f7a8b)",
+            ],
+            false,
+        ),
+        (
+            "cargo test",
+            vec![
+                "running 238 tests",
+                "test shown::tests::only_the_last_lines_are_quoted ... ok",
+                "test shown::screen::tests::a_value_in_groups_withholds_the_screen ... ok",
+                "test result: ok. 238 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s",
+            ],
+            false,
+        ),
+        (
+            "a Rust type error with a long type path",
+            vec![
+                "error[E0308]: mismatched types",
+                "   --> crates/cf-engine/src/shown.rs:258:20",
+                "    |",
+                "258 |         let rows: Vec<&str> = tail.iter().map(undecorated).collect::<Vec<String>>();",
+                "    |                 ----------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Vec<&str>`, found `Vec<String>`",
+                "    = note: expected struct `Vec<&str>`",
+                "               found struct `Vec<std::string::String>`",
+            ],
+            false,
+        ),
+        (
+            "a type path alone",
+            vec!["std::collections::hash::map::HashMap<alloc::string::String, alloc::vec::Vec<core::option::Option<u8>>>"],
+            false,
+        ),
+        (
+            "git log",
+            vec![
+                "commit 4aeb48564ce31f17a2e92e5c39e4fbe15a51bb37",
+                "Author: Gabriel Voicu <gabriel@example.test>",
+                "Date:   Wed Nov 4 08:00:00 2026 +0200",
+                "",
+                "    A short body and the padding alone after it is the case that decides the lone padding row",
+                "",
+                "commit 3eb253eeb0123456789abcdef0123456789abcde",
+                "Author: Gabriel Voicu <gabriel@example.test>",
+            ],
+            false,
+        ),
+        (
+            "git log --oneline",
+            vec![
+                "4aeb48564 A short body and the padding alone after it is the case that decides",
+                "3eb253eeb A key cropped to one row withholds the screen too: a lone row of twelve that looks encoded",
+                "187f81d89 A sentence with a digit in it is not a row of base64",
+            ],
+            false,
+        ),
+        (
+            "a connection error",
+            vec![
+                "error: failed to connect to 127.0.0.1:8080: Connection refused (os error 61)",
+                "caused by: tcp connect error",
+            ],
+            false,
+        ),
+        (
+            "a database connection error",
+            vec!["Error: connect ECONNREFUSED 127.0.0.1:5432"],
+            false,
+        ),
+        (
+            "a panic",
+            vec![
+                "thread 'main' panicked at src/main.rs:12:5:",
+                "called `Option::unwrap()` on a `None` value",
+                "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+            ],
+            false,
+        ),
+        (
+            "a Python traceback",
+            vec![
+                "Traceback (most recent call last):",
+                "  File \"app.py\", line 12, in <module>",
+                "    main()",
+                "ValueError: invalid literal for int() with base 10: 'abc'",
+            ],
+            false,
+        ),
+        (
+            "an npm install",
+            vec![
+                "added 312 packages, and audited 313 packages in 9s",
+                "found 0 vulnerabilities",
+            ],
+            false,
+        ),
+        (
+            "ls -la",
+            vec![
+                "total 24",
+                "-rw-r--r--  1 me  staff  1234 Nov  4 08:00 shown.rs",
+                "drwxr-xr-x  5 me  staff   160 Nov  4 08:00 tests",
+            ],
+            false,
+        ),
+        (
+            "a file diff stat in a frame",
+            vec![
+                "┌─────────────────────────┬─────┐",
+                "│ crates/cf-engine/src/shown.rs │ 89 │",
+                "└─────────────────────────┴─────┘",
+            ],
+            false,
+        ),
+        (
+            "Pi's model not available",
+            vec![
+                "Model gpt-9 is not available on your plan.",
+                "Run /model to choose another one.",
+            ],
+            false,
+        ),
+        (
+            "a window that printed nothing but a prompt",
+            vec!["$ "],
+            false,
+        ),
+        // The withheld.
+        (
+            "a Rust syntax error saying unexpected token",
+            vec![
+                "error: unexpected token: `;`",
+                " --> src/main.rs:3:14",
+            ],
+            true,
+        ),
+        (
+            "a bare full hash",
+            vec!["4aeb48564ce31f17a2e92e5c39e4fbe15a51bb37"],
+            true,
+        ),
+        ("a bare identifier", vec!["ParseFailure"], true),
+        ("an encoded-looking row", vec!["hkiG9w0BAQEFAASC"], true),
+    ];
+    let mut withheld = 0;
+    for (label, rows, expected) in &cases {
+        let said = note(rows);
+        let was = said.contains("so they are left out");
+        assert_eq!(was, *expected, "{label}: {said}");
+        withheld += usize::from(was);
+    }
+    assert_eq!((withheld, cases.len()), (4, 19));
+}

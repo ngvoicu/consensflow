@@ -306,3 +306,67 @@ fn a_long_run_of_small_letters_is_hidden_too() {
         assert_eq!(hidden(text), text, "{text}");
     }
 }
+
+/// The beginning of a token of a known kind is enough to withhold a screen (T-1205 round 4):
+/// the re-check read `sk-abcd efgh …` out of the ledger, for the masker needs the body whole.
+#[test]
+fn the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body() {
+    for text in [
+        "sk-abcd",
+        "see sk-abcd efgh ijkl",
+        "pk_live_abcd",
+        "rk-abcd",
+        "ghp_abcd",
+        "gho_abcd",
+        "ghu_abcd",
+        "ghs_abcd",
+        "ghr_abcd",
+        "github_pat_abcd",
+        "glpat-abcd",
+        "xoxb-abcd",
+        "xoxa-abcd",
+        "xoxp-abcd",
+        "xoxr-abcd",
+        "xoxs-abcd",
+        "AKIAABCD",
+        "ASIAABCD",
+        "AIzaabcd",
+        "eyJhbGci",
+        "npm_abcdefghijkl",
+        "hf_abcdefghijkl",
+        "ya29.abcdefghijkl",
+        "SG.abcdefgh",
+        // The prefix with nothing after it, a blank, or the end of the text.
+        "sk-",
+        "token sk- then",
+        "glpat- abcd",
+        // A Basic credential of base64's, as short as four characters.
+        "Basic YTpi",
+        "basic dXNlcjpwYXNz",
+    ] {
+        assert!(begins_a_token(text), "{text}");
+    }
+    // What begins like a kind and is a word or a name.
+    for text in [
+        "sk",
+        "task-list",
+        "disk-usage is high",
+        "ask-me anything",
+        "npm_config_cache",
+        "npm_abc",
+        "hf_hub_download",
+        "SG.Assert",
+        "ASIA",
+        "ASIAN",
+        "AKIA",
+        "eyJ",
+        "ya29.short",
+        "Basic setup",
+        "Basic Authentication",
+        "basic",
+        "ghx_abcd",
+        "xoxz-abcd",
+    ] {
+        assert!(!begins_a_token(text), "{text}");
+    }
+}

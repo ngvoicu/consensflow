@@ -4,6 +4,7 @@
 
 use serde_json::json;
 
+use super::secret::names_a_secret;
 use super::*;
 
 /// A screen that names no secret: a model the account cannot use.
@@ -343,8 +344,9 @@ fn a_last_line_longer_than_the_quote_is_cut_with_a_mark() {
     let said = shown(
         None,
         None,
-        // Words: a row of 5,000 letters with no blank in it is a key's body (`screen`).
-        Some(&["start of a very long line", &"word ".repeat(1_000)]),
+        // Words: a row of 5,000 letters with no blank in it is a key's body, and so are four
+        // words of one length in a row (`screen`).
+        Some(&["start of a very long line", &"is word was ".repeat(500)]),
     )
     .after("gone");
     let quote = said
@@ -373,7 +375,7 @@ fn a_key_looking_string_is_masked_and_the_note_counts_what_it_hid() {
         Some(1),
         None,
         Some(&[
-            "request with sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv was refused",
+            "request with AbCdEfGhIjKlMnOpQrStUv0123456789 was refused",
             "id 0123456789abcdef0123456789abcdef in the log",
         ]),
     )
@@ -388,7 +390,7 @@ fn a_key_looking_string_is_masked_and_the_note_counts_what_it_hid() {
     let one = shown(
         None,
         None,
-        Some(&["cloned with ghp_abcdefghijklmnopqrstuvwxyz0123456789"]),
+        Some(&["cloned from https://alice:hunter2@example.test/repo"]),
     )
     .after("gone");
     assert!(
@@ -399,21 +401,22 @@ fn a_key_looking_string_is_masked_and_the_note_counts_what_it_hid() {
 
 #[test]
 fn a_secret_in_a_line_the_quote_leaves_out_is_not_counted() {
-    let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    // A token of no kind with a prefix: a screen that shows one is withheld whole (`screen`).
+    let secret = "0123456789abcdef0123456789abcdef";
     let mut tail = vec![format!("first {secret}")];
     tail.extend((1..=6).map(|number| format!("line {number}")));
     let lines: Vec<&str> = tail.iter().map(String::as_str).collect();
     let said = shown(None, None, Some(&lines)).after("gone");
     assert!(!said.contains("masked"), "{said}");
-    assert!(!said.contains("ghp_"), "{said}");
+    assert!(!said.contains("0123456789abcdef"), "{said}");
 }
 
 #[test]
 fn a_secret_cut_in_the_middle_by_the_bound_is_hidden_before_it_is_cut() {
-    let secret = format!("sk-{}", "A1".repeat(30));
+    let secret = "A1".repeat(30);
     let line = format!("{} {secret}", "x".repeat(380));
     let said = shown(None, None, Some(&[line.as_str()])).after("gone");
-    assert!(!said.contains("sk-"), "{said}");
+    assert!(said.contains("[masked]"), "{said}");
     assert!(!said.contains("A1A1"), "{said}");
 }
 

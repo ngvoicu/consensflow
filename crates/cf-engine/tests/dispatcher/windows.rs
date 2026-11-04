@@ -332,6 +332,112 @@ fn a_pause_note_the_ledger_holds_says_none_of_a_password_the_screen_or_the_last_
     assert!(!note.contains("YWJjYWJj"), "{note}");
 }
 
+/// The note the ledger holds for a screen withheld for a secret it names.
+fn named_note() -> String {
+    format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines named a \
+         secret, so they are left out. {RESUME}"
+    )
+}
+
+/// The note the ledger holds for a screen withheld for what may be a key.
+fn key_note() -> String {
+    format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines held what \
+         may be a key, so they are left out. {RESUME}"
+    )
+}
+
+/// The re-check of `4aeb48564` (T-1224) read these out of the ledger's notes: a token the
+/// masker took a piece of, a name the window's wrap split over rows, values in groups, a key
+/// between bars, and a padding row beside a body that has no shape of its own. Each is a
+/// screen the note withholds whole now; nothing of its value reaches the ledger.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_secret_split_grouped_framed_or_padded() {
+    for (screen, value, named) in [
+        // A recognized token prefix, whatever follows it.
+        (
+            vec!["sk-abcdefghijkl mnopqrstuvwx yz1234"],
+            "mnopqrstuvwx",
+            true,
+        ),
+        (
+            vec!["sk-abcd efgh ijkl mnop qrst uvwx yz12 3456"],
+            "efgh ijkl",
+            true,
+        ),
+        // A name split over the physical rows of the window.
+        (
+            vec!["{\"api_", "key\": \"red", "green blue\"}"],
+            "green blue",
+            true,
+        ),
+        // Values in groups.
+        (
+            vec!["YWJj-ZGVm-ZGhp-amts-bWpv-cHFy-cHRu-dndv"],
+            "ZGVm-ZGhp",
+            false,
+        ),
+        (
+            vec!["deadbeef cafebabe feedface abcdefab deadbeef cafebabe feedface abcdefab"],
+            "cafebabe",
+            false,
+        ),
+        // The two-row key crop in a frame.
+        (
+            vec!["│ MIIEvQIBADANBgkq │", "│ hkiG9w0BAQEFAASC │"],
+            "hkiG9w0B",
+            false,
+        ),
+        // A padding row beside a body of small letters.
+        (vec!["abcdefghijklmnopqrstuvw", "="], "abcdefghij", false),
+    ] {
+        let note = paused_note(1, &screen, None);
+        assert_eq!(
+            note,
+            if named { named_note() } else { key_note() },
+            "{screen:?}"
+        );
+        assert!(!note.contains(value), "{screen:?}");
+    }
+}
+
+/// The files a tool worked on are never said in a pause note (T-1224, finding 2): a token split
+/// by blanks, a key's body below the masker's size, and credentials written in percent signs
+/// went to the ledger in the paths a note quoted.
+#[test]
+fn a_file_the_last_tool_call_worked_on_is_never_said_in_the_pause_note() {
+    for (path, value) in [
+        (
+            "/tmp/sk-abcd efgh ijkl mnop qrst uvwx yz12 3456.txt",
+            "efgh ijkl",
+        ),
+        ("/tmp/hkiG9w0BAQEFAASC.txt", "hkiG9w0B"),
+        (
+            "/tmp/https%3A%2F%2Falice%3Aswordfish%40example.test.json",
+            "swordfish",
+        ),
+        ("crates/cf-engine/src/shown.rs", "shown.rs"),
+    ] {
+        for tool in ["Read", "Edit", "Write"] {
+            let note = paused_note(
+                1,
+                &["running", "all fine"],
+                Some(cf_harness::records::LastCall::on(tool, path)),
+            );
+            assert_eq!(
+                note,
+                format!(
+                    "T-1 is paused: @zeus's window closed (exit code 1); its last tool call was {tool}; \
+                     its screen ended with: \"running / all fine\". {RESUME}"
+                ),
+                "{tool} {path}"
+            );
+            assert!(!note.contains(value), "{tool} {path}");
+        }
+    }
+}
+
 /// A window's exit reads its conversation's record with no window open, to name the last tool
 /// call. A participant whose window was asked for meanwhile, up, on its way or given up, is no
 /// business of that exit: it settles nothing more (the guard of `in_flight`'s `launches`),

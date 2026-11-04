@@ -15,19 +15,16 @@
 //! when the window closed is the cause, and `cargo …` points at it; the rest of the line is the
 //! record's, which the human can read.
 //!
-//! A tool given text of its own (a script, a patch, a prompt, a URL, a query) never reaches
-//! here: the reader keeps it as nothing (`cf-harness`' `calls`). A file a tool works on is
-//! said, masked, unless its name names a secret or is token-shaped.
-
-use std::sync::LazyLock;
+//! **Never a file's name either** (the re-check T-1224): a path carries a secret in more shapes
+//! than a rule can list, and each was found: a token split by blanks, a key's body of twelve
+//! characters, a URL with its credentials written in percent signs
+//! (`/tmp/https%3A%2F%2Falice%3Aswordfish%40example.test.json`). A call that works on a file is
+//! the tool's name alone in alpha.2. A tool given text of its own (a script, a patch, a prompt,
+//! a URL, a query) never reaches here: the reader keeps it as nothing (`cf-harness`' `calls`).
 
 use cf_harness::records::LastCall;
-use regex::Regex;
 
-use super::{cut_to, mask::mask, secret::names_a_secret};
-
-/// The most characters the text of a call takes in a note, between its quotation marks.
-const CALL_CHARS: usize = 200;
+use super::{cut_to, mask::mask};
 
 /// The most characters a tool's name takes.
 const TOOL_CHARS: usize = 40;
@@ -42,11 +39,6 @@ const PROGRAMS: [&str; 42] = [
     "wc", "diff", "mkdir", "rm", "cp", "mv", "tar", "python", "python3", "pytest", "node", "go",
     "mvn", "gradle", "dotnet", "java", "ruby", "kill", "pkill", "killall",
 ];
-
-/// A URL with a user in it, with or without a password: `scheme://user:pass@host`.
-#[allow(clippy::expect_used)]
-static USER_IN_URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s]*@").expect("a pattern of call"));
 
 /// What a note says of `call`, after "; ", or nothing where the call names nothing.
 pub(super) fn words(call: &LastCall) -> String {
@@ -69,19 +61,6 @@ pub(super) fn words(call: &LastCall) -> String {
             None if tool.is_empty() => "; its last tool call was a command".to_owned(),
             None => format!("; its last tool call was {tool}"),
         };
-    }
-    if let Some(target) = &call.target {
-        if quotable_target(target) {
-            let said = if tool.is_empty() {
-                target.clone()
-            } else {
-                format!("{tool} {target}")
-            };
-            return format!(
-                "; its last tool call was: \"{}\"",
-                cut_to(&said, CALL_CHARS)
-            );
-        }
     }
     if tool.is_empty() {
         String::new()
@@ -108,14 +87,6 @@ fn program(command: &str) -> Option<(&'static str, bool)> {
 fn label(tool: &str) -> String {
     let one_line = tool.split_whitespace().collect::<Vec<_>>().join(" ");
     cut_to(&mask(&one_line).text.replace('"', "'"), TOOL_CHARS)
-}
-
-/// Whether a file a tool works on may be said: its name names no secret and is no token.
-fn quotable_target(target: &str) -> bool {
-    !target.contains('\n')
-        && !names_a_secret(target)
-        && mask(target).count == 0
-        && !USER_IN_URL.is_match(target)
 }
 
 #[cfg(test)]
