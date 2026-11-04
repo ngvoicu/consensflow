@@ -278,8 +278,8 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "sed -n 's/^\\(live_[a-z0-9_]*\\)\\.rs$/--test \\1/p'"
-replace = "sed -n 's/^\\(live_[a-z0-9]*\\)\\.rs$/--test \\1/p'"
+find = "!s/^\\(live_[a-z0-9_]*\\)\\.rs$/--test \\1/p'"
+replace = "!s/^\\(live_[a-z0-9]*\\)\\.rs$/--test \\1/p'"
 
 [[plant]]
 name = "wiring: CI's live suites step asks for their ignored cases"
@@ -320,3 +320,66 @@ find = """  platform-free:
     runs-on: ubuntu-latest"""
 replace = """  platform-free:
     runs-on: macos-latest"""
+
+# The live matrix runs in a step of its own of CI's checks job, its cases side by side under
+# nextest, and the step of the other live suites leaves it out (T-1184).
+
+[[plant]]
+name = "wiring: CI's live suites step runs the live matrix again"
+meant = "ci_runs_the_offline_cases_of_every_live_suite_on_both_platforms"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "sed -n '/^live_matrix\\.rs$/!s/^"
+replace = "sed -n 's/^"
+
+[[plant]]
+name = "wiring: CI's live matrix step runs its cases in one process, one at a time"
+meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "run: cargo nextest run -p cf-e2e --test live_matrix --no-fail-fast --test-threads 4"
+replace = "run: cargo test -p cf-e2e --test live_matrix --no-fail-fast"
+
+[[plant]]
+name = "wiring: CI's live matrix step runs a case at a time"
+meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "--test live_matrix --no-fail-fast --test-threads 4"
+replace = "--test live_matrix --no-fail-fast --test-threads 1"
+
+[[plant]]
+name = "wiring: CI's live matrix step runs its live case on the real harnesses"
+meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "--test live_matrix --no-fail-fast --test-threads 4"
+replace = "--test live_matrix --no-fail-fast --run-ignored all --test-threads 4"
+
+[[plant]]
+name = "wiring: CI's checks job runs the live matrix without installing nextest"
+meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "      - run: cargo install cargo-nextest --version 0.9.148 --locked\n      # The live matrix on the rig's stand-ins"
+replace = "      # The live matrix on the rig's stand-ins"
+
+[[plant]]
+name = "wiring: CI's live matrix step has no limit of its own"
+meant = "ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "--test live_matrix --no-fail-fast --test-threads 4\n        timeout-minutes: 20\n"
+replace = "--test live_matrix --no-fail-fast --test-threads 4\n"

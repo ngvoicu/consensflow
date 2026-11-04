@@ -291,6 +291,7 @@ async fn run(
         roster: Rc::clone(&agents) as Rc<dyn crate::api::context::AgentRows>,
         log: Rc::clone(&log),
         trace: Rc::clone(&trace),
+        tooling_calls: crate::api::calls::switched_on(env.os(crate::api::calls::TOOLING_API_CALLS)),
     });
     // The programs the daemon runs and the time it reads: the engine's windows
     // are run with them, and so are the harness diagnostics of the screens, which

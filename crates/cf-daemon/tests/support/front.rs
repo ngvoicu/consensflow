@@ -62,6 +62,7 @@ impl Front {
             roster,
             log,
             trace,
+            tooling_calls: false,
         });
         Self {
             context,

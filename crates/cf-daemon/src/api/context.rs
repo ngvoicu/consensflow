@@ -94,6 +94,10 @@ pub struct Context {
     pub roster: Rc<dyn AgentRows>,
     pub log: Rc<Log>,
     pub trace: Rc<Trace>,
+    /// Whether each request a window's token answered is written to the trace for the
+    /// tooling ([`super::calls`]): only a test's daemon, started with
+    /// [`super::calls::TOOLING_API_CALLS`], has it.
+    pub tooling_calls: bool,
 }
 
 #[cfg(test)]

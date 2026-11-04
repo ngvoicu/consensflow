@@ -107,6 +107,16 @@ impl Records {
         self.said = false;
     }
 
+    /// The conversation's record begun again, empty: a window opened again on its conversation
+    /// that writes it anew, holding only what is said from then on, as a harness may (T-1118,
+    /// the owner's other board: the copy ConsensFlow kept is then longer than the record).
+    pub fn begin_anew(&mut self) -> io::Result<()> {
+        fs::write(&self.transcript, "")?;
+        self.cut = false;
+        self.said = false;
+        Ok(())
+    }
+
     /// Where the window's live status is: removed when the window ends.
     pub fn status_file(&self) -> &Path {
         &self.status_file
@@ -348,6 +358,24 @@ mod tests {
         // A turn is closed once.
         again.append(22, user("third")).unwrap();
         assert_eq!(types(&file), ["user", "assistant", "user", "user"]);
+    }
+
+    /// A window that writes its conversation anew when it is opened again (T-1118) keeps nothing
+    /// of the record before it, closes no turn of it, and writes what it is given from there.
+    #[test]
+    fn a_window_that_begins_its_record_anew_keeps_only_what_it_is_given_after() {
+        let config = tempfile::tempdir().unwrap();
+        let file = config.path().join("projects/integration/s.jsonl");
+        let mut first = Records::new(config.path(), "s", 1).unwrap();
+        first.append(1, user("first")).unwrap();
+        let mut again = Records::new(config.path(), "s", 2).unwrap();
+        assert!(again.said());
+        again.begin_anew().unwrap();
+        assert!(!again.said());
+        assert!(lines(&file).is_empty());
+        again.append(2, user("second")).unwrap();
+        assert_eq!(types(&file), ["user"]);
+        assert_eq!(lines(&file)[0]["message"]["content"], "second");
     }
 
     #[test]

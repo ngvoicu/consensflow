@@ -77,6 +77,15 @@
 //! the limit was reset and takes a turn on the meta prompt Claude sends
 //! (`AUTO_CONTINUE`), queued behind any turn it is in, as Claude's timer is.
 //!
+//! The windows of the member `CF_TEST_RESULTS_RECORDED_LATE` names (`chief 100000`) show
+//! nothing of a result pasted into them for that many milliseconds, at rest, then take it,
+//! as Claude Code did on a loaded Mac (T-760: no record for three minutes after a hand-over),
+//! their screen showing the message and a spinner meanwhile.
+//!
+//! The window of a participant `CF_TEST_RESUMED_ANEW` names, opened again on its
+//! conversation (`--resume`), writes its record anew: empty, then what it is given from
+//! there, as a harness may that rewrites it (T-1118's stale transcript).
+//!
 //! The window of a participant `CF_TEST_TRUST` names, opened in a git repository it
 //! was never told to trust, asks whether to trust it first, as Claude Code does
 //! (`trust`); with `CF_TEST_SAYS_FIRST` it prints those words before its first line,
@@ -166,6 +175,13 @@ const NO_LOGIN: &str =
 
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
+
+/// What Claude Code writes of a turn its provider refused for good, its model unknown to it.
+const GONE: &str = "API Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"model: claude-gone does not exist\"}}";
+
+/// What Claude Code writes of a turn its provider refused for a moment, its model overloaded
+/// (Anthropic's 529).
+const BUSY: &str = "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}";
 
 /// The meta prompt Claude Code sends by itself once a refused account has quota
 /// again (2.1.278 and later; this Mac's transcripts).
@@ -268,6 +284,10 @@ fn run(
         own_var(variable)
             .is_some_and(|wanted| !wanted.is_empty() && is_session_of(&participant, &wanted))
     };
+    // A window opened again on its conversation that writes its record anew.
+    if launch.resuming && named("CF_TEST_RESUMED_ANEW") {
+        records.begin_anew().map_err(|failed| failed.to_string())?;
+    }
     if named("CF_TEST_NO_LOGIN") || named("CF_TEST_NO_LOGIN_EXITS") {
         let mut out = io::stdout().lock();
         out.write_all(NO_LOGIN.as_bytes())
@@ -510,6 +530,34 @@ fn slow_start(said: Option<&str>, participant: &str) -> Duration {
         .map_or(Duration::ZERO, |(_, wait)| wait_of(Some(wait)))
 }
 
+/// How long the window of `participant` shows nothing of the message `text`, at rest, before it
+/// takes it: a result to a window `said` names (`<member> <milliseconds>`), and no other message.
+fn recorded_late(text: &str, said: Option<&str>, participant: &str) -> Duration {
+    if text.contains(" result from @") {
+        slow_start(said, participant)
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// How often a window that holds a message back draws its spinner.
+const SPINNER_EVERY: Duration = Duration::from_secs(3);
+
+/// The window holds `text` back for `late`, its record showing nothing of it and its status at
+/// rest, while its screen shows the message it took and a spinner, as a loaded Claude Code
+/// drew it (T-760): the screen printing is what tells it is taking the message in.
+fn hold_with_a_spinner(text: &str, late: Duration) {
+    let first = text.lines().next().unwrap_or_default();
+    let _ = say(&format!("> {first}\n"));
+    let until = std::time::Instant::now() + late;
+    let mut frame = 0_u32;
+    while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
+        frame += 1;
+        let _ = say(&format!("✻ Taking it in… ({frame})\r\n"));
+        thread::sleep(left.min(SPINNER_EVERY));
+    }
+}
+
 /// How long the message `text` stays in the hooks of its prompt: a line
 /// `HOOKS <seconds> <words>`.
 fn hooks_of(text: &str) -> Option<Duration> {
@@ -560,6 +608,16 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
                 .unwrap_or_else(PoisonError::into_inner) = Some(text.trim().to_owned());
         }
         return Ok(());
+    }
+    // A result the window shows nothing of for a while, at rest, as Claude Code did on a loaded
+    // Mac (T-760: no record for three minutes after the hand-over).
+    let late = recorded_late(
+        text,
+        own_var("CF_TEST_RESULTS_RECORDED_LATE").as_deref(),
+        &window.participant,
+    );
+    if !late.is_zero() {
+        hold_with_a_spinner(text, late);
     }
     if text == AUTO_CONTINUE_MARK {
         records
@@ -880,6 +938,30 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                             "role": "assistant",
                             "model": "<synthetic>",
                             "content": [{ "type": "text", "text": gone_model(&model).trim_end() }],
+                        },
+                    }),
+                )
+                .map_err(failed)?;
+        }
+        Reply::ApiError(status) => {
+            // The provider refused with an error of its API: Claude writes it as a record.
+            let (error, words) = if status == 529 {
+                ("overloaded", BUSY)
+            } else {
+                ("invalid_request", GONE)
+            };
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "assistant",
+                        "isApiErrorMessage": true,
+                        "apiErrorStatus": status,
+                        "error": error,
+                        "message": {
+                            "id": id,
+                            "role": "assistant",
+                            "content": [{ "type": "text", "text": words }],
                         },
                     }),
                 )
@@ -1305,6 +1387,26 @@ mod tests {
             Some(Duration::from_millis(8000))
         );
         assert_eq!(continues_after(said, "reviewer-amber-pine"), None);
+    }
+
+    /// A result is written late to the window of the member named, and no other message is, nor
+    /// a result to another window (T-760's shape, the matrix's `field-late-record`).
+    #[test]
+    fn a_result_is_recorded_late_by_the_window_named_and_nothing_else_is() {
+        let said = Some("chief 100000");
+        let result = "[ConsensFlow m-4 · T-1 · result from @matrix-worker-amber]\nA_DONE";
+        assert_eq!(
+            recorded_late(result, said, "chief"),
+            Duration::from_millis(100_000)
+        );
+        assert_eq!(recorded_late(result, said, "worker-amber"), Duration::ZERO);
+        assert_eq!(recorded_late(result, None, "chief"), Duration::ZERO);
+        let brief = "[ConsensFlow m-1 · T-1 · task from @chief]\nReply with exactly: A";
+        assert_eq!(recorded_late(brief, said, "chief"), Duration::ZERO);
+        assert_eq!(
+            recorded_late("Put one task on the board", said, "chief"),
+            Duration::ZERO
+        );
     }
 
     #[test]

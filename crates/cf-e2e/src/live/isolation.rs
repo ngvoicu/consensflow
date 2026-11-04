@@ -139,7 +139,9 @@ enum Seed {
     },
     /// A link in `to` to each entry of the owner's folder `from` but those named in `except`:
     /// what other programs of the rig keep in a folder the variables move (another tool's login
-    /// in `XDG_DATA_HOME`), left as it is for them. Where the folders are links' (Devin's, on Unix).
+    /// in `XDG_DATA_HOME`), left as it is for them; never a harness's of the kit's own, which
+    /// has a home of the run's (Muse's, whose sessions the daemon reads in the folder: T-1152).
+    /// Where the folders are links' (Devin's, on Unix).
     #[cfg(unix)]
     Reach {
         from: PathBuf,

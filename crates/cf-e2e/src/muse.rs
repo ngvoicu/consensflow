@@ -420,7 +420,14 @@ pub fn write_live_stand_in(
 # The rig's Muse, live: the machine's, on its real model, the person's keychain login.
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
 printf '%s %s\n' $$ $$ >> '{pids}'
-export HOME='{real}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
+# Its sessions go where the daemon reads them: the data folder the window was given, which a
+# harness's home of the run's own may have moved for the whole rig (Devin's), by its real
+# path; the rig's own where it was given none, or the person's.
+data="${{XDG_DATA_HOME:-}}"
+case "$data" in ''|'{real}'|'{real}'/*) data='{rig}/.local/share' ;; esac
+data="$(cd "$data" 2>/dev/null && pwd -P || printf '%s' "$data")"
+case "$data" in '{real}'|'{real}'/*) data='{rig}/.local/share' ;; esac
+export HOME='{real}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME="$data" XDG_CACHE_HOME='{rig}/.cache'
 exec '{binary}' "$@"
 "#,
         argv = argv.display(),
@@ -889,9 +896,11 @@ mod tests {
             .starts_with(std::fs::canonicalize(real.path()).unwrap()));
     }
 
-    /// T-1081: the rig's Muse on echo keeps its settings and sessions in the rig's home, as
-    /// the live one does, whatever XDG folders the windows were given (a Devin home moves them
-    /// all): a rig case on echo then meets the folders the live kit's Muse does.
+    /// T-1081: the rig's Muse on echo keeps its settings and sessions in the rig's home,
+    /// whatever XDG folders the windows were given (a Devin home moves them all). The live one
+    /// keeps its settings there too, and its sessions in the data folder the window was given,
+    /// where the daemon reads them (T-1152); the rig links that folder's `muse` to its own
+    /// (`give_muse_its_folders`), so both meet the folders the live kit's Muse does.
     #[cfg(unix)]
     #[test]
     fn the_rigs_muse_on_echo_keeps_its_folders_in_the_rigs_home_as_the_live_one_does() {
@@ -928,7 +937,8 @@ mod tests {
         super::write_stand_in(&bin, &install, 10, &rig, &argv).unwrap();
         assert_eq!(ran(&bin.join("muse")), wanted, "on echo");
         super::write_live_stand_in(&bin, &install, folder.path(), &rig, &argv).unwrap();
-        assert_eq!(ran(&bin.join("muse")), wanted, "live");
+        let live = format!("{}/.config /a-home/data", rig.display());
+        assert_eq!(ran(&bin.join("muse")), live, "live");
     }
 
     /// The rig's Muse, run as a window runs it, with a program of 0.6 s in Muse's place.

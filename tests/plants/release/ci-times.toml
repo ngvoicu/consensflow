@@ -94,3 +94,13 @@ runs = ["ci-times"]
 file = "tools/xtask/src/ci_times/binaries.rs"
 find = '''if line.starts_with("##[group]Run") {'''
 replace = '''if line.starts_with("##[group]Never") {'''
+
+[[plant]]
+name = "ci-times: the live matrix's step is given the general live step's limit"
+meant = "the_workspace_tests_and_their_job_have_limits_in_the_ci_this_checkout_runs"
+runs = ["ci-times"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "--test live_matrix --no-fail-fast --test-threads 4\n        timeout-minutes: 20\n"
+replace = "--test live_matrix --no-fail-fast --test-threads 4\n        timeout-minutes: 30\n"
