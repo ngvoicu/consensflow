@@ -789,3 +789,69 @@ fn the_end_of_a_window_the_human_switched_is_kept_on_the_conversation_it_switche
         "the conversation it switched to"
     );
 }
+
+/// A follow-up held for the chief's word (board-friction's `Kept::Held`) asks no stop
+/// (T-1199): the brief its launch began goes back to its queue by hand, the task's stop count
+/// stays as it was, no key is pressed into any window, and once the chief sends it on the
+/// brief is delivered once.
+#[test]
+fn a_held_follow_up_asks_no_stop_its_brief_goes_back_to_its_queue_and_is_delivered_once() {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    context.host.exits_with_a_survivor(4242);
+    let (tiers, session) = session_at_work(&context);
+    let window = context.host.last(&session).unwrap().pane;
+    context.adapter.answer(&session, "Recorded");
+    passes(&context, 2);
+    assert!(closed(&context, &window), "closed with its result");
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "chief")
+        .unwrap();
+    let inputs = context.host.inputs().len();
+    follow_up(&context, &tiers, 1, "Write the docs");
+    passes(&context, 3);
+    let held = tiers.task(2);
+    assert_eq!(held.task.state, "paused", "held for the chief's word");
+    let brief = held
+        .messages
+        .iter()
+        .find(|message| message.kind == "task")
+        .expect("its brief");
+    assert_eq!(
+        brief.state, "queued",
+        "the begun delivery is back in its queue"
+    );
+    let stops: Vec<serde_json::Value> = context
+        .ledger
+        .borrow()
+        .events(tiers.project.id, 0, 5_000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| {
+            event.kind == "task.state" && event.data["task"] == 2 && event.data["to"] == "paused"
+        })
+        .map(|event| event.data["stop"].clone())
+        .collect();
+    assert_eq!(
+        stops,
+        [serde_json::Value::Null],
+        "a hold for its conversation asks no stop"
+    );
+    assert_eq!(context.host.inputs().len(), inputs, "no key pressed");
+    send_on(&context, &tiers);
+    passes(&context, 3);
+    assert_eq!(tiers.task(2).task.state, "working");
+    let given = context
+        .adapter
+        .prepared()
+        .iter()
+        .filter(|launch| {
+            launch["message"]
+                .as_str()
+                .is_some_and(|said| said.contains("Write the docs"))
+        })
+        .count();
+    assert_eq!(given, 1, "the brief, delivered once");
+}

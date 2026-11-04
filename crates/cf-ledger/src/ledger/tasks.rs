@@ -145,6 +145,11 @@ impl Ledger {
         )
     }
 
+    /// Whether T-`number` was relaunched in its window: a message of it reached that window.
+    pub fn task_relaunched(&self, project_id: i64, number: i64) -> Result<bool, LedgerError> {
+        tasks::task_relaunched(&self.store, project_id, number)
+    }
+
     /// Whether message `message_id` was relaunched once already.
     pub fn was_relaunched(&self, project_id: i64, message_id: i64) -> Result<bool, LedgerError> {
         tasks::was_relaunched(&self.store, project_id, message_id)

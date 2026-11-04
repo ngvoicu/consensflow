@@ -281,6 +281,23 @@ pub(crate) fn relaunch_stalled(
     })
 }
 
+/// Whether T-`number` was relaunched in its window (`relaunch_stalled`'s log): a message of
+/// it reached that window before, though the relaunch took it back to give it again, so the
+/// task is no follow-up a window never had (board-friction's `kept_apart`, T-1223's P2-5).
+pub(crate) fn task_relaunched(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event WHERE project_id = ?1 AND kind = 'task.relaunched'
+               AND json_valid(data) AND json_extract(data, '$.task') = ?2",
+        )?
+        .exists(params![project_id, number])?)
+}
+
 /// Whether message `message_id` was relaunched once already (`relaunch_stalled`'s log).
 pub(crate) fn was_relaunched(
     store: &Store,
