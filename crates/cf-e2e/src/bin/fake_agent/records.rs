@@ -103,7 +103,7 @@ impl Records {
 
     /// The conversation's record begun again, empty: a window opened again on its conversation
     /// that writes it anew, holding only what is said from then on, as a harness may (T-1118,
-    /// Gabriel's other board: the copy ConsensFlow kept is then longer than the record).
+    /// the owner's other board: the copy ConsensFlow kept is then longer than the record).
     pub fn begin_anew(&mut self) -> io::Result<()> {
         fs::write(&self.transcript, "")?;
         self.cut = false;

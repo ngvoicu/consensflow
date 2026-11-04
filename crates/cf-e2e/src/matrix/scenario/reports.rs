@@ -1,4 +1,4 @@
-//! LMX-12's rest: the board-CLI reports of Gabriel's other board (T-1118) that are not field
+//! LMX-12's rest: the board-CLI reports of the owner's other board (T-1118) that are not field
 //! report 2 (in `order`), and the nudges half of field report 5 (T-1113).
 //!
 //! - A stale transcript: a window opened again on its conversation writes its record anew,
