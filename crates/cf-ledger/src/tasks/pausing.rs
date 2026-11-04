@@ -168,8 +168,8 @@ pub(crate) fn unmark_pause(
 /// reason (`never_began`): the stall a relaunch goes on from.
 pub const NEVER_BEGAN: &str = "its window began no turn on ";
 
-/// Whether `task` is paused by ConsensFlow on its own: held for its member's quota or a busy
-/// model (`held_until`), or its last move to paused named nobody (a message its window began
+/// Whether `task` is paused by ConsensFlow on its own: its last move to paused named nobody
+/// (held for its member's quota or a busy model, [`hold_task`]; a message its window began
 /// no turn on, [`NEVER_BEGAN`]; its window gone; a window that held several tasks; words that
 /// resumed it in vain; held for the chief's word on the conversation it follows,
 /// [`hold_for_context`]), and not with its project's suspension, which [`take_over_pause`]
@@ -181,16 +181,13 @@ pub(crate) fn paused_by_consensflow(store: &Store, task: &TaskRow) -> Result<boo
     if task.state != "paused" {
         return Ok(false);
     }
-    let (held, with_project): (Option<String>, i64) = store.db.query_row(
-        "SELECT held_until, paused_with_project FROM task WHERE id = ?",
+    let with_project: i64 = store.db.query_row(
+        "SELECT paused_with_project FROM task WHERE id = ?",
         [task.id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| row.get(0),
     )?;
     if with_project != 0 {
         return Ok(false);
-    }
-    if held.is_some() {
-        return Ok(true);
     }
     // The pause is whoever's last made it theirs: its move to paused, or a takeover of the
     // suspension's pause (`task.pause-taken`, which names who took it).

@@ -134,15 +134,29 @@ find = '''        let conversation = if participant.role == "chief" {
             match self.kept_apart(project, participant, found, before.as_ref(), first)? {
                 Kept::On(conversation) => conversation,
                 Kept::Held => {
-                    // The task is paused, a stop the launch did not capture: the message it
-                    // began goes back to wait for the chief's word, and the launch is over.
-                    self.launch_over(
+                    // The task is held for the chief's word, which asks no stop (T-1199): the
+                    // message the launch began goes back to wait for that word by hand, as
+                    // `launch_over` gives back only a message a new stop took, and the launch
+                    // is over.
+                    if self.launch_over(
                         record,
                         participant,
                         delivering,
                         stop,
                         "its task waits for the chief's word: the conversation it follows cannot be gone on in",
-                    )?;
+                    )? {
+                        return Ok(None);
+                    }
+                    if let Some(delivering) = delivering {
+                        self.give_back(
+                            delivering.message,
+                            "its task waits for the chief's word: the conversation it follows cannot be gone on in",
+                        )?;
+                        self.seams
+                            .ledger
+                            .borrow_mut()
+                            .launch_called_off(delivering.message)?;
+                    }
                     return Ok(None);
                 }
             }

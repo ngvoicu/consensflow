@@ -220,9 +220,11 @@ runs = ["engine-queued-tells"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
             .give_up_task(project.id, task.number, because)?;
+        self.settled_at_departure(participant, owed);
         Ok(())'''
 replace = '''
             .give_up_task(project.id, task.number, because)?;
+        self.settled_at_departure(participant, owed);
         self.tell_failed(project, task, &task.requester, because, &[], None, "")'''
 
 [[plant]]

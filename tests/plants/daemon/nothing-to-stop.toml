@@ -161,8 +161,10 @@ runs = ["ledger-receipt-sessions"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = """            "SELECT json_extract(data, '$.by') FROM event"""
-replace = """            "SELECT NULL FROM event"""
+find = """            "SELECT json_extract(data, '$.by') FROM event
+             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)"""
+replace = """            "SELECT NULL FROM event
+             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)"""
 
 [[plant]]
 name = "nothing to stop: a turn the record says is over a moment ago is pressed again"
