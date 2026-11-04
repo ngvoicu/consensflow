@@ -21,7 +21,7 @@ use std::path::Path;
 
 use cf_e2e::checkout;
 use cf_e2e::live::report;
-use cf_e2e::live::{self, Log};
+use cf_e2e::live::{self, Harness, Log};
 use cf_e2e::matrix::evidence::{Owner, REPORTS};
 use cf_e2e::matrix::run::{replay, run, Matrix, Outcome};
 use cf_e2e::matrix::scenario::Scenario;
@@ -208,9 +208,19 @@ mod tests {
     /// `scenario` on a board whose five positions the rig's stand-in plays, its evidence in
     /// `reports`.
     fn on_stand_ins(scenario: Scenario, reports: &Path) -> Outcome {
-        let log = Log::new(&format!("live matrix on stand-ins: {}", scenario.name));
+        on_seats(Seating::stand_ins(), scenario, reports)
+    }
+
+    /// `scenario` on a board of stand-ins seated as `seating` says (a worker of Devin's or
+    /// Codex's shape among them, T-1207), its evidence in `reports`.
+    fn on_seats(seating: Seating, scenario: Scenario, reports: &Path) -> Outcome {
+        let log = Log::new(&format!(
+            "live matrix on stand-ins ({}): {}",
+            seating.seat(Role::Worker).who(),
+            scenario.name
+        ));
         let matrix = Matrix {
-            seating: Seating::stand_ins(),
+            seating,
             scenario,
             stand_in: Path::new(FAKE_AGENT),
             // `--keep` (CONSENSFLOW_LIVE_KEEP) keeps a stand-in run's evidence where a real
@@ -557,10 +567,17 @@ mod tests {
     /// one still red (none passes unseen: a known red that holds is a red of its own, until its
     /// mark goes when I-7 lands).
     fn holds_but_its_known_reds(name: &str) {
+        holds_with(Harness::Claude, name);
+    }
+
+    /// [`holds_but_its_known_reds`], with the worker's seat played by the stand-in shaped as
+    /// `harness`'s (T-1207).
+    fn holds_with(harness: Harness, name: &str) {
         let reports = tempfile::tempdir().unwrap();
         let scenario = Scenario::named(name).unwrap();
         let marks = scenario.known.len();
-        let outcome = on_stand_ins(scenario, reports.path());
+        let seating = Seating::stand_ins().with_stand_in(Role::Worker, harness);
+        let outcome = on_seats(seating, scenario, reports.path());
         let table = report::table(&outcome.checks);
         assert!(
             outcome.failed().is_empty(),
@@ -575,7 +592,7 @@ mod tests {
         assert!(outcome
             .known
             .iter()
-            .all(|known| !known.ok && known.detail.starts_with("known red until T-11")));
+            .all(|known| !known.ok && known.detail.starts_with("known red until T-")));
     }
 
     #[test]
@@ -741,6 +758,200 @@ mod tests {
     #[test]
     fn field_question_not_retyped() {
         holds_but_its_known_reds("field-question-not-retyped");
+    }
+
+    #[test]
+    fn field_hold_notes() {
+        holds_but_its_known_reds("field-hold-notes");
+    }
+
+    #[test]
+    fn field_harness_dialog() {
+        holds_but_its_known_reds("field-harness-dialog");
+    }
+
+    #[test]
+    fn field_role_told() {
+        holds_but_its_known_reds("field-role-told");
+    }
+
+    #[test]
+    fn field_builds_daemon() {
+        holds_but_its_known_reds("field-builds-daemon");
+    }
+
+    #[test]
+    fn field_run_in_background() {
+        holds_but_its_known_reds("field-run-in-background");
+    }
+
+    #[test]
+    fn field_status_line() {
+        holds_but_its_known_reds("field-status-line");
+    }
+
+    #[test]
+    fn field_resume_at_rest() {
+        holds_but_its_known_reds("field-resume-at-rest");
+    }
+
+    #[test]
+    fn field_restart_mid_turn() {
+        holds_but_its_known_reds("field-restart-mid-turn");
+    }
+
+    #[test]
+    fn field_quota_out() {
+        holds_but_its_known_reds("field-quota-out");
+    }
+
+    #[test]
+    fn field_quota_account() {
+        holds_but_its_known_reds("field-quota-account");
+    }
+
+    #[test]
+    fn field_trust_git_init() {
+        holds_but_its_known_reds("field-trust-git-init");
+    }
+
+    #[test]
+    fn field_window_closed() {
+        holds_but_its_known_reds("field-window-closed");
+    }
+
+    #[test]
+    fn field_tell_queued() {
+        holds_but_its_known_reds("field-tell-queued");
+    }
+
+    #[test]
+    fn field_failure_reason() {
+        holds_but_its_known_reds("field-failure-reason");
+    }
+
+    #[test]
+    fn field_tell_keeps_work() {
+        holds_but_its_known_reds("field-tell-keeps-work");
+    }
+
+    #[test]
+    fn field_switch_chief() {
+        holds_but_its_known_reds("field-switch-chief");
+    }
+
+    #[test]
+    fn seat_tell() {
+        holds_but_its_known_reds("seat-tell");
+    }
+
+    #[test]
+    fn seat_finish() {
+        holds_but_its_known_reds("seat-finish");
+    }
+
+    #[test]
+    fn devin_worker_core() {
+        holds_with(Harness::Devin, "core");
+    }
+
+    #[test]
+    fn devin_worker_pause_resume_mid_turn() {
+        holds_with(Harness::Devin, "pause-resume-mid-turn");
+    }
+
+    #[test]
+    fn devin_worker_order_after_working() {
+        holds_with(Harness::Devin, "order-after-working");
+    }
+
+    #[test]
+    fn devin_worker_question_ask_answer() {
+        holds_with(Harness::Devin, "question-ask-answer");
+    }
+
+    #[test]
+    fn devin_worker_seat_tell() {
+        holds_with(Harness::Devin, "seat-tell");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_core() {
+        holds_with(Harness::Codex, "core");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_pause_resume_mid_turn() {
+        holds_with(Harness::Codex, "pause-resume-mid-turn");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_order_after_working() {
+        holds_with(Harness::Codex, "order-after-working");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_question_ask_answer() {
+        holds_with(Harness::Codex, "question-ask-answer");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_seat_tell() {
+        holds_with(Harness::Codex, "seat-tell");
+    }
+
+    #[test]
+    fn devin_worker_seat_finish() {
+        holds_with(Harness::Devin, "seat-finish");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_seat_finish() {
+        holds_with(Harness::Codex, "seat-finish");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_compaction() {
+        holds_with(Harness::Devin, "field-devin-compaction");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_command_left() {
+        holds_with(Harness::Devin, "field-devin-command-left");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_resumed_writes() {
+        holds_with(Harness::Devin, "field-devin-resumed-writes");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_reopened() {
+        holds_with(Harness::Devin, "field-devin-reopened");
+    }
+
+    #[test]
+    fn devin_worker_field_devin_quota() {
+        holds_with(Harness::Devin, "field-devin-quota");
+    }
+
+    /// The rig's Codex stand-in starts through a script, so Unix's only.
+    #[cfg(unix)]
+    #[test]
+    fn codex_worker_field_codex_slow_login_shell() {
+        holds_with(Harness::Codex, "field-codex-slow-login-shell");
     }
 
     /// Field report 5's nudges (T-1113): five minutes of wake-up calls a minute apart, too long

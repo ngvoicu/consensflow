@@ -417,7 +417,7 @@ mod tests {
     /// running its own words over the folder, so a suite added there, or a name its
     /// pattern misses, is held here; and it asks for no ignored case, which only the
     /// `live` command runs on the real harnesses. The live matrix is the one suite it leaves
-    /// out: it has a step of its own ([`ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side`]),
+    /// out: it has a step of its own ([`ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side`]),
     /// and a suite named by both would run twice. Run where `sh` is (the words are the
     /// workflow's bash); Windows reads the same file.
     #[cfg(unix)]
@@ -483,33 +483,54 @@ mod tests {
         );
     }
 
-    /// The live matrix's program, which CI runs in a step of its own.
+    /// The live matrix's program, which CI runs in a job of its own.
     const MATRIX: &str = "live_matrix";
 
-    /// The live matrix on the rig's stand-ins has a step of its own in CI's checks job, on both
-    /// platforms, with its own limit (T-1184): its cases are the longest of the live suites
-    /// (963 s on the Mac and 1,001 s on Windows, one at a time), which the general step's limit
-    /// would not hold. Its cases take turns in one process (`cf_e2e::serial`), so the step runs
-    /// them under nextest, each a process of its own and a board of its own (a home, a daemon,
-    /// its ports), several at once; never the ignored case, which is the real harnesses'.
+    /// The live matrix on the rig's stand-ins runs in a job of its own on both platforms, in
+    /// thirds, nextest's partitions of its cases by count (T-1195, T-1207: halves passed 6 minutes
+    /// once the Devin and Codex seats came in): its 56 cases took 601 s 4 at
+    /// a time on a Mac as a step of the checks job (T-1184), and 6 at a time lost two of them on
+    /// Windows. Its cases take turns in one process (`cf_e2e::serial`), so the step runs them
+    /// under nextest, each a process of its own and a board of its own (a home, a daemon, its
+    /// ports), several at once; never the ignored cases, which are the real harnesses' and those
+    /// run on request. The gate waits for the job, and no step of the checks job runs the
+    /// matrix besides.
     #[test]
-    fn ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side() {
+    fn ci_runs_the_live_matrix_in_a_job_of_its_own_in_thirds_its_cases_side_by_side() {
         let jobs = jobs(&workflow());
-        let (_, checks) = jobs
-            .iter()
-            .find(|(id, _)| id == "checks")
-            .expect("ci.yml has no checks job");
-        assert_eq!(listed(checks, "os"), ["macos-latest", "windows-latest"]);
+        let job = |id: &str| {
+            jobs.iter()
+                .find(|(name, _)| name == id)
+                .map(|(_, lines)| lines)
+                .unwrap_or_else(|| panic!("ci.yml has no {id} job"))
+        };
+        let matrix = job("live-matrix");
+        assert_eq!(listed(matrix, "os"), ["macos-latest", "windows-latest"]);
+        assert_eq!(
+            listed(matrix, "part"),
+            ["1/3", "2/3", "3/3"],
+            "each third of the cases, once"
+        );
         let program = format!("--test {MATRIX}");
-        let named: Vec<usize> = (0..checks.len())
-            .filter(|at| checks[*at].contains(&program))
+        assert!(
+            !job("checks").iter().any(|line| line.contains(&program)),
+            "the checks job runs no case of the matrix besides"
+        );
+        assert!(
+            listed(job("gate"), "needs")
+                .iter()
+                .any(|need| need == "live-matrix"),
+            "the gate waits for the matrix"
+        );
+        let named: Vec<usize> = (0..matrix.len())
+            .filter(|at| matrix[*at].contains(&program))
             .collect();
         let [at] = named[..] else {
-            panic!("one line of the checks job names {program}, not {named:?}: {checks:?}")
+            panic!("one line of the live-matrix job names {program}, not {named:?}: {matrix:?}")
         };
-        let run = checks[at]
+        let run = matrix[at]
             .strip_prefix("run: ")
-            .unwrap_or_else(|| panic!("the matrix's step is one command: {}", checks[at]));
+            .unwrap_or_else(|| panic!("the matrix's step is one command: {}", matrix[at]));
         let words: Vec<&str> = run.split_whitespace().collect();
         assert_eq!(
             words[..5],
@@ -519,6 +540,10 @@ mod tests {
         assert!(
             words.contains(&"--no-fail-fast") && !run.contains("ignored"),
             "every case runs, and no live one: {run}"
+        );
+        assert!(
+            run.ends_with(" --partition count:${{ matrix.part }}"),
+            "each job runs its half: {run}"
         );
         let threads = words
             .iter()
@@ -547,15 +572,15 @@ mod tests {
             "no step but the matrix's runs a case again"
         );
         assert!(
-            checks[at - 1] == "- name: The live matrix on the stand-ins"
-                && checks[at + 1].starts_with("timeout-minutes: "),
+            matrix[at - 1] == "- name: The live matrix on the stand-ins"
+                && matrix[at + 1].starts_with("timeout-minutes: "),
             "the matrix's step is named and has a limit of its own: {:?}",
-            &checks[at - 1..=at + 1]
+            &matrix[at - 1..=at + 1]
         );
-        let installed = checks
+        let installed = matrix
             .iter()
             .position(|line| line.starts_with("- run: cargo install cargo-nextest "))
-            .expect("the checks job installs nextest");
+            .expect("the live-matrix job installs nextest");
         assert!(installed < at, "nextest is installed before the step");
     }
 

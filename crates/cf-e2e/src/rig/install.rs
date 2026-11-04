@@ -107,6 +107,21 @@ pub(super) fn environment(
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
+    // A stand-in Devin keeps its store and settings in the rig's own home, whatever folders of
+    // the machine's a caller passed: Devin's are under `APPDATA` on Windows, and the live kit
+    // gives the machine's own, which put the stand-in's store in the machine owner's (zeewin2,
+    // T-1207: its writes failed on the real store's foreign keys, and nothing was kept).
+    if config.devin.is_some() {
+        env.retain(|(name, _)| name != "APPDATA" && name != "LOCALAPPDATA");
+        env.push((
+            "APPDATA".to_owned(),
+            text(&home.join("AppData").join("Roaming")),
+        ));
+        env.push((
+            "LOCALAPPDATA".to_owned(),
+            text(&home.join("AppData").join("Local")),
+        ));
+    }
     // A harness's home of the run's own is where its windows run, whatever else was set.
     for (name, value) in homes {
         env.retain(|(held, _)| held != name);
@@ -625,6 +640,40 @@ mod tests {
         assert!(!root.path().join("consensflow/agents.json").exists());
         assert_eq!(roster["agents"][0]["id"], "chief");
         assert_eq!(roster["agents"][1]["model"], "fake");
+    }
+
+    /// A rig with a stand-in Devin keeps Devin's folders in its own home, over the machine's a
+    /// caller passed (the live kit passes `APPDATA`), and a rig without one keeps what it was
+    /// given (T-1207).
+    #[test]
+    fn a_rig_given_a_stand_in_devin_keeps_its_folders_in_the_rigs_home_over_the_machines() {
+        let root = Path::new("root");
+        let owners = config()
+            .var("APPDATA", "C:/Users/owner/AppData/Roaming")
+            .var("LOCALAPPDATA", "C:/Users/owner/AppData/Local");
+        let env = environment(
+            root,
+            &root.join("fake-bin"),
+            &owners.clone().devin("/the/fake-devin"),
+            &[],
+        );
+        assert_eq!(
+            var(&env, "APPDATA"),
+            root.join("home")
+                .join("AppData")
+                .join("Roaming")
+                .to_string_lossy()
+        );
+        assert_eq!(
+            var(&env, "LOCALAPPDATA"),
+            root.join("home")
+                .join("AppData")
+                .join("Local")
+                .to_string_lossy()
+        );
+        assert_eq!(env.iter().filter(|(name, _)| name == "APPDATA").count(), 1);
+        let env = environment(root, &root.join("fake-bin"), &owners, &[]);
+        assert_eq!(var(&env, "APPDATA"), "C:/Users/owner/AppData/Roaming");
     }
 
     #[test]

@@ -93,6 +93,31 @@ pub fn rig_for(installs: &[Installed], shims: &Path, stand_in: &Path) -> Result<
     }
 }
 
+/// `config` with the rig's stand-ins of Devin and Codex where `roster` seats one: a row of
+/// that kind on the stand-in's fake model (the matrix's seats, T-1207). They are the crate's
+/// `fake-devin` and `fake-codex`, beside `stand_in` (the `fake-agent` binary).
+fn with_shaped_stand_ins(config: Config, roster: &[Value], stand_in: &Path) -> Config {
+    let shaped = |kind: &str| {
+        roster.iter().any(|row| {
+            row["kind"] == kind
+                && [agents::STAND_IN_CHIEF_MODEL, agents::STAND_IN_WORKER_MODEL]
+                    .contains(&row["model"].as_str().unwrap_or_default())
+        })
+    };
+    let beside =
+        |name: &str| stand_in.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    let config = if shaped("devin") {
+        config.devin(beside("fake-devin"))
+    } else {
+        config
+    };
+    if shaped("codex") {
+        config.codex(beside("fake-codex"))
+    } else {
+        config
+    }
+}
+
 /// A project of the rig whose chief the check plays.
 pub struct Members {
     rig: Rig,
@@ -171,6 +196,12 @@ impl Members {
             .fold(config, |config, (name, value)| {
                 config.daemon_var(name, value)
             });
+        let config = with_shaped_stand_ins(config, &plan.roster, stand_in);
+        let config = if plan.finder {
+            config.as_the_finder_starts_it()
+        } else {
+            config
+        };
         let mut rig = Rig::start(config.clone())?;
         if super::keep_requested() {
             log.say(format!(

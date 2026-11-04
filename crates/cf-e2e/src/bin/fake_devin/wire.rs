@@ -229,6 +229,19 @@ impl Wire {
         self.record(json!({ "turnClientMessageId": client, "cause": cause }))
     }
 
+    /// The turn that answers `client` ended for its account's quota, as Devin wrote one on a Pro
+    /// plan (poker-lab, 2026-10-03): cause `quota_exhausted`, its words in `errorMessage`.
+    pub fn ended_for_quota(&mut self, client: &str, words: &str) -> io::Result<()> {
+        if self.stamped {
+            self.status("blocked")?;
+        }
+        self.record(json!({
+            "turnClientMessageId": client,
+            "cause": "quota_exhausted",
+            "errorMessage": words,
+        }))
+    }
+
     /// The turn that answers `client` ended in the model's request `request`, as Devin
     /// 3000.11 says it (`wire-b09accf0.jsonl` of T-652, lines 46275-46276): a record that
     /// names the turn's message and its request (`turnRequestId`), then the cause, with

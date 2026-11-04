@@ -23,11 +23,12 @@
 # workspace's tests 10 to 11 on macOS and 16 to 18 on Windows, Playwright 4 on
 # macOS, the setup and the staging 2 to 4, and the rest 3. Now:
 #   checks         the Node tests, the CLI's and the app's tests, cf-e2e's own and
-#                  its live suites' offline cases, the live matrix on the stand-ins in a
-#                  step of its own (T-1184), clippy, and cf-bridge's;
+#                  its live suites' offline cases, clippy, and cf-bridge's;
 #   workspace      the workspace's tests, whole (its limit below says why);
 #   daemons        the daemons' suites in six shards, a sixth of their cases
 #                  each (`cargo xtask test daemons` with CF_TEST_SHARD: suites.rs);
+#   live-matrix    the live matrix on the stand-ins in thirds, nextest's partitions
+#                  of its cases (T-1195, T-1207);
 #   platform-free  on Linux, once: the layout of the Rust, the linter, the page's
 #                  Playwright suite and the engine's paced kit, which read no code
 #                  of one system's (T-1161).
@@ -81,7 +82,7 @@ jobs:
       # harness, which cargo test runs without --ignored: each suite's own oracle, its
       # readers of a harness's records and its rules. Their cases on the real harnesses
       # are `cargo xtask live`'s alone, before a release. The programs are the files
-      # there, whichever there are, but the live matrix, which has the step below; until
+      # there, whichever there are, but the live matrix, which has a job of its own; until
       # T-1161 no job ran them, and the local gate that did no longer lands the
       # integrations (suites.rs holds this step).
       - name: The offline cases of every live suite
@@ -89,28 +90,6 @@ jobs:
           tests=$(ls crates/cf-e2e/tests | sed -n '/^live_matrix\.rs$/!s/^\(live_[a-z0-9_]*\)\.rs$/--test \1/p' | tr '\n' ' ')
           cargo test -p cf-e2e --no-fail-fast $tests
         timeout-minutes: 30
-      # nextest, for the live matrix's step, as the workspace job installs it: built once,
-      # then the cache's (~/.cargo/bin).
-      - run: cargo install cargo-nextest --version 0.9.148 --locked
-      # The live matrix on the rig's stand-ins (tests/live_matrix.rs): every scenario of a
-      # board, and the field reports' known reds, each marked until the task whose fix
-      # turns it green (T-1168, T-1173). One at a time its cases took 963 s on a Mac and
-      # 1,001 s on Windows (T-1173), which the step above could not hold beside its own
-      # 8 and 6.5 minutes, so it has a step and a limit of its own (T-1184). Its cases take
-      # turns in one process (cf_e2e::serial); nextest runs each in a process of its own,
-      # each on a board of its own (a home, a daemon, its ports), 4 at a time: the runners
-      # have 3 processors (macOS) and 4 (Windows), and a case mostly waits on its board.
-      # Its 40 cases took 468 to 494 s 4 at a time on a Mac and 474 s on Windows (T-1186;
-      # 31 took 256 to 316 s, T-1184). The limit is
-      # set with a margin over that until CI's own runs read it (`cargo xtask ci-times
-      # --step "The live matrix"`); suites.rs holds this step, ci_times' tests its limit.
-      # A case that fails is run once more, here and in no other step: on the runners each
-      # run of a3-1's landing met another case's timing red that passed in the others (T-1177,
-      # the chief's decision m-7388). One that passes the second time is FLAKY in the log, and
-      # said; one that fails twice is red.
-      - name: The live matrix on the stand-ins
-        run: cargo nextest run -p cf-e2e --test live_matrix --no-fail-fast --test-threads 4 --retries 1
-        timeout-minutes: 20
       # Every crate linted, its tests included.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The harnesses' crate as the daemon builds it, without the test kit
@@ -269,6 +248,53 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The live matrix on the rig's stand-ins (tests/live_matrix.rs): every scenario of a board,
+  # the field-found issues as the field had them, and the known reds, each marked until the
+  # task whose fix turns it green (T-1168, T-1173, T-1186, T-1195, T-1207), with workers of
+  # Devin's and Codex's shape besides Claude's (T-1207; Codex's stand-in is Unix's only). Its
+  # cases take turns in one process (cf_e2e::serial); nextest runs each in a process of its
+  # own, each on a board of its own (a home, a daemon, its ports), 4 at a time: a case mostly
+  # waits on its board, and the runners have 3 processors (macOS) and 4 (Windows). 6 at a time
+  # lost cases on Windows (T-1195). Its cases run in thirds, nextest's partitions of them by
+  # count, a job each, so that a third stays under about 6 minutes (T-1207: halves passed it
+  # once the Devin and Codex seats came in). The step's limit is set with a margin until CI's
+  # own runs read it (`cargo xtask ci-times --step "The live matrix"`); suites.rs holds this
+  # job, ci_times' tests its limit.
+  live-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        part: ['1/3', '2/3', '3/3']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npm --prefix app run bundle:ui
+      - run: npm --prefix app run prepare-sidecar
+      # nextest, as the workspace job installs it: built once, then the cache's (~/.cargo/bin).
+      - run: cargo install cargo-nextest --version 0.9.148 --locked
+      # A case that fails is run once more, here and in no other step: on the runners each
+      # run of a3-1's landing met another case's timing red that passed in the others (T-1177,
+      # the chief's decision m-7388). One that passes the second time is FLAKY in the log, and
+      # said; one that fails twice is red.
+      - name: The live matrix on the stand-ins
+        run: cargo nextest run -p cf-e2e --test live_matrix --no-fail-fast --test-threads 4 --retries 1 --partition count:${{ matrix.part }}
+        timeout-minutes: 20
+      # The reports of the rigs its failed cases left, where the rig writes them: the
+      # machine's temp folder, as the daemons' job finds it.
+      - name: Where the matrix's rigs keep the reports of its failed cases
+        if: failure()
+        run: echo "MATRIX_RIG_TEMP=$(node -e "console.log(require('os').tmpdir())")" >> "$GITHUB_ENV"
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: matrix-rig-reports-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ${{ env.MATRIX_RIG_TEMP }}/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
   # What reads no code of one system's runs once, on Linux, where runners are many
   # (T-1161): the steps it took on each of macOS's and Windows' checks were 7 and 3
   # minutes. The page tells a Mac and Windows by the browser's user agent, and the
@@ -304,7 +330,7 @@ jobs:
   # cancelled or was skipped makes them red and not skipped, which a rule would
   # take for passed.
   gate:
-    needs: [checks, platform-free, workspace, daemons]
+    needs: [checks, platform-free, workspace, daemons, live-matrix]
     if: always()
     strategy:
       fail-fast: false

@@ -85,7 +85,11 @@ impl Snapshot {
         self.lanes
             .iter()
             .find(|lane| lane["participant"]["handle"] == handle)
-            .and_then(|lane| lane["participant"]["agent"].as_str())
+            .and_then(|lane| {
+                lane["participant"]["member"]
+                    .as_str()
+                    .or(lane["participant"]["agent"].as_str())
+            })
             .map(str::to_owned)
             .or_else(|| {
                 self.events.iter().find_map(|event| {

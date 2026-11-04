@@ -135,6 +135,7 @@ pub fn order() -> Vec<Scenario> {
                 }),
                 Step {
                     human: None,
+                    restarts: false,
                     name: "own step",
                     asks: |bindings| {
                         format!(
