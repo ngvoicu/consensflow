@@ -33,6 +33,8 @@
 [run]
 # The role texts, and the golden of Node's chief text that holds them whole.
 rest-engine-text-goldens-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
+# The text's goldens hold no tester (Node had none): the tester's card is read by its own test.
+rest-engine-text-roles-tester = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::teach_the_tester_only_the_board_s_commands"]
 # The Pi channel's looks for the extension's verdict, on a clock the test moves.
 rest-pi-send-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::channel::send::tests::record::"]
 # A paste the window still holds is pressed Enter again.
@@ -100,8 +102,8 @@ replace = "Your findings are a one-line summary of your turn: ConsensFlow collec
 
 [[plant]]
 name = "held-rest: the tester's card says its result is a one-line summary of its turn"
-meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
-runs = ["rest-engine-text-goldens-roles"]
+meant = "teach_the_tester_only_the_board_s_commands"
+runs = ["rest-engine-text-roles-tester"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"

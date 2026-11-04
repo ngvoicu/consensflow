@@ -371,6 +371,7 @@ replace = "if panes.contains_key(&key) || self.teardown.counts().0 > 0 {"
 [[plant]]
 name = "windows close: a program that outlived its output for good is left running"
 meant = "a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed"
+platforms = ["windows"]
 runs = ["panes-handlers-windows", "panes-output-end"]
 
 [[plant.edit]]
@@ -381,6 +382,7 @@ replace = "let _ = key;"
 [[plant]]
 name = "windows close: the daemon is told before a program that outlived its output is gone"
 meant = "a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed"
+platforms = ["windows"]
 runs = ["panes-handlers-windows", "panes-output-end"]
 
 [[plant.edit]]
