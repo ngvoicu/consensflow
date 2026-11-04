@@ -47,7 +47,7 @@ in three ways, each made by hand:
   four commands that take one say how it ends (B6): the six prints that hold the usage,
   `cf task --help` among them, where the `--file` example follows the heredoc's;
 - the reply of each case that gives a window words (`cf task add`, `resume`, `tell`: ten
-  cases) has a last line, `Sent: <n> characters, ending "<its last words>".` (B6);
+  cases) has a last line, `Sent: <n> characters, ending "<its last words>".` (B6; it begins `T-3: sent` since T-957, below);
 - the daemon's traces of the same commands were changed with them.
 ## The usage after `cf task edit`
 
@@ -167,3 +167,31 @@ Board tasks T-1118 and T-1128 (3.0.7-alpha.2): `cf task edit`, `reopen` and `res
 (else the brief's first line); edit takes it alone`, in the six prints of `board.json` that
 hold the usage: each is what the built `cf` prints from `crates/cf/src/board/usage.txt`,
 changed by hand in those words alone.
+
+## The last line of a reply names its task
+
+Board task T-957 (3.0.7, from T-689): the line that ends the reply of `cf task add`, `reopen`,
+`resume`, `edit` and `cf tell` begins with the task, `T-3: sent 24 characters, ending "…".`,
+where it began `Sent:`. A chief that read only that last line (a harness shows a command's
+output cut, `crates/cf/src/board/cut.rs`) did not learn the number of the task it had just
+added. The ten cases of `board.json` that carry the line were changed by a script from each
+case's own first word (`T-3 is on the board …` gives `T-3`), and nothing else in them moved.
+The daemon's traces that hold the line (`cf-board-004`, `-008`, `-009`, `-010`, `-011`, `-014`,
+`-015`, `-016`, `-017`, `-020`, `-021`, `-022`) are all departed from Node's already, for other
+words (`DEPARTED` in `crates/cf-daemon/tests/api/main.rs`), so they are not edited.
+
+The line of a task given to a window says what it waits for (`T-7 [open] blocked by T-1, T-2 ·
+@chief ← @chief: …`), as the line of a task for a tier did (T-957, from T-798). No case of
+`board.json` prints such a line, so none changed; the daemon's trace that does (`cf-board-021`) departs
+from Node's already (`crates/cf-daemon/tests/api/main.rs`), and is not edited.
+
+## `cf task add --after` says the task may wait for the chief's word (T-957, the field issue of 2026-10-29)
+
+The reply of `cf task add --after T-3` ends, before the `T-6: sent …` line, with ` If that window
+cannot go on in its conversation when T-6 starts, T-6 waits paused for your word (cf task edit T-6,
+then cf task resume T-6).`: a follow-up whose window closed with no proof its program was gone is
+held for the chief's word (`crates/cf-engine/src/ownership.rs`) instead of going to a window of its
+own, which would not remember the task it follows. The board cannot say at the add whether that
+window will be proven gone (the host's word on its exit comes to the engine, after the accept), so
+the sentence is the same for every follow-up. The one case of `board.json` that adds one was changed
+by hand, in those words alone; the daemon's traces hold no `--after` add.

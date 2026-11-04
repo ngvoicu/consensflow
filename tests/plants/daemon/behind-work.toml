@@ -380,8 +380,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        Ending::Declined => format!(\"cancel {them} first, or pass T-{number} on\"),\n"
-replace = "        Ending::Declined => format!(\"cancel {them} first, or let T-{number} finish\"),\n"
+find = "        (Ending::Declined, _) => format!(\"cancel {them} first, or pass T-{number} on\"),\n"
+replace = "        (Ending::Declined, _) => format!(\"cancel {them} first, or let T-{number} finish\"),\n"
 
 [[plant]]
 name = "behind work: a follow-up of a task that fails again is told to the chief the first time only"

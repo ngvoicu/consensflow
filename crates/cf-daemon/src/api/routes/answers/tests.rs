@@ -85,6 +85,68 @@ async fn the_answer_may_be_by_choices() {
 }
 
 #[tokio::test]
+async fn a_text_of_several_lines_answers_a_question_with_options_whole() {
+    // T-637: the lines were read as one answer each, and a question with one set of options
+    // refused a heredoc with "one answer per question (1)".
+    let scene = scene();
+    let asked = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .ask(
+            scene.project.id,
+            &cf_ledger::NewQuestion {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                questions: Some(json!([{
+                    "question": "Which?",
+                    "header": "Pick",
+                    "options": [{ "label": "Approve live tests" }, { "label": "Offline only" }]
+                }])),
+                ..cf_ledger::NewQuestion::default()
+            },
+        )
+        .unwrap();
+    let words = "Approve live tests, with these:\n- the cheap models only\n- stop at the first red";
+    let body = json!({ "question": asked.id, "body": words }).to_string();
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["message"]["choices"], json!([[words]]));
+}
+
+#[tokio::test]
+async fn an_answer_that_is_too_many_lines_for_the_questions_says_how_many_it_has() {
+    let scene = scene();
+    let asked = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .ask(
+            scene.project.id,
+            &cf_ledger::NewQuestion {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                questions: Some(json!([
+                    { "question": "Which?", "header": "One", "options": [{ "label": "A" }] },
+                    { "question": "And?", "header": "Two", "options": [{ "label": "B" }] },
+                ])),
+                ..cf_ledger::NewQuestion::default()
+            },
+        )
+        .unwrap();
+    let body = json!({ "question": asked.id, "body": "A\nB\nC" }).to_string();
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(status, 400, "{said}");
+    assert!(
+        said["message"]
+            .as_str()
+            .unwrap()
+            .contains("this ask has 2 questions; give one answer to each, one line each"),
+        "{said}"
+    );
+}
+
+#[tokio::test]
 async fn a_whole_number_in_any_spelling_names_the_question() {
     let scene = scene();
     let id = scene.question.id;

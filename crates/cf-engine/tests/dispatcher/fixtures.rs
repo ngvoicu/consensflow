@@ -206,6 +206,23 @@ pub fn participant(context: &Context, project: i64, handle: &str) -> Option<Part
         .find(|participant| participant.handle == handle)
 }
 
+/// The notes of task `number`'s thread that hold it for the chief's word: a pause note whose way
+/// on is to rewrite its brief and send it to a window of its own (the hold of a follow-up that
+/// cannot go on in the conversation of the task it follows).
+pub fn hold_notes(context: &Context, project: i64, number: i64) -> Vec<String> {
+    context
+        .task(project, number)
+        .messages
+        .into_iter()
+        .filter(|message| message.kind == "note")
+        .map(|message| message.body)
+        .filter(|body| {
+            body.starts_with(&format!("T-{number} is paused: "))
+                && body.contains(&format!("cf task edit T-{number}"))
+        })
+        .collect()
+}
+
 /// The notes a participant was sent, oldest first.
 pub fn notes(context: &Context, participant: i64) -> Vec<String> {
     let mut sent: Vec<String> = context

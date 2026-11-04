@@ -13,7 +13,7 @@ use cf_engine::testing::Context;
 use cf_harness::contract::Pane;
 use serde_json::{json, Value};
 
-use crate::fixtures::Tiers;
+use crate::fixtures::{hold_notes, Tiers};
 
 /// How long the pane must have printed nothing: `windows.rs`' `DRAWN_QUIET_MS`.
 const STILL_MS: i64 = 1_500;
@@ -205,6 +205,9 @@ fn a_cancelled_task_closes_its_window_at_once_whatever_its_screen_shows() {
 fn the_next_task_of_the_session_waits_for_the_same_screen_and_its_requester_is_told_nothing_of_it()
 {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = context.with_staff(&["zeus"]);
     let window = at_work(&context, project.id);
     printed(&context, 300);
@@ -238,9 +241,55 @@ fn the_next_task_of_the_session_waits_for_the_same_screen_and_its_requester_is_t
     context.close();
 }
 
+/// The same, where the host proves nothing of the exit: the window closes as it rests, and T-2,
+/// a follow-up no window had, is held for the chief's word instead of opening a window unasked.
+#[test]
+fn the_next_task_of_the_session_waits_for_the_same_screen_and_a_close_with_no_proof_holds_it_for_the_chiefs_word(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    printed(&context, 300);
+    answers(&context);
+    context.give(project.id, "zeus", "Lexer");
+    let opened = context.host.opened().len();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(open(&context, &window), "its screen is being drawn");
+    assert_eq!(context.host.opened().len(), opened);
+    assert_eq!(context.task(project.id, 2).task.state, "queued");
+    assert!(
+        hold_notes(&context, project.id, 2).is_empty(),
+        "told nothing while it waits"
+    );
+
+    // The screen rests: the window closes, with no proof its program ended.
+    printed(&context, STILL_MS);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed(), std::slice::from_ref(&window));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.host.opened().len(), opened, "no window unasked");
+    assert_eq!(context.task(project.id, 2).task.state, "paused");
+    assert_eq!(hold_notes(&context, project.id, 2).len(), 1);
+
+    // The chief's word sends it on, and T-2 opens a window of its own.
+    context.resume_task(project.id, 2, "Go on in a window of your own.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.host.opened().len(), opened + 1);
+    assert_ne!(context.host.last("zeus").unwrap().pane, window);
+    assert_eq!(context.task(project.id, 2).task.state, "working");
+    context.close();
+}
+
 #[test]
 fn the_next_task_of_the_session_waits_no_longer_than_the_bound_for_a_screen_that_never_rests() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = context.with_staff(&["zeus"]);
     let window = at_work(&context, project.id);
     printed(&context, 300);
@@ -261,6 +310,43 @@ fn the_next_task_of_the_session_waits_no_longer_than_the_bound_for_a_screen_that
     assert_eq!(context.host.killed(), std::slice::from_ref(&window));
     context.pass().unwrap();
     context.pass().unwrap();
+    assert_eq!(context.host.opened().len(), opened + 1);
+    assert_eq!(context.task(project.id, 2).task.state, "working");
+    context.close();
+}
+
+/// The same, where the host proves nothing of the exit: at the bound the window closes, and T-2
+/// is held for the chief's word instead of opening a window unasked.
+#[test]
+fn the_next_task_of_the_session_waits_no_longer_than_the_bound_and_a_close_with_no_proof_holds_it_for_the_chiefs_word(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    printed(&context, 300);
+    answers(&context);
+    context.give(project.id, "zeus", "Lexer");
+    let opened = context.host.opened().len();
+    context.pass().unwrap();
+    assert!(open(&context, &window));
+
+    context.advance(BOUND_MS - 1);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(open(&context, &window), "a millisecond before the bound");
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed(), std::slice::from_ref(&window));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.host.opened().len(), opened, "no window unasked");
+    assert_eq!(context.task(project.id, 2).task.state, "paused");
+    assert_eq!(hold_notes(&context, project.id, 2).len(), 1);
+
+    context.resume_task(project.id, 2, "Go on in a window of your own.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
     assert_eq!(context.host.opened().len(), opened + 1);
     assert_eq!(context.task(project.id, 2).task.state, "working");
     context.close();
@@ -316,6 +402,9 @@ fn a_task_in_hand_again_ends_the_wait_and_the_next_time_it_is_done_the_window_wa
 #[test]
 fn a_window_opened_since_waits_its_own_time_not_the_bound_of_the_one_that_closed() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = context.with_staff(&["zeus"]);
     let first = at_work(&context, project.id);
     printed(&context, 300);
@@ -331,6 +420,57 @@ fn a_window_opened_since_waits_its_own_time_not_the_bound_of_the_one_that_closed
     // T-2 opens a window, and is done in it with the screen drawing: that window waits.
     printed(&context, 5_000);
     context.give(project.id, "zeus", "Lexer");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 2).task.state, "working");
+    let second = context.host.last("zeus").unwrap().pane;
+    assert_ne!(second, first);
+    printed(&context, 300);
+    context.adapter.answer("zeus", "Lexer done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 2).task.state, "done");
+    assert!(open(&context, &second), "it waits its own time");
+    context.advance(BOUND_MS);
+    context.pass().unwrap();
+    assert!(!open(&context, &second));
+    context.close();
+}
+
+/// The same, where the host proves nothing of the exit: T-2, a follow-up no window had, is held
+/// for the chief's word when the first window has closed, and the window it is then sent on in
+/// waits its own time, as before.
+#[test]
+fn a_window_opened_since_waits_its_own_time_and_a_first_close_with_no_proof_holds_the_task_for_the_chiefs_word(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let first = at_work(&context, project.id);
+    printed(&context, 300);
+    answers(&context);
+    context.advance(BOUND_MS);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.killed(),
+        std::slice::from_ref(&first),
+        "the bound is over"
+    );
+
+    printed(&context, 5_000);
+    context.give(project.id, "zeus", "Lexer");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 2).task.state, "paused");
+    assert_eq!(hold_notes(&context, project.id, 2).len(), 1);
+    assert_eq!(
+        context.host.last("zeus").unwrap().pane,
+        first,
+        "no second window yet"
+    );
+
+    context.resume_task(project.id, 2, "Go on in a window of your own.");
     for _ in 0..3 {
         context.pass().unwrap();
     }

@@ -8,7 +8,9 @@
 use cf_engine::testing::Context;
 use cf_ledger::NewTask;
 
-use crate::fixtures::{assert_match, closed, given, last_launch, last_message, native_of, Tiers};
+use crate::fixtures::{
+    assert_match, closed, given, hold_notes, last_launch, last_message, native_of, Tiers,
+};
 
 #[test]
 fn a_follow_up_waiting_for_what_it_needs_keeps_no_window_open_and_goes_to_one_opened_again_on_the_conversation(
@@ -224,6 +226,9 @@ fn a_follow_up_of_an_older_accepted_task_waits_while_the_window_holds_a_result_t
 #[test]
 fn a_follow_up_released_by_the_cancel_of_its_sessions_task_goes_once_the_window_is_stopped() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let tiers = Tiers::new(&context, &["zeus"]);
     let project = tiers.project.id;
     tiers.open();
@@ -288,6 +293,64 @@ fn a_follow_up_released_by_the_cancel_of_its_sessions_task_goes_once_the_window_
     assert_match(
         words.last().unwrap(),
         r"^\[ConsensFlow m-\d+ · T-3 · task from @chief\]\nNow the lexer$",
+    );
+}
+
+/// The same, where the host proves nothing of the exit of the window that did T-1: the first
+/// follow-up is held for the chief's word, not given to a window unasked, and the one behind it
+/// waits, as it waited for the window at work, for the window it holds.
+#[test]
+fn a_follow_up_of_a_window_that_closed_with_no_proof_is_held_and_the_one_behind_it_waits() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+
+    for body in ["First the tests", "Now the lexer"] {
+        context.create_task(
+            project,
+            NewTask {
+                from: "chief".to_owned(),
+                after: Some(1),
+                body: body.to_owned(),
+                ..NewTask::default()
+            },
+        );
+    }
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(project, 1, "chief")
+        .unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "no proof: held for the chief's word"
+    );
+    assert_eq!(hold_notes(&context, project, 2).len(), 1);
+    assert_eq!(tiers.task(3).task.state, "open", "waiting for the window");
+    assert!(hold_notes(&context, project, 3).is_empty());
+
+    // The chief's word sends T-2 on in a window of its own; T-3 waits behind it still.
+    context.resume_task(project, 2, "Go on in a window of your own.");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert_eq!(tiers.assignee(2), session);
+    assert_eq!(
+        tiers.task(3).task.state,
+        "open",
+        "ready, and waiting for the window"
     );
 }
 

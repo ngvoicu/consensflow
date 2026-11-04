@@ -100,6 +100,30 @@ fn a_member_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_it
     context.pass().unwrap();
     context.pass().unwrap();
 
+    // The follow-up is not given to a window of its own unasked: its brief may count on
+    // the window before, whose conversation is gone. It is held for the chief's word,
+    // told once why, and no window is prepared.
+    assert_eq!(context.task(project.id, 2).task.state, "paused");
+    assert_eq!(context.codex.prepared().len(), 1, "no window is prepared");
+    let told = context.task(project.id, 2).messages;
+    let held: Vec<&str> = told
+        .iter()
+        .filter(|message| message.kind == "note")
+        .map(|message| message.body.as_str())
+        .collect();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert!(
+        held[0].starts_with("T-2 is paused: ")
+            && held[0].contains("holds nothing of the conversation of T-1")
+            && held[0].contains("cf task edit T-2")
+            && held[0].contains("cf task resume T-2"),
+        "{held:?}"
+    );
+    context.resume_task(project.id, 2, "Go on in a window of your own");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
     let launches = context.codex.prepared();
     assert_eq!(launches.len(), 2);
     assert_eq!(launches[1]["resume"], Value::Null, "afresh");
@@ -151,6 +175,62 @@ fn a_member_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_it
             .all(|text| !text.contains(super::REPLACES)),
         "{:?}",
         said_to(&context, &session)
+    );
+    context.close();
+}
+
+/// A task a window had before is not a follow-up: the chief's word to send it back was given
+/// knowing the window, so where its harness holds nothing of the conversation it opens
+/// afresh, as it did, and is not held.
+#[test]
+fn a_task_a_window_had_opens_afresh_where_its_harness_holds_nothing_of_the_conversation_and_is_not_held(
+) {
+    let context: Context = codex();
+    let (project, session, _member) = finished_session(&context);
+    // T-2 goes on in T-1's conversation, and is done and accepted, as T-1 was.
+    follow_up(&context, &project, "Now the lexer");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 2).task.state, "working");
+    context.codex.answer(&session, "Lexer done");
+    context.pass().unwrap();
+    context.accept_if_done(project.id, 2);
+    // T-1 comes back after T-2 went through the session (as a ledger or a restart may leave
+    // it), and its harness holds nothing of the conversation T-2 left.
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "UPDATE task SET state = 'failed' WHERE project_id = {} AND number = 1;",
+            project.id
+        ))
+        .unwrap();
+    context.codex.holds_nothing(&session);
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project.id, 1, "chief", "The tests fail")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "a task a window had is not held"
+    );
+    let launches = context.codex.prepared();
+    assert_eq!(launches.len(), 3);
+    assert_eq!(launches[2]["resume"], Value::Null, "afresh");
+    assert!(
+        context
+            .task(project.id, 1)
+            .messages
+            .iter()
+            .all(|message| message.kind != "note" || !message.body.contains("new conversation")),
+        "a conversation the harness lost is told nothing of, as it never was"
     );
     context.close();
 }

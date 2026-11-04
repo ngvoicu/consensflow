@@ -66,7 +66,7 @@ enum Outcome {
 /// Node never withdraws a note that told a requester a task was paused, so
 /// the notes this ledger withdraws when the task is resumed are, in Node's
 /// recordings, queued still, and its dispatcher goes on to paste them; and
-/// the 23 that name `RESULT_ACCEPTED`, `RESULT_SENT_BACK` or
+/// the 22 that name `RESULT_ACCEPTED`, `RESULT_SENT_BACK` or
 /// `DECIDED_BEFORE_PASTED`, which the withdrawal of a decided task's result
 /// moved: Node leaves it queued, and its dispatcher pastes it after the
 /// decision it asked for; and the 5 that name `TAKEN_BEFORE_GIVEN`,
@@ -87,7 +87,10 @@ enum Outcome {
 /// that names `CRITICAL_WORDS`, which the rewording of a critical task's lead
 /// moved (T-1060); and the one that names `BUSY_NAMES_ITS_HOLDER`, which the
 /// naming of the task that holds a window in a `session-busy` refusal moved
-/// (T-1122).
+/// (T-1122); and the one that names `BEFORE_SAYS_WHAT_TO_DO`, which the words of
+/// a `--before` refusal for a task in a window moved (T-675); and the 2 that name
+/// `ANSWER_COUNT_SAID`, which the words of the refusal of a choice answer that does not
+/// answer each question once moved (T-637).
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -139,8 +142,8 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-messages-009", 9, "the door's read `answerTo` is gone, and a choice answer lands queued: its task waits until it is received"),
     ("ledger-messages-010", 11, READ_AT_ONCE),
     ("ledger-messages-011", 10, "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
-    ("ledger-messages-013", 10, READ_AT_ONCE),
-    ("ledger-messages-014", 10, READ_AT_ONCE),
+    ("ledger-messages-013", 9, ANSWER_COUNT_SAID),
+    ("ledger-messages-014", 9, ANSWER_COUNT_SAID),
     ("ledger-messages-015", 10, PICK_ROOM),
     ("ledger-messages-016", 12, ANSWERED_AS_IT_WAITED),
     ("ledger-messages-017", 10, DOOR_READ),
@@ -181,7 +184,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-005", 26, REASON_PAUSE),
     ("ledger-tasks-010", 15, RESULT_ACCEPTED),
     ("ledger-tasks-011", 17, RESULT_ACCEPTED),
-    ("ledger-tasks-012", 20, RESULT_ACCEPTED),
+    ("ledger-tasks-012", 18, BEFORE_SAYS_WHAT_TO_DO),
     ("ledger-tasks-015", 5, WAITED_FOR),
     ("ledger-tasks-016", 10, KEPT_BY_PAUSE),
     ("ledger-tasks-018", 16, KEPT_BY_PAUSE),
@@ -203,6 +206,14 @@ const REMOVAL_CANCELS_WAITING: &str =
 /// which one holds it and what to do about it (T-1122).
 const BUSY_NAMES_ITS_HOLDER: &str =
     "a door refuses a task for a window that holds one (`createTask` with `after`, here T-1 paused): `session-busy` names the task that holds the window and its state, and how to free it (\"@x's window holds T-1, paused: resume T-1 and wait for its result, or cancel T-1, before giving it another task; or open the task for its tier\"), where Node said \"@x is still on its work: wait for its result, or open the task for its tier\"; the trace's later departure (a pause keeps what is on its way: a question, a task message, a result) is behind it";
+/// The refusal of an answer that does not answer each question once says how many
+/// questions the ask has and how they are answered (T-637, 3.0.7).
+const ANSWER_COUNT_SAID: &str =
+    "the answer to a choice question is refused for its count (`answer` with a body of one line for an ask of two questions, and with two lists of picks for an ask of one): `bad-choices` says how many questions the ask has and how they are answered (\"answer: this ask has 2 questions; give one answer to each, one line each in the order asked …\", \"answer: this ask has 1 question; give one answer to it, a label or your own words …\"), where Node's said \"answer: one answer per question (N)\"; the trace's later departure (a choice answer lands queued: Node read it at once, `READ_AT_ONCE`) is behind it";
+/// The refusal of a `--before` for a task already in a window says what to do instead
+/// (T-675, 3.0.7).
+const BEFORE_SAYS_WHAT_TO_DO: &str =
+    "the chief adds a task `before` T-1 while T-1 is queued for its window (`createTask` with `before`): the refusal `not-on-the-board` goes on after \"only a task still on the board can wait for a new one\" with what to do instead (a task in a window is not pulled back: add the new task alone, put T-1 behind it with `cf task edit T-1 --needs +T-n`, or cancel it and add it again with `--needs`), where Node's said no more; the trace's later departure (the chief accepting the task while its result is still queued for it, `RESULT_ACCEPTED`) is behind it";
 /// A follow-up of a task still on its work is taken, and waits on the board
 /// for that task to be accepted.
 const FOLLOW_UP_BEHIND_WORK: &str =

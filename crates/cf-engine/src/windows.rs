@@ -28,6 +28,7 @@ use crate::deliveries::Delivering;
 use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
+use crate::ownership::Kept;
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
 use crate::runtime::{begin, caught, returning};
@@ -1063,7 +1064,35 @@ impl Dispatcher {
             )? {
                 return Ok(None);
             }
-            self.kept_apart(project, participant, found, before.as_ref(), first)?
+            match self.kept_apart(project, participant, found, before.as_ref(), first)? {
+                Kept::On(conversation) => conversation,
+                Kept::Held => {
+                    // The task is held for the chief's word, which asks no stop (T-1199): the
+                    // message the launch began goes back to wait for that word by hand, as
+                    // `launch_over` gives back only a message a new stop took, and the launch
+                    // is over.
+                    if self.launch_over(
+                        record,
+                        participant,
+                        delivering,
+                        stop,
+                        "its task waits for the chief's word: the conversation it follows cannot be gone on in",
+                    )? {
+                        return Ok(None);
+                    }
+                    if let Some(delivering) = delivering {
+                        self.give_back(
+                            delivering.message,
+                            "its task waits for the chief's word: the conversation it follows cannot be gone on in",
+                        )?;
+                        self.seams
+                            .ledger
+                            .borrow_mut()
+                            .launch_called_off(delivering.message)?;
+                    }
+                    return Ok(None);
+                }
+            }
         };
         // The task whose work the window holds: its first message's, or what its
         // conversation was last given where it goes on with one.
