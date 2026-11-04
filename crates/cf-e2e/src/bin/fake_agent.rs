@@ -396,7 +396,10 @@ fn run(
     } else {
         " · bypass permissions on"
     };
-    say(&format!("fake agent {said} on {}{mode}\n", launch.session))
+    // No session id on the screen: a UUID is four groups of hex and more, which the close's
+    // note takes for a key and withholds the whole screen for (failure-why, T-1227); the tests
+    // read the words before it.
+    say(&format!("fake agent {said} on its conversation{mode}\n"))
         .map_err(|failed| failed.to_string())?;
     if let (trust::Answer::Yes, Some(after)) = (&answer, trust::leaves_after()) {
         thread::sleep(after);
