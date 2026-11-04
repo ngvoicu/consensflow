@@ -11,6 +11,7 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod alive;
+mod began;
 mod capture;
 mod child;
 mod descriptors;
@@ -41,6 +42,7 @@ pub mod test_support;
 mod testing;
 
 pub use alive::alive;
+pub use began::began_after;
 pub use capture::{capture, capture_whole, CaptureFailed, Captured, LEFT_RUNNING};
 pub use child::{spawn, Child, Ender, Streams};
 pub use descriptors::{close_all_on_exec, hold_only_the_streams};

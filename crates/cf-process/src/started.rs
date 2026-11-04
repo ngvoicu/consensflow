@@ -148,13 +148,13 @@ impl Started {
 /// When `started` began, in microseconds since the epoch: macOS says it so; Linux says it in
 /// clock ticks since the machine started, which `/proc/stat` says the time of.
 #[cfg(target_os = "macos")]
-fn began_at(started: &Started) -> Option<u64> {
+pub(crate) fn began_at(started: &Started) -> Option<u64> {
     Some(started.identity.born)
 }
 
 /// As on macOS, from the ticks since the machine started and when it started.
 #[cfg(target_os = "linux")]
-fn began_at(started: &Started) -> Option<u64> {
+pub(crate) fn began_at(started: &Started) -> Option<u64> {
     let stat = std::fs::read_to_string("/proc/stat").ok()?;
     let booted: u64 = stat
         .lines()
@@ -174,7 +174,7 @@ fn began_at(started: &Started) -> Option<u64> {
 
 /// No other system says.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn began_at(_started: &Started) -> Option<u64> {
+pub(crate) fn began_at(_started: &Started) -> Option<u64> {
     None
 }
 

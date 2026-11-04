@@ -33,6 +33,7 @@
 relaunch-follow-ups-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::restart"]
 relaunch-follow-ups-boundary = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::boundary"]
 relaunch-follow-ups-status = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::status"]
+relaunch-follow-ups-began = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "began::"]
 relaunch-follow-ups-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::outside"]
 relaunch-follow-ups-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shared::"]
 relaunch-follow-ups-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "an_idle_quit_with_a_message_queued_read_as_a_cut_turn::"]
@@ -216,3 +217,38 @@ runs = ["relaunch-follow-ups-adapter"]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = "                .find(|(pid, status)| status.session == *session && !before.contains(pid));"
 replace = "                .find(|(pid, status)| status.session == *session && !before.contains(pid) || status.session == *session);"
+
+# A window ended for the relaunch leaves its Claude status file, and Windows gives its number to a
+# program begun since: read as a second Claude on the conversation, the next window's record was
+# "shared" and no answer of it taken for its task's result (zeewin, the live matrix's field7 red
+# with its evidence; CI runs 41787972093 and 41792519144's field6 pair; T-1226).
+
+[[plant]]
+name = "relaunch follow-ups: a status file whose number a later program took is a Claude"
+meant = "a_status_file_whose_number_a_later_program_took_names_no_claude"
+runs = ["relaunch-follow-ups-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = '''    if written.is_some_and(|written| cf_process::began_after(pid, written + SLACK)) {'''
+replace = '''    if written.is_some_and(|_| false) {'''
+
+[[plant]]
+name = "relaunch follow-ups: no process is said to have begun after a moment"
+meant = "this_process_began_before_now_and_after_a_moment_before_it"
+runs = ["relaunch-follow-ups-began"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/began.rs"
+find = '''    began(pid).is_some_and(|began| began > time)'''
+replace = '''    began(pid).is_some_and(|_| time > SystemTime::now())'''
+
+[[plant]]
+name = "relaunch follow-ups: a window opened again shares its conversation with the number its ended window left"
+meant = "a_window_opened_again_beside_the_status_its_ended_window_left_under_a_number_another_program_took_shares_nothing"
+runs = ["relaunch-follow-ups-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = '''    if written.is_some_and(|written| cf_process::began_after(pid, written + SLACK)) {'''
+replace = '''    if written.is_some_and(|written| written < SystemTime::UNIX_EPOCH) {'''
