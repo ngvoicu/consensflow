@@ -12,6 +12,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use cf_e2e::muse::{self, hook_blocks, hook_runs};
 use cf_e2e::rig::{Config, Project, Rig};
@@ -248,32 +249,42 @@ fn muse_run_in(
     let settings = json!({ "SessionStart": [{ "matcher": "", "hooks": hooks }] });
     let workspace = at("work");
     fs::create_dir_all(&workspace)?;
-    let mut command = std::process::Command::new(&install.binary);
-    command
-        .arg("exec")
-        .args(["--provider", "echo", "--json", "--contributor-mode", "off"])
-        .args(["--workspace", &workspace.to_string_lossy()])
-        .args(["-c", &format!("hooks={settings}")]);
+    let mut run = cf_e2e::process::Run::new(&install.binary)
+        .args([
+            "exec",
+            "--provider",
+            "echo",
+            "--json",
+            "--contributor-mode",
+            "off",
+        ])
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("-c")
+        .arg(format!("hooks={settings}"));
     if let Some(session) = session {
-        command.args(["--session-id", session]);
+        run = run.arg("--session-id").arg(session);
     }
-    let ran = command
+    // Muse's hooks run in a shell of their own: cmd.exe on Windows, which a program is given
+    // the means to find there, and the system's `cat` on a Mac.
+    let ran = run
         .arg("x")
-        .env("HOME", home.path())
-        .env("USERPROFILE", home.path())
-        .env("APPDATA", at("appdata"))
-        .env("LOCALAPPDATA", at("localappdata"))
-        .env("XDG_CONFIG_HOME", at(".config"))
-        .env("XDG_DATA_HOME", at(".local/share"))
-        .env("XDG_CACHE_HOME", at(".cache"))
-        .env("MUSE_NO_AUTO_UPDATE", "1")
-        .stdin(std::process::Stdio::null())
-        .output()?;
-    assert!(
-        ran.status.success(),
-        "muse exec: {}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
+        .vars([
+            ("HOME", home.path().as_os_str()),
+            ("USERPROFILE", home.path().as_os_str()),
+            ("APPDATA", at("appdata").as_os_str()),
+            ("LOCALAPPDATA", at("localappdata").as_os_str()),
+            ("XDG_CONFIG_HOME", at(".config").as_os_str()),
+            ("XDG_DATA_HOME", at(".local/share").as_os_str()),
+            ("XDG_CACHE_HOME", at(".cache").as_os_str()),
+            ("MUSE_NO_AUTO_UPDATE", "1".as_ref()),
+        ])
+        .var("PATH", "/usr/bin:/bin")
+        .finding_programs()
+        .closed_input()
+        .limit(Duration::from_secs(120))
+        .run()?;
+    assert_eq!(ran.code, Some(0), "muse exec: {ran}");
     let sessions = muse::sessions(home.path());
     let (_, log) = sessions
         .last()
