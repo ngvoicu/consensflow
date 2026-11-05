@@ -583,6 +583,46 @@ pub fn has(records: &[Value], wanted: &str) -> bool {
     records.iter().any(|record| kind(record) == wanted)
 }
 
+/// How each run of a SessionStart hook ended, in the order the log wrote them: `completed`
+/// or `failed`, and what Muse says where it failed (`hook_run_terminal`). Muse 1.4.14 ends
+/// a hook that printed more than 16,384 bytes as `failed`, with `output_too_large`, and
+/// takes nothing of what it printed.
+pub fn hook_runs(records: &[Value]) -> Vec<(String, Option<String>)> {
+    records
+        .iter()
+        .filter(|record| kind(record) == "run/hook_run_terminal")
+        .filter(|record| record["payload"]["event"]["event"] == "SessionStart")
+        .map(|record| {
+            let event = &record["payload"]["event"];
+            (
+                event["status"].as_str().unwrap_or_default().to_owned(),
+                event["error"].as_str().map(str::to_owned),
+            )
+        })
+        .collect()
+}
+
+/// The context the SessionStart hooks gave the session, each hook's block by the number
+/// Muse names it with (`hook:session_start:session:<n>`), in that order: a block a later
+/// start wrote again (a resume) is its last text.
+pub fn hook_blocks(records: &[Value]) -> Vec<(u32, String)> {
+    let mut blocks: std::collections::BTreeMap<u32, String> = std::collections::BTreeMap::new();
+    for record in records {
+        if kind(record) != "run/context_block_updated" {
+            continue;
+        }
+        let event = &record["payload"]["event"];
+        let number = event["id"]
+            .as_str()
+            .and_then(|id| id.strip_prefix("hook:session_start:session:"))
+            .and_then(|number| number.parse().ok());
+        if let (Some(number), Some(text)) = (number, event["text"].as_str()) {
+            blocks.insert(number, text.to_owned());
+        }
+    }
+    blocks.into_iter().collect()
+}
+
 /// The question tools each model request of the log offered, in order: the names among
 /// its `toolset.active_tools` (`run/model_request_configured`) Muse asks the person with,
 /// `request_user_input` and the `request_user_input_async` `--yolo` adds (1.4.14).
