@@ -119,6 +119,34 @@ fn hooked(rig: &Rig) -> Option<Vec<Value>> {
         .find(|records| !hook_runs(records).is_empty())
 }
 
+/// The first 40 characters of `text`, for a message.
+fn head(text: &str) -> String {
+    text.chars().take(40).collect()
+}
+
+/// Whether `blocks` are the whole of `role` in order, each as Muse keeps a block: the white
+/// space at both ends of what a hook printed cut off. Each block is the next of the role, and
+/// between one and the next, and after the last, only line breaks of the role are not in a
+/// block: no indentation is lost where a part begins.
+fn covers(role: &str, blocks: &[(u32, String)]) -> Result<(), String> {
+    let mut rest = role;
+    for (at, (number, text)) in blocks.iter().enumerate() {
+        let after_break = rest.trim_start_matches('\n');
+        let gap = &rest[..rest.len() - after_break.len()];
+        if at == 0 && !gap.is_empty() {
+            return Err(format!("the role begins with {gap:?}"));
+        }
+        rest = after_break
+            .strip_prefix(text.as_str())
+            .ok_or_else(|| format!("block {number} ({}…) is not what comes next in the role: {:?}", head(text), head(after_break)))?;
+    }
+    if rest.chars().all(|character| character == '\n') {
+        Ok(())
+    } else {
+        Err(format!("the role goes on after the last block: {:?}", head(rest)))
+    }
+}
+
 #[test]
 fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outcome {
     let Some(config) = muse_rig() else {
@@ -127,10 +155,12 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
     let rig = Rig::start(config)?;
     let project = largest_chiefs_project(&rig)?;
     rig.tell(project.id(), "Reply with exactly: ROLE_GIVEN")?;
+    // The hooks' runs are written as they end and their blocks after the last: the turn that
+    // follows them has ended when the log is read whole.
     rig.wait_for(
-        "the chief's Muse to run its SessionStart hooks",
+        "the chief's Muse to run its SessionStart hooks and answer",
         secs(120),
-        || Ok(hooked(&rig).is_some()),
+        || Ok(hooked(&rig).is_some_and(|log| !muse::terminals(&log).is_empty())),
     )?;
     let log = hooked(&rig).ok_or("the chief's session has no hook run")?;
     let role = the_latest_role(&rig).ok_or("the chief's launch wrote no role")?;
@@ -162,9 +192,9 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
         "{:?}",
         blocks.iter().map(|(_, text)| text.len()).collect::<Vec<_>>()
     );
-    let given: String = blocks.iter().map(|(_, text)| text.as_str()).collect();
-    assert_eq!(given.len(), role.len());
-    assert!(given == role, "the context is not the role text");
+    if let Err(why) = covers(&role, &blocks) {
+        panic!("the blocks are not the role text: {why}");
+    }
     rig.close()?;
     Ok(())
 }

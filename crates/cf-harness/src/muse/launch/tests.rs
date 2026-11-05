@@ -135,11 +135,12 @@ fn configured(dir: &Path) -> Env {
 }
 
 fn ours() -> Value {
-    added_hook(
+    added_hooks(
         "/app/cf",
         "/launch/role/SKILL.md",
         "/launch/sessions.jsonl",
         false,
+        1,
     )
     .unwrap()
 }
@@ -208,16 +209,17 @@ fn with_no_settings_or_no_hooks_there_is_consensflow_s_alone_and_a_settings_file
 
 #[test]
 fn the_hook_names_its_files_on_its_command_line_quoted_for_the_hook_s_shell() {
-    let hook = added_hook(
+    let hook = added_hooks(
         "/Apps/Consens Flow/cf",
         "/l/it's/SKILL.md",
         "/l/sessions.jsonl",
         false,
+        1,
     )
     .unwrap();
     assert_eq!(
         hook["hooks"][0]["command"],
-        r"'/Apps/Consens Flow/cf' hook muse-session '/l/it'\''s/SKILL.md' '/l/sessions.jsonl'"
+        r"'/Apps/Consens Flow/cf' hook muse-session '/l/it'\''s/SKILL.md' '/l/sessions.jsonl' '0'"
     );
     assert_eq!(hook["matcher"], "");
 }
@@ -230,25 +232,104 @@ fn the_hook_names_its_files_on_its_command_line_quoted_for_the_hook_s_shell() {
 #[test]
 fn on_windows_the_hook_is_a_cmd_line_of_words_with_no_quote_and_a_path_cmd_cannot_take_is_refused()
 {
-    let hook = added_hook(
+    let hook = added_hooks(
         r"C:\Apps\ConsensFlow\cf.exe",
         r"C:\Users\Zoë\l\it's\SKILL.md",
         r"C:\Users\Zoë\l\sessions.jsonl",
         true,
+        1,
     )
     .unwrap();
     assert_eq!(
         hook["hooks"][0]["commandWindows"],
-        r"C:\Apps\ConsensFlow\cf.exe hook muse-session C:\Users\Zoë\l\it's\SKILL.md C:\Users\Zoë\l\sessions.jsonl"
+        r"C:\Apps\ConsensFlow\cf.exe hook muse-session C:\Users\Zoë\l\it's\SKILL.md C:\Users\Zoë\l\sessions.jsonl 0"
     );
     assert_eq!(hook["hooks"][0]["timeout"], 10);
-    let off = added_hook("/a/cf", "/l/SKILL.md", "/l/sessions.jsonl", false).unwrap();
+    let off = added_hooks("/a/cf", "/l/SKILL.md", "/l/sessions.jsonl", false, 1).unwrap();
     assert!(off["hooks"][0].get("commandWindows").is_none(), "{off}");
     for unsayable in [r"Z:\no such folder\cf.exe", r"Z:\a&b\cf.exe"] {
-        let refused = added_hook(unsayable, r"C:\l\SKILL.md", r"C:\l\s.jsonl", true).unwrap_err();
+        let refused =
+            added_hooks(unsayable, r"C:\l\SKILL.md", r"C:\l\s.jsonl", true, 1).unwrap_err();
         assert!(
             refused.contains("cmd.exe") && refused.contains(unsayable),
             "{refused}"
         );
     }
+}
+
+/// A role is longer than a hook may say (16,384 bytes, T-1246), so each part of it has a hook
+/// of its own, in the one group, named by its number; and the number is on Windows' line too.
+#[test]
+fn a_role_in_parts_has_a_hook_for_each_numbered_from_0_on_both_lines() {
+    let group = added_hooks("/app/cf", "/l/SKILL.md", "/l/s.jsonl", false, 3).unwrap();
+    let hooks = group["hooks"].as_array().unwrap();
+    assert_eq!(group["matcher"], "");
+    assert_eq!(hooks.len(), 3);
+    for (part, hook) in hooks.iter().enumerate() {
+        assert_eq!(
+            hook["command"],
+            format!("'/app/cf' hook muse-session '/l/SKILL.md' '/l/s.jsonl' '{part}'")
+        );
+        assert_eq!(hook["timeout"], 10);
+    }
+    let group = added_hooks(r"C:\cf.exe", r"C:\l\SKILL.md", r"C:\l\s.jsonl", true, 2).unwrap();
+    let lines: Vec<_> = group["hooks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hook| hook["commandWindows"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            r"C:\cf.exe hook muse-session C:\l\SKILL.md C:\l\s.jsonl 0",
+            r"C:\cf.exe hook muse-session C:\l\SKILL.md C:\l\s.jsonl 1"
+        ]
+    );
+}
+
+/// Muse keeps a block of a hook until a hook of its number writes it again, and a resumed
+/// conversation keeps its blocks: a role that fits in fewer parts than at the launch before
+/// is given hooks for the numbers it lost, after the owner's own, which give blocks too.
+#[test]
+fn a_launch_resuming_a_longer_role_has_hooks_for_the_blocks_it_left_after_the_owners() {
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = install(dir.path(), "1.4.14-R7309.1", &["muse-bin-1.4.14-R7309.1"]);
+    let settings = dir.path().join("muse/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"a"},{"type":"command","command":"b"}]},{"command":"c"}]}}"#,
+    )
+    .unwrap();
+    let env = Env::from_vars([
+        ("HOME", "/h"),
+        ("XDG_CONFIG_HOME", dir.path().to_str().unwrap()),
+        (
+            "CONSENSFLOW_HOME",
+            dir.path().join("consensflow").to_str().unwrap(),
+        ),
+    ]);
+    let ours = |parts: usize, earlier: usize| {
+        let given = integration(
+            &env,
+            &LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap(),
+            &launcher,
+            "/app/cf",
+            "/l/SKILL.md",
+            parts,
+            earlier,
+        )
+        .unwrap();
+        let hooks: Value =
+            serde_json::from_str(given.args[1].strip_prefix("hooks=").unwrap()).unwrap();
+        let starts = hooks["SessionStart"].as_array().unwrap();
+        assert_eq!(starts.len(), 3, "the owner's two entries and ours");
+        starts[2]["hooks"].as_array().unwrap().len()
+    };
+    // The owner's give three blocks (0 to 2); a role of 2 parts that was 5 (blocks 0 to 7).
+    assert_eq!(ours(2, 0), 2, "a new conversation: a hook for a part");
+    assert_eq!(ours(2, 5), 2, "a role that did not shrink: nothing to write over");
+    assert_eq!(ours(2, 8), 5, "three blocks left (5 to 7): three hooks more");
+    assert_eq!(ours(3, 8), 5, "the same blocks, now say its third part and two nothing");
 }

@@ -32,6 +32,7 @@ use cf_proto::specs::Variant;
 use super::index;
 use super::launch;
 use super::paths;
+use super::session_hook;
 use super::window::{MuseWindow, CLEAR_INPUT};
 use crate::contract::{
     Adapter, FirstMessage, Input, Launch, LaunchId, Prepared, Records, Skill, Specs, Used, Work,
@@ -131,12 +132,30 @@ impl Adapter for MuseAdapter {
             // names: where Muse has none of its own, ConsensFlow's is written where it
             // is kept for every launch.
             specmint::write_own(Harness::Muse, env, launch)?;
+            // A hook may say 16,384 bytes and a role is longer: a hook for each part
+            // (T-1246), and over the blocks a longer role left in a conversation resumed.
+            let parts = session_hook::parts(launch.instructions).len();
+            if parts > session_hook::MOST_PARTS {
+                return Err(format!(
+                    "the {} window's role text is {} bytes, which is more than the {} hooks Muse Code is given for it can say ({} bytes each)",
+                    launch.role,
+                    launch.instructions.len(),
+                    session_hook::MOST_PARTS,
+                    session_hook::OUTPUT_LIMIT,
+                ));
+            }
+            let earlier = launch
+                .resume
+                .and_then(|session| paths::transcript(session, env).ok().flatten())
+                .map_or(0, |log| session_hook::blocks_given(&log));
             let integration = launch::integration(
                 env,
                 launch.id,
                 &executable,
                 &self.services.bundle.pane_cf,
                 &role.file,
+                parts,
+                earlier,
             )?;
             let agent = launch.agent.unwrap_or_default();
             let open = if launch.resume.is_none() {
