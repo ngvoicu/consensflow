@@ -623,6 +623,25 @@ pub fn hook_blocks(records: &[Value]) -> Vec<(u32, String)> {
     blocks.into_iter().collect()
 }
 
+/// The bytes of developer context each full model request of the log carried (the
+/// `model_input_trace_recorded` of each: its `context` lane, which holds the blocks the
+/// SessionStart hooks gave and Muse's own), in order: what reached the wire, not only what
+/// the log says a hook gave.
+pub fn request_context_bytes(records: &[Value]) -> Vec<u64> {
+    records
+        .iter()
+        .filter(|record| kind(record) == "run/model_input_trace_recorded")
+        .filter(|record| record["payload"]["event"]["scope"] == "full_request")
+        .filter_map(|record| {
+            record["payload"]["event"]["bounded"]["aggregates"]
+                .as_array()?
+                .iter()
+                .find(|lane| lane["logical_lane"]["value"] == "context")?["byte_count"]
+                .as_u64()
+        })
+        .collect()
+}
+
 /// The question tools each model request of the log offered, in order: the names among
 /// its `toolset.active_tools` (`run/model_request_configured`) Muse asks the person with,
 /// `request_user_input` and the `request_user_input_async` `--yolo` adds (1.4.14).
