@@ -902,3 +902,32 @@ platforms = ["windows"]
 file = "app/src-tauri/src/lib.rs"
 find = "        page_crash::load_again_when_it_fails(&window);"
 replace = "        let _ = &window;"
+
+# The app's update check on Windows, which reads the release feed itself: with no TLS provider
+# installed reqwest panics at the build of its client (T-1247). Both places that install it are
+# taken out, the start of the app and the feed's client, so that the plant is the defect itself.
+[[plant]]
+name = "windows smoke, on the app: the update check is made with no TLS provider installed (Windows)"
+meant = "the update check answers up to date or an update"
+runs = [["node", "app/scripts/windows-smoke-desktop.mjs", "--build-app"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+    crate::tls::install_ring_as_default();
+    reqwest::Client::builder()
+'''
+replace = '''
+    reqwest::Client::builder()
+'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''
+    tls::install_ring_as_default();
+    let context = tauri::generate_context!();
+'''
+replace = '''
+    let context = tauri::generate_context!();
+'''
