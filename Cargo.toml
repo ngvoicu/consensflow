@@ -81,8 +81,12 @@ regex = "1"
 # TLS library of the system's and nothing to build with OpenSSL on Windows.
 # `rustls-no-provider` is the one reqwest feature that brings none: the app's
 # updater builds rustls on ring, and a second provider (aws-lc-rs, reqwest's
-# own) would leave rustls with none to choose. `cf-daemon` hands the client its
-# own TLS settings, built on ring, and so installs nothing process-wide.
+# own) would leave rustls with none to choose. A client built on it needs the
+# provider named: `cf-daemon` hands the client its own TLS settings, built on
+# ring, and so installs nothing process-wide; the app installs ring for its
+# process (app/src-tauri/src/tls.rs), which the updater's plugin does only for
+# its own check, so that Windows' feed client panicked at every start (T-1247).
+# tools/xtask/tests/tls_provider.rs holds every client to one of the two.
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider"] }
 # The ledger's SQLite, built in: every platform runs the same SQLite.
 rusqlite = { version = "0.40", features = ["bundled"] }
