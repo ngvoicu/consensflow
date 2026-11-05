@@ -1,0 +1,275 @@
+# A Muse window's role in parts (T-1246): Muse Code 1.4.14 takes at most 16,384 bytes of a
+# SessionStart hook's output, and every chief's role is longer, so the launch gives Muse a hook
+# for each part of the role (`crates/cf-harness/src/muse/session_hook.rs`: `parts`, the hook
+# that says one part, `blocks_given`; `muse/launch.rs`: `added_hooks`, `integration`;
+# `muse/adapter.rs`: the count and the refusal; `cf hook muse-session`'s third word, in
+# `crates/cf/src/hook.rs`), the sizes of the roles ConsensFlow makes held against it
+# (`cf-engine`'s `role_change` tests), and the rig's cases on the machine's own Muse
+# (`crates/cf-e2e/tests/rig/muse_role.rs`). Every name here begins `muse role parts:`, so
+# `cargo xtask plants daemon "muse role parts:"` runs them.
+
+[run]
+mrp-hook = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::session_hook::"]
+mrp-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::launch::"]
+mrp-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::adapter::"]
+mrp-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch", "muses_session_hook"]
+mrp-pins = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests::the_largest_roles_are_given"]
+# The rig's cases on the machine's Muse (none where it has none: they pass, saying why, so
+# their plants say `harnesses = ["muse"]` and are not run there).
+mrp-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_role::a_muse_chief_with_the_largest_role"]
+
+# What a part may say: a hook of Muse's takes 16,384 bytes.
+[[plant]]
+name = "muse role parts: a part is given more than a hook may say"
+meant = "a_role_is_given_in_parts_that_each_go_in_a_hook_under_the_limit_and_are_the_role_together"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''const PART_OUTPUT: usize = 16_000;'''
+replace = '''const PART_OUTPUT: usize = 20_000;'''
+
+[[plant]]
+name = "muse role parts: the rig's Muse takes a part past its limit and keeps nothing of it"
+meant = "a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks"
+runs = ["mrp-rig"]
+harnesses = ["muse"]
+builds = true
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''const PART_OUTPUT: usize = 16_000;'''
+replace = '''const PART_OUTPUT: usize = 20_000;'''
+
+# What a character costs in a hook's JSON: a quote and a backslash two bytes.
+[[plant]]
+name = "muse role parts: a quote or a line break costs one byte in the JSON, not two"
+meant = "a_role_is_given_in_parts_that_each_go_in_a_hook_under_the_limit_and_are_the_role_together"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''        '"' | '\\' | '\n' | '\r' | '\t' | '\u{8}' | '\u{c}' => 2,'''
+replace = '''        '"' | '\\' | '\n' | '\r' | '\t' | '\u{8}' | '\u{c}' => 1,'''
+
+# Where a part is cut: at a line break, before a line Muse would cut no indentation from.
+[[plant]]
+name = "muse role parts: a part is cut in the middle of a line, not at a line break"
+meant = "a_part_ends_at_a_line_break_unless_a_line_is_longer_than_a_part"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''            let cut = plain.or(any).unwrap_or(at);'''
+replace = '''            let cut = at;'''
+
+[[plant]]
+name = "muse role parts: a part is cut before an indented line where a line that is not was there"
+meant = "a_part_is_cut_before_a_line_muse_would_lose_no_indentation_of_where_the_role_has_one"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''            let cut = plain.or(any).unwrap_or(at);'''
+replace = '''            let cut = any.or(plain).unwrap_or(at);'''
+
+# Which part a hook says, and what only the first writes.
+[[plant]]
+name = "muse role parts: every hook says the first part"
+meant = "a_role_is_given_in_parts_that_each_go_in_a_hook_under_the_limit_and_are_the_role_together"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    Some(hook_output(parts.get(part).copied().unwrap_or(NO_MORE)))'''
+replace = '''    Some(hook_output(parts[0]))'''
+
+[[plant]]
+name = "muse role parts: the rig's Muse is given the first part by every hook"
+meant = "a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks"
+runs = ["mrp-rig"]
+harnesses = ["muse"]
+builds = true
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    Some(hook_output(parts.get(part).copied().unwrap_or(NO_MORE)))'''
+replace = '''    Some(hook_output(parts[0]))'''
+
+[[plant]]
+name = "muse role parts: a hook past the last part says nothing over the block an old role left"
+meant = "a_part_past_the_roles_last_says_there_is_no_more_and_only_the_first_writes_the_session_down"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    Some(hook_output(parts.get(part).copied().unwrap_or(NO_MORE)))'''
+replace = '''    Some(hook_output(parts.get(part).copied().unwrap_or("")))'''
+
+[[plant]]
+name = "muse role parts: every part's hook writes the session down, not the first alone"
+meant = "a_part_past_the_roles_last_says_there_is_no_more_and_only_the_first_writes_the_session_down"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    if let (0, Some(said)) = (part, said) {'''
+replace = '''    if let (_, Some(said)) = (part, said) {'''
+
+# The blocks an earlier launch left in a conversation.
+[[plant]]
+name = "muse role parts: the blocks an earlier launch gave are one fewer than they are"
+meant = "the_blocks_an_earlier_launch_gave_are_one_more_than_the_highest_number_in_the_log"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                given = given.max(number.saturating_add(1));'''
+replace = '''                given = given.max(number);'''
+
+[[plant]]
+name = "muse role parts: the hooks of a resumed conversation count the owner's hooks twice over"
+meant = "a_launch_resuming_a_longer_role_has_hooks_for_the_blocks_it_left_after_the_owners"
+runs = ["mrp-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''        .max(earlier.saturating_sub(owner_starts(&owner_hooks(env)?)))'''
+replace = '''        .max(earlier)'''
+
+[[plant]]
+name = "muse role parts: the hooks over the blocks an old role left are as many as it left, past what Muse takes"
+meant = "a_launch_resuming_a_longer_role_has_hooks_for_the_blocks_it_left_after_the_owners"
+runs = ["mrp-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''        .max(earlier.saturating_sub(owner_starts(&owner_hooks(env)?)))
+        .min(super::session_hook::MOST_PARTS);'''
+replace = '''        .max(earlier.saturating_sub(owner_starts(&owner_hooks(env)?)));'''
+
+[[plant]]
+name = "muse role parts: a resumed conversation's log is never looked in for the blocks it has"
+meant = "a_resumed_conversation_whose_role_got_shorter_is_given_hooks_over_the_blocks_it_kept"
+runs = ["mrp-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''                .and_then(|session| paths::transcript(session, env).ok().flatten())'''
+replace = '''                .and_then(|_| None::<std::path::PathBuf>)'''
+
+# The hooks of a launch: one for each part, numbered, on both lines.
+[[plant]]
+name = "muse role parts: the hook's command line leaves out the number of its part"
+meant = "a_role_in_parts_has_a_hook_for_each_numbered_from_0_on_both_lines"
+runs = ["mrp-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''                "command": cf_hook(pane_cf, "muse-session", &[role_file, said, &number]),'''
+replace = '''                "command": cf_hook(pane_cf, "muse-session", &[role_file, said]),'''
+
+[[plant]]
+name = "muse role parts: Windows' line leaves out the number of the part"
+meant = "a_role_in_parts_has_a_hook_for_each_numbered_from_0_on_both_lines"
+runs = ["mrp-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''                    Value::String(format!("{cf} hook muse-session {role} {said} {number}"));'''
+replace = '''                    Value::String(format!("{cf} hook muse-session {role} {said}"));'''
+
+[[plant]]
+name = "muse role parts: a launch is given one hook, for the first part"
+meant = "a_role_longer_than_a_hook_may_say_is_given_a_hook_for_each_part_of_it"
+runs = ["mrp-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            let parts = session_hook::parts(launch.instructions).len();'''
+replace = '''            let parts = session_hook::parts(launch.instructions).len().min(1);'''
+
+[[plant]]
+name = "muse role parts: a role that needs more hooks than Muse was measured to take is launched"
+meant = "a_role_that_needs_more_hooks_than_muse_was_measured_to_take_is_refused_in_words"
+runs = ["mrp-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            if parts > session_hook::MOST_PARTS {'''
+replace = '''            if false {'''
+
+[[plant]]
+name = "muse role parts: more hooks than a Windows command line takes are allowed"
+meant = "the_most_parts_on_windows_paths_as_long_as_a_launch_has_fit_a_command_line"
+runs = ["mrp-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''pub const MOST_PARTS: usize = 20;'''
+replace = '''pub const MOST_PARTS: usize = 60;'''
+
+# `cf hook muse-session`'s third word.
+[[plant]]
+name = "muse role parts: cf hook muse-session takes no part number and says the first"
+meant = "muses_session_hook_says_the_part_its_command_line_names"
+runs = ["mrp-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/hook.rs"
+find = '''            args.get(2)
+                .and_then(|part| part.to_str())
+                .and_then(|part| part.parse().ok())
+                .unwrap_or(0),'''
+replace = '''            0,'''
+
+# The sizes of the roles ConsensFlow makes, held against the channel: a chief's text that grows
+# by 4,000 bytes is a part more, and the case says so.
+[[plant]]
+name = "muse role parts: the chief's text grows by a part"
+meant = "the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_every_part_fits_a_hook"
+runs = ["mrp-pins"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''# ConsensFlow Chief of Staff
+'''
+replace = '''# ConsensFlow Chief of Staff
+
+PLANTED PADDING. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+'''

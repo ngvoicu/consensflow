@@ -147,6 +147,27 @@ fn the_most_rules() -> String {
 
 /// [`a_chiefs_role`] with the project's rules for the staff, if it has some.
 fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> String {
+    a_chiefs_role_for(&a_mac(), rows, specs_on, rules)
+}
+
+/// A window's `cf` on a Mac, by the path of the app's.
+fn a_mac() -> CfWord {
+    CfWord::new(
+        "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
+        Shell::Posix,
+    )
+}
+
+/// A window's `cf` on Windows, as PowerShell, which Muse's and Codex's shell there is, runs it.
+fn a_windows() -> CfWord {
+    CfWord::new(
+        r"C:\Users\someone\AppData\Local\ConsensFlow\cli\bin\cf.exe",
+        Shell::PowerShell,
+    )
+}
+
+/// [`a_chiefs_role_with`] for a window whose `cf` is `cf`.
+fn a_chiefs_role_for(cf: &CfWord, rows: usize, specs_on: bool, rules: Option<&str>) -> String {
     let staff: Vec<StaffRow> = (0..rows)
         .map(|at| StaffRow {
             name: format!("member-{at}"),
@@ -164,10 +185,7 @@ fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> Strin
         &Env::default(),
         "chief",
         &staff,
-        &CfWord::new(
-            "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
-            Shell::Posix,
-        ),
+        cf,
         specs_on.then_some(&specs),
     )
     .map(|text| with_staff_rules(text, "chief", rules))
@@ -805,4 +823,51 @@ fn a_chief_that_comes_up_after_its_greeting_was_told_has_its_failed_starts_clear
     });
     context.dispatcher.came_up(&record);
     assert!(record.window.borrow().relaunch.is_none());
+}
+
+/// T-1246: Muse takes at most 16,384 bytes of a hook's output, and a Muse window has its
+/// role by hooks alone, so a role is given in parts, a hook for each (`cf_harness::muse`),
+/// each part's hook under that limit and the parts together the role. A chief's role has been
+/// longer than one hook says since each command of it named the window's `cf` in full (T-1049:
+/// 17,455 bytes with no staff at all), so no chief's is one part; a member's, the rules for the
+/// staff the most the ledger takes and all, is. The most of parts is the hooks Muse was measured
+/// to take at one start. These are the numbers: the spare bytes of the last part are in the
+/// message of each case that fails.
+#[test]
+fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_every_part_fits_a_hook(
+) {
+    use cf_harness::muse::{hook_output, parts, MOST_PARTS, OUTPUT_LIMIT};
+    let most = the_most_rules();
+    let on = |name: &str, role: &str, parts_wanted: usize| {
+        let cut = parts(role);
+        assert_eq!(cut.concat(), role, "{name}: the parts are the role");
+        let outputs: Vec<usize> = cut.iter().map(|part| hook_output(part).len()).collect();
+        let spare = outputs.last().map(|last| OUTPUT_LIMIT - last);
+        assert_eq!(
+            cut.len(),
+            parts_wanted,
+            "{name}: {} bytes in parts of {outputs:?} bytes of hook output; the last has {spare:?} spare",
+            role.len()
+        );
+        assert!(cut.len() <= MOST_PARTS, "{name}: past the hooks Muse takes");
+        assert!(
+            outputs.iter().all(|&bytes| bytes <= OUTPUT_LIMIT),
+            "{name}: a part past Muse's limit: {outputs:?}"
+        );
+    };
+    for (cf, shape) in [(a_mac(), "a Mac"), (a_windows(), "Windows")] {
+        let chief = |rows, specs, rules: Option<&str>| a_chiefs_role_for(&cf, rows, specs, rules);
+        on(&format!("a chief with no staff on {shape}"), &chief(0, false, None), 2);
+        on(
+            &format!("the largest chief (25 staff, specs, the most rules) on {shape}"),
+            &chief(25, true, Some(&most)),
+            2,
+        );
+        for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+            let text = role_instructions(&Env::default(), role, &[], &cf, None)
+                .map(|text| with_staff_rules(text, role, Some(&most)))
+                .unwrap();
+            on(&format!("the {role} with the most rules on {shape}"), &text, 1);
+        }
+    }
 }

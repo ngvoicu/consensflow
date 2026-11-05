@@ -62,7 +62,7 @@ pub const NO_MORE: &str =
 /// answer (`additionalContext`), which Muse reads as it reads plain words (the block it
 /// keeps is the text alone), and which cannot be mistaken for a start of JSON that does
 /// not parse (a plain part that opened with a `{`).
-fn context(text: &str) -> String {
+pub fn hook_output(text: &str) -> String {
     let said = json!({
         "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": text }
     });
@@ -81,7 +81,7 @@ fn encoded(character: char) -> usize {
 }
 
 /// The parts `role` is given to Muse in: consecutive pieces of it that, put one by one in a
-/// hook's answer ([`context`]), are each at most 16,000 bytes, and that put together are
+/// hook's answer ([`hook_output`]), are each at most 16,000 bytes, and that put together are
 /// the role. Muse keeps a block with the white space at both ends of it cut off (a hook
 /// that printed `"\n\n  lead\n  two\n\n"` gave `"lead\n  two"`), so a part is cut where
 /// that loses nothing: at the last line break of the part that leaves a line that begins
@@ -90,7 +90,7 @@ fn encoded(character: char) -> usize {
 /// A role no longer than a part is one part, and its hook says what it always did. No role
 /// is no part.
 pub fn parts(role: &str) -> Vec<&str> {
-    let room = PART_OUTPUT - context("").len();
+    let room = PART_OUTPUT - hook_output("").len();
     let mut parts = Vec::new();
     let (mut start, mut used) = (0, 0);
     // Where a line begins that a part may be cut before: one that begins with a character
@@ -147,7 +147,7 @@ pub fn session_hook(
     if parts.is_empty() {
         return None;
     }
-    Some(context(parts.get(part).copied().unwrap_or(NO_MORE)))
+    Some(hook_output(parts.get(part).copied().unwrap_or(NO_MORE)))
 }
 
 /// How many context blocks the SessionStart hooks of the launches before this one gave
@@ -412,6 +412,18 @@ mod tests {
         );
     }
 
+    /// The numbers the module rests on, measured on Muse Code 1.4.14-R7309.1 with its echo model
+    /// (T-1246; the rig's `muse_role` cases hold them on the machine's Muse): a hook may say
+    /// 16,384 bytes, a part is given 16,000, and 20 hooks of one start were all taken. A Muse
+    /// that changes them is the cases' to fail, and these to be changed with them.
+    #[test]
+    fn the_numbers_are_those_measured_on_muse_1_4_14() {
+        assert_eq!(OUTPUT_LIMIT, 16_384);
+        assert_eq!(PART_OUTPUT, 16_000);
+        assert_eq!(MOST_PARTS, 20);
+        assert_eq!(hook_output("").len(), 78, "the wrapper of a JSON answer");
+    }
+
     /// A role of `lines` lines of `width` characters of `character`, each ended by a line break.
     fn role_of(character: char, width: usize, lines: usize) -> String {
         let line = format!("{}\n", character.to_string().repeat(width));
@@ -440,7 +452,7 @@ mod tests {
     #[test]
     fn a_role_is_given_in_parts_that_each_go_in_a_hook_under_the_limit_and_are_the_role_together() {
         let launch = launch();
-        let overhead = context("").len();
+        let overhead = hook_output("").len();
         // What each part makes of text that is plain, escapes to twice its bytes, has the
         // control characters, and is of two, three and four bytes to a character, with the
         // line a hook's text is cut on at every size.
@@ -486,7 +498,7 @@ mod tests {
         for pair in cut.windows(2) {
             let next_line = 71;
             assert!(
-                context(pair[0]).len() + next_line > PART_OUTPUT,
+                hook_output(pair[0]).len() + next_line > PART_OUTPUT,
                 "a part left room for the next line"
             );
         }
@@ -537,10 +549,10 @@ mod tests {
         let (printed, _) = said_part(&launch, role, 0);
         assert_eq!(printed, ROLE);
         // The most that goes in one: the hook is at its budget, under Muse's limit.
-        let room = PART_OUTPUT - context("").len();
+        let room = PART_OUTPUT - hook_output("").len();
         let exact = "a".repeat(room);
         assert_eq!(parts(&exact), [exact.as_str()]);
-        assert_eq!(context(&exact).len(), PART_OUTPUT);
+        assert_eq!(hook_output(&exact).len(), PART_OUTPUT);
         assert_eq!(parts(&format!("{exact}a")).len(), 2);
     }
 

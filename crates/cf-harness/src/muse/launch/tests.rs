@@ -332,4 +332,39 @@ fn a_launch_resuming_a_longer_role_has_hooks_for_the_blocks_it_left_after_the_ow
     assert_eq!(ours(2, 5), 2, "a role that did not shrink: nothing to write over");
     assert_eq!(ours(2, 8), 5, "three blocks left (5 to 7): three hooks more");
     assert_eq!(ours(3, 8), 5, "the same blocks, now say its third part and two nothing");
+    assert_eq!(
+        ours(2, 100),
+        crate::muse::MOST_PARTS,
+        "never past the most hooks Muse was measured to take"
+    );
+}
+
+/// A Windows process takes a command line of at most 32,767 characters, and the hooks are on
+/// Muse's (`-c hooks=<json>`): a hook for each part of a role, each with the window's `cf`,
+/// the role's file and the sessions' file on both of its lines, backslashes doubled in the
+/// JSON. The most parts, with paths as long as a launch's are, leave the line room.
+#[test]
+fn the_most_parts_on_windows_paths_as_long_as_a_launch_has_fit_a_command_line() {
+    let cf = r"C:\Users\someone-with-a-long-name\AppData\Local\ConsensFlow\cli\bin\cf.exe";
+    let launch = r"C:\Users\someone-with-a-long-name\AppData\Roaming\consensflow\integrations\muse\11111111-1111-4111-8111-111111111111";
+    let role = format!(r"{launch}\role\.claude\skills\consensflow-chief\SKILL.md");
+    let said = format!(r"{launch}\sessions.jsonl");
+    let group = added_hooks(
+        cf,
+        &role,
+        &said,
+        true,
+        crate::muse::MOST_PARTS,
+    )
+    .unwrap();
+    let argument = format!("hooks={}", js::stringify(&json!({ "SessionStart": [group] })));
+    // What else is on the line: the program, the model, the flags, a long folder or two.
+    let rest = 4_000;
+    assert!(
+        argument.len() + rest < 32_767,
+        "{} hooks of {} characters leave {} for the rest of the line",
+        crate::muse::MOST_PARTS,
+        argument.len(),
+        32_767 - argument.len()
+    );
 }

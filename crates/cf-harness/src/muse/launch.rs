@@ -222,7 +222,9 @@ pub(super) fn integration(
     let root = launch_folder("muse", env, launch)?;
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
     let said = path::join(&[&root, SAID]);
-    let count = parts.max(earlier.saturating_sub(owner_starts(&owner_hooks(env)?)));
+    let count = parts
+        .max(earlier.saturating_sub(owner_starts(&owner_hooks(env)?)))
+        .min(super::session_hook::MOST_PARTS);
     let hooks = hooks(
         env,
         added_hooks(pane_cf, role_file, &said, env.on_windows(), count)?,
