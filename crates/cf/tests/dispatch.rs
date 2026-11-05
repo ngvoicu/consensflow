@@ -108,19 +108,19 @@ fn muses_session_hook_reads_its_files_from_its_command_line_and_writes_the_sessi
 }
 
 /// T-1246: a hook of Muse's may say 16,384 bytes and a role is longer, so the launch gives
-/// Muse a hook for each part of the role and each names its number on its command line:
-/// the hook of part 1 says the second part and writes nothing down, and one past the last
-/// says there is no more; where none is named it is the first.
+/// Muse a hook for each block of the role and each names its number on its command line:
+/// the hook of block 1 says the second part, framed, and writes nothing down, and one past
+/// the last says the role has no such part; where none is named it is the first.
 #[test]
-fn muses_session_hook_says_the_part_its_command_line_names() {
+fn muses_session_hook_says_the_block_its_command_line_names() {
     let dir = tempfile::tempdir().unwrap();
     let role = dir.path().join("SKILL.md");
     let said = dir.path().join("sessions.jsonl");
-    // 480 lines of 71 bytes: three hooks' parts.
+    // 480 lines of 71 bytes: three parts.
     let text = format!("{}\n", "a".repeat(70)).repeat(480);
     fs::write(&role, &text).unwrap();
     let event = r#"{"hook_event_name":"SessionStart","session_id":"01a17bc7-6aab-75a0-bfae-b627eaa5ecd8","source":"startup"}"#;
-    let part = |number: Option<&str>| {
+    let block = |number: Option<&str>| {
         let mut words = vec![
             "hook",
             "muse-session",
@@ -136,16 +136,22 @@ fn muses_session_hook_says_the_part_its_command_line_names() {
             .unwrap()
             .to_owned()
     };
-    let parts = cf_harness::muse::parts(&text);
-    assert_eq!(parts.len(), 3);
-    assert_eq!(part(Some("1")), parts[1]);
+    let blocks = cf_harness::muse::blocks(&text);
+    assert_eq!(blocks.len(), 3);
+    assert!(
+        blocks[1].starts_with("<<consensflow-role "),
+        "{}",
+        blocks[1]
+    );
+    assert_eq!(block(Some("1")), blocks[1]);
     assert!(
         !said.exists(),
-        "only the first part writes the session down"
+        "only the first block writes the session down"
     );
-    assert_eq!(part(Some("2")), parts[2]);
-    assert_eq!(part(Some("3")), cf_harness::muse::NO_MORE);
-    assert_eq!(part(None), parts[0], "no part named is the first");
+    assert_eq!(block(Some("2")), blocks[2]);
+    let id = blocks[0].split(' ').nth(1).unwrap();
+    assert_eq!(block(Some("3")), cf_harness::muse::filler(id, 4, 3));
+    assert_eq!(block(None), blocks[0], "no number named is the first");
     assert_eq!(fs::read_to_string(&said).unwrap().lines().count(), 1);
 }
 

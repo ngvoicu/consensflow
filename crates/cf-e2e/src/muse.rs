@@ -623,6 +623,27 @@ pub fn hook_blocks(records: &[Value]) -> Vec<(u32, String)> {
     blocks.into_iter().collect()
 }
 
+/// The `order` each SessionStart block of the log was written with, by its number, in the
+/// order the log wrote them (a block written again, as a resume does, again): Muse puts its
+/// developer context blocks in a request by this number, ascending (the `order` of
+/// `run_context_messages` in each `model_request_configured` is so, 85 to 4,294,967,295), and
+/// gives a hook's block `900000 + <number>` by the hook's place among those that printed.
+pub fn hook_block_orders(records: &[Value]) -> Vec<(u32, u64)> {
+    records
+        .iter()
+        .filter(|record| kind(record) == "run/context_block_updated")
+        .filter_map(|record| {
+            let event = &record["payload"]["event"];
+            let number = event["id"]
+                .as_str()?
+                .strip_prefix("hook:session_start:session:")?
+                .parse()
+                .ok()?;
+            Some((number, event["order"].as_u64()?))
+        })
+        .collect()
+}
+
 /// The bytes of developer context each full model request of the log carried (the
 /// `model_input_trace_recorded` of each: its `context` lane, which holds the blocks the
 /// SessionStart hooks gave and Muse's own), in order: what reached the wire, not only what

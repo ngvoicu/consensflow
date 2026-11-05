@@ -468,9 +468,12 @@ fn a_role_that_needs_more_hooks_than_muse_was_measured_to_take_is_refused_in_wor
 
 /// A resumed conversation has the blocks the hooks of its earlier launches gave it, until a
 /// hook of the same number writes them again: a role that fits in fewer parts than the one
-/// before it has hooks for the numbers it lost, which say nothing is there now.
+/// before it has hooks for the blocks of ours it lost, which say it has no such part. What
+/// the owner's hooks printed is no part of the count, and a log that cannot be counted gives
+/// a hook for every block a role could have (T-1246's review: P1).
 #[test]
-fn a_resumed_conversation_whose_role_got_shorter_is_given_hooks_over_the_blocks_it_kept() {
+fn a_resumed_conversation_is_given_a_hook_for_every_block_of_ours_it_has_and_for_all_where_none_can_be_counted(
+) {
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), Some("1.4.14-R7309.1"));
     let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
@@ -484,12 +487,19 @@ fn a_resumed_conversation_whose_role_got_shorter_is_given_hooks_over_the_blocks_
         .join("05")
         .join(session);
     fs::create_dir_all(&folder).unwrap();
-    // The launch before gave it five blocks (0 to 4): its role was five parts.
-    fs::write(
-        folder.join("session.jsonl"),
-        r#"{"payload":{"event":{"kind":"context_block_updated","id":"hook:session_start:session:4"}}}"#,
-    )
-    .unwrap();
+    let log = folder.join("session.jsonl");
+    let block = |number: usize, text: &str| {
+        json!({ "payload": { "kind": "run", "event": {
+            "kind": "context_block_updated",
+            "id": format!("hook:session_start:session:{number}"),
+            "text": text,
+        }}})
+        .to_string()
+    };
+    let write = |blocks: &[(usize, &str)]| {
+        let lines: Vec<String> = blocks.iter().map(|(n, t)| block(*n, t)).collect();
+        fs::write(&log, lines.join("\n") + "\n").unwrap();
+    };
     let hooks = |instructions: &str, resume: Option<&str>| {
         let prepared = prepared_with(&env, resume, instructions).unwrap();
         hooks_of(&prepared.argv)["SessionStart"][0]["hooks"]
@@ -498,23 +508,63 @@ fn a_resumed_conversation_whose_role_got_shorter_is_given_hooks_over_the_blocks_
             .len()
     };
     let two = role_of(300);
+    let five = role_of(1_000);
     assert_eq!(crate::muse::parts(&two).len(), 2);
-    assert_eq!(
-        hooks(&two, None),
-        2,
-        "a new conversation has no blocks to write over"
-    );
-    assert_eq!(
-        hooks(&two, Some(session)),
-        5,
-        "three blocks left: a hook for each"
-    );
+    assert_eq!(crate::muse::parts(&five).len(), 5);
+    let framed = crate::muse::blocks(&five);
+    let filler = crate::muse::filler("00000000", 2, 1);
+    // A new conversation has no blocks to write over.
+    assert_eq!(hooks(&two, None), 2);
+    // The launch before gave five blocks of ours: the new role of two parts writes over all five.
+    write(&[
+        (0, &framed[0]),
+        (1, &framed[1]),
+        (2, &framed[2]),
+        (3, &framed[3]),
+        (4, &framed[4]),
+    ]);
+    assert_eq!(hooks(&two, Some(session)), 5);
+    assert_eq!(hooks(&five, Some(session)), 5, "a role that did not shrink");
+    // The owner's blocks above ours, or before: no part of the count, whatever they were.
+    write(&[
+        (0, &framed[0]),
+        (1, &framed[1]),
+        (2, "what an owner's hook printed"),
+        (6, "and another"),
+    ]);
+    assert_eq!(hooks(&two, Some(session)), 2);
+    // A filler an earlier launch wrote is ours: its block is covered while the log has it.
+    write(&[(0, &framed[0]), (3, &filler)]);
+    assert_eq!(hooks(&two, Some(session)), 4);
+    // No block at all: the role's parts alone.
+    write(&[(0, "an owner's words")]);
+    assert_eq!(hooks(&two, Some(session)), 2);
+    // A log that cannot be counted: a hook for every block a role could have.
     assert_eq!(
         hooks(&two, Some("01a17bc9-0000-7000-8000-000000000000")),
-        2,
-        "a conversation Muse has no log of keeps what it had"
+        crate::muse::MOST_PARTS,
+        "a conversation Muse has no log of"
     );
-    let five = role_of(1_000);
-    assert_eq!(crate::muse::parts(&five).len(), 5);
-    assert_eq!(hooks(&five, Some(session)), 5, "a role that did not shrink");
+    let big = fs::File::options().write(true).open(&log).unwrap();
+    big.set_len(1024 * 1024 * 1024 + 1).unwrap();
+    assert_eq!(
+        hooks(&two, Some(session)),
+        crate::muse::MOST_PARTS,
+        "a log too long to count"
+    );
+    big.set_len(0).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        write(&[(0, &framed[0])]);
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::File::open(&log).is_err() {
+            assert_eq!(
+                hooks(&two, Some(session)),
+                crate::muse::MOST_PARTS,
+                "a log it cannot open"
+            );
+        }
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 }

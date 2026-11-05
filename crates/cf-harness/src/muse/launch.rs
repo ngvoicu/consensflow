@@ -104,7 +104,7 @@ fn really(launcher: &Path) -> PathBuf {
 }
 
 /// The hooks ConsensFlow adds for a launch's SessionStart, `count` of them in one group
-/// of the matcher's: each `cf hook muse-session` of the window's `cf` (`pane_cf`, named
+/// of the matcher's, the group put first ([`hooks`]): each `cf hook muse-session` of the window's `cf` (`pane_cf`, named
 /// in full, as Muse's hook shell has a `PATH` of its own), with the role file, the file it
 /// writes the window's sessions in, and the number of the part of the role it says (0 for
 /// the first; a hook may say 16,384 bytes of output and a role is longer, so each part has
@@ -174,7 +174,11 @@ fn owner_hooks(env: &Env) -> Result<Map<String, Value>, String> {
 }
 
 /// The hooks a launch runs with: the owner's, each event's in its order, and
-/// ConsensFlow's SessionStart hooks (`added`, one group) after the owner's own.
+/// ConsensFlow's SessionStart hooks (`added`, one group) **before** the owner's own: ours
+/// always print, so each is the block of its number whatever the owner's hooks print
+/// (Muse numbers the blocks of the hooks that printed, in the order of the hooks), and a
+/// hook of the owner's that prints only sometimes cannot move a part of the role to
+/// another block, or leave an old one in the conversation.
 pub(super) fn hooks(env: &Env, added: Value) -> Result<Value, String> {
     let mut hooks = owner_hooks(env)?;
     let mut starts = match hooks.remove("SessionStart") {
@@ -184,52 +188,29 @@ pub(super) fn hooks(env: &Env, added: Value) -> Result<Value, String> {
             return Err("the hooks of Muse Code's settings cannot take ConsensFlow's".to_owned())
         }
     };
-    starts.push(added);
+    starts.insert(0, added);
     hooks.insert("SessionStart".to_owned(), Value::Array(starts));
     Ok(Value::Object(hooks))
 }
 
-/// How many SessionStart hooks the owner's settings give Muse: each hook of each of the
-/// event's entries.
-fn owner_starts(owner: &Map<String, Value>) -> usize {
-    owner
-        .get("SessionStart")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|entry| {
-            entry
-                .get("hooks")
-                .and_then(Value::as_array)
-                .map_or(1, Vec::len)
-        })
-        .sum()
-}
-
-/// What the window of `launch` runs with, its role in `role_file` (in `parts` parts: one
-/// hook for each): its folder made, the program it runs, and the hooks it is given.
-/// `earlier` is how many context blocks the hooks of the launches before this one gave the
-/// conversation it resumes (`session_hook::blocks_given`, none for a new one): a role
-/// that now fits in fewer parts than it did has the hooks of the parts it lost, which say
-/// over each block the old one left in the conversation that nothing is there now (Muse
-/// keeps a block until a hook of its number writes it again). The owner's own hooks come
-/// first and give blocks of their own, which the count leaves room for.
+/// What the window of `launch` runs with, its role in `role_file`, said by `count` hooks (a
+/// hook for each block of ours the conversation is to have: [`super::session_hook::parts`],
+/// and the blocks an earlier launch of it wrote that this one writes over,
+/// [`super::session_hook::cover_of`]): its folder made, the program it runs, and the
+/// hooks it is given.
 pub(super) fn integration(
     env: &Env,
     launch: &LaunchId,
     executable: &str,
     pane_cf: &str,
     role_file: &str,
-    parts: usize,
-    earlier: usize,
+    count: usize,
 ) -> Result<Integration, String> {
     let program = pinned(executable, env)?;
     let root = launch_folder("muse", env, launch)?;
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
     let said = path::join(&[&root, SAID]);
-    let count = parts
-        .max(earlier.saturating_sub(owner_starts(&owner_hooks(env)?)))
-        .min(super::session_hook::MOST_PARTS);
+    let count = count.min(super::session_hook::MOST_PARTS);
     let hooks = hooks(
         env,
         added_hooks(pane_cf, role_file, &said, env.on_windows(), count)?,

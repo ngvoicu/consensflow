@@ -146,7 +146,8 @@ fn ours() -> Value {
 }
 
 #[test]
-fn the_owner_s_hooks_run_with_consensflow_s_after_them_and_their_file_is_never_written() {
+fn consensflow_s_hooks_run_before_the_owner_s_so_their_blocks_are_the_first_and_the_owner_s_file_is_never_written(
+) {
     let dir = tempfile::tempdir().unwrap();
     let settings = dir.path().join("muse/settings.json");
     fs::create_dir_all(settings.parent().unwrap()).unwrap();
@@ -167,11 +168,13 @@ fn the_owner_s_hooks_run_with_consensflow_s_after_them_and_their_file_is_never_w
     );
     let starts = hooks["SessionStart"].as_array().unwrap();
     assert_eq!(starts.len(), 2);
+    // Ours first (T-1246): Muse numbers the blocks of the hooks that printed in this order, ours
+    // always print, so part k of a role is block k whatever the owner's hooks print.
+    assert_eq!(starts[0], ours(), "ConsensFlow's first");
     assert_eq!(
-        starts[0], owner["hooks"]["SessionStart"][0],
-        "the owner's first"
+        starts[1], owner["hooks"]["SessionStart"][0],
+        "the owner's after"
     );
-    assert_eq!(starts[1], ours());
     assert_eq!(
         fs::read_to_string(&settings).unwrap(),
         text,
@@ -288,11 +291,10 @@ fn a_role_in_parts_has_a_hook_for_each_numbered_from_0_on_both_lines() {
     );
 }
 
-/// Muse keeps a block of a hook until a hook of its number writes it again, and a resumed
-/// conversation keeps its blocks: a role that fits in fewer parts than at the launch before
-/// is given hooks for the numbers it lost, after the owner's own, which give blocks too.
+/// Which hook says what, in the launch's configuration: each of ours is one `cf hook
+/// muse-session` of its number, and `count` of them are given, first.
 #[test]
-fn a_launch_resuming_a_longer_role_has_hooks_for_the_blocks_it_left_after_the_owners() {
+fn a_launch_gives_count_hooks_of_ours_first_whatever_the_owner_has() {
     let dir = tempfile::tempdir().unwrap();
     let launcher = install(dir.path(), "1.4.14-R7309.1", &["muse-bin-1.4.14-R7309.1"]);
     let settings = dir.path().join("muse/settings.json");
@@ -310,42 +312,30 @@ fn a_launch_resuming_a_longer_role_has_hooks_for_the_blocks_it_left_after_the_ow
             dir.path().join("consensflow").to_str().unwrap(),
         ),
     ]);
-    let ours = |parts: usize, earlier: usize| {
+    let hooks_of = |count: usize| {
         let given = integration(
             &env,
             &LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap(),
             &launcher,
             "/app/cf",
             "/l/SKILL.md",
-            parts,
-            earlier,
+            count,
         )
         .unwrap();
         let hooks: Value =
             serde_json::from_str(given.args[1].strip_prefix("hooks=").unwrap()).unwrap();
-        let starts = hooks["SessionStart"].as_array().unwrap();
-        assert_eq!(starts.len(), 3, "the owner's two entries and ours");
-        starts[2]["hooks"].as_array().unwrap().len()
+        let starts = hooks["SessionStart"].as_array().unwrap().clone();
+        assert_eq!(starts.len(), 3, "ours and the owner's two entries");
+        (starts[0]["hooks"].as_array().unwrap().len(), starts)
     };
-    // The owner's give three blocks (0 to 2); a role of 2 parts that was 5 (blocks 0 to 7).
-    assert_eq!(ours(2, 0), 2, "a new conversation: a hook for a part");
+    for count in [1, 2, 5, 20] {
+        let (ours, starts) = hooks_of(count);
+        assert_eq!(ours, count);
+        assert_eq!(starts[1]["hooks"][0]["command"], "a", "the owner's follow");
+        assert_eq!(starts[2]["command"], "c");
+    }
     assert_eq!(
-        ours(2, 5),
-        2,
-        "a role that did not shrink: nothing to write over"
-    );
-    assert_eq!(
-        ours(2, 8),
-        5,
-        "three blocks left (5 to 7): three hooks more"
-    );
-    assert_eq!(
-        ours(3, 8),
-        5,
-        "the same blocks, now say its third part and two nothing"
-    );
-    assert_eq!(
-        ours(2, 100),
+        hooks_of(500).0,
         crate::muse::MOST_PARTS,
         "never past the most hooks Muse was measured to take"
     );

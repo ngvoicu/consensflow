@@ -14,6 +14,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use cf_e2e::muse::members::{echo_worker, project, the_session};
 use cf_e2e::muse::{self, hook_blocks, hook_runs};
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::{json, Value};
@@ -45,6 +46,11 @@ fn muse_rig() -> Option<Config> {
             None
         }
     }
+}
+
+/// A rig whose Muse turns are `turn_ms` long.
+fn muse_rig_of(turn_ms: u64) -> Option<Config> {
+    muse_rig().map(|config| config.var("CF_TEST_MUSE_DELAY_MS", turn_ms.to_string()))
 }
 
 /// The most rules for the staff the ledger takes: 8,000 bytes in 150 lines, the lines in
@@ -93,9 +99,9 @@ fn largest_chiefs_project(rig: &Rig) -> cf_e2e::Result<Project<'_>> {
     Ok(project)
 }
 
-/// The role text of the chief's latest launch: the file its hooks read, in the launch's folder
+/// The role text of the latest launch of a window of `role` (`chief`, `worker`): the file its hooks read, in the launch's folder
 /// (the newest of the rig's, which is the one the chief's window runs on).
-fn the_latest_role(rig: &Rig) -> Option<String> {
+fn the_latest_role(rig: &Rig, role: &str) -> Option<String> {
     let launches = rig.home().join("integrations").join("muse");
     let mut roles: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(launches)
         .ok()?
@@ -103,7 +109,7 @@ fn the_latest_role(rig: &Rig) -> Option<String> {
         .map(|launch| {
             launch
                 .path()
-                .join("role/.claude/skills/consensflow-chief/SKILL.md")
+                .join(format!("role/.claude/skills/consensflow-{role}/SKILL.md"))
         })
         .filter_map(|file| Some((fs::metadata(&file).ok()?.modified().ok()?, file)))
         .collect();
@@ -111,49 +117,134 @@ fn the_latest_role(rig: &Rig) -> Option<String> {
     fs::read_to_string(roles.pop()?.1).ok()
 }
 
-/// What the chief's latest session says of its SessionStart hooks: the session's records once
-/// the hooks have run in it.
-fn hooked(rig: &Rig) -> Option<Vec<Value>> {
+/// The latest session that has had its SessionStart hooks run, and its records: what it says of
+/// them once they have. (The project's first window, never prompted, has a session of no hook.)
+fn hooked_session(rig: &Rig) -> Option<(String, Vec<Value>)> {
     rig.muse_sessions()
         .into_iter()
         .rev()
-        .map(|(_, log)| muse::records(&log))
-        .find(|records| !hook_runs(records).is_empty())
+        .map(|(id, log)| (id, muse::records(&log)))
+        .find(|(_, records)| !hook_runs(records).is_empty())
 }
 
-/// The first 40 characters of `text`, for a message.
-fn head(text: &str) -> String {
-    text.chars().take(40).collect()
+/// [`hooked_session`]'s records.
+fn hooked(rig: &Rig) -> Option<Vec<Value>> {
+    hooked_session(rig).map(|(_, records)| records)
 }
 
-/// Whether `blocks` are the whole of `role` in order, each as Muse keeps a block: the white
-/// space at both ends of what a hook printed cut off. Each block is the next of the role, and
-/// between one and the next, and after the last, only line breaks of the role are not in a
-/// block: no indentation is lost where a part begins.
-fn covers(role: &str, blocks: &[(u32, String)]) -> Result<(), String> {
-    let mut rest = role;
-    for (at, (number, text)) in blocks.iter().enumerate() {
-        let after_break = rest.trim_start_matches('\n');
-        let gap = &rest[..rest.len() - after_break.len()];
-        if at == 0 && !gap.is_empty() {
-            return Err(format!("the role begins with {gap:?}"));
+/// What ConsensFlow's blocks begin with, a part's frame and a filler alike
+/// (`cf_harness::muse::MARK`; this crate holds no harness code, the log is what it reads).
+const MARK: &str = "<<consensflow-role";
+
+/// How an unframed role begins: the front matter of its skill file.
+const FRONT_MATTER: &str = "---\nname: consensflow-";
+
+/// What a role's blocks look like in a session's log, once checked (`layout`): how many parts
+/// the role has, and how many blocks of ConsensFlow's the conversation has (a role that got
+/// shorter leaves fillers over the old blocks).
+#[derive(Debug, PartialEq, Eq)]
+struct Layout {
+    parts: usize,
+    blocks: usize,
+}
+
+/// The id, the part and the number of parts a framed block's head line says.
+fn head_of(text: &str) -> Option<(String, usize, usize)> {
+    let line = text.lines().next()?.strip_prefix(MARK)?.trim_start();
+    let (id, rest) = line.split_once(" part ")?;
+    let number: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    let of: String = rest
+        .split_once(" of ")?
+        .1
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    Some((id.to_owned(), number.parse().ok()?, of.parse().ok()?))
+}
+
+/// Judges the blocks the SessionStart hooks of a session gave (`blocks`: the last text of
+/// each number, as the session's log keeps them) against the role text the launch wrote
+/// (`role`): ConsensFlow's own are blocks `0..k` with nothing of the owner's among them; the
+/// first `parts` of them, in order, with the frames off, are the role to the byte (an
+/// unframed role as Muse cuts it); the rest are fillers of the same role's id; and none of
+/// the `old` texts, which an earlier role said, is in any block. What the owner's hooks
+/// printed is after ours, and is no part of any of it.
+fn layout(role: &str, blocks: &[(u32, String)], old: &[String]) -> Result<Layout, String> {
+    let ours = |text: &str| text.starts_with(MARK) || text.starts_with(FRONT_MATTER);
+    let mine: Vec<&(u32, String)> = blocks.iter().filter(|(_, text)| ours(text)).collect();
+    let numbers: Vec<u32> = mine.iter().map(|(number, _)| *number).collect();
+    if numbers != (0..mine.len() as u32).collect::<Vec<_>>() {
+        return Err(format!(
+            "ConsensFlow's blocks are not the first ones: {numbers:?} of {:?}",
+            blocks.iter().map(|(number, _)| *number).collect::<Vec<_>>()
+        ));
+    }
+    let Some((_, first)) = mine.first() else {
+        return Err("the conversation has no block of ConsensFlow's".to_owned());
+    };
+    let parts = match head_of(first) {
+        None => {
+            if first.as_str() != role.trim() {
+                return Err(format!(
+                    "the unframed role is not the role text: {} bytes of {}",
+                    first.len(),
+                    role.len()
+                ));
+            }
+            1
         }
-        rest = after_break.strip_prefix(text.as_str()).ok_or_else(|| {
-            format!(
-                "block {number} ({}…) is not what comes next in the role: {:?}",
-                head(text),
-                head(after_break)
-            )
-        })?;
+        Some((id, 1, of)) => {
+            let mut joined = String::new();
+            for (at, (number, text)) in mine.iter().take(of).enumerate() {
+                let Some((this, part, parts)) = head_of(text) else {
+                    return Err(format!("block {number} is no part of the role"));
+                };
+                if (this.as_str(), part, parts) != (id.as_str(), at + 1, of) {
+                    return Err(format!(
+                        "block {number} says {this} part {part} of {parts}, not {id} part {} of {of}",
+                        at + 1
+                    ));
+                }
+                if text.trim() != text {
+                    return Err(format!("block {number} has white space at its ends"));
+                }
+                let inner = text
+                    .split_once('\n')
+                    .and_then(|(_, rest)| rest.rsplit_once('\n'))
+                    .ok_or_else(|| format!("block {number} has no frame"))?
+                    .0;
+                joined += inner;
+            }
+            if mine.len() < of || joined != role {
+                return Err(format!(
+                    "the {of} parts are {} bytes, the role {}, and {} blocks are ConsensFlow's",
+                    joined.len(),
+                    role.len(),
+                    mine.len()
+                ));
+            }
+            for (number, text) in &mine[of..] {
+                let said = format!("{MARK} {id} part {}: there is no part", number + 1);
+                if !text.starts_with(&said) {
+                    return Err(format!(
+                        "block {number} is no filler of {id}: {}",
+                        &text[..text.len().min(90)]
+                    ));
+                }
+            }
+            of
+        }
+        Some((_, part, _)) => return Err(format!("the first block says part {part}")),
+    };
+    for (number, text) in blocks {
+        if let Some(old) = old.iter().find(|old| text.contains(old.as_str())) {
+            return Err(format!("block {number} still has old role text: {old}"));
+        }
     }
-    if rest.chars().all(|character| character == '\n') {
-        Ok(())
-    } else {
-        Err(format!(
-            "the role goes on after the last block: {:?}",
-            head(rest)
-        ))
-    }
+    Ok(Layout {
+        parts,
+        blocks: mine.len(),
+    })
 }
 
 /// The human tells the chief `text`: a bracketed paste, and Enter a moment after it, in a write of
@@ -200,7 +291,7 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
         || Ok(hooked(&rig).is_some_and(|log| !muse::terminals(&log).is_empty())),
     )?;
     let log = hooked(&rig).ok_or("the chief's session has no hook run")?;
-    let role = the_latest_role(&rig).ok_or("the chief's launch wrote no role")?;
+    let role = the_latest_role(&rig, "chief").ok_or("the chief's launch wrote no role")?;
     // The role is the largest ConsensFlow makes: past what one hook says.
     assert!(
         role.len() > MUSE_HOOK_OUTPUT_LIMIT * 3 / 2,
@@ -217,13 +308,8 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
         !runs.is_empty() && runs.iter().all(|(status, _)| status == "completed"),
         "the hooks: {runs:?}"
     );
-    // And the context they gave is the whole role, in order.
+    // And the context they gave is the whole role, in order, to the byte.
     let blocks = hook_blocks(&log);
-    assert_eq!(
-        blocks.iter().map(|(number, _)| *number).collect::<Vec<_>>(),
-        (0..blocks.len() as u32).collect::<Vec<_>>(),
-        "one block for each hook, from the first"
-    );
     assert!(
         blocks
             .iter()
@@ -234,8 +320,270 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
             .map(|(_, text)| text.len())
             .collect::<Vec<_>>()
     );
-    if let Err(why) = covers(&role, &blocks) {
-        panic!("the blocks are not the role text: {why}");
+    let laid = layout(&role, &blocks, &[]).map_err(|why| format!("the blocks: {why}"))?;
+    assert!(laid.parts >= 2, "{laid:?}");
+    // Muse puts its blocks in a request by their `order`, and gives a hook's block the one of
+    // its place: each part is where its number says, ascending, and every byte is in the
+    // request's developer context (the one message of the wire's `context` lane).
+    let orders = muse::hook_block_orders(&log);
+    assert!(
+        orders
+            .iter()
+            .all(|(number, order)| *order == 900_000 + u64::from(*number)),
+        "{orders:?}"
+    );
+    let given: usize = blocks.iter().map(|(_, text)| text.len()).sum();
+    let carried = muse::request_context_bytes(&log);
+    assert!(
+        carried.last().is_some_and(|bytes| *bytes >= given as u64),
+        "the request's context is {carried:?} bytes, the blocks {given}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+/// The hooks of the owner's Muse, in the rig's home: SessionStart hooks that each print the file
+/// they name as it is (`cat`, `type` on Windows), as a person's would print what a script said.
+/// What a hook prints is changed between launches by writing its file ([`owners_say`]).
+fn owner_hooks(rig: &Rig, files: &[PathBuf]) -> cf_e2e::Result<()> {
+    let config =
+        PathBuf::from(rig.var("XDG_CONFIG_HOME").ok_or_else(|| {
+            cf_e2e::Error::Daemon("the rig's Muse has no config folder".to_owned())
+        })?)
+        .join("muse");
+    let hooks: Vec<Value> = files
+        .iter()
+        .map(|file| {
+            let file = file.to_string_lossy();
+            json!({
+                "type": "command",
+                "command": format!("cat '{file}'"),
+                "commandWindows": format!("type {file}"),
+                "timeout": 10,
+            })
+        })
+        .collect();
+    cf_e2e::files::write(
+        &config.join("settings.json"),
+        json!({
+            "schema_version": 1,
+            "hooks": { "SessionStart": [{ "matcher": "", "hooks": hooks }] },
+        })
+        .to_string(),
+    )
+}
+
+/// What each hook of the owner's prints from now on: its text, or nothing.
+fn owners_say(files: &[PathBuf], says: &[Option<&str>]) -> cf_e2e::Result<()> {
+    for (file, says) in files.iter().zip(says) {
+        cf_e2e::files::write(file, says.unwrap_or(""))?;
+    }
+    Ok(())
+}
+
+/// Rules of the most bytes and lines the ledger takes, in characters a hook's answer writes in
+/// two bytes, led by `tag`, a word of this version of the rules that no other has: a role that
+/// has them is three parts for a chief and two for a member, where a short rule is two and one.
+fn heavy_rules(tag: &str) -> String {
+    let mut lines = vec![format!("RULESTAG-{tag}")];
+    let each = (8_000 - lines[0].len() - 149) / 149;
+    lines.extend((0..149).map(|_| "\"\\".repeat(each / 2) + &"\"".repeat(each % 2)));
+    let mut rules = lines.join("\n");
+    rules += &"\"".repeat(8_000 - rules.len());
+    assert_eq!((rules.len(), rules.split('\n').count()), (8_000, 150));
+    rules
+}
+
+/// Short rules, led by `tag`.
+fn short_rules(tag: &str) -> String {
+    format!("RULESTAG-{tag}\nBe brief.")
+}
+
+/// Says the rules of `project` (none where `None`).
+fn set_rules(rig: &Rig, project: &Project<'_>, rules: Option<&str>) -> cf_e2e::Result<()> {
+    let said = rig.page(
+        "project.rules",
+        json!({ "project": project.id(), "rules": rules }),
+    )?;
+    assert_eq!(said["ok"], true, "{said}");
+    Ok(())
+}
+
+/// Every launch of a chief, as a person quits the app and opens it again: the project is closed
+/// and resumed, the chief is told a word, and the case waits for its turn to end (its hooks
+/// ran before it). `launch` is the number of this launch of the case (the first is 1).
+fn chief_launch(
+    rig: &Rig,
+    project: &Project<'_>,
+    launch: usize,
+) -> cf_e2e::Result<(String, String, Vec<(u32, String)>)> {
+    // The project's own first window opened before the rules were said, and is never
+    // prompted: each launch of the case is a window opened after it (the window of the project
+    // is the first, so the `launch`th of the case is the `launch + 1`th).
+    crate::specs::relaunch(rig, project, launch + 1)?;
+    tell_the_chief(rig, project, "Reply with exactly: ROLE_GIVEN")?;
+    rig.wait_for(
+        &format!("the chief's turn {launch} to end"),
+        secs(180),
+        || Ok(hooked(rig).is_some_and(|log| muse::terminals(&log).len() >= launch)),
+    )?;
+    let said = |why: &str| cf_e2e::Error::Daemon(why.to_owned());
+    let (session, log) =
+        hooked_session(rig).ok_or_else(|| said("the chief's session has no hook run"))?;
+    let role =
+        the_latest_role(rig, "chief").ok_or_else(|| said("the chief's launch wrote no role"))?;
+    Ok((session, role, hook_blocks(&log)))
+}
+
+#[test]
+fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and_however_its_role_changes(
+) -> Outcome {
+    let Some(config) = muse_rig() else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    let owner = tempfile::tempdir()?;
+    let files = [owner.path().join("one.txt"), owner.path().join("two.txt")];
+    owners_say(&files, &[None, None])?;
+    owner_hooks(&rig, &files)?;
+    rig.stand_ins(&json!({ "schemaVersion": 1, "agents": [
+        { "id": "chief", "kind": "muse", "model": "muse-spark-1.3", "effort": "minimal" }
+    ]}))?;
+    let project = Project::open(&rig, "chief", json!({ "staff": [] }))?;
+    // The chief's launches. Each says what the role is (rules of one version, heavy or short),
+    // and what each of the owner's two hooks prints this launch: both, none, one and then the
+    // other, so that the owner's blocks come and go and the role's size does too (3 parts for
+    // heavy rules, 2 for short) and stays the same across a resume.
+    let steps: [(Option<String>, [Option<&str>; 2]); 7] = [
+        (
+            Some(heavy_rules("A")),
+            [Some("OWNER-ONE-A"), Some("OWNER-TWO-A")],
+        ),
+        (Some(heavy_rules("B")), [None, None]), // the same size, the owner silent: the review's case
+        (Some(short_rules("C")), [Some("OWNER-ONE-C"), None]), // shorter, the owner prints one
+        (Some(heavy_rules("D")), [None, Some("OWNER-TWO-D")]), // longer
+        (Some(short_rules("E")), [None, None]), // shorter, the owner silent
+        (
+            Some(short_rules("F")),
+            [Some("OWNER-ONE-F"), Some("OWNER-TWO-F")],
+        ), // the same size
+        (Some(heavy_rules("G")), [None, Some("OWNER-TWO-G")]),
+    ];
+    let mut old: Vec<String> = Vec::new();
+    let mut covered = 0;
+    let mut conversation: Option<String> = None;
+    for (at, (rules, says)) in steps.iter().enumerate() {
+        let launch = at + 1;
+        set_rules(&rig, &project, rules.as_deref())?;
+        owners_say(&files, says)?;
+        let (session, role, blocks) = chief_launch(&rig, &project, launch)?;
+        let laid = layout(&role, &blocks, &old)
+            .map_err(|why| format!("launch {launch} ({}): {why}", rules_tag(&role)))?;
+        // Parts as the rules make them; blocks never fewer than any launch had.
+        let heavy = rules.as_deref().is_some_and(|rules| rules.len() > 1_000);
+        assert_eq!(
+            laid.parts,
+            if heavy { 3 } else { 2 },
+            "launch {launch}: {laid:?}"
+        );
+        covered = covered.max(laid.parts);
+        assert_eq!(
+            laid.blocks, covered,
+            "launch {launch}: a block of ours for every part ever said"
+        );
+        // What the owner's hooks print this launch is after ours.
+        for text in says.iter().flatten() {
+            assert!(
+                blocks
+                    .iter()
+                    .any(|(number, block)| block == text && *number as usize >= laid.blocks),
+                "launch {launch}: {text} is not among the blocks after ours: {:?}",
+                blocks.iter().map(|(number, _)| number).collect::<Vec<_>>()
+            );
+        }
+        old.push(format!("RULESTAG-{}", rules_tag(&role)));
+        old.retain(|tag| !role.contains(tag.as_str()));
+        // The one conversation went on, from the first launch to the last: each resumed it.
+        assert_eq!(
+            *conversation.get_or_insert(session.clone()),
+            session,
+            "launch {launch}: one conversation"
+        );
+        assert!(
+            launch == 1 || muse::members::last_resumed(&rig, &session),
+            "launch {launch} did not resume it: {:?}",
+            rig.muse_launches().last()
+        );
+    }
+    rig.close()?;
+    Ok(())
+}
+
+/// The tag of the rules a role says (`RULESTAG-<tag>`), for a message.
+fn rules_tag(role: &str) -> String {
+    role.split("RULESTAG-")
+        .nth(1)
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_text() -> Outcome {
+    let Some(config) = muse_rig_of(500) else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    let owner = tempfile::tempdir()?;
+    let files = [owner.path().join("one.txt")];
+    owners_say(&files, &[Some("OWNER-ONE-1")])?;
+    owner_hooks(&rig, &files)?;
+    let project = project(&rig, &echo_worker())?;
+    // A worker's role with no rules is one block, unframed as it always was; with the heaviest
+    // rules it is two, framed; and back. Each task opens its worker again on its conversation.
+    let steps: [(Option<String>, Option<&str>, usize); 5] = [
+        (None, Some("OWNER-ONE-1"), 1),
+        (Some(heavy_rules("B")), None, 2),
+        (Some(short_rules("C")), Some("OWNER-ONE-C"), 1),
+        (Some(heavy_rules("D")), None, 2),
+        (None, None, 1),
+    ];
+    let mut old: Vec<String> = Vec::new();
+    let mut covered = 1;
+    for (at, (rules, says, parts)) in steps.iter().enumerate() {
+        let number = at + 1;
+        set_rules(&rig, &project, rules.as_deref())?;
+        owners_say(&files, &[*says])?;
+        let brief = if number == 1 {
+            format!("DISPATCH --tier standard Reply with exactly: T{number}_DONE")
+        } else {
+            rig.tell(project.id(), &format!("CF task accept T-{}", number - 1))?;
+            format!(
+                "DISPATCH --tier standard --after T-{} Reply with exactly: T{number}_DONE",
+                number - 1
+            )
+        };
+        rig.tell(project.id(), &brief)?;
+        rig.wait_for(&format!("T-{number} to be answered"), secs(180), || {
+            Ok(project.task(number as i64)?["state"] == "done")
+        })?;
+        let (session, log) = the_session(&rig);
+        assert_eq!(muse::terminals(&log).len(), number, "{session}");
+        let role = the_latest_role(&rig, "worker").ok_or("the worker's launch wrote no role")?;
+        let blocks = hook_blocks(&log);
+        let laid = layout(&role, &blocks, &old)
+            .map_err(|why| format!("task {number} ({}): {why}", rules_tag(&role)))?;
+        assert_eq!(laid.parts, *parts, "task {number}: {laid:?}");
+        covered = covered.max(laid.parts);
+        assert_eq!(
+            laid.blocks, covered,
+            "task {number}: a block of ours for every part ever said"
+        );
+        old.push(format!("RULESTAG-{}", rules_tag(&role)));
+        old.retain(|tag| !role.contains(tag.as_str()) && tag != "RULESTAG-");
     }
     rig.close()?;
     Ok(())
