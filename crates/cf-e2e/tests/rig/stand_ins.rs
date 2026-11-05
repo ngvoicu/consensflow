@@ -21,6 +21,29 @@ use serde_json::Value;
 
 use crate::{Outcome, FAKE_AGENT};
 
+/// The rig's leftover check takes a noted number for a window's only while its process runs
+/// the stand-in (T-1236; on Windows CI a reused number held by `sort.exe` was said to be a
+/// window left): the chief's window, running, is the one it names, by its number and its
+/// command line, so the program it reads is the window's own on each system.
+#[test]
+fn the_leftover_check_names_a_window_still_running_by_the_stand_in_it_runs() -> Outcome {
+    use crate::secs;
+
+    let rig = crate::rig()?;
+    let _project = cf_e2e::rig::Project::open(&rig, "chief", serde_json::json!({}))?;
+    rig.wait_for("the chief's window to note its number", secs(60), || {
+        Ok(!rig.started().is_empty())
+    })?;
+    let chief = rig.started()[0].pid;
+    let named = rig
+        .windows_the_close_would_name()
+        .ok_or("the check named no window, though the chief's runs")?;
+    assert!(named.starts_with(&format!("{chief} (")), "{named}");
+    assert!(named.contains("fake-agent"), "{named}");
+    rig.close()?;
+    Ok(())
+}
+
 /// A window the pane host closes: its stand-in agent is asked to end (TERM and
 /// HUP to its group) and leaves by itself, at once and with the code 0, where
 /// the host would otherwise wait out its grace and kill it. Every case of the
