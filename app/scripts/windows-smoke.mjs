@@ -185,7 +185,17 @@ try {
     (answered?.phase === 'idle' || answered?.phase === 'available') && !answered?.error,
     'the update check answers up to date or an update',
   )
-  check(!/panicked/.test(appLog()), "the app's error log holds no panic after the update check")
+  const logged = appLog()
+  console.log(`the app's log after the update check: ${logged.length} bytes`)
+  check(!/panicked/.test(logged), "the app's error log holds no panic after the update check")
+  // "ConsensFlow kept running" is the app's warning that it stopped an error of its own
+  // (panics.rs): a dialog of the system's class, put up a moment after the error. Nothing
+  // this smoke does warrants one.
+  await sleep(2000)
+  check(
+    !windowClasses(app.pid).includes('#32770'),
+    'no dialog of the app tells the person it kept running after the update check',
+  )
 
   for (const screen of ['Agents', 'Harnesses']) {
     await main.locator('#settings-button').click()
@@ -282,9 +292,6 @@ try {
     !classes.some((name) => /^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS|PseudoConsoleWindow)$/.test(name)),
     'no window of the app is a console',
   )
-  // "ConsensFlow kept running" is the app's warning that it stopped an error of its own
-  // (panics.rs); it is a dialog of the system's class, and nothing in this smoke warrants one.
-  check(!classes.includes('#32770'), 'no dialog of the app tells the person it kept running')
 
   // A page whose process failed is loaded again (app/src-tauri/src/page_crash.rs): a page
   // that is gone acknowledges no window's output, and the pane host stops reading a window
