@@ -156,6 +156,34 @@ fn covers(role: &str, blocks: &[(u32, String)]) -> Result<(), String> {
     }
 }
 
+/// The human tells the chief `text`: a bracketed paste, and Enter a moment after it, in a write of
+/// its own. [`Rig::tell`] writes them together, as a terminal does for a paste, and Muse on Windows
+/// reads keys a character at a time, so an Enter that comes with the paste is a line break in it
+/// and the words wait in the box unsent (T-954's finding; zeewin2 left this case's words so).
+/// The first session's hooks run at its first prompt, so the case sends it.
+fn tell_the_chief(rig: &Rig, project: &Project<'_>, text: &str) -> cf_e2e::Result<()> {
+    rig.wait_for("the chief to be idle", secs(60), || {
+        Ok(project.lane("chief")?["activity"]["state"] == "idle")
+    })?;
+    let pane = project.lane("chief")?["pane"].clone();
+    let send = |bytes: &str| {
+        let answer = rig.host(
+            "pane.input",
+            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": bytes.as_bytes() }),
+        )?;
+        if answer["ok"] == true {
+            Ok(())
+        } else {
+            Err(cf_e2e::Error::Daemon(format!(
+                "pane.input was refused: {answer}"
+            )))
+        }
+    };
+    send(&format!("\u{1b}[200~{text}\u{1b}[201~"))?;
+    std::thread::sleep(Duration::from_secs(if cfg!(windows) { 8 } else { 1 }));
+    send("\r")
+}
+
 #[test]
 fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outcome {
     let Some(config) = muse_rig() else {
@@ -163,7 +191,7 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
     };
     let rig = Rig::start(config)?;
     let project = largest_chiefs_project(&rig)?;
-    rig.tell(project.id(), "Reply with exactly: ROLE_GIVEN")?;
+    tell_the_chief(&rig, &project, "Reply with exactly: ROLE_GIVEN")?;
     // The hooks' runs are written as they end and their blocks after the last: the turn that
     // follows them has ended when the log is read whole.
     rig.wait_for(
