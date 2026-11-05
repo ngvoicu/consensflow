@@ -751,7 +751,37 @@ fn a_plant_whose_command_without_it_hangs_and_then_says_0_is_not_caught() {
             checkout.path("a.rs").display()
         ),
     ]);
-    let (status, said) = driven_within(&checkout, &[plant], Duration::from_secs(2));
+    // Its state is its own checkout's: driven in the repository's, any other test that wrote
+    // there in the 2 s read as a run that changed the checkout, UNSTABLE (GitHub's macOS
+    // runner, CI run 41933381016; T-476's class).
+    let own_checkout = Context {
+        root: checkout.root.clone(),
+        env: context().env,
+    };
+    let mut setup = runner_with(&own_checkout, Duration::from_secs(120), Stops::never);
+    git(&mut setup, &["init", "-q"]);
+    git(&mut setup, &["add", "."]);
+    git(&mut setup, &["commit", "-q", "-m", "first"]);
+    let family = crate::plants::kit::Family {
+        name: "demo".into(),
+        limit: Duration::from_secs(2),
+        rebuild: None,
+        plants: vec![plant],
+        known_unapplied: Vec::new(),
+    };
+    let chosen: Vec<&crate::plants::kit::Plant> = family.plants.iter().collect();
+    let mut out = Vec::new();
+    let mut own = runner_with(&own_checkout, Duration::from_secs(2), Stops::never);
+    let status =
+        crate::plants::driver::run(&checkout, &family, &chosen, &mut own, &mut out).unwrap();
+    let said = String::from_utf8(out).unwrap();
+    if let Some(folder) = said
+        .lines()
+        .next()
+        .and_then(|first| first.strip_prefix("copies of what is planted are kept in "))
+    {
+        let _ = fs::remove_dir_all(folder);
+    }
     assert_eq!(status, 1);
     assert_eq!(fs::read_to_string(checkout.path("a.rs")).unwrap(), "one\n");
     assert!(said.contains("NOT RUN          p: one ("), "{said}");
