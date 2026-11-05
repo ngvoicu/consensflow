@@ -186,7 +186,8 @@ try {
     'the update check answers up to date or an update',
   )
   const logged = appLog()
-  console.log(`the app's log after the update check: ${logged.length} bytes`)
+  console.log(`the app's log after the update check, ${logged.length} bytes:`)
+  console.log(logged.slice(0, 3000).trimEnd() || '(empty)')
   check(!/panicked/.test(logged), "the app's error log holds no panic after the update check")
   // "ConsensFlow kept running" is the app's warning that it stopped an error of its own
   // (panics.rs): a dialog of the system's class, put up a moment after the error. Nothing
