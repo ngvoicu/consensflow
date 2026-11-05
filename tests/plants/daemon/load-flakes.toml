@@ -127,6 +127,8 @@ replace = '''
 name = "load flakes: a program that began after the last window was noted is taken for a window"
 meant = "a_program_that_began_after_the_last_note_is_none_of_the_windows"
 runs = ["rig-lib-left"]
+# Unix's `began_after` (`ps`'s age); Windows' has its own plant below.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/left.rs"
