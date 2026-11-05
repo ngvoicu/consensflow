@@ -123,6 +123,19 @@ pub fn described(pid: u32) -> Option<String> {
     })
 }
 
+/// The command line of the process `pid`, as `ps` says it: none where there is no such
+/// process or `ps` says nothing of it.
+#[cfg(unix)]
+pub fn command(pid: u32) -> Option<String> {
+    let ran = Run::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .inheriting_env()
+        .run()
+        .ok()?;
+    let said = ran.stdout.trim();
+    (ran.code == Some(0) && !said.is_empty()).then(|| said.to_owned())
+}
+
 /// How long the process `pid` has run, in whole seconds: the `etime` of `ps`. None where
 /// it is not there or the system will not say. A process that has run for less than
 /// another is one that began after it.

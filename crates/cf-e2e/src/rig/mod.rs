@@ -726,6 +726,14 @@ impl Rig {
         recorded(self.var("CLAUDE_CONFIG_DIR").unwrap_or_default(), session)
     }
 
+    /// What the rig's leftover check says now, the windows still running: the first noted
+    /// number whose process is a window's, as the close would name it were it still there
+    /// then. A case holds with it that the check tells the stand-in's own program from
+    /// another's (T-1236): a window running is named, not taken for another program.
+    pub fn windows_the_close_would_name(&self) -> Option<String> {
+        left::left_behind(&self.root.join("pids.jsonl"), Duration::ZERO, left::NOTER)
+    }
+
     /// The processes the stand-in agent recorded starting, in order. The
     /// chief's comes first.
     pub fn started(&self) -> Vec<Started> {
@@ -910,7 +918,7 @@ impl Rig {
         // The pane host kills each window's process as it shuts down, and a
         // killed process leaves the process table a moment later (once it is
         // reaped): one still there after a few seconds was left behind.
-        if let Some(left) = left::left_behind(&self.root.join("pids.jsonl"), GONE) {
+        if let Some(left) = left::left_behind(&self.root.join("pids.jsonl"), GONE, left::NOTER) {
             return Err(Error::Daemon(format!(
                 "fake harness process remains after bridge shutdown: {left}"
             )));

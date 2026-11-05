@@ -16,6 +16,10 @@ use std::time::Duration;
 use super::wait;
 use crate::process;
 
+/// The program that notes its number (`fake_agent`'s `note_process`): the stand-in's own,
+/// which every window of a rig runs. No other program notes one.
+pub(super) const NOTER: &str = "fake-agent";
+
 /// How much younger than the file a process may be and still be taken for a window's:
 /// `ps` says a process's age to the second, and the file's time is exact.
 #[cfg(unix)]
@@ -24,7 +28,7 @@ const SLACK: Duration = Duration::from_secs(2);
 /// What is left of the windows noted in `pids_file`, once `within` has passed: the first
 /// process still there that is a window's, in words that say what it is; none where they
 /// are all gone.
-pub(super) fn left_behind(pids_file: &Path, within: Duration) -> Option<String> {
+pub(super) fn left_behind(pids_file: &Path, within: Duration, program: &str) -> Option<String> {
     let noted = fs::read_to_string(pids_file).unwrap_or_default();
     for pid in noted
         .lines()
@@ -36,10 +40,61 @@ pub(super) fn left_behind(pids_file: &Path, within: Duration) -> Option<String> 
         if began_after(pid, pids_file) {
             continue;
         }
+        if runs_another(pid, program) {
+            continue;
+        }
         let what = describe(pid);
         return Some(format!("{pid} ({what})"));
     }
     None
+}
+
+/// Whether the process `pid` runs another program than `program`, as its command line says:
+/// one that does took the number a window gave back, whenever it began. Its start alone does
+/// not tell it: the file's last note is the latest window's, and a program that took the
+/// number of a window that ended before another window noted its own began before that note
+/// (a chief opened again, CI run 41973700452: `sort.exe` held the first chief's number), as
+/// one that began within the slack does. Where the command cannot be read, the process is
+/// taken for a window's.
+fn runs_another(pid: u32, program: &str) -> bool {
+    command(pid).is_some_and(|command| !names(&command, program))
+}
+
+/// Whether the command line `command` runs `program`: a word of it whose file name is
+/// `program`, `.exe` aside, in any case (Windows' names are).
+fn names(command: &str, program: &str) -> bool {
+    command
+        .split(|c: char| c.is_whitespace() || c == '"')
+        .filter(|word| !word.is_empty())
+        .map(|word| word.rsplit(['/', '\\']).next().unwrap_or(word))
+        .map(|name| {
+            name.len()
+                .checked_sub(4)
+                .filter(|&at| name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".exe"))
+                .map_or(name, |at| &name[..at])
+        })
+        .any(|name| name.eq_ignore_ascii_case(program))
+}
+
+/// The command line of the process `pid`, as `ps` says it: none where it is gone or `ps`
+/// cannot say.
+#[cfg(unix)]
+fn command(pid: u32) -> Option<String> {
+    process::command(pid)
+}
+
+/// The command line of the process `pid`, as Windows' process table says it (the closing
+/// listing's own, `live::members::ThisMachine`): none where it is gone or the table cannot be
+/// read.
+#[cfg(windows)]
+fn command(pid: u32) -> Option<String> {
+    use crate::live::members::{Machine, ThisMachine};
+    ThisMachine
+        .processes()
+        .ok()?
+        .into_iter()
+        .find(|running| running.identity.pid == pid)
+        .map(|running| running.command)
 }
 
 /// Whether the process `pid` began after the file `noted` was last written: one that did
