@@ -125,5 +125,14 @@ runs = ["tls-rule"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/feed.rs"
-find = "ServerConfig::builder_with_provider(provider)"
-replace = "ServerConfig::builder()"
+find = '''
+    let config = ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|cause| words("protocols", &cause))?
+        .with_no_client_auth()
+'''
+replace = '''
+    let _ = provider;
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+'''
