@@ -409,14 +409,14 @@ fn set_rules(rig: &Rig, project: &Project<'_>, rules: Option<&str>) -> cf_e2e::R
     Ok(())
 }
 
+/// What a launch of the chief left: the conversation it is in, the role text the launch wrote, and
+/// the last text of each block of the hooks in the conversation's log.
+type Launched = (String, String, Vec<(u32, String)>);
+
 /// Every launch of a chief, as a person quits the app and opens it again: the project is closed
 /// and resumed, the chief is told a word, and the case waits for its turn to end (its hooks
 /// ran before it). `launch` is the number of this launch of the case (the first is 1).
-fn chief_launch(
-    rig: &Rig,
-    project: &Project<'_>,
-    launch: usize,
-) -> cf_e2e::Result<(String, String, Vec<(u32, String)>)> {
+fn chief_launch(rig: &Rig, project: &Project<'_>, launch: usize) -> cf_e2e::Result<Launched> {
     // The project's own first window opened before the rules were said, and is never
     // prompted: each launch of the case is a window opened after it (the window of the project
     // is the first, so the `launch`th of the case is the `launch + 1`th).

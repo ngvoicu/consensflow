@@ -1094,6 +1094,7 @@ mod tests {
     /// `cargo test -p cf-harness --lib muse::session_hook::tests::timing -- --ignored --nocapture`
     #[test]
     #[ignore = "a timing: run by hand with --ignored --nocapture"]
+    #[allow(clippy::disallowed_methods)] // The knobs of a timing run by hand, read where it is.
     fn timing_of_the_count_on_a_long_log() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("session.jsonl");
