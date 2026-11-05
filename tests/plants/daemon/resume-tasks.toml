@@ -370,7 +370,7 @@ runs = ["ledger-suspended", "engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "        .filter(|because| because.contains(MAY_STILL_RUN))"
+find = "        .filter(|because| warns(because))"
 replace = "        .filter(|_| false)"
 
 [[plant]]

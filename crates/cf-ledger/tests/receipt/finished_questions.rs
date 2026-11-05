@@ -36,7 +36,7 @@ fn a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answ
     let (task, question) = asked(&mut w);
 
     w.ledger
-        .record_finished(w.project, task, "The words it ended on")
+        .record_finished(w.project, task, "The words it ended on", (0, 0))
         .expect("finished");
     assert_eq!(w.state(task), "done");
     assert_eq!(w.message(question).state, "cancelled");
@@ -72,7 +72,7 @@ fn a_paused_task_finished_withdraws_the_question_it_was_paused_on() {
     assert_eq!(w.state(task), "paused");
 
     w.ledger
-        .record_finished(w.project, task, "The words it ended on")
+        .record_finished(w.project, task, "The words it ended on", (0, 0))
         .expect("finished");
     assert_eq!(w.message(question).state, "cancelled");
     assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
@@ -89,7 +89,7 @@ fn a_question_not_yet_given_to_the_chief_is_never_given() {
     assert_eq!(w.message(question).state, "queued");
 
     w.ledger
-        .record_finished(w.project, task, "The words it ended on")
+        .record_finished(w.project, task, "The words it ended on", (0, 0))
         .expect("finished");
     assert_eq!(w.message(question).state, "cancelled");
     // What is next for the chief is the result, not the question.
@@ -107,7 +107,7 @@ fn a_question_with_an_answer_that_stands_is_left_as_it_is() {
     let answer = w.answer(question, "Tabs");
 
     w.ledger
-        .record_finished(w.project, task, "Done")
+        .record_finished(w.project, task, "Done", (0, 0))
         .expect("finished");
     assert_ne!(w.message(question).state, "cancelled");
     assert_ne!(w.message(answer.id).state, "cancelled");
@@ -133,7 +133,7 @@ fn the_chiefs_tell_is_not_a_question_of_the_window_and_is_left_alone() {
     assert_eq!(w.state(task), "paused");
 
     w.ledger
-        .record_finished(w.project, task, "Done")
+        .record_finished(w.project, task, "Done", (0, 0))
         .expect("finished");
     assert_ne!(
         w.message(told).state,
@@ -153,7 +153,7 @@ fn a_question_open_at_a_harness_door_is_shut_out_of_waiting_by_the_finish() {
     assert_eq!(w.state(task), "waiting");
 
     w.ledger
-        .record_finished(w.project, task, "The words it ended on")
+        .record_finished(w.project, task, "The words it ended on", (0, 0))
         .expect("finished");
     assert_eq!(
         w.ledger.claim_answer(question, zeus).expect("a poll"),

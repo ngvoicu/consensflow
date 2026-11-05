@@ -319,9 +319,9 @@ runs = ["meeting-page", "meeting-proto"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::ComputerUseOpen
+find = '''                | Self::ModelsGet
         )'''
-replace = '''                | Self::ComputerUseOpen
+replace = '''                | Self::ModelsGet
                 | Self::ProjectMeeting
         )'''
 

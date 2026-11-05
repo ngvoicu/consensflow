@@ -76,6 +76,7 @@ impl Plan {
             command: &command,
             env: &options.env,
             node: &machine.node,
+            machine: &machine.name,
             limits: machine.limits,
         };
         let upload = upload_name(&options.dir, id);

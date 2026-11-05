@@ -1,0 +1,341 @@
+# A setting that changes the chief's role while its window is open is told to the window at its
+# next rest (T-1182; `crates/cf-engine/src/role_news.rs`, the wording in `roles/news.rs`): the
+# project's specs (on, off, the folder, the variant, and what the app says for a project that
+# follows it) and the project's rules for its staff. A launch gives the role as it is; the note
+# gives a window that is open the section that changed, once, at its rest, on every harness, and
+# a Codex conversation is recorded as told it, so its resume says nothing of it again. Each plant
+# breaks one rule and the test written for it fails: the dispatcher's tests (`tests/dispatcher/
+# role_news.rs` and `specs.rs`), the wording's (`roles::news`), each adapter's (the skill put in
+# place for a window that is open) and the page's (the dialog says whether the chief is told now).
+# The end to end cases are the rig's (`specs::a_chief_whose_window_is_open_is_told...`,
+# `specs_codex`).
+#
+# Every name holds `role news`, so `npm run plants:daemon -- "role news"` runs them all.
+
+[run]
+rn-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_news::"]
+rn-news-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "roles::news"]
+rn-harness-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "--", "a_chief_whose_window_is_open"]
+rn-harness-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::adapter::tests::a_chief_whose_window_is_open"]
+rn-harness-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::specmint::"]
+rn-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a project whose chief has no window open|Project settings: a save answered after the dialog was left|saves the rules for the staff as written"]
+
+[[plant]]
+name = "role news: a chief at rest is never looked at for a setting changed under it"
+meant = "specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_rest_once_on_every_harness"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.tell_role_news(project, participant, record)?;\n"
+replace = ""
+
+[[plant]]
+name = "role news: a chief in a turn is written a note"
+meant = "specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_rest_once_on_every_harness"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        self.note_rest(record, &observed, idle, looked);\n"
+replace = "        self.tell_role_news(project, participant, record)?;\n        self.note_rest(record, &observed, idle, looked);\n"
+
+[[plant]]
+name = "role news: a chief is told where its skill is before the skill is in place"
+meant = "specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_rest_once_on_every_harness"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            if let Err(cause) = adapter.place_specmint(&specs.launch(), launch) {"
+replace = "            if let Err(cause) = Ok::<(), String>(()).and_then(|()| {\n                let _ = (&specs, launch);\n                Ok(())\n            }) {"
+
+[[plant]]
+name = "role news: a change one look finds is told"
+meant = "a_change_that_one_look_finds_and_the_next_does_not_is_told_to_nobody"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "        if record.window.borrow().news.seen.as_ref() != Some(&wanted) {"
+replace = "        if false {"
+
+[[plant]]
+name = "role news: a note that waits for its turn and says what the project says is written again"
+meant = "a_note_that_waits_behind_a_message_goes_in_when_the_chief_rests_and_is_not_written_again"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            Some(\"queued\") if written.parts == *wanted => Ok(false),"
+replace = "            Some(\"queued\") if false => Ok(false),"
+
+[[plant]]
+name = "role news: a note that waits for its turn and says what the project no longer does goes in"
+meant = "a_note_that_waits_for_its_turn_is_withdrawn_when_the_setting_changes_again_and_said_anew"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            Some(\"queued\") if written.parts == *wanted => Ok(false),"
+replace = "            Some(\"queued\") => Ok(false),"
+
+[[plant]]
+name = "role news: a note that went in is not taken as told"
+meant = "specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_rest_once_on_every_harness"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "                    told.parts = written.parts;"
+replace = "                    let _ = (&told, &written);"
+
+[[plant]]
+name = "role news: a change that could not be put in place is not tried again when it comes back"
+meant = "a_skill_that_could_not_be_put_in_place_is_tried_again_when_the_setting_comes_back_to_what_failed"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            if part.news.refused.as_ref() != Some(&wanted) {"
+replace = "            if false {"
+
+[[plant]]
+name = "role news: a change that could not be put in place is not remembered"
+meant = "a_skill_that_cannot_be_put_in_place_is_told_to_the_human_once_and_the_chief_not_at_all"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "        record.window.borrow_mut().news.refused = Some(wanted);"
+replace = "        let _ = &wanted;"
+
+[[plant]]
+name = "role news: the conversation is recorded as told the staff it was never told"
+meant = "a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_though_specs_were_told_now"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "        as_launched.participants.clone_from(&told.staff);"
+replace = "        let _ = &told.staff;"
+
+[[plant]]
+name = "role news: the note is no note of a role, so a Codex resume tells the same again"
+meant = "a_codex_chief_told_of_a_setting_now_is_not_told_the_same_again_when_it_is_resumed"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            &role.instructions,\n        )?;"
+replace = "            &body,\n        )?;"
+
+[[plant]]
+name = "role news: a greeting leaves the chief to be told what the greeting told"
+meant = "a_clear_that_comes_with_a_change_one_look_has_found_is_given_the_role_with_it_and_told_no_more"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "        if part.news.told.is_some() {\n            part.news.told = Some(Told::of("
+replace = "        if false {\n            part.news.told = Some(Told::of("
+
+[[plant]]
+name = "role news: a chief is launched with nothing told"
+meant = "specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_rest_once_on_every_harness"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            part.news = NewsPart::launched(planned.told.clone());"
+replace = "            part.news = NewsPart::default();"
+
+[[plant]]
+name = "role news: the project's rules for its staff are no setting to tell"
+meant = "the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_and_to_no_member"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            specs: self.specs_setting(project, participant),\n            rules: project.staff_rules.clone(),"
+replace = "            specs: self.specs_setting(project, participant),\n            rules: None,"
+
+[[plant]]
+name = "role news: the project's specs are no setting to tell"
+meant = "specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_rest_once_on_every_harness"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            specs: self.specs_setting(project, participant),\n            rules: project.staff_rules.clone(),"
+replace = "            specs: None,\n            rules: project.staff_rules.clone(),"
+
+[[plant]]
+name = "role news: a member is launched as a chief is, to be told"
+meant = "a_member_at_rest_while_it_waits_for_an_answer_is_told_nothing_of_the_rules_changed_under_it"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        let told = (participant.role == \"chief\")\n            .then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));"
+replace = "        let told = true.then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));"
+
+[[plant]]
+name = "role news: specs turned off are told to plan as specs"
+meant = "specs_turned_off_say_to_plan_as_tasks_and_that_the_specs_there_stay"
+runs = ["rn-news-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/news.rs"
+find = "Plan new work as tasks, not specs; the specs already in `{}` stay."
+replace = "Plan new work as specs; the specs already in `{}` stay."
+
+[[plant]]
+name = "role news: a new folder is not said"
+meant = "a_new_folder_names_both_and_gives_the_section_with_the_skill_of_the_new_one"
+runs = ["rn-news-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/news.rs"
+find = "            if was.folder != now.folder {"
+replace = "            if false {"
+
+[[plant]]
+name = "role news: a new variant is not said"
+meant = "a_new_variant_names_both_and_leaves_the_folder_unsaid"
+runs = ["rn-news-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/news.rs"
+find = "            if was.variant != now.variant {"
+replace = "            if false {"
+
+[[plant]]
+name = "role news: the specs left in the old folder are not said to stay"
+meant = "a_new_folder_names_both_and_gives_the_section_with_the_skill_of_the_new_one"
+runs = ["rn-news-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/news.rs"
+find = "            let stay = if was.folder == now.folder {"
+replace = "            let stay = if true {"
+
+[[plant]]
+name = "role news: the note is a task"
+meant = "specs_turned_on_give_the_section_and_say_it_is_context"
+runs = ["rn-news-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/news.rs"
+find = "const CONTEXT: &str = \"This is context, not a task: say in one short line that you have it, and wait for the next message.\";"
+replace = "const CONTEXT: &str = \"This is a task: do it.\";"
+
+[[plant]]
+name = "role news: rules written are said changed"
+meant = "rules_written_changed_and_taken_away_each_have_their_words"
+runs = ["rn-news-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/news.rs"
+find = "            if was.is_some() { \"changed\" } else { \"wrote\" },"
+replace = "            \"changed\","
+
+[[plant]]
+name = "role news: Claude puts the skill in another harness's place for a window that is open"
+meant = "claude::specs::a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch_would_have_it"
+runs = ["rn-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "        specmint::write_own_of(Harness::Claude, &self.env, Some(*specs), id).map(|_| ())\n"
+replace = "        specmint::write_own_of(Harness::Pi, &self.env, Some(*specs), id).map(|_| ())\n"
+
+[[plant]]
+name = "role news: Pi puts the skill in another harness's place for a window that is open"
+meant = "pi::specs::a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch_would_have_it"
+runs = ["rn-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = "        specmint::write_own_of(Harness::Pi, &self.env, Some(*specs), id).map(|_| ())\n"
+replace = "        specmint::write_own_of(Harness::Claude, &self.env, Some(*specs), id).map(|_| ())\n"
+
+[[plant]]
+name = "role news: Codex puts the skill in another harness's place for a window that is open"
+meant = "codex::specs::a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch_would_have_it"
+runs = ["rn-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "        specmint::write_own_of(Harness::Codex, &self.services.env, Some(*specs), id).map(|_| ())\n"
+replace = "        specmint::write_own_of(Harness::Pi, &self.services.env, Some(*specs), id).map(|_| ())\n"
+
+[[plant]]
+name = "role news: Devin puts the skill in another harness's place for a window that is open"
+meant = "devin::launches::a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch_would_have_it"
+runs = ["rn-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        specmint::write_own_of(Harness::Devin, &self.services.env, Some(*specs), id).map(|_| ())\n"
+replace = "        specmint::write_own_of(Harness::Pi, &self.services.env, Some(*specs), id).map(|_| ())\n"
+
+[[plant]]
+name = "role news: Muse puts the skill in another harness's place for a window that is open"
+meant = "muse::adapter::tests::a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch_would_have_it"
+runs = ["rn-harness-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = "        specmint::write_own_of(Harness::Muse, self.env(), Some(*specs), id).map(|_| ())\n"
+replace = "        specmint::write_own_of(Harness::Pi, self.env(), Some(*specs), id).map(|_| ())\n"
+
+[[plant]]
+name = "role news: a skill the harness has installed is written over for a window that is open"
+meant = "a_window_that_is_open_is_given_the_files_a_launch_writes_and_nothing_where_the_harness_has_the_variant"
+runs = ["rn-harness-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = "        skill: Skill::Own(_),\n    }) = specs"
+replace = "        skill: _,\n    }) = specs"
+
+[[plant]]
+name = "role news page: the Specs save says the chief is told now whether or not its window is open"
+meant = "a project whose chief has no window open says its specs reach the chief at its next launch, and the chief is told now where it has one"
+runs = ["rn-page"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    const when = running ? 'the chief is told now' : 'the chief is told at its next launch'"
+replace = "    const when = 'the chief is told now'"
+
+[[plant]]
+name = "role news page: the Specs save asks whether the chief runs after the daemon answered"
+meant = "Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it"
+runs = ["rn-page"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    const when = running ? 'the chief is told now' : 'the chief is told at its next launch'"
+replace = "    const when = this.#page.chiefRunning()\n      ? 'the chief is told now'\n      : 'the chief is told at its next launch'"
+
+[[plant]]
+name = "role news page: a chief with its window closed counts as running"
+meant = "a project whose chief has no window open says its specs reach the chief at its next launch, and the chief is told now where it has one"
+runs = ["rn-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      (lane) => lane.participant.role === 'chief' && lane.pane !== null,"
+replace = "      (lane) => lane.participant.role === 'chief',"
+
+[[plant]]
+name = "role news page: the rules for the staff do not say the chief is told now"
+meant = "saves the rules for the staff as written, by their own Save, shows what the daemon kept, and shows them when the dialog opens again"
+runs = ["rn-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = "    const told = this.#page.chiefRunning() ? 'the chief is told now, and ' : ''"
+replace = "    const told = ''"

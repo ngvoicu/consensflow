@@ -27,7 +27,8 @@ fn a_note_quotes_the_first_commands_and_says_how_many_it_leaves_out() {
 
 #[test]
 fn a_command_is_one_line_and_bounded_and_a_secret_in_it_is_hidden() {
-    let long = format!("tool {}", "x".repeat(400));
+    // Words: forty letters in a row are a token's, and are hidden (T-823).
+    let long = format!("tool {}", "ab ".repeat(200));
     let quoted = quote(&[process(1, &long)]);
     assert_eq!(quoted.chars().count(), COMMAND_CHARS);
     assert!(quoted.ends_with('…'));

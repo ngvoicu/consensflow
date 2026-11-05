@@ -26,7 +26,6 @@
 
 use std::time::{Duration, Instant};
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::json;
 
@@ -49,7 +48,7 @@ fn the_close_of_a_codex_chief_whose_server_does_not_end_when_asked_is_answered_a
         "schemaVersion": 1,
         "agents": [{ "id": "codex-chief", "kind": "codex", "model": "fake" }],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open(&rig, "codex-chief", json!({}))?;
     wait_for_the_chief(&rig, &project)?;
 

@@ -31,6 +31,7 @@ process-closed-stream-stress = ["cargo", "test", "--offline", "-p", "cf-process"
 rig-lib-spawned = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::spawned"]
 rig-lib-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
 rig-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left"]
+rig-lib-closing-listing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing::tests::the_machines_processes_are_listed"]
 rig-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
 rig-stand-ins = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_ins::the_stand_in_agents_job_writes"]
 regressions-idle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "idle_compaction_read_as_a_cut_turn"]
@@ -285,3 +286,40 @@ find = """
 replace = """
         .finding_programs()
 }"""
+
+# The rig's leftover check on Windows (T-1226; CI runs 41787972093 and 41792519144): a number
+# Windows gave to another program after the last note is none of the windows', as its process
+# table says when the program began, and the closing listing reads that table, not Git Bash's
+# `ps -x`.
+
+[[plant]]
+name = "load flakes: on Windows a program that took a window's number is a window left behind"
+meant = "a_program_that_began_after_the_last_note_is_none_of_the_windows"
+runs = ["rig-lib-left"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''        (Some(began), Some(written)) => began_later(began, written),'''
+replace = '''        (Some(_), Some(_)) => false,'''
+
+[[plant]]
+name = "load flakes: a program that began within the slack of the last note is taken for a later one"
+meant = "windows_time_reads_from_1601_and_a_later_start_is_after_the_slack_only"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''        .is_ok_and(|after| after > Duration::from_secs(2))'''
+replace = '''        .is_ok_and(|after| after > Duration::ZERO)'''
+
+[[plant]]
+name = "load flakes: the closing listing on Windows lists none of the machine's processes"
+meant = "the_machines_processes_are_listed_with_this_test_among_them"
+runs = ["rig-lib-closing-listing"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''            .map(|all| on_windows(&all))'''
+replace = '''            .map(|_| Vec::new())'''

@@ -10,6 +10,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::shared::quota::Quota;
+use crate::shared::record::calls::LastCall;
+use crate::shared::record::drawn::{Detail, Kind};
 
 /// A look's reading: what the record says, or that it could not say, with
 /// the reason (`{unknown: true, reason}`).
@@ -82,6 +84,21 @@ pub struct Record {
     /// reading Node wrote has it.
     #[serde(skip)]
     pub failure: Option<String>,
+    /// What kind of failure the harness's record names, in plain words, where it names one it
+    /// has a plain name for (Codex's `codex_error_info`: `cyber_policy` is its safety filter
+    /// refusing the turn). The words of [`Record::failure`] are the harness's; these are
+    /// ConsensFlow's, so the note says them apart. None where the record names no kind, or one
+    /// with no plain name. No reading Node wrote has it.
+    #[serde(skip)]
+    pub failure_kind: Option<String>,
+    /// The last tool call the record shows, in pieces: the tool, and its shell command or the
+    /// file it works on. It is what a window was doing when it closed under its task, which no
+    /// screen of it says (T-823: a Claude Code worker closed with exit 143 three seconds after
+    /// its `cargo test --workspace` was killed). Whole as the record has it, within its bound:
+    /// the engine decides whether a note may say it, and cuts it short. None where the record
+    /// shows no call, or the reader cannot say. No reading Node wrote has it.
+    #[serde(skip)]
+    pub last_call: Option<Arc<LastCall>>,
     /// The turn was stopped before a word of it, and its harness put its message back in
     /// the input box, out of the conversation it answers from, though the items still
     /// hold it, as the record says (Muse's `run_retracted`). A reader whose record
@@ -113,11 +130,23 @@ pub struct Record {
     /// Code's): said only where there are any, and no reading Node wrote has them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<Monitor>,
+    /// The commands among the jobs pending (the jobs that are no monitors), as the
+    /// harness's record says them: when each began and whether a time limit moved it into
+    /// the background (Claude Code's reader). A reader that cannot say leaves it empty and
+    /// the count of `pending.jobs` stands. Never said: no reading Node wrote has it.
+    #[serde(skip)]
+    pub commands: Vec<Command>,
     /// Where the record's lines stand: those torn and passed over, the record each item
     /// began in, and what the last of them leave in the harness's input box. Never said:
     /// no reading Node wrote has it.
     #[serde(skip)]
     pub lines: Box<Lines>,
+    /// The items only the history shows (a model's thinking, a call still running, a
+    /// compaction no item says), each with the place among [`Record::items`] it stands
+    /// before ([`Timeline`](crate::shared::record::drawn::Timeline)): no reader of the conversation's words comes to one.
+    /// Never said: no reading Node wrote has them.
+    #[serde(skip)]
+    pub beside: Vec<(usize, Item)>,
 }
 
 /// A harness that moved a window's model on its own: from the model the window answered
@@ -193,6 +222,20 @@ pub struct Monitor {
     pub called: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<Notice>,
+}
+
+/// A command a turn started in the background that its harness has said no end of: its
+/// task's id, when it began running (milliseconds since the epoch, where the record says a
+/// time), and the time limit it passed where that is what moved it into the background.
+/// A command run in the background from its call began when the call returned. A command
+/// that was run in the foreground with a time limit and passed it is moved by Claude Code
+/// (`toolUseResult.timedOutAfterMs`) and goes on running: it began that limit before the
+/// record that says so (T-1181; the field board's T-299, whose worker did not notice).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Command {
+    pub id: Arc<str>,
+    pub since: Option<i64>,
+    pub limit_ms: Option<i64>,
 }
 
 /// What a monitor watches, as the call that armed it says.
@@ -299,6 +342,8 @@ impl Record {
             asking: false,
             failed: false,
             failure: None,
+            failure_kind: None,
+            last_call: None,
             took_back: false,
             model_moved: None,
             model_drift: None,
@@ -306,7 +351,9 @@ impl Record {
             settlement: Settlement::Unknown,
             pending: Pending::default(),
             monitors: Vec::new(),
+            commands: Vec::new(),
             lines: Box::default(),
+            beside: Vec::new(),
         }
     }
 }
@@ -370,6 +417,29 @@ pub struct Item {
     /// `isCompactSummary`): the harness's own, and no message of the user's. Never
     /// said: a reading is the one Node wrote, which read it as the user's.
     pub compaction: bool,
+    /// What the history draws of it besides its words ([`Detail`]): none where its reader
+    /// says nothing more of it than its role does ([`Item::kind`]). Never said: a reading is
+    /// the one Node wrote.
+    pub detail: Option<Arc<Detail>>,
+}
+
+impl Item {
+    /// What it is, as the history draws it: what its detail says, else what its role says
+    /// (a compaction's summary is a compaction's).
+    pub fn kind(&self) -> Kind {
+        if let Some(detail) = &self.detail {
+            return detail.kind;
+        }
+        if self.compaction {
+            return Kind::Compaction;
+        }
+        match self.role {
+            Role::User => Kind::Prompt,
+            Role::Assistant => Kind::Text,
+            Role::Tool => Kind::Tool,
+            Role::Custom => Kind::Notice,
+        }
+    }
 }
 
 impl Serialize for Item {
@@ -457,6 +527,7 @@ mod tests {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         });
         record.items.push(Item {
             id: Arc::from("msg_2"),
@@ -467,6 +538,7 @@ mod tests {
             commentary: true,
             synthetic: false,
             compaction: false,
+            detail: None,
         });
         // A compaction's summary is the user's item it was to Node.
         record.items.push(Item {
@@ -478,6 +550,7 @@ mod tests {
             commentary: false,
             synthetic: false,
             compaction: true,
+            detail: None,
         });
         record.settlement = Settlement::InFlight;
         assert_eq!(

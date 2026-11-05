@@ -100,7 +100,7 @@ fn shares_the_work_of_one_tier_across_harnesses_the_harness_with_the_fewest_task
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [
                 member("zeus", "claude-code"),
                 member("diana", "claude-code"),
@@ -254,6 +254,31 @@ fn stops_the_window_of_a_task_the_human_reassigns_before_the_task_leaves_it_even
     );
 }
 
+/// The human gives a working task to another member: its window is stopped first, by `retire`'s
+/// kill, which sets no close of the engine's own. The exit that comes is the kill's, and the pause
+/// note says the engine had sent it, never that the signal was none of its own (the review of
+/// `a26e0848e`, P2: the note said "which ConsensFlow did not send").
+#[cfg(unix)]
+#[test]
+fn a_window_the_engine_killed_to_reassign_its_task_does_not_say_the_signal_was_not_its_own() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .host
+        .exits_showing(Some(143), None, Some(&["Running the workspace tests"]));
+    context.reassign_task(1, 1).unwrap();
+    let notes = tiers.notes("chief");
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert_match(
+        &notes[0],
+        r#"^T-1 is paused: @zeus-[a-z]+-[a-z]+'s window closed \(exit code 143, consistent with SIGTERM; ConsensFlow had sent it a kill before it closed\); its screen ended with: "Running the workspace tests"\. "#,
+    );
+    assert!(!notes[0].contains("did not send"), "{}", notes[0]);
+}
+
 #[test]
 fn keeps_a_task_with_its_window_when_the_window_would_not_stop_and_reassigns_it_once_it_does() {
     let context = Context::new();
@@ -340,10 +365,17 @@ fn tells_the_requester_once_when_nobody_of_the_tier_is_free_and_assigns_when_one
 fn tells_the_requester_of_a_waiting_task_though_a_deleted_projects_waiting_task_was_told_before_it()
 {
     let context = Context::new();
-    context.roster.model.replace(Some("m".to_owned()));
-    context.roster.gone.borrow_mut().insert("zeus".to_owned());
-    let waits = "T-1 waits for a free standard worker: @zeus has no agent any more (zeus is not among your agents: define it, or remove the member).";
+    // Zeus runs on a harness whose windows ConsensFlow cannot open: it is never free.
+    let waits = "T-1 waits for a free standard worker: @zeus runs on kimi, whose windows ConsensFlow cannot open (remove @zeus from the staff and add a member on another harness).";
+    let on_kimi = |context: &Context| {
+        context.edit_ledger(|file| {
+            let db = rusqlite::Connection::open(file).unwrap();
+            db.execute_batch("UPDATE participant SET harness = 'kimi' WHERE handle = 'zeus'")
+                .unwrap();
+        });
+    };
     let first = Tiers::new(&context, &["zeus"]);
+    on_kimi(&context);
     let gone = first.open();
     context.pass().unwrap();
     assert_eq!(first.notes("chief"), [waits]);
@@ -351,6 +383,7 @@ fn tells_the_requester_of_a_waiting_task_though_a_deleted_projects_waiting_task_
     context.delete_project(first.project.id).unwrap();
 
     let second = Tiers::new(&context, &["zeus"]);
+    on_kimi(&context);
     assert_ne!(
         second.open().id,
         gone.id,

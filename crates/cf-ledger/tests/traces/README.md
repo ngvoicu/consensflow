@@ -119,3 +119,15 @@ where the words it replaced forbade work on specifications — which a project m
 have — and sent the findings to `your coordinator`. `ledger-tiered-012`, the one
 recording whose `assignTask` answer holds those words, departs at that call and is in
 `DEPARTED`; the recording is not rewritten.
+
+A chief is a harness and a model (T-729, migration 0028): Node's chief ran on a saved
+agent. T-729's move (its tool went once every recording was moved, T-1202) moved what that changes, and nothing
+else: a request names the chief's `model` in its `agent`'s place (the agent's name, as
+no roster is here), the chief a call of the trace made or switched names no agent and
+says its model after its harness, in answers and in its row (`agent` and
+`switched_from_agent` NULL), the switches the trace logged name a model on each side, a
+last switch an older build made names none, and a chief's model that is no model's id is
+refused as one (`invalid-model`). A ledger an older build left keeps its chief as it holds
+it. 241 of the 425 traces moved: 2973 chief participants, 262 rows, 153 switch events, 22
+last switches, 257 requests, 68 switch requests, 6 refusals. Run again, it moves nothing.
+The four columns of 0028 are held apart as 0024's is (`testing::chief_model`).

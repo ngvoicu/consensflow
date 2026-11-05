@@ -177,36 +177,52 @@ fn a_devin_window_names_the_family_then_the_level_then_the_variant_as_devin_writ
     }
 }
 
+/// What a chief or a member picked on each harness reaches its window as (harness-models):
+/// the agent the engine gives the launch (`ChiefRuns`: the effort, Pi's as its thinking,
+/// none for Devin, whose model is the exact id it lists for the effort) becomes the flags
+/// the harness takes.
 #[test]
-fn every_id_devin_lists_with_a_level_is_what_a_window_on_its_family_and_variant_at_that_level_opens_on(
-) {
-    // What Devin 3000.11.205 listed on 2026-10-25 (`devin models list --format json`),
-    // the catalog's copy: each id with a level is its family and variant at the level.
-    let file =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../cf-catalog/tests/catalog/devin-models.json");
-    let listed: Value = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
-    let levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-    let variants = ["fast", "priority", "lightning", "1m", "thinking"];
-    let mut read = 0;
-    for family in listed["families"].as_array().unwrap() {
-        if family["slug"] == "fusion" {
-            continue;
-        }
-        for id in family["ids"].as_array().unwrap() {
-            let id = id.as_str().unwrap();
-            let words: Vec<&str> = id.split('-').collect();
-            let Some(level) = words
-                .iter()
-                .rposition(|word| !variants.contains(word))
-                .filter(|&at| levels.contains(&words[at]))
-            else {
-                continue;
-            };
-            let mut model = words.clone();
-            let effort = model.remove(level);
-            assert_eq!(devin_model_of(&model.join("-"), Some(effort)), id);
-            read += 1;
-        }
+fn a_model_and_effort_picked_reach_each_harness_s_window_as_it_takes_them() {
+    let agent = |model, effort, thinking| Agent {
+        model: Some(model),
+        effort,
+        thinking,
+        designer: false,
+    };
+    for (harness, given, flags) in [
+        (
+            Harness::Claude,
+            agent("claude-opus-5-5", Some("high"), None),
+            vec!["--model", "claude-opus-5-5", "--effort", "high"],
+        ),
+        (
+            Harness::Codex,
+            agent("gpt-6.1-sol", Some("ultra"), None),
+            vec![
+                "--model",
+                "gpt-6.1-sol",
+                "-c",
+                "model_reasoning_effort=\"ultra\"",
+            ],
+        ),
+        (
+            Harness::Pi,
+            agent("anthropic/claude-fable-5", None, Some("max")),
+            vec!["--model", "anthropic/claude-fable-5", "--thinking", "max"],
+        ),
+        (
+            Harness::Devin,
+            agent("swe-2-max", None, None),
+            vec!["--model", "swe-2-max"],
+        ),
+        (
+            Harness::Muse,
+            agent("muse-wonder-1.0", Some("low"), None),
+            vec!["--model", "muse-wonder-1.0", "--reasoning-effort", "low"],
+        ),
+    ] {
+        let window = start(harness, given, Some("s-1"), Some("hello")).expect("a window");
+        let args = window.args.join(" ");
+        assert!(args.contains(&flags.join(" ")), "{harness:?}: {args}");
     }
-    assert!(read > 200, "the list has its ids: {read}");
 }

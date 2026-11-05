@@ -981,7 +981,7 @@ fn a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until
     );
     context.host.refuse_kills.set(false);
     context.advance(11_000);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "no key that sends, while closed");
 
@@ -1027,7 +1027,7 @@ fn an_enter_sends_no_continuation_whose_task_was_paused_or_cancelled_while_the_s
         context.pass().unwrap();
         assert_eq!(context.message(note.id).state, "delivering");
         context.advance(11_000);
-        context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+        context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
         let looking = context
             .host
             .request_holds
@@ -1095,7 +1095,7 @@ fn an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_loo
         }
         assert_eq!(context.message(words.id).state, "delivering");
         context.advance(11_000);
-        context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+        context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
         let looking = context
             .host
             .request_holds

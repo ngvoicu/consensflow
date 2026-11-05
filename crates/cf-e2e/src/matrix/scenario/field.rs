@@ -137,6 +137,7 @@ pub fn field() -> Vec<Scenario> {
                             )
                             .map(|_| ())
                     }),
+                    restarts: false,
                     name: "the complex tester leaves the staff",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
@@ -163,7 +164,13 @@ pub fn field() -> Vec<Scenario> {
             ],
             |judged| {
                 let to = lane_of(judged, "T")
-                    .and_then(|lane| lane["participant"]["agent"].as_str())
+                    // The member the session is of, since members are named by their model
+                    // and run on no saved agent (harness-models).
+                    .and_then(|lane| {
+                        lane["participant"]["member"]
+                            .as_str()
+                            .or(lane["participant"]["agent"].as_str())
+                    })
                     .unwrap_or("none");
                 let retiered = judged
                     .snapshot

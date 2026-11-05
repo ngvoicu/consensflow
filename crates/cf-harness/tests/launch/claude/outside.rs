@@ -119,6 +119,38 @@ fn a_window_whose_conversation_another_claude_shows_beside_it_says_so_from_then_
     );
 }
 
+/// The window before was ended for the window opened again, and its status file is left, as a
+/// Claude the host ends leaves it; its number went to a program begun since, as Windows gives a
+/// number back at once and to any program. That program is no Claude on the conversation: the
+/// window is its only one, and its turns are its own (zeewin: the live matrix's follow-up whose
+/// result was never taken, and the brief that never began never paused; T-1226).
+#[test]
+fn a_window_opened_again_beside_the_status_its_ended_window_left_under_a_number_another_program_took_shares_nothing(
+) {
+    let home = Home::new();
+    let other = OtherProcess::start();
+    home.status(SESSION, &json!({ "status": "idle" }), other.pid());
+    let left = path::join(&[
+        home.var("CLAUDE_CONFIG_DIR"),
+        "sessions",
+        &format!("{}.json", other.pid()),
+    ]);
+    let written = fs::metadata(&left).unwrap().modified().unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&left)
+        .unwrap()
+        .set_modified(written - std::time::Duration::from_secs(600))
+        .unwrap();
+    let (window, observed) = reopened(&home, true);
+    assert!(
+        observed.settled && !observed.shared,
+        "the window's own turn, and no other Claude: {observed:?}"
+    );
+    assert!(!finished(window.observe()).unwrap().shared);
+    drop(other);
+}
+
 #[test]
 fn a_claude_of_another_conversation_or_a_parked_job_on_this_one_shares_nothing() {
     let home = Home::new();

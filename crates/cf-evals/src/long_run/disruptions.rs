@@ -17,7 +17,10 @@
 //! `/compact` typed into the idle chief, and the app quit and started again after it
 //! while a worker is mid-tool and the chief has had no turn since, so that the Resume
 //! reads a record that ends in an idle compaction (A5; a loose moment, half an
-//! interval late, takes any worker at work); the chief switched while the staff work
+//! interval late, takes any worker at work; a chief that has had a turn since the
+//! compaction, as one has whenever a worker's result is delivered, is compacted again
+//! first when it is at rest, which sets the shape up instead of waiting for it, T-1069);
+//! the chief switched while the staff work
 //! and a job runs; the app quit and started again with a Devin worker mid-tool (B1);
 //! a project suspended and resumed. The compaction comes before the switch, and is
 //! typed only into a chief that is Claude Code at its moment: the chief it is typed
@@ -164,10 +167,14 @@ pub struct Choice {
     pub target: Target,
     pub how: &'static str,
     pub lacks: Option<&'static str>,
+    /// A restart after a played compaction whose chief has had a turn since is preceded by a
+    /// compaction typed into the idle chief again: A5's shape is set up and not waited for.
+    pub recompact: bool,
 }
 
 /// What a restart after a played compaction lacks when the chief has had a turn
-/// since: A5's shape, a Resume that reads a record ending in an idle compaction.
+/// since and cannot be compacted again (it is at work, or not Claude Code): A5's
+/// shape, a Resume that reads a record ending in an idle compaction.
 pub const NO_IDLE_COMPACTION: &str =
     "A5's shape: the chief had a turn after the compaction, so the Resume read no idle compaction";
 
@@ -220,14 +227,18 @@ impl Schedule {
                 && matches!(planned.state, State::Played { .. })
         });
         let choice = |target: Target, how: &'static str| {
-            let lacks =
-                (waiting.disruption == Disruption::Restart && compacted && !moment.chief_compacted)
-                    .then_some(NO_IDLE_COMPACTION);
+            // A restart after a played compaction whose chief has had a turn since: a chief at
+            // rest is compacted again first, which sets A5's shape up; one at work cannot be,
+            // and the restart lacks the shape.
+            let after_compaction =
+                waiting.disruption == Disruption::Restart && compacted && !moment.chief_compacted;
+            let recompact = after_compaction && can_compact(moment);
             Choice {
                 disruption: waiting.disruption,
                 target,
                 how,
-                lacks,
+                lacks: (after_compaction && !recompact).then_some(NO_IDLE_COMPACTION),
+                recompact,
             }
         };
         if let Some(target) = aim(waiting.disruption, moment, true, compacted) {
@@ -328,6 +339,11 @@ fn impossible(disruption: Disruption, chief: &str, staff: &[String]) -> Option<S
     }
 }
 
+/// Whether the chief can be compacted at `moment`: Claude Code, at rest.
+fn can_compact(moment: &Moment) -> bool {
+    moment.chief == COMPACTS && moment.chief_idle
+}
+
 /// Where `disruption` is aimed at `moment`, if the moment fits: `strict`, the
 /// shape it is for (a tool call at work, a job running, and for the restart after a
 /// compaction that was played, `compacted`, a chief whose record still ends in it);
@@ -347,11 +363,9 @@ fn aim(disruption: Disruption, moment: &Moment, strict: bool, compacted: bool) -
             handle: worker.handle.clone(),
             task: worker.task,
         }),
-        Disruption::Compact => {
-            (moment.chief == COMPACTS && moment.chief_idle).then_some(Target::Project)
-        }
+        Disruption::Compact => can_compact(moment).then_some(Target::Project),
         Disruption::Restart => at_work(false)
-            .filter(|_| !strict || !compacted || moment.chief_compacted)
+            .filter(|_| !strict || !compacted || moment.chief_compacted || can_compact(moment))
             .map(|_| Target::Project),
         Disruption::Switch => {
             let job = moment.workers.iter().any(|worker| worker.tool);

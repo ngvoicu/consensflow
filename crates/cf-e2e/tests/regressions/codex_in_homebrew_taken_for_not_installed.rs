@@ -47,7 +47,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The bodies of the chief's messages that hold `words`.
@@ -128,13 +128,13 @@ fn a_task_for_a_codex_worker_whose_codex_is_only_in_the_systems_folder_reaches_i
         codex.display(),
         rig.open_frames()
     );
-    // And the pickers offer Codex's agents: none of its harness is missing.
-    let agents = rig.page("agents.list", json!({}))?;
+    // And the pickers offer Codex: it is not among the harnesses missing here.
+    let missing = rig.page("harnesses.missing", json!({}))?;
     assert!(
-        !agents["missing"]
+        missing["missing"]
             .as_array()
-            .is_some_and(|missing| missing.iter().any(|harness| harness == "codex")),
-        "{agents}"
+            .is_some_and(|missing| !missing.iter().any(|harness| harness == "codex")),
+        "{missing}"
     );
     rig.close()?;
     Ok(())

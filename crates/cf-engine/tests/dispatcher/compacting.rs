@@ -71,7 +71,7 @@ fn handed_its_brief(context: &Context) -> (i64, i64) {
 fn compacting(context: &Context) {
     context.host.set_snapshot(json!({
         "tail": [COMPACTING, "└ Making room to continue.", "› Ask the agent to do anything"],
-        "outputQuietMs": 5000,
+        "screenQuietMs": 5000,
     }));
 }
 
@@ -79,7 +79,7 @@ fn compacting(context: &Context) {
 fn at_its_prompt(context: &Context) {
     context.host.set_snapshot(json!({
         "tail": ["› Ask the agent to do anything"],
-        "outputQuietMs": 5000,
+        "screenQuietMs": 5000,
     }));
 }
 
@@ -235,7 +235,7 @@ fn a_window_that_never_shows_the_prompt_its_first_message_waits_for_is_given_up_
     context.adapter.asks_to_trust("/work", true);
     context.host.set_snapshot(json!({
         "tail": ["Welcome to a harness that draws its status line otherwise"],
-        "outputQuietMs": 5000,
+        "screenQuietMs": 5000,
     }));
     let project = context.with_staff(&["zeus"]).id;
     let brief = context
@@ -283,7 +283,7 @@ fn a_window_owed_its_first_message_that_reads_at_work_is_waited_for_past_its_lau
     context.adapter.asks_to_trust("/work", true);
     context.host.set_snapshot(json!({
         "tail": ["Resuming the conversation…"],
-        "outputQuietMs": 5000,
+        "screenQuietMs": 5000,
     }));
     let project = context.with_staff(&["zeus"]).id;
     let brief = context
@@ -316,7 +316,7 @@ fn a_window_owed_its_first_message_that_reads_at_work_is_waited_for_past_its_lau
     context.adapter.with("zeus", |agent| agent.settled = true);
     context
         .host
-        .set_snapshot(json!({ "tail": [TRUST_PROMPT], "outputQuietMs": 5000 }));
+        .set_snapshot(json!({ "tail": [TRUST_PROMPT], "screenQuietMs": 5000 }));
     // The watch of its screen looks again (its sleep, which only the test ends).
     for _ in 0..4 {
         context.timers.fire_next();

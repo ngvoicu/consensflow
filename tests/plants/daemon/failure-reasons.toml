@@ -32,6 +32,10 @@ failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--li
 failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 failure-reason-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record"]
+failure-reason-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record"]
+failure-reason-calls = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::calls"]
+failure-reason-contract = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::"]
+failure-reason-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
 failure-reason-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_failure_said_no_reason::"], builds = true }
 
 [[plant]]
@@ -43,13 +47,13 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-            let because = self
-                .why_it_failed(participant, record, observed)
-                .await?
-                .said;
+            let why = self.why_it_failed(participant, record, observed).await?;
 '''
 replace = '''
-            let because = format!("@{}'s harness reported a failure", participant.handle);
+            let why = crate::deliveries::Why {
+                said: format!("@{}'s harness reported a failure", participant.handle),
+                key: String::new(),
+            };
 '''
 
 [[plant]]
@@ -953,12 +957,12 @@ runs = ["failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-            let because = self
-                .why_it_failed(participant, record, observed)
-                .await?
-                .said;'''
+            let why = self.why_it_failed(participant, record, observed).await?;'''
 replace = '''
-            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+            let why = crate::deliveries::Why {
+                said: format!("@{}'s harness reported a failure", participant.handle),
+                key: String::new(),
+            };'''
 
 [[plant]]
 name = "failure reason: a quotation of the task's latest header is taken for its paste, and a failed turn there told as the task's"
@@ -1090,3 +1094,369 @@ find = '''                config.join("settings.json"),
                 config.join("trust.json"),'''
 replace = '''                config.join("trust.json"),'''
 
+[[plant]]
+name = "failure reason: Claude's reader keeps no last tool call"
+meant = "the_command_a_turn_ran_last_is_the_last_call_whether_or_not_its_result_came"
+runs = ["failure-reason-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''            self.last_call.clone_from(&record.last_call);'''
+replace = '''            let _ = &record.last_call;'''
+
+[[plant]]
+name = "failure reason: Claude's reader does not say its last tool call"
+meant = "the_command_a_turn_ran_last_is_the_last_call_whether_or_not_its_result_came"
+runs = ["failure-reason-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''        record.last_call.clone_from(&self.last_call);'''
+replace = '''        let _ = &self.last_call;'''
+
+[[plant]]
+name = "failure reason: Claude's last tool call is a subagent's too"
+meant = "a_subagents_call_is_no_call_of_the_window"
+runs = ["failure-reason-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    if !main {
+        return None;
+    }
+    blocks(content)'''
+replace = '''    blocks(content)'''
+
+[[plant]]
+name = "failure reason: Claude's last tool call of a message is its first"
+meant = "the_latest_call_wins_a_tool_that_is_no_shell_is_its_name_and_main_argument_and_none_is_none"
+runs = ["failure-reason-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    blocks(content)
+        .iter()
+        .rev()
+        .filter(|block| kind(block) == Some("tool_use"))'''
+replace = '''    blocks(content)
+        .iter()
+        .filter(|block| kind(block) == Some("tool_use"))'''
+
+[[plant]]
+name = "failure reason: Claude's reader drops the file a call works on"
+meant = "the_latest_call_wins_a_tool_that_is_no_shell_is_its_name_and_main_argument_and_none_is_none"
+runs = ["failure-reason-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''    ("file_path", &Keep::Scalar),
+'''
+replace = ''''''
+
+[[plant]]
+name = "failure reason: Codex's reader keeps no last tool call"
+meant = "the_last_call_is_the_shells_command_or_the_tools_name_and_input"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''                    self.last_call = Some(line);'''
+replace = '''                    let _ = line;'''
+
+[[plant]]
+name = "failure reason: Codex's reader does not say its last tool call"
+meant = "the_last_call_is_the_shells_command_or_the_tools_name_and_input"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''        record.last_call.clone_from(&self.last_call);'''
+replace = '''        let _ = &self.last_call;'''
+
+[[plant]]
+name = "failure reason: Pi's reader keeps no last tool call"
+meant = "the_last_call_is_the_bash_command_or_the_tool_and_its_path_the_latest_winning"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''                        self.last_call = Some(line);'''
+replace = '''                        let _ = line;'''
+
+[[plant]]
+name = "failure reason: Pi's reader does not say its last tool call"
+meant = "the_last_call_is_the_bash_command_or_the_tool_and_its_path_the_latest_winning"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''        record.last_call.clone_from(&self.last_call);'''
+replace = '''        let _ = &self.last_call;'''
+
+[[plant]]
+name = "failure reason: Devin's reader does not say its last tool call"
+meant = "the_last_call_is_the_exec_command_or_the_tool_and_its_file_the_latest_winning"
+runs = ["failure-reason-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''    record.last_call.clone_from(&chain.last_call);
+'''
+replace = ''''''
+
+[[plant]]
+name = "failure reason: Muse's reader keeps no last tool call"
+meant = "the_last_call_is_the_last_of_the_calls_a_turn_committed_as_a_line"
+runs = ["failure-reason-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '''                        self.last_call = Some(line);'''
+replace = '''                        let _ = line;'''
+
+[[plant]]
+name = "failure reason: a shell run through -lc is its whole command line"
+meant = "a_command_line_run_through_a_shell_is_its_script"
+runs = ["failure-reason-calls"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/calls.rs"
+find = '''                [_, flag, script] if flag.starts_with('-') && flag.ends_with('c') => {
+                    Some((*script).to_owned())
+                }
+'''
+replace = ''''''
+
+[[plant]]
+name = "failure reason: the seam's default says no last tool call"
+meant = "the_last_call_of_a_record_is_the_one_it_shows_on_every_harness_and_none_where_it_cannot_be_read"
+runs = ["failure-reason-contract"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''                Reading::Known(record) => record.last_call.clone(),'''
+replace = '''                Reading::Known(_) => None,'''
+
+[[plant]]
+name = "failure reason: the engine reads no last tool call of a record"
+meant = "a_worker_window_that_closed_says_what_it_was_running_and_the_screen_where_no_row_names_a_secret"
+runs = ["failure-reason-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''        self.seams.records.last_call(harness, &session).await'''
+replace = '''        let _ = (harness, session);
+        None'''
+
+[[plant]]
+name = "failure reason: a Codex kind has no plain name"
+meant = "a_turn_codex_refused_for_a_safety_filter_names_the_kind_in_plain_words_and_keeps_its_own"
+runs = ["failure-reason-codex", "failure-reason-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/kinds.rs"
+find = '''    let (kind, what, on) = KINDS.iter().find(|(kind, _, _)| *kind == name)?;'''
+replace = '''    let (kind, what, on) = KINDS.iter().find(|(kind, _, _)| *kind == name && false)?;'''
+
+[[plant]]
+name = "failure reason: a Codex kind in an object is not named"
+meant = "every_failure_kind_codex_names_that_is_no_limit_has_a_plain_name_with_its_own_after_it"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/kinds.rs"
+find = '''        Value::Object(kinds) => kinds.keys().next()?.as_str(),'''
+replace = '''        Value::Object(_) => return None,'''
+
+[[plant]]
+name = "failure reason: Codex's reader keeps no kind of a failed turn"
+meant = "a_turn_codex_refused_for_a_safety_filter_names_the_kind_in_plain_words_and_keeps_its_own"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''                        kind: kinds::plain(error),'''
+replace = '''                        kind: None,'''
+
+[[plant]]
+name = "failure reason: Codex's reader does not say the kind of a failed turn"
+meant = "a_turn_codex_refused_for_a_safety_filter_names_the_kind_in_plain_words_and_keeps_its_own"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''            record.failure_kind.clone_from(kind);'''
+replace = '''            let _ = kind;'''
+
+[[plant]]
+name = "failure reason: Codex's safety filter is a server busy for a moment"
+meant = "a_turn_codex_refused_for_a_safety_filter_names_the_kind_in_plain_words_and_keeps_its_own"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''const BUSY: [&str; 3] = [
+    "server_overloaded",'''
+replace = '''const BUSY: [&str; 4] = [
+    "cyber_policy",
+    "server_overloaded",'''
+
+[[plant]]
+name = "failure reason: a look finds no kind of a failed turn"
+meant = "a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_before_its_words"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''Some(Reading::Known(record)) if self.failed => record.failure_kind.as_deref(),'''
+replace = '''Some(Reading::Known(_)) if self.failed => None,'''
+
+[[plant]]
+name = "failure reason: the note leaves out the kind of the failure"
+meant = "a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_before_its_words"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''            failed.push_str(&format!(": {kind}"));'''
+replace = '''            let _ = kind;'''
+
+[[plant]]
+name = "failure reason: a call's input in JSON text is not read as an object"
+meant = "input_written_as_json_text_is_read_and_text_of_a_tools_own_is_kept_as_nothing"
+runs = ["failure-reason-calls"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/calls.rs"
+find = '''            Ok(object @ Value::Object(_)) => {'''
+replace = '''            Ok(object @ Value::Object(_)) if false => {'''
+
+[[plant]]
+name = "failure reason: a pattern, a URL or a query is kept as the file a tool works on"
+meant = "a_shell_call_is_its_command_whole_and_any_other_its_tool_and_file"
+runs = ["failure-reason-calls"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/calls.rs"
+find = '''const TARGETS: [&str; 2] = ["file_path", "path"];'''
+replace = '''const TARGETS: [&str; 5] = ["file_path", "path", "pattern", "url", "query"];'''
+
+[[plant]]
+name = "failure reason: a command too long to keep whole is kept cut"
+meant = "a_command_too_long_to_keep_whole_is_not_kept_cut"
+runs = ["failure-reason-calls"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/calls.rs"
+find = '''            .filter(|command| command.chars().count() <= COMMAND_CHARS);'''
+replace = '''            .map(|command| command.chars().take(COMMAND_CHARS).collect::<String>());'''
+
+[[plant]]
+name = "failure reason: Devin's reader keeps no last tool call of an answered chain"
+meant = "the_last_call_is_the_exec_command_or_the_tool_and_its_file_the_latest_winning"
+runs = ["failure-reason-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '''            if let Some(call) = last_call_of(message) {
+                last_call = Some(call);
+            }
+            let id = match'''
+replace = '''            let id = match'''
+
+[[plant]]
+name = "failure reason: Devin's reader keeps no last tool call of a call nothing answered"
+meant = "a_call_nothing_answered_below_the_head_of_the_chain_is_the_last_call"
+runs = ["failure-reason-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '''            // nothing to answer it (the review of `a26e0848e`, P2).
+            if let Some(call) = last_call_of(message) {
+                last_call = Some(call);
+            }
+'''
+replace = '''            // nothing to answer it (the review of `a26e0848e`, P2).
+'''
+
+[[plant]]
+name = "failure reason: Muse's reader does not say its last tool call"
+meant = "the_last_call_is_the_last_of_the_calls_a_turn_committed_as_a_line"
+runs = ["failure-reason-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '''        record.last_call = self.held.last_call().cloned();
+'''
+replace = ''''''
+
+[[plant]]
+name = "failure reason: a span found later takes no more of a value than one found earlier"
+meant = "no_part_of_a_value_survives_the_rules_that_overlap_on_it"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''            Some(last) if start <= last.1 => last.1 = last.1.max(end),'''
+replace = '''            Some(last) if start <= last.1 => {}'''
+
+[[plant]]
+name = "failure reason: base64 with no digit in it is no token"
+meant = "a_long_base64_value_is_hidden_whether_or_not_a_digit_is_in_it"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        rule(r"[A-Za-z0-9]{40,}={0,2}", 0, is_base64_letters),'''
+replace = '''        rule(r"[A-Za-z0-9]{40,}={0,2}", 0, has_a_letter_and_a_digit),'''
+
+[[plant]]
+name = "failure reason: base64 with a plus or padding and no digit is no token"
+meant = "a_long_base64_value_is_hidden_whether_or_not_a_digit_is_in_it"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        rule(r"[A-Za-z0-9+/]{39,}={0,2}", 0, is_base64_marked),'''
+replace = '''        rule(r"[A-Za-z0-9+/]{39,}={0,2}", 0, has_a_letter_and_a_digit),'''
+
+[[plant]]
+name = "failure reason: an address inside a URL's user takes the host with it"
+meant = "the_user_and_password_of_a_url_are_hidden_and_the_host_is_not"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''            yields_to_url: true,'''
+replace = '''            yields_to_url: false,'''
+
+[[plant]]
+name = "failure reason: a command's -u user:password is no secret"
+meant = "the_user_and_password_of_a_commands_dash_u_are_hidden"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:-[uU]|--user|--proxy-user)'''
+replace = '''(?:--user)'''
+
+[[plant]]
+name = "failure reason: a run of small letters is no token"
+meant = "a_long_run_of_small_letters_is_hidden_too"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        .any(|c| c.is_ascii_alphabetic())'''
+replace = '''        .any(|c| c.is_ascii_uppercase())'''
+
+[[plant]]
+name = "failure reason: a number of forty digits is taken for base64"
+meant = "a_name_a_path_and_a_number_are_not_taken_for_base64"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        .any(|c| c.is_ascii_alphabetic())'''
+replace = '''        .any(|_| true)'''

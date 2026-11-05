@@ -27,7 +27,7 @@ fn project_of(context: &Context, staff: &[(&str, &str, &str)]) -> ProjectView {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "apollo" },
             "staff": members,
         }))
         .unwrap()
@@ -110,10 +110,29 @@ fn a_task_open_when_the_last_member_of_its_tier_moves_to_another_tier_goes_to_th
         let context = Context::new();
         let project = project_of(&context, &[("zeus", pool, "complex")]);
         let number = open(&context, &project, pool, "complex");
+        // The human moves zeus to another tier in Edit member: the tiers no longer follow a
+        // saved agent's (harness-models).
+        let zeus = project
+            .participants
+            .iter()
+            .find(|participant| participant.role != "chief" && participant.role != "human")
+            .expect("the member")
+            .handle
+            .clone();
         context
             .ledger
             .borrow_mut()
-            .refresh_member_tiers(|_| Some("standard".to_owned()))
+            .edit_member(
+                project.id,
+                &zeus,
+                &cf_ledger::MemberEdit {
+                    harness: "claude-code".to_owned(),
+                    model: None,
+                    effort: None,
+                    model_name: Some("zeus".to_owned()),
+                    tier: "standard".to_owned(),
+                },
+            )
             .unwrap();
         context.pass().unwrap();
         context.pass().unwrap();

@@ -65,24 +65,25 @@ fn opens_a_project_with_its_chief_window_and_binds_the_chief_conversation() {
     );
 }
 
+/// A chief runs on the harness and the model picked for it (CHF-04): a request that names
+/// no model, or one that is no model's id, opens nothing.
 #[test]
-fn opens_a_project_whose_chief_runs_on_its_saved_agent_and_none_whose_chief_names_no_agent_or_one_not_among_the_agents(
-) {
+fn opens_a_project_whose_chief_runs_on_the_model_picked_for_it_and_none_whose_chief_names_no_model()
+{
     let context = Context::new();
-    context.roster.gone.borrow_mut().insert("nobody".to_owned());
     let request = |chief: Value| json!({ "directory": "/work/app", "name": "app", "chief": chief });
     let refused = context.open_project(request(json!({ "harness": "claude-code" })));
     assert_eq!(
         refused.unwrap_err().to_string(),
-        "pick one of your saved agents for the chief: its harness, model and effort come with it"
+        "pick a harness for the chief, and one of its models"
     );
     let refused = context.open_project(request(
-        json!({ "harness": "claude-code", "agent": "nobody" }),
+        json!({ "harness": "claude-code", "model": "--print" }),
     ));
-    assert!(refused
-        .unwrap_err()
-        .to_string()
-        .contains("nobody is not among your agents"));
+    assert_eq!(
+        refused.unwrap_err().to_string(),
+        "not a model id: \"--print\""
+    );
     assert!(
         context.ledger.borrow().projects().unwrap().is_empty(),
         "nothing was opened"
@@ -91,13 +92,17 @@ fn opens_a_project_whose_chief_runs_on_its_saved_agent_and_none_whose_chief_name
     let chief = project.participants.iter().find(|p| p.handle == "chief");
     let chief = chief.expect("the chief");
     assert_eq!(
-        (chief.harness.as_deref(), chief.agent.as_deref()),
-        (Some("claude-code"), Some("apollo"))
+        (
+            chief.harness.as_deref(),
+            chief.model.as_deref(),
+            chief.agent.as_deref()
+        ),
+        (Some("claude-code"), Some("claude-opus-5"), None)
     );
     assert_eq!(
         context.adapter.prepared()[0]["agent"]["model"],
         "claude-opus-5",
-        "its agent's model"
+        "the model picked for it"
     );
     held_to(
         context.close(),

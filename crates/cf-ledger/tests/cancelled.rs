@@ -35,7 +35,9 @@ fn options() -> Options {
 /// A project at /work/app: apollo its chief, zeus, hera and athena its standard workers.
 fn project(ledger: &mut Ledger) -> ProjectView {
     let worker = |agent: &str| NewMember {
-        agent: agent.into(),
+        model: None,
+        effort: None,
+        model_name: Some(agent.into()),
         harness: "claude-code".into(),
         designer: false,
         roles: vec!["worker".into()],
@@ -47,7 +49,8 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             name: "app".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("apollo".into()),
+                model: Some("apollo".into()),
+                effort: None,
             },
             staff: vec![worker("zeus"), worker("hera"), worker("athena")],
             gate: false,

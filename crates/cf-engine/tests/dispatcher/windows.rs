@@ -8,7 +8,7 @@ use std::rc::Rc;
 use cf_engine::testing::Context;
 use serde_json::{json, Value};
 
-use crate::fixtures::assert_match;
+use crate::fixtures::{assert_match, native_of, Tiers};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["the dispatcher"];
@@ -102,6 +102,421 @@ fn a_worker_window_that_ends_mid_task_says_how_it_ended_and_what_it_showed_in_th
         "T-1 is paused: @zeus's window closed (exit code 0xC0000005); its screen ended with: \
          \"Reading src/parser.rs / thread 'main' panicked at src/tui.rs:88\". \
          Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// Kluris T-153 (T-823): a Claude Code worker's window closed with exit code 143 after the
+/// project's own tests killed its `cargo test`, and the pause note said only "exit code 143".
+/// No stop and no close of ConsensFlow's was under way, so the note says the signal and that it
+/// did not come from ConsensFlow.
+#[cfg(unix)]
+#[test]
+fn a_worker_window_that_exited_with_a_signals_status_says_so_and_that_consensflow_sent_it_no_kill()
+{
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .host
+        .exits_showing(Some(143), None, Some(&["Running the workspace tests"]));
+    context.exit("zeus");
+
+    let task = context.task(project.id, 1);
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    assert_eq!(
+        note.body,
+        "T-1 is paused: @zeus's window closed (exit code 143, consistent with SIGTERM; \
+         ConsensFlow had sent it no kill); \
+         its screen ended with: \"Running the workspace tests\". \
+         Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// The pause note the ledger holds for a worker whose window ended with exit code `code`, its
+/// screen `screen` and its record's last tool call `call`.
+fn paused_note(
+    code: u32,
+    screen: &[&str],
+    call: Option<std::sync::Arc<cf_harness::records::LastCall>>,
+) -> String {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| agent.last_call = call);
+    context.host.exits_showing(Some(code), None, Some(screen));
+    context.exit("zeus");
+    let task = context.task(project.id, 1);
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    note.body.clone()
+}
+
+/// What the ledger's note ends with after the screen: the resume.
+const RESUME: &str =
+    "Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.";
+
+/// The same window's note said "its last screen lines named a secret, so they are left out", and
+/// the chief never learned the cause (T-823, kluris T-153): it says what the window was
+/// running, the program of the last tool call its record shows and not a word of what it was
+/// given, and the screen it showed where nothing on it names a secret.
+#[test]
+fn a_worker_window_that_closed_says_what_it_was_running_and_the_screen_where_no_row_names_a_secret()
+{
+    let call = cf_harness::records::LastCall::shell(
+        "Bash",
+        "cargo fmt --check && cargo test --workspace -- --nocapture",
+    );
+    assert_eq!(
+        paused_note(
+            3,
+            &["Running the workspace tests", "test result: FAILED", "bye"],
+            Some(call.clone())
+        ),
+        format!(
+            "T-1 is paused: @zeus's window closed (exit code 3); \
+             its last tool call was Bash: \"cargo \u{2026}\"; \
+             its screen ended with: \"Running the workspace tests / test result: FAILED / bye\". {RESUME}"
+        )
+    );
+    // One row that names a secret, and the whole screen is withheld, as the base's rule has it.
+    assert_eq!(
+        paused_note(
+            3,
+            &[
+                "Running the workspace tests",
+                "test result: FAILED",
+                "export TEST_TOKEN=abc",
+                "cargo test exited",
+                "bye",
+            ],
+            Some(call)
+        ),
+        format!(
+            "T-1 is paused: @zeus's window closed (exit code 3); \
+             its last tool call was Bash: \"cargo \u{2026}\"; \
+             its last screen lines named a secret, so they are left out. {RESUME}"
+        )
+    );
+}
+
+/// The reviews of `a26e0848e` and `860010398` put passwords in a real ledger note with screens
+/// the per-row rules quoted. The note the ledger holds says none of them, for the first
+/// review's three and the second's three, and says the screen was left out; so for rows that
+/// may be a key with no word to say so; so for what the last tool call carries, wrapped in a
+/// program the list names or not, and for a base64 value the masker once let through.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_password_the_screen_or_the_last_call_carried() {
+    let named = format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines named a \
+         secret, so they are left out. {RESUME}"
+    );
+    for (screen, value) in [
+        // The first review (T-1216).
+        (
+            vec!["Password:", "Enter the value below", "red green blue"],
+            "red green blue",
+        ),
+        (
+            vec!["PASSWORD: >-", "  correct horse", "  battery staple"],
+            "battery staple",
+        ),
+        (
+            vec!["password: correct horse", "battery staple", "alpha bravo"],
+            "battery staple",
+        ),
+        // The second (T-1222): a sentence that trails off, an assignment wrapped by hand, a
+        // token wrapped over rows of one short word.
+        (
+            vec![
+                "The password consists of these words",
+                "correct",
+                "horse",
+                "battery",
+                "staple",
+                "connection failed",
+            ],
+            "battery",
+        ),
+        (
+            vec![
+                "PASSWORD=correct",
+                "horse",
+                "battery staple",
+                "connection failed",
+            ],
+            "battery staple",
+        ),
+        (
+            vec![
+                "API_KEY=sk-abcdefghijkl",
+                "mnopqrstuvwx",
+                "xyz",
+                "connection failed",
+            ],
+            "mnopqrstuvwx",
+        ),
+    ] {
+        let note = paused_note(1, &screen, None);
+        assert_eq!(note, named, "{screen:?}");
+        assert!(!note.contains(value), "{screen:?}");
+    }
+
+    // Rows that may be a key, with no name and no delimiter in view.
+    let key = format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines held what \
+         may be a key, so they are left out. {RESUME}"
+    );
+    for (screen, value) in [
+        (vec!["YQ==", "Yg=="], "YQ=="),
+        (vec!["MIIEvQIBADANBgkq", "hkiG9w0BAQEFAASC"], "hkiG9w0B"),
+        (vec!["hkiG9w0BAQEFAASC"], "hkiG9w0B"),
+        (
+            vec!["abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv"],
+            "abcdefghijkl",
+        ),
+    ] {
+        let note = paused_note(1, &screen, None);
+        assert_eq!(note, key, "{screen:?}");
+        assert!(!note.contains(value), "{screen:?}");
+    }
+
+    // What the last tool call carries: a program the list names is named and nothing after it;
+    // one it does not is the tool's name alone.
+    for (command, said) in [
+        (
+            "npm exec -- docker login -p redgreenblue",
+            "Bash: \"npm \u{2026}\"",
+        ),
+        (
+            "git -C /w config http.extraHeader X-Session:redgreenblue",
+            "Bash: \"git \u{2026}\"",
+        ),
+        (
+            "node login.js alice redgreenblue",
+            "Bash: \"node \u{2026}\"",
+        ),
+        ("curl -u alice:redgreenblue https://example.test/", "Bash"),
+        ("TOKEN=redgreenblue cargo test", "Bash"),
+    ] {
+        let note = paused_note(
+            1,
+            &["running", "all fine"],
+            Some(cf_harness::records::LastCall::shell("Bash", command)),
+        );
+        assert_eq!(
+            note,
+            format!(
+                "T-1 is paused: @zeus's window closed (exit code 1); its last tool call was {said}; \
+                 its screen ended with: \"running / all fine\". {RESUME}"
+            ),
+            "{command}"
+        );
+        assert!(
+            !note.contains("redgreenblue") && !note.contains("alice") && !note.contains("docker"),
+            "{command}"
+        );
+    }
+
+    // A base64 value with no digit, on a row that names nothing, is masked.
+    let note = paused_note(
+        1,
+        &[
+            "running",
+            "value YWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJjYWJj end",
+        ],
+        None,
+    );
+    assert!(!note.contains("YWJjYWJj"), "{note}");
+}
+
+/// The note the ledger holds for a screen withheld for a secret it names.
+fn named_note() -> String {
+    format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines named a \
+         secret, so they are left out. {RESUME}"
+    )
+}
+
+/// The note the ledger holds for a screen withheld for what may be a key.
+fn key_note() -> String {
+    format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines held what \
+         may be a key, so they are left out. {RESUME}"
+    )
+}
+
+/// The re-check of `4aeb48564` (T-1224) read these out of the ledger's notes: a token the
+/// masker took a piece of, a name the window's wrap split over rows, values in groups, a key
+/// between bars, and a padding row beside a body that has no shape of its own. Each is a
+/// screen the note withholds whole now; nothing of its value reaches the ledger.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_secret_split_grouped_framed_or_padded() {
+    for (screen, value, named) in [
+        // A recognized token prefix, whatever follows it.
+        (
+            vec!["sk-abcdefghijkl mnopqrstuvwx yz1234"],
+            "mnopqrstuvwx",
+            true,
+        ),
+        (
+            vec!["sk-abcd efgh ijkl mnop qrst uvwx yz12 3456"],
+            "efgh ijkl",
+            true,
+        ),
+        // The same URL, written in percent signs.
+        (
+            vec!["https%3A%2F%2Falice%3Aswordfish%40example.test"],
+            "swordfish",
+            true,
+        ),
+        // A name split over the physical rows of the window.
+        (
+            vec!["{\"api_", "key\": \"red", "green blue\"}"],
+            "green blue",
+            true,
+        ),
+        // Values in groups.
+        (
+            vec!["YWJj-ZGVm-ZGhp-amts-bWpv-cHFy-cHRu-dndv"],
+            "ZGVm-ZGhp",
+            false,
+        ),
+        (
+            vec!["deadbeef cafebabe feedface abcdefab deadbeef cafebabe feedface abcdefab"],
+            "cafebabe",
+            false,
+        ),
+        // The two-row key crop in a frame.
+        (
+            vec!["│ MIIEvQIBADANBgkq │", "│ hkiG9w0BAQEFAASC │"],
+            "hkiG9w0B",
+            false,
+        ),
+        // A body of small letters in rows narrower than twelve.
+        (
+            vec![
+                "abcdefghijk",
+                "lmnopqrstuv",
+                "wxyzabcdefg",
+                "hijklmnopqr",
+                "stuv",
+            ],
+            "lmnopqrstuv",
+            false,
+        ),
+        // The same body in rows of differing widths.
+        (
+            vec![
+                "abcdefghij",
+                "klmnopqrstu",
+                "vwxyzabcdefg",
+                "hijklmnop",
+                "qrs",
+            ],
+            "klmnopqrstu",
+            false,
+        ),
+        // A padding row beside a body of small letters.
+        (vec!["abcdefghijklmnopqrstuvw", "="], "abcdefghij", false),
+    ] {
+        let note = paused_note(1, &screen, None);
+        assert_eq!(
+            note,
+            if named { named_note() } else { key_note() },
+            "{screen:?}"
+        );
+        assert!(!note.contains(value), "{screen:?}");
+    }
+}
+
+/// The files a tool worked on are never said in a pause note (T-1224, finding 2): a token split
+/// by blanks, a key's body below the masker's size, and credentials written in percent signs
+/// went to the ledger in the paths a note quoted.
+#[test]
+fn a_file_the_last_tool_call_worked_on_is_never_said_in_the_pause_note() {
+    for (path, value) in [
+        (
+            "/tmp/sk-abcd efgh ijkl mnop qrst uvwx yz12 3456.txt",
+            "efgh ijkl",
+        ),
+        ("/tmp/hkiG9w0BAQEFAASC.txt", "hkiG9w0B"),
+        (
+            "/tmp/https%3A%2F%2Falice%3Aswordfish%40example.test.json",
+            "swordfish",
+        ),
+        ("crates/cf-engine/src/shown.rs", "shown.rs"),
+    ] {
+        for tool in ["Read", "Edit", "Write"] {
+            let note = paused_note(
+                1,
+                &["running", "all fine"],
+                Some(cf_harness::records::LastCall::on(tool, path)),
+            );
+            assert_eq!(
+                note,
+                format!(
+                    "T-1 is paused: @zeus's window closed (exit code 1); its last tool call was {tool}; \
+                     its screen ended with: \"running / all fine\". {RESUME}"
+                ),
+                "{tool} {path}"
+            );
+            assert!(!note.contains(value), "{tool} {path}");
+        }
+    }
+}
+
+/// A window's exit reads its conversation's record with no window open, to name the last tool
+/// call. A participant whose window was asked for meanwhile, up, on its way or given up, is no
+/// business of that exit: it settles nothing more (the guard of `in_flight`'s `launches`),
+/// and no pause note says a window closed under a task that another window now has (the
+/// review of `a26e0848e`, P3: the fake answered at once, and the guard had no case).
+#[test]
+fn a_window_that_exits_while_its_record_is_read_and_is_replaced_before_the_read_ends_pauses_nothing(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let session = tiers.assignee(1);
+    let first = context.host.last(&session).unwrap().pane;
+    let native = native_of(&context, tiers.id(&session)).expect("its conversation");
+    context.adapter.with("zeus", |agent| {
+        agent.last_call = Some(cf_harness::records::LastCall::shell("Bash", "cargo test"));
+    });
+    let reading = context
+        .adapter
+        .last_call_holds
+        .hold(move |asked| asked[0] == native.as_str());
+    context
+        .host
+        .exits_showing(Some(1), None, Some(&["Running the workspace tests"]));
+    // The window exits; its note waits for the record, which is held.
+    let exit = context.begin_exit(&session);
+    // The human opens the session's window again meanwhile: a replacement comes up.
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.pass().unwrap();
+    let second = context.host.last(&session).unwrap().pane;
+    assert_ne!(second, first, "a replacement window came up");
+    reading.open();
+    drop(exit);
+    context.pass().unwrap();
+
+    let task = tiers.task(1);
+    assert_ne!(
+        task.task.state, "paused",
+        "the replaced window's exit paused nothing"
+    );
+    assert!(
+        task.messages
+            .iter()
+            .all(|m| !m.body.contains("window closed")),
+        "{:?}",
+        task.messages.iter().map(|m| &m.body).collect::<Vec<_>>()
     );
 }
 

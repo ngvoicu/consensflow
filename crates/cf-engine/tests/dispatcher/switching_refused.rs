@@ -1,7 +1,7 @@
-//! Switching the chief to another agent, where it is refused or goes on
-//! as it was: a project it does not know, a harness's own default model, an
-//! image agent, a closed project, an agent that was deleted, and a daemon
-//! that stopped with a message on its way.
+//! Switching the chief to another harness and model, where it is refused or goes on as
+//! it was: a project it does not know, no model named, a closed project, saved agents
+//! deleted (which a chief runs on none of), and a daemon that stopped with a message on its
+//! way.
 
 use cf_engine::SwitchWhen;
 use cf_ledger::NewProject;
@@ -26,26 +26,26 @@ fn switches_no_chief_of_a_project_it_does_not_know_and_says_so() {
 }
 
 #[test]
-fn switches_no_chief_to_a_harnesss_own_default_model_it_names_a_saved_agent() {
+fn switches_no_chief_to_a_harness_with_no_model_named() {
     let context = with_codex();
     let project = context.with_staff(&["zeus"]);
     let chief = context.id(project.id, "chief");
     context.pass().unwrap();
     context.adapter.busy("chief");
-    // An agent the request does not name is the empty one, which the engine refuses.
+    // A model the request does not name is the empty one, which the engine refuses.
     for when in [SwitchWhen::Now, SwitchWhen::Turn] {
         let refused = context
             .switch_chief(project.id, to("codex", ""), when, false)
             .unwrap_err();
-        assert_match(
-            &refused.to_string(),
-            "pick one of your saved agents for the chief",
+        assert_eq!(
+            refused.to_string(),
+            "pick a harness for the chief, and one of its models"
         );
     }
     let now = chief_of(&context, project.id);
     assert_eq!(
-        (now.harness.as_deref(), now.agent.as_deref()),
-        (Some("claude-code"), Some("apollo"))
+        (now.harness.as_deref(), now.model.as_deref()),
+        (Some("claude-code"), Some("claude-opus-5"))
     );
     assert_eq!(
         context.dispatcher.pending_switch(chief),
@@ -58,61 +58,6 @@ fn switches_no_chief_to_a_harnesss_own_default_model_it_names_a_saved_agent() {
         context.close(),
         SUITES,
         "switches no chief to a harness's own default model: it names a saved agent",
-    );
-}
-
-#[test]
-fn opens_no_project_on_an_image_agent_nor_switches_a_chief_to_one() {
-    let context = with_codex();
-    context
-        .roster
-        .designers
-        .borrow_mut()
-        .insert("pygmalion".to_owned());
-    let designing = "pygmalion is an image agent, which can only be an image designer";
-    let project = context.with_staff(&["zeus"]);
-    let chief = context.id(project.id, "chief");
-    context.pass().unwrap();
-    context.adapter.busy("chief");
-    let refused = context
-        .open_project(json!({
-            "directory": "/work/api",
-            "name": "api",
-            "chief": { "harness": "codex", "agent": "pygmalion" },
-        }))
-        .unwrap_err();
-    assert_eq!(refused.to_string(), designing);
-    for when in [SwitchWhen::Now, SwitchWhen::Turn] {
-        let refused = context
-            .switch_chief(project.id, to("codex", "pygmalion"), when, false)
-            .unwrap_err();
-        assert_eq!(refused.to_string(), designing);
-    }
-    let names: Vec<String> = context
-        .ledger
-        .borrow()
-        .projects()
-        .unwrap()
-        .into_iter()
-        .map(|project| project.name)
-        .collect();
-    assert_eq!(names, ["app"], "nothing was opened");
-    let now = chief_of(&context, project.id);
-    assert_eq!(
-        (now.harness.as_deref(), now.agent.as_deref()),
-        (Some("claude-code"), Some("apollo"))
-    );
-    assert_eq!(
-        context.dispatcher.pending_switch(chief),
-        None,
-        "nothing waits to switch"
-    );
-    assert!(context.host.killed().is_empty());
-    assert!(context.codex.prepared().is_empty());
-    held_to(
-        context.close(),
-        SUITES,
-        "opens no project on an image agent, nor switches a chief to one: an image agent only designs",
     );
 }
 
@@ -153,13 +98,13 @@ fn keeps_a_chief_on_its_harnesss_own_default_model_as_it_is_until_switch_chief_m
         .unwrap();
     let now = chief_of(&context, project.id);
     assert_eq!(
-        (now.harness.as_deref(), now.agent.as_deref()),
-        (Some("codex"), Some("astraeus"))
+        (now.harness.as_deref(), now.model.as_deref()),
+        (Some("codex"), Some("gpt-6-astra"))
     );
     let launched = context.codex.prepared().last().cloned().unwrap();
     assert_match(
         launched["message"].as_str().unwrap(),
-        r"The human switched this project's chief from Claude Code to you, Codex \(astraeus\)\.",
+        r"The human switched this project's chief from Claude Code to you, Codex \(gpt-6-astra\)\.",
     );
     held_to(
         context.close(),
@@ -189,46 +134,29 @@ fn switches_no_chief_of_a_closed_project() {
     );
 }
 
+/// A chief runs on a harness and a model, never on a saved agent (CHF-04): the roster is
+/// not read for it, so an agent the human deleted holds no chief closed.
 #[test]
-fn keeps_a_chief_whose_agent_was_deleted_closed_tells_the_human_and_holds_what_it_was_to_receive() {
+fn opens_a_chief_whatever_became_of_the_saved_agents_and_tells_the_human_nothing() {
     let context = with_codex();
-    context.roster.gone.borrow_mut().insert("nobody".to_owned());
     let project = context.with_staff(&["zeus"]);
     context.pass().unwrap();
-    let refused = context
-        .switch_chief(project.id, to("codex", "nobody"), SwitchWhen::Now, false)
-        .unwrap_err();
-    assert_match(&refused.to_string(), "nobody is not among your agents");
     context
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
         .unwrap();
     context.close_project(project.id).unwrap();
-    context
-        .roster
-        .gone
-        .borrow_mut()
-        .insert("astraeus".to_owned());
     let opened = context.host.opened().len();
     context.resume_project(project.id).unwrap();
     assert_eq!(
         context.host.opened().len(),
-        opened,
-        "no window on a model that is gone"
+        opened + 1,
+        "the chief opens on its model"
     );
-    let told = to_human(&context, project.id)
-        .into_iter()
-        .find(|body| body.contains("no longer among your agents"))
-        .unwrap();
-    assert_match(
-        &told,
-        r"The chief runs on astraeus, which is no longer among your agents: add it back under Agents, or switch the chief\.",
-    );
-    context.pass().unwrap();
-    assert_eq!(
-        context.host.opened().len(),
-        opened,
-        "and no pass tries again"
-    );
+    let launched = context.codex.prepared().last().cloned().unwrap();
+    assert_eq!(launched["agent"]["model"], "gpt-6-astra");
+    assert!(to_human(&context, project.id)
+        .iter()
+        .all(|body| !body.contains("among your agents")));
     held_to(
         context.close(),
         SUITES,

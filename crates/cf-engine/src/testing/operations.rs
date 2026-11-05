@@ -26,7 +26,7 @@ use crate::windows::Activity;
 
 /// What a Switch chief is asked, as `switchChief` is given it.
 fn switch_asked(project: i64, to: &SwitchTo, when: SwitchWhen, note: bool) -> Value {
-    let mut asked = json!({ "harness": to.harness, "agent": to.agent });
+    let mut asked = json!({ "harness": to.harness, "model": to.model });
     if when == SwitchWhen::Turn {
         asked["when"] = json!("turn");
     }
@@ -85,7 +85,7 @@ impl Context {
         let dispatcher = Rc::clone(&self.dispatcher);
         let asked = request.clone();
         let open = self.operation("openProject", json!([request]), answer, async move {
-            let request = NewProject::from_json(&asked)?;
+            let request = NewProject::from_json(&super::context::staffed(&asked))?;
             dispatcher.open_project(request).await
         });
         self.executor.start_now(open)
@@ -224,6 +224,26 @@ impl Context {
             async move { dispatcher.finish_task(project, number, &by).await },
         );
         self.run(finishing)
+    }
+
+    /// ConsensFlow gives T-`number` up `because` its window's turn failed, as a look at a failed
+    /// turn does (`fail_task`): the give-up alone, at a moment a test chooses.
+    pub fn give_up_task(
+        &self,
+        project: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<(), EngineError> {
+        let project = self.dispatcher.known_project(project)?;
+        let thread = self
+            .ledger
+            .borrow()
+            .task(project.id, number)?
+            .expect("the task");
+        let handle = thread.task.assignee.clone().expect("its window's session");
+        let participant = self.id(project.id, &handle);
+        self.dispatcher
+            .fail_task(&project, participant, &thread.task, because, "")
     }
 
     /// The human hides a session's terminal (`hideWindow`).

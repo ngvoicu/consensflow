@@ -44,16 +44,27 @@
 //! migration 0026's two (the staff's rules and the size Claude members compact
 //! at), held apart as the wake-up columns are.
 //!
+//! And migration 0028's four columns of the `participant` table (a chief's model, the
+//! model it was switched from, the one its last launch asked for and the one a launch
+//! found gone), which Node's
+//! participants never had: in the rows of that table and in the text of its schema.
+//!
 //! What only Node's ledger had is held apart the other way round, on both
 //! sides: the mark that a project comes back by itself after a restart
 //! (`resumeOnStart` in what the ledger answers and logs, `resume_on_start` in
 //! its database), which migration 0013 took away, is taken out of what Node
 //! recorded, where this ledger's has none to take out.
 
+mod chief_model;
+mod chosen_tier;
 mod compaction;
 mod described;
+mod drawn_items;
 mod handed;
+mod harness_models;
+mod history_indexes;
 mod meeting;
+mod model_list;
 mod pasted_into;
 mod paused_with_project;
 mod program_gone;
@@ -64,9 +75,17 @@ mod staff_rules;
 
 use serde_json::{Map, Value};
 
+pub use chief_model::undo_migration_0028;
+pub use chosen_tier::undo_migration_0030;
 pub use compaction::undo_migration_0020;
+pub use drawn_items::undo_migration_0032;
 pub use handed::undo_migration_0022;
+pub use harness_models::{
+    hold_apart_what_members_run_on, node_member, node_staff, undo_migration_0031,
+};
+pub use history_indexes::undo_migration_0029;
 pub use meeting::undo_migration_0025;
+pub use model_list::undo_migration_0027;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
@@ -126,9 +145,10 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// three of migration 0015, the one of migration 0016, the description of
 /// migration 0017, the one of migration 0018, the one of migration 0020, the one
 /// of migration 0021, the one of migration 0022, the one of migration 0024, the
-/// meeting of migration 0025 and the staff's rules and Claude's compaction of 0026
-/// (their name and, in every row, the value at its place), the table migration
-/// 0020 made (a long item's parts), the stop in the event rows that paused a
+/// meeting of migration 0025, the staff's rules and Claude's compaction of 0026, the
+/// four of migration 0028, the one of migration 0030 and the two of migration 0032 (their name
+/// and, in every row, the value at its place), the tables migrations 0020 and 0032 made (a long
+/// item's parts, an edit's change), the stop in the event rows that paused a
 /// task, and the look in the event rows of a delivery's begin, retry or failure.
 /// A dump from before the migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
@@ -144,15 +164,20 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(handed::COLUMNS)
         .chain(pasted_into::COLUMNS)
         .chain(program_gone::COLUMNS)
+        .chain(chief_model::COLUMNS)
+        .chain(harness_models::COLUMNS)
+        .chain(drawn_items::COLUMNS)
     {
         take_column_out(tables, table, column);
     }
     for column in added_columns().filter_map(|definition| definition.split_whitespace().next()) {
         take_column_out(tables, "project", column);
     }
-    for table in compaction::made("TABLE") {
-        tables.remove(table);
-    }
+    // Kept in their order: a table taken out mid-list must not move the last into its place.
+    let made: Vec<&str> = compaction::made("TABLE")
+        .chain([model_list::TABLE, drawn_items::TABLE])
+        .collect();
+    tables.retain(|table, _| !made.contains(&table.as_str()));
 }
 
 /// `column` of `table`, as the recorder dumps a table (its `columns` and its
@@ -190,8 +215,10 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// that of the role text a message says, that of the mark of a compaction's
 /// summary in a copy, the table and the indexes migration 0020 made, that of the
 /// mark a project's suspension leaves on the tasks it paused, that of when a
-/// message was handed to its window, nor that of whether the program of a
-/// conversation's last window was proven gone. A dump of Node's is left as it is.
+/// message was handed to its window, that of whether the program of a
+/// conversation's last window was proven gone, nor the four of a chief's model, nor a member's effort
+/// and its model's name. A dump
+/// of Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {
         if version.as_i64().is_some_and(|at| at > NODE_LAST_VERSION) {
@@ -207,7 +234,11 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             .chain(compaction::made("INDEX"))
             .any(|made| made == name)
     });
-    schema.retain(|entry| entry["name"] != pasted_into::TRIGGER);
+    schema.retain(|entry| {
+        entry["name"] != pasted_into::TRIGGER
+            && entry["name"] != model_list::TABLE
+            && entry["name"] != drawn_items::TABLE
+    });
     for entry in schema {
         let name = entry["name"].as_str().map(str::to_owned);
         let Some(Value::String(sql)) = entry.get_mut("sql") else {
@@ -215,7 +246,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
         };
         match name.as_deref() {
             Some("participant") => {
-                *sql = sql.replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1);
+                *sql = sql
+                    .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
+                    .replace(harness_models::COLUMN_LINES, "")
+                    .replace(chief_model::COLUMN_LINES, "");
             }
             Some("task") => {
                 *sql = sql
@@ -244,7 +278,9 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql.replace(pasted_into::COLUMN_LINES, "");
             }
             Some("transcript") => {
-                *sql = sql.replace(compaction::COLUMN_LINES, "");
+                *sql = sql
+                    .replace(compaction::COLUMN_LINES, "")
+                    .replace(drawn_items::COLUMN_LINES, "");
             }
             _ => {}
         }

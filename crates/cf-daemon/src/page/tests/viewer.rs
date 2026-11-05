@@ -60,7 +60,7 @@ fn asked_with(specs: Value, files: &[(&str, &str)], given: impl FnOnce(Specs) ->
     let mut opening = json!({
         "directory": folder.path().to_str().unwrap(),
         "name": "app",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         "staff": [],
     });
     if !specs.is_null() {

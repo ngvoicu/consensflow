@@ -48,6 +48,13 @@ name = "fake-cf"
 path = "src/bin/fake_cf.rs"
 required-features = ["test-support"]
 
+# The rig's Muse on Windows, which has no `exec`: the machine's Muse, run on its fake
+# model with the command line it is given written down (`cf_e2e::muse::StandIn`).
+[[bin]]
+name = "muse-stand-in"
+path = "src/bin/muse_stand_in.rs"
+required-features = ["test-support"]
+
 # A daemon that says it is Node's, for the case that holds the rig to refusing
 # a daemon that is not the native one.
 [[bin]]
@@ -64,6 +71,8 @@ path = "src/bin/smoke_paste_reader.rs"
 required-features = ["test-support"]
 
 [dependencies]
+# The saved agents a case names its chief by, read as the daemon reads them: the
+# harness and model the New project dialog picks for it (CHF-07).
 # The app bundles a case may start: none of the live app's identity.
 cf-base.workspace = true
 # What a program the rig starts is left of its descriptors: its streams alone.

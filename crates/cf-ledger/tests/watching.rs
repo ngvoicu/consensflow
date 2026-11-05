@@ -18,7 +18,8 @@ fn project() -> NewProject {
         name: "app".into(),
         chief: NewChief {
             harness: "claude-code".into(),
-            agent: None,
+            model: None,
+            effort: None,
         },
         staff: Vec::new(),
         gate: false,

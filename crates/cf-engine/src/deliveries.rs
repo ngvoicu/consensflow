@@ -18,7 +18,7 @@ use cf_ledger::{
     is_told, reopen_or_accept, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver,
     MessageView, NewNote, ParticipantView, ProjectView, TaskView,
 };
-use cf_proto::panes::HumanInput;
+use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -515,18 +515,24 @@ impl Dispatcher {
             // mark goes only once the ledger has it: a write that failed leaves it,
             // for the next pass to ask again (the same, round 12).
             // An item the paste begins, as only a paste proves it arrived
-            // (`is_paste_of`): a header quoted in other words proves nothing.
+            // (`is_paste_of`): a header quoted in other words proves nothing. A launch's
+            // first message was pasted behind the brief its fresh window was given first,
+            // and the item the human's Enter made begins with that (T-812).
+            let found = self.seams.ledger.borrow().message(stale.message)?;
+            let first = match &found {
+                Some(found) => self.brief_given_first(found)?,
+                None => None,
+            };
             let copied = self
                 .seams
                 .ledger
                 .borrow()
                 .copied_items_since(record.id, &marker_of(stale.message), &stale.since)?
                 .into_iter()
-                .find(|(_, text)| is_paste_of(text, stale.message, None))
+                .find(|(_, text)| is_paste_of(text, stale.message, first.as_deref()))
                 .map(|(item, _)| item);
             if let Some(item) = copied {
                 let receipt = json!({ "item": item });
-                let found = self.seams.ledger.borrow().message(stale.message)?;
                 let tells = match &found {
                     Some(found) => self.tells_a_role(found)?,
                     None => None,
@@ -541,7 +547,7 @@ impl Dispatcher {
                 self.changed();
                 return Ok(());
             }
-            // The key that empties it goes only into a window that printed nothing
+            // The key that empties it goes only into a window whose screen held still
             // for a while and holds nothing the human typed since it was read ready:
             // a second Control-C in a row ends Claude Code (the same review, round 11).
             let quiet = self.may_press(&pane).await;
@@ -1302,8 +1308,8 @@ impl Dispatcher {
         (self.now() - held.since_ms >= HELD_TOLD_MS).then_some(held.message)
     }
 
-    /// Whether a key may be pressed into `pane` now: its screen says it printed
-    /// nothing for [`ENTER_AGAIN_QUIET_MS`] and holds nothing the human typed.
+    /// Whether a key may be pressed into `pane` now: what its screen shows held still for
+    /// [`ENTER_AGAIN_QUIET_MS`] and it holds nothing the human typed.
     async fn may_press(&self, pane: &Pane) -> bool {
         let body = json!({ "id": pane.id, "generation": pane.generation });
         let snapshot = returning(self.seams.host.request("pane.snapshot", body))
@@ -1313,7 +1319,7 @@ impl Dispatcher {
             snapshot.get("ok") == Some(&Value::Bool(true))
                 && !js::truthy(snapshot.get("unsent"))
                 && snapshot
-                    .get("outputQuietMs")
+                    .get(SCREEN_QUIET_MS)
                     .and_then(Value::as_f64)
                     .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS)
         })
@@ -1437,9 +1443,11 @@ impl Dispatcher {
     }
 
     /// The chief's turn that failed: the human is told why, once, on the board.
-    /// Nothing else of the chief's changes.
+    /// Nothing else of the chief's changes, but where the failure is its harness saying it
+    /// no longer has the model the chief's launch asked for: the window closes and the chief
+    /// opens again at once on the harness's default (CHF-06), which its note says.
     pub(crate) async fn tell_chief_failed(
-        &self,
+        self: &Rc<Self>,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Rc<Record>,
@@ -1450,6 +1458,19 @@ impl Dispatcher {
         };
         let why = self.why_it_failed(participant, record, observed).await?;
         if self.forgotten(record) {
+            return Ok(());
+        }
+        // Its record's own words, never the screen `why` falls back on (Calliope's P1, T-955).
+        let refused = observed.failure().unwrap_or_default();
+        if let Some(gone) = self.gone_model(participant, refused)? {
+            let pane = record.window.borrow().pane.clone();
+            if let Some(pane) = pane {
+                if !self.close_own(record, &pane).await? {
+                    return Ok(());
+                }
+            }
+            self.settle_told(record, given, "human", &why.key);
+            self.reopen_without(record, gone);
             return Ok(());
         }
         if self.same_outage(record, &why.key) {
@@ -1542,7 +1563,9 @@ impl Dispatcher {
     /// words where its record has them, and otherwise in the last lines its
     /// window shows, which is where a harness that says nothing in its record
     /// says why (a crash, a model it does not know), or that it could not be read.
-    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]). The
+    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]), and both follow
+    /// the kind of failure the harness's record names in plain words, where it has a name for
+    /// it (`Observed::failure_kind`). The
     /// lines ConsensFlow typed into the window itself, its last pastes as the
     /// screen shows them ([`Shown::without_pastes`]), are no reason of its own,
     /// and are neither quoted nor compared.
@@ -1552,7 +1575,13 @@ impl Dispatcher {
         record: &Record,
         observed: &Observed,
     ) -> Result<Why, EngineError> {
-        let failed = format!("@{}'s harness reported a failure", participant.handle);
+        let mut failed = format!("@{}'s harness reported a failure", participant.handle);
+        // The kind its record names, where the harness has a plain name for it: ConsensFlow's
+        // words, said before the harness's own so that a reader tells them apart (a safety
+        // filter's refusal is not a crash, T-823).
+        if let Some(kind) = observed.failure_kind() {
+            failed.push_str(&format!(": {kind}"));
+        }
         // Words with nothing of a word in them ("…") say nothing: the screen may.
         if let Some(words) = observed.failure() {
             if let Some(said) = after_words(&failed, words) {
@@ -1562,21 +1591,7 @@ impl Dispatcher {
                 });
             }
         }
-        let pastes: Vec<Paste> = self
-            .seams
-            .ledger
-            .borrow()
-            .last_pastes(participant.id, PASTES_ON_SCREEN)?
-            .into_iter()
-            .map(|begun| {
-                // As it was pasted: sent again, or naming a note (Calliope's T-987), its
-                // commands started by the window's own `cf` (`cf_for`).
-                Ok(Paste {
-                    id: begun.message.id,
-                    text: self.delivery_text_of(&begun.message, &begun.carried)?,
-                })
-            })
-            .collect::<Result<_, EngineError>>()?;
+        let pastes = self.pastes_on_screen(participant.id)?;
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {
             Some(pane) => self.look_at(&pane).await,
@@ -1595,6 +1610,26 @@ impl Dispatcher {
             said: shown.after(&failed),
             key: shown.outage_key(),
         })
+    }
+
+    /// What ConsensFlow last pasted into participant `participant_id`'s window, as many as
+    /// a screen shows: lines of a screen that are these are no words of the window's own
+    /// ([`Shown::without_pastes`]).
+    pub(crate) fn pastes_on_screen(&self, participant_id: i64) -> Result<Vec<Paste>, EngineError> {
+        self.seams
+            .ledger
+            .borrow()
+            .last_pastes(participant_id, PASTES_ON_SCREEN)?
+            .into_iter()
+            .map(|begun| {
+                // As it was pasted: sent again, or naming a note (Calliope's T-987), its
+                // commands started by the window's own `cf` (`cf_for`).
+                Ok(Paste {
+                    id: begun.message.id,
+                    text: self.delivery_text_of(&begun.message, &begun.carried)?,
+                })
+            })
+            .collect()
     }
 
     /// What a window was to receive goes back to its queue with its attempt:
@@ -1993,17 +2028,29 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// `task` fails `because`, as the failed turn of its window said it, which `cause` tells
+    /// from another outage (empty where the screen could not be read). The ledger tells the
+    /// requester, with the words that went (T-437), and of the windows that failed alike
+    /// before it was given the first, in one note.
     pub(crate) fn fail_task(
         &self,
         project: &ProjectView,
+        participant: i64,
         task: &TaskView,
         because: &str,
+        cause: &str,
     ) -> Result<(), EngineError> {
+        // The stop the window was asked for the task is settled by the give-up, which takes
+        // the task out of its hands (T-1223's P2-4).
+        let owed = self.owed_at_departure(participant, task.number)?;
         // The ledger tells the requester, with the words that went (T-437).
-        self.seams
-            .ledger
-            .borrow_mut()
-            .give_up_task(project.id, task.number, because)?;
+        self.seams.ledger.borrow_mut().give_up_task_for_cause(
+            project.id,
+            task.number,
+            because,
+            cause,
+        )?;
+        self.settled_at_departure(participant, owed);
         Ok(())
     }
 

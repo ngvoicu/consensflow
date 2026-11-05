@@ -48,7 +48,7 @@ fn a_brief_cut_in_the_middle_of_a_fence_is_posted_as_given_and_the_reply_shows_w
     );
     assert_eq!(
         String::from_utf8_lossy(&ran.stdout),
-        "T-1 is on the board for a standard worker; it starts in a new window of one, and its result arrives in your inbox.\nSent: 8,151 characters, ending \"…```rust fn main() { let parser = Parser::new(\".\n",
+        "T-1 is on the board for a standard worker; it starts in a new window of one, and its result arrives in your inbox.\nT-1: sent 8,151 characters, ending \"…```rust fn main() { let parser = Parser::new(\".\n",
         "its size, and the open fence it ends in"
     );
     assert!(ran.stderr.is_empty());

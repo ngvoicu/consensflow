@@ -58,6 +58,14 @@ pub struct FakeHost {
     /// The panes the engine looked at for how long they had printed nothing
     /// ([`EngineHost::quiet`]), in order.
     quiet_looks: RefCell<Vec<Pane>>,
+    /// The panes the engine looked at for a dialog of their harness
+    /// ([`EngineHost::screen`]), in order.
+    screen_looks: RefCell<Vec<Pane>>,
+    /// How many alerts the system has on screen, as `pane.alerts` answers it
+    /// ([`FakeHost::set_alerts`]): none said, unless the test says.
+    alerts: Cell<Option<usize>>,
+    /// How often the engine asked ([`EngineHost::alerts`]).
+    alert_looks: Cell<usize>,
     /// What every exit says besides which pane ended
     /// ([`FakeHost::exits_showing`]): the program's code and signal, and the
     /// lines its screen ended with.
@@ -119,12 +127,24 @@ impl FakeHost {
     }
 
     /// What `pane.snapshot` answers besides `ok` from now on
-    /// (`host.snapshot = { outputQuietMs: 300 }`).
+    /// (`host.snapshot = { screenQuietMs: 300 }`).
     pub fn set_snapshot(&self, answer: Value) {
         let Value::Object(fields) = answer else {
             panic!("a snapshot is an object");
         };
         *self.snapshot.borrow_mut() = fields;
+    }
+
+    /// How many alerts the system has on screen from now on, as the host says it: none where it
+    /// does not say.
+    pub fn set_alerts(&self, alerts: Option<usize>) {
+        self.alerts.set(alerts);
+    }
+
+    /// How often the engine looked at the alerts on screen ([`EngineHost::alerts`]): no call of
+    /// Node's host, so not among the requests.
+    pub fn alert_looks(&self) -> usize {
+        self.alert_looks.get()
     }
 
     /// What the exits from now on say: the program ended with `code` (or a
@@ -215,6 +235,12 @@ impl FakeHost {
     /// trace.
     pub fn quiet_looks(&self) -> Vec<Pane> {
         self.quiet_looks.borrow().clone()
+    }
+
+    /// The panes the engine looked at for a dialog of their harness, in order
+    /// ([`EngineHost::screen`]): no call of Node's host, so not among the requests.
+    pub fn screen_looks(&self) -> Vec<Pane> {
+        self.screen_looks.borrow().clone()
     }
 
     /// The last pane opened for `handle`'s window: its own, or one of its sessions'.
@@ -460,7 +486,7 @@ impl EngineHost for FakeHost {
         })
     }
 
-    /// The `outputQuietMs` the test set ([`FakeHost::set_snapshot`]), none where it set
+    /// The `screenQuietMs` the test set ([`FakeHost::set_snapshot`]), none where it set
     /// none or null, which is a host that does not say. Answered at once, in no turn of its
     /// own, and written down nowhere: Node's host had no such look, and the traces hold
     /// every call the engine makes of it.
@@ -469,9 +495,30 @@ impl EngineHost for FakeHost {
         let quiet = self
             .snapshot
             .borrow()
-            .get("outputQuietMs")
+            .get(cf_proto::panes::SCREEN_QUIET_MS)
             .and_then(Value::as_f64);
         Box::pin(async move { Ok(quiet) })
+    }
+
+    /// What the test set the screen to show ([`FakeHost::set_snapshot`]), its `ok` and all, as
+    /// `pane.snapshot` answers it. Answered at once, in no turn of its own, and written down
+    /// nowhere but [`FakeHost::screen_looks`]: Node's host had no such look.
+    fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>> {
+        self.screen_looks.borrow_mut().push(pane.clone());
+        let mut answer = Map::new();
+        answer.insert("ok".to_owned(), Value::Bool(true));
+        answer.extend(self.snapshot.borrow().clone());
+        // The lines as drawn go only to a request that asks for them (`request`): this asks none.
+        answer.remove("bottom");
+        Box::pin(async move { Ok(Value::Object(answer)) })
+    }
+
+    /// What the test set the alerts on screen to ([`FakeHost::set_alerts`]), answered at once and
+    /// written down nowhere but [`FakeHost::alert_looks`]: Node's host had no such look.
+    fn alerts(&self) -> Work<'_, Result<Option<usize>, HostError>> {
+        self.alert_looks.set(self.alert_looks.get() + 1);
+        let alerts = self.alerts.get();
+        Box::pin(async move { Ok(alerts) })
     }
 }
 

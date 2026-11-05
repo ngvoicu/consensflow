@@ -285,10 +285,7 @@ async fn a_home_with_no_agents_file_has_specs_off_and_the_first_word_said_makes_
             assert!(!file.exists(), "a read makes nothing");
             let set = ask(&held.app, "specs.set", json!({ "on": true })).await;
             assert_eq!(set["app"], json!({ "on": true }), "{set}");
-            assert_eq!(
-                held.kept(),
-                json!({ "ownHarnessOnly": false, "specs": true })
-            );
+            assert_eq!(held.kept(), json!({ "specs": true }));
         })
         .await;
 }

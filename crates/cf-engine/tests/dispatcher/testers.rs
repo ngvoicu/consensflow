@@ -21,7 +21,7 @@ fn project_of(context: &Context, staff: &[(&str, &[&str], &str)]) -> ProjectView
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": members,
         }))
         .unwrap()

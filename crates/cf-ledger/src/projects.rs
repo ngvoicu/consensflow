@@ -27,7 +27,7 @@ pub(crate) use staff_rules::set_staff_rules;
 pub use staff_rules::{parse_staff_rules, STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 
 use crate::meeting::{end_every_meeting, end_meeting, Ended};
-use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
+use crate::model::{self, LedgerError};
 use crate::specs::{keep_specs, SpecsChange};
 use crate::staff::{add_participant, NewParticipant};
 use crate::store::Store;
@@ -104,20 +104,29 @@ impl ProjectRow {
     }
 }
 
-/// A new project's chief: the harness it runs on and, since chiefs are
-/// always saved agents, the agent; one with none is from before then and
-/// runs on its harness's default.
+/// A new project's chief: the harness it runs on and the model of that harness the human
+/// picked (CHF-04); one with none runs on its harness's own default.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewChief {
     pub harness: String,
-    pub agent: Option<String>,
+    pub model: Option<String>,
+    /// The effort it runs its model at; none for its harness's own.
+    pub effort: Option<String>,
 }
 
 /// A member a new project starts with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewMember {
-    pub agent: String,
+    /// The harness by its kind (`claude-code`).
     pub harness: String,
+    /// The model as its harness takes it (Pi's `provider/id`, Devin's exact `model_uid`);
+    /// none for its harness's default.
+    pub model: Option<String>,
+    /// The effort it runs the model at; none where it names none (a Devin `model_uid`
+    /// holds its own, which is said here too).
+    pub effort: Option<String>,
+    /// What its harness's list calls the model; none where the list was never read.
+    pub model_name: Option<String>,
     pub designer: bool,
     /// One or more of worker, advisor, reviewer, tester and designer; the first leads.
     pub roles: Vec<String>,
@@ -149,10 +158,11 @@ impl NewProject {
         let name = parse_name(value.get("name"))?;
         let chief = value.get("chief");
         let harness = model::parse_harness(chief.and_then(|chief| chief.get("harness")))?;
-        let agent = match chief.and_then(|chief| chief.get("agent")) {
+        let chief_model = match chief.and_then(|chief| chief.get("model")) {
             None | Some(Value::Null) => None,
-            agent => Some(model::parse_agent_id(agent, &[])?),
+            given => Some(model::parse_model_id(given)?),
         };
+        let chief_effort = model::parse_effort(chief.and_then(|chief| chief.get("effort")))?;
         let gate = match value.get("gate") {
             None => false,
             gate => model::parse_gate(gate)?,
@@ -175,7 +185,8 @@ impl NewProject {
             name,
             chief: NewChief {
                 harness: harness.to_string(),
-                agent,
+                model: chief_model,
+                effort: chief_effort,
             },
             staff,
             gate,
@@ -198,32 +209,76 @@ impl NewMember {
                 model::parse_roles(Some(&given))?
             }
         };
-        let agent = model::parse_agent_id(value.get("agent"), &COORDINATOR_HANDLES)?;
         let harness = model::parse_harness(value.get("harness"))?;
+        let model = match value.get("model") {
+            None | Some(Value::Null) => None,
+            given => Some(model::parse_model_id(given)?),
+        };
+        let effort = model::parse_effort(value.get("effort"))?;
+        let model_name = model::parse_model_name(value.get("modelName"))?;
         let designer = match value.get("designer") {
             None => false,
             Some(Value::Bool(designer)) => *designer,
             Some(_) => return Err(designer_refused()),
         };
-        model::require_fitting_roles(&agent, designer, &roles)?;
+        let shown =
+            crate::handles::model_shown(model_name.as_deref(), model.as_deref(), Some(harness));
+        model::require_fitting_roles(&shown, designer, &roles)?;
         let tier = model::parse_tier(value.get("tier"))?;
         Ok(Self {
-            agent,
             harness: harness.to_string(),
+            model,
+            effort,
+            model_name,
             designer,
             roles: roles.into_iter().map(str::to_string).collect(),
             tier: tier.to_string(),
         })
     }
 
-    /// Checks the member as the Node ledger did: its roles, normalized.
+    /// Checks the member: its roles, normalized, its harness, its model and effort, and
+    /// its tier, which the human must have picked.
     pub(crate) fn check(&self) -> Result<Vec<&'static str>, LedgerError> {
         let roles = model::require_roles(&self.roles, || model::printed(Some(&json!(self.roles))))?;
-        model::require_agent_id(&self.agent, &COORDINATOR_HANDLES)?;
         model::require_harness(&self.harness)?;
-        model::require_fitting_roles(&self.agent, self.designer, &roles)?;
+        if let Some(model) = &self.model {
+            model::require_model_id(model)?;
+        }
+        model::parse_effort(self.effort.as_ref().map(|effort| json!(effort)).as_ref())?;
+        model::parse_model_name(self.model_name.as_ref().map(|name| json!(name)).as_ref())?;
+        model::require_fitting_roles(&self.shown(), self.designer, &roles)?;
         model::require_tier(&self.tier)?;
         Ok(roles)
+    }
+
+    /// What the member's model is called ([`crate::handles::model_shown`]).
+    pub fn shown(&self) -> String {
+        crate::handles::model_shown(
+            self.model_name.as_deref(),
+            self.model.as_deref(),
+            Some(&self.harness),
+        )
+    }
+
+    /// The handle the member joins `project` under: made from its model and effort,
+    /// unique in the project ([`crate::handles::member_handle`]).
+    pub(crate) fn handle(&self, store: &Store, project: i64) -> Result<String, LedgerError> {
+        let mut failed = None;
+        let handle = crate::handles::member_handle(
+            &self.shown(),
+            self.effort.as_deref(),
+            &self.harness,
+            |handle| {
+                crate::handles::handle_taken(&store.db, project, handle).unwrap_or_else(|cause| {
+                    failed = Some(cause);
+                    true
+                })
+            },
+        );
+        match failed {
+            Some(cause) => Err(cause.into()),
+            None => Ok(handle),
+        }
     }
 }
 
@@ -234,7 +289,7 @@ fn designer_refused() -> LedgerError {
     )
 }
 
-/// A project with its chief, on the saved agent it runs on, and its staff, and
+/// A project with its chief, on the harness and model it runs on, and its staff, and
 /// the calls and specs the human said for it, kept in the same write: the
 /// chief's first launch reads the specs, and the project is never seen without
 /// them. Everything the ledger refuses is refused before the write begins.
@@ -245,8 +300,8 @@ pub(crate) fn create_project(
     model::require_text(&request.directory, "directory", 4096)?;
     require_name(&request.name)?;
     let chief_harness = model::require_harness(&request.chief.harness)?;
-    if let Some(agent) = &request.chief.agent {
-        model::require_agent_id(agent, &[])?;
+    if let Some(chief_model) = &request.chief.model {
+        model::require_model_id(chief_model)?;
     }
     let members = request
         .staff
@@ -272,30 +327,19 @@ pub(crate) fn create_project(
             ],
         )?;
         let id = store.db.last_insert_rowid();
-        add_participant(store, id, NewParticipant::coordinator("human", None, None))?;
-        add_participant(
+        add_participant(store, id, NewParticipant::coordinator("human", None))?;
+        let chief = add_participant(
             store,
             id,
-            NewParticipant::coordinator(
-                "chief",
-                request.chief.agent.as_deref(),
-                Some(chief_harness),
-            ),
+            NewParticipant::coordinator("chief", Some(chief_harness)),
+        )?;
+        store.db.execute(
+            "UPDATE participant SET model = ?, effort = ? WHERE id = ?",
+            params![request.chief.model, request.chief.effort, chief.id],
         )?;
         for (member, roles) in &members {
-            add_participant(
-                store,
-                id,
-                NewParticipant {
-                    handle: &member.agent,
-                    role: None,
-                    roles,
-                    agent: Some(&member.agent),
-                    harness: Some(&member.harness),
-                    designer: member.designer,
-                    tier: Some(&member.tier),
-                },
-            )?;
+            let handle = member.handle(store, id)?;
+            add_participant(store, id, NewParticipant::member(&handle, roles, member))?;
         }
         store.log(
             id,
@@ -427,8 +471,8 @@ pub(crate) fn delete_project(store: &mut Store, id: i64) -> Result<DeletedProjec
             created_at: row.created_at,
             members: count(
                 "SELECT COUNT(*) AS n FROM participant
-                 WHERE project_id = ? AND agent IS NOT NULL AND member_id IS NULL AND left_at IS NULL
-                   AND role != 'chief'",
+                 WHERE project_id = ? AND role NOT IN ('human', 'chief') AND member_id IS NULL
+                   AND left_at IS NULL",
             )?,
             sessions: count("SELECT COUNT(*) AS n FROM participant WHERE project_id = ? AND member_id IS NOT NULL")?,
             tasks: count("SELECT COUNT(*) AS n FROM task WHERE project_id = ?")?,

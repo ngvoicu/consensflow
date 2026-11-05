@@ -16,6 +16,12 @@ launcher-run = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "ru
 launcher-repair = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "repair"]
 launcher-holds = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "repair_holds"]
 launcher-terminal = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "terminal"]
+# The launcher on Windows, a launch file and the shim beside it (T-997): what setup and the app's repair make of it.
+launcher-pair = ["cargo", "test", "--offline", "-p", "cf-launcher", "--test", "pair"]
+# The shim as the process it is, the binary the bundle carries (`crates/cf/tests/shim.rs`).
+launcher-shim = ["cargo", "test", "--offline", "-p", "cf", "--test", "shim"]
+# The build that makes the shim and the staging that puts it in the bundle (`cargo xtask build-cf` and `stage`).
+launcher-build = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "sidecar"]
 
 [[plant]]
 name = "launcher: a launcher for cmd ends its lines in LF"
@@ -150,8 +156,8 @@ runs = ["launcher-repair"]
 
 [[plant.edit]]
 file = "crates/cf-launcher/src/repair.rs"
-find = "let script = launcher(windows, cf, pinned_home(&text, windows).as_deref());"
-replace = "let script = launcher(windows, cf, None);"
+find = "let script_text = launcher(windows, cf, pinned_home(&text, windows).as_deref());"
+replace = "let script_text = launcher(windows, cf, None);"
 
 [[plant]]
 name = "launcher: a repair pins a home the command did not"
@@ -160,8 +166,8 @@ runs = ["launcher-repair"]
 
 [[plant.edit]]
 file = "crates/cf-launcher/src/repair.rs"
-find = "let script = launcher(windows, cf, pinned_home(&text, windows).as_deref());"
-replace = 'let script = launcher(windows, cf, Some("/another/home"));'
+find = "let script_text = launcher(windows, cf, pinned_home(&text, windows).as_deref());"
+replace = 'let script_text = launcher(windows, cf, Some("/another/home"));'
 
 [[plant]]
 name = "launcher: a repair rewrites a command that already runs this cf"
@@ -171,7 +177,9 @@ runs = ["launcher-holds"]
 [[plant.edit]]
 file = "crates/cf-launcher/src/repair.rs"
 find = '''
-    if matches!(runs(&text, windows), Some(Runs::Native { cf: named }) if named == cf) {
+    if matches!(runs(&text, windows), Some(Runs::Native { cf: named }) if named == cf)
+        && shim.is_none_or(|shim| is_whole(file, held, shim))
+    {
         return Repair::Current;
     }'''
 replace = ""
@@ -220,14 +228,14 @@ runs = ["launcher-holds"]
 [[plant.edit]]
 file = "crates/cf-launcher/src/repair.rs"
 find = '''
-    if !file.exists() {
+    } else {
         return Repair::Absent;
-    }'''
+    };'''
 replace = '''
-    if !file.exists() {
+    } else {
         let _ = write_launcher(file, &launcher(windows, cf, None), windows);
         return Repair::Rewritten;
-    }'''
+    };'''
 
 [[plant]]
 name = "launcher: a repair looks at the first name only"
@@ -246,8 +254,8 @@ runs = ["launcher-terminal", "launcher-goldens"]
 
 [[plant.edit]]
 file = "crates/cf-launcher/src/install.rs"
-find = "let name = names(env.on_windows())[0];"
-replace = "let name = names(env.on_windows())[1];"
+find = "for name in sought(env.on_windows()) {"
+replace = "for name in names(env.on_windows()).iter().skip(1) {"
 
 [[plant]]
 name = "launcher: a folder is on PATH when a folder on it begins like it"
@@ -261,13 +269,26 @@ replace = ".any(|at| at.starts_with(&dir_text))"
 
 [[plant]]
 name = "launcher: an install replaces someone else's command"
+meant = "every_install_of_the_form_of_sh_leaves_what_node_left_and_says_what_it_said"
+runs = ["launcher-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = "!file.exists() || is_ours(&read_text(&file)?)"
+replace = "true"
+
+[[plant]]
+name = "launcher: an install on Windows replaces someone else's command"
 meant = "every_install_of_the_form_of_cmd_leaves_what_node_left_and_says_what_it_said"
 runs = ["launcher-goldens"]
 
 [[plant.edit]]
 file = "crates/cf-launcher/src/install.rs"
-find = "if file.exists() && !is_ours(&read_text(&file)?) {"
-replace = "if file.exists() && false {"
+find = "fn is_free(file: &Path) -> Result<bool, String> {"
+replace = """fn is_free(file: &Path) -> Result<bool, String> {
+    if true {
+        return Ok(true);
+    }"""
 
 [[plant]]
 name = "launcher: an install makes a command that cannot be run"
@@ -372,3 +393,223 @@ runs = ["launcher-units"]
 file = "crates/cf-launcher/src/wiring.rs"
 find = "if !self.exists {"
 replace = "if !self.exists && !self.mine {"
+
+# The terminal's command on Windows is a program that reads a launch file, and never a `.cmd`
+# (T-997): cmd.exe ends a command at the first line break of an argument, so a many-line
+# `cf ask "…"` typed in PowerShell reached the board as its first line. The plants of the
+# shells it was typed in are `tests/plants/cli/shells.toml`'s, which run on Windows alone.
+# There is no plant of a launch file that names its own shim: the shim would start itself
+# again and again, and the test that holds it (`a_launch_file_that_names_the_shim_itself_does_not_start_it_again`)
+# has no way to fail but to start them.
+
+[[plant]]
+name = "launcher: a launcher on Windows is a cmd again"
+meant = "the_names_are_the_apps_and_the_short_one_and_a_launch_file_where_windows_has_them"
+runs = ["launcher-units"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/places.rs"
+find = '''["consensflow.launch", "cf.launch"]'''
+replace = '''["consensflow.cmd", "cf.cmd"]'''
+
+[[plant]]
+name = "launcher: a launcher on Windows has no program beside its file"
+meant = "setup_writes_the_launch_file_and_the_shim_under_both_names_and_no_cmd"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = 'program::place(&program_of(&file), shim).map_err(|failed| failed.to_string())?;'
+replace = 'let _ = (shim, program_of(&file));'
+
+[[plant]]
+name = "launcher: setup leaves the cmd of ours that cmd.exe would run for the name"
+meant = "setup_takes_away_the_cmd_of_ours_that_a_build_before_the_shim_left"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = 'let _ = std::fs::remove_file(script_of(&file));'
+replace = 'let _ = script_of(&file);'
+
+[[plant]]
+name = "launcher: setup replaces the cmd of someone else"
+meant = "setup_leaves_a_cmd_of_someone_else_and_makes_no_launcher_under_its_name"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = 'if launch == Some(false) || ours(&script_of(file))? == Some(false) {'
+replace = 'if launch == Some(false) {'
+
+[[plant]]
+name = "launcher: setup replaces the program of someone else"
+meant = "setup_leaves_a_program_of_someone_else_and_makes_no_launcher_under_its_name"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = 'Ok(launch == Some(true) || !program_of(file).exists())'
+replace = 'Ok(true)'
+
+[[plant]]
+name = "launcher: setup writes a launch file for a bundle with no shim"
+meant = "a_bundle_with_no_shim_makes_no_launcher_and_the_sentence_says_where_it_looked"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/install.rs"
+find = 'Some(program::read_bundled(Path::new(&named))?)'
+replace = 'program::read_bundled(Path::new(&named)).ok()'
+
+[[plant]]
+name = "launcher: a status does not look for the cmd of a build before the shim"
+meant = "a_cmd_alone_is_still_the_command_a_status_and_a_doctor_find"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/places.rs"
+find = '''&["consensflow.launch", "consensflow.cmd"]'''
+replace = '''&["consensflow.launch"]'''
+
+[[plant]]
+name = "launcher: the repair does not see the cmd of a build before the shim"
+meant = "the_repair_makes_the_cmd_of_a_build_before_the_shim_a_launch_file_and_a_shim"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '} else if windows && script.exists() {'
+replace = '} else if false && script.exists() {'
+
+[[plant]]
+name = "launcher: the repair keeps a shim that is not the bundle's"
+meant = "the_repair_gives_a_pair_the_shim_of_the_bundle_when_its_own_is_another"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = 'Ok(bytes) => program::is_current(&program, bytes),'
+replace = 'Ok(_) => program.is_file(),'
+
+[[plant]]
+name = "launcher: the repair leaves the cmd of ours beside a pair that is whole"
+meant = "the_repair_takes_away_a_cmd_of_ours_left_beside_a_pair_that_is_whole"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '&& !is_leftover(&script_of(file))'
+replace = '&& true'
+
+[[plant]]
+name = "launcher: the repair gives up the cmd that runs for a pair it cannot make"
+meant = "the_repair_keeps_the_cmd_that_runs_when_the_bundle_has_no_shim_to_make_a_pair_of"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = 'return Repair::Failed(why.clone());'
+replace = 'let _ = why;'
+
+[[plant]]
+name = "launcher: the repair finds no pair whole"
+meant = "the_repair_run_again_finds_every_pair_whole_and_writes_nothing"
+runs = ["launcher-pair"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/repair.rs"
+find = '''    held == file
+        && match shim {'''
+replace = '''    false
+        && match shim {'''
+
+[[plant]]
+name = "launcher: a program is written in place"
+meant = "a_program_that_is_another_is_replaced_by_a_new_file_and_not_written_in_place"
+runs = ["launcher-units"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/program.rs"
+find = 'if program.symlink_metadata().is_ok() {'
+replace = 'if false {'
+
+[[plant]]
+name = "launcher: the copies of a program set aside are never taken away"
+meant = "the_copies_set_aside_earlier_are_taken_away_and_nothing_else_is"
+runs = ["launcher-units"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/program.rs"
+find = '''    sweep(program);
+    if is_current(program, bytes) {'''
+replace = '    if is_current(program, bytes) {'
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/program.rs"
+find = '''    write_file(program, bytes, 0o777)?;
+    sweep(program);
+    Ok(())'''
+replace = '''    write_file(program, bytes, 0o777)?;
+    Ok(())'''
+
+[[plant]]
+name = "launcher: the shim hands the cf its first argument and no more"
+meant = "every_argument_reaches_the_cf_as_it_was_given_and_the_code_it_ends_with_is_the_commands"
+runs = ["launcher-units", "launcher-shim"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/shim.rs"
+find = 'command.args(args);'
+replace = 'command.args(args.iter().take(1));'
+
+[[plant]]
+name = "launcher: the shim does not tell the cf the home the launch file pins"
+meant = "the_home_a_launch_file_pins_is_the_home_the_cf_is_told"
+runs = ["launcher-units"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/shim.rs"
+find = '''command.env("CONSENSFLOW_HOME", home);'''
+replace = 'let _ = home;'
+
+[[plant]]
+name = "launcher: the shim ends with 0 whatever the cf ends with"
+meant = "a_text_of_many_lines_reaches_the_cf_whole_with_every_other_argument_as_it_was_given"
+runs = ["launcher-shim"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/shim.rs"
+find = 'Ok(status.code().unwrap_or(1))'
+replace = 'Ok(0)'
+
+[[plant]]
+name = "launcher: the shim gives the cf no standard input"
+meant = "what_is_piped_in_reaches_the_cf_and_what_it_says_reaches_the_terminal"
+runs = ["launcher-shim"]
+
+[[plant.edit]]
+file = "crates/cf-launcher/src/shim.rs"
+find = 'command.args(args);'
+replace = '''command.args(args);
+    command.stdin(std::process::Stdio::null());'''
+
+[[plant]]
+name = "launcher: the Windows build does not ask for the shim"
+meant = "is_built_with_the_cf_and_put_beside_it_on_windows_alone"
+runs = ["launcher-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/build_cf.rs"
+find = '''.map(|_| ["--bin", "cf-shim"])'''
+replace = '''.map(|_| ["--bin", "cf"])'''
+
+[[plant]]
+name = "launcher: the staging leaves the shim out of the bundle"
+meant = "stages_the_shim_and_the_console_host_beside_it_on_windows_and_says_each_file"
+runs = ["launcher-build"]
+
+[[plant.edit]]
+file = "tools/xtask/src/sidecar/stage.rs"
+find = '''fs::copy(&from, &to).map_err(files("copy the shim to", &to))?;'''
+replace = 'let _ = (&from, &to);'

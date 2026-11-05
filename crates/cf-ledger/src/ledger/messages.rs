@@ -33,6 +33,19 @@ impl Ledger {
         messages::note(&mut self.store, project_id, note)
     }
 
+    /// The note that a task's window closed, from ConsensFlow to the requester of the task:
+    /// a line of the note still queued for the requester that tells of several tasks that
+    /// failed alike, where `note.task` is one of them, and a note of its own anywhere else.
+    pub fn tell_closed(
+        &mut self,
+        project_id: i64,
+        note: &NewNote,
+    ) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("note", None)?;
+        crate::tasks::tell_closed(&mut self.store, project_id, note)
+    }
+
     /// A note from ConsensFlow to `to`, about no task, that says its
     /// conversation `role` again, in the words `body`: the ledger knows it for a
     /// replacement of a role from then on ([`Ledger::role_notes_to`]), and records

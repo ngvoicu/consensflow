@@ -161,6 +161,26 @@ impl<'a> Driver<'a> {
         }
     }
 
+    /// A driver of the app started again ([`crate::live::members::Members::restart`]), with
+    /// the bounds and what the human typed before it.
+    pub fn resumed(
+        members: &'a Members,
+        log: &'a Log,
+        bounds: Bounds,
+        chief_kind: &'static str,
+        said: Vec<Said>,
+    ) -> Self {
+        Self {
+            said,
+            ..Self::new(members, log, bounds, chief_kind)
+        }
+    }
+
+    /// What this driver carries over a restart: its bounds and what the human typed.
+    pub fn carried(self) -> (Bounds, Vec<Said>) {
+        (self.bounds, self.said)
+    }
+
     /// Waits for `look`, every [`LOOK`], within `within` and the scenario's bounds, which are
     /// checked first at each look.
     pub fn wait<T>(

@@ -25,7 +25,8 @@ fn project(ledger: &mut Ledger, name: &str) -> ProjectView {
             name: name.into(),
             chief: NewChief {
                 harness: "codex".into(),
-                agent: Some("diana".into()),
+                model: Some("diana".into()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,

@@ -392,3 +392,102 @@ fn a_turn_that_begins_after_a_reroute_ends_it_and_one_inside_the_turn_does_not()
 fn read_ok(records: &[Value]) -> Record {
     read(records).unwrap()
 }
+
+/// Codex 0.165.0's window on a model its account lacks stays up, and its first turn ends
+/// with the refusal in `task_complete.error`, as `gone_launch.py codex` saw it on
+/// 2026-10-31: the turn failed, in words that refuse the model the launch asked for, so the
+/// chief is heard there (CHF-06, T-994), and the refusal is no quota's.
+#[test]
+fn a_turn_on_a_model_the_account_lacks_fails_in_words_that_refuse_that_model() {
+    let refused = json!({
+        "timestamp": AT,
+        "type": "event_msg",
+        "payload": {
+            "type": "task_complete",
+            "turn_id": "t1",
+            "last_agent_message": null,
+            "error": {
+                "message": "The 'gpt-gone-9' model is not supported when using Codex with a ChatGPT account.",
+                "codex_error_info": "model_not_found",
+            },
+        },
+    });
+    let read = read(&[started(json!("t1")), refused]).unwrap();
+    assert!(read.failed && read.quota.is_none());
+    let failure = read.failure.as_deref().unwrap_or_default();
+    assert!(
+        crate::codex::models::gone(failure, "gpt-gone-9"),
+        "{failure}"
+    );
+    assert!(!crate::codex::models::gone(failure, "gpt-6-luna"));
+}
+
+/// What a turn ended for a cybersecurity flag recorded, word for word (kluris T-158 and T-163,
+/// 2026-10-27, Codex 0.164.0): its `message`, beside `codex_error_info` `cyber_policy`.
+const CYBER_WORDS: &str = "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. If you\u{2019}re doing authorized security work that requires more cyber permissive safeguards, apply for Daybreak access via https://platform.openai.com/settings/organization/status-and-access before retrying.";
+
+#[test]
+fn a_turn_codex_refused_for_a_safety_filter_names_the_kind_in_plain_words_and_keeps_its_own() {
+    // T-823: the board said only "harness reported a failure", and the chief could not tell
+    // a refusal for content from a crash or a conversation grown too long.
+    let read = read(&[
+        limits(40.0, RESETS),
+        started(json!("t1")),
+        errored(json!("cyber_policy"), CYBER_WORDS),
+    ])
+    .unwrap();
+    assert!(read.failed);
+    assert_eq!(read.failure.as_deref(), Some(CYBER_WORDS));
+    assert_eq!(
+        read.failure_kind.as_deref(),
+        Some("Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness")
+    );
+    // No refusal for a moment, and no quota: the engine does not hold the turn to try it again.
+    assert_eq!(read.quota.as_deref().map(Quota::level), Some(Level::Ok));
+}
+
+#[test]
+fn every_failure_kind_codex_names_that_is_no_limit_has_a_plain_name_with_its_own_after_it() {
+    // The kinds of `CodexErrorInfo` in the binary of Codex 0.166.0, less the limits
+    // (`usage_limit_exceeded`, `rate_limit_exceeded`), the moments a server refused for
+    // (`server_overloaded`, `internal_server_error`, `policy_capacity_unavailable`), the
+    // login (`unauthorized`) and `other`: those the reader holds, or leaves to the words.
+    let named = [
+        "cyber_policy",
+        "bio_policy",
+        "misalignment_policy_violation",
+        "context_window_exceeded",
+        "session_budget_exceeded",
+        "model_not_found",
+        "invalid_prompt",
+        "bad_request",
+        "sandbox_error",
+        "active_turn_not_steerable",
+        "thread_rollback_failed",
+        "http_connection_failed",
+        "response_stream_connection_failed",
+        "response_stream_disconnected",
+        "response_too_many_failed_attempts",
+    ];
+    for info in named {
+        // A kind is a name, or an object that holds one.
+        for kind in [json!(info), json!({ info: { "http_status_code": 400 } })] {
+            let read = read(&[started(json!("t1")), errored(kind.clone(), "Words.")]).unwrap();
+            let said = read.failure_kind.unwrap_or_default();
+            assert!(said.contains(&format!("({info})")), "{kind}: {said:?}");
+        }
+    }
+    for info in [
+        "usage_limit_exceeded",
+        "rate_limit_exceeded",
+        "server_overloaded",
+        "other",
+        "a_kind_of_a_later_codex",
+    ] {
+        let read = read(&[started(json!("t1")), failed("t1", info, AT)]).unwrap();
+        assert_eq!(read.failure_kind, None, "{info}");
+    }
+    // A turn with no kind at all, or one that did not fail, names none.
+    let none = read(&[started(json!("t1")), errored(Value::Null, "Words.")]).unwrap();
+    assert_eq!(none.failure_kind, None);
+}

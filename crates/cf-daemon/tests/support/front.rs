@@ -18,10 +18,9 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::refusal::Refusal;
-use cf_daemon::api::context::{AgentRows, Closing, Context};
+use cf_daemon::api::context::{Closing, Context};
 use cf_daemon::api::credentials::Credentials;
 use cf_daemon::api::Api;
-use cf_daemon::roster::Agents;
 use cf_daemon::screens::Screens;
 use cf_daemon::seams::DaemonSpawn;
 use cf_harness::admin::HarnessAdmin;
@@ -33,7 +32,7 @@ use tokio::net::TcpStream;
 
 use crate::support::daemon::{executor, Kicks};
 
-/// What a handler of the API is given, over `ledger` and a roster, with the
+/// What a handler of the API is given, over `ledger`, with the
 /// executor its requests run on, and the wake-ups it asked for counted.
 pub struct Front {
     pub context: Rc<Context>,
@@ -43,7 +42,7 @@ pub struct Front {
 
 impl Front {
     /// The front's parts, with the daemon's log and trace in `folder`.
-    pub fn new(folder: &Path, ledger: Rc<RefCell<Ledger>>, roster: Rc<dyn AgentRows>) -> Self {
+    pub fn new(folder: &Path, ledger: Rc<RefCell<Ledger>>) -> Self {
         let (spawn, log, trace) = executor(folder);
         let kicks = Kicks::new();
         let context = Rc::new(Context {
@@ -59,7 +58,6 @@ impl Front {
                 })
             }),
             closing: Closing::new(),
-            roster,
             log,
             trace,
             tooling_calls: false,
@@ -78,27 +76,18 @@ impl Front {
 }
 
 /// The screens as the daemon mounts them in front of the API (`api::serve`),
-/// which `token` opens, over `env` and the saved `agents`; `on_roster_change`
-/// is what a change to the roster tells. The harness admin asks no feed and
+/// which `token` opens, over `env`. The harness admin asks no feed and
 /// runs no program: its seams are scripted, with nothing scripted, so a request
 /// that reached for either would fail and not reach out.
-pub fn screens(
-    token: &str,
-    env: Env,
-    agents: Rc<Agents>,
-    on_roster_change: Rc<dyn Fn() -> Result<(), String>>,
-) -> Rc<Screens> {
+pub fn screens(token: &str, env: Env) -> Rc<Screens> {
     Rc::new(Screens {
         token: token.to_owned(),
-        on_roster_change,
-        agents,
         admin: HarnessAdmin::new(
-            env.clone(),
+            env,
             Rc::new(ManualTime::new(EPOCH_MS)),
             Rc::new(ScriptedLatest::default()),
             Rc::new(ScriptedCapture::default()),
         ),
-        env,
     })
 }
 

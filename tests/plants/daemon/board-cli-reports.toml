@@ -425,10 +425,9 @@ runs = ["bcr-ledger-receipt-decided"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        Ending::Cancelled if task.state == "done" => {
+        (Ending::Cancelled, "done") => format!("accept T-{number}, or cancel {them} first"),
 '''
 replace = '''
-        Ending::Cancelled if false && task.state == "done" => {
 '''
 
 [[plant]]
@@ -439,8 +438,8 @@ runs = ["bcr-ledger-receipt-behind-work"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        Ending::Cancelled => format!("cancel {them} first, or let T-{number} finish"),
+        (Ending::Cancelled, _) => format!("cancel {them} first, or let T-{number} finish"),
 '''
 replace = '''
-        Ending::Cancelled => format!("accept T-{number}, or cancel {them} first"),
+        (Ending::Cancelled, _) => format!("accept T-{number}, or cancel {them} first"),
 '''

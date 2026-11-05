@@ -6,10 +6,8 @@
 //! daemon, and the command a window runs), the production Tauri commands, and a
 //! real PTY child. So it resolves NOTHING of the product from the repository,
 //! and every path it asserts on lives under `Contents/`. What it takes from the
-//! repository is this file, the proof of the agents screens
-//! ([`cf_e2e::agents_proof`]), which only speaks HTTP to the daemon the app
-//! started and reads the roster that daemon wrote, and a program of its own
-//! ([`PASTE_READER`]) that the stand-in harness runs. The bundle ships no Node,
+//! repository is this file and a program of its own ([`PASTE_READER`]) that the
+//! stand-in harness runs. The bundle ships no Node,
 //! and this runs none.
 //!
 //! The app is started in its self-test mode as the release workflow's signed
@@ -52,14 +50,12 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::time::Duration;
 
-use cf_e2e::agents_proof::{self, Daemon as Target};
 use cf_e2e::daemon_log::{self, Kind};
+use cf_e2e::files;
 use cf_e2e::process::{is_alive, own_var};
-use cf_e2e::{files, http};
 use regex::Regex;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use url::Url;
 
 use app::App;
 use machine::{parse_pids, Machine, FLOOD_LINES, FLOOD_WIDTH};
@@ -287,8 +283,8 @@ fn drive(
         "the daemon never confirmed the delivery from the record"
     );
 
-    // The agents screens, each in its dialog over the board, framed at the
-    // daemon's page with the UI token.
+    // The harnesses screen, in its dialog over the board, framed at the daemon's page
+    // with the UI token (the saved agents' screen is no more).
     let screens = app.wait_for("agents-screens")?["data"]["screens"].clone();
     let dialogs: Vec<Value> = screens
         .as_array()
@@ -299,42 +295,15 @@ fn drive(
         .collect();
     assert_eq!(
         Value::Array(dialogs),
-        json!([["Agents", true], ["Harnesses", true]]),
+        json!([["Harnesses", true]]),
         "{screens}"
     );
     let framed = |at: usize| screens[at]["src"].as_str().unwrap_or_default().to_owned();
     assert!(
-        Regex::new(r"^http://localhost:\d+/\?token=")?.is_match(&framed(0)),
+        Regex::new(r"^http://localhost:\d+/harnesses\?token=")?.is_match(&framed(0)),
         "{}",
         framed(0)
     );
-    assert!(
-        Regex::new(r"^http://localhost:\d+/harnesses\?token=")?.is_match(&framed(1)),
-        "{}",
-        framed(1)
-    );
-
-    // The agents behind those screens, asked of the daemon that serves them, the
-    // app's own, over its API and through the roster it writes. The packaged
-    // build's own catalog, an agent saved with its profile, the screens behind
-    // the UI token, and the deletion of the agent saved; nothing of the
-    // product's modules is used to ask. The address and the token are the ones
-    // the frame was given.
-    let served = framed(0);
-    let token = Url::parse(&served)?
-        .query_pairs()
-        .find(|(name, _)| name == "token")
-        .map(|(_, value)| value.into_owned())
-        .unwrap_or_default();
-    agents_proof::prove(Target {
-        url: http::origin(&served),
-        token: &token,
-        home: &machine.state,
-    })?;
-    writeln!(
-        said,
-        "the daemon's agents: the catalog, a saved profile, the screens, a deletion"
-    )?;
 
     let pasted = app.wait_for("large-paste")?;
     let expected = format!("\x1b[200~{}\x1b[201~", "漢字 résumé 🙂\r".repeat(30_000)).into_bytes();

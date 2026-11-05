@@ -116,9 +116,12 @@ fn every_handoff_reads_as_node_wrote_it() {
     let rows = table("handoffText");
     let mut halved = 0;
     for row in rows {
+        // Node named each side by its harness and its saved agent; a chief is a harness
+        // and a model now (CHF-08), named in the same words: the name Node's row gives
+        // its agent stands for the model.
         let from = SwitchedFrom {
             harness: row["from"]["harness"].as_str().unwrap().to_owned(),
-            agent: row["from"]["agent"].as_str().map(str::to_owned),
+            model: row["from"]["agent"].as_str().map(str::to_owned),
         };
         let to = seat(row["to"]["harness"].as_str(), row["to"]["agent"].as_str());
         let open = ChiefOpenWork {

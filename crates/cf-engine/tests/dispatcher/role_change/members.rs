@@ -42,7 +42,7 @@ fn working_session(context: &Context) -> ProjectView {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
         }))
         .unwrap()

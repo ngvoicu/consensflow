@@ -4,6 +4,7 @@
 
 use serde_json::json;
 
+use super::secret::names_a_secret;
 use super::*;
 
 /// A screen that names no secret: a model the account cannot use.
@@ -24,6 +25,8 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         possibly_left: Vec::new(),
         survivor: None,
         pasted: false,
+        part: Part::Unknown,
+        last_call: None,
     }
 }
 
@@ -321,7 +324,9 @@ fn only_the_last_lines_are_quoted() {
 
 #[test]
 fn a_quote_is_held_to_its_characters_and_the_older_lines_go_first() {
-    let long = "w".repeat(190);
+    // Rows of words: a row of 190 letters with no blank in it is a key's body (`screen`).
+    let long = format!("{}xy", "abc ".repeat(47));
+    assert_eq!(long.len(), 190);
     let lines = ["the oldest", long.as_str(), long.as_str(), "newest of them"];
     let said = shown(None, None, Some(&lines)).after("gone");
     let quote = said
@@ -339,7 +344,9 @@ fn a_last_line_longer_than_the_quote_is_cut_with_a_mark() {
     let said = shown(
         None,
         None,
-        Some(&["start of a very long line", &"x".repeat(5_000)]),
+        // Words: a row of 5,000 letters with no blank in it is a key's body, and so are four
+        // words of one length in a row (`screen`).
+        Some(&["start of a very long line", &"is word was ".repeat(500)]),
     )
     .after("gone");
     let quote = said
@@ -368,7 +375,7 @@ fn a_key_looking_string_is_masked_and_the_note_counts_what_it_hid() {
         Some(1),
         None,
         Some(&[
-            "request with sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv was refused",
+            "request with AbCdEfGhIjKlMnOpQrStUv0123456789 was refused",
             "id 0123456789abcdef0123456789abcdef in the log",
         ]),
     )
@@ -383,7 +390,7 @@ fn a_key_looking_string_is_masked_and_the_note_counts_what_it_hid() {
     let one = shown(
         None,
         None,
-        Some(&["cloned with ghp_abcdefghijklmnopqrstuvwxyz0123456789"]),
+        Some(&["cloned from https://alice:hunter2@example.test/repo"]),
     )
     .after("gone");
     assert!(
@@ -394,21 +401,22 @@ fn a_key_looking_string_is_masked_and_the_note_counts_what_it_hid() {
 
 #[test]
 fn a_secret_in_a_line_the_quote_leaves_out_is_not_counted() {
-    let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    // A token of no kind with a prefix: a screen that shows one is withheld whole (`screen`).
+    let secret = "0123456789abcdef0123456789abcdef";
     let mut tail = vec![format!("first {secret}")];
     tail.extend((1..=6).map(|number| format!("line {number}")));
     let lines: Vec<&str> = tail.iter().map(String::as_str).collect();
     let said = shown(None, None, Some(&lines)).after("gone");
     assert!(!said.contains("masked"), "{said}");
-    assert!(!said.contains("ghp_"), "{said}");
+    assert!(!said.contains("0123456789abcdef"), "{said}");
 }
 
 #[test]
 fn a_secret_cut_in_the_middle_by_the_bound_is_hidden_before_it_is_cut() {
-    let secret = format!("sk-{}", "A1".repeat(30));
+    let secret = "A1".repeat(30);
     let line = format!("{} {secret}", "x".repeat(380));
     let said = shown(None, None, Some(&[line.as_str()])).after("gone");
-    assert!(!said.contains("sk-"), "{said}");
+    assert!(said.contains("[masked]"), "{said}");
     assert!(!said.contains("A1A1"), "{said}");
 }
 
@@ -448,7 +456,7 @@ fn a_snapshot_answer_gives_its_tail_when_it_was_a_success() {
 
 #[test]
 fn what_changes_by_itself_in_an_outage_is_folded_and_every_other_number_kept() {
-    let key = |words: &str| words_key(words);
+    let key = |words: &str| words_folded(words);
     assert_eq!(
         key("Overloaded, retry in 12s"),
         key("Overloaded, retry in 7s")
@@ -535,7 +543,7 @@ fn what_a_screen_says_is_the_windows_lines_after_the_newest_paste() {
 
 #[test]
 fn a_footers_counters_are_folded_and_keep_one_failure_one() {
-    let key = |words: &str| words_key(words);
+    let key = |words: &str| words_folded(words);
     assert_eq!(
         key("Error: x / 12% context left"),
         key("Error: x / 9% context left")
@@ -560,5 +568,191 @@ fn a_footers_counters_are_folded_and_keep_one_failure_one() {
     assert_eq!(
         key("1.2k tokens and 3k left"),
         "#count tokens and #count left"
+    );
+}
+
+/// A code of failure is one the program ended with by itself: not the status Windows gives
+/// the human's Ctrl+C, which is their interrupt as a signal is on the Mac (Calliope's P2c,
+/// T-994); an access violation is the program's own.
+#[test]
+fn the_human_s_ctrl_c_on_windows_is_no_code_of_failure() {
+    assert!(shown(Some(1), None, None).ended_failing());
+    assert!(shown(Some(0xC000_0005), None, None).ended_failing());
+    assert!(!shown(Some(0xC000_013A), None, None).ended_failing());
+    assert!(!shown(Some(0), None, None).ended_failing());
+    assert!(!shown(None, Some("SIGINT"), None).ended_failing());
+}
+
+#[test]
+fn an_outage_key_is_a_hash_that_tells_equal_failures_and_keeps_nothing_readable() {
+    let hex = |key: &str| key.len() == 64 && key.chars().all(|c| c.is_ascii_hexdigit());
+    let secret = "sk-proj-Zq81XmN4vT7bKd29LpWs3YcRu6EhGf0A";
+
+    // The harness's words: what folds to the same is the same key, and no other.
+    let one = words_key(&format!(
+        "Incorrect API key provided: {secret} (retry in 12s)"
+    ));
+    let other = words_key(&format!(
+        "Incorrect API key provided: {secret} (retry in 7s)"
+    ));
+    let another = words_key(&format!(
+        "Incorrect API key provided: {secret} for another organisation"
+    ));
+    assert!(hex(&one), "{one}");
+    assert_eq!(one, other);
+    assert_ne!(one, another);
+    assert!(!one.contains("sk-proj"), "{one}");
+
+    // The screen's last lines are the same.
+    let screen = |last: &str| {
+        Shown::from_snapshot(&json!({
+            "ok": true,
+            "tail": ["Working", format!("export OPENAI_API_KEY={secret}"), last],
+        }))
+    };
+    let key = screen("Error: the request failed").outage_key();
+    assert!(hex(&key), "{key}");
+    assert_eq!(key, screen("Error: the request failed").outage_key());
+    assert_ne!(key, screen("Error: the model is not found").outage_key());
+    assert!(!key.contains("OPENAI") && !key.contains("sk-"), "{key}");
+
+    // A failure that said nothing the engine could tell has no key, and is never hashed into one.
+    assert_eq!(words_key(""), "");
+    assert_eq!(words_key("  \n ... \n"), "");
+    assert_eq!(Shown::default().outage_key(), "");
+    assert_eq!(
+        Shown::from_snapshot(&json!({ "ok": true, "tail": ["", "  "] })).outage_key(),
+        ""
+    );
+}
+
+/// T-823, kluris T-153: a Claude Code worker's window closed with exit code 143 three seconds
+/// after the project's own tests killed its `cargo test`, and the note said only "exit code
+/// 143". A shell's status above 128 is 128 and a signal; it is only consistent with it (a
+/// program can exit with 143, `sh -c 'exit 143'` does), and who sent the signal is said only
+/// where the engine knows what it sent (the review of `a26e0848e`, P2).
+#[cfg(unix)]
+#[test]
+fn an_exit_above_128_is_consistent_with_a_signal_and_what_consensflow_sent_is_said_when_known() {
+    let quote = "its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\"";
+    let with = |code: u32, part: Part| {
+        shown(Some(code), None, Some(&PI))
+            .with_part(part)
+            .after("@zeus's window closed")
+    };
+    for (code, name) in [
+        (129, "SIGHUP"),
+        (130, "SIGINT"),
+        (131, "SIGQUIT"),
+        (134, "SIGABRT"),
+        (137, "SIGKILL"),
+        (139, "SIGSEGV"),
+        (141, "SIGPIPE"),
+        (143, "SIGTERM"),
+    ] {
+        assert_eq!(
+            with(code, Part::NotSent),
+            format!("@zeus's window closed (exit code {code}, consistent with {name}; ConsensFlow had sent it no kill); {quote}"),
+            "{code}"
+        );
+        assert_eq!(
+            with(code, Part::Sent),
+            format!("@zeus's window closed (exit code {code}, consistent with {name}; ConsensFlow had sent it a kill before it closed); {quote}"),
+            "{code}"
+        );
+        // Not known: nothing is claimed of who sent it, and nothing that it was sent.
+        assert_eq!(
+            with(code, Part::Unknown),
+            format!("@zeus's window closed (exit code {code}, consistent with {name}); {quote}"),
+            "{code}"
+        );
+    }
+    // A signal whose number differs between systems is a number, not a name.
+    assert!(with(138, Part::Unknown).contains("(exit code 138, consistent with signal 10)"));
+    // A program's own code is no signal's, whatever it is: 128 is none, nor is 160 and above.
+    for code in [0, 1, 2, 127, 128, 160, 255] {
+        for part in [Part::Unknown, Part::NotSent, Part::Sent] {
+            assert_eq!(
+                with(code, part),
+                format!("@zeus's window closed (exit code {code}); {quote}"),
+                "{code}"
+            );
+        }
+    }
+    // A signal the host reported is a fact, and is told as one.
+    let reported = |part: Part| {
+        shown(Some(1), Some("Terminated"), Some(&PI))
+            .with_part(part)
+            .after("@zeus's window closed")
+    };
+    assert_eq!(
+        reported(Part::NotSent),
+        format!("@zeus's window closed (ended by signal Terminated, which ConsensFlow did not send: it had sent no kill); {quote}")
+    );
+    assert_eq!(
+        reported(Part::Sent),
+        format!("@zeus's window closed (ended by signal Terminated, after ConsensFlow had sent it a kill); {quote}")
+    );
+    assert_eq!(
+        reported(Part::Unknown),
+        format!("@zeus's window closed (ended by signal Terminated); {quote}")
+    );
+}
+
+#[test]
+fn a_status_is_a_signals_only_where_there_are_signals() {
+    assert_eq!(signalled(143, true).as_deref(), Some("SIGTERM"));
+    // Windows: 143 is a number the program returned.
+    assert_eq!(signalled(143, false), None);
+}
+
+/// Windows has no signals: a status above 128 is the number the program returned.
+#[cfg(windows)]
+#[test]
+fn an_exit_above_128_is_a_number_on_windows() {
+    assert_eq!(
+        shown(Some(143), None, Some(&PI))
+            .with_part(Part::NotSent)
+            .after("@zeus's window closed"),
+        "@zeus's window closed (exit code 143); its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\""
+    );
+}
+
+/// T-823: the last tool call the record shows is what the window was doing when it closed. What
+/// may be said of it is `call`'s; here it is where the note says it.
+#[test]
+fn the_last_tool_call_is_said_before_the_screen_and_a_host_that_sent_no_screen_has_it_too() {
+    let screen = "its screen ended with: \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\"";
+    assert_eq!(
+        shown(Some(2), None, Some(&PI))
+            .with_last_call(Some(LastCall::shell(
+                "Bash",
+                "cargo fmt --check && cargo test --workspace"
+            )))
+            .after("@zeus's window closed"),
+        format!("@zeus's window closed (exit code 2); its last tool call was Bash: \"cargo \u{2026}\"; {screen}")
+    );
+    // Nothing of a call where the record shows none, and the call still said with no screen.
+    assert_eq!(
+        shown(Some(2), None, None)
+            .with_last_call(None)
+            .after("gone"),
+        "gone (exit code 2)"
+    );
+    assert_eq!(
+        shown(Some(2), None, None)
+            .with_last_call(Some(LastCall::shell("Bash", "make test")))
+            .after("gone"),
+        "gone (exit code 2); its last tool call was Bash: \"make \u{2026}\""
+    );
+    // A command whose program is not named is the tool alone, and none of its words are said.
+    assert_eq!(
+        shown(Some(2), None, None)
+            .with_last_call(Some(LastCall::shell(
+                "Bash",
+                "curl -u alice:swordfish https://example.test/"
+            )))
+            .after("gone"),
+        "gone (exit code 2); its last tool call was Bash"
     );
 }

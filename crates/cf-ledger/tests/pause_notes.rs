@@ -25,7 +25,9 @@ fn world() -> World {
         open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
     let staff = ["zeus", "diana", "athena"]
         .map(|agent| NewMember {
-            agent: agent.into(),
+            model: None,
+            effort: None,
+            model_name: Some(agent.into()),
             harness: "claude-code".into(),
             designer: false,
             roles: vec!["worker".into()],
@@ -38,7 +40,8 @@ fn world() -> World {
             name: "app".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: None,
+                model: None,
+                effort: None,
             },
             staff,
             gate: false,
@@ -614,7 +617,7 @@ fn finishing_a_paused_task_withdraws_what_its_requester_was_told_of_the_pause_an
 
     let finished = world
         .ledger
-        .record_finished(world.project, 1, "Parser done")
+        .record_finished(world.project, 1, "Parser done", (0, 0))
         .expect("finished");
     assert_eq!(finished.task.state, "done");
     for id in [stall.id, queued.id] {

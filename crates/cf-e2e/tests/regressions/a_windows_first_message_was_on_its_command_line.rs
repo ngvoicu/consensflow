@@ -21,7 +21,6 @@
 use std::path::Path;
 
 #[cfg(unix)]
-use cf_e2e::files;
 #[cfg(unix)]
 use cf_e2e::process::Run;
 use cf_e2e::rig::{Project, Rig, OPEN};
@@ -170,7 +169,7 @@ fn a_workers_codex_window_holds_no_brief_on_its_command_line_and_its_brief_reach
             { "id": "coder", "kind": "codex", "model": "fake" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open_with_staff(&rig, "chief", None, &[("coder", "worker")])?;
     let word = unique("codex");
     let tiers = project.tiers()?;

@@ -78,7 +78,8 @@ fn the_old_window_of_a_switch_chief_is_looked_at_for_the_methods_await_and_the_c
         context.pass().unwrap();
         let to = SwitchTo {
             harness: "codex".to_owned(),
-            agent: "astraeus".to_owned(),
+            model: "gpt-6-astra".to_owned(),
+            effort: None,
         };
         let switching = context.begin_switch_chief(project.id, to, SwitchWhen::Now, false);
         tick_after(&context, project.id, turns);
@@ -167,7 +168,9 @@ fn enter_is_pressed_again_after_the_snapshot_and_the_key_each_a_request_whose_ca
         let context = Context::new();
         let project = context.with_staff(&["zeus"]);
         context.adapter.with("chief", |agent| agent.arrive = false);
-        context.host.set_snapshot(json!({ "outputQuietMs": 5000 }));
+        context
+            .host
+            .set_snapshot(json!({ "outputQuietMs": 5000, "screenQuietMs": 5000 }));
         context.note(project.id, "human", "chief", "hello");
         context.pass().unwrap();
         context.advance(11_000);

@@ -12,7 +12,6 @@ use cf_e2e::cf;
 use cf_e2e::daemon::{Daemon, Home};
 use cf_e2e::daemon_log::lines_of;
 use cf_e2e::files;
-use cf_e2e::http::Http;
 use regex::Regex;
 use serde_json::{json, Value};
 
@@ -130,10 +129,10 @@ fn ends_cf_ui_with_1_when_a_second_start_is_refused_its_ledger_and_its_log_says_
 }
 
 #[test]
-fn starts_though_its_agents_file_cannot_be_used_and_says_why_in_its_log() -> Outcome {
+fn starts_though_its_settings_file_cannot_be_read_and_leaves_it_as_it_is() -> Outcome {
     let home = Home::new()?;
     let file = home.consensflow().join("agents.json");
-    // A hand edit's trailing comma: the roster refuses the file and saves nothing over it.
+    // A hand edit's trailing comma: the start reads nothing of it, and saves nothing over it.
     let broken = "{\"schemaVersion\": 1, \"agents\": [{\"id\": \"mine\", \"kind\": \"codex\"},]}\n";
     files::write(&file, broken)?;
     let mut daemon = home.daemon()?;
@@ -142,15 +141,6 @@ fn starts_though_its_agents_file_cannot_be_used_and_says_why_in_its_log() -> Out
         .map_err(|failed| format!("it did not start: {failed}"))?;
     daemon.end_input();
     assert_eq!(daemon.exit_code(secs(60))?, Some(0), "{}", daemon.errors());
-    // The roster's words are under the line.
-    let log = home.log();
-    assert!(
-        Regex::new(
-            r"\n\S+ error the agents file could not be used\n {4}Your agents file .* is not valid JSON"
-        )?
-        .is_match(&log),
-        "{log}"
-    );
     assert_eq!(
         files::read_string(&file)?,
         broken,
@@ -159,15 +149,9 @@ fn starts_though_its_agents_file_cannot_be_used_and_says_why_in_its_log() -> Out
     Ok(())
 }
 
-/// A saved agent of the human's own, on Claude Code.
+/// A member on the stand-in Claude Code, named by its model (`mybuilder`).
 fn mybuilder() -> Value {
-    json!({
-        "id": "mybuilder",
-        "name": "Mybuilder",
-        "kind": "claude-code",
-        "model": "fake",
-        "workTier": "standard",
-    })
+    json!({ "harness": "claude-code", "model": "mybuilder", "tier": "standard" })
 }
 
 /// Whether `folder` holds the `cf` under test: the daemon's bundle, first on every window's
@@ -205,13 +189,16 @@ fn a_daemon_runs_a_copy_of_the_cf_in_its_home_and_not_the_build_a_cargo_build_ta
 #[test]
 fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundled_cf_first_on_path_and_names_it_no_node(
 ) -> Outcome {
-    let d = OverBridge::start(&[mybuilder()])?;
+    let d = OverBridge::start()?;
+    let mut member = mybuilder();
+    member["roles"] = json!(["worker", "reviewer"]);
     let opened = d.request(
         "project.open",
         json!({
             "directory": d.home.workspace(),
-            "agent": "mybuilder",
-            "staff": [{ "agent": "mybuilder", "roles": ["worker", "reviewer"] }],
+            "harness": "claude-code",
+            "model": "fake",
+            "staff": [member],
         }),
     )?;
     assert_eq!(opened["ok"], true, "{opened}");
@@ -259,7 +246,8 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
         .unwrap_or_default();
     let role = files::read_string(Path::new(file))?;
     assert!(
-        Regex::new(r"(?m)^\| mybuilder \| worker, reviewer \| Standard work \|$")?.is_match(&role),
+        Regex::new(r"(?m)^\| mybuilder \| mybuilder \| worker, reviewer \| Standard work \|$")?
+            .is_match(&role),
         "{role}"
     );
     // On Windows, cf.exe, its path in forward slashes: Git Bash drops backslashes.
@@ -278,48 +266,31 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
 }
 
 #[test]
-fn tells_the_page_when_the_board_changes_and_when_a_change_to_the_agents_moves_a_members_tier(
-) -> Outcome {
-    let d = OverBridge::start(&[mybuilder()])?;
+fn tells_the_page_when_the_board_changes() -> Outcome {
+    let d = OverBridge::start()?;
+    let mut member = mybuilder();
+    member["roles"] = json!(["worker"]);
     d.request(
         "project.open",
         json!({
             "directory": d.home.workspace(),
-            "agent": "mybuilder",
-            "staff": [{ "agent": "mybuilder", "roles": ["worker"] }],
+            "harness": "claude-code",
+            "model": "fake",
+            "staff": [member],
         }),
     )?;
     d.until("told the page of the new project", || {
         (!d.told("core").is_empty()).then_some(())
     })?;
-    // The agents screens, as the app opens them with its token.
-    let http = Http::new();
-    let token = d.handle["token"].as_str().unwrap_or_default();
-    let url = d.handle["url"].as_str().unwrap_or_default();
-    // A new agent moves nobody's tier; a member's agent given another does.
-    let added = http.send(
-        "POST",
-        &format!("{url}api/agents"),
-        Some(token),
-        Some(&json!({ "name": "myhelper", "harness": "claude", "model": "fake" })),
-    )?;
-    assert_eq!(added.status, 201);
-    let edited = http.send(
-        "PATCH",
-        &format!("{url}api/agents/mybuilder"),
-        Some(token),
-        Some(&json!({ "workTier": "complex" })),
-    )?;
-    assert_eq!(edited.status, 200);
     // A round trip on the bridge: every event sent before its answer has been read.
     assert_eq!(d.request("ping", json!({}))?, json!({ "ok": true }));
-    assert_eq!(d.told("roster").len(), 1);
+    assert!(d.told("roster").is_empty(), "nothing follows saved agents");
     Ok(())
 }
 
 #[test]
 fn stops_itself_when_the_apps_end_of_the_bridge_breaks() -> Outcome {
-    let mut d = OverBridge::start(&[])?;
+    let mut d = OverBridge::start()?;
     // Nobody reads the daemon's output any more, and its next write finds out.
     d.hang_up()?;
     d.daemon

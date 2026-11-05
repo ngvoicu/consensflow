@@ -1,6 +1,6 @@
 //! What the player compares, once a step has been made: the answer to an
 //! exchange of the test's own, as bytes; what the API did on the way (the
-//! wake-ups, the events, the clock, the roster); and the requests `cf` made,
+//! wake-ups, the events, the clock); and the requests `cf` made,
 //! each whole, and how they were answered: as the answer passed the relay, its
 //! status, its type and its bytes, as the test's own exchanges' are held.
 
@@ -36,8 +36,8 @@ pub fn exchange(
 }
 
 /// What the API did on the way, against what Node's did: the wake-ups, the
-/// events its ledger logged, the clock and the names it drew, the agents it
-/// asked the roster for.
+/// events its ledger logged, the clock and the names it drew. (Node's asked its roster
+/// for saved agents too, which this one has none of: harness-models.)
 pub fn effects(rig: &Rig, steps: &[&Value], events: &[Value], kicks: usize) -> Result<(), String> {
     let expected: usize = steps
         .iter()
@@ -55,16 +55,7 @@ pub fn effects(rig: &Rig, steps: &[&Value], events: &[Value], kicks: usize) -> R
     if let Some(why) = compare("the events it logged", &json!(events), &json!(recorded)) {
         return Err(why);
     }
-    if let Some(why) = rig.ledger.settle(steps) {
-        return Err(why);
-    }
-    let agents: Vec<Value> = steps
-        .iter()
-        .flat_map(|step| step["seams"].as_array().cloned().unwrap_or_default())
-        .map(|call| call["args"][0].clone())
-        .collect();
-    let asked = json!(rig.take_asked());
-    compare("the agents it asked for", &asked, &json!(agents)).map_or(Ok(()), Err)
+    rig.ledger.settle(steps).map_or(Ok(()), Err)
 }
 
 /// The requests a run of `cf` wrote, as the relay saw them pass, against the

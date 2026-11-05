@@ -1,6 +1,6 @@
-//! Whether a line a window showed names a secret: then the note quotes none of its
-//! screen (`shown`). A quote left out is a cost the note bears; a credential quoted is
-//! not (the lead's decision of round 5).
+//! Whether a line a window showed names a secret: then the note quotes none of the screen it
+//! was on (`shown`, `screen`). A quote left out is a cost the note bears; a credential quoted
+//! is not (the lead's decision of round 5).
 //!
 //! **A password, an API or private key, a credential** is named wherever its word is in a
 //! name, whatever the name's case and however it is split: a name is a run of letters,

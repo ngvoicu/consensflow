@@ -127,7 +127,7 @@ fn words_told_whose_enter_was_withheld_by_a_close_wait_and_the_answer_is_the_res
         assert!(context.close_project(project).is_err(), "its window stays");
         context.host.refuse_kills.set(false);
         context.advance(11_000);
-        context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+        context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
         context.pass().unwrap();
         assert_eq!(enters(&context), 0, "no key that sends");
         assert_eq!(context.message(told).state, "queued", "given back");

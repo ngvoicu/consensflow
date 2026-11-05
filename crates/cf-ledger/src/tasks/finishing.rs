@@ -11,7 +11,10 @@
 //! stopped for nothing (it closes by itself when it holds nothing else, as after
 //! an acceptance, and stays while it holds a paused task). A task still at work is
 //! called off with every message of it still on its way withdrawn (`call_off`), a
-//! result an older build left among them. A task is not
+//! result an older build left among them. A task that failed is called off the
+//! same way, its window if one is left stopped like any other's, so the board need
+//! not keep for good a task nobody means to reopen or accept (T-675, the field
+//! report of 2026-10-26). A task is not
 //! called off while an open task waits for it (`require_unawaited`): what
 //! waits for a task is released when it is accepted, so the waiter would be
 //! blocked for good. A member's removal cancels the member's tasks whatever
@@ -22,9 +25,10 @@
 
 use cf_base::js;
 use cf_proto::ledger::{TaskMoved, TaskView};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
+use super::outage;
 use super::pausing::shut_doors;
 use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, resume_words,
@@ -65,21 +69,52 @@ pub(crate) fn record_result(
 /// of a task at work, or of a paused one, whose worker's turn ended with its
 /// answer after the tell that paused it (`turn_end`'s paused answer). The pause
 /// is the finisher's own to end: the notes it left queued for the requester go
-/// ([`leave_pause_notes`]), as a resume's do.
+/// ([`leave_pause_notes`]), as a resume's do. `left` is how many background jobs and
+/// agents its window was counted running, which finishing does not end and the close after
+/// the accept does: kept with the move to done, for the accept to say (`left_running`).
 pub(crate) fn record_finished(
     store: &mut Store,
     project_id: i64,
     number: i64,
     body: &str,
+    left: (usize, usize),
 ) -> Result<TaskMoved, LedgerError> {
-    record(
+    record_counted(
         store,
         project_id,
         number,
         body,
         &FINISHABLE_TASK_STATES,
         true,
+        left,
     )
+}
+
+/// How many background jobs and agents the window of T-`number` was counted running when the
+/// chief or the human finished the task (`record_finished`): the closing of its window after
+/// the accept ends them (T-691, the field report of 2026-10-26, where a parity run was stopped
+/// that way). None where the task was finished by its worker's own word, which waits for the
+/// work to end, or the finish counted none. What ran then may have ended since; the count is
+/// what was known when the chief decided to finish.
+pub(crate) fn left_running(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+) -> Result<(i64, i64), LedgerError> {
+    let counted: Option<(Option<i64>, Option<i64>)> = store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.jobs'), json_extract(data, '$.agents') FROM event
+              WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)
+                AND json_extract(data, '$.task') = ?2 AND json_extract(data, '$.to') = 'done'
+              ORDER BY id DESC LIMIT 1",
+            params![project_id, number],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(counted.map_or((0, 0), |(jobs, agents)| {
+        (jobs.unwrap_or(0), agents.unwrap_or(0))
+    }))
 }
 
 /// The states a task can be finished at the word of the chief or the human.
@@ -95,6 +130,28 @@ fn record(
     body: &str,
     states: &[&str],
     finished_by_word: bool,
+) -> Result<TaskMoved, LedgerError> {
+    record_counted(
+        store,
+        project_id,
+        number,
+        body,
+        states,
+        finished_by_word,
+        (0, 0),
+    )
+}
+
+/// [`record`], and where the finish was at a word, the `left` jobs and agents its window was
+/// counted running, kept with the move to done for the accept to say.
+fn record_counted(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+    states: &[&str],
+    finished_by_word: bool,
+    left: (usize, usize),
 ) -> Result<TaskMoved, LedgerError> {
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
@@ -164,7 +221,13 @@ fn record(
                 ..Queued::default()
             },
         )?;
-        store.move_task(&task, "done", json!({ "result": message_id }))?;
+        // What a finish at a word counted running is kept for the accept to say.
+        let detail = if finished_by_word {
+            json!({ "result": message_id, "jobs": left.0, "agents": left.1 })
+        } else {
+            json!({ "result": message_id })
+        };
+        store.move_task(&task, "done", detail)?;
         release_ready(store, project_id)?;
         // A question its window asked through its harness's tool, still open at its door, is
         // shut out of waiting as an acceptance does.
@@ -330,14 +393,16 @@ fn require_result_received(store: &Store, task: &TaskRow, by: &str) -> Result<()
 /// a door refuses it only while it has a task in hand (`require_free`), and
 /// `--before` orders them by what each needs. A follow-up of a task still on its
 /// work is one of them: that task is among what it needs, and the window is
-/// given the follow-up once the task is accepted.
+/// given the follow-up once the task is accepted. A task needing nothing any more is
+/// one of them: `cf task edit T-n --needs -T-m` takes a need, the last included, from a
+/// task given to a window, which is then released as if the need had been accepted
+/// (T-798: it was found by the need rows it had, and with none was open for good).
 pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let waiting = store
         .db
         .prepare(
             "SELECT t.* FROM task t
        WHERE t.project_id = ? AND t.state = 'open' AND t.assignee_id IS NOT NULL
-         AND EXISTS (SELECT 1 FROM task_need n WHERE n.task_id = t.id)
          AND NOT EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
                          WHERE n.task_id = t.id AND d.state != 'accepted')
        ORDER BY t.id",
@@ -506,7 +571,8 @@ pub(crate) fn reopen_task(
 /// A task is called off, and whoever asked for it hears so in the same
 /// step, unless it cancelled the task itself: what was cancelled, and the
 /// window that was stopped when a member's had begun on it (the daemon
-/// stops that window on its next look). Whoever told the window words it
+/// stops that window on its next look). A task that failed is called off
+/// the same way: its window, if one is left, is stopped like any other's. Whoever told the window words it
 /// never had hears that they went, but the one who called the task off.
 /// Refused, `waited-for`, while an open or paused task waits for it. A task that
 /// is done is called off too, as a decision on its result (`call_off`): its
@@ -595,7 +661,7 @@ pub(crate) fn call_off(
     let cancellable = [
         &["open", "queued"],
         &ACTIVE_TASK_STATES[..],
-        &["paused", "done"],
+        &["paused", "done", "failed"],
     ]
     .concat();
     require_task_state(&task, &cancellable, "cancel")?;
@@ -676,7 +742,7 @@ pub(crate) fn call_off(
 /// (a paused one goes back to the board when resumed) with `task` among what
 /// they need. One that has gone to a window had everything it needed
 /// accepted, and one cancelled or failed waits for nothing.
-fn waiters(store: &Store, task: &TaskRow) -> Result<Vec<i64>, LedgerError> {
+pub(super) fn waiters(store: &Store, task: &TaskRow) -> Result<Vec<i64>, LedgerError> {
     Ok(store
         .db
         .prepare(
@@ -719,6 +785,18 @@ pub(crate) fn waiting_for_it(
     task: &TaskRow,
     requester: &str,
 ) -> Result<String, LedgerError> {
+    Ok(wait_for_it(
+        task.number,
+        &waiting_of(store, task, requester)?,
+    ))
+}
+
+/// The tasks that wait for `task` and were asked for by `requester`, oldest first.
+pub(super) fn waiting_of(
+    store: &Store,
+    task: &TaskRow,
+    requester: &str,
+) -> Result<Vec<i64>, LedgerError> {
     let mut here = Vec::new();
     for waiting in waiters(store, task)? {
         let waiter = store.task_row(task.project_id, waiting)?;
@@ -726,7 +804,16 @@ pub(crate) fn waiting_for_it(
             here.push(waiting);
         }
     }
-    Ok(wait_for_it(task.number, &here))
+    Ok(here)
+}
+
+/// What the note to the requester of the task `waiting` says of the failed task `number` it
+/// waits for. Written here once: the notes still queued when the task is reopened or called
+/// off are found by these words (`outage::no_longer_failed`).
+pub(super) fn waits_for_failed(waiting: i64, number: i64) -> String {
+    format!(
+        "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, reopen T-{number} and let it finish, or accept T-{number} with what you checked: cf task accept T-{number} \"…\""
+    )
 }
 
 /// The requester of each task that waits for the failed `task` is told, in a note of its own
@@ -753,9 +840,7 @@ fn tell_other_waiters(
                 to: &requester.handle,
                 task: Some(waiting),
                 kind: "note",
-                body: &format!(
-                    "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, reopen T-{number} and let it finish, or accept T-{number} with what you checked: cf task accept T-{number} \"…\""
-                ),
+                body: &waits_for_failed(waiting, number),
                 ..Sent::default()
             },
         )?;
@@ -801,8 +886,8 @@ pub(crate) fn waiting_for_it_of(
 /// when the task is accepted, so it would read "blocked by" it for good and
 /// nothing would tell anyone. Whoever cancels names the waiters to cancel
 /// first, or lets the task finish, or accepts it where it is done and has no
-/// finishing left; the human who declines its brief, which never started, passes
-/// it on.
+/// finishing left, or reopens or accepts it where it failed; the human who declines
+/// its brief, which never started, passes it on.
 fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<(), LedgerError> {
     let waiting = waiters(store, task)?;
     if waiting.is_empty() {
@@ -813,13 +898,15 @@ fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<()
         _ => ("wait", "them".to_owned()),
     };
     let number = task.number;
-    // What a done task has left to do is to be accepted, not to finish.
-    let says = match ending {
-        Ending::Cancelled if task.state == "done" => {
-            format!("accept T-{number}, or cancel {them} first")
-        }
-        Ending::Cancelled => format!("cancel {them} first, or let T-{number} finish"),
-        Ending::Declined => format!("cancel {them} first, or pass T-{number} on"),
+    // What a done task has left to do is to be accepted, not to finish; a failed one
+    // finishes only once it is reopened, or is accepted on what was checked.
+    let says = match (ending, task.state.as_str()) {
+        (Ending::Cancelled, "done") => format!("accept T-{number}, or cancel {them} first"),
+        (Ending::Cancelled, "failed") => format!(
+            "cancel {them} first, reopen T-{number} and let it finish, or accept it with what you checked"
+        ),
+        (Ending::Cancelled, _) => format!("cancel {them} first, or let T-{number} finish"),
+        (Ending::Declined, _) => format!("cancel {them} first, or pass T-{number} on"),
     };
     Err(LedgerError::refused_with(
         "waited-for",
@@ -955,7 +1042,7 @@ pub(crate) fn fail_task(
     number: i64,
     reason: &str,
 ) -> Result<TaskView, LedgerError> {
-    fail(store, project_id, number, reason, false)
+    fail(store, project_id, number, reason, false, "")
 }
 
 /// The daemon gives up on a task, as [`fail_task`] fails it, but for the words
@@ -969,16 +1056,21 @@ pub(crate) fn give_up_task(
     project_id: i64,
     number: i64,
     reason: &str,
+    cause: &str,
 ) -> Result<TaskView, LedgerError> {
-    fail(store, project_id, number, reason, true)
+    fail(store, project_id, number, reason, true, cause)
 }
 
+/// `cause` is what the failure said, to tell one outage from the next, as the engine hashes it
+/// (`Shown::outage_key`; empty where the engine could not tell): the requester is told of the windows that failed alike in one note
+/// (`outage`).
 fn fail(
     store: &mut Store,
     project_id: i64,
     number: i64,
     reason: &str,
     given_up: bool,
+    cause: &str,
 ) -> Result<TaskView, LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
@@ -1029,18 +1121,13 @@ fn fail(
         // same requester are named in that note; the others' requesters are told after it, each
         // in a note of its own.
         if given_up {
-            let words = failed(told.waiting_for_the_reopen(None));
-            let waiting = waiting_for_it(store, &task, &requester.handle)?;
-            send(
+            outage::tell_failure(
                 store,
-                project_id,
-                &Sent {
-                    to: &requester.handle,
-                    task: Some(number),
-                    kind: "note",
-                    body: &format!("{words}{waiting}"),
-                    ..Sent::default()
-                },
+                &task,
+                &requester.handle,
+                reason,
+                &told.waiting_for_the_reopen(None),
+                cause,
             )?;
         }
         tell_other_waiters(store, &task, given_up.then_some(requester.handle.as_str()))?;

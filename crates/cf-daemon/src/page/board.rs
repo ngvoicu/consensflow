@@ -2,22 +2,17 @@
 
 use serde_json::{json, Value};
 
-use super::agents::{agent_gone, saved};
 use super::body::{merged, one, Body, Fields, Said};
 use super::Page;
 
 /// `board.get`: the ledger's board, each lane with what the dispatcher knows of
-/// its window: after the lane's own fields, in this order, `agentMissing`
-/// (and, only when the gone agent is a ready-made one the catalog no longer
-/// carries, `agentRetired`, why it went), `activity`, `pane`, `hidden`,
+/// its window: after the lane's own fields, in this order, `activity`, `pane`, `hidden`,
 /// `switching` and `holding`, and, only while a
 /// stop of its task is ignored in every round and the host would not close its
 /// window, `unstopped`, and, only while its task waits on a background job or
 /// agent that its harness wakes its agent for, `held`.
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let board = page.ledger.borrow().board(body.whole("project")?)?;
-    let agents = saved(&page.env)?;
-    let roster = agents.roster();
     let mut shown = serde_json::to_value(&board)?;
     let lanes = shown
         .get_mut("lanes")
@@ -27,26 +22,7 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         let Some(fields) = drawn.as_object_mut() else {
             continue;
         };
-        let participant = &lane.participant;
-        let id = participant.id;
-        // A member whose agent is gone (a release dropped the entry, or the
-        // human removed their own) sits, and the board says why: read from the
-        // file at each lane, as it is now.
-        let missing = match &participant.agent {
-            Some(agent) if participant.member.is_none() => agent_gone(&roster, agent),
-            _ => false,
-        };
-        fields.insert("agentMissing".to_owned(), json!(missing));
-        // One a release took out of the catalog says why, so the human picks
-        // another agent rather than defining it again.
-        if let Some(why) = participant
-            .agent
-            .as_deref()
-            .filter(|_| missing)
-            .and_then(|agent| cf_engine::seams::Roster::retired(&agents, agent))
-        {
-            fields.insert("agentRetired".to_owned(), json!(why));
-        }
+        let id = lane.participant.id;
         fields.insert("activity".to_owned(), page.engine.activity(id));
         fields.insert(
             "pane".to_owned(),

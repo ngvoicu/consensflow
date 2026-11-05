@@ -1,0 +1,4 @@
+{
+ "exit": 1,
+ "stderr": "Error: Not logged in. Run `devin auth login` to authenticate."
+}

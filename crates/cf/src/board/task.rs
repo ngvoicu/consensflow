@@ -153,7 +153,6 @@ fn add(
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
     let brief = require_text(brief::brief_of(&words, given, input)?, ADD_USAGE)?;
-    let sent = brief::sent(&brief);
 
     let mut body = Map::new();
     if mine {
@@ -185,11 +184,13 @@ fn add(
     if let Some(before) = &before {
         body.insert("before".into(), json!(before));
     }
-    body.insert("body".into(), brief.into());
+    body.insert("body".into(), brief.clone().into());
 
     let created = board.post("/api/tasks", &Value::Object(body))?;
     let task = created.part("task")?;
     let number = js::text(task.get("number"));
+    // The new task's number is known only now, and the last line names it.
+    let sent = brief::sent(&number, &brief);
     // With human approval required, nothing moves until the human passes it on.
     let gated = if js::truthy(created.value().get("gated")) && !mine {
         " The human approves each message before it moves."
@@ -216,7 +217,7 @@ fn add(
         )
     } else if let Some(after) = after {
         format!(
-            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits}",
+            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits} If that window cannot go on in its conversation when T-{number} starts, T-{number} waits paused for your word (cf task edit T-{number}, then cf task resume T-{number}).",
             js::text(task.get("assignee"))
         )
     } else {
@@ -324,8 +325,13 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
         }
         kept.push(lane);
         if !lane_tasks.is_empty() {
+            // A lane on a harness says the model and effort it runs on (harness-models).
+            let runs_on = match lane.get("runsOn").and_then(Value::as_str) {
+                Some(runs_on) => format!(", {runs_on}"),
+                None => String::new(),
+            };
             lines.push(format!(
-                "@{} ({})",
+                "@{} ({}{runs_on})",
                 js::text(lane.get("handle")),
                 js::text(lane.get("role"))
             ));
@@ -462,7 +468,7 @@ fn moved(
     }
     // What the words that send a window on say of themselves.
     let sent = if briefed && !text.is_empty() {
-        format!("\n{}", brief::sent(&text))
+        format!("\n{}", brief::sent(number, &text))
     } else {
         String::new()
     };
@@ -488,6 +494,11 @@ fn moved(
     // What a cancel took with it of the words you told the task's window.
     let dropped = match answer.value().get("dropped") {
         Some(dropped) => went_with_it(answer.list(Some(dropped), "dropped")?),
+        None => String::new(),
+    };
+    // What the window was counted running when the task was finished, which the accept's close ends.
+    let running = match answer.value().get("running") {
+        Some(running) => still_running(number, running),
         None => String::new(),
     };
     let task = answer.take("task")?;
@@ -530,6 +541,7 @@ fn moved(
                 before: before.is_some(),
             },
         ),
+        "accept" => format!("{}{running}", task_line(&task)),
         _ => format!("{}{dropped}", task_line(&task)),
     };
     Ok(Said::new(task, format!("{said}{sent}")))
@@ -669,14 +681,26 @@ fn new_title(words: &Split) -> Result<Option<String>, Failure> {
     }
 }
 
-/// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
-/// `agents` the worker's harness still counted are said to run on until its window closes,
-/// or past it where the host cannot tell what is the window's (on Windows a program runs
-/// before its Job Object holds it, and on the Mac what left the window's session is not
-/// found, so the close does not end all of it).
-fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) -> String {
-    let who = js::text(task.get("assignee"));
-    let (jobs, agents) = (jobs.unwrap_or(0), agents.unwrap_or(0));
+/// What an accept says of the background work the task's window was counted running when
+/// the chief or the human finished the task (`running`: `jobs` and `agents`): the close of the
+/// window after the accept ends it, so it is said with the accept's own words, to the chief,
+/// who accepted knowing (T-691). The count is the finish's; what ran then may have ended since.
+/// Nothing for a window that ran nothing.
+fn still_running(number: u64, running: &Value) -> String {
+    let count = |field: &str| running.get(field).and_then(Value::as_u64).unwrap_or(0);
+    let (jobs, agents) = (count("jobs"), count("agents"));
+    let Some(left) = background_work(jobs, agents) else {
+        return String::new();
+    };
+    let them = if jobs + agents == 1 { "it" } else { "them" };
+    format!(
+        "\nT-{number}'s window was running {left} when it was finished; accepting closes the window and ends {them}."
+    )
+}
+
+/// "1 background job", "2 background jobs and 1 background agent or workflow": what a window's
+/// turn left running, as the harness counted it; none when it left nothing.
+fn background_work(jobs: u64, agents: u64) -> Option<String> {
     let plural = |count: u64, one: &str, many: &str| match count {
         1 => format!("1 {one}"),
         _ => format!("{count} {many}"),
@@ -687,13 +711,26 @@ fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) 
         "background agent or workflow",
         "background agents or workflows",
     );
-    let left = match (jobs, agents) {
-        (0, 0) => return format!(
+    match (jobs, agents) {
+        (0, 0) => None,
+        (_, 0) => Some(jobs_said),
+        (0, _) => Some(agents_said),
+        _ => Some(format!("{jobs_said} and {agents_said}")),
+    }
+}
+
+/// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
+/// `agents` the worker's harness still counted are said to run on until its window closes,
+/// or past it where the host cannot tell what is the window's (on Windows a program runs
+/// before its Job Object holds it, and on the Mac what left the window's session is not
+/// found, so the close does not end all of it).
+fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) -> String {
+    let who = js::text(task.get("assignee"));
+    let (jobs, agents) = (jobs.unwrap_or(0), agents.unwrap_or(0));
+    let Some(left) = background_work(jobs, agents) else {
+        return format!(
             "T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing ends nothing its turn left running."
-        ),
-        (_, 0) => jobs_said,
-        (0, _) => agents_said,
-        _ => format!("{jobs_said} and {agents_said}"),
+        );
     };
     let they = if jobs + agents == 1 { "it" } else { "they" };
     format!(
@@ -1034,6 +1071,25 @@ and 2 idle sessions (`cf task list --all`)";
         );
     }
 
+    /// A lane on a harness says in its head the model and effort it runs on, after its role
+    /// (harness-models); a lane that says none is as it was.
+    #[test]
+    fn a_lane_s_head_says_the_model_and_effort_it_runs_on() {
+        let mut opus = lane(
+            "opus-high",
+            "worker",
+            &[card(2, "working", Some("opus-high"))],
+        );
+        opus["runsOn"] = json!("Opus · high");
+        let plain = lane("zeus", "worker", &[card(3, "working", Some("zeus"))]);
+        let text = listed(&[], &json!([opus, plain]));
+        let heads: Vec<&str> = text.lines().filter(|line| line.starts_with('@')).collect();
+        assert_eq!(
+            heads,
+            ["@opus-high (worker, Opus · high)", "@zeus (worker)"]
+        );
+    }
+
     /// What `cf task add words…` posted and printed, the board answering with `answer`.
     fn added(words: &[&str], answer: &Value) -> (Option<Value>, String) {
         let api = scripted(vec![reply(201, answer.clone())]);
@@ -1064,7 +1120,7 @@ and 2 idle sessions (`cf task list --all`)";
         );
         assert_eq!(
             said,
-            "T-3 is on the board for a standard tester; it starts in a new window of one, and its result arrives in your inbox.\nSent: 7 characters, ending \"Run T-2\"."
+            "T-3 is on the board for a standard tester; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 7 characters, ending \"Run T-2\"."
         );
         // Beside the others, and with none of them it is a plain task.
         let (posted, _) = added(
@@ -1146,6 +1202,47 @@ and 2 idle sessions (`cf task list --all`)";
         }
     }
 
+    #[test]
+    fn an_accept_says_what_the_finish_left_running_which_the_close_of_the_window_ends() {
+        let accepted = |running: Value| {
+            let mut answer = json!({ "task": card(3, "accepted", Some("zeus")) });
+            if !running.is_null() {
+                answer["running"] = running;
+            }
+            let api = scripted(vec![reply(200, answer)]);
+            let words = vec!["accept".to_owned(), "T-3".to_owned()];
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut "".as_bytes(),
+            )
+            .ok()
+            .map(|said| said.text)
+            .unwrap()
+        };
+        let line = "T-3 [accepted] @zeus ← @chief: Task 3";
+        assert_eq!(accepted(Value::Null), line);
+        assert_eq!(
+            accepted(json!({ "jobs": 0, "agents": 0 })),
+            line,
+            "a window that ran nothing is not warned of"
+        );
+        assert_eq!(
+            accepted(json!({ "jobs": 1, "agents": 0 })),
+            format!("{line}\nT-3's window was running 1 background job when it was finished; accepting closes the window and ends it.")
+        );
+        assert_eq!(
+            accepted(json!({ "jobs": 2, "agents": 1 })),
+            format!("{line}\nT-3's window was running 2 background jobs and 1 background agent or workflow when it was finished; accepting closes the window and ends them.")
+        );
+        assert_eq!(
+            accepted(json!({ "jobs": 0, "agents": 2 })),
+            format!("{line}\nT-3's window was running 2 background agents or workflows when it was finished; accepting closes the window and ends them.")
+        );
+    }
+
     /// What `cf task edit words…` posted and printed, the board answering with `answer`.
     fn edited(
         words: &[&str],
@@ -1188,7 +1285,7 @@ and 2 idle sessions (`cf task list --all`)";
         // A new brief is words that give a window work: the reply says how they end (B6).
         assert_eq!(
             said,
-            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2\nSent: 17 characters, ending \"Parse the new way\"."
+            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2\nT-2: sent 17 characters, ending \"Parse the new way\"."
         );
         // Or on the standard input, as a heredoc gives it: its last newline is its own.
         let (posted, _) = edited(&["T-2", "-"], "Parse\nthe new way\n", &answer);
@@ -1214,7 +1311,7 @@ and 2 idle sessions (`cf task list --all`)";
             )]
         );
         assert!(
-            said.ends_with("\nSent: 17 characters, ending \"Parse the new way\"."),
+            said.ends_with("\nT-2: sent 17 characters, ending \"Parse the new way\"."),
             "{said}"
         );
     }
@@ -1462,7 +1559,7 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(posted, Some(json!({ "after": 3, "body": "Tests" })));
         assert_eq!(
             said,
-            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted.\nSent: 5 characters, ending \"Tests\"."
+            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted. If that window cannot go on in its conversation when T-5 starts, T-5 waits paused for your word (cf task edit T-5, then cf task resume T-5).\nT-5: sent 5 characters, ending \"Tests\"."
         );
     }
 

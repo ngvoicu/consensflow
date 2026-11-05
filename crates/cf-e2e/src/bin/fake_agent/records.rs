@@ -42,6 +42,10 @@ pub struct Records {
     /// How many images the window has taken: the number in the last placeholder
     /// it wrote (`images`).
     images: u32,
+    /// The model and effort its answers run on: what it was launched on, until the
+    /// human switches them with `/model` (CHF-05's native switch).
+    model: Option<String>,
+    effort: Option<String>,
 }
 
 /// Whether the conversation `text` ends in a turn nothing answered: its last
@@ -79,6 +83,8 @@ impl Records {
             cut: ends_cut(&kept),
             said: !kept.trim().is_empty(),
             images: 0,
+            model: None,
+            effort: None,
         })
     }
 
@@ -165,8 +171,30 @@ impl Records {
         self.open()?.write_all(&line.as_bytes()[..line.len() / 2])
     }
 
-    /// The record `fields` make, numbered as the next.
-    fn record(&mut self, pid: u32, fields: Value) -> Value {
+    /// Its answers run on `model` at `effort` from now on, as Claude's records say: the
+    /// launch's, or the human's `/model`.
+    pub fn runs_on(&mut self, model: Option<String>, effort: Option<String>) {
+        self.model = model;
+        self.effort = effort;
+    }
+
+    /// The model its answers run on, where the launch or the human named one.
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    /// The record `fields` make, numbered as the next: an answer of its own says the
+    /// model it ran on, in its message, and the effort, beside it, as Claude Code 2.1.312
+    /// writes them (one of Claude Code's own, `<synthetic>`, says its own).
+    fn record(&mut self, pid: u32, mut fields: Value) -> Value {
+        if fields["type"] == "assistant" && fields["message"]["model"].is_null() {
+            if let Some(model) = &self.model {
+                fields["message"]["model"] = json!(model);
+            }
+            if let Some(effort) = &self.effort {
+                fields["effort"] = json!(effort);
+            }
+        }
         self.ordinal += 1;
         self.said |= fields["type"] == "user";
         let mut record = Map::new();
@@ -195,6 +223,17 @@ impl Records {
             .append(true)
             .create(true)
             .open(&self.transcript)
+    }
+
+    /// Writes that the window waits on a dialog of its own, and why, as Claude Code 2.1.317
+    /// says it (`waiting`, `waitingFor`).
+    pub fn waiting(&self, pid: u32, why: &str) -> io::Result<()> {
+        make_folder_of(&self.status_file)?;
+        fs::write(
+            &self.status_file,
+            json!({ "pid": pid, "sessionId": self.session, "kind": "interactive", "status": "waiting", "waitingFor": why })
+                .to_string(),
+        )
     }
 
     /// Writes the status the window is in: `idle` or `busy`.

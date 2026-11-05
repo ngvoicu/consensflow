@@ -10,6 +10,7 @@ pub mod bridge;
 pub mod cf_word;
 pub mod codex;
 pub mod ledger;
+pub mod models;
 pub mod page;
 pub mod panes;
 pub mod questions;

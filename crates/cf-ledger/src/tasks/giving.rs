@@ -293,14 +293,7 @@ pub(crate) fn create_task(
         for number in &blocking {
             let waits = store.task_row(project_id, *number)?;
             if waits.state != "open" {
-                return Err(LedgerError::refused_with(
-                    "not-on-the-board",
-                    format!(
-                        "T-{number} is {}: only a task still on the board can wait for a new one",
-                        waits.state
-                    ),
-                    409,
-                ));
+                return Err(cannot_wait_for_a_new_one(store, &waits)?);
             }
             // A plan has no circles: what the new task waits for, near or far, cannot wait for it.
             if upstream(store, task_id, waits.id)? {
@@ -370,6 +363,73 @@ pub(crate) fn create_task(
             asked: moved,
         })
     })
+}
+
+/// The refusal of a `--before` that names a task which is not on the board: only
+/// an open one can wait for a new task. A task in a window is not pulled back, by
+/// design, so the refusal says what to do instead (T-675, the field report of
+/// 2026-10-27, where a chief cancelled a running review and added it again with
+/// its whole brief restated; and the review T-1212, finding 4: advice a task cannot
+/// follow is no advice). Add the new task alone, then, by who the task is given to and
+/// whether its brief can still be edited, not by its state alone:
+/// - a task for a tier, queued for its window with its brief not begun, is put behind the
+///   new one with `cf task edit T-n --needs +T-new` (T-1108); one given by name, a follow-up
+///   or the chief's own step, has no pool to wait on the board in, and is not told to;
+/// - a worker's task in its window (for a tier or by name, a follow-up included) is stopped
+///   with a pause and sent on when the new task is accepted, or, paused already, sent on;
+/// - the chief's own step is not paused (`own-work`): it is finished later, with `cf task
+///   done`, when the new task is accepted;
+/// - any of them is cancelled and added again with `--needs` (`--self --needs` for the
+///   chief's own step).
+///
+/// The new task is not on the board, since the refusal rolls it back, so it is not named by
+/// number.
+fn cannot_wait_for_a_new_one(store: &Store, waits: &TaskRow) -> Result<LedgerError, LedgerError> {
+    let number = waits.number;
+    let alone = "a task in a window is not pulled back";
+    let again = "cancel it and add it again with --needs on the new task";
+    let instead = if !matches!(
+        waits.state.as_str(),
+        "queued" | "working" | "waiting" | "paused"
+    ) {
+        "add that work again with --needs on the new task if it is still wanted".to_owned()
+    } else if super::own_steps::is_own_step(store, waits)? {
+        format!(
+            "{alone}. T-{number} is your own step, which is not paused: finish it later with cf task done T-{number} \"…\" once the new task is accepted, or cancel it and add it again with --self --needs on the new task"
+        )
+    } else if waits.state == "paused" {
+        format!(
+            "{alone}. Add the new task without --before, and send T-{number} on with cf task resume T-{number} \"…\" once the new task is accepted; or {again}"
+        )
+    } else if waits.state == "queued" && waits.pool.is_some() && !brief_begun(store, waits)? {
+        format!(
+            "{alone}. Add the new task without --before, then put T-{number} behind it with cf task edit T-{number} --needs +T-<the new task>; or {again}"
+        )
+    } else {
+        format!(
+            "{alone}. Add the new task without --before, pause T-{number} now (cf task pause T-{number}), and send it on with cf task resume T-{number} \"…\" once the new task is accepted; or {again}"
+        )
+    };
+    Ok(LedgerError::refused_with(
+        "not-on-the-board",
+        format!(
+            "T-{number} is {}: only a task still on the board can wait for a new one; {instead}",
+            waits.state
+        ),
+        409,
+    ))
+}
+
+/// Whether a task message of `task` has begun to reach its window (being pasted, pasted or
+/// read): what `cf task edit` refuses a task for, telling its window instead.
+fn brief_begun(store: &Store, task: &TaskRow) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message WHERE task_id = ? AND kind = 'task'
+               AND state IN ('delivering', 'delivered', 'read')",
+        )?
+        .exists([task.id])?)
 }
 
 /// Whether `task_id` needs `other_id`, directly or through the tasks it needs.

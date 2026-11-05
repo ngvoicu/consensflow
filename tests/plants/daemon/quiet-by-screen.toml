@@ -1,0 +1,221 @@
+# A window that repaints without changing what it shows counts as quiet (T-1083, found by
+# T-1081). Muse Code 1.4.14, at rest after a command it ran in the background was stopped,
+# writes colour resets and a move of the cursor to where it is every 50 ms. The daemon judged a
+# window at rest by its output going quiet, so the resume words of T-1081's live run waited
+# 360 s and were never let in, while the board said "a quiet screen". Now the pane host keeps a
+# second clock beside the output's: when what the screen shows last changed (`screenQuietMs`),
+# from a digest of its cells after each chunk; and every judge of a screen at rest or still
+# being drawn reads it. The paste's Enter and a box reader's "did the window answer the last
+# key" keep the output's clock.
+#
+# - the pane host: a chunk that changes nothing shown does not move the screen's clock; the
+#   cursor is not part of what is shown, the styled mark of a cell is; the host's resize is no
+#   change; the snapshot says the screen's clock apart from the output's;
+# - the paste's Enter waits on the output, not on the screen;
+# - the engine: the pacing's fallback, the lane that says it, a fresh window's drawn screen,
+#   the Enter again for a paste the record never showed (both of its looks), the key that
+#   empties a box, the daemon's host look of a closing window, Devin's `/bypass`: each reads
+#   the screen's clock; the lane's look costs no turn of the Node traces;
+# - a box reader asks the output whether the window answered the human's last key.
+#
+# Every name holds `quiet by screen`, so `cargo xtask plants daemon "quiet by screen"` runs them.
+
+[run]
+qs-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "screen::", "arbiter::", "pane_handlers::"]
+qs-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "looks::", "still_there::", "stale_box::", "close_when_drawn::"]
+qs-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::", "contract::bridge::"]
+qs-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::adapter::", "shared::input_box::"]
+
+[[plant]]
+name = "quiet by screen: every chunk moves the screen's clock"
+meant = "a_window_that_repaints_what_it_shows_is_quiet_by_its_screen_and_not_by_its_output"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "            printed.note(changed);"
+replace = "            printed.note(changed || !changed);"
+
+[[plant]]
+name = "quiet by screen: a chunk that draws again what is shown is a change"
+meant = "a_screen_printed_again_as_it_is_shows_no_change_and_what_a_person_sees_change_is_one"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = "        let changed = shows != self.shows;"
+replace = "        let changed = shows == shows;"
+
+[[plant]]
+name = "quiet by screen: the cursor is part of what the screen shows"
+meant = "a_screen_printed_again_as_it_is_shows_no_change_and_what_a_person_sees_change_is_one"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen/grid.rs"
+find = "        (self.rows, self.cols).hash(&mut hasher);"
+replace = "        (self.rows, self.cols, self.row, self.col).hash(&mut hasher);"
+
+[[plant]]
+name = "quiet by screen: a cell drawn plain where it was styled is no change"
+meant = "a_screen_printed_again_as_it_is_shows_no_change_and_what_a_person_sees_change_is_one"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen/grid.rs"
+find = "            row.styled.hash(&mut hasher);"
+replace = "            let _ = &row.styled;"
+
+[[plant]]
+name = "quiet by screen: the host's resize is the program's change"
+meant = "a_resize_is_no_change_and_what_is_drawn_after_it_is"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = """
+        self.grid.resize(usize::from(rows), usize::from(cols));
+        self.shows = self.grid.digest();"""
+replace = """
+        self.grid.resize(usize::from(rows), usize::from(cols));"""
+
+[[plant]]
+name = "quiet by screen: the screen's clock is the output's"
+meant = "a_snapshot_says_how_long_the_screen_has_shown_the_same_apart_from_the_output"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "            screen_quiet_ms: self.output.screen_quiet_ms(now),"
+replace = "            screen_quiet_ms: self.output.quiet_ms(now),"
+
+[[plant]]
+name = "quiet by screen: the snapshot does not say the screen's clock"
+meant = "a_window_that_repaints_what_it_shows_is_quiet_by_its_screen_and_not_by_its_output"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = """
+        "screenQuietMs":snapshot.screen_quiet_ms,"""
+replace = ""
+
+[[plant]]
+name = "quiet by screen: a paste's Enter waits on the screen"
+meant = "a_pastes_enter_waits_for_the_window_to_finish_echoing_it"
+runs = ["qs-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''
+            let echoed = output
+                .quiet_ms(now)
+                .filter(|quiet| *quiet < since && since - quiet >= self.drawn_after_ms);'''
+replace = '''
+            let echoed = output
+                .screen_quiet_ms(now)
+                .filter(|quiet| *quiet < since && since - quiet >= self.drawn_after_ms);'''
+
+[[plant]]
+name = "quiet by screen: the pacing's fallback reads the output"
+meant = "a_window_read_by_the_fallback_that_prints_and_shows_the_same_is_let_in"
+runs = ["qs-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        let screen_quiet_ms = ms(&snapshot, SCREEN_QUIET_MS);"
+replace = """        let screen_quiet_ms = ms(&snapshot, "outputQuietMs");"""
+
+[[plant]]
+name = "quiet by screen: the fallback's lane says a quiet screen unasked"
+meant = "a_harness_with_no_idle_word_of_its_own_waits_for_a_quiet_screen_too_and_says_so"
+runs = ["qs-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "        if settle == 0 || quiet.is_some_and(|quiet| quiet >= settle as f64) {"
+replace = "        if settle == 0 || quiet.is_none_or(|quiet| quiet >= 0.0) {"
+
+[[plant]]
+name = "quiet by screen: a fresh window is drawn by its output"
+meant = "a_fresh_window_that_prints_and_shows_the_same_is_drawn_by_its_screen"
+runs = ["qs-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            .and_then(|snapshot| snapshot.get(SCREEN_QUIET_MS))"
+replace = """            .and_then(|snapshot| snapshot.get("outputQuietMs"))"""
+
+[[plant]]
+name = "quiet by screen: a paste the record never showed is read printing by its output"
+meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
+runs = ["qs-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = """
+            watched.screen_quiet_ms = snapshot
+                .get(SCREEN_QUIET_MS)"""
+replace = """
+            watched.screen_quiet_ms = snapshot
+                .get("outputQuietMs")"""
+
+[[plant]]
+name = "quiet by screen: the Enter again waits for a quiet output"
+meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
+runs = ["qs-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            .and_then(|snapshot| snapshot.get(SCREEN_QUIET_MS))"
+replace = """            .and_then(|snapshot| snapshot.get("outputQuietMs"))"""
+
+[[plant]]
+name = "quiet by screen: the key that empties a box waits for a quiet output"
+meant = "the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed"
+runs = ["qs-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                    .get(SCREEN_QUIET_MS)"
+replace = """                    .get("outputQuietMs")"""
+
+[[plant]]
+name = "quiet by screen: the daemon's host look of a closing window reads the output"
+meant = "how_long_a_panes_screen_has_held_still_is_what_its_snapshot_says_and_none_where_it_says_nothing"
+runs = ["qs-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "    answer.get(SCREEN_QUIET_MS).and_then(Value::as_f64)"
+replace = """    answer.get("outputQuietMs").and_then(Value::as_f64)"""
+
+[[plant]]
+name = "quiet by screen: the fallback's lane costs a turn"
+meant = "an_answer_and_an_exit_written_together_are_one_read_and_the_exit_is_handled_first"
+runs = ["qs-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            let activity = self.fallback_lane(record, activity).await;"
+replace = "            let activity = returning(self.fallback_lane(record, activity)).await;"
+
+[[plant]]
+name = "quiet by screen: Devin's /bypass waits for a quiet output"
+meant = "a_window_in_the_normal_mode_is_given_bypass_once_drawn_and_is_ready_when_the_wire_says_it_changed"
+runs = ["qs-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            .get(SCREEN_QUIET_MS)"
+replace = """            .get("outputQuietMs")"""
+
+[[plant]]
+name = "quiet by screen: a box reader asks the screen whether the last key was answered"
+meant = "a_key_the_window_answered_with_no_change_shown_lets_its_box_be_read"
+runs = ["qs-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/input_box.rs"
+find = """        let drawn = quiet("outputQuietMs").is_some_and(|printed| printed < typed);"""
+replace = """        let drawn = quiet("screenQuietMs").is_some_and(|printed| printed < typed);"""

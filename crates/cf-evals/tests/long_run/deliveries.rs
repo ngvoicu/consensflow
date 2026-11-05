@@ -393,3 +393,86 @@ fn each_message_given_once_or_a_carrier_or_a_quote_holds_the_seventh() {
     scene.item(other, 0, "user", FIRST, true, &t(7, 0));
     assert!(found(&scene.look(ms(8, 0)), 7).is_empty());
 }
+
+/// What ConsensFlow's note to a chief whose turn was cut quotes, as the engine writes it:
+/// the opening of the turn that was cut, which was a wrapped delivery.
+const CUT_NOTE: &str = "[ConsensFlow m-38 · note from ConsensFlow] ConsensFlow stopped in the middle of your turn, which was cut: the turn that began at 2026-10-15 10:01 UTC with \"<pasted_content id=\"4868\"> [ConsensFlow m-246 · T-9 · result from @long-worker] Phase 1…\". Go on where you stopped.";
+
+#[test]
+fn a_cut_note_that_quotes_a_delivery_is_no_delivery_of_it_though_claude_code_escapes_the_quote() {
+    // T-1069 (T-695): the note m-38 quotes the opening of m-35's wrapped paste. The ledger
+    // holds the note as written; Claude Code's record holds the quoted wrapper escaped
+    // (`<\pasted_content`), so the words did not match the ledger's and the header inside
+    // them was counted as a second delivery of m-35, and the prompt as two joined.
+    let pasted = |inner: &str| {
+        format!("\n\n<pasted_content id=\"4868\">\n{inner}\n</pasted_content id=\"4868\">\n")
+    };
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    let body = CUT_NOTE.split_once("] ").unwrap().1;
+    scene.message(38, (CHIEF, None), "note", None, body, &t(2, 0));
+    scene.item(conversation, 0, "user", &pasted(FIRST), true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(
+        conversation,
+        2,
+        "user",
+        &CUT_NOTE.replace("<pasted_content", "<\\pasted_content"),
+        true,
+        &t(2, 2),
+    );
+    assert_eq!(said_of(&scene.look(ms(4, 0))), Vec::<String>::new());
+    // The same note with its quote unescaped was never a break; and a header glued after the
+    // note's words, escaped quote or not, is a delivery all the same.
+    scene.item(
+        conversation,
+        3,
+        "user",
+        &format!(
+            "{}{SECOND}",
+            CUT_NOTE.replace("<pasted_content", "<\\pasted_content")
+        ),
+        true,
+        &t(3, 2),
+    );
+    assert_eq!(
+        said_of(&scene.look(ms(4, 0))),
+        [
+            "@chief was given m-38 and m-248 as one prompt",
+            "@chief was given m-38 2 times"
+        ]
+    );
+}
+
+#[test]
+fn a_summary_the_copy_marks_for_a_harness_whose_record_the_watch_does_not_read_is_no_prompt() {
+    // T-655 and T-660: a Devin conversation's compaction writes a summary in the user's
+    // place, which the copy marks (`compaction`). It quotes the prompts before it whole, m-246
+    // among them, and was given none. Only Claude Code's record is read by the watch (its own
+    // flag, `isCompactSummary`); for every other harness the copy's mark is all there is.
+    let scene = Scene::new(&[("long-worker", "devin")]);
+    let conversation = chief(&scene);
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(
+        conversation,
+        2,
+        "user",
+        &format!("This session is being continued. The earlier prompts:\n\n{FIRST}\n\nDone."),
+        true,
+        &t(2, 2),
+    );
+    // Unmarked, it is a prompt that holds m-246 again: a real retry.
+    assert_eq!(said_of(&scene.look(ms(4, 0))), [TWICE]);
+    scene.compaction(conversation, 2);
+    assert_eq!(said_of(&scene.look(ms(4, 0))), Vec::<String>::new());
+    // A Claude Code conversation is held to its own record's flag, whatever the copy says:
+    // a row marked in the copy and not by the record is a prompt.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(conversation, 2, "user", FIRST, true, &t(2, 2));
+    scene.compaction(conversation, 2);
+    assert_eq!(said_of(&scene.look(ms(4, 0))), [TWICE]);
+}

@@ -25,7 +25,7 @@ fn with_a_codex_worker(context: &Context) -> Tiers<'_> {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "codex", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()

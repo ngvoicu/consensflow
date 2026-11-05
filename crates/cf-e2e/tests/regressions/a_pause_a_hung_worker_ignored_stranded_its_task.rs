@@ -11,16 +11,18 @@
 //! interrupt … To stop it now, cancel". The report is
 //! `issues/pausing-a-pi-worker-mid-turn-strands-its-task.md` in consensflow-sme.
 //!
-//! What the chief should have seen: the window that ignored the pause is closed,
-//! the task stays paused, and the notes say why; the resume opens the window again
-//! on its conversation, and the worker goes on with the resume's words.
+//! What the chief should have seen, as decided since (T-1199, the owner's rule of
+//! 2026-11-03: "pause should never close the window"): the window that ignored the pause is
+//! kept, never closed; the task stays paused; the chief who gave it and the human are told
+//! once that it did not stop, that ConsensFlow can see nothing it runs (its harness may be
+//! hung), and that only the human can end it, by deleting its session. It is asked again
+//! every minute. The resume's words wait for its turn to end, which a hung turn never does;
+//! the human decides: paused again, its session deleted, the window ends.
 //!
 //! The stand-in worker's turn hangs as Pi's did (`HANG`: it takes no Escape at
 //! all); a model request that never answers is the harness's own, so a turn that
-//! ignores every key is the closest shape of it. The stand-in is Claude's, whose
-//! window comes back on its conversation with `--resume`, as Pi's does with its
-//! session. Both orders are run: the field's, the resume after the close, and the
-//! resume during the rounds, before it.
+//! ignores every key is the closest shape of it. Both orders are run: the field's, the
+//! resume after the window is kept, and the resume during the rounds, before it.
 
 use std::thread::sleep;
 
@@ -28,7 +30,6 @@ use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::Error;
 use serde_json::{json, Value};
 
-use crate::resume_of_a_chief_with_no_turn::{after, resumed_on};
 use crate::{config, secs, Outcome};
 
 /// The tier the worker was given, as a word the chief's brief names.
@@ -51,13 +52,6 @@ fn closed_by_the_daemon(rig: &Rig, window: &Value) -> bool {
     let this =
         |frame: &Value| frame["id"] == window["id"] && frame["generation"] == window["generation"];
     rig.kills().iter().any(this) && rig.exits().iter().any(this)
-}
-
-/// Waits for the worker's window to come back: one more opened than `first`.
-fn comes_back(rig: &Rig, project: &Project, first: &[Value]) -> cf_e2e::Result<()> {
-    rig.wait_for("the worker's window to come back", secs(60), || {
-        Ok(workers_windows(rig, project).len() == first.len() + 1)
-    })
 }
 
 /// `cf` with `words`, run in the chief's window as its agent runs it.
@@ -97,21 +91,21 @@ fn results(project: &Project) -> cf_e2e::Result<Vec<String>> {
 }
 
 #[test]
-fn a_worker_hung_in_its_turn_is_closed_by_its_pause_and_goes_on_in_the_window_its_resume_opens(
+fn a_worker_hung_in_its_turn_is_kept_by_its_pause_told_once_and_its_resume_waits_for_the_human(
 ) -> Outcome {
     paused_then_resumed(false)
 }
 
 #[test]
-fn a_worker_hung_in_its_turn_resumed_before_its_pause_closed_it_goes_on_in_the_window_that_opens_again(
+fn a_worker_hung_in_its_turn_resumed_during_its_pauses_rounds_is_kept_and_its_words_wait_for_the_human(
 ) -> Outcome {
     paused_then_resumed(true)
 }
 
-/// The worker hangs in its turn on T-1 and the chief pauses T-1; `at_once`, the
-/// chief resumes it at once, in the rounds of the pause; else once the window is
-/// closed. The worker goes on in the window that opens again, and its answer is
-/// T-1's result.
+/// The worker hangs in its turn on T-1 and the chief pauses T-1; `at_once`, the chief
+/// resumes it at once, in the rounds of the pause; else once the window is kept. The
+/// window is never closed, the chief and the human are told once, the resume's words wait,
+/// and the human's delete-session ends the window.
 fn paused_then_resumed(at_once: bool) -> Outcome {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
@@ -127,80 +121,78 @@ fn paused_then_resumed(at_once: bool) -> Outcome {
         Ok(project.lane("worker")?["activity"]["state"] == "working")
     })?;
     let first = workers_windows(&rig, &project);
-    let session = first
-        .first()
-        .and_then(|window| after(window, "--session-id"))
-        .ok_or("the worker's window has no session")?
+    let window = first
+        .last()
+        .ok_or_else(|| Error::Daemon("the worker has no window".to_owned()))?
+        .clone();
+    let handle = project.task(1)?["assignee"]
+        .as_str()
+        .unwrap_or_default()
         .to_owned();
-    let window = first.last().ok_or("the worker has no window")?.clone();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     let resume = ["task", "resume", "T-1", "Reply with exactly: RESUMED_OK"];
 
     // The chief pauses T-1, and the window ignores every key.
     cf(&rig, &chief, &["task", "pause", "T-1"])?;
     if at_once {
-        // Resumed in the rounds, the window comes back by itself once it is closed: the
-        // case looks at the close only after that, as a loaded runner's look may come.
         cf(&rig, &chief, &resume)?;
-        comes_back(&rig, &project, &first)?;
     }
-    // What the host was asked and told stays, however soon a window opens after it;
-    // the notes come once the host has ended the window, which its exit can come before.
     rig.wait_for(
-        "the daemon to have closed the window that ignored the pause, and the notes that say so",
+        "the chief and the human to be told the window is kept",
         secs(60),
         || {
             let [human, to_chief] = told(&rig, &project)?;
-            Ok(closed_by_the_daemon(&rig, &window) && human.is_empty() && !to_chief.is_empty())
+            Ok(!human.is_empty() && !to_chief.is_empty())
         },
     )?;
-    if at_once {
-        assert_ne!(project.task(1)?["state"], "paused", "resumed, it stays so");
-    } else {
-        assert_eq!(project.task(1)?["state"], "paused");
-    }
-    let [human, to_chief] = told(&rig, &project)?;
-    // One note of the close, to the chief who gave the task, and none of its own to
-    // the human: two of one event said it twice (T-502's, 2026-10-25).
-    assert!(human.is_empty(), "the human was told: {human:?}");
+    // Past the minute it is asked again in, and a look or two.
+    sleep(secs(70));
     assert!(
-        to_chief.len() == 1 && to_chief[0].contains("so ConsensFlow closed it"),
-        "the chief was told: {to_chief:?}"
-    );
-    if !at_once {
-        // Paused, nothing opens it again.
-        sleep(secs(3));
-        assert_eq!(workers_windows(&rig, &project).len(), first.len());
-        assert_eq!(project.task(1)?["state"], "paused");
-        cf(&rig, &chief, &resume)?;
-        comes_back(&rig, &project, &first)?;
-    }
-
-    // What the chief should have seen: the window opens again, after the one closed,
-    // on its conversation, and the worker goes on with the resume's words.
-    let again = workers_windows(&rig, &project).remove(first.len());
-    assert!(
-        again["generation"].as_u64() > window["generation"].as_u64(),
-        "the window came back after the one closed: {} then {}",
-        window["generation"],
-        again["generation"]
+        !closed_by_the_daemon(&rig, &window),
+        "a pause closes no window"
     );
     assert_eq!(
-        resumed_on(&again),
-        Some(session.as_str()),
-        "the window came back on its conversation: {:?}",
-        again["argv"]
+        workers_windows(&rig, &project).len(),
+        first.len(),
+        "no window opened again"
     );
-    rig.wait_for("the worker to answer", secs(60), || {
-        Ok(rig.transcript(&session).contains("\"text\":\"RESUMED_OK\""))
+    let [human, to_chief] = told(&rig, &project)?;
+    assert!(
+        human.len() == 1
+            && human[0].contains("ConsensFlow can see nothing it runs")
+            && human[0].contains(&format!("delete @{handle}'s session")),
+        "the human was told once: {human:?}"
+    );
+    assert!(
+        to_chief.len() == 1
+            && to_chief[0].contains("ConsensFlow keeps the window open")
+            && to_chief[0].contains("only the human can end it sooner, by deleting its session"),
+        "the chief was told once: {to_chief:?}"
+    );
+    if !at_once {
+        assert_eq!(project.task(1)?["state"], "paused");
+        cf(&rig, &chief, &resume)?;
+        sleep(secs(5));
+    }
+    // The resume's words wait for a turn that never ends: nothing is typed into it.
+    assert_eq!(project.task(1)?["state"], "queued", "its words wait");
+    assert!(results(&project)?.is_empty());
+
+    // The human decides: a session whose task is not paused holds work, so the human
+    // pauses it again (the delete's own refusal says so), and deleting the session ends the
+    // window.
+    let paused = rig.page("task.pause", json!({ "project": project.id(), "task": 1 }))?;
+    assert_eq!(paused["ok"], true, "{paused}");
+    let ended = rig.page(
+        "session.end",
+        json!({ "project": project.id(), "handle": handle }),
+    )?;
+    assert_eq!(ended["ok"], true, "{ended}");
+    rig.wait_for("the window to end", secs(60), || {
+        Ok(rig.exits().iter().any(|frame| {
+            frame["id"] == window["id"] && frame["generation"] == window["generation"]
+        }))
     })?;
-    rig.wait_for("T-1 to be done", secs(60), || {
-        Ok(project.task(1)?["state"] == "done")
-    })?;
-    rig.wait_for("the result to reach the chief", secs(30), || {
-        Ok(!results(&project)?.is_empty())
-    })?;
-    assert_eq!(results(&project)?, ["RESUMED_OK"]);
     rig.close()?;
     Ok(())
 }

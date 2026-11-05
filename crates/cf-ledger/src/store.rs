@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use crate::messages::withdraw_continuations;
 use crate::model::{quoted, require_active, LedgerError, ACTIVE_TASK_STATES};
 use crate::projects::ProjectRow;
+use crate::tasks::{no_longer_failed, no_longer_waiting};
 use crate::views::{message_view, ParticipantRow, TaskRow, MESSAGE_SELECT, PARTICIPANT_SELECT};
 use crate::Event;
 
@@ -181,7 +182,9 @@ impl Store {
     /// A move ends a hold, and the mark that a project's suspension paused the
     /// task: the pause that sets either sets it after the move. A move out of the
     /// work (to any state but working and waiting) withdraws what told the task's
-    /// window to go on with it and was not handed to it (`continuations`).
+    /// window to go on with it and was not handed to it (`continuations`), and a move out of
+    /// `failed`, or of the wait for a failed task, what told the requester of the failure and
+    /// was not given it (`outage`).
     pub(crate) fn move_task(
         &mut self,
         task: &TaskRow,
@@ -212,6 +215,13 @@ impl Store {
         self.log(task.project_id, kind, data)?;
         if !ACTIVE_TASK_STATES.contains(&to) {
             withdraw_continuations(self, task, to)?;
+        }
+        // A task no longer failed, or no longer waiting, leaves what told it so untrue.
+        if task.state == "failed" && to != "failed" {
+            no_longer_failed(self, task, to)?;
+        }
+        if matches!(task.state.as_str(), "open" | "paused") && !matches!(to, "open" | "paused") {
+            no_longer_waiting(self, task, to)?;
         }
         Ok(())
     }

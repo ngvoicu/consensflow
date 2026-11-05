@@ -38,14 +38,15 @@ use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, FirstMessage, Held, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Readiness, Records, Skill, Window, Work,
+    Adapter, Admission, Agent, FirstMessage, Held, Launch, LaunchId, Observed, Over, Pane,
+    PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -77,6 +78,23 @@ const WINDOW: [&str; 4] = [
     "check_for_update_on_startup=false",
     "-c",
     "allow_login_shell=false",
+];
+
+/// Codex's offers to switch or install something, which wait in a window for a key nobody
+/// there presses, turned off for the window's launch alone (T-1183, read from Codex 0.166.0):
+/// the nudge near a rate limit to switch to a cheaper model ("Switch to … for lower credit
+/// usage?", `notice.hide_rate_limit_model_nudge`), the model's suggestion to install a plugin
+/// (`tool_suggest`), and the offer to install the MCP servers a skill names
+/// (`skill_mcp_dependency_install`). The features go as configuration, never as `--disable`,
+/// which refuses to start on a Codex that has no such feature; a key Codex does not know is
+/// passed over. What the owner has installed and configured stays as it is.
+const OFFERS: [&str; 6] = [
+    "-c",
+    "notice.hide_rate_limit_model_nudge=true",
+    "-c",
+    "features.tool_suggest=false",
+    "-c",
+    "features.skill_mcp_dependency_install=false",
 ];
 
 /// Why a message waits while the broker names no thread or cannot take one: a
@@ -134,6 +152,40 @@ const CODEX_ON_WINDOWS: SilentPaste = SilentPaste {
 };
 
 impl Adapter for CodexAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
+        Box::pin(super::models::listed(
+            &self.services.env,
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(
+        &'a self,
+        session: &'a str,
+        _asked: Option<&'a str>,
+    ) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, &self.services.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window and press s to keep it to that conversation: Enter there makes it your Codex default.")
+    }
+
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(super::models::default_model(
+            &self.services.env,
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let services = &self.services;
@@ -190,6 +242,7 @@ impl Adapter for CodexAdapter {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
             }
             args.extend(WINDOW.map(str::to_owned));
+            args.extend(OFFERS.map(str::to_owned));
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
@@ -287,6 +340,10 @@ impl Adapter for CodexAdapter {
             folder,
             paths::global_specmint(env, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Codex, &self.services.env, Some(*specs), id).map(|_| ())
     }
 }
 

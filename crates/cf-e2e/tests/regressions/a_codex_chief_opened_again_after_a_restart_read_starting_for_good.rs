@@ -108,7 +108,7 @@ fn chief_at_rest_when_the_app_quits(
             { "id": "worker", "kind": "claude-code", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     // The worker is the staff from the start: a member added later changes the chief's
     // role, which its resumed thread is then told by a note that waits for it.
     let project = Project::open_with_staff(&rig, "codex-chief", None, &[("worker", "worker")])?;

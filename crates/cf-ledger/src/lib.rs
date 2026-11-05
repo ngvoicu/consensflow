@@ -16,18 +16,21 @@
 #![forbid(unsafe_code)]
 
 mod conversations;
+pub mod handles;
 mod ledger;
 mod meeting;
 mod messages;
 /// The ledger's vocabulary: the words its records hold, their limits, and
 /// the parsers a caller reading JSON (the API, the page) checks a request with.
 pub mod model;
+mod model_lists;
 mod names;
 mod openings;
 mod page_reads;
 mod projects;
 mod questions;
 mod queue;
+mod saved_agents;
 mod schema;
 mod specs;
 mod staff;
@@ -40,20 +43,18 @@ mod views;
 mod wake_ups;
 
 pub use cf_proto::ledger::{
-    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationEnd,
-    ConversationView, Cut, DeletedProject, EventView, HeldTask, HistoryEntry, HistoryFrom,
-    HistoryItem, HistoryKey, HistoryRead, HistoryRow, Lane, LastSwitch, LatestMessages,
-    LatestTranscript, Links, MemberView, MessageOpening, MessageView, ParticipantConversation,
-    ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume, Scanned,
-    StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskReleased,
-    TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
-    TierChange,
+    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
+    DeletedProject, EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead,
+    HistoryRow, ItemDetail, Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView,
+    MessageOpening, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
+    RemovedMember, Resume, Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited,
+    TaskMoved, TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView,
+    TextCut, TextPart,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
-    ChiefSwitch, HistoryAsk, FIELD_MAX, HEADING_EVENT_MAX, HISTORY_FIND_MAX, HISTORY_PART,
-    HISTORY_SCAN_BYTES, ID_SHOWN, MESSAGE_OPENING, NATIVE_SESSION_MAX, OPENING_COST,
-    TRANSCRIPT_ITEM_MAX,
+    ChiefSwitch, HistoryAsk, FIELD_MAX, HISTORY_FIND_MAX, HISTORY_PART, HISTORY_SCAN_BYTES,
+    ID_SHOWN, MESSAGE_OPENING, NATIVE_SESSION_MAX, OPENING_COST, TRANSCRIPT_ITEM_MAX,
 };
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
@@ -62,7 +63,7 @@ pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
     continuation, continuation_in, continuation_tasks, cut_turn, is_busy_note, is_told,
     waiting_for_the_reopen, GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN,
-    WITHDRAWN_AFTER_HANDED,
+    NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
@@ -73,6 +74,7 @@ pub use projects::{
 };
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
-pub use tasks::resumed_in_vain;
-pub use tasks::{reopen_or_accept, NewTask, RESUME_WORDS};
+pub use staff::MemberEdit;
+pub use tasks::{reopen_or_accept, window_closed, NewTask, RESUME_WORDS, SAME_ERROR_WITHIN_MS};
+pub use tasks::{resumed_in_vain, NEVER_BEGAN};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

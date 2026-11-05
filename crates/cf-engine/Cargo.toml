@@ -9,7 +9,6 @@ publish = false
 [dependencies]
 cf-base.workspace = true
 # The work tiers and how each one reads, for the chief's text.
-cf-catalog.workspace = true
 cf-harness.workspace = true
 cf-ledger.workspace = true
 cf-proto.workspace = true
@@ -20,6 +19,8 @@ futures-util.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# What an outage's key is as it goes on (`shown::hashed`): a hash, never the screen's lines.
+sha2.workspace = true
 thiserror.workspace = true
 # The kit's temporary ledger.
 tempfile = { workspace = true, optional = true }

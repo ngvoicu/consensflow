@@ -36,6 +36,8 @@ $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorA
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
 $ErrorActionPreference = 'Continue'
+$env:CONSENSFLOW_TEST_MACHINE = 'zeewin'
+Write-Output "== test machine: $env:CONSENSFLOW_TEST_MACHINE"
 $env:CARGO_BUILD_JOBS = '4'
 $env:RUST_TEST_THREADS = '4'
 Write-Output "== limits: CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 (what this machine takes at once)"

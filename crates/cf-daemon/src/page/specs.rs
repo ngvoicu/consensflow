@@ -13,8 +13,9 @@ use super::Page;
 
 /// `project.specs`: all three parts at once, each checked before the project is
 /// looked for; one the page leaves out, or sends as `null`, is not said (the
-/// project follows what the app says, [`super::app_specs`]). It applies at the
-/// chief's next launch, which the page says.
+/// project follows what the app says, [`super::app_specs`]). A chief whose window is
+/// open is told at its next rest, in a note (`cf_engine`'s `role_news`), and any other
+/// takes it in the role of its next launch; the page says which, from its board.
 pub(super) async fn set(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let change = SpecsChange::from_json(&json!({
         "on": body.get("on"),

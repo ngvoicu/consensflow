@@ -50,6 +50,8 @@ fn the_restart_after_a_compaction_waits_for_a_chief_whose_record_still_ends_in_i
     schedule.played(Disruption::Compact, minutes(4), "strict".to_owned());
     let tooling = vec![worker("w", "claude", true, true)];
     let mut after = moment(minutes(8), tooling.clone());
+    // A chief at work is not compacted: the restart waits for it.
+    after.chief_idle = false;
     assert_eq!(schedule.next(&after), None, "the chief had a turn since");
     after.chief_compacted = true;
     let strict = schedule.next(&after).unwrap();
@@ -58,8 +60,8 @@ fn the_restart_after_a_compaction_waits_for_a_chief_whose_record_still_ends_in_i
     after.elapsed = minutes(10);
     let loose = schedule.next(&after).unwrap();
     assert_eq!(
-        (loose.how, loose.lacks),
-        ("loose", Some(NO_IDLE_COMPACTION))
+        (loose.how, loose.lacks, loose.recompact),
+        ("loose", Some(NO_IDLE_COMPACTION), false)
     );
     // Played so, it is kept as played without A5's shape.
     schedule.played(Disruption::Restart, minutes(10), "loose".to_owned());
@@ -328,4 +330,58 @@ fn the_switch_wants_a_job_running_the_compact_an_idle_chief_and_the_suspend_any_
             vec![worker("w", "claude", false, false)]
         ))
         .is_none());
+}
+
+#[test]
+fn a_restart_after_a_compaction_the_chief_has_had_a_turn_since_sets_the_shape_up_by_compacting_again(
+) {
+    // T-1069 (T-695): "restart was played without A5's shape: the chief had a turn after the
+    // compaction". An ordinary turn of the chief's came in after the compaction, as one does
+    // whenever a worker's result is delivered, and the restart waited for a record that ends in
+    // a compaction that will never be: it was played loose and lacked the shape, which fails the
+    // run. A chief at rest is the setup's moment: it is compacted again, and restarted at once.
+    let mut schedule = Schedule::new(
+        &[Disruption::Compact, Disruption::Restart],
+        minutes(4),
+        "claude",
+        &staff(&["claude"]),
+    );
+    schedule.played(Disruption::Compact, minutes(4), "strict".to_owned());
+    let tooling = vec![worker("w", "claude", true, true)];
+    let idle = moment(minutes(8), tooling.clone());
+    let choice = schedule.next(&idle).unwrap();
+    assert_eq!(
+        (choice.how, choice.lacks, choice.recompact),
+        ("strict", None, true),
+        "at rest, with a worker mid-tool: the compaction first"
+    );
+    // A chief whose record still ends in the compaction needs none.
+    let mut compacted = idle.clone();
+    compacted.chief_compacted = true;
+    let choice = schedule.next(&compacted).unwrap();
+    assert_eq!((choice.lacks, choice.recompact), (None, false));
+    // A chief at work cannot be compacted: the restart waits, and at the loose moment is played
+    // without the shape, saying so.
+    let mut working = idle.clone();
+    working.chief_idle = false;
+    assert_eq!(schedule.next(&working), None);
+    working.elapsed = minutes(10);
+    let choice = schedule.next(&working).unwrap();
+    assert_eq!(
+        (choice.how, choice.lacks, choice.recompact),
+        ("loose", Some(NO_IDLE_COMPACTION), false)
+    );
+    // A chief that is not Claude Code is never compacted: nothing sets the shape up.
+    let mut other = idle.clone();
+    other.chief = "codex".to_owned();
+    assert_eq!(schedule.next(&other), None);
+    // No compaction was played, no shape to set up.
+    let alone = Schedule::new(
+        &[Disruption::Restart],
+        minutes(4),
+        "claude",
+        &staff(&["claude"]),
+    );
+    let choice = alone.next(&idle).unwrap();
+    assert_eq!((choice.lacks, choice.recompact), (None, false));
 }

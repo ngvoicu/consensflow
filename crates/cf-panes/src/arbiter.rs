@@ -92,9 +92,14 @@ pub struct ArbiterSnapshot {
     pub typed: u64,
     /// How long ago the human last typed into the pane, once they have.
     pub typed_quiet_ms: Option<u64>,
-    /// How long the pane has printed nothing, once it has printed anything:
-    /// a harness still drawing its screen is not ready for input.
+    /// How long the pane has printed nothing, once it has printed anything: what a
+    /// paste's Enter waits on ([`EnterTiming`]), and a harness's reader of its input box
+    /// on whether the window answered the human's last key.
     pub output_quiet_ms: Option<u64>,
+    /// How long what the pane's screen shows has not changed, once it has shown
+    /// anything ([`crate::screen::Screen::feed`]): how a screen at rest is told from one
+    /// at work. A harness can print without end and change nothing shown (T-1083).
+    pub screen_quiet_ms: Option<u64>,
     /// How long since a paste was last written into the pane, once one was: a
     /// paste the host held while it was slow is written when it catches up, and
     /// the window's record has had only this long to show it.
@@ -151,36 +156,83 @@ struct Written {
     classes: Classes,
 }
 
-/// When one generation of a pane last printed. Its output thread notes every
-/// chunk here and takes no lock: output never waits on the pane's input.
+/// Where the arbiter reads the time from, and rests by while it waits. Every moment it keeps
+/// or compares comes through here: the paste-hold rules weigh how long a window printed and
+/// was quiet against numbers of milliseconds, so a test that raced a thread's sleep against
+/// them failed wherever the runner woke the thread late (T-1231). In production it is the
+/// wall clock; the tests of this module give it a clock that moves only when they say.
+pub(crate) trait Clock: Send + Sync {
+    fn now(&self) -> Instant;
+    /// Rests for `duration`, as a wait between two looks does.
+    fn rest(&self, duration: Duration);
+}
+
+/// The time of the machine.
+struct WallClock;
+
+impl Clock for WallClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn rest(&self, duration: Duration) {
+        std::thread::sleep(duration);
+    }
+}
+
+/// Whole milliseconds from `earlier` to `now`; none before it.
+fn millis_since(now: Instant, earlier: Instant) -> u64 {
+    u64::try_from(now.saturating_duration_since(earlier).as_millis()).unwrap_or(u64::MAX)
+}
+
+/// When one generation of a pane last printed, and when what its screen shows last
+/// changed. Its output thread notes every chunk here and takes no lock: output never
+/// waits on the pane's input.
 pub struct OutputClock {
+    clock: Arc<dyn Clock>,
     started: Instant,
     /// Milliseconds after `started` of the last output, plus one; 0 before
     /// the pane has printed anything.
     printed: AtomicU64,
+    /// Milliseconds after `started` of the last chunk that changed what the screen
+    /// shows, plus one; 0 before any has.
+    shown: AtomicU64,
 }
 
 impl OutputClock {
-    fn new() -> Self {
+    fn new(clock: Arc<dyn Clock>) -> Self {
         Self {
-            started: Instant::now(),
+            started: clock.now(),
+            clock,
             printed: AtomicU64::new(0),
+            shown: AtomicU64::new(0),
         }
     }
 
-    /// The pane printed something now.
-    pub(crate) fn note(&self) {
-        let now = self.elapsed_ms();
-        self.printed.store(now.saturating_add(1), Ordering::Release);
+    /// The pane printed `changed` now: whether it changed what its screen shows
+    /// ([`crate::screen::Screen::feed`]).
+    pub(crate) fn note(&self, changed: bool) {
+        let now = millis_since(self.clock.now(), self.started).saturating_add(1);
+        self.printed.store(now, Ordering::Release);
+        if changed {
+            self.shown.store(now, Ordering::Release);
+        }
     }
 
-    fn quiet_ms(&self) -> Option<u64> {
-        let printed = self.printed.load(Ordering::Acquire);
-        (printed != 0).then(|| self.elapsed_ms().saturating_sub(printed - 1))
+    /// How long the pane had printed nothing at `now`, once it has printed anything.
+    fn quiet_ms(&self, now: Instant) -> Option<u64> {
+        self.since(&self.printed, now)
     }
 
-    fn elapsed_ms(&self) -> u64 {
-        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    /// How long what the pane's screen shows had not changed at `now`, once it has shown
+    /// anything.
+    fn screen_quiet_ms(&self, now: Instant) -> Option<u64> {
+        self.since(&self.shown, now)
+    }
+
+    fn since(&self, clock: &AtomicU64, now: Instant) -> Option<u64> {
+        let at = clock.load(Ordering::Acquire);
+        (at != 0).then(|| millis_since(now, self.started).saturating_sub(at - 1))
     }
 }
 
@@ -191,7 +243,12 @@ impl OutputClock {
 /// reading it: Devin draws a long paste's placeholder only once it has read all
 /// of it, and an Enter before that finds nothing to send. What a window prints
 /// sooner than `drawn_after_ms` after the paste is its answer to the paste's
-/// first key, not its draw of the paste (Codex on Windows, [`SilentPaste`]).
+/// first key, not its draw of the paste (Codex on Windows, [`SilentPaste`]). It
+/// waits on the output, not on what the screen shows (T-1083): a window that
+/// still prints is still busy with the paste as far as anything here can tell
+/// (Codex on Windows asks where the cursor is while it reads one, T-1048), and an
+/// Enter too soon goes into the paste; a window that only repaints at rest costs
+/// the paste no more than `most_ms`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnterTiming {
     pub least_ms: u64,
@@ -248,20 +305,23 @@ impl EnterTiming {
 
     /// Waits until the Enter of a paste written at `pasted` may go: at once, where the
     /// window has taken it in already.
-    fn wait(&self, output: &OutputClock, pasted: Instant) {
+    fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         loop {
-            let since = u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX);
+            // One look at the time for both numbers: the paste's age and the quiet are of the
+            // same moment, however long the thread was kept from running between them.
+            let now = clock.now();
+            let since = millis_since(now, pasted);
             // How long the window has been quiet, once it printed after the paste, and not
             // only at once (its answer to the paste's first key).
             let echoed = output
-                .quiet_ms()
+                .quiet_ms(now)
                 .filter(|quiet| *quiet < since && since - quiet >= self.drawn_after_ms);
             if since >= self.most_ms
                 || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))
             {
                 return;
             }
-            std::thread::sleep(Duration::from_millis(5));
+            clock.rest(Duration::from_millis(5));
         }
     }
 }
@@ -306,7 +366,7 @@ type PaneState = Arc<Mutex<PaneInputState>>;
 type PaneStateMap = HashMap<String, PaneState>;
 
 impl PaneInputState {
-    fn new(generation: u64) -> Self {
+    fn new(generation: u64, clock: &Arc<dyn Clock>) -> Self {
         Self {
             generation,
             paste_in_flight: false,
@@ -314,7 +374,7 @@ impl PaneInputState {
             unsent: 0,
             typed: 0,
             typed_at: None,
-            output: Arc::new(OutputClock::new()),
+            output: Arc::new(OutputClock::new(Arc::clone(clock))),
             pasted: None,
             silent_paste: None,
             human_pasted: None,
@@ -323,25 +383,25 @@ impl PaneInputState {
         }
     }
 
-    fn snapshot(&self) -> ArbiterSnapshot {
+    /// What the pane holds at `now`: every age in it is of that one moment, so the human's
+    /// writes, read one after another, are never aged from different ones and an older write
+    /// never reads younger than a newer.
+    fn snapshot(&self, now: Instant) -> ArbiterSnapshot {
         ArbiterSnapshot {
             generation: self.generation,
             paste_in_flight: self.paste_in_flight,
             input_failed: self.input_failed,
             unsent: self.unsent > 0,
             typed: self.typed,
-            typed_quiet_ms: self
-                .typed_at
-                .map(|at| u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX)),
-            output_quiet_ms: self.output.quiet_ms(),
-            paste_quiet_ms: self
-                .pasted
-                .map(|pasted| u64::try_from(pasted.elapsed().as_millis()).unwrap_or(u64::MAX)),
+            typed_quiet_ms: self.typed_at.map(|at| millis_since(now, at)),
+            output_quiet_ms: self.output.quiet_ms(now),
+            screen_quiet_ms: self.output.screen_quiet_ms(now),
+            paste_quiet_ms: self.pasted.map(|pasted| millis_since(now, pasted)),
             human_writes: self
                 .writes
                 .iter()
                 .map(|written| HumanWrite {
-                    ago_ms: u64::try_from(written.at.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    ago_ms: millis_since(now, written.at),
                     length: written.length,
                     classes: written.classes.names(),
                 })
@@ -353,13 +413,20 @@ impl PaneInputState {
 pub struct InputArbiter {
     panes: Mutex<PaneStateMap>,
     enter: EnterTiming,
+    clock: Arc<dyn Clock>,
 }
 
 impl InputArbiter {
     pub fn new(enter: EnterTiming) -> Self {
+        Self::with_clock(enter, Arc::new(WallClock))
+    }
+
+    /// An arbiter that reads the time from `clock`: the wall clock, or a test's own.
+    pub(crate) fn with_clock(enter: EnterTiming, clock: Arc<dyn Clock>) -> Self {
         Self {
             panes: Mutex::new(HashMap::new()),
             enter,
+            clock,
         }
     }
 
@@ -432,7 +499,7 @@ impl InputArbiter {
             match panes.get(&pane.id) {
                 Some(state) => Arc::clone(state),
                 None => {
-                    let fresh = PaneInputState::new(pane.generation);
+                    let fresh = PaneInputState::new(pane.generation, &self.clock);
                     let output = Arc::clone(&fresh.output);
                     panes.insert(pane.id.clone(), Arc::new(Mutex::new(fresh)));
                     return Ok(output);
@@ -462,7 +529,7 @@ impl InputArbiter {
             return Err(ArbiterError::Busy);
         }
         before_commit();
-        *state = PaneInputState::new(pane.generation);
+        *state = PaneInputState::new(pane.generation, &self.clock);
         Ok(Arc::clone(&state.output))
     }
 
@@ -484,7 +551,7 @@ impl InputArbiter {
         let state = self.pane_state(pane)?;
         let state = lock_state(&state)?;
         validate_generation(&state, pane)?;
-        let snapshot = state.snapshot();
+        let snapshot = state.snapshot(self.clock.now());
         Ok(snapshot)
     }
 
@@ -517,7 +584,7 @@ impl InputArbiter {
             let mut state = lock_state(&state)?;
             let silent = state.silent_paste;
             let fed = if state.generation == pane.generation {
-                state.paste.feed(bytes, Instant::now())
+                state.paste.feed(bytes, self.clock.now())
             } else {
                 Fed {
                     ends: Vec::new(),
@@ -537,7 +604,7 @@ impl InputArbiter {
                     let state = self.pane_state(pane)?;
                     let mut state = lock_state(&state)?;
                     if state.generation == pane.generation {
-                        state.human_pasted = Some((Instant::now(), timing));
+                        state.human_pasted = Some((self.clock.now(), timing));
                     }
                 }
             }
@@ -549,13 +616,14 @@ impl InputArbiter {
         if state.generation == pane.generation {
             let read = keys_of(state.unsent, bytes, &fed.segments);
             state.unsent = read.unsent;
-            state.paste.idle(Instant::now());
+            let now = self.clock.now();
+            state.paste.idle(now);
             // What came, and when, and never a byte of it (`HumanWrite`).
             if state.writes.len() == HUMAN_WRITES {
                 state.writes.pop_front();
             }
             state.writes.push_back(Written {
-                at: Instant::now(),
+                at: now,
                 length: bytes.len(),
                 classes: read.classes,
             });
@@ -563,7 +631,7 @@ impl InputArbiter {
             // of the human's: the adapter's wait for their last key does not start again.
             if read.keyed {
                 state.typed += 1;
-                state.typed_at = Some(Instant::now());
+                state.typed_at = Some(now);
             }
         }
         Ok(())
@@ -584,7 +652,7 @@ impl InputArbiter {
                 .map(|(at, timing)| (at, timing, Arc::clone(&state.output)))
         };
         if let Some((at, timing, output)) = pasted {
-            timing.wait(&output, at);
+            timing.wait(self.clock.as_ref(), &output, at);
         }
         Ok(())
     }
@@ -671,14 +739,14 @@ impl InputArbiter {
         let mut pasted = false;
         let written = write_paste_via(writer, pane, &body, || {
             pasted = true;
-            enter.wait(&output, Instant::now());
+            enter.wait(self.clock.as_ref(), &output, self.clock.now());
         });
         // A paste is answered as it went: a lock poisoned meanwhile fails the
         // pane's next admission, never what this paste already wrote.
         if let Ok(mut state) = lock_state(&state) {
             state.paste_in_flight = false;
             if pasted {
-                state.pasted = Some(Instant::now());
+                state.pasted = Some(self.clock.now());
             }
         }
         written.map_err(|error| fail_input(&state, pane, error, pasted))
@@ -1127,7 +1195,7 @@ mod tests {
     #[cfg(unix)]
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{mpsc, Arc, Barrier, Mutex};
+    use std::sync::{mpsc, Arc, Barrier, Mutex, MutexGuard};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -1136,33 +1204,55 @@ mod tests {
 
     use cf_proto::panes::SilentPaste;
 
-    use super::{sanitize, ArbiterError, EnterTiming, InputArbiter, SanitizeError};
+    use super::{
+        sanitize, ArbiterError, Clock, EnterTiming, InputArbiter, OutputClock, SanitizeError,
+    };
     #[cfg(unix)]
     use crate::pty::{serial_pty_test, OpenedPane};
     use crate::pty::{PaneError, PaneInputWriter, PaneKey, PaneTable};
 
+    /// What the pane printed that changed nothing its screen shows moves its output's
+    /// clock and not its screen's (T-1083); a screen that has shown nothing says none.
+    #[test]
+    fn a_snapshot_says_how_long_the_screen_has_shown_the_same_apart_from_the_output() {
+        let Rig { clock, arbiter, .. } = Rig::new(EnterTiming::fixed(0));
+        let pane = PaneKey::new("still-pane", 1);
+        let printed = arbiter.register(&pane).expect("register");
+        let quiet = || {
+            let snapshot = arbiter.snapshot(&pane).expect("snapshot");
+            (snapshot.output_quiet_ms, snapshot.screen_quiet_ms)
+        };
+        printed.note(false);
+        assert_eq!(quiet(), (Some(0), None), "printed, and shown nothing");
+        printed.note(true);
+        clock.advance(Duration::from_millis(40));
+        printed.note(false);
+        assert_eq!(
+            quiet(),
+            (Some(0), Some(40)),
+            "the screen shows what it showed 40 ms ago"
+        );
+    }
+
     #[test]
     fn a_snapshot_says_how_long_the_pane_has_printed_nothing() {
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let Rig { clock, arbiter, .. } = Rig::new(EnterTiming::fixed(0));
         let pane = PaneKey::new("quiet-pane", 1);
         let printed = arbiter.register(&pane).expect("register");
         assert_eq!(
             arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms,
             None
         );
-        printed.note();
-        thread::sleep(Duration::from_millis(20));
+        printed.note(true);
+        clock.advance(Duration::from_millis(20));
         let quiet = arbiter.snapshot(&pane).expect("snapshot").output_quiet_ms;
-        assert!(
-            quiet.is_some_and(|ms| (20..5_000).contains(&ms)),
-            "{quiet:?}"
-        );
+        assert_eq!(quiet, Some(20));
 
         let newer = PaneKey::new("quiet-pane", 2);
         arbiter
             .register(&newer)
             .expect("register a newer generation");
-        printed.note();
+        printed.note(true);
         assert_eq!(
             arbiter.snapshot(&newer).expect("snapshot").output_quiet_ms,
             None,
@@ -1257,12 +1347,120 @@ mod tests {
         bytes: Vec<u8>,
     }
 
+    /// A clock that moves only when a test moves it, or a wait rests on it, and that has the
+    /// events a test scheduled on it (the prints of a window) happen at their own moments on the
+    /// way. A test that reads the arbiter's time on it does not depend on how soon a runner wakes
+    /// a thread: a window prints at the moment it was told to, whatever the machine is doing,
+    /// and a wait sees the time and the prints as of one and the same moment (T-1231: on a
+    /// loaded macOS runner a 10 ms sleep of the printer's thread woke past the 50 ms the
+    /// arbiter takes for a window's draw).
+    struct SimClock {
+        base: Instant,
+        /// How long the machine really stalls before each look it is given and each event it
+        /// fires: none, but in the test that shows no stall moves a moment of the clock's.
+        stall: Duration,
+        sim: Mutex<Sim>,
+    }
+
+    /// What happens at a moment of the clock: when, in what order of being scheduled, and what.
+    type Event = (Duration, u64, Box<dyn FnOnce() + Send>);
+
+    #[derive(Default)]
+    struct Sim {
+        elapsed: Duration,
+        scheduled: u64,
+        events: Vec<Event>,
+    }
+
+    impl SimClock {
+        fn new() -> Arc<Self> {
+            Self::stalling(Duration::ZERO)
+        }
+
+        fn stalling(stall: Duration) -> Arc<Self> {
+            Arc::new(Self {
+                base: Instant::now(),
+                stall,
+                sim: Mutex::new(Sim::default()),
+            })
+        }
+
+        fn sim(&self) -> MutexGuard<'_, Sim> {
+            self.sim.lock().expect("the simulated clock")
+        }
+
+        /// How much time has passed on it.
+        fn elapsed(&self) -> Duration {
+            self.sim().elapsed
+        }
+
+        /// Has `event` happen `after` now.
+        fn at(&self, after: Duration, event: impl FnOnce() + Send + 'static) {
+            let mut sim = self.sim();
+            let due = sim.elapsed + after;
+            sim.scheduled += 1;
+            let order = sim.scheduled;
+            sim.events.push((due, order, Box::new(event)));
+        }
+
+        /// Lets `by` pass: each event that falls in it happens at its own moment, in order, and
+        /// no later event or look at the time is before it.
+        fn advance(&self, by: Duration) {
+            thread::sleep(self.stall);
+            let target = self.elapsed() + by;
+            loop {
+                let next = {
+                    let mut sim = self.sim();
+                    let next = sim
+                        .events
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (due, _, _))| *due <= target)
+                        .min_by_key(|(_, (due, order, _))| (*due, *order))
+                        .map(|(index, _)| index);
+                    next.map(|index| {
+                        let (due, _, event) = sim.events.remove(index);
+                        sim.elapsed = sim.elapsed.max(due);
+                        event
+                    })
+                };
+                match next {
+                    Some(event) => {
+                        thread::sleep(self.stall);
+                        event();
+                    }
+                    None => break,
+                }
+            }
+            self.sim().elapsed = target;
+        }
+    }
+
+    impl Clock for SimClock {
+        fn now(&self) -> Instant {
+            self.base + self.elapsed()
+        }
+
+        fn rest(&self, duration: Duration) {
+            self.advance(duration);
+        }
+    }
+
     struct RecordingWriter {
         attempts: AtomicUsize,
         fail_on_attempt: Option<usize>,
         records: Mutex<Vec<RecordedWrite>>,
         observed: mpsc::Sender<RecordedWrite>,
+        /// The simulated clock its writes are stamped from, where a test has one.
+        clock: Option<Arc<SimClock>>,
+        /// The window behind the pane, where a test plays one: its output clock, the moments it
+        /// prints at, after the first write it is given, and whether those prints change what its
+        /// screen shows.
+        window: Mutex<Option<PlayedWindow>>,
     }
+
+    /// A window a test plays behind a pane ([`RecordingWriter::window`]).
+    type PlayedWindow = (Arc<OutputClock>, Vec<Duration>, bool);
 
     struct GatedRecordingWriter {
         attempts: AtomicUsize,
@@ -1287,6 +1485,18 @@ mod tests {
 
     impl RecordingWriter {
         fn new(fail_on_attempt: Option<usize>) -> (Arc<Self>, mpsc::Receiver<RecordedWrite>) {
+            Self::stamped_by(None, fail_on_attempt)
+        }
+
+        /// A writer that stamps its writes from `clock`.
+        fn timed(clock: Arc<SimClock>) -> (Arc<Self>, mpsc::Receiver<RecordedWrite>) {
+            Self::stamped_by(Some(clock), None)
+        }
+
+        fn stamped_by(
+            clock: Option<Arc<SimClock>>,
+            fail_on_attempt: Option<usize>,
+        ) -> (Arc<Self>, mpsc::Receiver<RecordedWrite>) {
             let (observed, receiver) = mpsc::channel();
             (
                 Arc::new(Self {
@@ -1294,6 +1504,8 @@ mod tests {
                     fail_on_attempt,
                     records: Mutex::new(Vec::new()),
                     observed,
+                    clock,
+                    window: Mutex::new(None),
                 }),
                 receiver,
             )
@@ -1308,9 +1520,23 @@ mod tests {
         fn write(&self, _pane: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
             let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
             let record = RecordedWrite {
-                at: Instant::now(),
+                at: self
+                    .clock
+                    .as_ref()
+                    .map_or_else(Instant::now, |clock| clock.now()),
                 bytes: bytes.to_vec(),
             };
+            // The window prints in answer to the first thing it is given.
+            if let Some(clock) = &self.clock {
+                if let Some((output, prints, shows)) =
+                    self.window.lock().expect("the window").take()
+                {
+                    for after in prints {
+                        let output = Arc::clone(&output);
+                        clock.at(after, move || output.note(shows));
+                    }
+                }
+            }
             self.records
                 .lock()
                 .expect("record lock")
@@ -1325,6 +1551,103 @@ mod tests {
         }
     }
 
+    /// An arbiter on a simulated clock, a writer that stamps its writes from the same clock, and
+    /// the channel the writer announces them on: a test of what the arbiter does with time lives
+    /// in the clock's time, not the machine's.
+    struct Rig {
+        clock: Arc<SimClock>,
+        arbiter: InputArbiter,
+        writer: Arc<RecordingWriter>,
+        observed: mpsc::Receiver<RecordedWrite>,
+    }
+
+    impl Rig {
+        fn new(enter: EnterTiming) -> Self {
+            Self::on(SimClock::new(), enter)
+        }
+
+        /// A rig on a clock beside a machine that stalls for `stall` before every look at the
+        /// time and every print.
+        fn stalling(enter: EnterTiming, stall: Duration) -> Self {
+            Self::on(SimClock::stalling(stall), enter)
+        }
+
+        fn on(clock: Arc<SimClock>, enter: EnterTiming) -> Self {
+            let arbiter = InputArbiter::with_clock(enter, clock.clone());
+            let (writer, observed) = RecordingWriter::timed(Arc::clone(&clock));
+            Self {
+                clock,
+                arbiter,
+                writer,
+                observed,
+            }
+        }
+
+        /// A pane of the arbiter's with the window behind it as a test plays one: its harness
+        /// reads a paste as `silent` says (none: it declared nothing), and it prints at each of
+        /// `prints`, from the first write it is given. A window prints in answer to what it was
+        /// given, at moments of the clock's, which no thread has to reach in time.
+        fn window(&self, key: &PaneKey, silent: Option<SilentPaste>, prints: Vec<Duration>) {
+            self.window_showing(key, silent, prints, true);
+        }
+
+        /// [`Rig::window`], where `shows` says whether its prints change what its screen shows:
+        /// a window that only repaints prints and shows the same (T-1083).
+        fn window_showing(
+            &self,
+            key: &PaneKey,
+            silent: Option<SilentPaste>,
+            prints: Vec<Duration>,
+            shows: bool,
+        ) {
+            let output = self
+                .arbiter
+                .register_with(key, silent)
+                .expect("register pane");
+            *self.writer.window.lock().expect("the window") = Some((output, prints, shows));
+        }
+
+        /// What the writer has written, as `between` and the tests read it.
+        fn records(&self) -> Vec<RecordedWrite> {
+            self.writer.records()
+        }
+    }
+
+    /// A window printing every 10 ms, from `from` ms after the first write it is given, for
+    /// `printing` ms: its echo of a paste.
+    fn printing_from(from: u64, printing: u64) -> Vec<Duration> {
+        (0..printing)
+            .step_by(10)
+            .map(|spent| Duration::from_millis(from + spent))
+            .collect()
+    }
+
+    /// A window that reads a paste and draws it: it prints at each of `prints` (ms after the
+    /// first write it is given) and then every 10 ms for `printing` ms from the last of them.
+    fn prints(prints: &[u64], printing: u64) -> Vec<Duration> {
+        let last = prints.last().copied().unwrap_or(0);
+        prints
+            .iter()
+            .map(|at| Duration::from_millis(*at))
+            .chain(printing_from(last, printing))
+            .collect()
+    }
+
+    /// The Enter of a paste goes at the first look at the time that finds the rule met, and the
+    /// wait looks every 5 ms: so no sooner than the rule asks, `due_ms` after the paste, and
+    /// less than one look after it.
+    #[track_caller]
+    fn assert_enter_at(waited: Duration, due_ms: u64, rule: &str) {
+        assert!(
+            waited >= Duration::from_millis(due_ms),
+            "{waited:?}: {rule}, due at {due_ms} ms"
+        );
+        assert!(
+            waited < Duration::from_millis(due_ms + 5),
+            "{waited:?}: later than {rule} asks, due at {due_ms} ms"
+        );
+    }
+
     /// How long the human's keys have been quiet, which the daemon's pacing waits on
     /// before it types a message in (3.0.7 chief-meeting, CMT-03): counted from the
     /// human's last key only. The daemon's own keys, its pastes and their Enter leave
@@ -1332,8 +1655,12 @@ mod tests {
     #[test]
     fn the_human_s_keys_alone_start_the_quiet_the_pacing_waits_on() {
         let key = PaneKey::new("quiet", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let Rig {
+            clock,
+            arbiter,
+            writer,
+            observed: _observed,
+        } = Rig::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
         let quiet = || arbiter.snapshot(&key).expect("snapshot").typed_quiet_ms;
         assert_eq!(quiet(), None, "never typed in");
@@ -1341,26 +1668,22 @@ mod tests {
         arbiter
             .write_typed_via(writer.as_ref(), &key, b"hi\r")
             .expect("the human's keys");
-        std::thread::sleep(std::time::Duration::from_millis(40));
+        clock.advance(Duration::from_millis(40));
         arbiter
             .write_via(writer.as_ref(), &key, b"\x03")
             .expect("the daemon's key");
         arbiter
             .write_paste_via(writer.as_ref(), &key, b"a message", None)
             .expect("the daemon's paste");
-        assert!(
-            quiet().is_some_and(|quiet| quiet >= 40),
-            "the daemon's keys and paste are not the human's: {:?}",
-            quiet()
+        assert_eq!(
+            quiet(),
+            Some(40),
+            "the daemon's keys and paste are not the human's"
         );
         arbiter
             .write_typed_via(writer.as_ref(), &key, b"x")
             .expect("the human's key");
-        assert!(
-            quiet().is_some_and(|quiet| quiet < 40),
-            "a key of the human's starts it again: {:?}",
-            quiet()
-        );
+        assert_eq!(quiet(), Some(0), "a key of the human's starts it again");
     }
 
     /// What the human typed and has not sent holds a paste back until they
@@ -1619,15 +1942,19 @@ mod tests {
     #[test]
     fn a_paste_cut_off_does_not_swallow_the_keys_typed_after_it() {
         let key = PaneKey::new("cut-off", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let Rig {
+            clock,
+            arbiter,
+            writer,
+            observed: _observed,
+        } = Rig::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
         forgetting_a_paste_after(&arbiter, &key, Duration::from_millis(100));
         arbiter
             .write_typed_via(writer.as_ref(), &key, b"\x1b[200~half")
             .expect("half of a paste");
         assert_eq!(unsent_of(&arbiter, &key), 4);
-        thread::sleep(Duration::from_millis(150));
+        clock.advance(Duration::from_millis(150));
         arbiter
             .write_typed_via(writer.as_ref(), &key, b"typed\r")
             .expect("what the human typed after");
@@ -1647,31 +1974,26 @@ mod tests {
     #[test]
     fn the_quiet_that_forgets_a_paste_starts_when_the_panes_last_write_ends() {
         let key = PaneKey::new("slow-chunk", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
         // 300 characters at 1 ms each: the keys after a paste of them wait 300 ms.
         let silent = SilentPaste {
             pace_us_per_character: 1_000,
             quiet_ms: 0,
             ..DRAWS
         };
-        let printer = drawing(
-            &arbiter,
-            &key,
-            silent,
-            &[Duration::from_millis(20)],
-            Duration::ZERO,
-        );
-        forgetting_a_paste_after(&arbiter, &key, Duration::from_millis(100));
+        rig.window(&key, Some(silent), prints(&[20], 0));
+        forgetting_a_paste_after(arbiter, &key, Duration::from_millis(100));
         let first = [&b"\x1b[200~"[..], &[b'x'; 300], b"\x1b[201~"].concat();
         for chunk in [&first[..], b"\x1b[200~y", b"z\n\x1b[201~"] {
             arbiter
                 .write_typed_via(writer.as_ref(), &key, chunk)
                 .expect("a chunk of the human's input");
         }
-        printer.join().expect("printer");
         assert_eq!(
-            unsent_of(&arbiter, &key),
+            unsent_of(arbiter, &key),
             300 + 3,
             "the second paste went on across its chunks, though the first waited 300 ms"
         );
@@ -1703,13 +2025,17 @@ mod tests {
     #[test]
     fn a_terminals_report_moves_neither_the_count_of_keys_nor_the_time_since_the_last() {
         let key = PaneKey::new("reports", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let Rig {
+            clock,
+            arbiter,
+            writer,
+            observed: _observed,
+        } = Rig::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
         arbiter
             .write_typed_via(writer.as_ref(), &key, b"x")
             .expect("a key");
-        std::thread::sleep(Duration::from_millis(30));
+        clock.advance(Duration::from_millis(30));
         let reports: [&[u8]; 6] = [
             b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
             b"\x1bP>|xterm.js(6.0.0)\x1b\\",
@@ -1725,10 +2051,10 @@ mod tests {
         }
         let read = arbiter.snapshot(&key).expect("snapshot");
         assert_eq!(read.typed, 1, "the reports are no keys");
-        assert!(
-            read.typed_quiet_ms.is_some_and(|quiet| quiet >= 30),
-            "the time since the last key goes on: {:?}",
-            read.typed_quiet_ms
+        assert_eq!(
+            read.typed_quiet_ms,
+            Some(30),
+            "the time since the last key goes on"
         );
         assert!(read.unsent, "the key typed is still there");
         arbiter
@@ -1784,8 +2110,12 @@ mod tests {
     #[test]
     fn a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte_of_them() {
         let key = PaneKey::new("ring", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let Rig {
+            clock,
+            arbiter,
+            writer,
+            observed: _observed,
+        } = Rig::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
         let writes: [&[u8]; 6] = [
             b"QZXJ",
@@ -1799,6 +2129,7 @@ mod tests {
             arbiter
                 .write_typed_via(writer.as_ref(), &key, write)
                 .expect("a write");
+            clock.advance(Duration::from_millis(1));
         }
         let read = arbiter.snapshot(&key).expect("snapshot");
         let kept: Vec<_> = read
@@ -1817,13 +2148,10 @@ mod tests {
                 (15, vec!["mouse", "focus"]),
             ]
         );
-        assert!(
-            read.human_writes
-                .windows(2)
-                .all(|pair| pair[0].ago_ms >= pair[1].ago_ms),
-            "oldest first: {:?}",
-            read.human_writes
-        );
+        // One moment ages them all: a millisecond apart, oldest first, and no write reads
+        // younger than one after it (T-1000, T-1012: ages read one by one tied or crossed).
+        let ages: Vec<u64> = read.human_writes.iter().map(|write| write.ago_ms).collect();
+        assert_eq!(ages, [6, 5, 4, 3, 2, 1], "oldest first: {read:?}");
         let shown = format!("{read:?}");
         assert!(
             !shown.contains(['Q', 'Z', 'X', 'J']),
@@ -1886,7 +2214,7 @@ mod tests {
             writing_arbiter.write_via(writer.as_ref(), &writing_key, b"typed")
         });
         first_write.wait();
-        printed.note();
+        printed.note(true);
         let (read, snapshot) = mpsc::channel();
         let reading_arbiter = Arc::clone(&arbiter);
         let reading_key = key.clone();
@@ -1896,7 +2224,9 @@ mod tests {
                 .map(|snapshot| snapshot.output_quiet_ms);
             let _ = read.send(quiet.is_ok_and(|quiet| quiet.is_some()));
         });
-        let read_meanwhile = snapshot.recv_timeout(Duration::from_secs(1));
+        // A lock held across the write would hold the read until the writer is released below,
+        // which is after this wait: a long deadline costs the green case nothing.
+        let read_meanwhile = snapshot.recv_timeout(Duration::from_secs(30));
         release_first_write.wait();
         writing.join().expect("writing thread").expect("the write");
         assert_eq!(read_meanwhile, Ok(true), "the write held the pane's lock");
@@ -1905,33 +2235,37 @@ mod tests {
     #[test]
     fn a_snapshot_says_how_long_since_a_paste_was_written_into_the_pane() {
         let key = PaneKey::new("pasted", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let Rig {
+            clock,
+            arbiter,
+            writer,
+            observed: _observed,
+        } = Rig::new(EnterTiming::fixed(0));
         arbiter.register(&key).expect("register pane");
         let pasted = || arbiter.snapshot(&key).expect("snapshot").paste_quiet_ms;
         assert_eq!(pasted(), None, "nothing pasted yet");
         arbiter
             .write_paste_via(writer.as_ref(), &key, b"body", None)
             .expect("write paste");
-        thread::sleep(Duration::from_millis(20));
-        assert!(
-            pasted().is_some_and(|ms| (20..5_000).contains(&ms)),
-            "{:?}",
-            pasted()
-        );
+        clock.advance(Duration::from_millis(20));
+        assert_eq!(pasted(), Some(20));
         // The daemon's own keys and the human's are no paste.
-        thread::sleep(Duration::from_millis(30));
+        clock.advance(Duration::from_millis(30));
         arbiter
             .write_via(writer.as_ref(), &key, b"\r")
             .expect("a key");
-        assert!(pasted().is_some_and(|ms| ms >= 50), "{:?}", pasted());
+        assert_eq!(pasted(), Some(50));
     }
 
     #[test]
     fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
         let key = PaneKey::new("recorded", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(25));
+        let Rig {
+            clock: _,
+            arbiter,
+            writer,
+            observed: _observed,
+        } = Rig::new(EnterTiming::fixed(25));
         arbiter.register(&key).expect("register pane");
 
         arbiter
@@ -1942,72 +2276,84 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].bytes, b"\x1b[200~body\x1b[201~");
         assert_eq!(records[1].bytes, b"\r");
-        assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(25));
+        assert_enter_at(between(&records), 25, "the host's fixed wait");
     }
 
-    /// Pastes `body` through an arbiter with `enter`, the pane printing
-    /// nothing for `silent` and then every 10 ms for `printing`, and says how
-    /// long its Enter waited.
-    fn enter_waited(enter: EnterTiming, silent: Duration, printing: Duration) -> Duration {
-        let key = PaneKey::new("echoing", 1);
+    /// The same on the machine's own clock, which every pane but a test's has: the Enter waits
+    /// at least the host's wait, and a sleep never wakes early, so no load can fail this.
+    #[test]
+    fn on_the_wall_clock_a_pastes_enter_waits_at_least_the_hosts_wait() {
+        let key = PaneKey::new("on-the-wall", 1);
         let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(enter);
-        let clock = arbiter.register(&key).expect("register pane");
-        let printer = thread::spawn(move || {
-            thread::sleep(silent);
-            let started = Instant::now();
-            while started.elapsed() < printing {
-                clock.note();
-                thread::sleep(Duration::from_millis(10));
-            }
-        });
+        let arbiter = InputArbiter::new(EnterTiming::fixed(25));
+        arbiter.register(&key).expect("register pane");
         arbiter
             .write_paste_via(writer.as_ref(), &key, b"body", None)
             .expect("write paste");
-        printer.join().expect("printer");
         let records = writer.records();
-        records[1].at.duration_since(records[0].at)
+        assert_eq!(records.len(), 2);
+        assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(25));
+    }
+
+    /// And a window nothing of which prints has its Enter at the most, on the wall clock too.
+    #[test]
+    fn on_the_wall_clock_a_paste_nothing_echoes_gets_its_enter_at_the_most_and_not_before() {
+        let key = PaneKey::new("on-the-wall-silent", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming {
+            least_ms: 0,
+            drawn_after_ms: 0,
+            quiet_ms: 60,
+            most_ms: 120,
+        });
+        arbiter.register(&key).expect("register pane");
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"body", None)
+            .expect("write paste");
+        let records = writer.records();
+        assert_eq!(records.len(), 2);
+        assert!(records[1].at.duration_since(records[0].at) >= Duration::from_millis(120));
+    }
+
+    /// Pastes `body` through an arbiter with `enter`, the pane printing nothing for `silent_ms`
+    /// and then every 10 ms for `printing_ms`, and says how long its Enter waited. What it prints
+    /// changes nothing its screen shows: the Enter waits on the window's output all the same, for
+    /// a window that still prints may still be taking the paste in (T-1083).
+    fn enter_waited(enter: EnterTiming, silent_ms: u64, printing_ms: u64) -> Duration {
+        let key = PaneKey::new("echoing", 1);
+        let rig = Rig::new(enter);
+        rig.window_showing(&key, None, printing_from(silent_ms, printing_ms), false);
+        rig.arbiter
+            .write_paste_via(rig.writer.as_ref(), &key, b"body", None)
+            .expect("write paste");
+        between(&rig.records())
     }
 
     #[test]
     fn a_pastes_enter_waits_for_the_window_to_finish_echoing_it() {
-        // A quiet spell well above the printer's 10 ms: a busy machine's
-        // scheduling gap is not the echo's end.
+        // The window prints every 10 ms until 240 ms: its echo ends there, and 150 ms of quiet
+        // after it is when the Enter goes.
         let enter = EnterTiming {
             least_ms: 0,
             drawn_after_ms: 0,
             quiet_ms: 150,
             most_ms: 5_000,
         };
-        let waited = enter_waited(enter, Duration::ZERO, Duration::from_millis(250));
-        assert!(
-            waited >= Duration::from_millis(250),
-            "{waited:?}: before the echo ended"
-        );
-        assert!(
-            waited < Duration::from_millis(2_000),
-            "{waited:?}: long after it"
-        );
+        let waited = enter_waited(enter, 0, 250);
+        assert_enter_at(waited, 240 + 150, "the quiet after the echo");
     }
 
     #[test]
     fn a_pastes_enter_waits_for_an_echo_that_comes_late() {
-        // Devin reading a long paste: silent, then its placeholder drawn.
+        // Devin reading a long paste: silent, then its placeholder drawn at 300 to 340 ms.
         let enter = EnterTiming {
             least_ms: 0,
             drawn_after_ms: 0,
             quiet_ms: 60,
             most_ms: 5_000,
         };
-        let waited = enter_waited(enter, Duration::from_millis(300), Duration::from_millis(50));
-        assert!(
-            waited >= Duration::from_millis(350),
-            "{waited:?}: before the late echo"
-        );
-        assert!(
-            waited < Duration::from_millis(2_500),
-            "{waited:?}: long after it"
-        );
+        let waited = enter_waited(enter, 300, 50);
+        assert_enter_at(waited, 340 + 60, "the quiet after the late echo");
     }
 
     #[test]
@@ -2018,24 +2364,21 @@ mod tests {
             quiet_ms: 60,
             most_ms: 300,
         };
-        let waited = enter_waited(enter, Duration::ZERO, Duration::ZERO);
-        assert!(waited >= Duration::from_millis(300), "{waited:?}");
-        assert!(waited < Duration::from_millis(2_500), "{waited:?}");
+        let waited = enter_waited(enter, 0, 0);
+        assert_enter_at(waited, 300, "the most");
     }
 
     #[test]
     fn a_window_that_never_stops_printing_gets_its_enter_at_the_most() {
-        // A quiet spell longer than the most: only the most lets Enter go,
-        // however the printer is scheduled.
+        // A quiet spell longer than the most: only the most lets Enter go.
         let enter = EnterTiming {
             least_ms: 0,
             drawn_after_ms: 0,
             quiet_ms: 10_000,
             most_ms: 300,
         };
-        let waited = enter_waited(enter, Duration::ZERO, Duration::from_millis(3_000));
-        assert!(waited >= Duration::from_millis(300), "{waited:?}");
-        assert!(waited < Duration::from_millis(2_500), "{waited:?}");
+        let waited = enter_waited(enter, 0, 3_000);
+        assert_enter_at(waited, 300, "the most");
     }
 
     /// A window that reads a paste silently and then draws it, with no pace or floor of its
@@ -2051,77 +2394,6 @@ mod tests {
     /// A paste of the human's, as the page's terminal writes one.
     const HUMAN_PASTE: &[u8] = b"\x1b[200~a few\rlines\x1b[201~";
 
-    /// A pane of `arbiter`'s, its harness reading a paste as `silent` says, that prints at each
-    /// of `prints` (from now) and then every 10 ms for `printing`: the window reading a paste
-    /// and then drawing it.
-    fn drawing(
-        arbiter: &InputArbiter,
-        key: &PaneKey,
-        silent: SilentPaste,
-        prints: &[Duration],
-        printing: Duration,
-    ) -> thread::JoinHandle<()> {
-        let clock = arbiter
-            .register_with(key, Some(silent))
-            .expect("register pane");
-        let prints = prints.to_vec();
-        thread::spawn(move || {
-            let started = Instant::now();
-            for at in prints {
-                thread::sleep(at.saturating_sub(started.elapsed()));
-                clock.note();
-            }
-            let drawn = Instant::now();
-            while drawn.elapsed() < printing {
-                clock.note();
-                thread::sleep(Duration::from_millis(10));
-            }
-        })
-    }
-
-    /// [`drawing`], timed from the paste: the window's prints come `prints` after the first write
-    /// it is given, read off `observed` (which the handle gives back), and it then prints for
-    /// `printing`. A window draws in answer to what it was given, and a printer timed from its
-    /// own start draws at the wrong moment where a sleep overshoots (GitHub's macOS runners, CI
-    /// runs 41767889064 and 41772376690: a 10 ms sleep woke past `drawn_after_ms`).
-    fn drawing_after_the_paste(
-        arbiter: &InputArbiter,
-        key: &PaneKey,
-        silent: SilentPaste,
-        observed: mpsc::Receiver<RecordedWrite>,
-        prints: &[Duration],
-        printing: Duration,
-    ) -> thread::JoinHandle<mpsc::Receiver<RecordedWrite>> {
-        let clock = arbiter
-            .register_with(key, Some(silent))
-            .expect("register pane");
-        let prints = prints.to_vec();
-        thread::spawn(move || {
-            let pasted = observed.recv().expect("the paste was written").at;
-            for at in prints {
-                let due = pasted + at;
-                // A short wait spins: a sleep of a few milliseconds can wake tens of them late.
-                if at < Duration::from_millis(50) {
-                    while Instant::now() < due {
-                        std::hint::spin_loop();
-                    }
-                } else {
-                    thread::sleep(due.saturating_duration_since(Instant::now()));
-                }
-                clock.note();
-            }
-            let drawn = Instant::now();
-            loop {
-                clock.note();
-                if drawn.elapsed() >= printing {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            observed
-        })
-    }
-
     /// How long after the first of `records` its second was written.
     fn between(records: &[RecordedWrite]) -> Duration {
         records[1].at.duration_since(records[0].at)
@@ -2135,30 +2407,25 @@ mod tests {
     #[test]
     fn a_humans_paste_and_its_enter_in_one_write_go_as_two_the_enter_once_the_window_took_it() {
         let key = PaneKey::new("pasted-at-once", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
-        let printer = drawing(
-            &arbiter,
-            &key,
-            DRAWS,
-            &[Duration::from_millis(200)],
-            Duration::from_millis(50),
-        );
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
+        // The window draws from 200 to 240 ms.
+        rig.window(&key, Some(DRAWS), prints(&[200], 50));
         let at_once = [HUMAN_PASTE, b"\r"].concat();
         arbiter
             .write_typed_via(writer.as_ref(), &key, &at_once)
             .expect("the human's paste and Enter");
-        printer.join().expect("printer");
 
-        let records = writer.records();
+        let records = rig.records();
         let written: Vec<&[u8]> = records.iter().map(|record| &record.bytes[..]).collect();
         assert_eq!(written, [HUMAN_PASTE, b"\r"]);
-        let waited = between(&records);
-        assert!(
-            waited >= Duration::from_millis(300),
-            "{waited:?}: before the window drew the paste and went quiet"
+        assert_enter_at(
+            between(&records),
+            240 + 100,
+            "the window's draw of the paste and its quiet",
         );
-        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
         let snapshot = arbiter.snapshot(&key).expect("snapshot");
         assert_eq!(snapshot.human_writes.len(), 1, "{snapshot:?}");
         assert_eq!(snapshot.human_writes[0].length, at_once.len());
@@ -2171,32 +2438,30 @@ mod tests {
     #[test]
     fn a_humans_enter_while_the_window_still_reads_their_paste_waits_until_it_drew_it() {
         let key = PaneKey::new("pasted-then-enter", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
-        let printer = drawing(
-            &arbiter,
-            &key,
-            DRAWS,
-            &[Duration::from_millis(400)],
-            Duration::from_millis(50),
-        );
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            clock,
+            arbiter,
+            writer,
+            ..
+        } = &rig;
+        // The window draws from 400 to 440 ms.
+        rig.window(&key, Some(DRAWS), prints(&[400], 50));
         arbiter
             .write_typed_via(writer.as_ref(), &key, HUMAN_PASTE)
             .expect("the human's paste");
-        thread::sleep(Duration::from_millis(100));
+        clock.advance(Duration::from_millis(100));
         arbiter
             .write_typed_via(writer.as_ref(), &key, b"\r")
             .expect("the human's Enter");
-        printer.join().expect("printer");
 
-        let records = writer.records();
+        let records = rig.records();
         assert_eq!(records.len(), 2);
-        let waited = between(&records);
-        assert!(
-            waited >= Duration::from_millis(500),
-            "{waited:?}: before the window drew the paste and went quiet"
+        assert_enter_at(
+            between(&records),
+            440 + 100,
+            "the window's draw of the paste and its quiet",
         );
-        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
         assert_eq!(arbiter.snapshot(&key).expect("snapshot").typed, 2);
     }
 
@@ -2206,33 +2471,31 @@ mod tests {
     #[test]
     fn a_humans_enter_after_the_window_took_their_paste_goes_at_once() {
         let key = PaneKey::new("pasted-and-drawn", 1);
-        let (writer, observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
-        let printer = drawing_after_the_paste(
-            &arbiter,
-            &key,
-            DRAWS,
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            clock,
+            arbiter,
+            writer,
             observed,
-            &[],
-            Duration::from_millis(50),
-        );
+        } = &rig;
+        // The window draws the paste for 50 ms after it, and then it is quiet.
+        rig.window(&key, Some(DRAWS), printing_from(0, 50));
         arbiter
             .write_typed_via(writer.as_ref(), &key, HUMAN_PASTE)
             .expect("the human's paste");
-        let observed = printer.join().expect("printer");
-        thread::sleep(Duration::from_millis(400));
+        clock.advance(Duration::from_millis(400));
         observed.try_iter().for_each(drop);
 
         for keys in [&b"\r"[..], b"next\r"] {
-            let pressed = Instant::now();
+            let pressed = clock.now();
             arbiter
                 .write_typed_via(writer.as_ref(), &key, keys)
                 .expect("the human's keys");
             let written = observed.try_recv().expect("the keys went").at;
-            assert!(
-                written.duration_since(pressed) < Duration::from_millis(1_000),
-                "{:?}: {keys:?} waited for a paste the window had taken",
-                written.duration_since(pressed)
+            assert_eq!(
+                written.duration_since(pressed),
+                Duration::ZERO,
+                "{keys:?} waited for a paste the window had taken"
             );
         }
     }
@@ -2244,32 +2507,55 @@ mod tests {
     #[test]
     fn a_print_at_once_after_the_paste_is_not_its_draw_and_the_enter_waits_for_the_draw() {
         let key = PaneKey::new("first-key-answered", 1);
-        let (writer, observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
         let silent = SilentPaste {
             drawn_after_ms: 50,
             ..DRAWS
         };
-        // The answer to the first key comes 10 ms after the paste, the draw 600 ms on.
-        let printer = drawing_after_the_paste(
-            &arbiter,
-            &key,
-            silent,
-            observed,
-            &[Duration::from_millis(10), Duration::from_millis(600)],
-            Duration::ZERO,
-        );
+        // The answer to the first key comes 10 ms after the paste, the draw 600 ms on: at the
+        // moments the clock was told, whatever the machine does meanwhile (CI run 41817130287:
+        // on a loaded runner a printer's 10 ms woke past the 50 ms and the Enter went early).
+        rig.window(&key, Some(silent), prints(&[10, 600], 0));
         let at_once = [HUMAN_PASTE, b"\r"].concat();
         arbiter
             .write_typed_via(writer.as_ref(), &key, &at_once)
             .expect("the human's paste and Enter");
-        printer.join().expect("printer");
-        let waited = between(&writer.records());
-        assert!(
-            waited >= Duration::from_millis(650),
-            "{waited:?}: the Enter went on the window's answer to the first key"
+        assert_enter_at(
+            between(&rig.records()),
+            600 + 100,
+            "the window's draw of the paste and its quiet, not its answer to the first key",
         );
-        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
+    }
+
+    /// The clock is the only time the rules read: a machine that really stalls for 20 ms before
+    /// every look at the time and every print (four looks' worth of the wait's own 5 ms) moves no
+    /// moment of the wait. Were the arbiter to read the machine's clock, or a window to print at
+    /// the machine's moment, the stalls would show here: the answer to the first key at 10 ms
+    /// would be taken for the draw, or the Enter would go at another moment.
+    #[test]
+    fn a_machine_that_stalls_before_every_look_and_every_print_moves_no_moment_of_the_wait() {
+        let key = PaneKey::new("stalled", 1);
+        let rig = Rig::stalling(EnterTiming::fixed(0), Duration::from_millis(20));
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
+        let silent = SilentPaste {
+            drawn_after_ms: 50,
+            ..DRAWS
+        };
+        rig.window(&key, Some(silent), prints(&[10, 120], 0));
+        let at_once = [HUMAN_PASTE, b"\r"].concat();
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &at_once)
+            .expect("the human's paste and Enter");
+        assert_enter_at(
+            between(&rig.records()),
+            120 + 100,
+            "the window's draw of the paste and its quiet, whatever the machine does between",
+        );
     }
 
     /// Never sooner than the window could have read the paste at its pace: a print and a quiet
@@ -2277,32 +2563,26 @@ mod tests {
     #[test]
     fn a_humans_enter_waits_at_least_as_long_as_the_window_takes_to_read_the_paste() {
         let key = PaneKey::new("read-at-its-pace", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
         let silent = SilentPaste {
             pace_us_per_character: 2_000,
             ..DRAWS
         };
         // 300 characters at 2 ms each: 600 ms.
         let paste = [&b"\x1b[200~"[..], &[b'x'; 300], b"\x1b[201~"].concat();
-        let printer = drawing(
-            &arbiter,
-            &key,
-            silent,
-            &[Duration::from_millis(100)],
-            Duration::ZERO,
-        );
+        rig.window(&key, Some(silent), prints(&[100], 0));
         let at_once = [&paste[..], b"\r"].concat();
         arbiter
             .write_typed_via(writer.as_ref(), &key, &at_once)
             .expect("the human's paste and Enter");
-        printer.join().expect("printer");
-        let waited = between(&writer.records());
-        assert!(
-            waited >= Duration::from_millis(600),
-            "{waited:?}: before the window could have read the paste"
+        assert_enter_at(
+            between(&rig.records()),
+            600,
+            "the time the window takes to read the paste",
         );
-        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
     }
 
     /// A window that never draws the paste has the human's Enter at its cap for the paste's
@@ -2310,8 +2590,10 @@ mod tests {
     #[test]
     fn a_window_that_never_draws_the_paste_has_the_enter_at_its_cap_for_the_pastes_length() {
         let key = PaneKey::new("never-drawn", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
         let silent = SilentPaste {
             most_ms: 100,
             most_us_per_character: 1_000,
@@ -2319,16 +2601,16 @@ mod tests {
         };
         // A cap of 100 ms and 300 characters at 1 ms each: 400 ms.
         let paste = [&b"\x1b[200~"[..], &[b'x'; 300], b"\x1b[201~"].concat();
-        arbiter
-            .register_with(&key, Some(silent))
-            .expect("register pane");
+        rig.window(&key, Some(silent), Vec::new());
         let at_once = [&paste[..], b"\r"].concat();
         arbiter
             .write_typed_via(writer.as_ref(), &key, &at_once)
             .expect("the human's paste and Enter");
-        let waited = between(&writer.records());
-        assert!(waited >= Duration::from_millis(400), "{waited:?}");
-        assert!(waited < Duration::from_millis(3_000), "{waited:?}");
+        assert_enter_at(
+            between(&rig.records()),
+            400,
+            "the cap for the paste's length",
+        );
     }
 
     /// What the pastes that end in each of `writes` (in order, to one watch) held.
@@ -2485,20 +2767,16 @@ mod tests {
     #[test]
     fn a_humans_paste_sent_in_chunks_is_held_for_all_of_its_characters() {
         let key = PaneKey::new("pasted-in-chunks", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
-        // 30,000 characters at 20 µs each: 600 ms, and the window drew them at once.
+        let rig = Rig::new(EnterTiming::fixed(0));
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
+        // 30,010 characters at 20 µs each: 600 ms, and the window drew them at once.
         let silent = SilentPaste {
             pace_us_per_character: 20,
             ..DRAWS
         };
-        let printer = drawing(
-            &arbiter,
-            &key,
-            silent,
-            &[Duration::from_millis(20)],
-            Duration::ZERO,
-        );
+        rig.window(&key, Some(silent), prints(&[20], 0));
         let first = [&b"\x1b[200~"[..], &[b'x'; 30_000]].concat();
         let last = b"tail of it\x1b[201~".to_vec();
         for chunk in [&first[..], &last[..], b"\r"] {
@@ -2506,17 +2784,15 @@ mod tests {
                 .write_typed_via(writer.as_ref(), &key, chunk)
                 .expect("a chunk of the human's input");
         }
-        printer.join().expect("printer");
 
-        let records = writer.records();
+        let records = rig.records();
         let written: Vec<&[u8]> = records.iter().map(|record| &record.bytes[..]).collect();
         assert_eq!(written, [&first[..], &last[..], b"\r"]);
-        let waited = records[2].at.duration_since(records[1].at);
-        assert!(
-            waited >= Duration::from_millis(550),
-            "{waited:?}: held for the last chunk's ten characters, not the paste's thirty thousand"
+        assert_enter_at(
+            records[2].at.duration_since(records[1].at),
+            600,
+            "the pace for the paste's thirty thousand characters, not the last chunk's ten",
         );
-        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
     }
 
     /// A chunk can end inside the closing marker: the paste is over all the same, and what
@@ -2525,28 +2801,26 @@ mod tests {
     fn a_closing_marker_split_between_two_writes_still_holds_what_follows_the_paste() {
         for (second, then) in [(&b"1~"[..], Some(&b"\r"[..])), (b"1~\r", None)] {
             let key = PaneKey::new("marker-split", 1);
-            let (writer, _observed) = RecordingWriter::new(None);
-            let arbiter = InputArbiter::new(EnterTiming::fixed(0));
-            let printer = drawing(
-                &arbiter,
-                &key,
-                DRAWS,
-                &[Duration::from_millis(300)],
-                Duration::ZERO,
-            );
+            let rig = Rig::new(EnterTiming::fixed(0));
+            let Rig {
+                clock,
+                arbiter,
+                writer,
+                ..
+            } = &rig;
+            rig.window(&key, Some(DRAWS), prints(&[300], 0));
             let first = b"\x1b[200~three\x1b[20";
             arbiter
                 .write_typed_via(writer.as_ref(), &key, first)
                 .expect("the paste, up to part of its closing marker");
-            let completed = Instant::now();
+            let completed = clock.now();
             for write in [Some(second), then].into_iter().flatten() {
                 arbiter
                     .write_typed_via(writer.as_ref(), &key, write)
                     .expect("the rest of the human's input");
             }
-            printer.join().expect("printer");
 
-            let written: Vec<Vec<u8>> = writer
+            let written: Vec<Vec<u8>> = rig
                 .records()
                 .into_iter()
                 .map(|record| record.bytes)
@@ -2556,12 +2830,11 @@ mod tests {
                 [first.to_vec(), b"1~".to_vec(), b"\r".to_vec()],
                 "the write that completes the marker goes as two, the paste and what follows"
             );
-            let enter = writer.records()[2].at.duration_since(completed);
-            assert!(
-                enter >= Duration::from_millis(350),
-                "{enter:?}: the Enter went before the window drew the paste and went quiet"
+            assert_enter_at(
+                rig.records()[2].at.duration_since(completed),
+                300 + 100,
+                "the window's draw of the paste and its quiet",
             );
-            assert!(enter < Duration::from_millis(4_000), "{enter:?}");
         }
     }
 
@@ -2578,30 +2851,31 @@ mod tests {
             most_ms: 300,
         };
         let key = PaneKey::new("delivered-slowly", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(host);
-        // 300 characters at 4 ms each: 1.2 s of reading, drawn all the while, then quiet.
+        let rig = Rig::new(host);
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
+        // 300 characters at 4 ms each: 1.2 s of reading, drawn all the while (the last print
+        // at 1,290 ms), then quiet for the 120 ms the host's wait says.
         let silent = SilentPaste {
             pace_us_per_character: 4_000,
             most_ms: 5_000,
             ..DRAWS
         };
-        let printer = drawing(&arbiter, &key, silent, &[], Duration::from_millis(1_300));
+        rig.window(&key, Some(silent), printing_from(0, 1_300));
         let body = vec![b'x'; 300];
         arbiter
             .write_paste_via(writer.as_ref(), &key, &body, None)
             .expect("the delivery");
-        printer.join().expect("printer");
 
-        let records = writer.records();
+        let records = rig.records();
         assert_eq!(records.len(), 2, "{records:?}");
         assert_eq!(records[1].bytes, b"\r");
-        let waited = between(&records);
-        assert!(
-            waited >= Duration::from_millis(1_300),
-            "{waited:?}: the Enter went while the window still read the paste"
+        assert_enter_at(
+            between(&records),
+            1_290 + 120,
+            "the window's read of the paste and its quiet, not the host's most",
         );
-        assert!(waited < Duration::from_millis(4_000), "{waited:?}");
     }
 
     /// The wait of a delivery is the host's and the declared one's longer, each of its four
@@ -2662,26 +2936,19 @@ mod tests {
             most_ms: 300,
         };
         let key = PaneKey::new("delivered-undeclared", 1);
-        let (writer, _observed) = RecordingWriter::new(None);
-        let arbiter = InputArbiter::new(host);
-        let clock = arbiter.register(&key).expect("register pane");
-        let printer = thread::spawn(move || {
-            let started = Instant::now();
-            while started.elapsed() < Duration::from_millis(1_300) {
-                clock.note();
-                thread::sleep(Duration::from_millis(10));
-            }
-        });
+        let rig = Rig::new(host);
+        let Rig {
+            arbiter, writer, ..
+        } = &rig;
+        rig.window(&key, None, printing_from(0, 1_300));
         arbiter
             .write_paste_via(writer.as_ref(), &key, &vec![b'x'; 300], None)
             .expect("the delivery");
-        printer.join().expect("printer");
 
-        let waited = between(&writer.records());
-        assert!(waited >= Duration::from_millis(300), "{waited:?}");
-        assert!(
-            waited < Duration::from_millis(1_200),
-            "{waited:?}: waited on a declaration nobody made"
+        assert_enter_at(
+            between(&rig.records()),
+            300,
+            "the host's most: a window that declared nothing is not waited on past it",
         );
     }
 
@@ -2789,7 +3056,7 @@ mod tests {
             let _ = blocked_sender.send(result);
         });
         started_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(30))
             .expect("blocked human writer started");
         thread::sleep(Duration::from_millis(50));
         assert!(matches!(
@@ -2808,7 +3075,9 @@ mod tests {
                 b"R",
             ));
         });
-        let responsive_on_time = responsive_receiver.recv_timeout(Duration::from_millis(500));
+        // A pane that waited on the blocked one would wait until the kill below, which is after
+        // this wait: the deadline can be as long as a loaded runner needs to run the thread.
+        let responsive_on_time = responsive_receiver.recv_timeout(Duration::from_secs(30));
 
         if responsive_on_time.is_err() {
             let cleanup_table = Arc::clone(&table);
@@ -2824,10 +3093,10 @@ mod tests {
 
         table.kill(&blocked_key).expect("kill blocked pane");
         let responsive_result = responsive_on_time
-            .or_else(|_| responsive_receiver.recv_timeout(Duration::from_secs(2)))
+            .or_else(|_| responsive_receiver.recv_timeout(Duration::from_secs(30)))
             .expect("responsive human write eventually finishes");
         let _ = blocked_receiver
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(Duration::from_secs(30))
             .expect("blocked human write unblocks after kill");
         blocked_writer.join().expect("blocked human writer thread");
         responsive_writer
@@ -2999,7 +3268,7 @@ mod tests {
         let paste = thread::spawn(move || {
             paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"old", None)
         });
-        let clone_deadline = Instant::now() + Duration::from_secs(1);
+        let clone_deadline = Instant::now() + Duration::from_secs(30);
         while Arc::strong_count(&cell) < 4 && Instant::now() < clone_deadline {
             thread::yield_now();
         }
@@ -3028,6 +3297,7 @@ mod tests {
                 typed: 0,
                 typed_quiet_ms: None,
                 output_quiet_ms: None,
+                screen_quiet_ms: None,
                 paste_quiet_ms: None,
                 human_writes: Vec::new(),
             }
@@ -3220,7 +3490,7 @@ mod tests {
                 let (table, key, seen) = (Arc::clone(&table), key.clone(), Arc::clone(&seen));
                 thread::spawn(move || {
                     while let Ok(chunk) = output.recv_timeout(Duration::from_secs(60)) {
-                        clock.note();
+                        clock.note(true);
                         let text = take(&table, &key, &chunk);
                         seen.lock().expect("seen").push_str(&text);
                     }
@@ -3306,7 +3576,7 @@ mod tests {
                 let (table, key, seen) = (Arc::clone(&table), key.clone(), Arc::clone(&seen));
                 thread::spawn(move || {
                     while let Ok(chunk) = output.recv_timeout(Duration::from_secs(90)) {
-                        clock.note();
+                        clock.note(true);
                         let text = take(&table, &key, &chunk);
                         seen.lock().expect("seen").push_str(&text);
                     }

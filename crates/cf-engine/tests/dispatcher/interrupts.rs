@@ -106,22 +106,22 @@ fn interrupts_a_task_paused_again_after_a_resume_however_many_rounds_its_first_p
         "the second pause is a stop of its own"
     );
     // Its rounds begin again: what the first pause's rounds were is not its, and
-    // the window is closed only once it ignored three rounds of its own.
+    // the window is kept only once it ignored three rounds of its own, never closed.
+    let zeus = context.id(project.id, "zeus");
     for round in 4..=5 {
         context.advance(3_100);
         context.pass().unwrap();
         assert_eq!(context.host.inputs().len(), round);
-        assert!(context.host.killed().is_empty(), "round {round}");
+        assert_eq!(context.dispatcher.unstopped(zeus), None, "round {round}");
     }
     context.advance(3_100);
     context.pass().unwrap();
-    assert_eq!(context.host.killed().len(), 1);
-    let zeus = context.id(project.id, "zeus");
+    assert!(context.host.killed().is_empty());
     assert_eq!(
-        context.dispatcher.activity(zeus).state,
-        ActivityState::Closed
+        context.dispatcher.unstopped(zeus),
+        Some(cf_engine::Unstopped { task: 1, rounds: 3 })
     );
-    // Not held to Node's recording: Node never closed a window for a stop it ignored.
+    // Not held to Node's recording: Node never kept a window for a stop it ignored.
 }
 
 #[test]

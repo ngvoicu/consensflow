@@ -299,9 +299,9 @@ runs = ["daemon-describing-page", "proto-page-describing"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::ComputerUseOpen
+find = '''                | Self::ModelsGet
         )'''
-replace = '''                | Self::ComputerUseOpen
+replace = '''                | Self::ModelsGet
                 | Self::ProjectRename
         )'''
 
@@ -312,9 +312,9 @@ runs = ["daemon-describing-page", "proto-page-describing"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::ComputerUseOpen
+find = '''                | Self::ModelsGet
         )'''
-replace = '''                | Self::ComputerUseOpen
+replace = '''                | Self::ModelsGet
                 | Self::ProjectDescribe
         )'''
 

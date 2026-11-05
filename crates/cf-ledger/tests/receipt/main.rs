@@ -33,6 +33,7 @@ mod handed;
 mod legacy;
 mod open_questions;
 mod open_tells;
+mod outage_notes;
 mod own_words;
 mod pause_notes;
 mod program_gone;

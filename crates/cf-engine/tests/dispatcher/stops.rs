@@ -5,7 +5,7 @@
 //! rules are those of `stops.rs`. None of these tests is held to a Node
 //! recording: the rule is Node's no more.
 
-use cf_engine::testing::{Context, Gate};
+use cf_engine::testing::Context;
 use cf_engine::{ActivityState, Unstopped};
 use cf_harness::contract::Pane;
 use cf_harness::records::Role;
@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use cf_ledger::NewTask;
 
-use crate::fixtures::{after, assert_match, exhausted, Tiers};
+use crate::fixtures::{after, assert_match, exhausted, hold_notes, now, Tiers};
 
 /// What pressing Escape into `pane` is, as the host is asked it.
 fn escape(pane: &Pane) -> Value {
@@ -107,17 +107,17 @@ fn a_stall_a_resume_and_a_fresh_window_press_no_escape() {
     );
 }
 
-/// What the human and the chief are told of a window closed for a pause it
-/// ignored, while its task is still paused.
-const CLOSED_PAUSED: [&str; 2] = [
-    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
-    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 stays paused, and its window reopens on its conversation when it is resumed.",
+/// What the human and the chief who gave T-1 are told of zeus's window kept after its
+/// three rounds, running nothing ConsensFlow can see, its task paused.
+const KEPT_PAUSED: [&str; 2] = [
+    "@zeus did not stop for T-1: its turn went on through the interrupt 3 times, and ConsensFlow can see nothing it runs: the host lists no work of its turn, and its harness no job or agent, so its harness may be hung (in a model request, or a tool it does not name). ConsensFlow keeps the window open and T-1 paused, closes nothing, and interrupts the turn again every minute. To end it now, delete @zeus's session.",
+    "T-1's window (@zeus) did not stop: its turn went on through the interrupt, and ConsensFlow can see nothing it runs (the host lists no work of its turn, its harness no job or agent): its harness may be hung. ConsensFlow keeps the window open and T-1 paused, closes nothing, and interrupts the turn again every minute; until then what it writes is not taken as T-1's result. `cf task resume T-1 \"…\"` gives the window your words once its turn ends; only the human can end it sooner, by deleting its session.",
 ];
 
 /// What they are told of it once the task was resumed while the window ignored the rounds.
-const CLOSED_RESUMED: [&str; 2] = [
-    "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. The words that resume T-1 go in once its window reopens on its conversation.",
-    "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. Your words go in once it reopens on its conversation.",
+const KEPT_RESUMED: [&str; 2] = [
+    "@zeus did not stop for T-1: its turn went on through the interrupt 3 times, and ConsensFlow can see nothing it runs: the host lists no work of its turn, and its harness no job or agent, so its harness may be hung (in a model request, or a tool it does not name). ConsensFlow keeps the window open, closes nothing, and interrupts the turn again every minute. To end it now, pause T-1 and delete @zeus's session.",
+    "T-1's window (@zeus) did not stop: its turn went on through the interrupt, and ConsensFlow can see nothing it runs (the host lists no work of its turn, its harness no job or agent): its harness may be hung. ConsensFlow keeps the window open, closes nothing, and interrupts the turn again every minute; until then what it writes is not taken as T-1's result. Your words go in once its turn ends; only the human can end it sooner, by deleting its session.",
 ];
 
 /// The notes the human and the chief were given that a window did not stop.
@@ -126,13 +126,6 @@ fn told(context: &Context, project: i64) -> [Vec<String>; 2] {
         ignored(context, project, "human"),
         ignored(context, project, "chief"),
     ]
-}
-
-/// One note of a window that did not stop, to the chief who gave the task, in the
-/// chief's words of `said` ([human's, chief's]), and none to the human: two notes of
-/// one event said it twice (T-502's m-3943 and m-3944, 2026-10-25).
-fn to_the_chief(said: [&str; 2]) -> [Vec<String>; 2] {
-    [Vec::new(), vec![said[1].to_owned()]]
 }
 
 /// The window at work on T-1 ignores every key, as a harness hung in a model
@@ -155,59 +148,72 @@ fn ignored_three_rounds(context: &Context, project: i64) -> Pane {
 }
 
 #[test]
-fn three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation(
-) {
+fn three_rounds_ignored_keep_the_window_said_once_its_task_paused_and_asked_again_every_minute() {
+    // A pause never closes a window (the owner's rule, T-1199): one that ignores every
+    // round, running nothing ConsensFlow can see, is kept, its task paused, and the chief
+    // who gave the task and the human are told once that only the human can end it.
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
-    let native = context.adapter.agent("zeus").native;
     let launches = context.adapter.prepared().len();
     let pane = ignored_three_rounds(&context, project);
 
-    // The look after the third: no key, and the window is closed, as the host proves.
-    context.host.exits_showing(Some(0), None, None);
+    // The look after the third: no key, and nothing closed.
     context.pass().unwrap();
     assert_eq!(context.host.inputs().len(), 3);
-    assert_eq!(context.host.killed(), [pane]);
-    assert_eq!(
-        context.dispatcher.activity(zeus).state,
-        ActivityState::Closed
-    );
+    assert!(context.host.killed().is_empty(), "a pause closes nothing");
     assert_eq!(
         context.dispatcher.unstopped(zeus),
-        None,
-        "a closed window has nothing to show of the stop"
+        Some(Unstopped { task: 1, rounds: 3 }),
+        "the board shows the window that did not stop"
     );
     assert_eq!(context.task(project, 1).task.state, "paused");
-    assert_eq!(told(&context, project), to_the_chief(CLOSED_PAUSED));
-
-    // Nothing more while it is paused: no window opens for it, nothing is said again.
-    context.advance(10 * 60_000);
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(context.adapter.prepared().len(), launches);
-    assert_eq!(context.host.inputs().len(), 3);
-    assert_eq!(told(&context, project).map(|notes| notes.len()), [0, 1]);
-    assert_eq!(context.task(project, 1).task.state, "paused");
-
-    // Resumed: the window reopens on its conversation, told its program before is
-    // gone, with the words as its first message and no key.
-    context.resume_task(project, 1, "Carry on");
-    context.pass().unwrap();
-    let back = context.adapter.prepared().pop().unwrap();
-    assert_eq!(back["resume"], json!(native), "the same conversation");
-    assert_eq!(context.adapter.previous_gone().last(), Some(&true));
-    assert_match(
-        back["message"].as_str().unwrap(),
-        r"T-1 · task from @chief\]\nResumed: Carry on$",
+    assert_eq!(
+        told(&context, project),
+        KEPT_PAUSED.map(|said| vec![said.to_owned()])
     );
+
+    // A minute on, three fresh rounds, a few seconds apart, and nothing said again; ten
+    // minutes on, the same, and no window opens for it.
+    for _ in 0..19 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.host.inputs().len(), 3, "less than a minute: no key");
+    context.advance(2_000);
     context.pass().unwrap();
-    assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(context.host.inputs(), vec![escape(&pane); 4], "asked again");
+    for _ in 0..3 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
     assert_eq!(
         context.host.inputs().len(),
-        3,
-        "the new window owes nothing for the pause"
+        6,
+        "three fresh rounds, no more"
     );
+    context.advance(10 * 60_000);
+    context.pass().unwrap();
+    assert!(context.host.killed().is_empty());
+    assert_eq!(context.adapter.prepared().len(), launches);
+    assert_eq!(told(&context, project).map(|notes| notes.len()), [1, 1]);
+    assert_eq!(context.task(project, 1).task.state, "paused");
+
+    // Its turn ends: the stop is paid, and the resume's words go into the same window.
+    context.adapter.answer("zeus", "Where I was");
+    context.pass().unwrap();
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    context.resume_task(project, 1, "Carry on");
+    context.pass().unwrap();
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
+    );
+    let words = context.adapter.agent("zeus").items.pop().unwrap();
+    assert_match(&words.text, r"Resumed: Carry on$");
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "working");
     context.adapter.answer("zeus", "Parser, finished");
     context.pass().unwrap();
     let thread = context.task(project, 1);
@@ -217,13 +223,14 @@ fn three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_re
 }
 
 #[test]
-fn a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_closed() {
+fn a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_kept() {
     // A stop is paid by a message of the user's after the one its turn began with
     // (T-807): the turn is over. A turn that goes on writing its own words, or whose
     // harness writes a compaction's summary in the user's place, is that same turn, at
-    // work through every round: it is closed as any that ignores them.
+    // work through every round: it is kept as any that ignores them, never closed.
     let context = Context::new();
     let project = working(&context);
+    let zeus = context.id(project, "zeus");
     context.adapter.busy("zeus");
     context.pause_task(project, 1);
     let pane = pane_of(&context, "zeus");
@@ -245,43 +252,45 @@ fn a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_
     }
     context.pass().unwrap();
     assert_eq!(context.host.inputs(), vec![escape(&pane); 3]);
-    assert_eq!(context.host.killed(), [pane], "a hung turn is closed");
+    assert!(context.host.killed().is_empty(), "a hung turn is kept");
+    assert!(context.dispatcher.unstopped(zeus).is_some());
     assert_eq!(context.task(project, 1).task.state, "paused");
 }
 
 #[test]
-fn a_task_resumed_while_its_window_ignores_the_rounds_has_its_words_go_into_the_window_that_reopens(
+fn a_task_resumed_while_its_window_ignores_the_rounds_has_its_words_go_into_that_window_once_its_turn_ends(
 ) {
     let context = Context::new();
     let project = working(&context);
-    let native = context.adapter.agent("zeus").native;
+    let launches = context.adapter.prepared().len();
     context.adapter.busy("zeus");
     context.pause_task(project, 1);
     context.pass().unwrap();
     // The chief resumes it at once, as zeewin's did 16 s after its pause: the words
-    // wait for a window at rest, which this one never is.
+    // wait for a window at rest, which this one is not.
     context.resume_task(project, 1, "Carry on");
     for _ in 0..3 {
         context.advance(3_100);
         context.pass().unwrap();
     }
     assert_eq!(context.host.inputs().len(), 3);
-    assert_eq!(
-        context.host.killed().len(),
-        1,
-        "closed after its third round"
+    assert!(
+        context.host.killed().is_empty(),
+        "kept after its third round"
     );
     assert_eq!(context.task(project, 1).task.state, "queued");
-    assert_eq!(told(&context, project), to_the_chief(CLOSED_RESUMED));
-
-    // The next pass opens it again, on its conversation, with the words.
-    context.pass().unwrap();
-    let back = context.adapter.prepared().pop().unwrap();
-    assert_eq!(back["resume"], json!(native));
-    assert_match(
-        back["message"].as_str().unwrap(),
-        r"T-1 · task from @chief\]\nResumed: Carry on$",
+    assert_eq!(
+        told(&context, project),
+        KEPT_RESUMED.map(|said| vec![said.to_owned()])
     );
+
+    // Its turn ends: the words go into the same window, and the task goes on there.
+    context.adapter.answer("zeus", "Where I was");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.adapter.prepared().len(), launches, "no new window");
+    let words = context.adapter.agent("zeus").items.pop().unwrap();
+    assert_match(&words.text, r"Resumed: Carry on$");
     context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "working");
     context.adapter.answer("zeus", "Parser, finished");
@@ -290,14 +299,15 @@ fn a_task_resumed_while_its_window_ignores_the_rounds_has_its_words_go_into_the_
 }
 
 #[test]
-fn a_window_held_for_quota_that_ignores_the_rounds_is_closed_and_the_reset_reopens_it_and_gives_the_words_once(
+fn a_window_held_for_quota_at_work_while_out_is_pressed_nothing_and_closed_never_and_its_words_go_in_once_it_rests(
 ) {
+    // T-1199's bug 10: a hold asked a stop, a window that read at work while its member
+    // was out (a harness that waits to try again) was pressed three rounds, ignored them,
+    // and was closed, its task left paused. A hold asks no stop.
     let context = Context::new();
     let project = working(&context);
-    let native = context.adapter.agent("zeus").native;
+    let zeus = context.id(project, "zeus");
     let launches = context.adapter.prepared().len();
-    // Out of quota, its harness hung in the turn: the task is held, and the window
-    // never rests.
     context.adapter.busy("zeus");
     let resets_at = after(&context, 2 * 3_600_000);
     context
@@ -305,46 +315,33 @@ fn a_window_held_for_quota_that_ignores_the_rounds_is_closed_and_the_reset_reope
         .quota("zeus", Some(exhausted(None, Some(&resets_at))));
     context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "paused", "held");
-    let pane = pane_of(&context, "zeus");
-    for _ in 0..3 {
+    for _ in 0..10 {
         context.pass().unwrap();
         context.advance(3_100);
     }
-    assert_eq!(context.host.inputs(), vec![escape(&pane); 3]);
-    context.host.exits_showing(Some(0), None, None);
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "no key for a hold"
+    );
+    assert!(context.host.killed().is_empty(), "and no close");
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(told(&context, project), [Vec::<String>::new(), Vec::new()]);
+
+    // The reset: the daemon resumes the task, and its words wait for the turn at work.
+    context.advance(2 * 3_600_000);
+    context.adapter.quota("zeus", None);
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "queued");
+    // The turn ends: the words go into the same window, once, and the task goes on.
+    context.adapter.answer("zeus", "Waited for the limit");
+    context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(
-        context.host.killed(),
-        [pane],
-        "closed while its member is out"
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
     );
-    assert_eq!(context.task(project, 1).task.state, "paused");
-    assert_eq!(told(&context, project), to_the_chief(CLOSED_PAUSED));
-
-    // Held until the reset: no window opens, and nothing goes in.
-    context.advance(60 * 60_000);
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(context.adapter.prepared().len(), launches);
-    assert_eq!(context.task(project, 1).task.state, "paused");
-
-    // The reset: the daemon resumes the task, and the window reopens on its
-    // conversation with the hold's words as its first message.
-    context.advance(60 * 60_000 + 1_000);
-    context.pass().unwrap();
-    let back = context.adapter.prepared().pop().unwrap();
-    assert_eq!(context.adapter.prepared().len(), launches + 1);
-    assert_eq!(back["resume"], json!(native), "the same conversation");
-    assert_match(
-        back["message"].as_str().unwrap(),
-        r"T-1 · task from ConsensFlow\]\nResumed: Go on where you stopped\.$",
-    );
-    context.pass().unwrap();
-    assert_eq!(context.task(project, 1).task.state, "working");
-    context.adapter.answer("zeus", "Parser, finished");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(context.task(project, 1).task.state, "done");
     let given = context
         .adapter
         .agent("zeus")
@@ -353,126 +350,62 @@ fn a_window_held_for_quota_that_ignores_the_rounds_is_closed_and_the_reset_reope
         .filter(|item| item.text.contains("Resumed: Go on where you stopped"))
         .count();
     assert_eq!(given, 1, "the words went in once");
-    assert_eq!(
-        context.host.inputs().len(),
-        3,
-        "and no key into the new window"
-    );
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "working");
+    context.adapter.answer("zeus", "Parser, finished");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "done");
+    assert!(context.host.inputs().is_empty());
 }
 
 #[test]
-fn a_task_cancelled_while_its_window_is_closed_is_said_to_be_cancelled_and_no_words_are_promised() {
-    // Astra's order on round 1: the close is asked of the host, which takes its
-    // time, and the task is cancelled before it answers.
+fn a_task_cancelled_while_its_window_is_kept_for_its_pause_is_cancelled_as_ever_and_its_window_holding_nothing_closes(
+) {
+    // A cancel keeps what it did before T-1199: the task is called off, its turn about the
+    // task is pressed a round (`interrupt_cancelled`), and its window, holding nothing now,
+    // closes at that look as any window with no task in hand does (`close_if_free`),
+    // whatever its turn; no note says a pause closed it.
     let context = Context::new();
     let project = working(&context);
+    let zeus = context.id(project, "zeus");
     let pane = ignored_three_rounds(&context, project);
-    let held = Gate::default();
-    *context.host.hold_kill.borrow_mut() = Some((pane.generation, held.clone()));
-    let stepping = context.begin_pass();
-    context.settle();
+    context.pass().unwrap();
+    assert!(context.dispatcher.unstopped(zeus).is_some(), "kept");
+    assert!(context.host.killed().is_empty());
     context
         .ledger
         .borrow_mut()
         .cancel_task(project, 1, "human")
         .unwrap();
-    held.open();
-    context.settle();
-    stepping.take().unwrap().unwrap();
-    assert_eq!(context.host.killed(), [pane]);
+    context.host.exits_showing(Some(0), None, None);
+    context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "cancelled");
-    assert_eq!(
-        told(&context, project),
-        to_the_chief([
-            "@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 was cancelled.",
-            "T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names. T-1 was cancelled.",
-        ])
-    );
-}
-
-#[test]
-fn a_close_the_host_refuses_is_shown_said_once_and_tried_again_every_minute_with_no_key() {
-    let context = Context::new();
-    let project = working(&context);
-    let zeus = context.id(project, "zeus");
-    let pane = ignored_three_rounds(&context, project);
-    context.host.refuse_kills.set(true);
-    context.pass().unwrap();
-    assert_eq!(
-        context.host.killed(),
-        std::slice::from_ref(&pane),
-        "the close was tried"
-    );
-    assert_eq!(
-        context.dispatcher.unstopped(zeus),
-        Some(Unstopped { task: 1, rounds: 3 }),
-        "the board shows the window that did not stop and is still open"
-    );
-    assert_eq!(
-        told(&context, project),
-        to_the_chief([
-            "@zeus did not stop for T-1: it ignored the interrupt 3 times, and its window would not close. ConsensFlow tries to close it again every minute; until then what is for it waits, and what it writes is not T-1's result.",
-            "T-1's window (@zeus) did not stop: it ignored the interrupt, and would not close. ConsensFlow tries again every minute; until then your words wait, and what it writes is not taken as T-1's result (cf task get T-1 --transcript shows it).",
-        ])
-    );
-
-    // Less than a minute: nothing; a minute: the close again, no key, nothing said.
-    for _ in 0..18 {
-        context.advance(3_100);
-        context.pass().unwrap();
-    }
-    assert_eq!(context.host.killed().len(), 1);
-    context.advance(10_000);
-    context.pass().unwrap();
-    assert_eq!(context.host.killed(), vec![pane.clone(); 2]);
+    assert_eq!(context.host.killed(), [pane], "holding nothing, it closes");
     assert_eq!(
         context.host.inputs().len(),
-        3,
-        "no key once every round was ignored"
+        4,
+        "the pause's three rounds, and the cancel's first, at the look that closes it"
     );
-    assert_eq!(told(&context, project).map(|notes| notes.len()), [0, 1]);
-
-    // The host takes the next: closed, and said so; the task stays paused.
-    context.host.refuse_kills.set(false);
-    context.advance(60_000);
-    context.pass().unwrap();
-    assert_eq!(context.host.killed(), vec![pane; 3]);
-    assert_eq!(
-        context.dispatcher.activity(zeus).state,
-        ActivityState::Closed
-    );
-    assert_eq!(context.dispatcher.unstopped(zeus), None);
-    let [human, chief] = told(&context, project);
-    assert_eq!(human, Vec::<String>::new());
-    assert_eq!(chief.len(), 2, "{chief:?}");
-    assert!(
-        chief.iter().any(|note| note == CLOSED_PAUSED[1]),
-        "{chief:?}"
-    );
-    assert_eq!(context.task(project, 1).task.state, "paused");
+    assert_eq!(told(&context, project).map(|notes| notes.len()), [1, 1]);
 }
 
 #[test]
-fn a_window_kept_open_whose_turn_ends_before_its_close_pays_the_stop_and_stays() {
+fn a_kept_window_whose_turn_ends_pays_the_stop_and_stays() {
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
     ignored_three_rounds(&context, project);
-    context.host.refuse_kills.set(true);
     context.pass().unwrap();
     assert!(context.dispatcher.unstopped(zeus).is_some());
-    context.host.refuse_kills.set(false);
     // Its turn ends by itself before the minute is out: paid at rest, never closed.
     context.adapter.answer("zeus", "Where I was");
     context.pass().unwrap();
     context.advance(10 * 60_000);
     context.pass().unwrap();
     assert_eq!(context.dispatcher.unstopped(zeus), None);
-    assert_eq!(
-        context.host.killed().len(),
-        1,
-        "only the close the host refused"
-    );
+    assert!(context.host.killed().is_empty());
+    assert_eq!(context.host.inputs().len(), 3, "no key once it is at rest");
     assert_eq!(context.dispatcher.activity(zeus).state, ActivityState::Idle);
     assert_eq!(context.task(project, 1).task.state, "paused");
 }
@@ -513,28 +446,26 @@ fn a_window_that_stops_at_its_second_round_is_never_closed_and_nobody_is_told() 
 }
 
 #[test]
-fn a_window_the_human_keeps_open_is_closed_all_the_same_and_is_theirs_again_once_it_reopens() {
+fn a_window_the_human_keeps_open_that_ignores_a_pause_is_kept_and_stays_theirs() {
     let context = Context::new();
     let tiers = crate::background::working(&context);
     let project = tiers.project.id;
     let session = tiers.assignee(1);
     context.open_window(project, &session).unwrap();
-    let pane = context.host.last("zeus").unwrap().pane;
     context.adapter.busy("zeus");
     context.pause_task(project, 1);
     for _ in 0..4 {
         context.pass().unwrap();
         context.advance(3_100);
     }
-    assert_eq!(
-        context.host.killed(),
-        [pane],
-        "the pause is the human's or the chief's own word: the window that ignores it goes"
-    );
+    assert!(context.host.killed().is_empty(), "a pause closes nothing");
     assert_eq!(context.task(project, 1).task.state, "paused");
 
-    // Resumed, it reopens; its task done, it stays open, as the human had it.
+    // Resumed, the words wait for the turn; it ends, they go in; its task done, the
+    // window stays open, as the human had it.
     context.resume_task(project, 1, "Carry on");
+    context.adapter.answer("zeus", "Where I was");
+    context.pass().unwrap();
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "working");
@@ -542,20 +473,20 @@ fn a_window_the_human_keeps_open_is_closed_all_the_same_and_is_theirs_again_once
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "done");
-    assert_eq!(
-        context.host.killed().len(),
-        1,
-        "the human holds the window that came back"
+    assert!(
+        context.host.killed().is_empty(),
+        "the human holds the window"
     );
 }
 
 #[test]
-fn a_harness_that_takes_its_turn_up_again_at_the_reset_is_interrupted_before_the_resume_goes_in() {
+fn a_harness_that_takes_its_turn_up_again_at_the_reset_is_pressed_nothing_and_the_resume_goes_in_after_it(
+) {
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
-    // The harness is out of quota and waits to try again, so its window never
-    // rests while the task is held: the stop the hold asked is never paid.
+    // The harness is out of quota and waits to try again, so its window never rests
+    // while the task is held: a hold asks no stop, and nothing is pressed into it.
     context.adapter.busy("zeus");
     let resets_at = after(&context, 2 * 3_600_000);
     context
@@ -564,11 +495,7 @@ fn a_harness_that_takes_its_turn_up_again_at_the_reset_is_interrupted_before_the
     context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "paused", "held");
     context.pass().unwrap();
-    let pressed = context.host.inputs().len();
-    assert!(
-        pressed >= 1,
-        "its window at work is interrupted while it is out"
-    );
+    assert_eq!(context.host.inputs().len(), 0, "a hold presses no key");
     assert_eq!(context.dispatcher.activity(zeus).state, ActivityState::Out);
 
     // The reset: its turn is up again by itself, and the daemon resumes the task.
@@ -580,22 +507,20 @@ fn a_harness_that_takes_its_turn_up_again_at_the_reset_is_interrupted_before_the
         "queued",
         "the words wait for the turn to end"
     );
-    assert!(
-        context.host.inputs().len() > pressed,
-        "interrupted again, before the words go in"
-    );
+    assert_eq!(context.host.inputs().len(), 0, "nor is the resume a stop");
     let words = context.adapter.agent("zeus").items.pop().unwrap();
     assert!(
         !words.text.contains("Resumed: Go on where you stopped"),
         "nothing was pasted into the working turn"
     );
-    // It stops; the words go in, once.
-    context.adapter.answer("zeus", "Stopped at the lexer");
+    // Its turn ends; the words go in, once.
+    context.adapter.answer("zeus", "Back at the lexer");
     context.pass().unwrap();
     let words = context.adapter.agent("zeus").items.pop().unwrap();
     assert_match(&words.text, r"Resumed: Go on where you stopped\.$");
     context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(context.host.inputs().len(), 0);
 }
 
 #[test]
@@ -629,7 +554,7 @@ fn a_second_pause_before_the_window_is_seen_at_rest_costs_no_second_key_and_is_p
 }
 
 #[test]
-fn a_window_out_of_quota_and_still_at_work_is_interrupted_while_its_activity_says_it_is_out() {
+fn a_window_out_of_quota_and_still_at_work_is_pressed_nothing_while_its_activity_says_it_is_out() {
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
@@ -639,19 +564,18 @@ fn a_window_out_of_quota_and_still_at_work_is_interrupted_while_its_activity_say
         .adapter
         .quota("zeus", Some(exhausted(None, Some(&resets_at))));
     context.pass().unwrap();
-    let pane = pane_of(&context, "zeus");
     context.pass().unwrap();
     assert_eq!(context.dispatcher.activity(zeus).state, ActivityState::Out);
     assert_eq!(
         context.host.inputs(),
-        [escape(&pane)],
-        "what its look finds it doing is what counts, not what the board says"
+        Vec::<Value>::new(),
+        "a quota wait never interrupts"
     );
-    // Its turn ends on the refusal: the stop is paid with no key.
+    // Its turn ends on the refusal: nothing owed, nothing pressed.
     context.adapter.answer("zeus", "Out of quota");
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(context.host.inputs().len(), 1);
+    assert!(context.host.inputs().is_empty());
     assert_eq!(context.dispatcher.unstopped(zeus), None);
 }
 
@@ -687,6 +611,9 @@ fn a_pause_of_a_task_the_window_holds_but_does_not_work_on_presses_no_key_and_it
 #[test]
 fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer_that_pause() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = working(&context);
     // T-2 is given to the window, which works on T-1, and is paused before any
     // words of it reach the window: nothing in the window is for it to stop.
@@ -725,9 +652,61 @@ fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer
     );
 }
 
+/// The same, where the host proves nothing of the exit of the window that closed: the words that
+/// resumed T-2 are not the first a window of its own is given; T-2 is held for the chief's word
+/// first, and the words that send it on are, with no turn of it to interrupt for the earlier pause.
+#[test]
+fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_are_held_for_the_chiefs_word_when_the_window_before_closed_with_no_proof(
+) {
+    let context = Context::new();
+    let project = working(&context);
+    context.give(project, "zeus", "Docs");
+    context.pause_task(project, 2);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+    context.pause_task(project, 1);
+    context.adapter.answer("zeus", "Stopped");
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    context.resume_task(project, 2, "Go on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "queued");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project, 2).task.state,
+        "paused",
+        "held for the chief's word: T-1's window closed with no proof"
+    );
+    assert_eq!(hold_notes(&context, project, 2).len(), 1);
+
+    context.resume_task(project, 2, "Go on in a window of your own.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 2).task.state, "working");
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "the turn the words began is not interrupted for a pause that came before them"
+    );
+}
+
 #[test]
 fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_goes_on_with() {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the session's next task
+    // goes on with its conversation (`ownership`), as this test is about something else.
+    context.host.exits_showing(Some(0), None, None);
     let project = working(&context);
     context.give(project, "zeus", "Docs");
     // T-1 is paused and its turn ends before a look finds it at work: the
@@ -746,6 +725,50 @@ fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_
         .borrow_mut()
         .cancel_task(project, 1, "chief")
         .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 2).task.state, "working");
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    // T-2 is paused in its turn: its stop is owed, whatever was paid for T-1.
+    context.adapter.busy("zeus");
+    context.pause_task(project, 2);
+    context.pass().unwrap();
+    let pane = pane_of(&context, "zeus");
+    assert_eq!(context.host.inputs(), [escape(&pane)]);
+}
+
+/// The same, where the host proves nothing of the exit of the window that closed: T-2 is held for
+/// the chief's word, no key is pressed for anything, and once sent on its stop is owed all the same.
+#[test]
+fn a_stop_paid_for_one_task_never_hides_the_stop_of_the_task_the_chief_sends_on_after_a_hold() {
+    let context = Context::new();
+    let project = working(&context);
+    context.give(project, "zeus", "Docs");
+    context.pause_task(project, 1);
+    context.adapter.answer("zeus", "Stopped");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "queued");
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project, 2).task.state,
+        "paused",
+        "held for the chief's word: T-1's window closed with no proof"
+    );
+    assert_eq!(hold_notes(&context, project, 2).len(), 1);
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    context.resume_task(project, 2, "Go on in a window of your own.");
     for _ in 0..3 {
         context.pass().unwrap();
     }
@@ -932,4 +955,596 @@ fn the_words_that_first_reach_a_window_the_human_opened_with_no_task_answer_a_pa
         Vec::<Value>::new(),
         "the turn the words began is not interrupted for a pause that came before them"
     );
+}
+
+/// The window the human opened for T-1's session, which stays open whatever its task:
+/// the project and the session.
+fn held_open(context: &Context) -> (i64, String) {
+    let tiers = crate::background::working(context);
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.open_window(project, &session).unwrap();
+    (project, session)
+}
+
+/// The window begins a turn of its own (Claude Code's meta prompt once its limit resets,
+/// or what the human typed): at work on it.
+fn its_own_turn(context: &Context, words: &str) {
+    let at = now(context);
+    context.adapter.begins_its_own_turn("zeus", words, &at);
+}
+
+/// The messages of the user's in zeus's record that say `words`.
+fn given_zeus(context: &Context, words: &str) -> usize {
+    context
+        .adapter
+        .agent("zeus")
+        .items
+        .iter()
+        .filter(|item| item.role == Role::User && item.text.contains(words))
+        .count()
+}
+
+#[test]
+fn a_reopen_after_a_hold_its_window_waited_out_at_work_presses_nothing_and_its_words_go_in_after_the_turn(
+) {
+    // T-1199's bug 9 on its task's way: T-21 was held for quota while its window waited at
+    // work to continue (m-444), went on by itself (m-446) and was done (m-447); reopened
+    // while its window was on a turn after its result, it was pressed three rounds and
+    // closed (m-450). The hold had asked a stop no look paid, which waited through the
+    // done task (`stop_of` counts none of a done task) for the reopen.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    let launches = context.adapter.prepared().len();
+    context.adapter.busy("zeus");
+    let resets_at = after(&context, 60_000);
+    context
+        .adapter
+        .quota("zeus", Some(exhausted(None, Some(&resets_at))));
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(context.task(project, 1).task.state, "paused", "held");
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "a hold presses nothing"
+    );
+
+    // Quota is back: the window goes on by itself, and its answer is the result.
+    context.advance(60_000);
+    context.adapter.quota("zeus", None);
+    its_own_turn(
+        &context,
+        "Your claude.ai usage limit has reset. Continue the task you were working on.",
+    );
+    context.pass().unwrap();
+    let at = now(&context);
+    context
+        .adapter
+        .ends_its_own_turn("zeus", "Parser, finished", &at);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "done");
+
+    // A turn of the window's own after its result, and the chief reopens T-1: nothing is
+    // pressed into the turn, nothing closed, and the words wait for its end.
+    its_own_turn(&context, "One more look at the parser");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "a reopen presses nothing"
+    );
+    assert!(context.host.killed().is_empty(), "and closes nothing");
+    assert_eq!(
+        given_zeus(&context, "Fix the README"),
+        0,
+        "nothing into the turn"
+    );
+    assert_eq!(told(&context, project), [Vec::<String>::new(), Vec::new()]);
+    context.adapter.answer("zeus", "Looked");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        given_zeus(&context, "Fix the README"),
+        1,
+        "its words, after the turn"
+    );
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
+    );
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "working");
+}
+
+#[test]
+fn a_resume_an_answer_a_follow_up_and_a_reopen_given_a_window_at_work_press_nothing_and_wait_for_its_turn(
+) {
+    // Only a pause, a tell, a cancel or the human's own stop asks a window to stop
+    // (T-1199): any other words wait for the turn at work to end, as a message does.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    let launches = context.adapter.prepared().len();
+    let quiet = |context: &Context, what: &str| {
+        for _ in 0..10 {
+            context.pass().unwrap();
+            context.advance(3_100);
+        }
+        assert_eq!(
+            context.host.inputs(),
+            Vec::<Value>::new(),
+            "{what} pressed a key"
+        );
+        assert!(context.host.killed().is_empty(), "{what} closed the window");
+    };
+
+    // A resume: T-1 paused at rest, and resumed while the window is on a turn of its own.
+    context.adapter.answer("zeus", "Halfway");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    its_own_turn(&context, "What the human typed");
+    context.pass().unwrap();
+    context.resume_task(project, 1, "Carry on");
+    quiet(&context, "a resume");
+    assert_eq!(given_zeus(&context, "Resumed: Carry on"), 0);
+    context.adapter.answer("zeus", "Typed back");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(given_zeus(&context, "Resumed: Carry on"), 1);
+
+    // An answer to the window's question, given while it works.
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    let question = context.ask(
+        project,
+        &context.task(project, 1).task.assignee.unwrap(),
+        "chief",
+        1,
+        "Which grammar?",
+    );
+    context.answer(project, question.id, "The v2 one");
+    quiet(&context, "an answer");
+    context.adapter.answer("zeus", "Parser, finished");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        given_zeus(&context, "The v2 one"),
+        1,
+        "the answer, after the turn"
+    );
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Parser, finished with v2");
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    // A reopen of T-1, done, given while the window is on a turn of its own.
+    assert_eq!(context.task(project, 1).task.state, "done");
+    its_own_turn(&context, "Check the parser once more");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Handle tabs too")
+        .unwrap();
+    quiet(&context, "a reopen");
+    assert_eq!(given_zeus(&context, "Handle tabs too"), 0);
+    context.adapter.answer("zeus", "Checked");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(given_zeus(&context, "Handle tabs too"), 1, "after the turn");
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "Tabs handled");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "done");
+
+    // A follow-up of T-1 for the same window, given while it is on a turn of its own:
+    // nothing is pressed, and nothing goes into the turn.
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(project, 1, "chief")
+        .unwrap();
+    its_own_turn(&context, "Tidy the notes");
+    context.pass().unwrap();
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Now the lexer".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    quiet(&context, "a follow-up");
+    assert_eq!(given_zeus(&context, "Now the lexer"), 0);
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "one window throughout"
+    );
+}
+
+#[test]
+fn a_pause_of_a_window_at_work_whose_member_goes_out_meanwhile_is_pressed_while_its_activity_says_it_is_out(
+) {
+    // A pause asks a stop, a hold none: the chief's pause of a window at work goes on with
+    // its rounds when the member is out meanwhile, whatever its activity says; what its
+    // look finds it doing is what counts.
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs().len(), 1, "the pause's first round");
+    let resets_at = after(&context, 3 * 3_600_000);
+    context
+        .adapter
+        .quota("zeus", Some(exhausted(None, Some(&resets_at))));
+    // The look that reads it out presses nothing; the looks after it, out, go on with the
+    // rounds.
+    for _ in 0..3 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.dispatcher.activity(zeus).state, ActivityState::Out);
+    assert_eq!(
+        context.host.inputs().len(),
+        3,
+        "its rounds go on while its activity says it is out"
+    );
+}
+
+#[test]
+fn a_pause_whose_turn_a_refusal_for_quota_ended_before_any_look_presses_no_key() {
+    // The chief's pause asks a stop; the refusal ended the turn before the window was
+    // looked at, and its record reads the turn in flight past it (T-502's reader): the turn
+    // is over, and the stop is paid with no key.
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    let resets_at = after(&context, 2 * 3_600_000);
+    context
+        .adapter
+        .refuse_unsettled("zeus", exhausted(Some(&now(&context)), Some(&resets_at)));
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(context.host.inputs(), Vec::<Value>::new(), "no key");
+    assert!(context.host.killed().is_empty());
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
+    assert_eq!(context.task(project, 1).task.state, "paused");
+}
+
+#[test]
+fn a_stop_owed_when_the_chief_finishes_its_task_is_settled_and_a_reopen_presses_nothing_into_the_turn_after(
+) {
+    // The chief pauses T-1 while its window works and goes on through the rounds, and
+    // finishes it at what the window said last: done with the pause's stop unpaid, and the
+    // window, the human's, still on that turn (bug 9's window, still on its turn after its
+    // result). The chief reopens T-1: what T-1 was asked before it was done is settled, and
+    // nothing is pressed into the turn; the words wait for its end (T-1199).
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    assert_eq!(pressed, 1, "the pause's first round");
+    // A complete answer, and the window still at work after it.
+    let item = context
+        .adapter
+        .item(Role::Assistant, "Half the parser, and the tests");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(item);
+        agent.settled = false;
+    });
+    let finished = context.finish_task(project, 1, "chief").unwrap();
+    assert_eq!(finished.task.state, "done");
+    context.adapter.with("zeus", |agent| agent.settled = false);
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        pressed,
+        "nothing pressed after the finish"
+    );
+    assert!(context.host.killed().is_empty());
+    context.adapter.answer("zeus", "Looked");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        given_zeus(&context, "Fix the README"),
+        1,
+        "its words, after the turn"
+    );
+}
+
+#[test]
+fn a_pause_and_a_resume_whose_task_ends_at_a_turn_end_before_the_words_went_in_owe_nothing_to_a_reopen(
+) {
+    // The chief's question on T-1199: paused, then resumed, and the task done at a turn end
+    // before the resume's words went in. That turn end is a look at rest, which pays the
+    // stop: a reopen owes none of it.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    context.resume_task(project, 1, "Carry on");
+    context.adapter.answer("zeus", "Parser, finished");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let state = context.task(project, 1).task.state;
+    if state != "done" {
+        // Its words went in at that rest: answered, the task is done.
+        context.adapter.answer("zeus", "Parser, finished again");
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "done");
+    its_own_turn(&context, "One more look at the parser");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(context.host.inputs().len(), pressed, "nothing pressed");
+    assert!(context.host.killed().is_empty());
+}
+
+#[test]
+fn a_tell_to_a_task_held_for_quota_asks_its_stop_and_the_reset_resumes_nothing() {
+    // T-1220's P1-1: a tell to a held task records a stop as any tell does, and takes the
+    // task out of its hold: no resume at the quota's reset.
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    let resets_at = after(&context, 60_000);
+    context
+        .adapter
+        .quota("zeus", Some(exhausted(None, Some(&resets_at))));
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "paused", "held");
+    assert!(context.host.inputs().is_empty(), "a hold presses nothing");
+    let session = context.task(project, 1).task.assignee.unwrap();
+    context.tell(project, &session, 1, "Use the v2 grammar");
+    for _ in 0..2 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert!(
+        !context.host.inputs().is_empty(),
+        "the tell's stop is pressed into the turn at work"
+    );
+    // The reset: the task is the chief's now, and stays paused.
+    context.advance(120_000);
+    context.adapter.quota("zeus", None);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "paused",
+        "no resume of its own"
+    );
+}
+
+#[test]
+fn a_finish_and_a_reopen_between_two_looks_settle_the_stop_and_a_pause_after_is_owed() {
+    // T-1220's P2-4: the chief finishes T-1 and reopens it at once, with no look between;
+    // the old stop is settled by the finish, and a pause asked after the reopen is owed.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    assert_eq!(pressed, 1, "the pause's first round");
+    let item = context
+        .adapter
+        .item(Role::Assistant, "Half the parser, and the tests");
+    context.adapter.with("zeus", |agent| {
+        agent.items.push(item);
+        agent.settled = false;
+    });
+    context.finish_task(project, 1, "chief").unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        pressed,
+        "nothing pressed after the finish"
+    );
+    // The control: a pause asked now is owed, and pressed.
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs().len(),
+        pressed + 1,
+        "a new pause is pressed"
+    );
+}
+
+#[test]
+fn a_failure_and_a_reopen_between_two_looks_settle_the_stop_and_a_pause_after_is_owed() {
+    // T-1223's P2-4, the re-check's chain: the pause of T-1 is pressed once into its window at
+    // work, the chief resumes it (queued again), ConsensFlow gives it up (`fail_task`, as a
+    // look at a failed turn does) and the chief reopens it, with no look between those. The
+    // old stop is settled by the give-up; a pause asked after the reopen is owed.
+    let context = Context::new();
+    let (project, _) = held_open(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    assert_eq!(pressed, 1, "the pause's first round");
+    context.resume_task(project, 1, "Go on");
+    assert_eq!(context.task(project, 1).task.state, "queued");
+    context
+        .give_up_task(project, 1, "its window's turn failed")
+        .unwrap();
+    assert_eq!(context.task(project, 1).task.state, "failed");
+    let at_failure = context.host.inputs().len();
+    context.adapter.with("zeus", |agent| {
+        agent.failed = false;
+        agent.failure = None;
+        agent.settled = false;
+    });
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Fix the README")
+        .unwrap();
+    for _ in 0..10 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.host.inputs().len(),
+        at_failure,
+        "nothing pressed after the failure"
+    );
+    // The control: a pause asked now is owed, and pressed.
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs().len(),
+        at_failure + 1,
+        "a new pause is pressed"
+    );
+}
+
+#[test]
+fn a_tell_to_a_task_paused_for_its_window_gone_asks_a_stop_of_the_window_the_human_brought_back() {
+    // T-1223's P2-3: zeus's window exits and T-1 is paused for it; the human opens the window
+    // again and begins a turn in it; then the chief tells T-1. The tell takes the pause over
+    // and asks its own stop, which the window at work is pressed for; the tell goes in once
+    // the window has stopped, once.
+    let context = Context::new();
+    let (project, session) = held_open(&context);
+    context.exit("zeus");
+    context.pass().unwrap();
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "paused",
+        "its window gone"
+    );
+    let stops_before = stops_of(&context, project, 1);
+    context.open_window(project, &session).unwrap();
+    context.pass().unwrap();
+    its_own_turn(&context, "Show me the parser's tests");
+    context.pass().unwrap();
+    let pressed = context.host.inputs().len();
+    let tell = context
+        .tell(project, &session, 1, "Check the README first")
+        .id;
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    let stops = stops_of(&context, project, 1);
+    assert_eq!(
+        stops.len(),
+        stops_before.len() + 1,
+        "the tell asked a stop: {stops:?}"
+    );
+    assert!(
+        context.host.inputs().len() > pressed,
+        "the window at work is pressed for it"
+    );
+    assert_eq!(
+        context.message(tell).state,
+        "queued",
+        "it waits for the stop"
+    );
+    context.adapter.answer("zeus", "Stopped");
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.message(tell).state,
+        "delivered",
+        "in once the window stopped"
+    );
+    assert_eq!(given_zeus(&context, "Check the README first"), 1, "once");
+}
+
+/// The stops asked of T-`number`, by the moves to paused that counted one.
+fn stops_of(context: &Context, project: i64, number: i64) -> Vec<Value> {
+    context
+        .ledger
+        .borrow()
+        .events(project, 0, 5_000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| {
+            event.kind == "task.state"
+                && event.data["task"] == number
+                && event.data["stop"].is_number()
+        })
+        .map(|event| event.data["stop"].clone())
+        .collect()
+}
+
+#[test]
+fn a_projects_close_closes_a_kept_window_as_the_humans_own_shutdown() {
+    // T-1199 round 3, the chief's 8: a pause never closes a window, but the human's Close of
+    // the project (and the app's quit) is no pause: it closes every window, a kept one too,
+    // and the task stays paused for the project's Resume.
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    let pane = ignored_three_rounds(&context, project);
+    context.pass().unwrap();
+    assert!(context.dispatcher.unstopped(zeus).is_some(), "kept");
+    assert!(context.host.killed().is_empty());
+    context.host.exits_showing(Some(0), None, None);
+    context.close_project(project).unwrap();
+    assert!(
+        context.host.killed().contains(&pane),
+        "the Close closes it, with every window of the project: {:?}",
+        context.host.killed()
+    );
+    assert_eq!(context.task(project, 1).task.state, "paused");
 }

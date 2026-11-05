@@ -130,6 +130,9 @@ pub struct Plan {
     /// The folder the harnesses' homes of the run's own are made in, as it spells it,
     /// where not the temporary folder ([`Plan::homes_made_in`]).
     pub homes_in: Option<PathBuf>,
+    /// Whether the daemon starts on the `PATH` the Finder gives an app, its login shell too slow
+    /// to give it its own ([`Config::as_the_finder_starts_it`](crate::rig::Config::as_the_finder_starts_it)).
+    pub finder: bool,
 }
 
 impl Plan {
@@ -147,6 +150,7 @@ impl Plan {
             roster: vec![chief],
             repository: false,
             homes_in: None,
+            finder: false,
         }
     }
 
@@ -318,6 +322,13 @@ mod tests {
         let row = json!({ "id": "x", "kind": "claude-code", "model": "fake-2" });
         assert_eq!(harness_of(&row), Some(Harness::Claude));
         assert_eq!(harness_of(&json!({ "id": "y", "kind": "nothing" })), None);
+        // Devin's and Codex's shapes of the stand-in, on its fake model, are no install either
+        // (the matrix's seats of those kinds, T-1207).
+        for kind in ["devin", "codex"] {
+            let row =
+                json!({ "id": "worker", "kind": kind, "model": "fake", "workTier": "standard" });
+            assert_eq!(harness_of(&row), None, "{kind}");
+        }
     }
 
     #[test]

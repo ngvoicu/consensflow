@@ -17,16 +17,6 @@ engine-no-adapter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", 
 ledger-pause-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses"]
 
 [[plant]]
-name = "harness gone: an agent of a kind the build does not run is listed as supported"
-meant = "an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_moves_off_it"
-runs = ["rig-regression-harness-gone"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/roster/views.rs"
-find = "            unsupported: harness.is_none(),\n"
-replace = "            unsupported: false,\n"
-
-[[plant]]
 name = "harness gone: a member on a harness with no adapter is taken for free"
 meant = "an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_moves_off_it"
 runs = ["rig-regression-harness-gone"]
@@ -80,8 +70,10 @@ runs = ["ledger-pause-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    if harness_gone {\n"
-replace = "    if false {\n"
+find = '''fn way_on(number: i64, way: Way) -> String {
+    match way {'''
+replace = '''fn way_on(number: i64, way: Way) -> String {
+    match if way == Way::Gone { Way::Resume } else { way } {'''
 
 [[plant]]
 name = "harness gone: a pause note of a gone harness is not read back"
@@ -90,8 +82,10 @@ runs = ["ledger-pause-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "    [false, true].into_iter().find_map(|harness_gone| {\n"
-replace = "    [false].into_iter().find_map(|harness_gone| {\n"
+find = '''    [Way::Resume, Way::Gone, Way::Held]
+        .into_iter()'''
+replace = '''    [Way::Resume, Way::Held]
+        .into_iter()'''
 
 [[plant]]
 name = "harness gone: a note of tasks on gone harnesses alone says their windows come back"
@@ -100,7 +94,7 @@ runs = ["ledger-pause-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "            if many.iter().any(|paused| !paused.harness_gone) {\n"
+find = "            if many.iter().any(|paused| paused.way == Way::Resume) {\n"
 replace = "            if true {\n"
 
 # The words told to the window of a task paused on a harness with no adapter reach nothing,
@@ -133,5 +127,19 @@ runs = ["engine-no-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "        named.because = with_kept(&named.because, message.id, why, held, named.harness_gone);\n"
-replace = "        named.because = with_kept(&named.because, message.id, why, held, false);\n"
+find = '''            held,
+            named.way == Way::Gone,'''
+replace = '''            held,
+            false,'''
+
+# The stall's way is `Way::of_stall` since T-1208 round 2 (a note's way is an enum, not a flag): the
+# unit tests of `pauses` build `Way::Gone` themselves, so this one is run through the engine.
+[[plant]]
+name = "harness gone: a stall on a gone harness is given the way of a window that comes back"
+meant = "words_told_to_the_window_of_a_task_paused_on_a_harness_with_no_adapter_are_said_to_reach_nothing_not_to_wait_for_a_resume"
+runs = ["engine-no-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "        if harness_gone {\n            Way::Gone"
+replace = "        if false {\n            Way::Gone"

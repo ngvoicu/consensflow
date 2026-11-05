@@ -839,3 +839,132 @@ fn a_follow_up_of_a_task_paused_under_an_ended_session_brings_the_session_back_a
         "nothing of the refused follow-up is left"
     );
 }
+
+/// Only a pause asks a window to stop (T-1199): the chief's pause counts a stop of the
+/// task its window works on; a hold for quota, the daemon's resume after it, the reopen
+/// of the task once done and its words being given count none, so a window that waited
+/// out a hold at work owes nothing when the task is back in its hands.
+#[test]
+fn a_hold_a_resume_and_a_reopen_ask_no_stop_and_only_a_pause_counts_one() {
+    let mut w = world();
+    let task = w.open("Parser").task.number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    assert_eq!(stop_of(&w, &session), Some((task, 0)));
+
+    w.hold(task);
+    assert_eq!(w.state(task), "paused", "held");
+    assert_eq!(
+        stop_of(&w, &session),
+        Some((task, 0)),
+        "a hold asks no stop"
+    );
+    let resumed = w.daemon_resumes(task);
+    assert_eq!(
+        stop_of(&w, &session),
+        Some((task, 0)),
+        "nor does its resume"
+    );
+    w.deliver(resumed.message.expect("its words").id);
+    w.ledger
+        .record_result(w.project, task, "Parser, done")
+        .expect("a result");
+    w.ledger
+        .reopen_task(w.project, task, "chief", "And the lexer")
+        .expect("sent back");
+    assert_eq!(stop_of(&w, &session), Some((task, 0)), "nor a reopen");
+
+    w.pause(task);
+    assert_eq!(stop_of(&w, &session), Some((task, 1)), "a pause does");
+    let held_after: Vec<(String, Option<i64>)> = w
+        .ledger
+        .events(w.project, 0, 500)
+        .expect("the log")
+        .into_iter()
+        .filter(|event| event.kind == "task.state" && event.data["to"] == "paused")
+        .map(|event| {
+            (
+                event.data["because"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                event.data["stop"].as_i64(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        held_after,
+        [("out of quota".to_owned(), None), (String::new(), Some(1))],
+        "the hold's move names no stop; the pause's names the one it asked"
+    );
+}
+
+/// The words that resume a paused task, given up before its window had them, pause it
+/// again with no stop asked (T-1199): a resume never interrupts a window, and one whose
+/// words never went in has nothing of them to stop.
+#[test]
+fn a_resume_whose_words_never_went_in_is_paused_again_with_no_stop_asked() {
+    let mut w = world();
+    let task = w.open("Parser").task.number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    w.pause(task);
+    assert_eq!(stop_of(&w, &session), Some((task, 1)));
+    let resumed = w.resume(task, "Carry on");
+    let words = resumed.message.expect("its words");
+    w.begin(words.id);
+    w.ledger
+        .fail_delivery(words.id, "the window never came up")
+        .expect("given up");
+    assert_eq!(w.state(task), "paused", "paused again");
+    assert_eq!(
+        stop_of(&w, &session),
+        Some((task, 1)),
+        "and no stop asked for it"
+    );
+}
+
+/// A tell, or the chief's pause, to a task ConsensFlow holds for quota takes the hold over
+/// (T-1220's P1-1): a stop is asked as by any pause, and the hold's time is gone, so the
+/// daemon resumes nothing at the reset.
+#[test]
+fn a_tell_or_a_pause_of_a_held_task_asks_a_stop_and_ends_the_hold() {
+    for by_tell in [true, false] {
+        let mut w = world();
+        let task = w.open("Parser").task.number;
+        let moved = w.assign(task, "zeus");
+        let session = moved.task.assignee.clone().expect("a session");
+        w.deliver(moved.message.expect("its brief").id);
+        w.hold(task);
+        assert_eq!(stop_of(&w, &session), Some((task, 0)), "a hold asks none");
+        if by_tell {
+            w.ledger
+                .ask(
+                    w.project,
+                    &cf_ledger::NewQuestion {
+                        from: Some("chief".to_owned()),
+                        to: session.clone(),
+                        body: Some("Use the v2 grammar".to_owned()),
+                        task: Some(task),
+                        urgent: true,
+                        ..cf_ledger::NewQuestion::default()
+                    },
+                )
+                .expect("told");
+        } else {
+            w.pause(task);
+        }
+        assert_eq!(stop_of(&w, &session), Some((task, 1)), "by_tell {by_tell}");
+        assert_eq!(w.state(task), "paused");
+        let due = w
+            .ledger
+            .held_tasks_due("2099-01-01T00:00:00.000Z")
+            .expect("a read");
+        assert!(
+            due.is_empty(),
+            "the hold is over: {due:?} (by_tell {by_tell})"
+        );
+    }
+}

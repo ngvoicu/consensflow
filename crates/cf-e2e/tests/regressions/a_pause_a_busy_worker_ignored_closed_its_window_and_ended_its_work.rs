@@ -16,7 +16,7 @@
 //! ignores the interrupt in that shape (T-1117's live runs: Claude Code, Codex and Devin on
 //! the Mac and zeewin2, Pi on the Mac, each stopped at the first Escape), so the stand-in is
 //! the shape's only red. A turn that ignores every key with nothing of its own running is
-//! still closed: `a_pause_a_hung_worker_ignored_stranded_its_task`.
+//! kept too, never closed (T-1199): `a_pause_a_hung_worker_ignored_stranded_its_task`.
 
 use std::thread::sleep;
 

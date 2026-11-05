@@ -96,7 +96,7 @@ async function open(page, data = model()) {
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'agents.list': () => answer({ agents: [], missing: [] }),
+      'harnesses.missing': () => answer({ missing: [] }),
       'board.get': ({ project }) => answer({ board: data.boards[project] }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       'staff.last': () => answer({ staff: [] }),

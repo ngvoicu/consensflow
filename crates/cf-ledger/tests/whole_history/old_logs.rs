@@ -1,17 +1,15 @@
 //! A ledger an older build wrote may hold events whose data is no JSON, JSON
 //! that is no object, or what this build never writes where it writes a
-//! conversation's id or a participant's handle. Migration 0020's indexes and
-//! the lookups of the log a heading takes read such an event as saying nothing
-//! of any conversation or participant, so the ledger opens on it and the
-//! viewer reads it: a switch whose data says nothing still ended the
-//! conversation it came in, to what the log does not say, and the agent the
-//! conversation began on is not said either.
+//! conversation's id or a participant's handle. Migration 0020's indexes read
+//! such an event as saying nothing of any conversation or participant, and
+//! 0020 cuts one logged too long; 0029 drops those indexes again, as the
+//! history reads no heading from the log (chief-harness, CHF-12). So the ledger
+//! migrates through both and opens on it, and the viewer reads its items.
 
 use std::path::PathBuf;
 
 use cf_ledger::{
-    migrate, open_ledger, HistoryEntry, HistoryFrom, Options, HISTORY_PART, MIGRATIONS,
-    SCHEMA_VERSION,
+    migrate, open_ledger, HistoryFrom, Options, HISTORY_PART, MIGRATIONS, SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection};
 
@@ -38,7 +36,7 @@ const UNREADABLE: [&str; 12] = [
     "\u{0}",
 ];
 
-/// The kinds of event the viewer reads the log for, each read through an index of 0020.
+/// The kinds of event migration 0020's indexes read the log for, until 0029 dropped them.
 const READ: [&str; 4] = [
     "conversation.started",
     "conversation.followed",
@@ -128,10 +126,7 @@ fn a_version_18_ledger_whose_log_holds_unreadable_events_of_every_kind_migrates_
     let history = everything(&ledger, 1, "chief").expect("read");
     assert_eq!(
         lines(&history),
-        [
-            r#"codex diana Some(Fresh) ["user: said in 1"]"#,
-            r#"codex diana None ["user: said in 2"]"#,
-        ]
+        [r#"["user: said in 1"]"#, r#"["user: said in 2"]"#,]
     );
     let found = ledger
         .read_history(
@@ -141,7 +136,7 @@ fn a_version_18_ledger_whose_log_holds_unreadable_events_of_every_kind_migrates_
         )
         .expect("a search");
     assert_eq!(ids(&found), ["i-2", "i-1"]);
-    // The log goes on as this build writes it, through the same indexes.
+    // The log goes on as this build writes it.
     let third = ledger
         .start_conversation(2, "codex")
         .expect("a conversation");
@@ -156,9 +151,9 @@ fn a_version_18_ledger_whose_log_holds_unreadable_events_of_every_kind_migrates_
     assert_eq!(
         lines(&history),
         [
-            r#"codex diana Some(Fresh) ["user: said in 1"]"#,
-            r#"codex diana Some(Fresh) ["user: said in 2"]"#,
-            r#"codex diana None ["user: said in 3"]"#,
+            r#"["user: said in 1"]"#,
+            r#"["user: said in 2"]"#,
+            r#"["user: said in 3"]"#,
         ]
     );
     drop(ledger);
@@ -209,8 +204,8 @@ fn a_ledger_3_0_5_wrote_migrates_to_the_viewer_s_0020_once_and_is_read_and_its_l
     assert_eq!(
         read,
         [
-            r#"codex diana Some(Fresh) ["user: said in 1"]"#,
-            r#"codex diana None ["user: said in 2", "assistant: (its first part)"]"#,
+            r#"["user: said in 1"]"#,
+            r#"["user: said in 2", "assistant: (its first part)"]"#,
         ]
     );
     drop(ledger);
@@ -308,10 +303,7 @@ fn a_version_18_ledger_holding_a_text_that_is_no_utf_8_migrates_and_is_read_with
     let texts: Vec<(String, i64)> = read
         .entries
         .iter()
-        .filter_map(|entry| match entry {
-            HistoryEntry::Item(row) => Some((row.item.text.clone(), row.key.row)),
-            HistoryEntry::Heading(_) => None,
-        })
+        .map(|row| (row.item.text.clone(), row.key.row))
         .collect();
     assert_eq!(texts[0].0, "a\u{FFFD}\u{FFFD}\u{FFFD}b");
     assert_eq!(texts[1].0, "a".repeat(HISTORY_PART));
@@ -336,7 +328,7 @@ fn a_version_18_ledger_holding_a_text_that_is_no_utf_8_migrates_and_is_read_with
 }
 
 #[test]
-fn a_switch_an_older_build_logged_long_is_cut_once_to_what_a_heading_reads_of_it() {
+fn a_switch_an_older_build_logged_long_is_cut_once_by_migration_0020_and_its_history_read() {
     let dir = tempfile::tempdir().expect("a folder");
     // A switch's data of a mebibyte, as no build writes (a few names); and one
     // of the same size whose names are no text, or longer than a field's.
@@ -373,9 +365,9 @@ fn a_switch_an_older_build_logged_long_is_cut_once_to_what_a_heading_reads_of_it
     assert_eq!(
         lines(&everything(&ledger, 1, "chief").expect("read")),
         [
-            r#"codex diana Some(Switch { harness: "codex", agent: Some("maia") }) ["user: said in 1"]"#,
-            r#"codex - Some(Switch { harness: "codex", agent: None }) ["user: said in 2"]"#,
-            r#"codex diana None ["user: said in 3"]"#,
+            r#"["user: said in 1"]"#,
+            r#"["user: said in 2"]"#,
+            r#"["user: said in 3"]"#,
         ]
     );
     drop(ledger);
@@ -398,52 +390,6 @@ fn a_switch_an_older_build_logged_long_is_cut_once_to_what_a_heading_reads_of_it
                 r#"{{"from":{{"harness":null,"agent":null}},"to":{{"harness":"codex","agent":null}},"cut":true,"cutFromBytes":{}}}"#,
                 sizes.1
             ),
-        ]
-    );
-}
-
-#[test]
-fn a_heading_reads_an_event_of_the_participant_that_names_no_conversation_or_says_nothing_as_saying_so(
-) {
-    let dir = tempfile::tempdir().expect("a folder");
-    // Each conversation but the last is left for one the log does not name as
-    // a whole number; the fourth by a switch whose data is no JSON.
-    let events = [
-        of("conversation.started", 1),
-        (
-            "conversation.followed",
-            r#"{"conversation": "1", "participant": "chief"}"#.to_owned(),
-        ),
-        of("conversation.started", 2),
-        (
-            "conversation.followed",
-            r#"{"conversation": 2.5, "participant": "chief"}"#.to_owned(),
-        ),
-        of("conversation.started", 3),
-        (
-            "conversation.followed",
-            r#"{"conversation": {"id": 3}, "participant": "chief"}"#.to_owned(),
-        ),
-        of("conversation.started", 4),
-        ("chief.switched", "{".to_owned()),
-        of("conversation.started", 5),
-    ];
-    let events: Vec<(&str, &str)> = events
-        .iter()
-        .map(|(kind, data)| (*kind, data.as_str()))
-        .collect();
-    let file = version_18(&dir, 5, &events);
-    let ledger = open_ledger(&file, Options::default()).expect("migrated and open");
-    // A chief's conversation began on what the first switch after it was
-    // from: one that says nothing says no agent.
-    assert_eq!(
-        lines(&everything(&ledger, 1, "chief").expect("read")),
-        [
-            r#"codex - Some(Window { resumed: false }) ["user: said in 1"]"#,
-            r#"codex - Some(Window { resumed: false }) ["user: said in 2"]"#,
-            r#"codex - Some(Window { resumed: false }) ["user: said in 3"]"#,
-            r#"codex - Some(Switch { harness: "", agent: None }) ["user: said in 4"]"#,
-            r#"codex diana None ["user: said in 5"]"#,
         ]
     );
 }

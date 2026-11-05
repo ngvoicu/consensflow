@@ -33,8 +33,10 @@
 //!
 //! Each time, no process of the window (the supervisor, Codex's server, its TUI),
 //! nor any other process on the machine, has a word of the role or of the human's
-//! instructions on its command line (`ps` on the window's tree, and `pgrep -f`), nor
-//! the window's board token (`ps` of every process). Codex's server had the token
+//! instructions on its command line (the window's tree, and every process of the
+//! machine), nor the window's board token (every process). The machine's processes are
+//! read as the live checks read them on any machine ([`ThisMachine`]): `ps` on macOS and
+//! Linux, Windows' process table on Windows, which has no `ps` (T-1079). Codex's server had the token
 //! there (`-c shell_environment_policy.set.CONSENSFLOW_TOKEN=…`, found in T-764's
 //! review): the broker gives ConsensFlow's variables to each thread in its `config`
 //! now, and the run's `config.toml` holds a user policy of `inherit = "core"`, under
@@ -49,9 +51,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cf_e2e::live::members::{self, find, Members, Plan};
+use cf_e2e::live::members::{
+    self, descending_from, find, Identity, Machine, Members, Plan, Running, ThisMachine,
+};
 use cf_e2e::live::{Harness, Log};
-use cf_e2e::process::Run;
 use cf_e2e::rollout;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
@@ -65,6 +68,13 @@ const READY: Duration = Duration::from_secs(240);
 
 /// The chief's handle, which names its lane.
 const CHIEF: &str = "chief";
+
+/// The command the human has the chief run to find whether its commands have the board's
+/// token: it says `TOKEN_IS_SET` or `TOKEN_IS_UNSET`, and never the value. Node's, which
+/// every machine's shell runs: a Codex window's shell on Windows is PowerShell, where
+/// `echo TOKEN_IS_$(test -n …)` is no command (T-1079).
+const TOKEN_PROBE: &str =
+    "node -e \"console.log('TOKEN_IS_' + (process.env.CONSENSFLOW_TOKEN ? 'SET' : 'UNSET'))\"";
 
 /// How often the board and the record are looked at.
 const LOOK: Duration = Duration::from_millis(500);
@@ -105,76 +115,72 @@ fn card(word: &str, replaces: bool) -> String {
     )
 }
 
-/// What `program` prints, run with `args`, and its exit code.
-fn run(program: &str, args: &[&str]) -> Result<(Option<i32>, String)> {
-    let ran = Run::new(Path::new(program))
-        .args(args.iter().copied())
-        .inheriting_env()
-        .run()?;
-    Ok((ran.code, ran.stdout.clone()))
+/// The processes of the tree of the window's own process `own` among `all` (the machine's),
+/// itself first: what descends from it, each by the parent that started it. None where the
+/// window's process has gone.
+fn tree_of(all: &[Running], own: Identity) -> Vec<Running> {
+    let Some(root) = all.iter().find(|process| process.identity == own) else {
+        return Vec::new();
+    };
+    std::iter::once(root.clone())
+        .chain(descending_from(all, own))
+        .collect()
 }
 
-/// The processes of the tree of `pid`, itself first, each with its command line as
-/// `ps` reads it.
-fn tree_of(pid: u32) -> Result<Vec<(u32, String)>> {
-    let mut found = Vec::new();
-    let mut next = vec![pid];
-    while let Some(pid) = next.pop() {
-        let (_, command) = run("ps", &["-ww", "-o", "command=", "-p", &pid.to_string()])?;
-        if command.trim().is_empty() {
-            continue;
-        }
-        found.push((pid, command.trim().to_owned()));
-        let (_, children) = run("pgrep", &["-P", &pid.to_string()])?;
-        next.extend(
-            children
-                .lines()
-                .filter_map(|line| line.trim().parse::<u32>().ok()),
-        );
-        if found.len() > 64 {
-            break;
-        }
-    }
-    Ok(found)
-}
-
-/// That no command line holds any of `words`: the chief's window's tree as `ps` reads
-/// it (which must hold Codex's server and TUI), and every process `pgrep -f` matches.
-fn on_no_command_line(members: &Members, words: &[&str], log: &Log) -> Result {
-    let window = members
-        .window_of(CHIEF)?
-        .ok_or_else(|| Error::Daemon("the chief has no window".to_owned()))?;
-    let process = members
-        .window_process(&window)
-        .ok_or_else(|| Error::Daemon("the pane host named no process for the window".to_owned()))?;
-    let tree = tree_of(process.pid)?;
-    let commands: Vec<&str> = tree.iter().map(|(_, command)| command.as_str()).collect();
-    if !commands
-        .iter()
-        .any(|command| command.contains("app-server"))
-        || !commands.iter().any(|command| command.contains("--remote"))
-    {
+/// That no command line among the machine's processes (`all`) holds any of `words`, nor
+/// `token`: the window's tree (of the process `own`, which must hold Codex's server and TUI),
+/// and every other process. How many processes the window's tree holds.
+fn on_no_command_line_of(
+    all: &[Running],
+    own: Identity,
+    words: &[&str],
+    token: &str,
+) -> Result<usize> {
+    let tree = tree_of(all, own);
+    let has = |part: &str| tree.iter().any(|process| process.command.contains(part));
+    if !has("app-server") || !has("--remote") {
         return Err(Error::Daemon(format!(
             "the window's tree has not got Codex's server and TUI: {} processes",
             tree.len()
         )));
     }
     for word in words {
-        if let Some((pid, _)) = tree.iter().find(|(_, command)| command.contains(word)) {
+        if let Some(process) = tree.iter().find(|process| process.command.contains(word)) {
             return Err(Error::Daemon(format!(
-                "pid {pid} of the window's tree has {word} on its command line"
+                "pid {} of the window's tree has {word} on its command line",
+                process.identity.pid
             )));
         }
-        let (code, found) = run("pgrep", &["-f", word])?;
-        if code != Some(1) {
+        let holding: Vec<String> = all
+            .iter()
+            .filter(|process| process.command.contains(word))
+            .map(|process| process.identity.pid.to_string())
+            .collect();
+        if !holding.is_empty() {
             return Err(Error::Daemon(format!(
                 "a pattern of {word} matches processes: {}",
-                found.split_whitespace().collect::<Vec<_>>().join(" ")
+                holding.join(" ")
             )));
         }
     }
-    // Nor the board's token, which the window's environment holds: read from every
-    // process's command line, not matched by `pgrep`, whose pattern it would be.
+    // Nor the board's token, which the window's environment holds.
+    if all.iter().any(|process| process.command.contains(token)) {
+        return Err(Error::Daemon(
+            "a process has the window's board token on its command line".to_owned(),
+        ));
+    }
+    Ok(tree.len())
+}
+
+/// That no command line holds any of `words`, nor the window's board token: the chief's
+/// window's tree and every process of the machine, as [`ThisMachine`] lists them.
+fn on_no_command_line(members: &Members, words: &[&str], log: &Log) -> Result {
+    let window = members
+        .window_of(CHIEF)?
+        .ok_or_else(|| Error::Daemon("the chief has no window".to_owned()))?;
+    let own = members
+        .window_process(&window)
+        .ok_or_else(|| Error::Daemon("the pane host named no process for the window".to_owned()))?;
     let token = window
         .open
         .as_ref()
@@ -182,15 +188,9 @@ fn on_no_command_line(members: &Members, words: &[&str], log: &Log) -> Result {
         .filter(|token| !token.is_empty())
         .ok_or_else(|| Error::Daemon("the window was opened with no board token".to_owned()))?
         .to_owned();
-    let (_, all) = run("ps", &["-A", "-ww", "-o", "command="])?;
-    if all.contains(&token) {
-        return Err(Error::Daemon(
-            "a process has the window's board token on its command line".to_owned(),
-        ));
-    }
+    let held = on_no_command_line_of(&ThisMachine.processes()?, own, words, &token)?;
     log.say(format!(
-        "ok: none of the {} processes of the window, nor any other, has the role or the board's token on its command line",
-        tree.len()
+        "ok: none of the {held} processes of the window, nor any other, has the role or the board's token on its command line"
     ));
     Ok(())
 }
@@ -249,7 +249,7 @@ fn token_reaches_commands(members: &Members, home: &Path, round: usize, log: &Lo
         members,
         home,
         &format!("C{round}"),
-        "Run this shell command and reply with its output alone: echo TOKEN_IS_$(test -n \"$CONSENSFLOW_TOKEN\" && echo SET || echo UNSET)",
+        &format!("Run this shell command and reply with its output alone: {TOKEN_PROBE}"),
         log,
     )?;
     if said.contains("TOKEN_IS_SET") {
@@ -431,4 +431,140 @@ fn a_codex_window_follows_a_role_no_command_line_holds_fresh_resumed_and_changed
     check(&config, &card_file, &words, &log)?;
     log.say("ok: the Codex chief followed its role, fresh, resumed and changed, and no command line held it");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn running(pid: u32, ppid: u32, command: &str) -> Running {
+        Running {
+            identity: Identity {
+                pid,
+                started: 1_000 + u64::from(pid),
+            },
+            ppid,
+            command: command.to_owned(),
+            exe: None,
+        }
+    }
+
+    /// The machine as zeewin2's process table lists it (Windows has no `ps`): the window's
+    /// process, Codex's server and TUI under it, and processes that are none of the window's.
+    fn windows_machine() -> (Vec<Running>, Identity) {
+        let all = vec![
+            running(4, 0, ""),
+            running(100, 4, r#""C:\Windows\System32\conhost.exe" 0x4"#),
+            running(
+                2000,
+                100,
+                r#""C:\Program Files\nodejs\node.exe" C:\codex\bin\codex.js"#,
+            ),
+            running(
+                2100,
+                2000,
+                r#""C:\codex\codex.exe" app-server --listen ws://127.0.0.1:50123"#,
+            ),
+            running(
+                2200,
+                2000,
+                r#""C:\codex\codex.exe" --remote ws://127.0.0.1:50123 --no-alt-screen"#,
+            ),
+            running(3000, 4, r#""C:\Windows\System32\notepad.exe" C:\notes.txt"#),
+        ];
+        let own = all[2].identity;
+        (all, own)
+    }
+
+    #[test]
+    fn the_window_s_tree_is_what_descends_from_its_process_in_a_windows_table_as_in_ps() {
+        let (all, own) = windows_machine();
+        let pids: Vec<u32> = tree_of(&all, own)
+            .iter()
+            .map(|process| process.identity.pid)
+            .collect();
+        assert_eq!(pids, [2000, 2100, 2200]);
+        // A window whose process has gone has no tree, whatever has its number since.
+        let gone = Identity {
+            pid: 2000,
+            started: 7,
+        };
+        assert!(tree_of(&all, gone).is_empty());
+    }
+
+    #[test]
+    fn nothing_is_found_where_no_command_line_holds_a_word_or_the_token() {
+        let (all, own) = windows_machine();
+        assert_eq!(
+            on_no_command_line_of(&all, own, &["ROLEALPHA7", "OWNERWORD7"], "tok-123").unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn a_word_on_the_command_line_of_the_windows_tree_or_of_any_other_process_is_found() {
+        let (mut all, own) = windows_machine();
+        all[4]
+            .command
+            .push_str(" -c developer_instructions=ROLEALPHA7");
+        let said = on_no_command_line_of(&all, own, &["ROLEALPHA7"], "tok").unwrap_err();
+        assert!(
+            said.to_string()
+                .contains("pid 2200 of the window's tree has ROLEALPHA7"),
+            "{said}"
+        );
+        // Another process of the machine: not in the tree, and found all the same.
+        let (mut all, own) = windows_machine();
+        all[5].command.push_str(" ROLEALPHA7");
+        let said = on_no_command_line_of(&all, own, &["ROLEALPHA7"], "tok").unwrap_err();
+        assert!(
+            said.to_string()
+                .contains("a pattern of ROLEALPHA7 matches processes: 3000"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn the_board_token_on_any_command_line_of_the_machine_is_found() {
+        let (mut all, own) = windows_machine();
+        all[5].command.push_str(" CONSENSFLOW_TOKEN=tok-123");
+        let said = on_no_command_line_of(&all, own, &["ROLEALPHA7"], "tok-123").unwrap_err();
+        assert!(
+            said.to_string().contains("board token on its command line"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_tree_without_codex_s_server_and_tui_is_not_the_window_s() {
+        let (all, own) = windows_machine();
+        let only_the_server: Vec<Running> = all
+            .into_iter()
+            .filter(|process| process.identity.pid != 2200)
+            .collect();
+        let said =
+            on_no_command_line_of(&only_the_server, own, &["ROLEALPHA7"], "tok").unwrap_err();
+        assert!(
+            said.to_string()
+                .contains("has not got Codex's server and TUI: 2 processes"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn the_command_that_asks_for_the_token_is_one_the_shell_of_every_machine_runs() {
+        // Windows' shell for a Codex window is PowerShell, where `$(test -n …)` runs no
+        // command (T-1079): Node's one-liner is the same on every machine.
+        assert!(TOKEN_PROBE.starts_with("node -e "), "{TOKEN_PROBE}");
+        for unix_only in ["$(", "test -n", "&&", "||", "echo"] {
+            assert!(
+                !TOKEN_PROBE.contains(unix_only),
+                "{unix_only}: {TOKEN_PROBE}"
+            );
+        }
+        assert!(TOKEN_PROBE.contains("CONSENSFLOW_TOKEN"));
+        // The answer is said, and the command's own words are no answer.
+        assert!(!TOKEN_PROBE.contains("TOKEN_IS_SET"));
+        assert!(!TOKEN_PROBE.contains("TOKEN_IS_UNSET"));
+    }
 }

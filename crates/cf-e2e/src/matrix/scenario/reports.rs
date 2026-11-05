@@ -217,6 +217,7 @@ pub fn reports() -> Vec<Scenario> {
                             )
                             .map(|_| ())
                     }),
+                    restarts: false,
                     name: "the wake-up calls on, a minute apart, for five",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),

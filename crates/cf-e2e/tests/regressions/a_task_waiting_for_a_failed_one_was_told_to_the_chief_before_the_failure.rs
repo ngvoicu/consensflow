@@ -12,14 +12,13 @@
 //! the rest).
 //!
 //! A Codex worker fails here three seconds into its brief, for a request its server refused
-//! (a model at capacity is waited out since T-1112), with words of the stand-in's own
-//! (`a_failure_said_no_reason`), and the chief has put a second task on the board that needs
+//! (a model at capacity is waited out since T-1112), with words of the stand-in's own and the
+//! plain name Codex's kind has (`a_failure_said_no_reason`), and the chief has put a second task on the board that needs
 //! the first.
 //!
 //! What the owner should have seen: the chief is sent one note for T-1, the failure first,
 //! and the task that waits for it named after the failure, in the same note.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -40,7 +39,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The notes ConsensFlow wrote the chief that name T-1 or T-2, in the order they were
@@ -90,7 +89,7 @@ fn a_task_that_waits_for_a_failed_one_is_named_in_the_note_that_says_it_failed()
     assert_eq!(
         told.iter().map(|(_, body)| body.as_str()).collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: @{session}'s harness reported a failure; it said: \"{SAID}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\" T-2 waits for it: cancel T-2, or reopen T-1 and let it finish."
+            "T-1 failed: @{session}'s harness reported a failure: the API rejected the request as malformed (bad_request); it said: \"{SAID}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\" T-2 waits for it: cancel T-2, or reopen T-1 and let it finish."
         )],
         "the failure first, and the task that waits for it in it: {told:?}"
     );

@@ -132,11 +132,32 @@ impl<'a> Chief<'a> {
     /// The human closes the project and resumes it, as the live check does, and the
     /// window the chief's next launch opens is waited for: `windows` of them by now.
     fn is_resumed(&self, windows: usize) -> Result<Value, Box<dyn std::error::Error>> {
+        self.is_resumed_after(windows, || Ok(()))
+    }
+
+    /// The human closes the project, turns its specs on in `FOLDER` with the variant
+    /// `variant` while it is closed, and resumes it. (A chief whose window is open is told
+    /// of specs turned on at its rest instead, and the rig's `specs_codex` holds that.)
+    fn is_given_specs_and_resumed(
+        &self,
+        variant: &str,
+        windows: usize,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        self.is_resumed_after(windows, || self.is_given_specs(variant))
+    }
+
+    /// [`Chief::is_resumed`], with `between` done once the project is closed.
+    fn is_resumed_after(
+        &self,
+        windows: usize,
+        between: impl FnOnce() -> Result<(), Box<dyn std::error::Error>>,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let id = self.project.id();
-        for op in ["project.close", "project.resume"] {
-            let done = self.rig.page(op, json!({ "project": id }))?;
-            assert_eq!(done["ok"], true, "{op}: {done}");
-        }
+        let closed = self.rig.page("project.close", json!({ "project": id }))?;
+        assert_eq!(closed["ok"], true, "project.close: {closed}");
+        between()?;
+        let resumed = self.rig.page("project.resume", json!({ "project": id }))?;
+        assert_eq!(resumed["ok"], true, "project.resume: {resumed}");
         let chief = format!("p{id}-chief");
         let opened = || {
             self.rig
@@ -251,8 +272,7 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
     );
     assert!(chief.told_of_specs()?.is_empty());
 
-    chief.is_given_specs("tdd")?;
-    let resumed = chief.is_resumed(2)?;
+    let resumed = chief.is_given_specs_and_resumed("tdd", 2)?;
     // The window's command line has nothing of the role: its role's file holds the
     // section (and is given to no resumed thread), and the note that says it again
     // goes in by paste once the window is up.
@@ -321,8 +341,7 @@ fn a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_rec
 
     // The human chooses another variant: that is a change, said again, once, and the
     // role names the copy of that variant, kept beside the first.
-    chief.is_given_specs("core")?;
-    let fourth = chief.is_resumed(4)?;
+    let fourth = chief.is_given_specs_and_resumed("core", 4)?;
     rig.wait_for(
         "the chief to be told of the other variant",
         secs(60),

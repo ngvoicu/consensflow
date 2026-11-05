@@ -230,8 +230,8 @@ fn a_job_and_a_step_are_found_by_the_name_github_shows_them_under() {
 const LIVE_MATRIX: &str = "The live matrix on the stand-ins";
 
 /// The workspace's tests, the gate's job and the live matrix's step are held to their limits:
-/// the matrix's, at 20 minutes, is about 2.5 times what its 40 cases took 4 at a time on the Mac
-/// and on Windows (468 to 494 s, T-1186), a margin for GitHub's runners, which have fewer
+/// the matrix's, at 20 minutes, is about 3.5 times what a half of its 56 cases took 4 at a time
+/// on the Mac (308 and 338 s, T-1195), a margin for GitHub's runners, which have fewer
 /// processors, until CI's own runs read it; a share of 80 % fails a run at 16.
 #[test]
 fn the_workspace_tests_and_their_job_have_limits_in_the_ci_this_checkout_runs() {

@@ -1,9 +1,18 @@
 //! The command ConsensFlow puts in the user's terminal: `consensflow` and `cf`
-//! in the `bin` folder of ConsensFlow's home, `.cmd` where Windows has them,
-//! each a small script that runs the app's own `cf`, so a terminal and a window
-//! never drift apart. The app already carries a working program, so this is a
-//! launcher pointing at it, not a second installation to keep in sync, and
-//! nothing to do with npm: the same move VS Code makes with its `code` command.
+//! in the `bin` folder of ConsensFlow's home, each a small script that runs the
+//! app's own `cf`, so a terminal and a window never drift apart. The app already
+//! carries a working program, so this is a launcher pointing at it, not a second
+//! installation to keep in sync, and nothing to do with npm: the same move VS
+//! Code makes with its `code` command.
+//!
+//! On Windows the command is a program, `cf.exe` (`consensflow.exe`), and not a
+//! `.cmd`: cmd.exe ends a command at the first line break of an argument, so a
+//! PowerShell user's many-line `cf ask "…"` reached the board as its first line.
+//! The program is the shim ([`shim`]), a copy of the one the bundle carries
+//! beside its `cf`, and it reads the launch file beside it (`cf.launch`, which
+//! holds what the `.cmd` held) to find the `cf` it runs. The launcher is that
+//! pair, and everything below treats the file as the launcher and the program as
+//! what makes it a command ([`program`]).
 //!
 //! - [`install`] writes it, and [`status`] says whether it is there, where,
 //!   and whether that place is on `PATH`. A command someone else put there
@@ -17,16 +26,19 @@
 //!   `cf.mjs`) keeps working after the bundle has neither. One that serves
 //!   another home is left to the app of that home.
 //!
-//! It sits below the daemon, the native `cf` and the app, and knows no
-//! layout of a bundle: every caller names the `cf` of its own, the daemon's
+//! It sits below the daemon, the native `cf` and the app, and knows one fact of
+//! a bundle: on Windows its shim is beside its `cf` ([`program`]). Every other
+//! layout is the caller's: each names the `cf` of its own, the daemon's
 //! `machine::bundle_of` beside its binary, the app the folder of its
 //! resources. It reads the home the way every other crate does, from the
-//! environment it is handed, and starts no process.
+//! environment it is handed, and starts no process: the shim does, and it is a
+//! program of its own.
 
 #![forbid(unsafe_code)]
 
 mod install;
 mod places;
+mod program;
 mod repair;
 mod text;
 mod wiring;
@@ -35,3 +47,5 @@ pub use install::{install, status, Installed};
 pub use places::Places;
 pub use repair::{repair, Repair, Repaired};
 pub use wiring::{runtime, Shape, Wiring};
+
+pub mod shim;

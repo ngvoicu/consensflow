@@ -56,12 +56,6 @@ pub const COMMANDS: &[Command] = &[
         run: Run::Native(clis),
     },
     Command {
-        words: &["test", "agents"],
-        about: "Run the proof of the agents screens (the agents_proof cases of the daemon test of cf-e2e) against the native daemon",
-        usage: "[cargo test arguments: --offline, or -- and libtest's]",
-        run: Run::Native(agents),
-    },
-    Command {
         words: &["test", "load"],
         about: "Run the daemon under load (the load test of cf-e2e, which cargo test ignores unless asked)",
         usage: "[cargo test arguments: --offline, or -- and libtest's; CONSENSFLOW_LOAD_PROJECTS, _WAVES and _TASKS set the size]",
@@ -106,11 +100,6 @@ const CLIS: Suite = Suite {
     filter: None,
     ignored: false,
 };
-const AGENTS: Suite = Suite {
-    tests: &["daemon"],
-    filter: Some("agents_proof::"),
-    ignored: false,
-};
 const LOAD: Suite = Suite {
     tests: &["load"],
     filter: None,
@@ -133,7 +122,6 @@ pub(crate) fn named(name: &str) -> Option<Suite> {
         "integration" => Some(INTEGRATION),
         "regressions" => Some(REGRESSIONS),
         "clis" => Some(CLIS),
-        "agents" => Some(AGENTS),
         "load" => Some(LOAD),
         _ => None,
     }
@@ -169,10 +157,6 @@ fn regressions(
 
 fn clis(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
     run(context, CLIS, args, console)
-}
-
-fn agents(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
-    run(context, AGENTS, args, console)
 }
 
 fn load(context: &Context, args: &[OsString], console: &mut Console) -> Result<i32, Failure> {
@@ -252,7 +236,6 @@ mod tests {
             ["test", "integration"],
             ["test", "regressions"],
             ["test", "clis"],
-            ["test", "agents"],
             ["test", "load"],
         ] {
             let command = COMMANDS.iter().find(|command| command.words == words);
@@ -279,7 +262,6 @@ mod tests {
             INTEGRATION,
             REGRESSIONS,
             CLIS,
-            AGENTS,
             LOAD,
         ];
         assert_eq!(words.len(), suites.len());
@@ -350,18 +332,6 @@ mod tests {
     }
 
     #[test]
-    fn the_agents_proof_is_the_agents_proof_cases_of_the_daemon_test() {
-        assert_eq!(
-            line(AGENTS, &[]),
-            "cargo test -p cf-e2e --test daemon agents_proof::"
-        );
-        assert_eq!(
-            line(AGENTS, &["--offline"]),
-            "cargo test -p cf-e2e --test daemon agents_proof:: --offline"
-        );
-    }
-
-    #[test]
     fn the_load_suite_asks_for_the_ignored_cases_after_the_arguments_for_cargo() {
         assert_eq!(
             line(LOAD, &[]),
@@ -388,7 +358,6 @@ mod tests {
             INTEGRATION,
             REGRESSIONS,
             CLIS,
-            AGENTS,
             LOAD,
             SMOKE,
         ] {
@@ -448,7 +417,7 @@ mod tests {
     /// running its own words over the folder, so a suite added there, or a name its
     /// pattern misses, is held here; and it asks for no ignored case, which only the
     /// `live` command runs on the real harnesses. The live matrix is the one suite it leaves
-    /// out: it has a step of its own ([`ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side`]),
+    /// out: it has a step of its own ([`ci_runs_the_live_matrix_in_a_job_of_its_own_in_two_halves_its_cases_side_by_side`]),
     /// and a suite named by both would run twice. Run where `sh` is (the words are the
     /// workflow's bash); Windows reads the same file.
     #[cfg(unix)]
@@ -514,33 +483,54 @@ mod tests {
         );
     }
 
-    /// The live matrix's program, which CI runs in a step of its own.
+    /// The live matrix's program, which CI runs in a job of its own.
     const MATRIX: &str = "live_matrix";
 
-    /// The live matrix on the rig's stand-ins has a step of its own in CI's checks job, on both
-    /// platforms, with its own limit (T-1184): its cases are the longest of the live suites
-    /// (963 s on the Mac and 1,001 s on Windows, one at a time), which the general step's limit
-    /// would not hold. Its cases take turns in one process (`cf_e2e::serial`), so the step runs
-    /// them under nextest, each a process of its own and a board of its own (a home, a daemon,
-    /// its ports), several at once; never the ignored case, which is the real harnesses'.
+    /// The live matrix on the rig's stand-ins runs in a job of its own on both platforms, in
+    /// thirds, nextest's partitions of its cases by count (T-1195, T-1207: halves passed 6 minutes
+    /// once the Devin and Codex seats came in): its 56 cases took 601 s 4 at
+    /// a time on a Mac as a step of the checks job (T-1184), and 6 at a time lost two of them on
+    /// Windows. Its cases take turns in one process (`cf_e2e::serial`), so the step runs them
+    /// under nextest, each a process of its own and a board of its own (a home, a daemon, its
+    /// ports), several at once; never the ignored cases, which are the real harnesses' and those
+    /// run on request. The gate waits for the job, and no step of the checks job runs the
+    /// matrix besides.
     #[test]
-    fn ci_runs_the_live_matrix_in_a_step_of_its_own_its_cases_side_by_side() {
+    fn ci_runs_the_live_matrix_in_a_job_of_its_own_in_thirds_its_cases_side_by_side() {
         let jobs = jobs(&workflow());
-        let (_, checks) = jobs
-            .iter()
-            .find(|(id, _)| id == "checks")
-            .expect("ci.yml has no checks job");
-        assert_eq!(listed(checks, "os"), ["macos-latest", "windows-latest"]);
+        let job = |id: &str| {
+            jobs.iter()
+                .find(|(name, _)| name == id)
+                .map(|(_, lines)| lines)
+                .unwrap_or_else(|| panic!("ci.yml has no {id} job"))
+        };
+        let matrix = job("live-matrix");
+        assert_eq!(listed(matrix, "os"), ["macos-latest", "windows-latest"]);
+        assert_eq!(
+            listed(matrix, "part"),
+            ["1/3", "2/3", "3/3"],
+            "each third of the cases, once"
+        );
         let program = format!("--test {MATRIX}");
-        let named: Vec<usize> = (0..checks.len())
-            .filter(|at| checks[*at].contains(&program))
+        assert!(
+            !job("checks").iter().any(|line| line.contains(&program)),
+            "the checks job runs no case of the matrix besides"
+        );
+        assert!(
+            listed(job("gate"), "needs")
+                .iter()
+                .any(|need| need == "live-matrix"),
+            "the gate waits for the matrix"
+        );
+        let named: Vec<usize> = (0..matrix.len())
+            .filter(|at| matrix[*at].contains(&program))
             .collect();
         let [at] = named[..] else {
-            panic!("one line of the checks job names {program}, not {named:?}: {checks:?}")
+            panic!("one line of the live-matrix job names {program}, not {named:?}: {matrix:?}")
         };
-        let run = checks[at]
+        let run = matrix[at]
             .strip_prefix("run: ")
-            .unwrap_or_else(|| panic!("the matrix's step is one command: {}", checks[at]));
+            .unwrap_or_else(|| panic!("the matrix's step is one command: {}", matrix[at]));
         let words: Vec<&str> = run.split_whitespace().collect();
         assert_eq!(
             words[..5],
@@ -550,6 +540,10 @@ mod tests {
         assert!(
             words.contains(&"--no-fail-fast") && !run.contains("ignored"),
             "every case runs, and no live one: {run}"
+        );
+        assert!(
+            run.ends_with(" --partition count:${{ matrix.part }}"),
+            "each job runs its half: {run}"
         );
         let threads = words
             .iter()
@@ -578,15 +572,15 @@ mod tests {
             "no step but the matrix's runs a case again"
         );
         assert!(
-            checks[at - 1] == "- name: The live matrix on the stand-ins"
-                && checks[at + 1].starts_with("timeout-minutes: "),
+            matrix[at - 1] == "- name: The live matrix on the stand-ins"
+                && matrix[at + 1].starts_with("timeout-minutes: "),
             "the matrix's step is named and has a limit of its own: {:?}",
-            &checks[at - 1..=at + 1]
+            &matrix[at - 1..=at + 1]
         );
-        let installed = checks
+        let installed = matrix
             .iter()
             .position(|line| line.starts_with("- run: cargo install cargo-nextest "))
-            .expect("the checks job installs nextest");
+            .expect("the live-matrix job installs nextest");
         assert!(installed < at, "nextest is installed before the step");
     }
 
@@ -607,11 +601,7 @@ mod tests {
             out: &mut out,
             err: &mut err,
         };
-        for (value, suite) in [
-            (Some("4/3"), DAEMONS),
-            (Some("1/2"), AGENTS),
-            (Some("1/2"), LOAD),
-        ] {
+        for (value, suite) in [(Some("4/3"), DAEMONS), (Some("1/2"), LOAD)] {
             assert!(
                 matches!(
                     run(&with(value), suite, &[], &mut console),

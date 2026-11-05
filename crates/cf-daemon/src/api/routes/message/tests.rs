@@ -53,7 +53,9 @@ async fn the_recipient_and_the_sender_read_the_whole_message_and_no_one_else_doe
             .add_member(
                 scene.project.id,
                 &cf_ledger::NewMember {
-                    agent: "hera".to_owned(),
+                    model: None,
+                    effort: None,
+                    model_name: Some("hera".to_owned()),
                     harness: "claude-code".to_owned(),
                     designer: false,
                     roles: vec!["worker".to_owned()],
@@ -120,7 +122,8 @@ async fn a_message_of_another_project_is_none_of_this_one_s_even_for_a_handle_th
             name: "other".to_owned(),
             chief: cf_ledger::NewChief {
                 harness: "claude-code".to_owned(),
-                agent: Some("mybuilder".to_owned()),
+                model: Some("mybuilder".to_owned()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,

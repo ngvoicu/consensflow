@@ -124,13 +124,12 @@ fn a_question_hook_with_no_window_says_nothing_and_succeeds() {
 
 #[test]
 fn outside_a_window_an_empty_token_is_none_and_cf_answers_by_itself() {
-    let ran = cf(
-        &["catalog", "--harness", "pi"],
-        &[("CONSENSFLOW_TOKEN", "")],
-        "",
-    );
+    let ran = cf(&["--version"], &[("CONSENSFLOW_TOKEN", "")], "");
     assert_eq!(ran.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&ran.stdout).starts_with("pi:\n"));
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stdout),
+        format!("{}\n", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 const BRIDGE: &str =

@@ -72,6 +72,7 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
 use serde_json::Value;
@@ -80,11 +81,13 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Input, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Question, Readiness, Records, ServersChosen, Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, Decline, Dialog, DialogSign, FirstMessage, Held, Input, Launch, LaunchId,
+    Observed, Over, Pane, PaneHost, Prepared, Question, Readiness, Records, ServersChosen, Skill,
+    Specs, Trusts, Used, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Boundary, Options, Reading, Settlement};
+use crate::seams::processes::Processes;
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, InputBox, Unsent};
@@ -94,6 +97,86 @@ use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
 use crate::shared::{compacting, pane, specmint, window_args};
 
+/// What every window's Claude Code is started with in its environment, for its launch alone:
+/// no survey of its own (Claude Code 2.1.317's session survey "How is Claude doing this
+/// session?", its memory and plugin ratings), which waits under the prompt for a digit
+/// nobody in the window types (T-1183). It is the one switch of its offers a launch can give:
+/// the offer to install an LSP plugin, and a command's hint to install one, are turned off only
+/// in the owner's own `~/.claude.json` (`lspRecommendationDisabled`, `claudeCodeHints`), which
+/// ConsensFlow never writes; they close by themselves after 30 s, and the engine tells of them
+/// meanwhile (`dialogs`).
+const QUIET: [(&str, &str); 1] = [("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1")];
+
+/// The questions of Claude Code's offers to install a plugin (2.1.317): of an LSP plugin, for a
+/// file of an extension a marketplace has one for, and of a plugin a command's output hints at.
+const OFFERS_CLOSING: [&str; 2] = [LSP_OFFER, "Would you like to install it?"];
+
+/// The question of Claude Code's offer to install an LSP plugin, and its choice that declines
+/// it and writes nothing (2.1.317).
+const LSP_OFFER: &str = "Would you like to install this LSP plugin?";
+const LSP_DECLINE: &str = "No, not now";
+
+/// What Claude Code 2.1.317 asks where a PreToolUse hook answers "ask" for a call, its words of
+/// the hook above it ("Hook tool.check requires confirmation for this command: <the hook's
+/// reason> [plugin:…]"), and its choice that refuses the call (T-1198).
+const HOOK_QUESTION: &str = "Do you want to proceed?";
+const HOOK_SAYS: [&str; 2] = ["Hook ", "requires confirmation for this"];
+const HOOK_DECLINE: &str = "No";
+
+/// How long a hook's ask may wait for the human before ConsensFlow answers it "No", in
+/// milliseconds: ten minutes (the chief's decision of 2026-11-03, T-1198), or what
+/// `CONSENSFLOW_HOOK_ASK_MS` says where it says a number (the rig's cases).
+const HOOK_ASK_MS: i64 = 10 * 60_000;
+
+/// The decline of `dialog` where it is a hook's ask on a call: "No", by its digit, once nobody
+/// answered it for `after_ms`. "No" writes nothing, neither to the settings nor to
+/// `~/.claude.json` (2.1.317's `nOr`: `"no"` → `{behavior:"deny"}`, where only "Yes, and don't
+/// ask again" carries `permissionUpdates`), but a "No" with no words of the user's ends the
+/// turn (`cancelAndAbort` aborts it, and the model is told to stop and wait for the user), so
+/// the window is told once it rests to go on without the call, the hook's reason with it where
+/// the screen showed one. "Yes" is never chosen, of any hook's or permission's prompt.
+fn hook_ask_decline(dialog: &Dialog, after_ms: i64) -> Option<Decline> {
+    let says = dialog.detail.join(" ");
+    if dialog.question != HOOK_QUESTION || !HOOK_SAYS.iter().all(|words| says.contains(words)) {
+        return None;
+    }
+    let at = dialog
+        .options
+        .iter()
+        .position(|option| option == HOOK_DECLINE)?;
+    let no = u8::try_from(at + 1).ok().filter(|digit| *digit <= 9)?;
+    let span = if after_ms < 60_000 {
+        format!("{} seconds", after_ms / 1_000)
+    } else {
+        format!("{} minutes", after_ms / 60_000)
+    };
+    let reason = hook_reason(&says).map_or_else(String::new, |reason| {
+        format!(" The hook said: \u{201c}{reason}\u{201d}")
+    });
+    let then_tell = format!(
+        "A hook asked for confirmation of your last call, and nobody answered it within {span}, so ConsensFlow answered \u{201c}No\u{201d} for you: that call did not run.{reason} Go on without that call, or say in your result that you could not do the task without it."
+    );
+    Some(Decline {
+        choice: HOOK_DECLINE.to_owned(),
+        key: vec![b'0' + no],
+        after_ms: Some(after_ms),
+        then_tell: Some(then_tell),
+        what: "hook prompt on its call".to_owned(),
+    })
+}
+
+/// The hook's own reason in what a hook's ask says above its question: what follows the colon
+/// after "requires confirmation for this <call>", up to the hook's source in brackets.
+fn hook_reason(says: &str) -> Option<String> {
+    let after = &says[says.find(HOOK_SAYS[1])? + HOOK_SAYS[1].len()..];
+    let reason = after[after.find(':')? + 1..].trim();
+    let reason = reason.split(" [").next().unwrap_or(reason).trim();
+    (!reason.is_empty()).then(|| reason.to_owned())
+}
+
+/// The seconds after which Claude Code closes those offers by itself (`Zlt=30000`).
+const OFFER_CLOSES_AFTER_S: u32 = 30;
+
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
     env: Env,
@@ -102,6 +185,7 @@ pub struct ClaudeAdapter {
     entropy: Rc<dyn Entropy>,
     /// The bundle's `cf` as a window names it: what the launch's hooks run.
     pane_cf: String,
+    processes: Rc<dyn Processes>,
     /// Where Claude keeps its own status of each of its processes, made
     /// whole once, as Node resolved it when it made the adapter; or why
     /// there is none.
@@ -117,12 +201,43 @@ impl ClaudeAdapter {
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
             pane_cf: services.bundle.pane_cf.clone(),
+            processes: Rc::clone(&services.processes),
             statuses: status::folder(&services.env),
         }
     }
 }
 
 impl Adapter for ClaudeAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
+        Box::pin(super::models::listed(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+        ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(&'a self, session: &'a str, asked: Option<&'a str>) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, asked, &self.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window and press s to keep it to that conversation: Enter there makes it your Claude Code default.")
+    }
+
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(super::models::default_model(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Claude, &self.env)?;
@@ -132,6 +247,7 @@ impl Adapter for ClaudeAdapter {
                 launch.role != "chief",
                 launch.compaction,
                 &self.pane_cf,
+                Some(launch.directory),
             )?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in
@@ -208,7 +324,10 @@ impl Adapter for ClaudeAdapter {
             argv.extend(invocation.args);
             Ok(Prepared {
                 argv,
-                env: Vec::new(),
+                env: QUIET
+                    .iter()
+                    .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+                    .collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()
@@ -241,6 +360,11 @@ impl Adapter for ClaudeAdapter {
                         .map(str::to_owned),
                     trusts: trust::trusts(launch.directory),
                     directory: launch.directory.to_owned(),
+                    hook_ask_ms: self
+                        .env
+                        .text("CONSENSFLOW_HOOK_ASK_MS")
+                        .and_then(|ms| ms.parse().ok())
+                        .unwrap_or(HOOK_ASK_MS),
                 }),
             })
         })
@@ -307,10 +431,16 @@ impl Adapter for ClaudeAdapter {
             paths::global_specmint(&self.env, variant),
         )
     }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Claude, &self.env, Some(*specs), id).map(|_| ())
+    }
 }
 
 /// A Claude window, and what the engine told it of itself.
 struct ClaudeWindow {
+    /// How long a hook's ask waits for the human before it is answered "No" (`HOOK_ASK_MS`).
+    hook_ask_ms: i64,
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     statuses: String,
@@ -518,6 +648,66 @@ impl Window for ClaudeWindow {
 
     fn shows_prompt(&self, screen: &[String]) -> bool {
         super::trust::shows_prompt(screen)
+    }
+
+    /// Claude Code's offers to install a plugin close by themselves after 30 s, answered
+    /// "timeout" (an LSP plugin, which counts it as ignored) or "no" (a command's hint), as
+    /// 2.1.317's dialog of them draws them (`Zlt=30000`).
+    fn dialog(&self, screen: &[String]) -> Option<Dialog> {
+        let shown = crate::shared::dialog::read(screen)?;
+        let closes_after_s = OFFERS_CLOSING
+            .contains(&shown.dialog.question.as_str())
+            .then_some(OFFER_CLOSES_AFTER_S);
+        Some(Dialog {
+            prompt_below: self.shows_prompt(&shown.below),
+            closes_after_s,
+            ..shown.dialog
+        })
+    }
+
+    /// Claude Code's list of safe declines: its offer to install an LSP plugin, answered "No, not
+    /// now" by the digit its list numbers that choice with (2.1.317's lists take a digit for the
+    /// choice of that number, at once). That answer writes nothing (`case"no":break`, where
+    /// "Never for this plugin", "Disable all LSP recommendations" and an offer left to close
+    /// by itself each write `~/.claude.json`), as `cargo xtask live harness-dialogs` showed on a
+    /// throwaway configuration (T-1192). Not its hint to install a plugin a command named:
+    /// every answer to it but a cancel writes the plugin's name in `claudeCodeHints.plugin`.
+    fn safe_decline(&self, dialog: &Dialog) -> Option<Decline> {
+        if let Some(decline) = hook_ask_decline(dialog, self.hook_ask_ms) {
+            return Some(decline);
+        }
+        if dialog.question != LSP_OFFER {
+            return None;
+        }
+        let at = dialog
+            .options
+            .iter()
+            .position(|option| option == LSP_DECLINE)?;
+        let digit = u8::try_from(at + 1).ok().filter(|digit| *digit <= 9)?;
+        Some(Decline {
+            choice: LSP_DECLINE.to_owned(),
+            key: vec![b'0' + digit],
+            after_ms: None,
+            then_tell: None,
+            what: "offer".to_owned(),
+        })
+    }
+
+    /// Claude Code's status says `waiting`, and why, for a dialog of its own (2.1.317's table of
+    /// its dialogs): "input needed" for its question tool, which is the board's to answer in a
+    /// member's window and the human's in the chief's; every other reason ("dialog open",
+    /// "permission prompt", "sandbox request", "goal proposal") is a dialog of Claude Code's
+    /// that waits for a key (T-1183). It does not always: with its offer to install an LSP
+    /// plugin open in a turn at work it said `busy` (`cargo xtask live harness-dialogs`,
+    /// 2026-11-03), so a window whose status says no wait is left to the screen.
+    fn dialog_sign(&self, observed: &Observed) -> DialogSign {
+        match &observed.waiting {
+            Some(Waiting { reason }) if reason.as_deref() == Some(status::QUESTION_TOOL) => {
+                DialogSign::Shut
+            }
+            Some(_) => DialogSign::Open,
+            None => DialogSign::Screen,
+        }
     }
 
     fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {

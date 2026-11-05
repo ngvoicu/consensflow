@@ -360,6 +360,30 @@ fn claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_u
     );
 }
 
+/// Claude Code 2.1.312's window on a model the account does not have opens and stays up;
+/// its first turn fails with a `<synthetic>` API error in the model's own name
+/// (`tools/probes/chief-harness/gone_launch.py`, 2026-10-29). The turn's failure is those
+/// words, which is where a chief's gone model is heard (CHF-06), never its screen
+/// (Calliope's P1, T-955).
+#[test]
+fn a_turn_on_a_model_the_account_lacks_fails_in_claude_codes_words_naming_it() {
+    const GONE: &str = "There's an issue with the selected model (claude-gone-9-9). It may not exist or you may not have access to it. Run /model to pick a different model.";
+    let mut refusal = having(
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!(GONE))]),
+            Value::Null,
+        ),
+        json!({ "isApiErrorMessage": true, "timestamp": AT }),
+    );
+    refusal["message"]["model"] = json!("<synthetic>");
+    let failure = failure_of(&[hello(), refusal]);
+    assert_eq!(failure.as_deref(), Some(GONE));
+    assert!(crate::claude::models::gone(GONE, "claude-gone-9-9"));
+}
+
 /// A reading of a failure, its turn settled natively, that its provider refused for a moment
 /// (T-1112): `Quota::Busy`, in the refusal's words, at its time.
 fn busy(items: &str) -> String {

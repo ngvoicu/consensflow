@@ -23,32 +23,59 @@
 //! the host sent is looked at, not only those the quote would keep: a value that
 //! goes on over a line keeps no name on the line it ends on. The cost is the screens
 //! that name one and hold none: Pi without a login says "No API key found for the
-//! selected model", and its note now says its lines were left out, with the exit code;
+//! selected model", and its note says its lines were left out, with the exit code;
 //! so does a screen that shows the shell's `pwd`.
+//!
+//! **No row beside a secret is quoted, and no guess is made of where a secret ends.** T-823's
+//! first version left out the row that named a secret and its neighbours and quoted the rest,
+//! and a review (T-1216, then T-1222) put passwords in the ledger with it twice over: a label
+//! with its value below, a YAML block, a value hard-wrapped over rows, a sentence that trails
+//! off, an assignment wrapped over rows of one word. Guessing the extent failed both times,
+//! and the base's rule stands in alpha.2. Quoting a row next to a secret, where the extent is
+//! *proven*, is later work (`issues/per-line-quoting-of-a-screen-next-to-a-secret.md` in the
+//! brain). The rows are also looked at together, without the frame a program draws round them,
+//! and as one text (the re-check T-1224 read passwords out of the ledger that a test of one row
+//! at a time did not see): a name or a token's beginning the window's wrap cut in two is whole at
+//! the join; the beginning of a token of a known kind (`sk-`, `ghp_`) withholds the screen
+//! whatever follows it; so do a key with no name and no delimiter in view (rows of base64 and
+//! nothing else, a lone padding row `=`) and a value in groups (`YWJj-ZGVm-…`). All in
+//! [`screen`].
+//!
+//! **How the program ended** is said as the host said it: its signal where it sent one, and a
+//! status above 128 as consistent with the signal it names (143 SIGTERM, 137 SIGKILL,
+//! [`signalled`]), no more; whether ConsensFlow sent it is said only from what the engine
+//! recorded ([`Part`]). **What the window was doing** is the last tool call its record shows,
+//! said before its screen: the tool, and for a shell call the first word of the command where
+//! it is a program the list names, never more of the command, and never the file a tool worked
+//! on ([`Shown::with_last_call`]).
 //!
 //! **A program the host could not end** (`survivor`) is said in place of how it
 //! ended: it may still run ([`Shown::outlived`]). Nothing waits for it: a window
 //! that opens on its conversation opens beside it, which the words warn of.
 
+mod call;
 pub(crate) mod mask;
 mod ours;
+mod screen;
 mod secret;
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
 use std::sync::LazyLock;
 
+use cf_harness::records::LastCall;
 use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft, SnapshotTail};
 use regex::Regex;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use mask::mask;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
-use secret::names_a_secret;
 
 /// The most lines of a screen a note quotes: the last ones.
 const QUOTE_LINES: usize = 6;
@@ -60,6 +87,9 @@ const BETWEEN: &str = " / ";
 /// The first exit code that is a Windows status (an `NTSTATUS` of a warning or
 /// an error) rather than a number the program returned.
 const STATUS_CODES: u32 = 0x8000_0000;
+/// The status Windows ends a console program with on the human's Ctrl+C
+/// (`STATUS_CONTROL_C_EXIT`): their interrupt, as a signal is on the Mac.
+const CONSOLE_CTRL_C: u32 = 0xC000_013A;
 
 /// What the pane host said of a window: how its program ended where it had,
 /// the last lines its screen showed, and what it left running when the window
@@ -77,6 +107,10 @@ pub struct Shown {
     survivor: Option<u32>,
     /// Lines of the screen were ConsensFlow's own and are left out ([`Shown::without_pastes`]).
     pasted: bool,
+    /// What ConsensFlow itself had sent the window's program before it ended ([`Part`]).
+    part: Part,
+    /// The last tool call the window's record shows ([`Shown::with_last_call`]).
+    last_call: Option<Arc<LastCall>>,
 }
 
 impl Shown {
@@ -90,6 +124,8 @@ impl Shown {
             possibly_left: exit.possibly_left,
             survivor: exit.survivor,
             pasted: false,
+            part: Part::Unknown,
+            last_call: None,
         }
     }
 
@@ -170,11 +206,18 @@ impl Shown {
     }
 
     /// What the screen says of a failure, to tell one outage from the next
-    /// ([`outage_key`]): its last lines with a word in them.
+    /// ([`hashed`]): its last lines with a word in them, which are the screen's own and may
+    /// name a secret, so only their hash goes on.
     pub(crate) fn outage_key(&self) -> String {
+        hashed(&self.screen_folded())
+    }
+
+    /// The last lines of the screen with a word in them, folded ([`folded_key`]): readable,
+    /// and for [`Shown::outage_key`] alone.
+    fn screen_folded(&self) -> String {
         self.tail
             .as_deref()
-            .map_or_else(String::new, |tail| outage_key(tail, Keep::Last))
+            .map_or_else(String::new, |tail| folded_key(tail, Keep::Last))
     }
 
     /// The last lines of the screen the host sent: none where it sent none.
@@ -189,6 +232,16 @@ impl Shown {
     /// settles its window before the host's word comes).
     pub(crate) fn gone(&self) -> Option<bool> {
         self.is_known().then_some(self.survivor.is_none())
+    }
+
+    /// Whether the host said the program ended with a code of failure: not 0, and no signal
+    /// (a close's, or the human's Ctrl-C), nor the status Windows gives the human's Ctrl+C
+    /// ([`CONSOLE_CTRL_C`], Calliope's P2c, T-994).
+    pub(crate) fn ended_failing(&self) -> bool {
+        self.signal.is_none()
+            && self
+                .code
+                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C)
     }
 
     pub fn is_known(&self) -> bool {
@@ -218,12 +271,28 @@ impl Shown {
             said.push_str(&format!(" ({ended})"));
         }
         said.push_str(besides);
+        if let Some(call) = &self.last_call {
+            said.push_str(&call::words(call));
+        }
         let Some(tail) = &self.tail else {
             return said;
         };
-        if tail.iter().any(|line| names_a_secret(line)) {
-            said.push_str("; its last screen lines named a secret, so they are left out");
-            return said;
+        // The base's rule (the lead's decision of round 5), and the reviews of `860010398` and
+        // `4aeb48564`: where the extent of a secret cannot be proven the whole screen goes, and
+        // no row beside a secret is ever quoted. Every line the host sent is looked at, not only
+        // those the quote would keep, and the rows together as well as one by one (`screen`).
+        match screen::withheld(tail) {
+            Some(screen::Withheld::Secret) => {
+                said.push_str("; its last screen lines named a secret, so they are left out");
+                return said;
+            }
+            Some(screen::Withheld::Key) => {
+                said.push_str(
+                    "; its last screen lines held what may be a key, so they are left out",
+                );
+                return said;
+            }
+            None => {}
         }
         match Quote::of(tail, Keep::Last) {
             None if self.pasted => said.push_str("; its screen showed nothing of its own"),
@@ -233,18 +302,73 @@ impl Shown {
         said
     }
 
+    /// This exit with what ConsensFlow had sent the window's program before it ended: a
+    /// signal's source is told only by that, never by an exit code.
+    pub(crate) fn with_part(mut self, part: Part) -> Self {
+        self.part = part;
+        self
+    }
+
+    /// This exit with the last tool call the window's record shows, as a line
+    /// (`Record::last_call`): what the window was doing when it closed, which the note says
+    /// before its screen, masked and cut short. None where the record shows none.
+    pub(crate) fn with_last_call(mut self, call: Option<Arc<LastCall>>) -> Self {
+        self.last_call = call;
+        self
+    }
+
     /// How the program ended, in words. A Windows program that crashed, or was
     /// ended by its console's Ctrl+C, ends with the status that says why
     /// (`0xC0000005`, an access violation; `0xC000013A`, the Ctrl+C), which is
     /// written as Windows writes it: in decimal it is ten digits nobody knows.
+    ///
+    /// A signal the host reported is named. A status above 128 is a shell's convention for a
+    /// program a signal ended (143 is SIGTERM, 137 SIGKILL), and the note says it is
+    /// consistent with it, no more (a program can exit with 143). What ConsensFlow had sent
+    /// the program is said only where the engine knows it ([`Part`]; the project's own tests
+    /// killed a Claude Code worker's `cargo test` and then the worker, and the note said
+    /// "exit code 143", T-823).
     fn ended(&self) -> Option<String> {
-        match (&self.signal, self.code) {
-            (Some(signal), _) => Some(format!("ended by signal {signal}")),
-            (None, Some(code)) if code >= STATUS_CODES => Some(format!("exit code {code:#010X}")),
-            (None, Some(code)) => Some(format!("exit code {code}")),
-            (None, None) => None,
-        }
+        // A signal the host reported is a fact; a status above 128 is a shell's convention
+        // for one (`/bin/sh -c 'exit 143'` ends normally and says it), so the note says only
+        // that the status is consistent with the signal (the review of `a26e0848e`, P2).
+        let (said, reported) = match (&self.signal, self.code) {
+            (Some(signal), _) => (format!("ended by signal {signal}"), true),
+            (None, Some(code)) if code >= STATUS_CODES => {
+                return Some(format!("exit code {code:#010X}"));
+            }
+            (None, Some(code)) => match signalled(code, cfg!(unix)) {
+                Some(name) => (format!("exit code {code}, consistent with {name}"), false),
+                None => return Some(format!("exit code {code}")),
+            },
+            (None, None) => return None,
+        };
+        Some(match (self.part, reported) {
+            (Part::NotSent, true) => {
+                format!("{said}, which ConsensFlow did not send: it had sent no kill")
+            }
+            (Part::Sent, true) => format!("{said}, after ConsensFlow had sent it a kill"),
+            (Part::NotSent, false) => format!("{said}; ConsensFlow had sent it no kill"),
+            (Part::Sent, false) => {
+                format!("{said}; ConsensFlow had sent it a kill before it closed")
+            }
+            (Part::Unknown, _) => said,
+        })
     }
+}
+
+/// What ConsensFlow had itself sent a window's program when it ended: a kill, by pane and
+/// generation, from the moment it asked. It says a signal was not its own
+/// only when it knows (`Part::NotSent`): every window it opened is one it records the sends of.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Part {
+    /// Not known: no claim is made.
+    #[default]
+    Unknown,
+    /// It sent a kill.
+    Sent,
+    /// It sent nothing.
+    NotSent,
 }
 
 /// `because`, and after it what a harness said of it in its own record (an
@@ -264,15 +388,40 @@ pub(crate) fn after_words(because: &str, words: &str) -> Option<String> {
 }
 
 /// What a harness's `words` say of a failure, to tell one outage from the next
-/// ([`outage_key`]): their first lines with a word in them.
+/// ([`hashed`]): their first lines with a word in them. A provider's error can name the key
+/// it refused ("Incorrect API key provided: sk-…"), so only their hash goes on.
 pub(crate) fn words_key(words: &str) -> String {
+    hashed(&words_folded(words))
+}
+
+/// The first lines of a harness's `words` with a word in them, folded ([`folded_key`]):
+/// readable, and for [`words_key`] alone.
+fn words_folded(words: &str) -> String {
     let lines: Vec<String> = words.lines().map(str::to_owned).collect();
-    outage_key(&lines, Keep::First)
+    folded_key(&lines, Keep::First)
+}
+
+/// What an outage's key is as it goes on, to the engine's memory, the ledger, its log and the
+/// trace: the SHA-256 of what the failure said as [`folded_key`] folds it, in hex. The words
+/// of a failure and the lines of a screen can hold a login or a token, and the note that
+/// quotes them masks them (`mask`, `names_a_secret`); the key only has to be told equal or
+/// not, and keeps nothing readable. A failure that said nothing the engine could tell
+/// (no line with a word in it) has no key: the empty one, which is no cause and is never
+/// hashed into one.
+fn hashed(folded: &str) -> String {
+    if folded.is_empty() {
+        return String::new();
+    }
+    Sha256::digest(folded.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The lines a quote of `lines` would keep, their blanks made one and what
-/// changes by itself within one outage folded ([`folded`]).
-fn outage_key(lines: &[String], keep: Keep) -> String {
+/// changes by itself within one outage folded ([`folded`]). Readable: it never leaves the
+/// functions that hash it ([`hashed`]).
+fn folded_key(lines: &[String], keep: Keep) -> String {
     let lines: Vec<String> = lines
         .iter()
         .filter(|line| line.chars().any(char::is_alphanumeric))
@@ -460,4 +609,40 @@ enum Keep {
 fn cut(text: &str, limit: usize) -> String {
     let kept: String = text.chars().take(limit.saturating_sub(1)).collect();
     format!("{kept}…")
+}
+
+/// `text`, cut to `limit` characters with the mark that says so where it is longer.
+fn cut_to(text: &str, limit: usize) -> String {
+    if text.chars().count() > limit {
+        cut(text, limit)
+    } else {
+        text.to_owned()
+    }
+}
+
+/// The signal a status above 128 says ended the program (a shell's `128 + signal`): its name
+/// where every system the app runs on agrees on it, its number otherwise. None for a status
+/// that is no signal's, and for every status on Windows, which has no signals: there it is
+/// the number the program returned.
+fn signalled(code: u32, unix: bool) -> Option<String> {
+    if !unix || !(129..=159).contains(&code) {
+        return None;
+    }
+    let number = code - 128;
+    let name = match number {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        4 => "SIGILL",
+        5 => "SIGTRAP",
+        6 => "SIGABRT",
+        8 => "SIGFPE",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        14 => "SIGALRM",
+        15 => "SIGTERM",
+        _ => return Some(format!("signal {number}")),
+    };
+    Some(name.to_owned())
 }

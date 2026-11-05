@@ -9,10 +9,11 @@ use serde_json::Value;
 
 use super::patterns::QUIET_COMMAND;
 use super::project::{
-    Absorbed, Assistant, Block, Boundary, Call, Compacting, Hook, Projected, ToolResult, User,
+    Absorbed, Assistant, Block, Boundary, Call, Compacting, Hook, Projected, Ran, ToolResult, User,
 };
 use super::{Candidate, Terminal, Transcript, TypedCompact};
 use crate::shared::quota::{busy_quota, exhausted_quota, unavailable_quota};
+use crate::shared::record::drawn::{self, Detail, Kind, Status};
 use crate::shared::record::reading::{native_id, ModelMoved, Role};
 
 impl Transcript {
@@ -41,6 +42,7 @@ impl Transcript {
             Projected::User(user) => self.user(user, place, seq)?,
             Projected::Output(parent) => self.output(parent),
             Projected::Boundary(boundary) => self.boundary(boundary),
+            Projected::Compacted(tokens) => self.compacted_from = *tokens,
         }
         Ok(())
     }
@@ -163,6 +165,9 @@ impl Transcript {
         if let Some(model) = &record.model {
             self.answered_from(model, record.fallback.as_ref(), record.at.as_ref());
         }
+        if record.last_call.is_some() {
+            self.last_call.clone_from(&record.last_call);
+        }
         let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));
         let item = self.items.assistant(Arc::clone(&message_id), at, seq);
@@ -172,12 +177,31 @@ impl Transcript {
         // The record's uuid is asked for even of a record that says nothing.
         let uuid = id_of(record.uuid.as_ref(), "claude record", seq)?;
         self.items.fragment(item, Arc::clone(&uuid), &record.text);
+        for thinking in &record.thinking {
+            self.items.thinking(&uuid, thinking, at, seq);
+        }
 
         for block in &record.blocks {
             match block {
-                Block::Use(id, made) => {
+                Block::Use(id, made, called) => {
                     let call = self.keys.of(id.as_ref());
                     if call.truthy() {
+                        if let Some(Value::String(native)) = id.as_ref() {
+                            if !native.is_empty() {
+                                let detail = drawn::tool(
+                                    &called.name,
+                                    Arc::clone(&called.header),
+                                    Some(Status::Running),
+                                );
+                                self.items.called(
+                                    Arc::from(native.as_str()),
+                                    call.clone(),
+                                    detail,
+                                    at,
+                                    seq,
+                                );
+                            }
+                        }
                         match made {
                             Call::TaskStop => {
                                 self.task_stops.insert(call.clone());
@@ -190,7 +214,7 @@ impl Transcript {
                         self.open_tools.insert(call);
                     }
                 }
-                Block::Result(result) => self.tool_result(result, at, seq)?,
+                Block::Result(result) => self.tool_result(result, None, at, seq)?,
             }
         }
 
@@ -226,8 +250,17 @@ impl Transcript {
     }
 
     /// A tool's result in a block: the call it answers is closed, and the
-    /// result is an item. A block that names no call is passed over.
-    fn tool_result(&mut self, result: &ToolResult, at: &Value, seq: usize) -> Result<(), String> {
+    /// result is an item. A block that names no call is passed over. What the history draws
+    /// of it is the call's (its name and header), with how it ended (`is_error`), how long
+    /// it took (what its record says, `ran`, else the time between the call's record and
+    /// its own) and the change it made.
+    fn tool_result(
+        &mut self,
+        result: &ToolResult,
+        ran: Option<&Ran>,
+        at: &Value,
+        seq: usize,
+    ) -> Result<(), String> {
         let call = self.keys.of(result.call.as_ref());
         if !call.truthy() {
             return Ok(());
@@ -239,7 +272,23 @@ impl Transcript {
             "claude tool result",
             &Value::from(seq),
         )?;
-        self.items.tool(id, text, at, seq);
+        let call = self.items.call_of(&id);
+        let mut detail = call
+            .and_then(|call| call.detail.as_deref())
+            .cloned()
+            .unwrap_or_else(|| Detail::of(Kind::Tool));
+        let millis = |at: Option<&Value>| at.and_then(Value::as_str).and_then(time::parse);
+        let called = millis(call.and_then(|call| call.at.as_ref()));
+        detail.status = Some(if result.failed {
+            Status::Failed
+        } else {
+            Status::Ok
+        });
+        detail.took_ms = ran
+            .and_then(|ran| ran.took_ms)
+            .or_else(|| drawn::took(called, millis(Some(at))));
+        detail.diff = ran.and_then(|ran| ran.diff.as_deref()).map(Arc::from);
+        self.items.tool(id, text, at, seq, detail);
         Ok(())
     }
 
@@ -284,12 +333,21 @@ impl Transcript {
         let at = record.at.as_ref().unwrap_or(&number);
         let typed = self.typed_compact.take();
         self.put_back = false;
+        // What the record says of its tool's run is of its one result.
+        let ran = (record.results.len() == 1).then_some(&record.ran);
         for result in &record.results {
-            self.tool_result(result, at, seq)?;
+            self.tool_result(result, ran, at, seq)?;
         }
         if let Some((call, job)) = &record.job {
             let watch = self.monitors.remove(&self.keys.of(call.as_ref()));
-            self.jobs.started(Arc::clone(job), watch);
+            // When the record says it was written: a time that does not parse names none.
+            let at_ms = record
+                .at
+                .as_ref()
+                .and_then(Value::as_str)
+                .and_then(time::parse);
+            self.jobs
+                .started(Arc::clone(&job.id), watch, at_ms, job.limit_ms);
         }
         if let Some((call, job)) = &record.stopped {
             if self.task_stops.remove(&self.keys.of(call.as_ref())) {
@@ -323,7 +381,8 @@ impl Transcript {
         let cancels = typed.is_some_and(|typed| Self::cancels(&typed, record));
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
         if record.summary {
-            self.items.summary(id, &record.text, at, seq);
+            self.items
+                .summary(id, &record.text, at, seq, self.compacted_from.take());
         } else if record.transcript_only {
             self.items.push(id, Role::Custom, &record.text, at, seq);
         } else if record.notification {

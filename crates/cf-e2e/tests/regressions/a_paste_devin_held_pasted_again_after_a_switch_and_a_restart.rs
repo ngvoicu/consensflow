@@ -38,7 +38,6 @@
 //! and what the chief's store holds of it.
 
 use cf_e2e::devin_store;
-use cf_e2e::files;
 use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
@@ -70,7 +69,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "claude-code", "model": "fake" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 fn a_rig() -> Config {

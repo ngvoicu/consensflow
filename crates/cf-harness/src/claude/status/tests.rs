@@ -223,3 +223,43 @@ fn the_holders_of_a_conversation_are_the_live_claudes_that_show_it_but_a_parked_
     let missing = dir.path().join("none").to_string_lossy().into_owned();
     assert_eq!(holders(&missing, "S"), None, "no folder to read");
 }
+
+/// A window that was ended left its status file, and its number went to another program that
+/// began after the file was last written: Windows gives a number back at once and to any
+/// program. That program is no Claude showing the conversation, and the next window on it is
+/// its only holder; read as a second holder, its record was "shared" and no answer of the next
+/// window's was taken for its task's result (zeewin, the live matrix's field7 and field6 pair,
+/// T-1226). A Claude that began before its file was last written is the one that wrote it.
+#[test]
+fn a_status_file_whose_number_a_later_program_took_names_no_claude() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_string_lossy().into_owned();
+    let left = Other::start();
+    let pid = left.0.id();
+    write(
+        dir.path(),
+        "1.json",
+        &json!({ "pid": pid, "sessionId": "S", "status": "idle" }),
+    );
+    // The file was last written an hour ago: by a process of that number then, not this one.
+    let written = fs::metadata(dir.path().join("1.json"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    fs::File::options()
+        .write(true)
+        .open(dir.path().join("1.json"))
+        .unwrap()
+        .set_modified(written - std::time::Duration::from_secs(3600))
+        .unwrap();
+    assert_eq!(holders(&folder, "S"), Some(Vec::new()), "a later program");
+    assert_eq!(statuses(&folder), []);
+    // Written now, while it runs: it is the one that wrote it.
+    write(
+        dir.path(),
+        "1.json",
+        &json!({ "pid": pid, "sessionId": "S", "status": "idle" }),
+    );
+    assert_eq!(holders(&folder, "S"), Some(vec![pid]));
+    drop(left);
+}

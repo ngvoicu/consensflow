@@ -7,15 +7,48 @@ use cf_base::file::{make_folder, Mkdir};
 use cf_base::home::config_root;
 use cf_base::path;
 
-/// The names the launcher goes by, the one the app is called and the short
-/// one the skill teaches; `.cmd` where Windows has them, which has no
-/// shebang. The first is the one a status is asked of.
+/// The names the launcher's file goes by, the one the app is called and the
+/// short one the skill teaches. The first is the one a status is asked of.
+///
+/// On Windows the file is `.launch`: the text the program beside it reads
+/// ([`program_of`]), where every build before the shim wrote a `.cmd` for
+/// cmd.exe to run ([`script_of`]), and cmd.exe ends a command at the first
+/// line break of an argument.
 pub(crate) fn names(windows: bool) -> [&'static str; 2] {
     if windows {
-        ["consensflow.cmd", "cf.cmd"]
+        ["consensflow.launch", "cf.launch"]
     } else {
         ["consensflow", "cf"]
     }
+}
+
+/// The names a status looks for the first launcher under, in order: the
+/// launcher of this build and, on Windows, the `.cmd` of every build before the
+/// shim, which is a launcher until the app repairs it ([`script_of`]).
+pub(crate) fn sought(windows: bool) -> &'static [&'static str] {
+    if windows {
+        &["consensflow.launch", "consensflow.cmd"]
+    } else {
+        &["consensflow"]
+    }
+}
+
+/// The program that stands for the launcher at `launch` on Windows: the shim,
+/// `cf.exe` for `cf.launch`, which finds its text by its own name.
+pub(crate) fn program_of(launch: &Path) -> PathBuf {
+    launch.with_extension("exe")
+}
+
+/// The launch file the shim at `program` reads: `cf.launch` for `cf.exe`, found
+/// by the shim's own name.
+pub(crate) fn launch_of(program: &Path) -> PathBuf {
+    program.with_extension("launch")
+}
+
+/// The launcher the builds before the shim wrote on Windows for `launch`:
+/// `cf.cmd` for `cf.launch`, which cmd.exe cuts a many-line argument of.
+pub(crate) fn script_of(launch: &Path) -> PathBuf {
+    launch.with_extension("cmd")
 }
 
 /// Where a launcher is looked for and made.

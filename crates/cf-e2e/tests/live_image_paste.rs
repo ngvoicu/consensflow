@@ -31,8 +31,11 @@
 //!   what `WINDOWS_CONVERTS` answers where the machine is Windows, whose native paths, a
 //!   drive letter and backslashes, are the question of T-265). A last window is given a
 //!   message with an image path as the first message of its launch, an argument of the program,
-//!   which Claude makes no attachment of. What the shapes are is the report, and where Claude moves
-//!   a placeholder or a separator, the run says so first.
+//!   which Claude makes no attachment of (the probe of how Claude takes an argument: ConsensFlow
+//!   itself has pasted a Claude window's first message since T-681, behind the brief it
+//!   received, so that paste is attached like any, and the engine's proof of it is
+//!   `first_delivered.rs` of the engine's dispatcher tests, T-812). What the shapes are is the
+//!   report, and where Claude moves a placeholder or a separator, the run says so first.
 //! - **`a_result_that_starts_with_an_image_path_is_delivered_to_a_claude_chief_once`** is the
 //!   field's shape (`daemon`): a real Claude as the chief of a project on the native daemon, the
 //!   stand-in as the designer, whose result starts with the paths of two pictures it saved. The

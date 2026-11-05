@@ -165,6 +165,7 @@ pub fn deliveries() -> Vec<Scenario> {
                 ),
                 Step {
                     human: Some(|members| members.rig().types(&chief_pane(members)?, DRAFT.as_bytes())),
+                    restarts: false,
                     name: "the human types in the chief's window and sends nothing",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
@@ -172,6 +173,7 @@ pub fn deliveries() -> Vec<Scenario> {
                 },
                 Step {
                     human: Some(|members| members.rig().types(&chief_pane(members)?, b"\r")),
+                    restarts: false,
                     name: "the human sends what they typed",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
@@ -224,6 +226,7 @@ pub fn deliveries() -> Vec<Scenario> {
                         members.rig().stall_host_at_paste(" · result from @", STALL);
                         Ok(())
                     }),
+                    restarts: false,
                     name: "the pane host stalls at the paste of a result",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
@@ -252,6 +255,7 @@ pub fn deliveries() -> Vec<Scenario> {
                 // A second paste, had there been one, reaches the record a hold later.
                 Step {
                     human: Some(|_| Ok(())),
+                    restarts: false,
                     name: "a hold goes by, in which a second paste would show",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
@@ -281,6 +285,7 @@ pub fn deliveries() -> Vec<Scenario> {
                         let pane = chief_pane(members)?;
                         REPORTS.iter().try_for_each(|report| members.rig().types(&pane, report))
                     }),
+                    restarts: false,
                     name: "the terminal's reports reach the chief's window on the human's path",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),
@@ -371,6 +376,7 @@ pub fn deliveries() -> Vec<Scenario> {
                 ),
                 Step {
                     human: None,
+                    restarts: false,
                     name: "the chief answers it in a turn of its own",
                     asks: |_| "Work for half a minute on the plan in your head. Our worker will ask you a question meanwhile: answer it with `cf answer` and the word JSON, without waiting for it to be typed to you. Tell me in one line when its result is back.".to_owned(),
                     stand_in: |_| "SLEEP 30 CF answer m-2 :: JSON".to_owned(),
@@ -378,6 +384,7 @@ pub fn deliveries() -> Vec<Scenario> {
                 },
                 Step {
                     human: Some(|_| Ok(())),
+                    restarts: false,
                     name: "two minutes go by",
                     asks: |_| String::new(),
                     stand_in: |_| String::new(),

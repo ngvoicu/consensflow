@@ -81,9 +81,9 @@ meant = "a_harness_is_told_from_another_only_where_the_list_allows"
 runs = ["adapter-baseline-dispatch"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/profile.rs"
-find = '    if kind == "claude-code" {'
-replace = '    if kind.starts_with("claude-code") {'
+file = "crates/cf-ledger/src/saved_agents.rs"
+find = '        let effort = text(if kind == "pi" { "thinking" } else { "effort" });'
+replace = '        let effort = text(if kind.starts_with("pi") { "thinking" } else { "effort" });'
 
 # --- the ceiling ---
 

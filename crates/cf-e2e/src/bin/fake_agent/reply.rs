@@ -204,6 +204,9 @@ pub enum Reply {
     ApiError(u16),
     /// An Escape stopped the turn before it answered.
     Stopped,
+    /// The model it runs on is one its account does not have (`CF_TEST_GONE_MODEL`): the
+    /// turn fails at once, as Claude Code 2.1.312's does.
+    Gone,
     /// The turn works through these steps, a pause after each (an Escape in one of them
     /// stops it there), and then answers the text: a turn whose record grows while it
     /// is at work (`PACED`).
@@ -212,36 +215,16 @@ pub enum Reply {
 
 /// `cf` as an agent runs it: the one first on the window's `PATH`, whichever
 /// ConsensFlow installed there. What it printed and said, trimmed.
-fn run_cf(words: &[String]) -> String {
-    let path = own_var("PATH").unwrap_or_default();
-    let extensions = own_var("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned());
-    let cf = first_on_path("cf", &path, &extensions).unwrap_or_else(|| "cf".into());
-    match Run::new(cf).args(words).inheriting_env().unlimited().run() {
+pub fn run_cf(words: &[String]) -> String {
+    match Run::new(cf_e2e::process::as_a_shell_finds("cf"))
+        .args(words)
+        .inheriting_env()
+        .unlimited()
+        .run()
+    {
         Ok(ran) => ran.output().trim().to_owned(),
         Err(failed) => failed.to_string(),
     }
-}
-
-/// The first `name` in the folders of `path`, as a shell finds a command: on Windows with each
-/// of the extensions `extensions` names (`PATHEXT`). A program started by its bare name on
-/// Windows is looked for first in the folder of the program that starts it, which no shell
-/// does: this stand-in's is cargo's `target\debug`, where another tree's build of `cf` may be
-/// (zeewin2, T-1186: a3-1's `cf`, with T-1110's fix, ran for a tree without it).
-fn first_on_path(name: &str, path: &str, extensions: &str) -> Option<std::path::PathBuf> {
-    let extensions: Vec<&str> = if cfg!(windows) {
-        extensions
-            .split(';')
-            .filter(|extension| !extension.is_empty())
-            .collect()
-    } else {
-        vec![""]
-    };
-    std::env::split_paths(path).find_map(|folder| {
-        extensions
-            .iter()
-            .map(|extension| folder.join(format!("{name}{extension}")))
-            .find(|file| file.is_file())
-    })
 }
 
 /// Claude's question tool: the settings' PreToolUse hook answers, or the
@@ -970,32 +953,6 @@ mod tests {
             ["Step 1 of 3", "Step 2 of 3", "Step 3 of 3"]
         );
         assert_eq!(answer, "Reply with exactly: REPORT");
-    }
-
-    /// `cf` is the first on the window's `PATH`, as a shell finds it, and none elsewhere is.
-    #[test]
-    fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
-        let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let file = |folder: &tempfile::TempDir| {
-            folder
-                .path()
-                .join(if cfg!(windows) { "cf.EXE" } else { "cf" })
-        };
-        std::fs::write(file(&second), "").unwrap();
-        let path = std::env::join_paths([first.path(), second.path()]).unwrap();
-        let path = path.to_str().unwrap();
-        let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
-        assert_eq!(
-            found.canonicalize().unwrap(),
-            file(&second).canonicalize().unwrap()
-        );
-        std::fs::write(file(&first), "").unwrap();
-        let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
-        assert_eq!(
-            found.canonicalize().unwrap(),
-            file(&first).canonicalize().unwrap()
-        );
-        assert_eq!(first_on_path("cf", "", ".EXE"), None);
     }
 
     #[test]

@@ -19,6 +19,7 @@ use std::io::{self, Read, Write};
 
 use cf_board::{Board, BoardError};
 use cf_proto::cf_word::CfWord;
+use cf_proto::questions::ASKED_THEN_END_THE_TURN;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
@@ -368,9 +369,10 @@ fn ask(
     )?;
     let message = posted(board, "/api/questions", body_of(question))?;
     let text = format!(
-        "m-{} asked @{}. The answer arrives as a message; end your turn now.",
+        "m-{} asked @{}. {}",
         js::text(message.get("id")),
-        js::text(message.get("recipient"))
+        js::text(message.get("recipient")),
+        ASKED_THEN_END_THE_TURN
     );
     Ok(Said::new(message, text))
 }
@@ -390,7 +392,7 @@ fn tell(
         brief::brief_of(&words, given, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
-    let sent = brief::sent(&what);
+    let sent = brief::sent(number, &what);
     let mut answer = board.post(
         &format!("/api/tasks/{number}/tell"),
         &Value::Object(body_of(what)),
@@ -466,15 +468,15 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let mut answer = board.get("/api/staff")?;
     let members = answer.take("members")?;
     let text = match answer.list(Some(&members), "members")? {
-        [] => {
-            "No agents are on this project staff yet; the human adds them in the app.".to_string()
-        }
+        [] => "No members are on this project's staff yet; the human adds them in the app."
+            .to_string(),
         all => all
             .iter()
             .map(|member| {
                 format!(
-                    "@{} · {} · {}",
+                    "@{} · {} · {} · {}",
                     js::text(member.get("handle")),
+                    runs_on(member),
                     js::join(list(member.get("roles")), "+"),
                     js::text(member.get("tier"))
                 )
@@ -483,6 +485,21 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
             .join("\n"),
     };
     Ok(Said::new(members, text))
+}
+
+/// What a member of `cf staff` runs on (spec harness-models): its model as its harness's
+/// list names it and its effort (`Opus · high`), then its harness and the model's id as the
+/// harness takes it (`(Claude Code, claude-opus-5-5)`), or its harness's default model.
+fn runs_on(member: &Value) -> String {
+    let mut shown = js::text(member.get("modelName")).into_owned();
+    if let Some(effort) = member.get("effort").and_then(Value::as_str) {
+        shown = format!("{shown} · {effort}");
+    }
+    let id = member
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("its default model");
+    format!("{shown} ({}, {id})", js::text(member.get("harnessName")))
 }
 
 fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {

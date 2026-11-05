@@ -9,6 +9,7 @@
 mod editing;
 mod finishing;
 mod giving;
+mod outage;
 mod own_steps;
 mod pausing;
 
@@ -23,21 +24,24 @@ pub(crate) use editing::{edit_task, edit_task_with, retitle_task, tell_open};
 pub use finishing::reopen_or_accept;
 pub(crate) use finishing::{
     accept_failed_task, accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task,
-    note_stranded_waits, record_finished, record_result, release_ready, reopen_task,
+    left_running, note_stranded_waits, record_finished, record_result, release_ready, reopen_task,
     tell_stranded_waiters, tell_waiting_for_failed, waiting_for_it_of, Ending,
 };
 pub use giving::NewTask;
 pub(crate) use giving::{
     assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
 };
+pub(crate) use outage::{no_longer_failed, no_longer_waiting, tell_closed};
+pub use outage::{window_closed, SAME_ERROR_WITHIN_MS};
 pub(crate) use own_steps::withdrawn_late;
-pub use pausing::resumed_in_vain;
 pub(crate) use pausing::{
-    clear_hold, go_on_in_window, held_tasks_due, hold_task, pause_again, pause_task,
-    pause_with_project, paused_task, rest_while_resumed, resume_task, resume_with_project,
-    resume_words, resume_words_not_in, stop_asked_by, stop_of, take_over_pause, task_in_hand,
-    tell_it_goes_on, told_since_paused, unmark_pause, work_while_resumed,
+    clear_hold, go_on_in_window, held_for_context, held_tasks_due, hold_for_context, hold_task,
+    pause_again, pause_task, pause_with_project, paused_by_consensflow, paused_task,
+    relaunch_stalled, rest_while_resumed, resume_task, resume_with_project, resume_words,
+    resume_words_not_in, stop_asked_by, stop_of, take_over_pause, task_in_hand, task_relaunched,
+    tell_it_goes_on, told_since_paused, unmark_pause, was_relaunched, work_while_resumed,
 };
+pub use pausing::{resumed_in_vain, NEVER_BEGAN};
 
 /// What a paused task's window is told when it goes on: the human's Resume
 /// and the daemon's alike.

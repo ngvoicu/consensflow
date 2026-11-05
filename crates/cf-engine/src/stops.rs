@@ -21,26 +21,38 @@
 //! asks for, again a few seconds later, three rounds in all. A window that
 //! ignores them all has not stopped.
 //!
-//! **A pause never ends a window's work** (T-1117: a worker's database tests in WSL
-//! were ended by the close of a window that ignored its pause). So a window that
-//! ignored every round is closed only where its close would end nothing it started:
-//! the host is asked what the window's turn runs (`pane.background`), and its
-//! harness's record what jobs and agents it runs ([`close_would_end`]). One that runs
-//! anything, or of which the host could not say, is kept open, its task paused and none
-//! of its work ended; whoever gave the task and the human are told once what runs, and
-//! how to end it (only the human can, by deleting its session). It is asked again every
-//! ten seconds, and pays the stop at rest if its turn ends meanwhile (its tool call
-//! returned). Once its work has ended and its turn is still at work, three fresh rounds
-//! are pressed, the turn's own safe point. A window that ignores every round with
-//! nothing of its own running has nothing to keep it open (a harness hung in a model
-//! request: the zeewin long run's Pi of 2026-10-19, whose resume waited 1 h 48 min with
-//! the board behind it), and ConsensFlow closes it, which ends its process as any close
-//! does; the task keeps its state, paused or queued behind the words that resume it, and
-//! resumed it reopens on its conversation. Whoever gave the task is told why, in one note
-//! that says what was checked. A window the host would not close is shown on the board,
-//! it is told that once, and the close is tried again once a minute while it works; it
-//! pays the stop if its turn ends meanwhile. An agent still at work on a turn about a task cancelled under it
-//! is interrupted the same way, three rounds at most, and never closed for it.
+//! **A pause never closes a window** (the owner's rule of 2026-11-03: "pause should never
+//! close the window"; T-1117 before it: a worker's database tests in WSL were ended by the
+//! close of a window that ignored its pause). A window that ignored every round is kept
+//! open, its task paused and nothing of it ended, and shown on the board. What it does is
+//! said as far as ConsensFlow can tell: the host is asked what the window's turn runs
+//! (`pane.background`), and its harness's record what jobs and agents it runs
+//! ([`close_would_end`]). Whoever gave the task and the human are told once that it did
+//! not stop, what it runs, or that ConsensFlow can see nothing it runs (a harness hung in
+//! a model request: the zeewin long run's Pi of 2026-10-19), and that only the human can
+//! end it, by deleting its session. One that runs work is asked again every ten seconds,
+//! and once its work has ended and its turn is still at work, three fresh rounds are
+//! pressed, the turn's own safe point; one that runs nothing ConsensFlow can see is asked
+//! again every minute, three fresh rounds each time. Either pays the stop at rest when its
+//! turn ends, and what waits for it goes in then. One exception, which is no pause's: the
+//! stop ConsensFlow asked of a window that began no turn on a message (`never_began`), which
+//! that window ignores running nothing, relaunches it with that very message again, and the
+//! task goes on by itself (T-1130): nothing of a message never begun can be lost. The
+//! relaunch is bound to that message and that window, asked again before the window is
+//! retired and after every look the host or the record is asked for (a word of an answer
+//! since, the human's unsent words, a dialog, a screen or a record unread, a delivery moved
+//! on: it is kept instead), resumes that stall alone, is told as it happened (on its
+//! conversation, or afresh), and is tried once for a message (T-1220). A tell or a pause
+//! takes a stalled or a held task over, and asks its stop (`cf_ledger`'s
+//! `paused_by_consensflow`). A stop the task was asked of its window, owed still when the
+//! chief's Finish makes it done, is settled there: a reopen after presses nothing for it,
+//! whatever look comes between (T-1220's P2-4). Only a pause asks a stop: the chief's or
+//! the human's, a tell's, ConsensFlow's own of a window that began nothing, or a project's
+//! Close; a hold for quota and a resume whose words never went in ask none (`cf_ledger`'s
+//! `pause`), and a reopen, a resume, a follow-up and an answer are words that wait for the
+//! turn to end, as any message does. An agent still at work on a turn about a task
+//! cancelled under it is interrupted the same way, three rounds at most, and never closed
+//! for it.
 //! A harness that writes no record of a turn it was interrupted in (Claude,
 //! before a word of its answer) is told of each round whose keys the host took
 //! ([`cf_harness::contract::Window::interrupted`]), and reads the looks that
@@ -49,9 +61,11 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use cf_base::js;
 use cf_harness::contract::{Observed, Over};
-use cf_harness::records::Role;
-use cf_ledger::{NewNote, ParticipantView, ProjectView, Stop};
+use cf_harness::records::{Reading, Role};
+use cf_ledger::{LedgerError, MessageView, NewNote, ParticipantView, ProjectView, Stop};
+use serde_json::Value;
 
 use crate::background::close_would_end;
 use crate::delivery_text::marker_of;
@@ -60,25 +74,49 @@ use crate::record::Record;
 use crate::seams::EngineError;
 use crate::windows::press_interrupt;
 
-/// How many rounds of Escape a stop gets before its window is closed, and how
-/// soon one round follows another.
+/// How many rounds of Escape a stop gets before its window is kept as one that did not
+/// stop, and how soon one round follows another.
 const ROUNDS: u32 = 3;
 const ROUND_EVERY_MS: i64 = 3_000;
-/// How often the close of a window that ignored every round, which the host
-/// refused, is tried again.
+/// How often a window that ignored every round, running nothing ConsensFlow can see, is
+/// asked again to stop: three fresh rounds.
 const KEPT_EVERY_MS: i64 = 60_000;
-/// How often a window kept open for its work is asked again what it runs.
+/// Whether the host's look at a window's screen, the last before its kill, shows it untouched
+/// for longer than `span` ms (since the record's fresh read was asked): no paste on its way,
+/// none of the human's words unsent, no key of the human's, nothing printed. A host that says
+/// nothing of what the window printed gives no such evidence (T-1223's P1-1).
+fn untouched_since(snapshot: &Value, span: i64) -> bool {
+    if js::truthy(snapshot.get("unsent")) || js::truthy(snapshot.get("pasteInFlight")) {
+        return false;
+    }
+    let span = span.max(0) as f64;
+    let quiet = snapshot.get("outputQuietMs").and_then(Value::as_f64);
+    if !quiet.is_some_and(|quiet| quiet > span) {
+        return false;
+    }
+    let keys = snapshot.get("humanWrites").and_then(Value::as_array);
+    !keys.is_some_and(|keys| {
+        keys.iter().any(|key| {
+            key.get("agoMs")
+                .and_then(Value::as_f64)
+                .is_none_or(|ago| ago <= span)
+        })
+    })
+}
+
+/// How often a window kept running its work is asked again what it runs.
 const RECHECK_EVERY_MS: i64 = 10_000;
 
-/// Why a window that ignored every round of a stop is still open.
+/// How a window that ignored every round of a stop is kept: no window is closed for a
+/// stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kept {
     /// It is not: its rounds go on, or are over.
     No,
-    /// Closing it would end work it runs: it is kept for that work.
+    /// It runs work, which it is kept running.
     ForWork,
-    /// The host refused to close it.
-    Refused,
+    /// It runs nothing ConsensFlow can see: its harness may be hung.
+    Ignored,
 }
 
 /// What a window was interrupted for.
@@ -91,8 +129,8 @@ pub(crate) enum StopKey {
 }
 
 /// The rounds one stop has had: how many were pressed, when the last was
-/// (or when its window was last kept open), whether and why the window ignored
-/// them all and is kept open, whether whoever was to be told was told so, and the
+/// (or when its window was last kept), whether and how the window ignored
+/// them all and is kept, whether whoever was to be told was told so, and the
 /// turn its first round was pressed into, by the message of the user's that began
 /// it ([`last_message`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,19 +139,54 @@ pub(crate) struct Interrupted {
     rounds: u32,
     at: i64,
     kept: Kept,
-    /// Told that the window is kept for its work: said once for the stop, however
+    /// Told that the window did not stop and is kept: said once for the stop, however
     /// often it is kept.
-    told_work: bool,
+    told: bool,
     turn: Option<Arc<str>>,
 }
 
-/// A stop a window ignored in every round, and still has not paid, the host
-/// having refused to close it: the number of its task, and how many times it
-/// has been ignored.
+/// A stop a window ignored in every round, and still has not paid, the window
+/// kept: the number of its task, and how many times it has been ignored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Unstopped {
     pub task: i64,
     pub rounds: u32,
+}
+
+/// The stall ConsensFlow's own pause made of a window for a message it began no turn on
+/// (`never_began`): the stop it asked (its task, the task's number and the stop's
+/// sequence), the message by its id and by its item in the window's record, and the
+/// window's generation. A relaunch is this stall's alone (T-1220's P1-2, P1-3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Stalled {
+    pub(crate) task_id: i64,
+    pub(crate) number: i64,
+    pub(crate) seq: i64,
+    pub(crate) message: i64,
+    pub(crate) item: Arc<str>,
+    pub(crate) generation: u64,
+}
+
+/// A relaunch done, to be told as the window comes back: the task's number, the message
+/// given again, whoever gave the task, and how many rounds the window ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Relaunching {
+    pub(crate) number: i64,
+    pub(crate) message: i64,
+    pub(crate) requester: String,
+    pub(crate) rounds: u32,
+    /// How the window came back, once it did: on its conversation, or afresh.
+    pub(crate) resumed: Option<bool>,
+}
+
+/// What came of a stall's relaunch.
+enum Relaunch {
+    /// The window was retired and the stall dealt with, as its note says.
+    Done,
+    /// Nothing done: the window is kept as any window that ignores a pause.
+    Not,
+    /// Nothing done, its message relaunched once already: kept, and the note says so.
+    Once,
 }
 
 /// What a look at a window found it to be, as far as a stop goes.
@@ -131,50 +204,94 @@ enum Look {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Round {
     Press,
-    /// Every round was ignored: the window is closed where that ends nothing it
-    /// started, and kept open for its work otherwise; no key is pressed.
-    Close,
+    /// Every round was ignored, or a window kept is due a look: what it runs is asked,
+    /// and it is kept, or given fresh rounds; no key is pressed at this look.
+    Keep,
     Wait,
 }
 
-/// What the notes of a window closed for a stop it ignored say became of its
-/// task T-`number`, as it is once the close was taken (`state`, none for one
-/// deleted): to the human, and to whoever gave it. The close is awaited, and the
-/// task may move meanwhile. Only a task still paused waits for its resume, and
-/// only one queued for this window (`ours`: resumed while it closed) has words
-/// that go in as it reopens; one cancelled, finished or given elsewhere has none.
-/// One shown working or waiting for its resume's words (`words_wait`) is that one queued:
-/// its claim goes with the window, whichever the close or its exit is seen first.
-fn became_of(number: i64, state: Option<&str>, ours: bool, words_wait: bool) -> (String, String) {
-    let both = |said: String| (said.clone(), said);
-    // Shown working or waiting for the words that resumed it: the claim goes with the
-    // window, and the task is queued for them (`withdraw_resume_claim`).
+/// What the human and whoever gave the task read of a window kept for a stop it ignored
+/// `rounds` times: @`handle`'s, on T-`number`, which runs `runs` (none: nothing ConsensFlow
+/// can see), the task `state` as they are told (none: deleted). The task is said paused only
+/// while it is; one resumed meanwhile has words that go in once the turn ends, and one
+/// called off is said so; one in another window's hands now (`ours` false) is that one's,
+/// and nothing of it is promised. Nothing is closed, nothing of it is ended, and only the
+/// human ends it sooner. A window whose message `again` began nothing after ConsensFlow
+/// relaunched it once is relaunched no more (T-1220's P3-7), and the notes say so.
+fn kept_words(
+    handle: &str,
+    number: i64,
+    rounds: u32,
+    runs: Option<&str>,
+    state: Option<&str>,
+    ours: bool,
+    again: Option<i64>,
+) -> (String, String) {
     let state = match state {
-        Some("working" | "waiting") if ours && words_wait => Some("queued"),
+        Some(_) if !ours => Some("elsewhere"),
         other => other,
     };
-    match state {
-        Some("paused") => both(format!(
-            "T-{number} stays paused, and its window reopens on its conversation when it is resumed."
-        )),
-        Some("queued") if ours => (
-            format!("The words that resume T-{number} go in once its window reopens on its conversation."),
-            "Your words go in once it reopens on its conversation.".to_owned(),
+    let paused = state == Some("paused");
+    let task = match state {
+        Some("paused") => format!(" and T-{number} paused"),
+        _ => String::new(),
+    };
+    let after = match state {
+        Some("elsewhere") => format!(" T-{number} is in another window's hands now;"),
+        Some("paused") => format!(
+            " `cf task resume T-{number} \"…\"` gives the window your words once its turn ends;"
         ),
-        Some("cancelled") => both(format!("T-{number} was cancelled.")),
-        Some("failed") => both(format!("T-{number} failed.")),
-        Some("accepted") => both(format!("T-{number} was accepted.")),
-        Some(state) => both(format!("T-{number} is {state}.")),
-        None => both(format!("T-{number} was deleted.")),
+        Some("queued" | "working" | "waiting") => {
+            " Your words go in once its turn ends;".to_owned()
+        }
+        Some("cancelled") => format!(" T-{number} was cancelled;"),
+        Some(state) => format!(" T-{number} is {state};"),
+        None => format!(" T-{number} was deleted;"),
+    };
+    let held = matches!(state, Some("queued" | "working" | "waiting"));
+    let result = if paused || held {
+        format!(" until then what it writes is not taken as T-{number}'s result.")
+    } else {
+        String::new()
+    };
+    // A session that holds work the human must pause first: its delete says so too.
+    let end = if held {
+        format!("pause T-{number} and delete @{handle}'s session")
+    } else {
+        format!("delete @{handle}'s session")
+    };
+    let (human, to_requester) = match runs {
+        Some(runs) => (
+            format!(
+                "@{handle} did not stop for T-{number}: its turn went on through the interrupt {rounds} times, and its window runs work that closing it would end: {runs}. ConsensFlow keeps the window open for that work{task}, and ends none of it; once the work has ended, it interrupts the turn again. To end the work now, {end}."
+            ),
+            format!(
+                "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, and it runs work that closing it would end: {runs}. ConsensFlow keeps the window open for it{task}, ends none of it, and interrupts the turn again once that work has ended;{result}{after} only the human can end the work sooner, by deleting its session."
+            ),
+        ),
+        None => (
+            format!(
+                "@{handle} did not stop for T-{number}: its turn went on through the interrupt {rounds} times, and ConsensFlow can see nothing it runs: the host lists no work of its turn, and its harness no job or agent, so its harness may be hung (in a model request, or a tool it does not name). ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute. To end it now, {end}."
+            ),
+            format!(
+                "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, and ConsensFlow can see nothing it runs (the host lists no work of its turn, its harness no job or agent): its harness may be hung. ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute;{result}{after} only the human can end it sooner, by deleting its session."
+            ),
+        ),
+    };
+    match again {
+        Some(message) => {
+            let once = format!(" Its window began no turn on m-{message} again after ConsensFlow relaunched it once, so it is relaunched no more.");
+            (format!("{human}{once}"), format!("{to_requester}{once}"))
+        }
+        None => (human, to_requester),
     }
 }
 
 /// The cadence: the first press of a stop is at once; a round follows three
 /// seconds after the last, up to three; three seconds after the third, the
-/// window of a pause's stop is closed or kept for its work; one kept for its work
-/// is looked at again every ten seconds, and where the host refused the close, it
-/// is tried again once a minute; a cancelled task's turn gets its three rounds and
-/// no more.
+/// window of a pause's stop is kept; one kept for its work is looked at again every ten
+/// seconds, and one kept running nothing ConsensFlow can see once a minute; a cancelled
+/// task's turn gets its three rounds and no more.
 fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
     let Some(done) = done.filter(|done| done.key == key) else {
         return Round::Press;
@@ -183,11 +300,11 @@ fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
     let every = match done.kept {
         Kept::No => None,
         Kept::ForWork => Some(RECHECK_EVERY_MS),
-        Kept::Refused => Some(KEPT_EVERY_MS),
+        Kept::Ignored => Some(KEPT_EVERY_MS),
     };
     if let Some(every) = every {
         return if since >= every {
-            Round::Close
+            Round::Keep
         } else {
             Round::Wait
         };
@@ -197,14 +314,11 @@ fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
     } else if done.rounds < ROUNDS {
         Round::Press
     } else if matches!(key, StopKey::Pause { .. }) {
-        Round::Close
+        Round::Keep
     } else {
         Round::Wait
     }
 }
-
-/// What the note of a window closed for a stop it ignored says was checked first.
-const CHECKED: &str = "First ConsensFlow checked what it ran: the host listed no work of its turn, and its harness no job or agent, so the close ended nothing either names.";
 
 /// What a pause's `stop` is pressed for.
 fn pause_key(stop: &Stop) -> StopKey {
@@ -247,8 +361,8 @@ fn past_its_turn(record: &Record, stop: &Stop, observed: &Observed) -> bool {
 }
 
 impl Dispatcher {
-    /// A stop that a window ignored in every round, whose close the host
-    /// refused: none while it is paid, was never asked, or closed its window.
+    /// A stop that a window ignored in every round, the window kept: none while it is
+    /// paid, was never asked, or its window has gone.
     pub fn unstopped(&self, participant: i64) -> Option<Unstopped> {
         self.record(participant)
             .and_then(|record| record.window.borrow().unstopped)
@@ -403,8 +517,11 @@ impl Dispatcher {
         }
     }
 
-    /// The window is at work on a turn the stop is for: a round of Escape if
-    /// the cadence says so; or, every round ignored, the window is closed.
+    /// The window is at work on a turn the stop is for: a round of Escape if the cadence
+    /// says so; or, every round ignored, the window is kept, never closed. What it runs is
+    /// asked: one that runs work is kept for it, and gets fresh rounds once it has ended;
+    /// one that runs nothing ConsensFlow can see is kept, and gets fresh rounds a minute
+    /// on. Whoever is to be told is told once.
     async fn interrupt_for(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -422,33 +539,336 @@ impl Dispatcher {
                 self.press(record).await;
                 Ok(())
             }
-            Round::Close => {
+            Round::Keep => {
                 let rounds = done.as_ref().map_or(0, |done| done.rounds);
                 let kept = done.as_ref().map_or(Kept::No, |done| done.kept);
-                let told_work = done.as_ref().is_some_and(|done| done.told_work);
-                if let Some(runs) = self.close_would_end(record, observed).await {
-                    self.keep(record, key, stop.number, rounds, Kept::ForWork);
-                    if told_work {
+                let told = done.as_ref().is_some_and(|done| done.told);
+                let runs = self.close_would_end(record, observed).await;
+                let mut again = None;
+                let now = match (&runs, kept) {
+                    (Some(_), _) => Kept::ForWork,
+                    // What it was kept for has ended, or a minute went by with nothing it
+                    // runs in view, and its turn is still at work: the turn may take a key
+                    // now (its tool call returned). Three fresh rounds.
+                    (None, Kept::ForWork | Kept::Ignored) => {
+                        self.fresh_rounds(record, key, observed);
+                        self.press(record).await;
                         return Ok(());
                     }
-                    return self.say_kept_for_work(project, participant, stop, rounds, &runs);
-                }
-                if kept == Kept::ForWork {
-                    // What it was kept for has ended, and its turn is still at work: the turn
-                    // may take a key now (its tool call returned). Three fresh rounds.
-                    self.fresh_rounds(record, key, observed);
-                    self.press(record).await;
+                    // ConsensFlow's own stop of a message the window never began: nothing of it
+                    // can be lost, and the window is relaunched with that message again
+                    // (T-1130), where every check of `relaunch_unbegun` holds; else it is
+                    // kept as any window that ignores a pause.
+                    (None, Kept::No) => {
+                        if let Some(stalled) = self.stalled_for(record, stop) {
+                            match self
+                                .relaunch_unbegun(
+                                    project,
+                                    participant,
+                                    record,
+                                    &stalled,
+                                    rounds,
+                                    observed,
+                                )
+                                .await?
+                            {
+                                Relaunch::Done => return Ok(()),
+                                Relaunch::Once => again = Some(stalled.message),
+                                Relaunch::Not => {}
+                            }
+                        }
+                        Kept::Ignored
+                    }
+                };
+                self.keep(record, key, stop.number, rounds, now);
+                if told {
                     return Ok(());
                 }
-                if self.retire(record).await? {
-                    return self.say_closed(project, participant, stop, rounds);
-                }
-                self.keep(record, key, stop.number, rounds, Kept::Refused);
-                if kept == Kept::Refused {
-                    return Ok(());
-                }
-                self.say_kept(project, participant, stop, rounds)
+                self.say_kept(project, participant, stop, rounds, runs.as_deref(), again)
             }
+        }
+    }
+
+    /// The stall `stop` is, where it is the one ConsensFlow's own pause asked of the window
+    /// for a message it began no turn on (`never_began`), and not a pause of the chief's, the
+    /// human's or a tell's, which ask stops of their own.
+    fn stalled_for(&self, record: &Record, stop: &Stop) -> Option<Stalled> {
+        record
+            .window
+            .borrow()
+            .stalled
+            .clone()
+            .filter(|stalled| stalled.task_id == stop.task_id && stalled.seq == stop.seq)
+    }
+
+    /// Whether the window is still the stall's, as `observed` shows it: the window of the
+    /// stall's generation, nothing being pasted into it, no dialog of its own, its record read
+    /// and its own, nothing in it after the message (no word of an answer since, T-1220's
+    /// P1-2); and in the ledger the task paused at the stall's stop, in its hands, the message
+    /// its latest. What it runs is [`Dispatcher::close_would_end`]'s to say.
+    fn still_unbegun(
+        &self,
+        participant: &ParticipantView,
+        record: &Record,
+        stalled: &Stalled,
+        observed: &Observed,
+    ) -> Result<bool, EngineError> {
+        {
+            let part = record.window.borrow();
+            if part.retiring
+                || part.pane.as_ref().map(|pane| pane.generation) != Some(stalled.generation)
+                || part.stalled.as_ref() != Some(stalled)
+            {
+                return Ok(false);
+            }
+        }
+        if record.delivery.borrow().delivering.is_some()
+            || observed.waiting.is_some()
+            || observed.failed
+            || observed.shared
+            || observed.reading.as_deref().is_none_or(Reading::read_failed)
+        {
+            return Ok(false);
+        }
+        let items = observed.items();
+        let Some(at) = items.iter().rposition(|item| item.id == stalled.item) else {
+            return Ok(false);
+        };
+        if items[at + 1..].iter().any(|item| item.role != Role::Custom) {
+            return Ok(false);
+        }
+        let ledger = self.seams.ledger.borrow();
+        let stop = Stop {
+            task_id: stalled.task_id,
+            number: stalled.number,
+            seq: stalled.seq,
+        };
+        if ledger.stop_of(participant.id)? != Some(stop) {
+            return Ok(false);
+        }
+        let paused = ledger
+            .task(participant.project_id, stalled.number)?
+            .is_some_and(|thread| {
+                thread.task.state == "paused"
+                    && thread.task.assignee.as_ref() == Some(&participant.handle)
+            });
+        let latest = ledger.last_pasted(participant.id, stalled.task_id)?;
+        Ok(paused && latest.is_some_and(|message| message.id == stalled.message))
+    }
+
+    /// The window that began no turn on a message ignored every round of ConsensFlow's
+    /// stop of it, running nothing. It is relaunched only on evidence taken after the last
+    /// await before its kill (T-1223's P1-1), and where that message was never relaunched
+    /// before (one relaunch for a delivery, T-1220's P3-7): its record read afresh, still the
+    /// stall's ([`Dispatcher::still_unbegun`]); nothing it runs that a close would end, as the
+    /// host and its harness say after that read; and last the host's look at its screen,
+    /// which has printed nothing, taken no key of the human's and no paste, and holds none of
+    /// the human's words unsent, since that read was asked ([`untouched_since`]). Between
+    /// that look and the kill nothing is awaited, and every check of the window and the
+    /// ledger is asked again. Where any of it cannot be had, the window is kept, as any window
+    /// that ignores a pause, and the human told so. Then the window is retired, and the
+    /// ledger, in one write that asks every condition of the stall again (a newer pause, a
+    /// tell, a hold or a resume since, T-1220's P1-3), gives that very message back to the
+    /// window's keeping and queues the task for it: the window opened again is given it, as
+    /// it was, once (T-1220's P2-5, P2-6), and its requester is told once it has arrived
+    /// ([`Dispatcher::tell_relaunched`]). A ledger that refuses leaves the task as it is,
+    /// and the requester is told so.
+    async fn relaunch_unbegun(
+        self: &Rc<Self>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Rc<Record>,
+        stalled: &Stalled,
+        rounds: u32,
+        observed: &Observed,
+    ) -> Result<Relaunch, EngineError> {
+        if self
+            .seams
+            .ledger
+            .borrow()
+            .was_relaunched(project.id, stalled.message)?
+        {
+            return Ok(Relaunch::Once);
+        }
+        if !self.still_unbegun(participant, record, stalled, observed)? {
+            return Ok(Relaunch::Not);
+        }
+        let (pane, window) = {
+            let part = record.window.borrow();
+            (part.pane.clone(), part.window.clone())
+        };
+        let (Some(pane), Some(window)) = (pane, window) else {
+            return Ok(Relaunch::Not);
+        };
+        // The record read afresh: the window may have begun since the look. It is asked of
+        // the stall once the screen is read, with every other check.
+        let asked = self.now();
+        let Ok(fresh) = window.observe().await else {
+            return Ok(Relaunch::Not);
+        };
+        // What it runs, as the host and its harness say it now.
+        if self.close_would_end(record, &fresh).await.is_some() {
+            return Ok(Relaunch::Not);
+        }
+        // Last, the screen: untouched since the fresh read was asked, or kept. Nothing is
+        // awaited after it before the kill.
+        let snapshot = self.snapshot_now(&pane, false).await;
+        let Some(snapshot) = snapshot.filter(Value::is_object) else {
+            return Ok(Relaunch::Not);
+        };
+        if self.forgotten(record)
+            || !untouched_since(&snapshot, self.now() - asked)
+            || !self.still_unbegun(participant, record, stalled, &fresh)?
+        {
+            return Ok(Relaunch::Not);
+        }
+        if !self.retire(record).await? {
+            return Ok(Relaunch::Not);
+        }
+        let handle = &participant.handle;
+        let (number, message) = (stalled.number, stalled.message);
+        let relaunched = self.seams.ledger.borrow_mut().relaunch_stalled(
+            project.id,
+            number,
+            participant.id,
+            message,
+            stalled.seq,
+            &stalled.item,
+        );
+        match relaunched {
+            Ok(task) => {
+                *record.relaunching.borrow_mut() = Some(Relaunching {
+                    number,
+                    message,
+                    requester: task.requester,
+                    rounds,
+                    resumed: None,
+                });
+            }
+            Err(LedgerError::Refused(refusal)) => {
+                let task = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .task(project.id, number)?
+                    .map(|thread| thread.task);
+                if let Some(task) = task {
+                    let now = match task.state.as_str() {
+                        "paused" => format!("T-{number} stays paused, and its window opens again on its conversation when it is resumed."),
+                        state => format!("T-{number} is {state}."),
+                    };
+                    self.seams.ledger.borrow_mut().note(
+                        project.id,
+                        &NewNote {
+                            from: None,
+                            to: task.requester,
+                            task: Some(number),
+                            body: format!(
+                                "T-{number}'s window (@{handle}) began no turn on m-{message} and went on through the interrupt {rounds} times with nothing of its own running. ConsensFlow was relaunching it, but {}, so it gave the window nothing again. {now}",
+                                refusal.message
+                            ),
+                        },
+                    )?;
+                }
+            }
+            Err(failed) => return Err(failed.into()),
+        }
+        self.changed();
+        Ok(Relaunch::Done)
+    }
+
+    /// The window relaunched for a message it began no turn on came back, `resumed` on its
+    /// conversation or afresh where its harness held it no more: kept for the note its
+    /// requester is told once that message has arrived ([`Dispatcher::tell_relaunched`]).
+    pub(crate) fn relaunched_back(&self, record: &Record, resumed: bool) {
+        if let Some(relaunching) = record.relaunching.borrow_mut().as_mut() {
+            relaunching.resumed = Some(resumed);
+        }
+    }
+
+    /// `message` arrived in the window relaunched to be given it again, by a copy after the
+    /// one that never began (`confirm_arrival`): its requester is told once, as it happened.
+    /// Nothing is said before that arrival, nor of a relaunch whose window never came back
+    /// (T-1223's P2-2).
+    pub(crate) fn tell_relaunched(
+        &self,
+        record: &Record,
+        arrived: &MessageView,
+    ) -> Result<(), EngineError> {
+        let relaunching = {
+            let mut kept = record.relaunching.borrow_mut();
+            match kept.as_ref() {
+                Some(relaunching)
+                    if relaunching.message == arrived.id && relaunching.resumed.is_some() =>
+                {
+                    kept.take()
+                }
+                _ => None,
+            }
+        };
+        let Some(Relaunching {
+            number,
+            message,
+            requester,
+            rounds,
+            resumed,
+        }) = relaunching
+        else {
+            return Ok(());
+        };
+        let how = if resumed == Some(true) {
+            "relaunched it on its conversation"
+        } else {
+            "opened it afresh, as its harness held its conversation no more,"
+        };
+        let handle = &arrived.recipient;
+        self.seams.ledger.borrow_mut().note(
+            arrived.project_id,
+            &NewNote {
+                from: None,
+                to: requester,
+                task: Some(number),
+                body: format!(
+                    "T-{number}'s window (@{handle}) began no turn on m-{message} and went on through the interrupt {rounds} times with nothing of its own running, so ConsensFlow {how} and gave it m-{message} again. T-{number} goes on by itself."
+                ),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// The task leaves the window's hands at a step that made it so (the chief's Finish or
+    /// the human's Done, ConsensFlow's give-up of a failed turn): a stop it was asked before,
+    /// still owed, is settled there, whatever look comes next or never comes between it and a
+    /// reopen (T-1220's P2-4, T-1223's P2-4). A delivery given up for good fails its task
+    /// with no stop owed: told words go in only at rest, after the stop is paid, a brief
+    /// fails only a task still queued for it, and the words that resume a task pause it
+    /// again. The stop is the one read before that step ([`Dispatcher::owed_at_departure`]),
+    /// never whatever is latest later: a stop asked after has a greater sequence, and is owed.
+    pub(crate) fn settle_at_departure(&self, record: &Record, stop: Option<&Stop>) {
+        if let Some(stop) = stop.filter(|stop| self.owes(record, stop)) {
+            self.pay(record, stop);
+        }
+    }
+
+    /// The stop `participant`'s window was asked for T-`number`, read before a step that may
+    /// take the task out of its hands: what [`Dispatcher::settled_at_departure`] settles.
+    pub(crate) fn owed_at_departure(
+        &self,
+        participant: i64,
+        number: i64,
+    ) -> Result<Option<Stop>, EngineError> {
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .stop_of(participant)?
+            .filter(|stop| stop.number == number))
+    }
+
+    /// [`Dispatcher::settle_at_departure`] on `participant`'s window, where it has one.
+    pub(crate) fn settled_at_departure(&self, participant: i64, stop: Option<Stop>) {
+        if let (Some(record), Some(stop)) = (self.record(participant), stop) {
+            self.settle_at_departure(&record, Some(&stop));
         }
     }
 
@@ -501,16 +921,16 @@ impl Dispatcher {
                 Some(done) => (done.rounds, done.turn.clone()),
                 None => (0, last_message(observed)),
             };
-            let told_work = part
+            let told = part
                 .interrupted
                 .as_ref()
-                .is_some_and(|done| done.key == key && done.told_work);
+                .is_some_and(|done| done.key == key && done.told);
             part.interrupted = Some(Interrupted {
                 key,
                 rounds: rounds + 1,
                 at: now,
                 kept: Kept::No,
-                told_work,
+                told,
                 turn,
             });
             part.unstopped.take().is_some()
@@ -520,8 +940,9 @@ impl Dispatcher {
         }
     }
 
-    /// The work a window was kept open for has ended: its stop's rounds begin again, the
-    /// first pressed now, into the same turn, and what was said of it stays said.
+    /// The work a window was kept for has ended, or a minute went by: its stop's rounds
+    /// begin again, the first pressed now, into the same turn, and what was said of it
+    /// stays said.
     fn fresh_rounds(&self, record: &Record, key: StopKey, observed: &Observed) {
         if let Some(done) = record.window.borrow_mut().interrupted.as_mut() {
             done.rounds = 0;
@@ -551,22 +972,19 @@ impl Dispatcher {
         close_would_end(left.as_ref(), observed.pending(), kept.as_deref())
     }
 
-    /// Every round of the stop was ignored, and the window is kept open, for the
-    /// work it runs or because the host would not close it: it is marked, and the
-    /// board shows it, until it is looked at again.
+    /// Every round of the stop was ignored, and the window is kept, as `kept` says: it is
+    /// marked, and the board shows it, until it pays the stop; whoever is to be told is
+    /// told now if they were not, so it is marked told.
     fn keep(&self, record: &Record, key: StopKey, number: i64, rounds: u32, kept: Kept) {
         {
             let mut part = record.window.borrow_mut();
-            let (turn, told_work) = part
-                .interrupted
-                .as_ref()
-                .map_or((None, false), |done| (done.turn.clone(), done.told_work));
+            let turn = part.interrupted.as_ref().and_then(|done| done.turn.clone());
             part.interrupted = Some(Interrupted {
                 key,
                 rounds,
                 at: self.now(),
                 kept,
-                told_work: told_work || kept == Kept::ForWork,
+                told: true,
                 turn,
             });
             part.unstopped = Some(Unstopped {
@@ -577,123 +995,51 @@ impl Dispatcher {
         self.changed();
     }
 
-    /// Whoever gave the task, and whoever asked the stop, are told that the window
-    /// did not stop and was closed, and what became of the task once the close was
-    /// taken ([`became_of`]).
-    fn say_closed(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        stop: &Stop,
-        rounds: u32,
-    ) -> Result<(), EngineError> {
-        let (handle, number) = (&participant.handle, stop.number);
-        let task = self
-            .seams
-            .ledger
-            .borrow()
-            .task(project.id, number)?
-            .map(|thread| thread.task);
-        // A task deleted meanwhile has no words to wait.
-        let words_wait = match &task {
-            Some(_) => self
-                .seams
-                .ledger
-                .borrow()
-                .resume_words_not_in(project.id, number)?
-                .is_some(),
-            None => false,
-        };
-        let (human, words) = became_of(
-            number,
-            task.as_ref().map(|task| task.state.as_str()),
-            task.as_ref()
-                .is_some_and(|task| task.assignee.as_ref() == Some(handle)),
-            words_wait,
-        );
-        self.tell_stop(
-            project,
-            stop,
-            task.map(|task| task.requester),
-            format!(
-                "@{handle} did not stop for T-{number}: it ignored the interrupt {rounds} times, so ConsensFlow closed its window. {CHECKED} {human}"
-            ),
-            format!(
-                "T-{number}'s window (@{handle}) did not stop: it ignored the interrupt, so ConsensFlow closed it. {CHECKED} {words}"
-            ),
-            false,
-        )
-    }
-
     /// Whoever gave the task, whoever asked the stop and the human are told once that the
-    /// window did not stop, that it is kept open for the work it runs (`runs`), which
-    /// nothing ended, and how to end it.
-    fn say_kept_for_work(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        stop: &Stop,
-        rounds: u32,
-        runs: &str,
-    ) -> Result<(), EngineError> {
-        let (handle, number) = (&participant.handle, stop.number);
-        let requester = self
-            .seams
-            .ledger
-            .borrow()
-            .task(project.id, number)?
-            .map(|thread| thread.task.requester);
-        self.tell_stop(
-            project,
-            stop,
-            requester,
-            format!(
-                "@{handle} did not stop for T-{number}: its turn went on through the interrupt {rounds} times, and its window runs work that closing it would end: {runs}. ConsensFlow keeps the window open for that work and T-{number} paused, and ends none of it; once the work has ended, it interrupts the turn again. To end the work now, delete @{handle}'s session."
-            ),
-            format!(
-                "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, and it runs work that closing it would end: {runs}. ConsensFlow keeps the window open for it and T-{number} paused, ends none of it, and interrupts the turn again once that work has ended; until then what it writes is not taken as T-{number}'s result. `cf task resume T-{number} \"…\"` gives the window your words once its turn ends; only the human can end the work sooner, by deleting its session."
-            ),
-            true,
-        )
-    }
-
-    /// Whoever gave the task, and whoever asked the stop, are told once that the
-    /// window did not stop and would not close, and what that means.
+    /// window did not stop and is kept, what it runs as far as ConsensFlow can tell (`runs`;
+    /// none: nothing it can see), which nothing ended, and that only the human can end it.
+    /// What they read of the task is what it is as they are told ([`kept_words`]).
     fn say_kept(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         stop: &Stop,
         rounds: u32,
+        runs: Option<&str>,
+        again: Option<i64>,
     ) -> Result<(), EngineError> {
-        let (handle, number) = (&participant.handle, stop.number);
-        let requester = self
+        let task = self
             .seams
             .ledger
             .borrow()
-            .task(project.id, number)?
-            .map(|thread| thread.task.requester);
+            .task(project.id, stop.number)?
+            .map(|thread| thread.task);
+        let ours = task
+            .as_ref()
+            .is_some_and(|task| task.assignee.as_ref() == Some(&participant.handle));
+        let (human, to_requester) = kept_words(
+            &participant.handle,
+            stop.number,
+            rounds,
+            runs,
+            task.as_ref().map(|task| task.state.as_str()),
+            ours,
+            again,
+        );
         self.tell_stop(
             project,
             stop,
-            requester,
-            format!(
-                "@{handle} did not stop for T-{number}: it ignored the interrupt {rounds} times, and its window would not close. ConsensFlow tries to close it again every minute; until then what is for it waits, and what it writes is not T-{number}'s result."
-            ),
-            format!(
-                "T-{number}'s window (@{handle}) did not stop: it ignored the interrupt, and would not close. ConsensFlow tries again every minute; until then your words wait, and what it writes is not taken as T-{number}'s result (cf task get T-{number} --transcript shows it)."
-            ),
-            false,
+            task.map(|task| task.requester),
+            human,
+            to_requester,
         )
     }
 
-    /// A note of `stop`'s end to each who needs it, once each: whoever gave the
-    /// task, `requester`, else the human; whoever asked the stop, where that
-    /// is someone else (the human's pause or the chief's tell of a task the other
-    /// gave): their own act closed the window and ended its work; and the human,
-    /// where `board` (a window kept for its work, which only the human can end). The
-    /// human reads `human`, any other `to_requester`. Two notes to one reader of one
-    /// event said it twice (T-502's, 2026-10-25).
+    /// A note of a window kept for `stop` to each who needs it, once each: whoever gave
+    /// the task, `requester`, else the human; whoever asked the stop, where that is
+    /// someone else (the human's pause or the chief's tell of a task the other gave); and
+    /// the human, who alone can end it. The human reads `human`, any other `to_requester`.
+    /// Two notes to one reader of one event said it twice (T-502's, 2026-10-25).
     fn tell_stop(
         &self,
         project: &ProjectView,
@@ -701,7 +1047,6 @@ impl Dispatcher {
         requester: Option<String>,
         human: String,
         to_requester: String,
-        board: bool,
     ) -> Result<(), EngineError> {
         let asked_by =
             self.seams
@@ -710,7 +1055,7 @@ impl Dispatcher {
                 .stop_asked_by(project.id, stop.number, stop.seq)?;
         let mut readers = vec![requester.unwrap_or_else(|| "human".to_owned())];
         readers.extend(asked_by.filter(|by| !readers.contains(by)));
-        if board && !readers.iter().any(|reader| reader == "human") {
+        if !readers.iter().any(|reader| reader == "human") {
             readers.push("human".to_owned());
         }
         let mut ledger = self.seams.ledger.borrow_mut();
@@ -764,7 +1109,7 @@ mod tests {
             rounds,
             at,
             kept,
-            told_work: false,
+            told: false,
             turn: None,
         }
     }
@@ -787,11 +1132,11 @@ mod tests {
     }
 
     #[test]
-    fn three_rounds_ignored_close_the_window_of_a_pause_and_a_cancelled_turn_just_stops() {
+    fn three_rounds_ignored_keep_the_window_of_a_pause_and_a_cancelled_turn_just_stops() {
         assert_eq!(
             next_round(Some(&done(2, 0, Kept::No)), KEY, 3_000),
             Round::Press,
-            "two rounds ignored are no reason to close it"
+            "two rounds ignored are no reason to keep it"
         );
         assert_eq!(
             next_round(Some(&done(3, 0, Kept::No)), KEY, 2_999),
@@ -799,7 +1144,7 @@ mod tests {
         );
         assert_eq!(
             next_round(Some(&done(3, 0, Kept::No)), KEY, 3_000),
-            Round::Close
+            Round::Keep
         );
         let cancelled = StopKey::Cancelled { task: 4 };
         let last = Interrupted {
@@ -810,80 +1155,20 @@ mod tests {
     }
 
     #[test]
-    fn a_close_the_host_refused_is_tried_again_every_minute_with_no_key_and_no_ceiling() {
+    fn a_window_kept_running_nothing_in_view_is_asked_again_every_minute_with_no_ceiling() {
         assert_eq!(
-            next_round(Some(&done(3, 0, Kept::Refused)), KEY, 59_999),
+            next_round(Some(&done(3, 0, Kept::Ignored)), KEY, 59_999),
             Round::Wait
         );
         assert_eq!(
-            next_round(Some(&done(3, 0, Kept::Refused)), KEY, 60_000),
-            Round::Close
+            next_round(Some(&done(3, 0, Kept::Ignored)), KEY, 60_000),
+            Round::Keep
         );
         assert_eq!(
-            next_round(Some(&done(3, 0, Kept::Refused)), KEY, 40 * 60_000),
-            Round::Close
+            next_round(Some(&done(3, 0, Kept::Ignored)), KEY, 40 * 60_000),
+            Round::Keep,
+            "a hung harness is the human's to end, however long"
         );
-    }
-
-    #[test]
-    fn a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended(
-    ) {
-        let said = |state, ours| became_of(1, state, ours, false);
-        let both = |text: &str| (text.to_owned(), text.to_owned());
-        assert_eq!(
-            said(Some("paused"), true),
-            both(
-                "T-1 stays paused, and its window reopens on its conversation when it is resumed."
-            )
-        );
-        assert_eq!(
-            said(Some("queued"), true),
-            (
-                "The words that resume T-1 go in once its window reopens on its conversation."
-                    .to_owned(),
-                "Your words go in once it reopens on its conversation.".to_owned()
-            )
-        );
-        // Shown working or waiting for the words that resumed it, which have not gone in: the
-        // claim goes with the window, so the task is queued for them, as it reads once the exit
-        // is seen. Without them (or not ours) it is what it is.
-        for state in [Some("working"), Some("waiting")] {
-            assert_eq!(
-                became_of(1, state, true, true),
-                said(Some("queued"), true),
-                "{state:?}"
-            );
-            assert_eq!(
-                became_of(1, state, true, false),
-                (
-                    format!("T-1 is {}.", state.unwrap_or_default()),
-                    format!("T-1 is {}.", state.unwrap_or_default())
-                ),
-                "{state:?}"
-            );
-            assert_eq!(
-                became_of(1, state, false, true).0,
-                format!("T-1 is {}.", state.unwrap_or_default()),
-                "{state:?}"
-            );
-        }
-        for (state, ours, text) in [
-            (Some("queued"), false, "T-1 is queued."),
-            (Some("cancelled"), true, "T-1 was cancelled."),
-            (Some("failed"), true, "T-1 failed."),
-            (Some("done"), true, "T-1 is done."),
-            (Some("accepted"), true, "T-1 was accepted."),
-            (Some("open"), false, "T-1 is open."),
-            (None, false, "T-1 was deleted."),
-        ] {
-            let (human, requester) = said(state, ours);
-            assert_eq!(
-                (human.as_str(), requester.as_str()),
-                (text, text),
-                "{state:?}"
-            );
-            assert!(!human.contains("go in"), "{state:?}");
-        }
     }
 
     #[test]
@@ -894,20 +1179,93 @@ mod tests {
         );
         assert_eq!(
             next_round(Some(&done(3, 0, Kept::ForWork)), KEY, 10_000),
-            Round::Close
+            Round::Keep
         );
         assert_eq!(
             next_round(Some(&done(3, 0, Kept::ForWork)), KEY, 40 * 60_000),
-            Round::Close,
+            Round::Keep,
             "with no ceiling: the work may run for hours"
         );
+    }
+
+    #[test]
+    fn a_kept_windows_notes_say_what_its_task_is_as_they_are_told() {
+        // To the chief, after what ConsensFlow does: the task as it is, and what the chief
+        // can do; to the human, how to end it, a session that holds work paused first.
+        let tail = |state| kept_words("zeus", 1, 3, None, state, true, None).1;
+        let human = |state| kept_words("zeus", 1, 3, None, state, true, None).0;
+        assert!(tail(Some("paused")).contains("keeps the window open and T-1 paused,"));
+        assert!(tail(Some("paused")).ends_with("until then what it writes is not taken as T-1's result. `cf task resume T-1 \"…\"` gives the window your words once its turn ends; only the human can end it sooner, by deleting its session."));
+        assert!(human(Some("paused")).ends_with("To end it now, delete @zeus's session."));
+        for state in ["queued", "working", "waiting"] {
+            let said = tail(Some(state));
+            assert!(!said.contains("paused"), "{state}: {said}");
+            assert!(
+                said.ends_with("until then what it writes is not taken as T-1's result. Your words go in once its turn ends; only the human can end it sooner, by deleting its session."),
+                "{state}: {said}"
+            );
+            assert!(
+                human(Some(state))
+                    .ends_with("To end it now, pause T-1 and delete @zeus's session."),
+                "{state}"
+            );
+        }
+        for (state, said) in [
+            (Some("cancelled"), " T-1 was cancelled;"),
+            (Some("done"), " T-1 is done;"),
+            (Some("failed"), " T-1 is failed;"),
+            (Some("accepted"), " T-1 is accepted;"),
+            (Some("open"), " T-1 is open;"),
+            (None, " T-1 was deleted;"),
+        ] {
+            let told = tail(state);
+            assert!(
+                told.contains(&format!("every minute;{said} only the human")),
+                "{state:?}: {told}"
+            );
+            assert!(
+                !told.contains("cf task resume") && !told.contains("go in"),
+                "{state:?}"
+            );
+        }
+        // A task in another window's hands now (its owner changed: given to its tier again)
+        // is that window's: no words of it are promised, nor is it said paused.
+        for state in ["paused", "queued", "working"] {
+            let (human, told) = kept_words("zeus", 1, 3, None, Some(state), false, None);
+            assert!(
+                told.contains("every minute; T-1 is in another window's hands now; only the human"),
+                "{state}: {told}"
+            );
+            assert!(
+                !told.contains("cf task resume")
+                    && !told.contains("go in")
+                    && !told.contains("paused"),
+                "{state}: {told}"
+            );
+            assert!(
+                human.ends_with("To end it now, delete @zeus's session."),
+                "{state}: {human}"
+            );
+        }
+        // A message relaunched once that began nothing again: relaunched no more, both told.
+        let (human, told) = kept_words("zeus", 1, 3, None, Some("paused"), true, Some(42));
+        for said in [&human, &told] {
+            assert!(said.ends_with("Its window began no turn on m-42 again after ConsensFlow relaunched it once, so it is relaunched no more."), "{said}");
+        }
+        let work = kept_words("zeus", 1, 3, Some("node job"), Some("paused"), true, None);
+        assert!(work
+            .0
+            .contains("runs work that closing it would end: node job."));
+        assert!(work
+            .1
+            .contains("keeps the window open for it and T-1 paused, ends none of it"));
     }
 
     #[test]
     fn another_stop_starts_its_rounds_afresh() {
         let later = StopKey::Pause { task: 4, seq: 2 };
         assert_eq!(
-            next_round(Some(&done(3, 0, Kept::Refused)), later, 1),
+            next_round(Some(&done(3, 0, Kept::Ignored)), later, 1),
             Round::Press
         );
     }

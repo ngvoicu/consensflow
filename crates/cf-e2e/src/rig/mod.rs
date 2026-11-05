@@ -58,7 +58,7 @@ pub use commands::names_command;
 pub use homes::HarnessHome;
 pub use jobs::Job;
 pub use names::project_name;
-pub use project::{write_staff, Project};
+pub use project::{chief_body, chief_of, member_body, write_staff, Project};
 pub use route::{Held, Pasted};
 
 pub(crate) use observe::events_of;
@@ -73,8 +73,13 @@ const REQUEST: Duration = Duration::from_secs(10);
 /// How long the daemon and the pane host each have to end once their input has.
 const EXIT: Duration = Duration::from_secs(5);
 
-/// How long a process a window started has to be gone once the pane host is.
+/// How long a process a window started has to be gone once the pane host is. Windows takes
+/// longer to take an ended process out of its table on a busy runner, where every case of the
+/// live matrix found one left at 3 s (CI runs 41787972093 and 41792519144, T-1226).
+#[cfg(not(windows))]
 const GONE: Duration = Duration::from_secs(3);
+#[cfg(windows)]
+const GONE: Duration = Duration::from_secs(10);
 
 /// How long the router is given to read what the pane host wrote last, once the
 /// host has gone.
@@ -279,8 +284,9 @@ impl Config {
     /// sets `CF_TEST_MUSE_DELAY_MS`: they find the rig's launcher first on their `PATH`
     /// as `muse`, and the binary it names beside it ([`crate::muse::write_stand_in`]).
     /// What each was run with is in `muse-argv.log` of the rig's folder
-    /// ([`Rig::muse_launches`]). A script that runs it, so Unix's (a Mac's: no
-    /// Windows machine has Muse yet).
+    /// ([`Rig::muse_launches`]), and each window's process and its Muse's in
+    /// `muse-pids.log` ([`Rig::muse_pids`]). A script that runs it on a Mac; on Windows
+    /// `install`'s stand-in program ([`crate::muse::Installed::through`]).
     #[must_use]
     pub fn muse(mut self, install: crate::muse::Installed, delay_ms: u64) -> Self {
         self.muse = Some((install, crate::muse::Run::Echo { turn_ms: delay_ms }));
@@ -288,8 +294,9 @@ impl Config {
     }
 
     /// [`Config::muse`], live: the windows run the machine's Muse on the model each is
-    /// launched on, with the person's login (its secret in the keychain, which Muse finds
-    /// by `real_home`), their settings and sessions in the rig's home
+    /// launched on, with the person's login (on a Mac its secret in the keychain, which Muse
+    /// finds by `real_home`; on Windows a copy of its file without a refresh token, in the
+    /// rig's home), their settings and sessions in the rig's home
     /// ([`crate::muse::write_live_stand_in`]). It spends the account's allowance.
     #[must_use]
     pub fn muse_live(
@@ -549,6 +556,19 @@ impl Rig {
     /// `~/.config/muse` ([`crate::muse::write_live_stand_in`]).
     pub fn muse_launcher(&self) -> Option<&Path> {
         self.muse_launcher.as_deref()
+    }
+
+    /// The stand-ins a case seats (`install::STAND_INS`): the members it names, each by
+    /// the name its handle is, with the harness, the model and the effort it runs on and
+    /// its tier. No file of the daemon's: the case's own, beside the home.
+    pub fn stand_ins_file(&self) -> PathBuf {
+        self.root.join(install::STAND_INS)
+    }
+
+    /// The stand-ins a case seats are `roster`'s (`{agents: [{id, kind, model, effort,
+    /// workTier, designer}]}`), for the projects it opens and the members it adds after.
+    pub fn stand_ins(&self, roster: &Value) -> Result<()> {
+        crate::files::write(&self.stand_ins_file(), format!("{roster}\n"))
     }
 
     /// The daemon's home, `CONSENSFLOW_HOME`.

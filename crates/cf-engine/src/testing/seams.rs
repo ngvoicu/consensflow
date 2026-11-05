@@ -1,14 +1,13 @@
 //! The engine's other seams as Node's dispatcher suite made them: a token named
 //! after its window's handle, each window's environment naming its participant,
-//! the saved agents' models, a role text per role, and a trace, a log and
+//! the app's settings, a role text per role, and a trace, a log and
 //! launch files that keep what they are told. Every call is written down in the
 //! Node traces' shape.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 
-use cf_base::refusal::Refusal;
 use cf_harness::contract::LaunchId;
 use cf_ledger::{Ledger, ParticipantView, ProjectView};
 use cf_proto::cf_word::CfWord;
@@ -18,11 +17,11 @@ use serde_json::{json, Value};
 
 use super::recorder::Recorder;
 use crate::roles::ProjectSpecs;
-use crate::seams::{
-    Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, Roles, Roster, SavedAgent, Trace,
-};
+use crate::seams::{AppSettings, Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, Roles, Trace};
 
-/// The saved model of each fake agent, as the roster gives it at launch.
+/// The model each fake member runs on, by the name a test gives it: what a launch of it is
+/// given, as Node's roster gave its agent's (the kit's members are named by these names,
+/// their models' names, [`super::context`]).
 pub const MODELS: [(&str, &str); 6] = [
     ("apollo", "claude-opus-5"),
     ("zeus", "claude-opus-5"),
@@ -105,14 +104,21 @@ impl crate::seams::ComputerUse for FakeComputerUse {
 /// Each window's environment names its participant.
 pub struct FakePaneEnv {
     pub(crate) recorder: Recorder,
+    /// The window's environment says its home is the project's folder (`HOME`), as a window
+    /// opened on the home folder has it: none of the recorded traces has it.
+    pub home_is_the_project: std::cell::Cell<bool>,
 }
 
 impl PaneEnv for FakePaneEnv {
-    fn env(&self, participant: &ParticipantView, _project: &ProjectView) -> Vec<(String, String)> {
-        let env = vec![(
+    fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)> {
+        let mut env = vec![(
             "CONSENSFLOW_PARTICIPANT".to_owned(),
             participant.handle.clone(),
         )];
+        // Not among the recorded: the traces are Node's, which knew no such variable.
+        if self.home_is_the_project.get() {
+            env.push(("HOME".to_owned(), project.directory.clone()));
+        }
         self.recorder.called(
             "paneEnv",
             None,
@@ -129,6 +135,9 @@ pub struct FakeRoles {
     /// What a test adds to every text to say the roles were rewritten (a release
     /// of ConsensFlow that changed them): nothing, as no trace of Node's has any.
     pub rewritten: RefCell<String>,
+    /// Whether a chief's text says how many members its staff has, as the real text's table
+    /// of them makes it differ from a staff to another: not, as no trace of Node's has.
+    pub with_staff: Cell<bool>,
     /// How a command starts in every window: the word `cf`, unless a test gives the
     /// windows a path.
     pub cf: RefCell<CfWord>,
@@ -159,6 +168,9 @@ impl Roles for FakeRoles {
             json!([{ "handle": participant.handle, "role": participant.role }]),
             json!(text),
         );
+        if self.with_staff.get() && participant.role == "chief" {
+            text += &format!(" staff {}", crate::roles::staff_of(_project).len());
+        }
         if let Some(specs) = specs {
             text += &format!(
                 " with specs: {} in {} at {}",
@@ -171,69 +183,16 @@ impl Roles for FakeRoles {
     }
 }
 
-/// The saved agents: each fake agent on its model, unless the test took it
-/// away or broke the agents file.
-pub struct FakeRoster {
-    pub(crate) recorder: Recorder,
-    /// Agents the human deleted.
-    pub gone: RefCell<HashSet<String>>,
-    /// Ready-made agents a release took out of the catalog, and why: a call of
-    /// it is no call Node's roster had, so none is written down.
-    pub retired: RefCell<HashMap<String, String>>,
-    /// Agents that are image agents.
-    pub designers: RefCell<HashSet<String>>,
-    /// The agents file cannot be read.
-    pub broken: Cell<bool>,
-    /// Every agent runs on this model, where a test's roster names one for all.
-    pub model: RefCell<Option<String>>,
-    /// What the human says of specs for every project (the agents file's
-    /// choice), which a call of the roster does not write down: no trace of
-    /// Node's has it.
+/// What the app says: of specs for every project, as a test sets it. A call of it is no
+/// call Node's roster had, so none is written down.
+pub struct FakeAppSettings {
     pub app_specs: RefCell<AppSpecs>,
-    /// How often a launch asked what the human says of specs for every
-    /// project: a launch that no setting of the app could change asks nothing.
+    /// How often a launch asked what the human says of specs for every project: a launch
+    /// that no setting of the app could change asks nothing.
     pub app_specs_asked: Cell<usize>,
 }
 
-/// Why the agents file cannot be read, as the roster says it.
-const UNREADABLE: &str = "Your agents file agents.json is not valid JSON: fix it or move it away; ConsensFlow left it as it is.";
-
-impl Roster for FakeRoster {
-    fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal> {
-        let at = self.recorder.call("roster", None, json!([name]));
-        if self.broken.get() {
-            let refusal = Refusal::new("agents-unreadable", UNREADABLE);
-            self.recorder
-                .answered(at, json!({ "$error": { "message": refusal.message } }));
-            return Err(refusal);
-        }
-        if self.gone.borrow().contains(name) {
-            self.recorder.answered(at, Value::Null);
-            return Ok(None);
-        }
-        let model = self.model.borrow().clone().or_else(|| {
-            MODELS
-                .iter()
-                .find(|(agent, _)| *agent == name)
-                .map(|(_, model)| (*model).to_owned())
-        });
-        let designer = self.designers.borrow().contains(name);
-        self.recorder.answered(
-            at,
-            json!({ "id": name, "model": model, "designer": designer }),
-        );
-        Ok(Some(SavedAgent {
-            model,
-            effort: None,
-            thinking: None,
-            designer,
-        }))
-    }
-
-    fn retired(&self, name: &str) -> Option<String> {
-        self.retired.borrow().get(name).cloned()
-    }
-
+impl AppSettings for FakeAppSettings {
     fn app_specs(&self) -> AppSpecs {
         self.app_specs_asked.set(self.app_specs_asked.get() + 1);
         self.app_specs.borrow().clone()

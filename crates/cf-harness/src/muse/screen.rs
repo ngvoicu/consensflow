@@ -2,9 +2,12 @@
 //! echo`): under the header `Muse Code <version>` and the conversation, the input box,
 //! a rule that names the voice key (`── Voice input (⌥ + v to start) ───…`), the box's
 //! lines, the first after its `❯`, a rule again, and the status line (the model, the
-//! folder, `YOLO`). An empty box shows nothing after its `❯`. The box stays drawn while
-//! a turn works, its status above it ("◈ Thinking (3s · esc to interrupt)"). Words the
-//! conversation shows of the user's are drawn after a `❯` too, with no rule above.
+//! folder, `YOLO`). An empty box shows nothing after its `❯`, or one of Muse's tips, drawn
+//! styled with the cursor at the box's start (Muse 1.4.14, T-1081's live run: "Ask to monitor
+//! a running build or log and get pinged on changes" after a backgrounded command was
+//! cancelled). The box stays drawn while a turn works, its status above it ("◈ Thinking (3s ·
+//! esc to interrupt)"). Words the conversation shows of the user's are drawn after a `❯` too,
+//! with no rule above.
 //!
 //! One screen holds a window for good: a resume of a session another Muse holds opens
 //! Muse's session picker, which says so ("that session is already open in another
@@ -56,21 +59,43 @@ fn boxed(screen: &[String]) -> Option<(usize, &str, bool)> {
     Some((first, typed, more))
 }
 
-/// What Muse's input box holds, where `screen` shows one. Muse draws no hint in an
-/// empty box, so the cursor says nothing more than the words do.
-pub(crate) fn read(screen: &[String], _cursor: Option<Cursor>) -> Option<InputBox> {
-    let (_, typed, more) = boxed(screen)?;
-    Some(if typed.is_empty() && !more {
-        InputBox::Empty
-    } else {
-        InputBox::Holds
-    })
+/// Whether the box on `screen`, its first line at `first`, holds only one of Muse's tips,
+/// as `cursor` says: on one line, the cursor right after the mark and its space, and nothing
+/// from it on drawn plain. Words typed there and the cursor moved back to their start (Home)
+/// are drawn plain.
+fn only_a_tip(screen: &[String], first: usize, more: bool, cursor: Option<Cursor>) -> bool {
+    let line = &screen[first];
+    let start = line.chars().take_while(|c| c.is_whitespace()).count() + MARK_AND_SPACE;
+    !more
+        && cursor.is_some_and(|cursor| {
+            cursor.line == first && cursor.col == start && cursor.plain_after == 0
+        })
+}
+
+/// How many characters the mark and the space after it take on the box's first line.
+const MARK_AND_SPACE: usize = 2;
+
+/// What Muse's input box holds, where `screen` shows one: empty where nothing is after the
+/// mark, or only one of Muse's tips, as the cursor says ([`only_a_tip`]).
+pub(crate) fn read(screen: &[String], cursor: Option<Cursor>) -> Option<InputBox> {
+    let (first, typed, more) = boxed(screen)?;
+    Some(
+        if (typed.is_empty() && !more) || only_a_tip(screen, first, more, cursor) {
+            InputBox::Empty
+        } else {
+            InputBox::Holds
+        },
+    )
 }
 
 /// The words Muse's input box shows on `screen`, its lines after the mark with a line
-/// break between two: empty for an empty box, none where it shows no box.
-pub(crate) fn words(screen: &[String]) -> Option<String> {
-    let (first, typed, _) = boxed(screen)?;
+/// break between two: empty for an empty box, and for one that shows only a tip as the
+/// cursor says ([`only_a_tip`]); none where it shows no box.
+pub(crate) fn words(screen: &[String], cursor: Option<Cursor>) -> Option<String> {
+    let (first, typed, more) = boxed(screen)?;
+    if only_a_tip(screen, first, more, cursor) {
+        return Some(String::new());
+    }
     let end = first + screen[first..].iter().position(|line| is_rule(line))?;
     let words = std::iter::once(typed)
         .chain(screen[first + 1..end].iter().map(|line| line.trim()))
@@ -145,6 +170,58 @@ mod tests {
         assert!(shows_prompt(&working));
     }
 
+    /// T-1081's live run (Muse 1.4.14, a Muse advisor under a Devin chief): a turn whose
+    /// backgrounded command the pause cancelled, at rest, its empty box filled with one of
+    /// Muse's tips. The pane host's snapshot, as recorded: the cursor at the box's start and
+    /// nothing from it on drawn plain. The delivery of the resume was held for those words for
+    /// 360 s, 2 runs of 2.
+    const TIPPED: [&str; 12] = [
+        "",
+        "◆ Checked terminal tool operation — cancelled",
+        "└ tool cancelled",
+        "",
+        "◆ Interrupted · Report issues with /feedback",
+        "",
+        "◆ Finished · Run requested perl script · ⊘ · cancelled · ctrl+o",
+        "",
+        "── Voice input (⌥ + v to start) ────────────────────────────────────────────────",
+        "❯ Ask to monitor a running build or log and get pinged on changes",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "  muse-spark-1.3 · minimal · /p/v/f/5/c/T/c/workspace/p2-devin · YOLO",
+    ];
+
+    #[test]
+    fn a_box_that_shows_only_muse_s_tip_is_empty_and_words_typed_there_are_held() {
+        use crate::shared::input_box::shown;
+        use cf_proto::agents::Harness;
+        let screen: Vec<String> = TIPPED.iter().map(|line| (*line).to_owned()).collect();
+        let at_start = |plain_after| Cursor {
+            line: 9,
+            col: 2,
+            shown: true,
+            plain_after,
+        };
+        assert_eq!(read(&screen, Some(at_start(0))), Some(InputBox::Empty));
+        assert_eq!(
+            shown(Harness::Muse, &screen, Some(at_start(0))).as_deref(),
+            Some("")
+        );
+        // The same words typed, the cursor moved back to their start: drawn plain, held.
+        assert_eq!(read(&screen, Some(at_start(20))), Some(InputBox::Holds));
+        // Typed, the cursor after them.
+        let after = Cursor {
+            col: 65,
+            ..at_start(0)
+        };
+        assert_eq!(read(&screen, Some(after)), Some(InputBox::Holds));
+        assert_eq!(
+            shown(Harness::Muse, &screen, Some(after)).as_deref(),
+            Some("Ask to monitor a running build or log and get pinged on changes")
+        );
+        // No word of the cursor: the words are held, as before.
+        assert_eq!(read(&screen, None), Some(InputBox::Holds));
+    }
+
     #[test]
     fn words_in_the_box_on_one_line_or_more_are_held_and_the_conversation_s_are_not() {
         let typed = screen("❯ Say hello.", "❯ probe words");
@@ -196,7 +273,7 @@ mod tests {
         assert!(shows_prompt(&quoting));
         assert!(!box_cut(&quoting));
         assert_eq!(
-            words(&quoting).as_deref(),
+            words(&quoting, None).as_deref(),
             Some("Read this screen:\n❯ Say hello.\n◆ echo: Say hello.")
         );
     }

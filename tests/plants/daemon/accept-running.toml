@@ -1,0 +1,77 @@
+# What an accept says of the work the finish left running (3.0.7-alpha.4 fixes, T-691 and T-1181;
+# the field board of 2026-11-02: T-299's worker had a command that a time limit moved into the
+# background, the chief finished the task, and the close of the window after the accept ended the
+# command, nobody told). `cf task finish` records the worker's last words as the result and
+# ends nothing its turn left running; the close of the window after the accept does. So a finish
+# keeps the jobs and agents it counted with its move to done, the accept's route says them
+# (`running`), and `cf task accept` prints "T-3's window was running 1 background job when it was
+# finished; accepting closes the window and ends it." A worker's own result waits for its work to
+# end, so its accept says nothing. The commit is `7be5ffdb1` of `wt/board-friction`, taken here
+# with the hunks of that branch's other commits left out. One plant takes one rule out; a test of
+# it fails. Every name holds `accept running:`.
+
+[run]
+ar-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "left_running"]
+ar-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "turn_end::"]
+ar-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task"]
+ar-cf = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+
+[[plant]]
+name = "accept running: a finish keeps no count of what its window ran"
+meant = "a_finish_keeps_what_the_window_was_counted_running_for_the_accept_to_say"
+runs = ["ar-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '            json!({ "result": message_id, "jobs": left.0, "agents": left.1 })'
+replace = '            json!({ "result": message_id })'
+
+[[plant]]
+name = "accept running: the first finish of a task is the one counted, not the latest"
+meant = "a_task_sent_back_and_finished_again_is_counted_by_its_latest_finish"
+runs = ["ar-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "              ORDER BY id DESC LIMIT 1\","
+replace = "              ORDER BY id ASC LIMIT 1\","
+
+[[plant]]
+name = "accept running: the engine's finish counts nothing running"
+meant = "finish_takes_the_last_complete_answer_of_a_held_task_once_and_ends_nothing"
+runs = ["ar-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "            (pending.jobs, pending.agents),"
+replace = "            (0, 0),"
+
+[[plant]]
+name = "accept running: the route does not read what the finish counted"
+meant = "an_accept_says_how_many_jobs_and_agents_the_finish_counted_running"
+runs = ["ar-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "            running = ledger.left_running(project, number)?;"
+replace = "            running = (0, 0);"
+
+[[plant]]
+name = "accept running: cf says nothing of what the window ran"
+meant = "an_accept_says_what_the_finish_left_running_which_the_close_of_the_window_ends"
+runs = ["ar-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    let (jobs, agents) = (count("jobs"), count("agents"));'
+replace = '    let (jobs, agents) = (count("jobs") * 0, count("agents") * 0);'
+
+[[plant]]
+name = "accept running: cf says one job and many are all it"
+meant = "an_accept_says_what_the_finish_left_running_which_the_close_of_the_window_ends"
+runs = ["ar-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    let them = if jobs + agents == 1 { "it" } else { "them" };'
+replace = '    let them = "it";'

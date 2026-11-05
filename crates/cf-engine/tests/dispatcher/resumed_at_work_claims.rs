@@ -156,10 +156,12 @@ fn a_close_of_the_project_while_the_task_reads_working_leaves_the_resume_for_the
 }
 
 #[test]
-fn a_kept_window_closed_after_its_resume_leaves_the_task_queued_and_says_its_words_go_in() {
+fn a_kept_window_whose_work_ends_after_its_resume_stays_its_task_at_work_and_its_words_wait_for_the_turn(
+) {
     // T-1117's kept window: the pause was ignored while work ran, the chief resumed the task,
     // the window went on and the task read working; the work ended, the fresh rounds were
-    // ignored too, and ConsensFlow closed the window. Its close is not a pause of the task.
+    // ignored too. A pause never closes a window (T-1199): it stays, kept, and the words
+    // that resumed the task go in once its turn ends.
     let context = Context::new();
     context.background.leaves(Some(Background {
         total: 1,
@@ -187,7 +189,7 @@ fn a_kept_window_closed_after_its_resume_leaves_the_task_queued_and_says_its_wor
     context.pass().unwrap();
     assert_eq!(state(&context, project.id), "working");
 
-    // Its work ends, and the fresh rounds are ignored: the window is closed.
+    // Its work ends, and the fresh rounds are ignored: the window is kept.
     context.background.leaves(Some(Background::default()));
     context.advance(10_000);
     context.pass().unwrap();
@@ -195,23 +197,28 @@ fn a_kept_window_closed_after_its_resume_leaves_the_task_queued_and_says_its_wor
         context.advance(3_100);
         context.pass().unwrap();
     }
-    context.host.exits_showing(Some(0), None, None);
     context.advance(3_100);
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(context.host.killed().len(), 1);
-    assert_eq!(state(&context, project.id), "queued");
+    assert!(context.host.killed().is_empty(), "a pause closes nothing");
+    assert_eq!(state(&context, project.id), "working");
     let said: Vec<String> = notes(&context, context.id(project.id, "chief"))
         .into_iter()
-        .filter(|note| note.contains("ConsensFlow closed it"))
+        .filter(|note| note.contains("did not stop") || note.contains("closed it"))
         .collect();
-    assert_eq!(said.len(), 1, "{said:?}");
-    assert!(
-        said[0].ends_with("Your words go in once it reopens on its conversation."),
-        "{}",
-        said[0]
+    assert_eq!(
+        said.len(),
+        1,
+        "said once, as it was kept for its work: {said:?}"
     );
     assert_eq!(paused_notes(&context, project.id), Vec::<String>::new());
+
+    // Its turn ends: the words go in.
+    context.adapter.answer("zeus", "Where I was");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let words = context.adapter.agent("zeus").items.pop().unwrap();
+    assert!(words.text.ends_with("Resumed: Carry on"), "{}", words.text);
 }
 
 // ---- F2: a quit and the Resume ----------------------------------------------------------

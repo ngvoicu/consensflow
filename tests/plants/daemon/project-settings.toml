@@ -364,8 +364,10 @@ runs = ["page-board-empty"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "add the agents this project may use under Project settings."
-replace = "add the agents this project may use under Staff."
+find = '''
+add the members this project may use under Project settings.'''
+replace = '''
+add the members this project may use under Staff.'''
 
 [[plant]]
 name = "project settings: the wake-up calls are saved with the approval's tick"
@@ -500,8 +502,8 @@ runs = ["page-new-project"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    if (this.#starting) return\n"
-replace = ""
+find = "    if (this.#starting || !this.#chief.picked()) return\n"
+replace = "    if (!this.#chief.picked()) return\n"
 
 [[plant]]
 name = "project settings: a start refused after the human left the dialog is said nowhere"
@@ -544,11 +546,13 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/app.js"
-find = '''  if (!(await showProject(id))) return
-  await readAgents()
+find = '''
+  if (!(await showProject(id))) return
+  await readMissing()
   await projectSettings.open(id)
 '''
-replace = '''  await readAgents()
+replace = '''
+  await readMissing()
   await projectSettings.open(state.board.project.id)
 '''
 
@@ -675,8 +679,14 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "      if (!agent) return\n      const project = this.#project\n"
-replace = "      if (!agent) return\n      const project = page.board().project.id\n"
+find = '''
+      const { modelName, ...picked } = values
+      const project = this.#project
+'''
+replace = '''
+      const { modelName, ...picked } = values
+      const project = page.board().project.id
+'''
 
 [[plant]]
 name = "project settings: a member is removed from the project the board shows"
@@ -813,8 +823,8 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if project.state != "open" {
             return Ok(());
         }
-        // A chief whose agent is gone stays closed'''
-replace = '''        // A chief whose agent is gone stays closed'''
+        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
+replace = '''        // A chief held for want of a model to start on, as the ledger keeps it, is stepped'''
 
 [[plant]]
 name = "project settings: the daemon refuses the approval of a closed project"

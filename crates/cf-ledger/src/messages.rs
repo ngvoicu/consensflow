@@ -36,16 +36,16 @@ use crate::model::{self, require_active, LedgerError, FINISHED_TASK_STATES, MAX_
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
 use crate::store::Store;
-use crate::tasks::{pause_task, take_over_pause};
+use crate::tasks::{pause_task, paused_by_consensflow, take_over_pause};
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
     adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
-pub(crate) use continuations::withdraw_queued_note;
 pub use continuations::{continuation, continuation_in, continuation_tasks, cut_turn};
 pub(crate) use continuations::{withdraw_continuations, withdraw_stale};
+pub(crate) use continuations::{withdraw_each, withdraw_queued_note};
 #[cfg(feature = "test-support")]
 pub(crate) use delivery::forget_receipt;
 pub use delivery::GivenUp;
@@ -66,11 +66,11 @@ pub(crate) use paused_answers::{
     given as paused_answer_given, note as note_paused_answer, put_back as put_back_paused_answers,
     queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
 };
-pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{
-    join_pause_note, leave_pause_notes, note_pause, note_stall, say_again, warnings_on_their_way,
-    warnings_queued, Afterwards,
+    join_pause_note, leave_pause_notes, note_held_for_context, note_pause, note_stall, say_again,
+    warnings_on_their_way, warnings_queued, Afterwards,
 };
+pub use pauses::{MAY_STILL_RUN, NOT_PROVEN_GONE};
 pub use receipt::Read;
 pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
@@ -168,8 +168,10 @@ pub(crate) fn ask(
             };
             // A task paused already is paused for the tell all the same: one its
             // project's suspension paused is the teller's from now on.
+            // A task ConsensFlow paused on its own (held, stalled) is the teller's now: its
+            // stop is asked, and it goes on only by a resume (T-1220's P1-1).
             let task = store.task_row(project_id, number)?;
-            if task.state == "paused" {
+            if task.state == "paused" && !paused_by_consensflow(store, &task)? {
                 take_over_pause(store, &task, from)?;
             } else {
                 pause_task(store, project_id, number, Some(from), None)?;
@@ -216,7 +218,8 @@ pub(crate) fn ask(
 
 /// The answer goes back to whoever asked; the one asked answers. A plain
 /// question's answer is delivered into the asker's window. A question with
-/// options is answered by choice (or by text, one line per question): that
+/// options is answered by choice (or by text: one line per question of an ask
+/// of several, any text for an ask of one, `require_choices`): that
 /// answer is read at once and never delivered, because the harness door
 /// that asked collects it and the tool call completes with it; the asker's
 /// task resumes here. A question on a task that is over (accepted, cancelled

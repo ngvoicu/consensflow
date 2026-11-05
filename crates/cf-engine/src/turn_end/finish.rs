@@ -17,6 +17,10 @@
 //! (`cf-ledger`'s `withdraw_open_questions`). The chief's word is over the reader's here as
 //! everywhere in Finish.
 //!
+//! The words of the turns that ended with a question of the worker's own out come first in what it
+//! takes, as in a result the worker's turn end records (`earlier_turns`, T-1204): a Finish after the
+//! answer went in gives the write-up the turn ended with before it, and the reply to the answer.
+//!
 //! It is the way out of a wait that has no end, and of a reader that reads a turn at work
 //! that is not (T-442, dip-agentos's T-20): a job that runs for ever (a dev server, a
 //! headless browser the harness moved to the background) never wakes its agent, and its
@@ -52,6 +56,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
+use super::earlier_turns::with_earlier;
 use super::{
     first_on_its_way, leftovers, lost_in_turn, pending_after_look, watching_of, with_leftovers,
     with_lost, words_of,
@@ -249,16 +254,33 @@ impl Dispatcher {
         // What the turn left, as the note to the chief counts it: a monitor that said it ended
         // is over where a look found no command in the window.
         let pending = pending_after_look(&observed, watching_of(&record.held.borrow()));
-        let words = with_lost(words_of(&run), &participant.handle, lost);
+        // The turns that ended with a question of the worker's out come first, as in a
+        // result the worker's own turn end records (T-1204).
+        let earlier =
+            self.earlier_turns(&thread, &participant, items, &replacements, &words_of(&run))?;
+        let words = with_earlier(
+            with_lost(words_of(&run), &participant.handle, lost),
+            &earlier,
+        );
         let body = with_leftovers(
             words,
             &leftovers(&participant.handle, pending, Some(by), observed.settled),
         );
-        let moved = self
+        // The stop the task was asked of its window, owed still, is settled by the finish:
+        // the task leaves the window's hands here, whatever look comes before a reopen.
+        let owed = self
             .seams
             .ledger
-            .borrow_mut()
-            .record_finished(project, number, &body)?;
+            .borrow()
+            .stop_of(participant.id)?
+            .filter(|stop| stop.task_id == thread.task.id);
+        let moved = self.seams.ledger.borrow_mut().record_finished(
+            project,
+            number,
+            &body,
+            (pending.jobs, pending.agents),
+        )?;
+        self.settle_at_departure(record, owed.as_ref());
         record.held.borrow_mut().reset();
         self.changed();
         Ok(Finished {

@@ -17,7 +17,7 @@ fn opens_with_the_text_of_the_role_its_task_needs_in_a_session_per_task() {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [
                 { "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" },
                 {

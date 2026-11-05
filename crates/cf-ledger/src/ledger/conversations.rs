@@ -111,6 +111,37 @@ impl Ledger {
         conversations::history_read(&mut self.store, project_id, page, find, tools)
     }
 
+    /// A chief that needs an edit runs on the model and effort its harness's record names,
+    /// and needs none (T-1202).
+    pub fn chief_ran_on(
+        &mut self,
+        participant_id: i64,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Result<(), LedgerError> {
+        conversations::chief_ran_on(&mut self.store, participant_id, model, effort)
+    }
+
+    /// The chief's launch asked its harness for `model`; none for the harness's own default.
+    pub fn chief_launched(
+        &mut self,
+        participant_id: i64,
+        model: Option<&str>,
+    ) -> Result<(), LedgerError> {
+        conversations::chief_launched(&mut self.store, participant_id, model)
+    }
+
+    /// The chief's launch found `gone` gone: it runs on `model` from now on, and no reopen
+    /// asks for `gone` again.
+    pub fn chief_gone(
+        &mut self,
+        participant_id: i64,
+        gone: &str,
+        model: Option<&str>,
+    ) -> Result<(), LedgerError> {
+        conversations::chief_gone(&mut self.store, participant_id, gone, model)
+    }
+
     /// The project's latest Switch chief; none before any.
     pub fn last_switch(&self, project_id: i64) -> Result<Option<LastSwitch>, LedgerError> {
         conversations::last_switch(&self.store, project_id)

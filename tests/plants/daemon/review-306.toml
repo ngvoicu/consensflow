@@ -720,9 +720,9 @@ runs = ["ledger-receipt-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '''    pause(store, task, detail, false)?;
+find = '''    pause(store, task, detail, false, Stops::NotAsked)?;
     Ok(true)'''
-replace = '''    pause(store, task, detail, true)?;
+replace = '''    pause(store, task, detail, true, Stops::NotAsked)?;
     Ok(true)'''
 
 [[plant]]

@@ -20,10 +20,13 @@ fn staffed(rig: &Rig) -> (i64, i64) {
             name: "app".to_owned(),
             chief: NewChief {
                 harness: "claude-code".to_owned(),
-                agent: Some("apollo".to_owned()),
+                model: Some("apollo".to_owned()),
+                effort: None,
             },
             staff: vec![NewMember {
-                agent: "zeus".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],

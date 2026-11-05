@@ -47,7 +47,7 @@ fn staffed_on(context: &Context, harness: &str) -> i64 {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": harness, "agent": "apollo" },
+            "chief": { "harness": harness, "model": "apollo" },
             "staff": staff,
         }))
         .unwrap()

@@ -5,8 +5,9 @@
 //! have to install Node, npm, or the CLI. The bundle carries the native `cf`
 //! (crates/cf) as a resource, `cli/bin/cf`: it is the daemon the app starts
 //! (`cf ui`) and the command every window runs, and nothing else of the CLI
-//! travels, no Node and no sources. On Windows it carries Microsoft's own
-//! console host beside it, in `conpty/`.
+//! travels, no Node and no sources. On Windows it carries beside it the program
+//! the terminal's command is, `cli/bin/cf-shim.exe` (`cf setup` copies it to
+//! the home's `bin` as `cf.exe`), and Microsoft's own console host, in `conpty/`.
 
 use std::ffi::OsString;
 use std::fs;
@@ -32,8 +33,9 @@ pub(super) fn run(
 }
 
 /// Builds `cf` and stages it as the bundle's `cli/bin/cf`, and on Windows
-/// stages the console host, fetched in `package`'s version, as the bundle's
-/// `conpty/`. Says each file it stages that is not `cf`, then where `cf` is.
+/// stages the shim beside it and the console host, fetched in `package`'s
+/// version, as the bundle's `conpty/`. Says each file it stages that is not
+/// `cf`, then where `cf` is.
 fn stage(
     context: &Context,
     package: &Package,
@@ -49,6 +51,12 @@ fn stage(
     fs::create_dir_all(&bin).map_err(files("make", &bin))?;
     let staged = bin.join(system.platform().cf());
     fs::copy(&cf, &staged).map_err(files("copy the cf to", &staged))?;
+    // Beside the `cf`, where it was put in `bin/` next to the `cf` the line above copied.
+    if let Some(shim) = system.platform().shim() {
+        let from = cf.with_file_name(shim);
+        let to = bin.join(shim);
+        fs::copy(&from, &to).map_err(files("copy the shim to", &to))?;
+    }
     // Windows: Microsoft's own console host, which the Windows bundle puts beside
     // the app (tauri.windows.conf.json) and the portable exe in its runtime.
     if system.platform() == Platform::Windows {

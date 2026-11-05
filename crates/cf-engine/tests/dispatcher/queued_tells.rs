@@ -398,7 +398,7 @@ fn an_answer_that_leaves_work_running_while_told_words_wait_is_no_hold_and_its_r
         !tiers
             .notes("chief")
             .iter()
-            .any(|note| note.contains("goes on in the background")),
+            .any(|note| note.contains("is still working in the background")),
         "{:?}",
         tiers.notes("chief")
     );

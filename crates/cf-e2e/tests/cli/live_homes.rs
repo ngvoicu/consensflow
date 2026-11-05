@@ -44,16 +44,17 @@ const LOOKED_IN: [&str; 4] = [
 ];
 
 /// The kit itself, which sets these by design.
-const KIT: [&str; 4] = [
+const KIT: [&str; 5] = [
     "crates/cf-e2e/src/live/machine.rs",
     "crates/cf-e2e/src/live/isolation.rs",
+    "crates/cf-e2e/src/live/isolation/windows.rs",
     "crates/cf-e2e/src/live/login.rs",
     "crates/cf-e2e/src/live/members.rs",
 ];
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 13] = [
+const BY_HAND: [(&str, &str, &str); 18] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -88,20 +89,28 @@ const BY_HAND: [(&str, &str, &str); 13] = [
         "the same read of the machine's Devin config, as Windows names its folder",
     ),
     (
-        "crates/cf-e2e/tests/live_muse_background.rs",
+        "crates/cf-e2e/tests/live_muse/tui.rs",
         "HOME",
-        "it runs Muse alone, in no window of the kit's: the owner's home for the keychain, which \
-         holds the login, and nothing else of it (Muse finds its keychain by HOME, T-705)",
+        "what `live_muse_background` and `live_muse_posture` share (T-790 moved it there): they run \
+         Muse alone, in no window of the kit's, on a Mac only: the owner's home for the keychain, \
+         which holds the login, and nothing else of it (Muse finds its keychain by HOME, T-705)",
     ),
     (
-        "crates/cf-e2e/tests/live_muse_background.rs",
+        "crates/cf-e2e/tests/live_muse/tui.rs",
         "XDG_CONFIG_HOME",
-        "the same run's config folder, a throwaway of its own: nothing of the owner's is read there",
+        "the same runs' config folder, a throwaway of their own: nothing of the owner's is read there",
     ),
     (
-        "crates/cf-e2e/tests/live_muse_background.rs",
+        "crates/cf-e2e/tests/live_muse/tui.rs",
         "XDG_DATA_HOME",
-        "the same run's data folder, a throwaway of its own, where Muse writes its sessions",
+        "the same runs' data folder, a throwaway of their own, where Muse writes its sessions",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_window.rs",
+        "CODEX_HOME",
+        "the question case gives its window a throwaway folder holding one AGENTS.md, the foreign \
+         rules Muse reads as the person's where they have no ~/.claude/CLAUDE.md (T-790); no Codex \
+         runs, and nothing of the owner's Codex is read or written",
     ),
     (
         "crates/cf-e2e/tests/live_own_cf.rs",
@@ -125,6 +134,27 @@ const BY_HAND: [(&str, &str, &str); 13] = [
         "crates/cf-e2e/tests/live_muse_reads.rs",
         "XDG_DATA_HOME",
         "the same reads' data folder, a throwaway holding a copy of the model catalog alone",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "CLAUDE_CONFIG_DIR",
+        "it sets no home: with `--keep` it copies what the run's own window recorded, from the folder \
+         the kit gave that window under this variable (`members.rig().var`)",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "CODEX_HOME",
+        "the same copy of the records, for another harness",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "PI_CODING_AGENT_DIR",
+        "the same copy of the records, for another harness",
+    ),
+    (
+        "crates/cf-e2e/tests/live_history_items.rs",
+        "XDG_DATA_HOME",
+        "the same copy of the records, for another harness",
     ),
 ];
 

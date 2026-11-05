@@ -10,8 +10,9 @@ use cf_ledger::{
 };
 use serde_json::{json, Map, Value};
 
-use super::agents::{chief_on, last_staff_now, membership, saved};
 use super::body::{one, Body, Fields, Said};
+use super::chief::chief_asked;
+use super::staff::picked_member;
 use super::Page;
 
 /// `projects.list`.
@@ -20,8 +21,10 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
     one("projects", projects)
 }
 
-/// `project.open`: the chief on the saved agent given; the staff given, as the
-/// roster has those agents now, else the last staff. The gate, the wake-up calls
+/// `project.open`: the chief on the harness, model and effort given (`chief_asked`); the
+/// staff given, each member a harness, a model its harness lists, an effort and a tier, as
+/// Add member takes one, else the last staff, but its members on a harness not installed
+/// here. The gate, the wake-up calls
 /// (`wakeUp`, as `wakeup.set` takes them) and the specs (`specs`, as
 /// `project.specs` takes them) are the human's word for the project, kept in
 /// the write that makes it, so the chief's first launch has them; one the
@@ -33,17 +36,12 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         None | Some(Value::Null) => json!(basename(directory)?),
         Some(name) => name.clone(),
     };
-    let agents = saved(&page.env)?;
-    let roster = agents.roster();
-    let chief = chief_on(&roster, body.get("agent"))?;
+    let chief = chief_asked(page, body, false)?;
     let staff = match body.get("staff") {
-        None => last_staff_now(&page.ledger.borrow(), &roster)?,
+        None => last_staff(page)?,
         Some(Value::Array(members)) => members
             .iter()
-            .map(|member| {
-                let given = Body::new(member);
-                Ok(membership(&roster, given.get("agent"))?.with_roles(given.get("roles")))
-            })
+            .map(|member| Ok(member_json(&picked_member(page, Body::new(member), false)?)))
             .collect::<Result<Vec<_>, Said>>()?,
         // `staff.map` of what is no list.
         Some(other) => {
@@ -60,7 +58,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     request.insert("name".to_owned(), name);
     request.insert(
         "chief".to_owned(),
-        json!({ "harness": chief.harness, "agent": chief.agent }),
+        json!({ "harness": chief.harness, "model": chief.model, "effort": chief.effort }),
     );
     for key in ["gate", "wakeUp", "specs"] {
         if let Some(said) = body.get(key) {
@@ -70,6 +68,49 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     request.insert("staff".to_owned(), Value::Array(staff));
     let project = page.engine.open_project(new_project(request)?).await?;
     one("project", project)
+}
+
+/// A member as the ledger reads one from JSON (`NewMember::from_json`).
+fn member_json(member: &NewMember) -> Value {
+    json!({
+        "harness": member.harness,
+        "model": member.model,
+        "effort": member.effort,
+        "modelName": member.model_name,
+        "designer": member.designer,
+        "roles": member.roles,
+        "tier": member.tier,
+    })
+}
+
+/// The last project's staff for a new one, each member on a harness installed here, as the
+/// ledger reads it from JSON: what New project starts with where the page names no staff.
+fn last_staff(page: &Page) -> Result<Vec<Value>, Said> {
+    let missing = cf_harness::detect::missing_harnesses(&page.env);
+    Ok(page
+        .ledger
+        .borrow()
+        .last_staff()?
+        .into_iter()
+        .filter(|member| {
+            member
+                .harness
+                .as_deref()
+                .and_then(cf_proto::agents::Harness::from_kind)
+                .is_some_and(|harness| !missing.contains(&harness))
+        })
+        .map(|member| {
+            json!({
+                "harness": member.harness,
+                "model": member.model,
+                "effort": member.effort,
+                "modelName": member.model_name,
+                "designer": member.designer,
+                "roles": member.roles,
+                "tier": member.tier,
+            })
+        })
+        .collect())
 }
 
 /// `project.resume`.
@@ -144,7 +185,8 @@ pub(super) async fn describe(page: &Page, body: Body<'_>) -> Result<Fields, Said
 /// looked for. `rules` that are left out, `null` or blank take them away. Only
 /// the page writes them: no route of the agents' API does, so no `cf` command,
 /// the chief's or a member's, changes them. Every window of the project is given
-/// them when it next starts (the engine's `roles::with_staff_rules`).
+/// them when it next starts (the engine's `roles::with_staff_rules`), and a chief whose
+/// window is open is told at its next rest, in a note (the engine's `role_news`).
 pub(super) async fn rules(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let rules = parse_staff_rules(body.get("rules"))?;
     let project = page
@@ -193,7 +235,11 @@ fn typed(request: &Map<String, Value>) -> Option<NewProject> {
         name: request.get("name")?.as_str()?.to_owned(),
         chief: NewChief {
             harness: chief.get("harness")?.as_str()?.to_owned(),
-            agent: Some(chief.get("agent")?.as_str()?.to_owned()),
+            model: Some(chief.get("model")?.as_str()?.to_owned()),
+            effort: match chief.get("effort") {
+                None | Some(Value::Null) => None,
+                Some(effort) => Some(effort.as_str()?.to_owned()),
+            },
         },
         staff: staff.iter().map(member).collect::<Option<Vec<_>>>()?,
         gate: match request.get("gate") {
@@ -216,7 +262,9 @@ fn member(member: &Value) -> Option<NewMember> {
         .map(|role| role.as_str().map(str::to_owned))
         .collect::<Option<Vec<_>>>()?;
     Some(NewMember {
-        agent: member.get("agent")?.as_str()?.to_owned(),
+        model: None,
+        effort: None,
+        model_name: Some(member.get("agent")?.as_str()?.to_owned()),
         harness: member.get("harness")?.as_str()?.to_owned(),
         designer: member.get("designer")?.as_bool()?,
         roles,

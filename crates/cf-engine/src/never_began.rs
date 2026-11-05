@@ -26,9 +26,12 @@
 //!   at rest (Devin's, Muse's) pays it at once and is kept, and `cf task resume` sends its
 //!   words into it, where the brief is above them. One read in flight is pressed the stop's
 //!   rounds: a Claude Code reads at rest by the engine's own Escape (`by_press`) and is kept;
-//!   one that reads in flight still (Codex's, Pi's) is closed as any window that ignores a
-//!   pause's rounds, and the resume opens it again on its conversation. A stop paid with no
-//!   key would keep that window reading in flight, and no resume's words would go in.
+//!   one that reads in flight still (Codex's, Pi's), running nothing, is relaunched on its
+//!   conversation and its task resumed with its brief again, so that it goes on by itself
+//!   (`stops`: the stop is ConsensFlow's own, marked on the window, and nothing of a brief
+//!   never begun can be lost; a pause of the chief's or the human's never relaunches nor
+//!   closes a window, T-1199). A stop paid with no key would keep that window reading in
+//!   flight, and no words would go in.
 //!
 //! Limits. A window whose screen prints while it begins nothing (a status line that redraws
 //! by itself) is waited for until its screen is quiet for [`QUIET_MS`] at a look past its
@@ -44,6 +47,7 @@ use cf_base::{js, time};
 use cf_harness::contract::{Input, Observed};
 use cf_harness::records::{Reading, Role};
 use cf_ledger::{ParticipantView, ProjectView};
+use cf_proto::panes::SCREEN_QUIET_MS;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
@@ -207,6 +211,30 @@ impl Dispatcher {
             thread.task.number
         ));
         self.stall(project, &thread.task, &said, &because, None, false)?;
+        // The stop this pause asked is ConsensFlow's own: a window that ignores it with
+        // nothing running is relaunched on its conversation (`stops`), as a pause's is not.
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        let generation = record
+            .window
+            .borrow()
+            .pane
+            .as_ref()
+            .map(|pane| pane.generation);
+        let stalled = match (stop, unbegun.message, generation) {
+            (Some(stop), Some(message), Some(generation)) if stop.task_id == thread.task.id => {
+                Some(crate::stops::Stalled {
+                    task_id: stop.task_id,
+                    number: stop.number,
+                    seq: stop.seq,
+                    message,
+                    item: Arc::clone(&unbegun.item),
+                    generation,
+                })
+            }
+            // A message with no header of ours is no delivery to give again: no relaunch.
+            _ => None,
+        };
+        record.window.borrow_mut().stalled = stalled;
         self.changed();
         Ok(())
     }
@@ -289,8 +317,10 @@ impl Dispatcher {
         if js::truthy(snapshot.get("unsent")) {
             return Ok(Pressed::Unsent);
         }
+        // What the screen shows held still, not its output: a window that repaints the same
+        // at rest prints all the time (Muse Code after a stopped command, T-1083).
         let quiet = snapshot
-            .get("outputQuietMs")
+            .get(SCREEN_QUIET_MS)
             .and_then(Value::as_f64)
             .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
         if !quiet {
@@ -325,8 +355,9 @@ fn never_began(unbegun: &Unbegun, sent: i64, entered: i64, pressed: Pressed, now
         .map_or_else(|| "its latest message".to_owned(), |id| format!("m-{id}"));
     let again = pressed.said(&clock(entered));
     format!(
-        "its window began no turn on {message}: it went in at {} UTC and its record shows it with nothing after it, \
+        "{}{message}: it went in at {} UTC and its record shows it with nothing after it, \
          {again}, and nothing began by {} UTC",
+        cf_ledger::NEVER_BEGAN,
         clock(sent),
         clock(now)
     )

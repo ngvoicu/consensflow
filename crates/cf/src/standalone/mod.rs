@@ -1,6 +1,5 @@
 //! The standalone verbs of the CLI, answered here as Node answered them, word
-//! for word: the usage, the version, `catalog`, `agent add|list|edit|remove`,
-//! and `setup` and `doctor`, which wire the launcher, the stale hooks and the
+//! for word: the usage, the version, and `setup` and `doctor`, which wire the launcher, the stale hooks and the
 //! app's preparation (`cf_launcher`, `cf_harness`). `tests/cli_goldens` holds
 //! them to what Node said, file by file (the recording was made from Node and
 //! is fixed since: `tests/goldens/README.md`).
@@ -19,8 +18,6 @@
 //! name or a value is the most it takes, so the word is a request for help
 //! wherever it stands ahead of a `--`, and a name after a `--` is a name.
 
-mod agent;
-mod catalog;
 mod doctor;
 mod setup;
 
@@ -32,10 +29,8 @@ use cf_base::env::Env;
 use cf_base::home::config_root;
 use cf_base::js;
 use cf_base::refusal::Refusal;
-use cf_catalog::{roster_path, Catalog, Roster};
 use cf_daemon::machine;
 use cf_harness::detect::detect_harnesses;
-use serde::Serialize;
 use serde_json::Value;
 
 /// Said when the environment names no folder to keep ConsensFlow's things in.
@@ -95,11 +90,9 @@ pub fn run(
         }
         // The word that asks for a verb's usage is answered before the verb
         // reads its words or the home, whatever else follows it.
-        Some(verb @ ("catalog" | "agent" | "setup" | "doctor" | "ui")) if asks_for_help(rest) => {
-            writeln!(out, "{}", usage_of(&help_path(verb, rest))).map_err(Stop::from)
+        Some(verb @ ("setup" | "doctor" | "ui")) if asks_for_help(rest) => {
+            writeln!(out, "{}", usage_of(&[verb])).map_err(Stop::from)
         }
-        Some("catalog") => catalog::run(rest, out),
-        Some("agent") => agent::run(env, rest, out),
         Some("setup") => setup::run(env, rest, out),
         // Whatever words follow it are no matter, as in Node.
         Some("doctor") => doctor::run(env, out),
@@ -133,19 +126,8 @@ pub(crate) fn asks_for_help(words: &[String]) -> bool {
         .any(|word| word == "--help" || word == "-h")
 }
 
-/// What `cf <verb> <words…> --help` is the usage of: the verb, and for
-/// `agent` the action when it names one.
-fn help_path<'a>(verb: &'a str, words: &'a [String]) -> Vec<&'a str> {
-    let action = words
-        .first()
-        .map(String::as_str)
-        .filter(|_| verb == "agent")
-        .filter(|word| ["add", "list", "edit", "remove"].contains(word));
-    std::iter::once(verb).chain(action).collect()
-}
-
-/// The lines of the usage that belong to the command `cf <path…>` (`["agent",
-/// "edit"]`), with the lines that go on from them.
+/// The lines of the usage that belong to the command `cf <path…>` (`["setup"]`),
+/// with the lines that go on from them.
 fn usage_of(path: &[&str]) -> String {
     let usage = usage();
     let mut kept = false;
@@ -166,16 +148,6 @@ fn usage_of(path: &[&str]) -> String {
     lines.join("\n")
 }
 
-/// The catalog this build ships, which a verb lists or names agents by.
-fn bundled() -> Result<Catalog, Stop> {
-    Catalog::bundled().map_err(|failed| Stop::Said(failed.to_string()))
-}
-
-/// `value` as JSON, for the verb that prints it.
-fn to_json<T: Serialize>(value: &T) -> Result<Value, Stop> {
-    serde_json::to_value(value).map_err(|failed| Stop::Said(failed.to_string()))
-}
-
 /// What stops a verb that needs ConsensFlow's folder where none is named.
 fn no_home() -> Stop {
     Stop::Said(NO_HOME.to_owned())
@@ -185,19 +157,6 @@ fn no_home() -> Stop {
 /// go on without.
 fn home(env: &Env) -> Result<PathBuf, Stop> {
     config_root(env).ok_or_else(no_home)
-}
-
-/// The roster of the home `env` names, over `catalog`.
-fn roster<'a>(env: &Env, catalog: &'a Catalog) -> Result<Roster<'a>, Stop> {
-    let path = roster_path(env).ok_or_else(no_home)?;
-    Ok(Roster::new(catalog, path))
-}
-
-/// How many agents there are, the catalog's and the human's together: what
-/// `setup` and `doctor` count (`listAgents(env).length`).
-fn agents_saved(env: &Env) -> Result<usize, Stop> {
-    let catalog = bundled()?;
-    Ok(roster(env, &catalog)?.list()?.len())
 }
 
 /// The harnesses installed here, by id, in the order detection lists them.

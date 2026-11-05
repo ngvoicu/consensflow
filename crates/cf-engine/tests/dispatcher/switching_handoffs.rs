@@ -54,7 +54,7 @@ fn replaces_a_handoff_still_on_its_way_and_resume_of_a_closed_project_brings_the
     assert_eq!(handoffs.len(), 1);
     assert_match(
         &handoffs[0].body,
-        r"from Codex \(astraeus\) to you, Claude Code \(apollo\)\.",
+        r"from Codex \(gpt-6-astra\) to you, Claude Code \(claude-opus-5\)\.",
     );
 
     // Closed before the new chief showed it, nor its record: the handoff waits for Resume.
@@ -64,7 +64,7 @@ fn replaces_a_handoff_still_on_its_way_and_resume_of_a_closed_project_brings_the
     let prepared = context.adapter.prepared().last().cloned().unwrap();
     assert_match(
         prepared["message"].as_str().unwrap(),
-        r"You are the chief now\. The human switched this project's chief from Codex \(astraeus\) to you, Claude Code \(apollo\)\.",
+        r"You are the chief now\. The human switched this project's chief from Codex \(gpt-6-astra\) to you, Claude Code \(claude-opus-5\)\.",
     );
     held_to(
         context.close(),
@@ -91,7 +91,8 @@ fn takes_a_handoff_titled_for_the_lead_as_a_ledger_from_before_2026_10_03_holds_
             project.id,
             &ChiefSwitch {
                 harness: "codex".to_owned(),
-                agent: "astraeus".to_owned(),
+                model: "gpt-6-astra".to_owned(),
+                effort: None,
                 cut: false,
             },
         )
@@ -132,7 +133,7 @@ fn takes_a_handoff_titled_for_the_lead_as_a_ledger_from_before_2026_10_03_holds_
     let prepared = context.adapter.prepared().last().cloned().unwrap();
     assert_match(
         prepared["message"].as_str().unwrap(),
-        r"You are the chief now\. The human switched this project's chief from Codex \(astraeus\) to you, Claude Code \(apollo\)\.",
+        r"You are the chief now\. The human switched this project's chief from Codex \(gpt-6-astra\) to you, Claude Code \(claude-opus-5\)\.",
     );
     held_to(
         context.close(),

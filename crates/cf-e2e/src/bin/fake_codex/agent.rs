@@ -30,7 +30,9 @@
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
-//! anything else is acknowledged. A message whose line begins `COMPACT <seconds>` has
+//! anything else is acknowledged; a line `CF <words> :: <text>` is a call of `cf`, answered with
+//! what it printed. A turn at work stops when the TUI's Escape asks (`turn/interrupt`), as
+//! Codex's does at one Escape: it ends `turn_aborted`, with no answer. A message whose line begins `COMPACT <seconds>` has
 //! the thread compacted first, as Codex 0.165 compacts a long thread at the start of a
 //! turn: the turn begins, nothing more is written for that long, then the compaction
 //! and only after it the message (T-901, the field's rollout of 2026-10-28). A message that says `QUOTA-OUT` is refused for
@@ -130,6 +132,8 @@ pub struct Agent {
     unsaid: AtomicU64,
     /// Whether a turn runs now, which a read of the thread says (`thread/read`).
     running: AtomicBool,
+    /// Whether the turn at work was asked to stop (`turn/interrupt`, the TUI's Escape).
+    interrupted: AtomicBool,
 }
 
 /// What `lock` holds, whether or not a thread that held it panicked.
@@ -189,6 +193,7 @@ impl Agent {
                     .unwrap_or(0),
             ),
             running: AtomicBool::new(false),
+            interrupted: AtomicBool::new(false),
         }
     }
 
@@ -236,6 +241,15 @@ impl Agent {
     pub fn take(self: &Arc<Self>, text: &str) {
         let (agent, text) = (Arc::clone(self), text.to_owned());
         thread::spawn(move || agent.turn(&text));
+    }
+
+    /// The turn at work stops, as Codex's does at its TUI's Escape (`turn/interrupt`): it ends
+    /// aborted, with no answer, and what was queued behind it goes on. Nothing where no turn
+    /// runs.
+    pub fn interrupt(&self) {
+        if self.running.load(Ordering::Relaxed) {
+            self.interrupted.store(true, Ordering::Relaxed);
+        }
     }
 
     /// A connection hears, from now on, what Codex says of the thread unasked.
@@ -395,7 +409,21 @@ impl Agent {
             self.plugins.call_a_tool();
         }
         let (work, said) = what_it_says(text);
-        thread::sleep(work.saturating_sub(began.elapsed()));
+        self.interrupted.store(false, Ordering::Relaxed);
+        while began.elapsed() < work && !self.interrupted.load(Ordering::Relaxed) {
+            thread::sleep(work.saturating_sub(began.elapsed()).min(INTERRUPT_LOOK));
+        }
+        // Stopped at its TUI's Escape: Codex ends the turn aborted, and says nothing more of it.
+        if self.interrupted.swap(false, Ordering::Relaxed) {
+            self.write(
+                "event_msg",
+                json!({ "type": "turn_aborted", "turn_id": turn, "reason": "interrupted" }),
+            );
+            return;
+        }
+        // A line `CF <words> :: <text>` is a call of `cf` by the agent's shell tool, answered
+        // with what it printed, as the other stand-ins answer theirs (T-1207).
+        let said = cf_in(text).map_or(said, |words| run_cf(&words));
         if refused(text) {
             self.write(
                 "event_msg",
@@ -422,6 +450,24 @@ impl Agent {
                     "error": {
                         "message": "The stand-in model is busy. Pick another model.",
                         "codex_error_info": "server_overloaded",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
+        // The turn Codex's safety filter refused, as the rollouts of kluris T-158 and T-163
+        // recorded it (2026-10-27, Codex 0.164.0): the error's words and its kind.
+        if text.contains("TURN-FILTERED") {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. If you\u{2019}re doing authorized security work that requires more cyber permissive safeguards, apply for Daybreak access via https://platform.openai.com/settings/organization/status-and-access before retrying.",
+                        "codex_error_info": "cyber_policy",
                     },
                     "completed_at": jiff::Timestamp::now().as_second(),
                 }),
@@ -559,6 +605,45 @@ fn compacts_for(text: &str) -> Option<Duration> {
         .map(Duration::from_secs)
 }
 
+/// How often a turn at work looks whether it was asked to stop.
+const INTERRUPT_LOOK: Duration = Duration::from_millis(50);
+
+/// The words of the message's line `CF <words> :: <text>` (after a `SLEEP <seconds>` too): each
+/// word, and the text, spaces and all, as one last word, as the other stand-ins read theirs.
+fn cf_in(text: &str) -> Option<Vec<String>> {
+    static SLEEP: OnceLock<Regex> = OnceLock::new();
+    text.lines().find_map(|line| {
+        let line = pattern::once(&SLEEP, r"^(?:SLEEP \d+ )+").replace(line, "");
+        let rest = line.strip_prefix("CF ")?;
+        let mut parts = rest.split(" :: ");
+        let mut words: Vec<String> = parts
+            .next()
+            .unwrap_or_default()
+            .split(' ')
+            .map(str::to_owned)
+            .collect();
+        let said: Vec<&str> = parts.collect();
+        if !said.is_empty() {
+            words.push(said.join(" :: "));
+        }
+        Some(words)
+    })
+}
+
+/// `cf` as an agent runs it: the one first on the window's `PATH`, with the window's own
+/// environment. What it printed and said, trimmed.
+fn run_cf(words: &[String]) -> String {
+    match cf_e2e::process::Run::new(cf_e2e::process::as_a_shell_finds("cf"))
+        .args(words)
+        .inheriting_env()
+        .unlimited()
+        .run()
+    {
+        Ok(ran) => ran.output().trim().to_owned(),
+        Err(failed) => failed.to_string(),
+    }
+}
+
 /// How long the message `text` has the agent work, and what it says at the end.
 fn what_it_says(text: &str) -> (Duration, String) {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
@@ -585,6 +670,31 @@ fn what_it_says(text: &str) -> (Duration, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `CF` line of a message is the words of a call of `cf`, its text one last word; after a
+    /// `SLEEP` too; none where no line begins so (T-1207).
+    #[test]
+    fn a_cf_line_is_the_words_of_a_call_of_cf() {
+        let brief =
+            "[ConsensFlow m-1 · T-1 · task from @chief]\nCF ask :: Which format, JSON or text?";
+        assert_eq!(
+            cf_in(brief),
+            Some(vec![
+                "ask".to_owned(),
+                "Which format, JSON or text?".to_owned()
+            ])
+        );
+        assert_eq!(
+            cf_in("SLEEP 8 CF task finish T-1"),
+            Some(vec![
+                "task".to_owned(),
+                "finish".to_owned(),
+                "T-1".to_owned()
+            ])
+        );
+        assert_eq!(cf_in("Reply with exactly: DONE"), None);
+        assert_eq!(cf_in("Run CF ask :: no"), None);
+    }
 
     #[test]
     fn a_message_that_says_sleep_works_that_long_and_one_that_asks_for_a_word_is_answered_with_it()

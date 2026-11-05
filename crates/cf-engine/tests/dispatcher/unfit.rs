@@ -71,7 +71,7 @@ fn a_chief_whose_window_is_unfit_for_work_closes_without_its_project_and_the_hum
 /// `while_drawing` says so, and say they are unfit at the third ask.
 fn never_drawn(while_drawing: bool) -> (Context, Rc<Cell<u32>>) {
     let context = Context::new();
-    context.host.set_snapshot(json!({ "outputQuietMs": null }));
+    context.host.set_snapshot(json!({ "screenQuietMs": null }));
     context.adapter.ready_while_drawing.set(while_drawing);
     let asked = Rc::new(Cell::new(0));
     let counted = Rc::clone(&asked);

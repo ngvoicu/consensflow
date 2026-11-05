@@ -1,0 +1,2089 @@
+# The harnesses' model listings (CHF-03, chief-harness spec, T-727): each harness lists its
+# models with no model turn (`Adapter::models`, crates/cf-harness/src/{claude,codex,pi,devin,muse}/models.rs
+# over shared/one_shot.rs), one `ModelListing` type (crates/cf-proto/src/models.rs) whose default is
+# never a contributor model, a disabled one or one of a stale listing, kept in the home ledger
+# (migration 0027, crates/cf-ledger/src/model_lists.rs), and read by the daemon at the first ask of
+# its life and at the human's Refresh, one harness at a time (crates/cf-daemon/src/models.rs).
+# Phase 1's plants follow T-727's, their names holding `chief:`; phases 2 and 3 add their own.
+#
+# CHF-03's names hold `listing:` and Phase 1's (CHF-04 to CHF-10, with Muse's rows and the
+# fixes of Calliope's T-955) hold `chief:`: `npm run plants:daemon -- "listing:"` runs the
+# first, `-- "chief:"` the second.
+#
+# Phase 2's (CHF-11 to CHF-13, T-730) hold `timeline:`: the history is one stream of items
+# across a participant's conversations with no heading (crates/cf-ledger/src/conversations/history.rs,
+# crates/cf-engine/src/handoff/viewer.rs, app/ui/core/history-viewer.js), a conversation that shows
+# no item is passed, charged, and gone on past, and migration 0029 drops the indexes the headings
+# read. The heading plants of session-viewer.toml went with the headings.
+#
+# Phase 3's (CHF-14 to CHF-19, T-728) hold `items:`: each reader says what the history draws
+# of an item besides its words (crates/cf-harness/src/shared/record/drawn.rs and each
+# harness's reader), the items only the history shows stand beside a reading's items and
+# never among them or in its recording, the ledger keeps both (migration 0032,
+# crates/cf-ledger/src/conversations/transcripts.rs and history.rs) and its readers of words
+# leave the history's own out, the engine copies the timeline (crates/cf-engine/src/transcripts.rs)
+# and the page and `cf task get --transcript` show a call's header (T-486).
+#
+# Phase 4's (CHF-20, CHF-21, T-731) hold `view:`: the history viewer drawn to the mock
+# (app/ui/core/history-viewer.js, app/ui/page.css, app/ui/index.html): each item by its kind,
+# or its role where an older build copied it; prompts and deliveries whole in blue blocks; a
+# call's header, its output folded to its last lines with an exit line kept in sight, its
+# change as rows, the time it took, and its colour; a compaction violet; the earlier history
+# from a quiet first row above what is in view; dark and light; and the ledger's search
+# finding a call's header.
+#
+# T-995's (Calliope's re-check T-994) hold `gone:`: the adapter hears a refusal of the model
+# asked for (Pi by the id after its provider), a held chief costs a pass nothing, a default
+# that is the gone model holds the chief, and the exit's screen is read without
+# ConsensFlow's pastes, at its launch alone, never for the human's Ctrl+C.
+
+[run]
+ch-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "models::"]
+ch-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "models::"]
+ch-one-shot = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::one_shot::"]
+ch-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "model_lists"]
+ch-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::model_list"]
+ch-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "models::"]
+chm-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chief_model"]
+chm-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::chief_model"]
+chm-last-used = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "last_used::"]
+chm-tail = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::tail::"]
+chm-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "chief_model::"]
+chm-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::"]
+chm-switching = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "switching_refused::"]
+chm-role = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::"]
+chm-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "handoff::"]
+chm-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening::"]
+chm-daemon-reading = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::reading::"]
+chm-page-pick = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the chief is picked as a harness"]
+chm-page-unread = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "models cannot be read"]
+chm-page-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "card in the dock what the chief is doing|card the model its window ran on"]
+chm-ledger-chief = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chief_model"]
+chm-pi-models = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::models::"]
+chm-claude-used = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::last_used::"]
+chm-muse-used = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::last_used::"]
+chm-muse-models = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::models::"]
+chm-muse-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::a_turn_on_a_model"]
+chm-page-muse = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the chief is picked as a harness"]
+chm-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "chief_model::"]
+gn-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::models::"]
+gn-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::models::"]
+gn-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::models::"]
+gn-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::models::"]
+gn-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::models::"]
+gn-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+tl-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history"]
+tl-ledger-plan = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "conversations::history::"]
+tl-ledger-schema = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "schema::"]
+tl-ledger-undo = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::history_indexes::"]
+tl-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::"]
+tl-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history::"]
+tl-ui = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs"]
+# Tab in WebKit, the engine of the app's window on the Mac: Chromium's Tab reaches a button of itself.
+tl-ui-webkit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "--config", "app/playwright.webkit.config.mjs", "app/tests/history-viewer.spec.mjs", "-g", "by Tab"]
+tl-ui-drawer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "names a compaction's summary in what a window wrote"]
+it-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::drawn::"]
+it-shared = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::drawn::"]
+it-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::drawn::"]
+it-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record::"]
+it-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::drawn::"]
+it-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::drawn::"]
+it-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "drawn::"]
+it-ledger-plan = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "conversations::history::"]
+it-ledger-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::drawn_items::"]
+it-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "transcripts::"]
+it-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::tests::depth::"]
+it-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
+it-viewer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::"]
+it-evals = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "measure::tests::"]
+
+[[plant]]
+name = 'listing: a stale listing gives a default'
+meant = "a_stale_list_gives_no_default_whatever_it_marks"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '        if self.is_stale() {'
+replace = '        if self.is_stale() && false {'
+
+[[plant]]
+name = 'listing: a contributor model may be the default'
+meant = "the_marked_model_is_the_default_unless_it_is_a_contributor_model_then_its_twin"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '        let usable = |model: &&ModelChoice| !model.contributor && !model.disabled;'
+replace = '        let usable = |model: &&ModelChoice| !model.disabled;'
+
+[[plant]]
+name = 'listing: a disabled model may be the default'
+meant = "with_no_twin_the_default_is_the_first_model_that_is_no_contributor_and_not_disabled"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '        let usable = |model: &&ModelChoice| !model.contributor && !model.disabled;'
+replace = '        let usable = |model: &&ModelChoice| !model.contributor;'
+
+[[plant]]
+name = 'listing: a contributor model is not known by its id'
+meant = "a_contributor_model_is_known_by_its_id_and_warned_of"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '    id.ends_with("-contributor")'
+replace = '    false'
+
+[[plant]]
+name = "listing: Pi's provider is not joined to its id for --model"
+meant = "pi_s_provider_and_id_are_joined_for_the_launch_at_the_first_slash_only"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '            Some(provider) => format!("{provider}/{}", self.id),'
+replace = '            Some(_) => self.id.clone(),'
+
+[[plant]]
+name = 'listing: an effort inside the id is launched by a join'
+meant = "an_effort_inside_the_id_launches_the_exact_id_listed_never_a_join"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '            .and_then(|effort| self.launch_ids.get(effort))'
+replace = '            .and_then(|effort| self.launch_ids.get(effort).filter(|_| false))'
+
+[[plant]]
+name = 'listing: a failed read drops the listing kept before'
+meant = "a_failed_read_keeps_the_listing_read_before_stale_for_its_reason"
+runs = ["ch-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '            kept.unwrap_or(Self {'
+replace = '            kept.filter(|_| false).unwrap_or(Self {'
+
+[[plant]]
+name = 'listing: claude: the default pointer is listed as a model'
+meant = "each_model_is_its_resolved_id_with_its_efforts_and_the_default_pointer_marks_one"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '.filter(|value| value != "default")'
+replace = '.filter(|_| true)'
+
+[[plant]]
+name = 'listing: claude: a model is its alias, not its resolved id'
+meant = "each_model_is_its_resolved_id_with_its_efforts_and_the_default_pointer_marks_one"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '        let id = text(row, "resolvedModel").unwrap_or(value);'
+replace = '        let id = value;'
+
+[[plant]]
+name = 'listing: claude: a disabled row is not marked'
+meant = "a_row_with_no_effort_or_disabled_says_so_and_a_disabled_one_is_never_the_default"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '            disabled: row.get("disabled") == Some(&Value::Bool(true)),'
+replace = '            disabled: false,'
+
+[[plant]]
+name = 'listing: claude: the read runs in no config folder of its own'
+meant = "the_list_is_read_in_the_config_folder_it_is_given_never_the_human_s"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '.with_var("CLAUDE_CONFIG_DIR", &config.to_string_lossy())'
+replace = '.with_var("CLAUDE_CONFIG_DIR_NOT", &config.to_string_lossy())'
+
+[[plant]]
+name = 'listing: codex: a hidden model is listed'
+meant = "the_account_s_list_has_its_models_efforts_and_default_and_no_hidden_one"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '        .filter(|row| row.get("hidden") != Some(&Value::Bool(true)))'
+replace = '        .filter(|_| true)'
+
+[[plant]]
+name = "listing: codex: an old copy of the account's list is fresh"
+meant = "a_list_from_no_copy_of_the_account_s_or_an_old_copy_is_stale_and_gives_no_default"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '        Some(fetched) if at - fetched > FRESH_MS => {'
+replace = '        Some(fetched) if at - fetched > FRESH_MS && false => {'
+
+[[plant]]
+name = 'listing: codex: the list Codex ships is fresh'
+meant = "a_list_from_no_copy_of_the_account_s_or_an_old_copy_is_stale_and_gives_no_default"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = "        None => listing.stale(\"the list Codex ships: it holds no copy of the account's\"),"
+replace = '        None => listing,'
+
+[[plant]]
+name = 'listing: codex: only the first page of model/list is read'
+meant = "a_read_initializes_then_asks_each_page_until_no_cursor"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '            if !cursor.is_string() {'
+replace = '            if true {'
+
+[[plant]]
+name = 'listing: pi: xhigh and max are taken where the map names none'
+meant = "the_levels_are_pi_s_own_rule_of_reasoning_and_the_thinking_map"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '            None => !matches!(*level, "xhigh" | "max"),'
+replace = '            None => true,'
+
+[[plant]]
+name = 'listing: pi: the provider is not kept apart'
+meant = "each_model_keeps_its_provider_apart_and_launches_as_both_joined"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '                provider: Some(provider),'
+replace = '                provider: Some(provider).filter(|_| false),'
+
+[[plant]]
+name = 'listing: pi: every read fetches the catalogs'
+meant = "only_the_human_s_refresh_fetches_pi_s_catalogs_and_a_failed_fetch_leaves_a_stale_list"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '    if fetch {'
+replace = '    if fetch || true {'
+
+[[plant]]
+name = 'listing: pi: the list is read online'
+meant = "the_list_is_read_offline_with_nothing_of_pi_s_own"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '        env: env.clone().with_var("PI_OFFLINE", "1"),'
+replace = '        env: env.clone(),'
+
+[[plant]]
+name = 'listing: devin: the fusion family is listed'
+meant = "a_model_with_no_effort_is_its_variant_and_fusion_is_left_out"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '    for family in families.iter().filter(|family| !fusion(family)) {'
+replace = '    for family in families.iter().filter(|_| true) {'
+
+[[plant]]
+name = "listing: devin: an effort's id is joined, not the exact one listed"
+meant = "each_model_keeps_the_exact_id_of_each_effort_its_efforts_from_the_lowest"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '                models[at].launch_ids.insert(effort.to_owned(), uid);'
+replace = '                { let joined = format!("{}-{effort}", models[at].id); models[at].launch_ids.insert(effort.to_owned(), joined); }'
+
+[[plant]]
+name = 'listing: devin: no suffix is read past'
+meant = "a_variant_s_effort_is_read_past_the_suffixes_from_its_end"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '        .take_while(|word| SUFFIXES.contains(word))'
+replace = '        .take_while(|_| false)'
+
+[[plant]]
+name = 'listing: one shot: the first line is the answer'
+meant = "the_answer_is_the_line_taken_for_it_past_what_comes_between_and_the_program_is_ended"
+runs = ["ch-one-shot"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/one_shot.rs"
+find = '        if answers(&answer) {'
+replace = '        if answers(&answer) || true {'
+
+[[plant]]
+name = 'listing: ledger: a stale listing is kept fresh'
+meant = "a_harness_s_listing_is_kept_whole_and_a_failed_read_keeps_the_one_before_stale"
+runs = ["ch-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model_lists.rs"
+find = '        Freshness::Stale { why } => Some(why.as_str()),'
+replace = '        Freshness::Stale { .. } => None::<&str>,'
+
+[[plant]]
+name = "listing: ledger: the players compare the model list table with Node's"
+meant = "takes_the_model_list_table_and_its_schema_out_and_nothing_else"
+runs = ["ch-ledger-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '        .chain([model_list::TABLE, drawn_items::TABLE])'
+replace = '        .chain(["no such table", drawn_items::TABLE])'
+
+[[plant]]
+name = 'listing: daemon: every ask reads the harness again'
+meant = "a_harness_is_read_at_the_first_ask_of_a_daemon_s_life_then_kept_and_read_again_at_refresh"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        if !refresh && self.read.borrow().contains(&harness) {'
+replace = '        if false {'
+
+[[plant]]
+name = 'listing: daemon: a harness not installed here is asked'
+meant = "a_harness_not_installed_here_is_never_asked"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        if harness_path(harness, &self.env).is_none() {'
+replace = '        if false {'
+
+[[plant]]
+name = 'listing: daemon: two harnesses are read at once'
+meant = "two_harnesses_are_read_one_after_the_other"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        let _turn = self.reading.lock().await;'
+replace = '        let _turn = ();'
+
+[[plant]]
+name = 'listing: daemon: a failed read drops the listing kept before'
+meant = "a_new_daemon_reads_again_at_its_first_ask_and_a_failure_keeps_the_listing_before_stale"
+runs = ["ch-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '        let listing = ModelListing::after(kept, adapter.models(refresh).await);'
+replace = '        let listing = ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await);'
+
+# A chief is a harness and a model (Phase 1, CHF-04 to CHF-10, T-729): the ledger's chief
+# model and its switch (crates/cf-ledger), each harness's last_used reader and its words for a
+# gone model (crates/cf-harness/src/*/last_used.rs, */models.rs, shared/tail.rs), the engine's
+# launch of a chief (crates/cf-engine/src/chief_model.rs and its hooks) and the daemon's chief
+# request (crates/cf-daemon/src/page/chief.rs). Every name holds `chief:`.
+
+[[plant]]
+name = "chief: a model id may begin with a flag's dash"
+meant = "a_model_id_is_what_a_harness_names_its_models_and_never_a_flag_or_words"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = '''        && (bytes[0].is_ascii_alphanumeric() || bytes[0] == b'~')'''
+replace = '''        && (bytes[0].is_ascii_alphanumeric() || bytes[0] == b'~' || bytes[0] == b'-')'''
+
+[[plant]]
+name = 'chief: a switch forgets the model it was from'
+meant = "a_switch_names_the_harness_and_the_model_it_leaves_and_the_ones_it_takes"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''                chief.model,
+'''
+replace = '''                None::<String>,
+'''
+
+[[plant]]
+name = "chief: a switch logs the agent's key"
+meant = "a_switch_names_the_harness_and_the_model_it_leaves_and_the_ones_it_takes"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '        let mut from = json!({ "harness": chief.harness, "model": chief.model });'
+replace = '        let mut from = json!({ "harness": chief.harness, "agent": chief.model });'
+
+[[plant]]
+name = 'chief: a switch keeps what the last launch asked for'
+meant = "the_model_a_chiefs_launch_asked_for_is_kept_apart_from_the_one_picked_for_it"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+model_name = NULL, agent = NULL, launched_model = NULL,'''
+replace = '''
+model_name = NULL, agent = NULL,'''
+
+[[plant]]
+name = 'chief: a switch keeps the model found gone'
+meant = "a_gone_model_is_kept_apart_and_the_harnesss_default_becomes_the_chiefs_model"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '           gone_model = NULL, out_until = NULL,'
+replace = '           out_until = NULL,'
+
+[[plant]]
+name = "chief: the card's model is said where it is the pick"
+meant = "the_model_a_chiefs_launch_asked_for_is_kept_apart_from_the_one_picked_for_it"
+runs = ["chm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = '            .filter(|launched| Some(launched) != row.model.as_ref()),'
+replace = '            .filter(|_| true),'
+
+[[plant]]
+name = "chief: the gone model's column is not held apart"
+meant = "takes_the_chiefs_model_columns_and_their_values_out_of_the_participant_table_and_nothing_else"
+runs = ["chm-ledger-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing/chief_model.rs"
+find = '''    ("participant", "gone_model"),
+'''
+replace = '''    ("participant", "launched_model"),
+'''
+
+[[plant]]
+name = "chief: Claude's synthetic entry is the model used"
+meant = "a_sidechain_a_synthetic_entry_and_an_api_error_are_never_the_model_used"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '        .filter(|model| !model.is_empty() && *model != "<synthetic>")'
+replace = '        .filter(|model| !model.is_empty())'
+
+[[plant]]
+name = "chief: Claude's sidechain is the model used"
+meant = "a_sidechain_a_synthetic_entry_and_an_api_error_are_never_the_model_used"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '''        || entry["isSidechain"] == true
+'''
+replace = ''
+
+[[plant]]
+name = "chief: Claude's fallback is taken for the human's"
+meant = "a_fallback_claude_code_made_by_itself_is_the_harnesss_and_one_the_human_made_after_is_theirs"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '        let fell_back = fallback_to(&entry) == Some(model);'
+replace = '        let fell_back = false;'
+
+[[plant]]
+name = "chief: Claude's effort is not read"
+meant = "the_last_assistant_entry_says_the_model_and_the_effort_a_flagless_resume_would_lose"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '                    effort: entry["effort"].as_str().map(str::to_owned),'
+replace = '                    effort: None,'
+
+[[plant]]
+name = "chief: Codex's applied switch is not read"
+meant = "a_switch_applied_before_any_turn_of_it_is_the_model_used_last"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/last_used.rs"
+find = '    } else if entry["type"] == "event_msg" && payload["type"] == "thread_settings_applied" {'
+replace = '    } else if entry["type"] == "event_msg" && payload["type"] == "thread_settings_applied" && false {'
+
+[[plant]]
+name = "chief: Pi's failed message is the model used"
+meant = "a_message_that_ended_in_an_error_is_never_the_model_used"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/last_used.rs"
+find = '''        || message["stopReason"] == "error"
+'''
+replace = ''
+
+[[plant]]
+name = "chief: Pi's thinking is not the message's"
+meant = "the_thinking_is_the_last_messages_never_the_settings_a_launchs_flags_left_unwritten"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/last_used.rs"
+find = '        thinking: message["thinkingLevel"].as_str().map(str::to_owned),'
+replace = '        thinking: None,'
+
+[[plant]]
+name = "chief: Devin's session row is not read"
+meant = "the_sessions_row_says_the_model_and_never_its_first_node"
+runs = ["chm-last-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/last_used.rs"
+find = '            Some(Cell::Text(model)) if !model.is_empty() => Some(Used {'
+replace = '            Some(Cell::Text(model)) if false => Some(Used {'
+
+[[plant]]
+name = 'chief: the tail gives the line the bound cuts'
+meant = "stops_at_the_bound_and_never_gives_the_line_it_cuts"
+runs = ["chm-tail"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/tail.rs"
+find = '''        if before[0] == b'\n' {'''
+replace = '        if true {'
+
+[[plant]]
+name = 'chief: the tail reads past its bound'
+meant = "reads_no_more_of_a_long_record_than_its_end_when_what_it_needs_is_there"
+runs = ["chm-tail"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/tail.rs"
+find = '    let floor = size.saturating_sub(bound);'
+replace = '    let floor = 0 * bound;'
+
+[[plant]]
+name = "chief: claude's words for a gone model are not heard"
+meant = "a_model_claude_code_does_not_have_is_said_in_its_words"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = '    (words.contains("unrecognized_model") || words.contains("issue with the selected model"))'
+replace = '    (words.is_empty())'
+
+[[plant]]
+name = "chief: codex's words for a gone model are not heard"
+meant = "a_model_codex_does_not_have_is_said_in_its_words"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = '    (words.contains("model is not supported") || words.contains("model_not_found"))'
+replace = '    (words.is_empty())'
+
+[[plant]]
+name = "chief: pi's words for a gone model are not heard"
+meant = "a_model_pi_does_not_have_is_said_in_its_providers_words_and_its_catalogs_warning_is_none"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '''    (words.contains("model_not_found")
+        || words.contains("not_found_error")
+        || words.contains("model is not supported"))'''
+replace = '''    (words.is_empty())'''
+
+[[plant]]
+name = "chief: devin's words for a gone model are not heard"
+meant = "a_model_devin_does_not_have_is_said_in_its_words"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = '    words.contains("Unknown model:")'
+replace = '    words.is_empty()'
+
+[[plant]]
+name = "chief: Pi's default may be a contributor model"
+meant = "pi_starts_on_its_settings_default_and_never_on_a_contributor_model"
+runs = ["ch-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '    if let Some(named) = named.filter(|named| !cf_proto::models::is_contributor(named)) {'
+replace = '    if let Some(named) = named {'
+
+[[plant]]
+name = 'chief: a model the harness moved to by itself is taken'
+meant = "a_model_the_harness_moved_to_by_itself_is_never_taken_and_the_last_launchs_is_asked_again"
+runs = ["chm-engine", "chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '            Some(used) if used.by_harness || Some(used.model.as_str()) == gone => Self {'
+replace = '            Some(used) if Some(used.model.as_str()) == gone => Self {'
+
+[[plant]]
+name = 'chief: a gone model is asked for again'
+meant = "a_reopen_never_asks_for_a_gone_model_again_though_the_record_still_names_it"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '            Some(used) if used.by_harness || Some(used.model.as_str()) == gone => Self {'
+replace = '            Some(used) if used.by_harness => Self {'
+
+[[plant]]
+name = 'chief: a reopen reads no record'
+meant = "a_reopen_goes_on_with_the_model_and_effort_the_human_switched_to_in_the_window"
+runs = ["chm-dispatcher", "chm-rig"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''            Some(session) => {
+                adapter
+                    .last_used(session, chief.launched_model.as_deref())
+                    .await
+            }'''
+replace = '            Some(_) => None,'
+
+[[plant]]
+name = 'chief: what the launch asked for is not kept'
+meant = "a_model_the_harness_moved_to_by_itself_is_never_taken_and_the_last_launchs_is_asked_again"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            self.chief_launched(participant, &runs)?;
+'''
+replace = '''
+'''
+
+[[plant]]
+name = 'chief: a gone model at a turn is a failed turn'
+meant = "a_turn_that_fails_on_a_gone_model_closes_the_window_and_starts_the_chief_on_the_default"
+runs = ["chm-dispatcher", "chm-rig"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '        if let Some(gone) = self.gone_model(participant, refused)? {'
+replace = '        if let Some(gone) = self.gone_model(participant, refused)?.filter(|_| false) {'
+
+[[plant]]
+name = 'chief: a window gone on a gone model closes the project'
+meant = "a_gone_model_starts_the_chief_on_its_harnesss_default_and_the_human_is_told_once"
+runs = ["chm-dispatcher", "chm-rig"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))? {'
+replace = '                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))?.filter(|_| false) {'
+
+[[plant]]
+name = 'chief: what waited for a held chief is not given back'
+meant = "what_waits_for_a_chief_held_on_a_gone_model_waits_for_the_chief_switched_in"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''            if let Some(delivering) = delivering {
+                self.give_back(
+                    delivering.message,
+                    "the chief's model is gone and its harness has no other",
+                )?;
+            }
+'''
+replace = ''
+
+[[plant]]
+name = 'chief: a chief may name no model'
+meant = "switches_no_chief_to_a_harness_with_no_model_named"
+runs = ["chm-switching"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '    model.filter(|model| !model.is_empty()).ok_or_else(|| {'
+replace = '    model.or(Some("")).ok_or_else(|| {'
+
+[[plant]]
+name = "chief: the handoff names the new chief's agent"
+meant = "names_the_switch_the_history_what_waits_and_the_last_word"
+runs = ["chm-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff.rs"
+find = '    let to = who(handoff.to.harness.as_deref(), handoff.to.model.as_deref());'
+replace = '    let to = who(handoff.to.harness.as_deref(), handoff.to.agent.as_deref());'
+
+[[plant]]
+name = 'chief: a model the harness does not list is taken'
+meant = "a_chief_on_a_model_its_harness_does_not_list_or_will_not_run_is_refused"
+runs = ["chm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+        .filter(|listing| !listing.models.is_empty());
+    let Some(listing) = kept else {'''
+replace = '''
+        .filter(|_| false);
+    let Some(listing) = kept else {'''
+
+[[plant]]
+name = "chief: the page marks no contributor model in the chief's list"
+meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+runs = ["chm-page-pick"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '        model.contributor ? `${model.label} · Contributor` : model.label,'
+replace = '        model.label,'
+
+[[plant]]
+name = "chief: the page says no contributor warning for the chief's model"
+meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+runs = ["chm-page-pick"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '        this.model()?.contributor ? answer?.contributorWarning : null,'
+replace = '        null,'
+
+[[plant]]
+name = "chief: the page offers a switch to the model the chief is on"
+meant = "says on the chief's card in the dock what the chief is doing and runs on, and switches it from there"
+runs = ["chm-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '      takenOff: (kind, id) => this.#current?.harness === kind && this.#current?.model === id,'
+replace = '      takenOff: () => false,'
+
+[[plant]]
+name = "chief: the page lets a model be picked where none could be read"
+meant = "a harness whose models cannot be read leaves the chief's model unpicked, and says why"
+runs = ["chm-page-unread"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#model.disabled = true
+    this.#answer = null'''
+replace = '''    this.#model.disabled = false
+    this.#answer = null'''
+
+[[plant]]
+name = "chief: the page starts a project whose chief's harness has no model to pick"
+meant = "a harness whose models cannot be read leaves the chief's model unpicked, and says why"
+runs = ["chm-page-unread"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    if (this.#picker.kind !== '' && model !== undefined) {'''
+replace = '''
+    if (this.#picker.kind !== '' && model === undefined) return true
+    if (this.#picker.kind !== '' && model !== undefined) {'''
+
+[[plant]]
+name = "chief: the card says the model picked, not the one the window ran on"
+meant = "says on the chief's card the model its window ran on, where the human switched it there"
+runs = ["chm-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+  participant.needsEdit ? 'no model: needs an edit' : (participant.ranOn ?? participant.model)'''
+replace = '''
+  participant.needsEdit ? 'no model: needs an edit' : participant.model'''
+
+[[plant]]
+name = "chief: Switch chief takes the pick for the model the chief is on"
+meant = "says on the chief's card the model its window ran on, where the human switched it there"
+runs = ["chm-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '    this.#chief.fill(missing, { harness: chief.harness, model: chief.ranOn ?? chief.model })'
+replace = '    this.#chief.fill(missing, { harness: chief.harness, model: chief.model })'
+
+[[plant]]
+name = "chief: a window that came up is read for a gone model in its screen's words"
+meant = "a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_keeps_its_model"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '            if project.state == "open" && !own && !up && at_its_launch && shown.ended_failing() {'
+replace = '            if project.state == "open" && !own && at_its_launch && shown.ended_failing() {'
+
+[[plant]]
+name = "chief: a code-0 exit is taken for a launch's refusal"
+meant = "a_launch_that_ended_with_code_0_before_it_came_up_keeps_its_model"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C)'
+replace = '                .is_some_and(|code| code != CONSOLE_CTRL_C)'
+
+[[plant]]
+name = "chief: a launch given up on is read for a gone model"
+meant = "a_window_given_up_on_with_a_gone_models_words_is_tried_again_and_keeps_its_model"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let before = record.window.borrow().relaunch;
+        let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;'''
+replace = '''        if let Some(gone) = self.gone_model(participant, because)? {
+            self.reopen_without(record, gone);
+            return Ok(());
+        }
+        let before = record.window.borrow().relaunch;
+        let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;'''
+
+[[plant]]
+name = "chief: a failed turn is read for a gone model in its screen's words"
+meant = "a_failed_turn_whose_record_says_nothing_of_the_model_keeps_it_whatever_the_screen_shows"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '        let refused = observed.failure().unwrap_or_default();'
+replace = '        let refused = why.said.as_str();'
+
+[[plant]]
+name = "chief: words of another model's refusal switch the chief"
+meant = "a_failed_turn_whose_record_names_another_gone_model_keeps_the_chiefs"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '        Ok(adapter.model_gone(words, &asked).then_some(asked))'
+replace = '        Ok(adapter.model_gone(words, "").then_some(asked))'
+
+[[plant]]
+name = "chief: Pi's catalog warning is taken for a gone model"
+meant = "a_model_pi_does_not_have_is_said_in_its_providers_words_and_its_catalogs_warning_is_none"
+runs = ["chm-pi-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '''        || words.contains("model is not supported"))'''
+replace = '''        || words.contains("model is not supported")
+        || words.contains("not found for provider"))'''
+
+[[plant]]
+name = "chief: the hold for no default lives in memory only"
+meant = "a_chief_held_for_no_default_stays_held_across_a_restart_and_is_told_once"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '                .chief_gone(chief.id, &gone, Some(&gone))?;'
+replace = '                .chief_launched(chief.id, chief.launched_model.as_deref())?;'
+
+[[plant]]
+name = "chief: a held chief's model is the harness's own default"
+meant = "a_chief_held_for_no_default_stays_held_across_a_restart_and_is_told_once"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '                .chief_gone(chief.id, &gone, Some(&gone))?;'
+replace = '                .chief_gone(chief.id, &gone, None)?;'
+
+[[plant]]
+name = "chief: a held chief opens on its next launch"
+meant = "a_chief_held_for_no_default_stays_held_across_a_restart_and_is_told_once"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '            if held_for_no_default(chief) {'
+replace = '            if held_for_no_default(chief) && false {'
+
+[[plant]]
+name = "chief: an old chief's handoff forgets the agent it ran on"
+meant = "a_ledger_whose_chief_names_a_saved_agent_and_no_model_opens_as_it_was"
+runs = ["chm-ledger-chief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '            model: chief.switched_from_model.or(chief.switched_from_agent),'
+replace = '            model: chief.switched_from_model,'
+
+[[plant]]
+name = "chief: an old chief's switch names no agent"
+meant = "a_ledger_whose_chief_names_a_saved_agent_and_no_model_opens_as_it_was"
+runs = ["chm-ledger-chief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '            from["agent"] = json!(agent);'
+replace = '            let _ = agent;'
+
+[[plant]]
+name = "chief: Claude's walk back goes past the human's /model"
+meant = "the_walk_back_ends_at_the_humans_own_switch_whatever_came_before_it"
+runs = ["chm-claude-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '        if newest.is_some() && line.contains(MODEL_SET) {'
+replace = '        if newest.is_some() && line.contains(MODEL_SET) && false {'
+
+[[plant]]
+name = "chief: Muse's turn model is not read"
+meant = "the_newest_turns_model_is_the_model_used"
+runs = ["chm-muse-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/last_used.rs"
+find = '            (None, Some("run.model.configured")) => {'
+replace = '            (None, Some("run.model.configured.never")) => {'
+
+[[plant]]
+name = "chief: Muse's own move is taken for the human's"
+meant = "a_move_muse_made_by_itself_is_the_harnesss_and_never_the_humans"
+runs = ["chm-muse-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/last_used.rs"
+find = '                used.by_harness = true;'
+replace = '                used.by_harness = false;'
+
+[[plant]]
+name = "chief: the human's /model in Muse is taken for Muse's own move"
+meant = "a_move_the_human_typed_model_for_is_theirs"
+runs = ["chm-muse-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/last_used.rs"
+find = '                if asks_for_a_model(command) {'
+replace = '                if asks_for_a_model(command) && false {'
+
+[[plant]]
+name = "chief: Muse's replay of the launch's model is a move"
+meant = "a_resumed_session_put_back_on_its_launchs_model_is_no_move"
+runs = ["chm-muse-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/last_used.rs"
+find = '                if replay {'
+replace = '                if replay && false {'
+
+[[plant]]
+name = "chief: Muse's words for a gone model are not heard"
+meant = "a_model_muse_does_not_have_is_said_in_its_providers_404"
+runs = ["chm-muse-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '    words.contains("does not exist or you lack access")'
+replace = '    words.contains("does not exist and you lack access")'
+
+[[plant]]
+name = "chief: Muse's stale list gives a chief a default"
+meant = "a_chief_starts_on_the_accounts_default_and_on_none_where_the_list_is_bundled_or_unread"
+runs = ["chm-muse-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '        return Err(why.clone());'
+replace = '        let _ = why;'
+
+[[plant]]
+name = "chief: Muse with no model but contributor ones is left to its own default"
+meant = "a_chief_starts_on_the_accounts_default_and_on_none_where_the_list_is_bundled_or_unread"
+runs = ["chm-muse-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '        .ok_or_else(|| "Muse Code offers no model that is not a contributor model".to_owned())'
+replace = '        .map_or(Ok(None), Ok)'
+
+[[plant]]
+name = "chief: Muse's bundled list is taken for the account's"
+meant = "a_list_a_host_with_no_login_gives_is_muses_bundled_one_and_is_stale"
+runs = ["chm-muse-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = '            listing.stale(BUNDLED)'
+replace = '            listing'
+
+[[plant]]
+name = "chief: the page offers no Muse chief"
+meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+runs = ["chm-page-muse"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''  muse: 'Muse Code',
+'''
+replace = ''
+
+[[plant]]
+name = "chief: a window that took work is never marked so"
+meant = "a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_keeps_its_model"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '            record.window.borrow_mut().took = true;'
+replace = '            record.window.borrow_mut().took = false;'
+
+[[plant]]
+name = "chief: a relaunch keeps the work the window before it took"
+meant = "a_resumed_chief_whose_relaunch_is_refused_starts_on_the_default"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '            part.took = false;'
+replace = '            part.took = part.took;'
+
+[[plant]]
+name = "timeline: only a search goes on past a conversation it went through, so a read stops at one that shows nothing"
+meant = "reads_past_thousands_of_conversations_that_show_no_item_to_the_one_item_before_them"
+runs = ["tl-daemon", "tl-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = """        // Through the whole conversation: the next read goes on past it.
+"""
+replace = """        // Through the whole conversation: the next read goes on past it.
+        if needle.is_none() {
+            return Ok(());
+        }
+"""
+
+[[plant]]
+name = "timeline: a read that went through a conversation goes on from its far side"
+meant = "every_read_moves_however_little_it_may_go_through_and_older_reaches_the_oldest"
+runs = ["tl-ledger", "tl-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        let edge = if self.newest_first { 0 } else { i64::MAX };"
+replace = "        let edge = if self.newest_first { i64::MAX } else { 0 };"
+
+[[plant]]
+name = "timeline: a conversation that shows nothing is charged nothing, so a read goes through every one"
+meant = "a_read_through_conversations_that_show_no_item_shows_none_and_reads_none_of_their_fields"
+runs = ["tl-ledger", "tl-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = """        if found.is_some() {
+            self.scanned.conversations += 1;
+        }
+"""
+replace = ""
+
+[[plant]]
+name = "timeline: a page is set out newest first"
+meant = "the_history_is_one_stream_of_items_oldest_first_across_three_conversations_on_two_harnesses"
+runs = ["tl-daemon", "tl-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = """    if !matches!(from, HistoryFrom::After(_)) {
+        items.reverse();
+    }
+"""
+replace = ""
+
+[[plant]]
+name = "timeline: an item does not say the conversation it stands in, so its long text is read nowhere"
+meant = "the_history_is_one_stream_of_items_oldest_first_across_three_conversations_on_two_harnesses"
+runs = ["tl-daemon", "tl-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "        conversation: row.key.conversation,"
+replace = "        conversation: 0,"
+
+[[plant]]
+name = "timeline: the next page goes on from the oldest item a full page dropped, not from the last it showed"
+meant = "takes_the_items_of_thousands_of_conversations_while_a_frame_has_room"
+runs = ["tl-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "    let last_taken = taken.last().map(|row| row.key);"
+replace = "    let last_taken = read.entries.last().map(|row| row.key);"
+
+[[plant]]
+name = "timeline: migration 0029 keeps the index of the chief's switches"
+meant = "the_ledger_keeps_no_index_of_what_the_history_s_headings_read"
+runs = ["tl-ledger-plan", "tl-ledger-schema"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0029.sql"
+find = """  DROP INDEX event_switch_index;
+"""
+replace = ""
+
+[[plant]]
+name = "timeline: undoing migration 0029 puts back an index 0020 never made so"
+meant = "undoing_migration_0029_leaves_the_schema_0028_left_and_the_ledger_migrates_again"
+runs = ["tl-ledger-undo"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing/history_indexes.rs"
+find = """        db.execute_batch(made)?;"""
+replace = """        db.execute_batch(&made.replace(" WHERE ", " WHERE 1 AND "))?;"""
+
+[[plant]]
+name = "timeline: the viewer reads a long item of no conversation"
+meant = "shows a long item by a part, and the whole of it on a click row, read a part at a time"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "          conversation: item.conversation,"
+replace = "          conversation: item.row,"
+
+[[plant]]
+name = "timeline: a read that stopped with nothing to show says nothing is kept"
+meant = "says where a read stopped that found nothing to show, and goes on from there"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = """      let none = history.partial ? 'Nothing to show yet.' : 'Nothing is kept of this history yet.'"""
+replace = """      let none = 'Nothing is kept of this history yet.'"""
+
+[[plant]]
+name = "timeline: the viewer names whose history it shows"
+meant = "draws one stream of items across conversations, titled History and naming no conversation, harness or model"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = """<h2 class="history-title" id="history-title">History</h2>"""
+replace = """<h2 class="history-title" id="history-title">History of the chief</h2>"""
+
+[[plant]]
+name = "gone: Pi's refusal must name the whole provider/id, which its provider never says"
+meant = "a_pi_refusal_names_the_id_after_its_provider_split_once_at_the_first_slash"
+runs = ["gn-pi", "chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "        && words.contains(id_of(asked))"
+replace = "        && words.contains(asked)"
+
+[[plant]]
+name = "gone: a Pi id is split at its last slash, so an OpenRouter id loses its own"
+meant = "a_pi_refusal_names_the_id_after_its_provider_split_once_at_the_first_slash"
+runs = ["gn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    model.split_once('/').map_or(model, |(_, id)| id)"
+replace = "    model.rsplit_once('/').map_or(model, |(_, id)| id)"
+
+[[plant]]
+name = "gone: Pi does not hear Anthropic's not_found_error"
+meant = "a_pi_refusal_names_the_id_after_its_provider_split_once_at_the_first_slash"
+runs = ["gn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = """        || words.contains("not_found_error")
+"""
+replace = ""
+
+[[plant]]
+name = "gone: Pi does not hear its openai-codex provider's refusal"
+meant = "a_pi_window_on_a_model_its_provider_lacks_fails_in_that_providers_words"
+runs = ["gn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = """        || words.contains("model is not supported"))"""
+replace = ")"
+
+[[plant]]
+name = "gone: Claude Code's refusal of another model is taken for the chief's"
+meant = "a_model_claude_code_does_not_have_is_said_in_its_words"
+runs = ["gn-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/models.rs"
+find = """        && words.contains(asked)
+}
+
+/// The model Claude Code starts on"""
+replace = """        && !asked.is_empty()
+}
+
+/// The model Claude Code starts on"""
+
+[[plant]]
+name = "gone: Codex's refusal of another model is taken for the chief's"
+meant = "a_model_codex_does_not_have_is_said_in_its_words"
+runs = ["gn-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/models.rs"
+find = """        && words.contains(asked)
+}
+
+/// The model Codex starts on"""
+replace = """        && !asked.is_empty()
+}
+
+/// The model Codex starts on"""
+
+[[plant]]
+name = "gone: Devin's refusal of another model is taken for the chief's"
+meant = "a_model_devin_does_not_have_is_said_in_its_words"
+runs = ["gn-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/models.rs"
+find = """    words.contains("Unknown model:") && words.contains(asked)"""
+replace = """    words.contains("Unknown model:") && !asked.is_empty()"""
+
+[[plant]]
+name = "gone: Muse's refusal of another model is taken for the chief's"
+meant = "a_model_muse_does_not_have_is_said_in_its_providers_404"
+runs = ["gn-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/models.rs"
+find = """    words.contains("does not exist or you lack access") && words.contains(asked)"""
+replace = """    words.contains("does not exist or you lack access") && !asked.is_empty()"""
+
+[[plant]]
+name = "gone: a held chief is stepped, beginning a delivery to give back every pass"
+meant = "a_held_chief_with_a_queued_message_costs_a_pass_nothing"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """        if participant.role == "chief" && held_for_no_default(participant) {"""
+replace = """        if participant.role == "chief" && held_for_no_default(participant) && project.id < 0 {"""
+
+[[plant]]
+name = "gone: a harness default that is the gone model is started on, and the chief told it starts"
+meant = "a_harness_default_that_is_the_gone_model_holds_the_chief_with_the_holds_note"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = "            Ok(Some(model)) if model == gone => {"
+replace = "            Ok(Some(model)) if model == gone && model.is_empty() => {"
+
+[[plant]]
+name = "gone: the exit's screen is read with ConsensFlow's own pastes on it"
+meant = "a_pasted_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let said = shown.clone().without_pastes(&pasted);"
+replace = "                let said = shown.clone().without_pastes(&pasted[..0]);"
+
+[[plant]]
+name = "gone: the exit's pastes are read after a delivery it did not take went back"
+meant = "a_pasted_message_quoting_a_gone_models_words_on_screen_is_no_refusal_of_its_window"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let said = shown.clone().without_pastes(&pasted);"
+replace = "                let said = shown.clone().without_pastes(&self.pastes_on_screen(record.id)?);"
+
+[[plant]]
+name = "gone: the exit's screen is read however long the window lived"
+meant = "a_chief_at_rest_that_ends_failing_past_its_launch_budget_keeps_its_model"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                opened.is_some_and(|opened| self.now() - opened <= self.seams.limits.launch_ms);"
+replace = "                opened.is_some_and(|opened| opened <= self.now());"
+
+[[plant]]
+name = "gone: the human's Ctrl+C on Windows is a code of failure"
+meant = "the_human_s_ctrl_c_on_windows_is_no_code_of_failure"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C)"
+replace = "                .is_some_and(|code| code != 0 && code != CONSOLE_CTRL_C + 1)"
+
+[[plant]]
+name = "gone: Claude's walk back stops at a /model the human cancelled"
+meant = "a_cancelled_model_command_is_no_choice_and_the_walk_back_finds_the_fallback_before_it"
+runs = ["chm-claude-used"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/last_used.rs"
+find = '''const MODEL_SET: &str = "<local-command-stdout>Set model to";'''
+replace = '''const MODEL_SET: &str = "<command-name>/model</command-name>";'''
+
+[[plant]]
+name = "items: a message's thinking stands after its words"
+meant = "thinking_said_in_the_record_of_its_words_stands_before_them"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '            stands: Stands::Before,'
+replace = '            stands: Stands::After,'
+
+[[plant]]
+name = "items: Claude's result that is an error is no failure"
+meant = "a_call_is_its_results_item_with_its_header_how_it_ended_and_how_long_it_took"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '        failed: block.get("is_error") == Some(&Value::Bool(true)),'
+replace = '        failed: false,'
+
+[[plant]]
+name = "items: Claude's call took no time its records say"
+meant = "a_call_is_its_results_item_with_its_header_how_it_ended_and_how_long_it_took"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            .or_else(|| drawn::took(called, millis(Some(at))));'
+replace = '            .or(None);'
+
+[[plant]]
+name = "items: Claude's edit says no change"
+meant = "a_call_says_the_time_its_record_says_it_took_and_an_edits_change"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '    ("structuredPatch", &Keep::Items(&HUNK)),'
+replace = '    ("structuredPatches", &Keep::Items(&HUNK)),'
+
+[[plant]]
+name = "items: Claude's call its turn left runs on"
+meant = "a_call_its_turn_left_without_a_result_says_no_more_that_it_runs"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '            if one.call.as_ref().is_some_and(|call| !open.contains(call)) {'
+replace = '            if one.call.as_ref().is_some_and(|call| open.contains(call) && false) {'
+
+[[plant]]
+name = "items: Claude's compaction says no tokens"
+meant = "a_compactions_summary_says_the_tokens_its_boundary_compacted_from"
+runs = ["it-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '                .summary(id, &record.text, at, seq, self.compacted_from.take());'
+replace = '                .summary(id, &record.text, at, seq, None);'
+
+[[plant]]
+name = 'items: the items beside are said in a reading'
+meant = "the_items_beside_are_never_said_in_a_records_reading"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = '''    #[serde(skip)]
+    pub beside: Vec<(usize, Item)>,'''
+replace = '    pub beside: Vec<(usize, Item)>,'
+
+[[plant]]
+name = 'items: a header holds more than 256 characters'
+meant = "a_header_says_a_call_in_one_line_of_at_most_256_characters"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/drawn.rs"
+find = '    Arc::from(one_line(&said, HEADER_MAX))'
+replace = '    Arc::from(one_line(&said, HEADER_MAX + 1))'
+
+[[plant]]
+name = 'items: a timeline read from a place skips the items beside wrongly'
+meant = "a_timeline_merges_the_items_beside_where_they_stand_from_any_place"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/drawn.rs"
+find = '            .take_while(|(j, (place, _))| place + j < first)'
+replace = '            .take_while(|(_, (place, _))| *place < first)'
+
+[[plant]]
+name = "items: Pi's thinking takes its step's id"
+meant = "a_steps_thinking_stands_beside_the_items_before_its_words"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '                            let id = Arc::from(format!("{id}:thinking:{place}"));'
+replace = '                            let id = Arc::from(format!("{id}"));'
+
+[[plant]]
+name = "items: Pi's result that is an error is no failure"
+meant = "a_result_says_its_calls_header_how_it_ended_and_how_long_it_took"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '        detail.status = Some(if field("isError") == Some(&Value::Bool(true)) {'
+replace = '        detail.status = Some(if field("isError") == Some(&Value::Bool(false)) {'
+
+[[plant]]
+name = "items: Pi's compaction is passed over"
+meant = "a_compaction_stands_beside_the_items_with_its_tokens_and_summary"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '            Some("compaction") => self.compaction(&record, at, &seq),'
+replace = '            Some("compactions") => self.compaction(&record, at, &seq),'
+
+[[plant]]
+name = "items: Pi's edit says no change"
+meant = "a_read_and_an_edit_are_headed_by_their_file_and_an_edit_says_its_change"
+runs = ["it-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '            .and_then(|details| details.get("diff"))'
+replace = '            .and_then(|details| details.get("patch"))'
+
+[[plant]]
+name = "items: Codex's exit code 1 is no failure"
+meant = "an_output_says_how_its_call_ended_and_how_long_it_took"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/drawn.rs"
+find = '        Some(code) if code != 0 => Status::Failed,'
+replace = '        Some(code) if code > 1 => Status::Failed,'
+
+[[plant]]
+name = "items: Codex's reasoning is passed over"
+meant = "a_reasonings_summary_stands_beside_the_items_and_moves_no_reading"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '            (Some("reasoning"), _) => {'
+replace = '            (Some("reasonings"), _) => {'
+
+[[plant]]
+name = "items: Codex's command completed still runs beside the items"
+meant = "a_command_codex_started_runs_beside_the_items_until_it_completes"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '                    self.beside[place].answered = true;'
+replace = '                    self.beside[place].answered = false;'
+
+[[plant]]
+name = "items: Codex's compaction is passed over"
+meant = "a_compaction_stands_beside_the_items_where_codex_wrote_it"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '            Some("compacted") => {'
+replace = '            Some("compactions") => {'
+
+[[plant]]
+name = "items: Devin's thinking is passed over"
+meant = "an_assistants_thinking_stands_beside_the_items_before_its_message"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '                    if let Some(thought) = thinking(message.get("thinking")) {'
+replace = '                    if let Some(thought) = thinking(message.get("thought")) {'
+
+[[plant]]
+name = "items: Devin's tool answer is headed by no call"
+meant = "a_tools_answer_is_headed_by_the_call_it_answers_and_says_no_end_devin_keeps_none"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '                        .and_then(|call| calls.get(call))'
+replace = '                        .and_then(|call| calls.get(call).filter(|_| false))'
+
+[[plant]]
+name = "items: Devin's compactor's summary is no compaction"
+meant = "the_summary_its_compactor_begins_a_chain_with_is_a_compaction"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '                Role::Custom if summary(message) =>'
+replace = '                Role::Custom if summary(message) && false =>'
+
+[[plant]]
+name = "items: Muse's reasoning is passed over"
+meant = "a_reasoning_stands_beside_the_items_and_a_call_runs_beside_them_until_its_result"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '            Some("reasoning_committed") => {'
+replace = '            Some("reasoning_committed_x") => {'
+
+[[plant]]
+name = "items: Muse's answered call still runs beside the items"
+meant = "a_reasoning_stands_beside_the_items_and_a_call_runs_beside_them_until_its_result"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record.rs"
+find = '                    self.answered(&id);'
+replace = ''
+
+[[plant]]
+name = "items: Muse's result that is an error is no failure"
+meant = "a_reasoning_stands_beside_the_items_and_a_call_runs_beside_them_until_its_result"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '                    let failed = result.get("is_error") == Some(&Value::Bool(true))'
+replace = '                    let failed = result.get("is_error") == Some(&Value::Bool(false))'
+
+[[plant]]
+name = "items: the copy's guard leaves a call that ended unwritten"
+meant = "a_calls_detail_is_kept_and_written_again_when_it_says_more_with_the_same_words"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '            OR transcript.role != excluded.role OR transcript.detail IS NOT excluded.detail'
+replace = '            OR transcript.role != excluded.role'
+
+[[plant]]
+name = 'items: an item only the history shows is copied out of its place'
+meant = "the_items_only_the_history_shows_are_in_it_where_they_stand_and_in_no_reader_of_words"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '        misplaced[at] = drawn_only && !present && later_copied;'
+replace = '        misplaced[at] = false && drawn_only && !present && later_copied;'
+
+[[plant]]
+name = "items: cf history reads the history's own items"
+meant = "the_items_only_the_history_shows_are_in_it_where_they_stand_and_in_no_reader_of_words"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '       WHERE conversation_id = ? AND drawn_only = 0 ORDER BY seq'
+replace = '       WHERE conversation_id = ? ORDER BY seq'
+
+[[plant]]
+name = "items: a task's transcript reads the history's own items"
+meant = "a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_history_shows"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '       WHERE c.participant_id = ? AND t.drawn_only = 0 ORDER BY t.conversation_id, t.seq'
+replace = '       WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq'
+
+[[plant]]
+name = 'items: thinking is copied whole'
+meant = "thinking_is_cut_as_a_tools_output_is_and_a_change_as_well"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '            let text = if role == "tool" || thinking {'
+replace = '            let text = if role == "tool" {'
+
+[[plant]]
+name = 'items: the history reads no change an edit made'
+meant = "thinking_is_cut_as_a_tools_output_is_and_a_change_as_well"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '            if diff_bytes > 0 {'
+replace = '            if diff_bytes > usize::MAX - 1 {'
+
+[[plant]]
+name = 'items: a kind the ledger does not know is drawn as one'
+meant = "a_kind_or_a_status_the_ledger_does_not_know_draws_as_a_plain_item_or_no_status"
+runs = ["it-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '            kind: word("kind", &KINDS)?,'
+replace = '            kind: word("kind", &KINDS).unwrap_or("text"),'
+
+[[plant]]
+name = 'items: the players keep the drawn columns of a dump'
+meant = "takes_the_drawn_columns_and_the_diff_table_out_of_a_dump_and_nothing_else"
+runs = ["it-ledger-testing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''        .chain(drawn_items::COLUMNS)
+'''
+replace = ''
+
+[[plant]]
+name = "items: the copy says no item is the history's alone"
+meant = "an_items_detail_is_copied_as_the_ledger_takes_it_and_a_reading_never_says_it"
+runs = ["it-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = '        if drawn_only {'
+replace = '        if drawn_only && false {'
+
+[[plant]]
+name = 'items: the copy passes over the items beside the reading'
+meant = "a_look_copies_the_timeline_its_items_and_those_beside_them_each_where_it_stands"
+runs = ["it-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = '                .map(|(item, drawn_only)| to_copy(item, drawn_only))'
+replace = '                .filter(|(_, drawn_only)| !drawn_only).map(|(item, drawn_only)| to_copy(item, drawn_only))'
+
+[[plant]]
+name = 'items: a search finds no call by its header'
+meant = "a_search_finds_a_call_by_its_header_and_counts_it_among_the_items"
+runs = ["it-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task/pages.rs"
+find = '                        [Some(item.text.as_str()), header]'
+replace = '                        [Some(item.text.as_str()), header.filter(|_| false)]'
+
+[[plant]]
+name = "items: a task's transcript says no call a tool's output answers"
+meant = "a_tools_item_says_the_call_it_answers_how_it_ended_and_how_long_it_took"
+runs = ["it-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = '                Some("tool") => tool(item).into(),'
+replace = '                Some("tool") => "Tool output".into(),'
+
+[[plant]]
+name = 'items: the page says nothing of what the history draws of an item'
+meant = "says_what_the_history_draws_of_an_item_and_nothing_of_one_its_reader_said_nothing_more_of"
+runs = ["it-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = '        detail: item.detail.clone(),'
+replace = '        detail: None,'
+
+[[plant]]
+name = "items: Devin's answer says no end of its call"
+meant = "a_tools_answer_says_how_its_call_ended_and_how_long_it_took_where_devin_says"
+runs = ["it-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/chain.rs"
+find = '        (Some(code), _) if code != 0 => Some(Status::Failed),'
+replace = '        (Some(code), _) if code > 1 => Some(Status::Failed),'
+
+[[plant]]
+name = "items: Codex's exec script is headed by its tool's name"
+meant = "a_script_of_codexs_exec_is_headed_by_the_command_it_runs_or_the_patch_it_applies"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/drawn.rs"
+find = '        (None, Some(script)) => scripted(script),'
+replace = '        (None, Some(_)) => (drawn::guess(name, None), None),'
+
+[[plant]]
+name = "items: Codex's file change is passed over"
+meant = "an_edit_codex_completed_stands_beside_the_items_with_its_change"
+runs = ["it-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '            Some("FileChange") if completed => {'
+replace = '            Some("FileChanges") if completed => {'
+
+[[plant]]
+name = "items: the evals count the history's own items among a run's words"
+meant = "a_read_of_the_words_leaves_out_the_historys_own_items_where_a_ledger_has_them"
+runs = ["it-evals"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure.rs"
+find = '    Ok(if has { " AND t.drawn_only = 0" } else { "" })'
+replace = '    Ok(if has { "" } else { "" })'
+
+[[plant]]
+name = "items: a Windows shell's script is headed by the shell's words"
+meant = "a_call_to_a_tool_this_module_does_not_know_is_headed_by_what_it_was_given"
+runs = ["it-shared"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/drawn.rs"
+find = '    const RUNS: [&str; 6] = ["-c", "-lc", "-ic", "/c", "-command", "-encodedcommand"];'
+replace = '    const RUNS: [&str; 6] = ["-c", "-lc", "-ic", "-c", "-c", "-encodedcommand"];'
+
+[[plant]]
+name = "items: Muse's command that exited 1 is no failure"
+meant = "a_commands_result_says_its_exit_and_an_edits_its_change_as_muse_writes_them"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '        failed: code.is_some_and(|code| code != 0) || status == Some("failed"),'
+replace = '        failed: code.is_some_and(|code| code > 1),'
+
+[[plant]]
+name = "items: Muse's edit says no change"
+meant = "a_commands_result_says_its_exit_and_an_edits_its_change_as_muse_writes_them"
+runs = ["it-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/held.rs"
+find = '    let (_, after) = said.split_once("--- original\n+++ updated\n")?;'
+replace = '    let (_, after) = said.split_once("--- before\n+++ after\n")?;'
+
+# Phase 4 (CHF-20, CHF-21, T-731): the view drawn to the mock.
+
+[[plant]]
+name = "view: an item is drawn by its role alone, never the kind its reader said"
+meant = "draws thinking italic and dimmed, on the stream"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (item.kind) return item.kind"
+replace = ""
+
+[[plant]]
+name = "view: a failed call is drawn as one whose status is unknown"
+meant = "draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  const status = ['ok', 'failed', 'running'].includes(item.status) ? item.status : 'unknown'"
+replace = "  const status = ['ok', 'running'].includes(item.status) ? item.status : 'unknown'"
+
+[[plant]]
+name = "view: a call's output is never folded"
+meant = "draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (hidden === 0) {"
+replace = "  if (lines.length > 0) {"
+
+[[plant]]
+name = "view: blank lines at an output's end are counted as lines of it"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = '''  const lines = text.replace(/\s+$/, '').split('\n')'''
+replace = '''  const lines = text.split('\n')'''
+
+[[plant]]
+name = "view: a failed call's exit line above the fold is not kept in sight"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  const pinned = exit === undefined ? null : element('pre', 'history-exit', exit.trim())"
+replace = "  const pinned = null"
+
+[[plant]]
+name = "view: a call that went well keeps its exit line in sight too"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    status === 'failed' && !shown.some((line) => EXIT_LINE.test(line))"
+replace = "    !shown.some((line) => EXIT_LINE.test(line))"
+
+[[plant]]
+name = "view: a call of a minute or more says its time in seconds alone"
+meant = "unfolds an output by the keyboard, and keeps an exit line in sight that the last 5 lines do not hold"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (seconds < 60) return `${seconds.toFixed(1)}s`"
+replace = "  return `${seconds.toFixed(1)}s`"
+
+[[plant]]
+name = "view: a call's header is drawn as one line, its path and lines not their own colours"
+meant = "draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  const file = FILE_CALL.exec(header)"
+replace = "  const file = null"
+
+[[plant]]
+name = "view: an edit's removed rows are drawn as kept ones"
+meant = "draws an edit's change as red and green rows"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    } else if (line.startsWith('-')) row.dataset.sign = 'removed'"
+replace = "    } else if (line.startsWith('-')) row.dataset.sign = 'kept'"
+
+[[plant]]
+name = "view: an edit that went well draws its tool's words with its change"
+meant = "draws an edit's change as red and green rows"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (!item.diff || status === 'failed' || holds(item.text, find)) {"
+replace = "  if (true) {"
+
+[[plant]]
+name = "view: a compaction's summary is shown before any click"
+meant = "draws a compaction as a violet block, with its tokens, and its summary on a click"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  summary.hidden = !holds(item.text, find)"
+replace = "  summary.hidden = false"
+
+[[plant]]
+name = "view: a compaction says no tokens"
+meant = "draws a compaction as a violet block, with its tokens, and its summary on a click"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "      ? `Compacted from ${item.tokens.toLocaleString('en')} tokens`"
+replace = "      ? 'Compacted'"
+
+[[plant]]
+name = "view: the agent's words are drawn as written, not as markdown"
+meant = "draws the agent's words as markdown, in the mock's heading, marker and inline-code colours"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    words.append(...render(item.text))"
+replace = "    words.append(item.text)"
+
+[[plant]]
+name = "view: an earlier page takes the place of the stream, not above it"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "      if (before && list) {"
+replace = "      if (false) {"
+
+[[plant]]
+name = "view: an earlier page above the stream moves what was in view"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "        this.#body.scrollTop = this.#body.scrollHeight - below"
+replace = ""
+
+[[plant]]
+name = "view: the earlier row is drawn below the items"
+meant = "loads earlier history from a quiet first row, above what is shown, never repeating or skipping an item"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    list.append(...this.#earlier(history, find), ...items)"
+replace = "    list.append(...items, ...this.#earlier(history, find))"
+
+[[plant]]
+name = "view: thinking is not italic"
+meant = "draws thinking italic and dimmed, on the stream"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = ".history-item .history-thinking { font-style: italic;"
+replace = ".history-item .history-thinking { font-style: normal;"
+
+[[plant]]
+name = "view: the viewer is dark in a light system"
+meant = "draws in the mock's light colours, in a monospace of the Mac's or Windows'"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "@media (prefers-color-scheme: light) {\n  dialog.history-viewer {"
+replace = "@media (prefers-color-scheme: no-preference) {\n  dialog.history-viewer {"
+
+[[plant]]
+name = "view: the viewer's monospace has no face of Windows'"
+meant = "draws in the mock's dark colours, in a monospace of the Mac's or Windows'"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = """Menlo, "Cascadia Mono", "Cascadia Code", Consolas, monospace;"""
+replace = """Menlo, monospace;"""
+
+[[plant]]
+name = "view: a call's header is not searched"
+meant = "a_search_finds_a_calls_header_as_it_finds_its_output_a_long_output_by_its_header_too"
+runs = ["tl-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        if from_part == 0 && header.is_some_and(|header| folded(header).contains(needle)) {"
+replace = "        if from_part == 0 && header.is_some_and(|header| header.contains(needle)) {"
+
+# The review of Phase 4 (T-1210, T-731's second round): Muse's exit line, what a search
+# matched in sight, a search that ends with nothing, Tab in WebKit, the light and dark
+# contrast, and the task drawer's compaction colours.
+
+[[plant]]
+name = "view: Muse Code's JSON exit line of a failed call is not kept in sight"
+meant = "keeps each harness's exit line of a failed call in sight, Muse Code's JSON line too, its colour from the status alone"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = '''  /^\s*(?:(?:exit code:?|(?:command|process) exited with code)\s*-?\d+|"exit_code"\s*:\s*-?\d+\s*,?)\s*$/i'''
+replace = '''  /^\s*(?:(?:exit code:?|(?:command|process) exited with code)\s*-?\d+)\s*$/i'''
+
+[[plant]]
+name = "view: a search unfolds no output to the line it matched"
+meant = "shows what a search matched: a line above the fold, a successful edit’s output, a summary"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    hidden = Math.min(hidden, first === -1 ? 0 : first)"
+replace = ""
+
+[[plant]]
+name = "view: a successful edit's output that holds the search is not drawn"
+meant = "shows what a search matched: a line above the fold, a successful edit’s output, a summary"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (!item.diff || status === 'failed' || holds(item.text, find)) {"
+replace = "  if (!item.diff || status === 'failed') {"
+
+[[plant]]
+name = "view: a compaction's summary that holds the search stays shut"
+meant = "shows what a search matched: a line above the fold, a successful edit’s output, a summary"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  summary.hidden = !holds(item.text, find)"
+replace = "  summary.hidden = true"
+
+[[plant]]
+name = "view: a search that stopped short and found nothing at its end keeps its start's notice"
+meant = "a search that stopped short and goes on to the end says what the last read found"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "        if (!list.querySelector('.history-item')) {"
+replace = "        if (false) {"
+
+[[plant]]
+name = "view: WebKit's Tab passes the click rows by"
+meant = "reaches every click row and header control by Tab, and acts on Enter and Space"
+runs = ["tl-ui-webkit"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  row.tabIndex = 0"
+replace = ""
+
+[[plant]]
+name = "view: WebKit's Tab passes the header's Close by"
+meant = "reaches every click row and header control by Tab, and acts on Enter and Space"
+runs = ["tl-ui-webkit"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''<button class="history-icon" type="submit" tabindex="0" aria-label="Close"'''
+replace = '''<button class="history-icon" type="submit" aria-label="Close"'''
+
+[[plant]]
+name = "view: the light viewer's quiet words are the shade the review measured short"
+meant = "draws every text of the viewer at 4.5:1 or more on its own background, light"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "    --history-quiet: #5b5f63;"
+replace = "    --history-quiet: #686c70;"
+
+[[plant]]
+name = "view: the dark viewer's quiet words are too dim on a call's block"
+meant = "draws every text of the viewer at 4.5:1 or more on its own background, dark"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "  --history-quiet: #b0b5ba;"
+replace = "  --history-quiet: #9aa0a6;"
+
+[[plant]]
+name = "view: the search's placeholder is the engine's own grey"
+meant = "draws every text of the viewer at 4.5:1 or more on its own background, dark"
+runs = ["tl-ui"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = ".history-search input::placeholder { color: var(--history-quiet); opacity: 1; }"
+replace = ""
+
+[[plant]]
+name = "view: the task drawer's compaction summary is bordered as any item"
+meant = "names a compaction's summary in what a window wrote as one, never as what was sent to it"
+runs = ["tl-ui-drawer"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''.transcript-item[data-compaction="true"] { border-color: var(--amber); }'''
+replace = ""

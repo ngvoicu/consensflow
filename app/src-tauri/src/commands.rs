@@ -1,6 +1,6 @@
 //! What the board page may ask of the app: the daemon's operations it forwards,
 //! its panes' input, size and acknowledgements, its output subscription, and
-//! the address of the agents screens.
+//! the address of the daemon's harnesses screen.
 
 use std::sync::Arc;
 
@@ -235,7 +235,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "message.read",
     "message.approve",
     "message.decline",
-    "agents.list",
+    "harnesses.missing",
     "staff.last",
     "wakeup.get",
     "wakeup.set",
@@ -255,6 +255,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "project.meeting",
     "project.rules",
     "project.compaction",
+    "models.get",
+    "member.edit",
 ];
 
 #[tauri::command]
@@ -329,8 +331,8 @@ pub async fn subscribe_output<R: Runtime>(
     .await
 }
 
-/// The address of one agents screen (the agents, the harnesses): the
-/// daemon's page with the UI token, which the board's page frames in a
+/// The address of the daemon's screen (the harnesses; the saved agents' screen is no
+/// more): the daemon's page with the UI token, which the board's page frames in a
 /// dialog of its own.
 #[tauri::command]
 pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
@@ -339,7 +341,7 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
     // Off the async runtime: asked while the daemon is starting, it waits.
     run_blocking("agents_screen", move || {
         let Some(roster) = daemon.roster() else {
-            return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
+            return json!({"ok":false,"error":"the harnesses screen is not available: the daemon is not up"});
         };
         match agents_url(&roster, &page) {
             Ok(url) => json!({"ok":true,"url":url.as_str()}),
@@ -351,9 +353,9 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
     .await
 }
 
-const AGENTS_PAGES: &[&str] = &["", "harnesses"];
+const AGENTS_PAGES: &[&str] = &["harnesses"];
 
-/// The daemon's page for one agents screen, carrying the UI token.
+/// The daemon's page for its screen (the harnesses), carrying the UI token.
 fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
     if !AGENTS_PAGES.contains(&page) {
         return Err(format!("no agents screen {page:?}"));
@@ -434,9 +436,9 @@ mod tests {
             "token":"secret",
         }))
         .unwrap();
-        assert_eq!(
-            agents_url(&roster, "").unwrap().as_str(),
-            "http://localhost:43123/?token=secret"
+        assert!(
+            agents_url(&roster, "").is_err(),
+            "no screen of saved agents"
         );
         assert_eq!(
             agents_url(&roster, "harnesses").unwrap().as_str(),

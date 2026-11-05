@@ -1,7 +1,7 @@
 //! A trace played against the API under test, step by step, as `FORMAT.md`
 //! says: the ledger's calls replayed, the windows' tokens issued, each
 //! exchange sent and its answer compared as bytes (with the wake-ups, the
-//! events, the clock and the roster it drew on), each run of `cf` made whole
+//! events and the clock it drew on), each run of `cf` made whole
 //! and what it printed compared, with every request it wrote (and no other)
 //! as the trace has it, and each answer it was given as the bytes it got (its
 //! status, its type, its body), and at the end the database the ledger left: a
@@ -40,10 +40,11 @@ const WAIT: Duration = Duration::from_secs(60);
 /// recorded: by trace, the exchange's `id`. Node's traces of the API were made
 /// with no screens mounted, and the daemon mounts them in front of the API
 /// (`api::handle`), so a path that is theirs is theirs to answer, whatever
-/// window asks: `GET /` with a window's token is their bare 401 where the
-/// API's own routes said 404 `unknown-route`. Every other answer is held to
-/// Node's bytes, and a test holds this list to the traces.
-pub const DEPARTURES: [(&str, u64); 1] = [("corners-api-001", 5)];
+/// window asks. None of the traces asks one now: `GET /`, which the saved
+/// agents' screen answered, is the API's 404 `unknown-route` again, as Node's
+/// said it (harness-models). Every other answer is held to Node's bytes, and a
+/// test holds this list to the traces.
+pub const DEPARTURES: [(&str, u64); 0] = [];
 
 /// What the screens answer a request of theirs that carries no UI token, as
 /// the daemon gives it (`Screens::handle`): not the API's 401, which says why.
@@ -207,7 +208,6 @@ impl Player<'_> {
         self.until_received(id - 1).await?;
         self.hold()?;
         self.rig.ledger.give(step);
-        self.save_agents(std::slice::from_ref(step));
         let sending = self.send(step);
         if step["detached"] == true {
             self.exchanges.insert(
@@ -267,19 +267,6 @@ impl Player<'_> {
         })
     }
 
-    /// The saved agents the roster stand-in of these exchanges answered with.
-    fn save_agents(&self, exchanges: &[Value]) {
-        let rows: Vec<Value> = exchanges
-            .iter()
-            .flat_map(|exchange| exchange["seams"].as_array().cloned().unwrap_or_default())
-            .map(|call| call["result"].clone())
-            .filter(|row| !row.is_null())
-            .collect();
-        if !rows.is_empty() {
-            self.rig.save_agents(&rows);
-        }
-    }
-
     /// One run of `cf`, made whole.
     async fn run(&mut self, step: &Value) -> Result<(), String> {
         let id = step["id"].as_u64().expect("an id");
@@ -288,7 +275,6 @@ impl Player<'_> {
         for exchange in &exchanges {
             self.rig.ledger.give(exchange);
         }
-        self.save_agents(&exchanges);
         let strings = |key: &str| -> Vec<String> {
             step[key]
                 .as_array()

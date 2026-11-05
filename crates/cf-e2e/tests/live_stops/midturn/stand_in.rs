@@ -14,7 +14,7 @@ use cf_e2e::live::Log;
 use cf_e2e::process::stall;
 
 use super::begin::{begin, Begun};
-use super::judge::lane_went_working_then_closed;
+use super::judge::lane_went_working_and_was_kept;
 use super::{numbers, stop_it, Hold};
 use crate::{Ctx, FAKE_AGENT};
 
@@ -134,7 +134,7 @@ fn a_stand_in_paused_in_the_middle_of_its_turn_is_a_stop_the_daemon_pays_and_eac
 /// The same case against a window that does not stop for the pause: the stand-in takes the
 /// Escape and then a minute and a half to wind its turn down (`CF_TEST_WIND_DOWN_MS`), as
 /// a window does that is slow to end its turn, so the three rounds are ignored, the daemon
-/// closes the window and says so to the human and the chief, and the case does not hold.
+/// keeps the window and says so to the human and the chief, and the case does not hold.
 /// It says each round all the same, which is what it is for.
 #[test]
 fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_says_each_round_of() {
@@ -196,10 +196,9 @@ fn goes_on_through_three_rounds(folder: &str, before_the_pause: impl FnOnce(&Mem
         said.contains("FAIL the daemon read the window at rest, and paid the stop there: its reading of the window never turned idle in the "),
         "{said}"
     );
-    // The window that did not stop was closed after its third round (whether the notes
-    // that say so had landed by the end of the watch is the host's grace's). It was
-    // working at the first look at the lane, whenever that came.
-    assert!(lane_went_working_then_closed(&said), "{said}");
+    // The window that did not stop was kept after its third round, never closed (T-1199).
+    // It was working at the first look at the lane, whenever that came.
+    assert!(lane_went_working_and_was_kept(&said), "{said}");
     // Each round was looked at, and the window was working at each look.
     assert_eq!(
         said.matches("s after its last key: the lane read working")

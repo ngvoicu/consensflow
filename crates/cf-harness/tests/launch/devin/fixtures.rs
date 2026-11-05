@@ -361,11 +361,14 @@ pub(super) fn settled(session: &str) -> Record {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         }],
         in_flight: false,
         asking: false,
         failed: false,
         failure: None,
+        failure_kind: None,
+        last_call: None,
         took_back: false,
         model_moved: None,
         model_drift: None,
@@ -373,7 +376,9 @@ pub(super) fn settled(session: &str) -> Record {
         settlement: Settlement::Settled,
         pending: Default::default(),
         monitors: Vec::new(),
+        commands: Vec::new(),
         lines: Box::default(),
+        beside: Vec::new(),
     }
 }
 

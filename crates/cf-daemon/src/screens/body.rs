@@ -45,16 +45,5 @@ pub(super) fn property<'a>(body: &'a Value, name: &str) -> Result<Option<&'a Val
     }
 }
 
-/// The fields of `body` as a roster operation, which reads its input's
-/// properties one by one, reads them: those of an object, none for any other
-/// value, and for `null` the error of the first property it reads, `first`.
-pub(super) fn fields(body: &Value, first: &str) -> Result<Map<String, Value>, String> {
-    property(body, first)?;
-    Ok(match body {
-        Value::Object(fields) => fields.clone(),
-        _ => Map::new(),
-    })
-}
-
 #[cfg(test)]
 mod tests;

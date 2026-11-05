@@ -160,6 +160,10 @@ impl Fake {
                 .fold(invocation.cwd.clone(), |path, part| path.join(part));
             fs::create_dir_all(&release).unwrap();
             fs::write(release.join(self.platform.cf()), bytes).unwrap();
+            // Asked for with `--bin cf-shim`, as it is where the command is a program.
+            if invocation.args.iter().any(|word| word == "cf-shim") {
+                fs::write(release.join("cf-shim.exe"), b"the new shim").unwrap();
+            }
         }
     }
 

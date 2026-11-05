@@ -21,6 +21,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::models::ModelListing;
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 
@@ -29,11 +30,12 @@ use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
+    Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
+use crate::seams::processes::Processes;
 use crate::seams::{Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
@@ -50,6 +52,7 @@ pub struct PiAdapter {
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     entropy: Rc<dyn Entropy>,
+    processes: Rc<dyn Processes>,
 }
 
 impl PiAdapter {
@@ -60,11 +63,47 @@ impl PiAdapter {
             records: Rc::clone(&services.records),
             time: Rc::clone(&services.time),
             entropy: Rc::clone(&services.entropy),
+            processes: Rc::clone(&services.processes),
         }
     }
 }
 
 impl Adapter for PiAdapter {
+    fn models(&self, fetch: bool) -> Work<'_, Result<ModelListing, String>> {
+        Box::pin(super::models::listed(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+            fetch,
+        ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(
+        &'a self,
+        session: &'a str,
+        _asked: Option<&'a str>,
+    ) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, &self.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window: Enter there keeps it to that conversation, and Ctrl+S makes it your Pi default.")
+    }
+
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(super::models::default_model(
+            &self.env,
+            &*self.processes,
+            &*self.time,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Pi, &self.env)?;
@@ -196,6 +235,10 @@ impl Adapter for PiAdapter {
             folder,
             paths::global_specmint(&self.env, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Pi, &self.env, Some(*specs), id).map(|_| ())
     }
 }
 

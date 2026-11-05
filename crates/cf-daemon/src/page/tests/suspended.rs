@@ -113,7 +113,7 @@ async fn each_section_saves_for_a_closed_project_and_nothing_starts_or_goes_unti
                 ),
                 (
                     "member.add",
-                    json!({ "project": project, "agent": "hera", "roles": ["worker"] }),
+                    json!({ "project": project, "harness": "claude-code", "model": "hera", "tier": "standard", "roles": ["worker"] }),
                 ),
                 (
                     "member.roles",

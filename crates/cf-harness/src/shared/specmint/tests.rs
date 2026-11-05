@@ -428,6 +428,62 @@ fn nothing_is_written_for_a_launch_with_no_specs_or_whose_harness_has_the_varian
 }
 
 #[test]
+fn a_window_that_is_open_is_given_the_files_a_launch_writes_and_nothing_where_the_harness_has_the_variant(
+) {
+    for harness in [
+        Harness::Claude,
+        Harness::Pi,
+        Harness::Devin,
+        Harness::Codex,
+        Harness::Muse,
+    ] {
+        let id = id();
+        let (by_launch, by_window) = (Fake::new(), Fake::new());
+        let (launch_env, window_env) = (home_env(&by_launch), home_env(&by_window));
+        let skill =
+            place(harness, &launch_env, Variant::Core, "docs/specs", None).expect("a place");
+        let specs = Specs {
+            variant: Variant::Core,
+            folder: "docs/specs",
+            skill: &skill,
+        };
+        write_own(harness, &launch_env, &launch(&id, Some(specs))).expect("written");
+        let window_skill =
+            place(harness, &window_env, Variant::Core, "docs/specs", None).expect("a place");
+        let window_specs = Specs {
+            skill: &window_skill,
+            ..specs
+        };
+        let copy = write_own_of(harness, &window_env, Some(window_specs), &id)
+            .expect("written")
+            .expect("a copy");
+        assert_eq!(copy.file(), window_skill.path(), "{harness:?}");
+        let (launched, opened) = (
+            files_under(Path::new(skill.path()).parent().expect("a folder")),
+            files_under(Path::new(window_skill.path()).parent().expect("a folder")),
+        );
+        assert_eq!(
+            launched, opened,
+            "{harness:?}: the same files, the same words"
+        );
+        // The human's own copy is the harness's already: nothing is written for it.
+        let theirs = Fake::new();
+        let their_env = home_env(&theirs);
+        let installed = Skill::Global("/home/me/.claude/skills/specmint-core/SKILL.md".to_owned());
+        let global = Specs {
+            skill: &installed,
+            ..specs
+        };
+        assert_eq!(
+            write_own_of(harness, &their_env, Some(global), &id),
+            Ok(None)
+        );
+        assert_eq!(write_own_of(harness, &their_env, None, &id), Ok(None));
+        assert!(!exists(&theirs.at("cf")), "{harness:?}: nothing was made");
+    }
+}
+
+#[test]
 fn a_window_that_has_no_home_to_write_in_says_so() {
     let id = id();
     let skill = Skill::Own("/nowhere/SKILL.md".to_owned());

@@ -5,8 +5,8 @@
 //! a part at a time, the participant's own alone; and nothing written or woken.
 
 use cf_ledger::{
-    ChiefSwitch, HistoryAsk, HistoryEntry, HistoryFrom, NewChief, NewMember, NewNote, NewProject,
-    HISTORY_PART, HISTORY_SCAN_BYTES, PAGE_BYTES,
+    ChiefSwitch, HistoryAsk, HistoryFrom, NewChief, NewMember, NewNote, NewProject, HISTORY_PART,
+    HISTORY_SCAN_BYTES, PAGE_BYTES,
 };
 use serde_json::Value;
 
@@ -23,7 +23,8 @@ fn project(rig: &Rig, name: &str) -> i64 {
             name: name.into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("ares".into()),
+                model: Some("ares".into()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -38,7 +39,9 @@ fn project(rig: &Rig, name: &str) -> i64 {
         .add_member(
             id,
             &NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "pi".into(),
                 designer: false,
                 roles: vec!["worker".into()],
@@ -135,7 +138,8 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                     harbour,
                     &ChiefSwitch {
                         harness: "codex".into(),
-                        agent: "maia".into(),
+                        model: "maia".into(),
+                        effort: None,
                         cut: false,
                     },
                 )
@@ -164,23 +168,14 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 .borrow()
                 .read_history(harbour, "chief", &ask_all)
                 .unwrap();
-            let heading = |id: i64| {
-                read.conversations
-                    .iter()
-                    .find(|heading| heading.conversation.id == id)
-                    .unwrap()
-                    .conversation
-                    .clone()
-            };
             // The place each item stands at, which a page gives with it.
             let row = |id: &str| {
                 read.entries
                     .iter()
-                    .find_map(|entry| match entry {
-                        HistoryEntry::Item(row) if row.item.id == id => Some(row.key.row),
-                        _ => None,
-                    })
+                    .find(|row| row.item.id == id)
                     .unwrap()
+                    .key
+                    .row
             };
             let logged = rig.kit.ledger.borrow().events(harbour, 0, 500).unwrap().len();
 
@@ -191,38 +186,22 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 json!({
                     "ok": true,
                     "history": {
-                        "conversations": [
+                        "items": [
                             {
-                                "id": first.id, "harness": "claude-code", "agent": "ares",
-                                "startedAt": heading(first.id).started_at,
-                                "endedAt": heading(first.id).ended_at,
-                                "endedBy": { "by": "switch", "harness": "codex", "agent": "maia" },
-                                "toolsLeftOut": 1,
-                                "items": [
-                                    {
-                                        "row": row("u-1"), "id": "u-1", "role": "user", "complete": true, "at": at,
-                                        "text": format!("[ConsensFlow m-{here} · note from @human]\nLook at the docs"),
-                                        "delivery": { "line": format!("· m-{here}: a note from @human: \"Look at the docs\" (cf inbox read m-{here})"), "at": 0 },
-                                    },
-                                    { "row": row("a-1"), "id": "a-1", "role": "assistant", "text": "Reading <b>them</b>", "complete": true, "at": at },
-                                    { "row": row("u-3"), "id": "u-3", "role": "user", "text": "This session is being continued.", "complete": true, "at": at, "compaction": true },
-                                    // Another project's message, and another participant's: text, and nothing of them.
-                                    {
-                                        "row": row("u-4"), "id": "u-4", "role": "user", "complete": true, "at": at,
-                                        "text": format!("[ConsensFlow m-{theirs} · note]\nx"),
-                                    },
-                                    { "row": row("u-5"), "id": "u-5", "role": "user", "complete": true, "at": at, "text": quoted },
-                                ],
+                                "conversation": first.id, "row": row("u-1"), "id": "u-1", "role": "user", "complete": true, "at": at,
+                                "text": format!("[ConsensFlow m-{here} · note from @human]\nLook at the docs"),
+                                "delivery": { "line": format!("· m-{here}: a note from @human: \"Look at the docs\" (cf inbox read m-{here})"), "at": 0 },
                             },
+                            { "conversation": first.id, "row": row("a-1"), "id": "a-1", "role": "assistant", "text": "Reading <b>them</b>", "complete": true, "at": at },
+                            { "conversation": first.id, "row": row("u-3"), "id": "u-3", "role": "user", "text": "This session is being continued.", "complete": true, "at": at, "compaction": true },
+                            // Another project's message, and another participant's: text, and nothing of them.
                             {
-                                "id": second.id, "harness": "codex", "agent": "maia",
-                                "startedAt": heading(second.id).started_at,
-                                "endedAt": null, "endedBy": null,
-                                "toolsLeftOut": 0,
-                                "items": [
-                                    { "row": row("m-1"), "id": "m-1", "role": "assistant", "text": "Taken over", "complete": true, "at": at },
-                                ],
+                                "conversation": first.id, "row": row("u-4"), "id": "u-4", "role": "user", "complete": true, "at": at,
+                                "text": format!("[ConsensFlow m-{theirs} · note]\nx"),
                             },
+                            { "conversation": first.id, "row": row("u-5"), "id": "u-5", "role": "user", "complete": true, "at": at, "text": quoted },
+                            // The conversation after the switch, in the same stream.
+                            { "conversation": second.id, "row": row("m-1"), "id": "m-1", "role": "assistant", "text": "Taken over", "complete": true, "at": at },
                         ],
                         "older": null,
                         "newer": null,
@@ -239,10 +218,10 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 json!({ "project": harbour, "handle": "chief", "tools": true, "find": "PASSED" }),
             )
             .await;
-            assert_eq!(tools["history"]["conversations"][0]["items"][0]["text"], "ok 12 passed");
+            assert_eq!(tools["history"]["items"][0]["text"], "ok 12 passed");
             // A page from a place a page said (before Codex's first item); never
             // before and after at once.
-            let place = serde_json::to_value(read.entries[0].key()).unwrap();
+            let place = serde_json::to_value(read.entries[0].key).unwrap();
             assert_eq!(place["conversation"], second.id);
             let before = ask(
                 &app,
@@ -250,12 +229,18 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 json!({ "project": harbour, "handle": "chief", "before": place }),
             )
             .await;
-            assert_eq!(before["history"]["conversations"].as_array().unwrap().len(), 1, "{before}");
+            let conversations: std::collections::HashSet<&Value> = before["history"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| &item["conversation"])
+                .collect();
+            assert_eq!(conversations.len(), 1, "{before}");
             // Newer goes on after the newest item that page shows, the chief's last on Claude.
             assert_eq!(before["history"]["newer"]["conversation"], first.id);
             assert_eq!(
                 before["history"]["newer"],
-                serde_json::to_value(read.entries[1].key()).unwrap(),
+                serde_json::to_value(read.entries[1].key).unwrap(),
                 "u-5's place"
             );
             assert_eq!(
@@ -276,6 +261,233 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 logged,
                 "and writes nothing"
             );
+        })
+        .await;
+}
+
+/// What a page must never say, in any key or value: a heading's fields, and the
+/// harnesses, the models and the handle of the chief whose history it is (CHF-11).
+const NO_HEADING: [&str; 14] = [
+    "conversations",
+    "harness",
+    "agent",
+    "startedAt",
+    "endedAt",
+    "endedBy",
+    "toolsLeftOut",
+    "claude-code",
+    "codex",
+    "Claude",
+    "Codex",
+    "ares",
+    "maia",
+    "chief",
+];
+
+/// Whether `answer` says nothing [`NO_HEADING`] holds; the first it says, where it does.
+fn headed(answer: &Value) -> Option<&'static str> {
+    let said = answer.to_string();
+    NO_HEADING.into_iter().find(|word| said.contains(word))
+}
+
+/// Each item a page shows, as its conversation, its id and its text.
+fn stream(answer: &Value) -> Vec<(i64, String, String)> {
+    answer["history"]["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a page of items: {answer}"))
+        .iter()
+        .map(|item| {
+            (
+                item["conversation"].as_i64().unwrap(),
+                item["id"].as_str().unwrap().to_owned(),
+                item["text"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// The place a page shows `id` at, as a page says a place.
+fn place_of(answer: &Value, id: &str) -> Value {
+    let item = answer["history"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == id)
+        .unwrap();
+    json!({ "conversation": item["conversation"], "row": item["row"] })
+}
+
+#[tokio::test]
+async fn the_history_is_one_stream_of_items_oldest_first_across_three_conversations_on_two_harnesses(
+) {
+    // CHF-11: three conversations of the chief, two on Claude Code and one on
+    // Codex after a Switch chief, and the one going on now with nothing copied
+    // yet. The page is their items, oldest first, each with its conversation and
+    // row: no heading, harness, model or name anywhere, and the empty one absent.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let copy = |conversation: i64, items: &[Value]| {
+                rig.kit
+                    .ledger
+                    .borrow_mut()
+                    .copy_transcript(conversation, items, 0)
+                    .unwrap();
+            };
+            let first = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            copy(first.id, &[item("u-1", "user", "Ship the parser"), item("a-1", "assistant", "On it")]);
+            let cleared = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .follow_conversation(chief, "claude-code", "s-2")
+                .unwrap();
+            copy(cleared.id, &[item("u-2", "user", "A fresh start")]);
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .switch_chief(
+                    harbour,
+                    &ChiefSwitch {
+                        harness: "codex".into(),
+                        model: "maia".into(),
+                        effort: None,
+                        cut: false,
+                    },
+                )
+                .unwrap();
+            let third = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "codex")
+                .unwrap();
+            copy(third.id, &[item("m-1", "assistant", "Taken over"), item("u-3", "user", "Go on")]);
+            let now = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "codex")
+                .unwrap();
+
+            let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            let keys: Vec<&String> = answer["history"].as_object().unwrap().keys().collect();
+            assert_eq!(keys, ["items", "older", "newer", "partial"], "{answer}");
+            assert_eq!(headed(&answer), None, "{answer}");
+            let said = |id: &str, text: &str, conversation: i64| (conversation, id.to_owned(), text.to_owned());
+            assert_eq!(
+                stream(&answer),
+                [
+                    said("u-1", "Ship the parser", first.id),
+                    said("a-1", "On it", first.id),
+                    said("u-2", "A fresh start", cleared.id),
+                    said("m-1", "Taken over", third.id),
+                    said("u-3", "Go on", third.id),
+                ]
+            );
+            assert!(stream(&answer).iter().all(|(conversation, ..)| *conversation != now.id));
+            let fields: Vec<&String> = answer["history"]["items"][0].as_object().unwrap().keys().collect();
+            assert_eq!(fields, ["conversation", "row", "id", "role", "text", "complete", "at"]);
+
+            // Paging across a conversation's edge, each way, from a place a page said:
+            // before Codex's first item are Claude Code's two conversations, and after
+            // the first conversation's last item, the second's and the third's.
+            let before = ask(
+                &app,
+                "history.get",
+                json!({ "project": harbour, "handle": "chief", "before": place_of(&answer, "m-1") }),
+            )
+            .await;
+            assert_eq!(headed(&before), None, "{before}");
+            let ids = |page: &Value| -> Vec<String> { stream(page).into_iter().map(|(_, id, _)| id).collect() };
+            assert_eq!(ids(&before), ["u-1", "a-1", "u-2"]);
+            assert_eq!(before["history"]["older"], Value::Null, "nothing older");
+            assert_eq!(before["history"]["newer"], place_of(&answer, "u-2"));
+            let after = ask(
+                &app,
+                "history.get",
+                json!({ "project": harbour, "handle": "chief", "after": place_of(&answer, "a-1") }),
+            )
+            .await;
+            assert_eq!(headed(&after), None, "{after}");
+            assert_eq!(ids(&after), ["u-2", "m-1", "u-3"]);
+            assert_eq!(after["history"]["older"], place_of(&answer, "u-2"));
+            assert_eq!(after["history"]["newer"], Value::Null, "nothing newer");
+            // A member's history is drawn the same way: one stream, nothing named.
+            let zeus = ask(&app, "history.get", json!({ "project": harbour, "handle": "zeus" })).await;
+            assert_eq!(zeus["history"], json!({ "items": [], "older": null, "newer": null, "partial": false }));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_search_runs_across_conversations_and_across_a_part_boundary_and_names_no_conversation() {
+    // CHF-13: the words found in a long item of the first conversation, where they
+    // cross from one part to the next, and in the third's; the second holds none.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let mut conversations = Vec::new();
+            let long = format!("{}needle{}", "é".repeat(HISTORY_PART - 3), "ü".repeat(100));
+            let copied = [
+                ("claude-code", vec![item("long", "assistant", &long)]),
+                ("claude-code", vec![item("u-2", "user", "nothing here")]),
+                ("codex", vec![item("u-3", "user", "A NEEDLE again")]),
+            ];
+            for (harness, items) in copied {
+                let conversation = rig
+                    .kit
+                    .ledger
+                    .borrow_mut()
+                    .start_conversation(chief, harness)
+                    .unwrap();
+                rig.kit
+                    .ledger
+                    .borrow_mut()
+                    .copy_transcript(conversation.id, &items, 0)
+                    .unwrap();
+                conversations.push(conversation.id);
+            }
+            let found = ask(
+                &app,
+                "history.get",
+                json!({ "project": harbour, "handle": "chief", "find": "Needle" }),
+            )
+            .await;
+            assert_eq!(found["ok"], true, "{found}");
+            assert_eq!(headed(&found), None, "{found}");
+            let items = found["history"]["items"].as_array().unwrap();
+            let shown: Vec<(i64, &str)> = items
+                .iter()
+                .map(|item| {
+                    (
+                        item["conversation"].as_i64().unwrap(),
+                        item["id"].as_str().unwrap(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                shown,
+                [(conversations[0], "long"), (conversations[2], "u-3")]
+            );
+            // The long one shows the part around the words, which begin in its first part.
+            let cut = &items[0]["cut"];
+            assert!(cut["from"].as_u64().unwrap() > 0, "{cut}");
+            assert!(items[0]["text"].as_str().unwrap().contains("needle"));
         })
         .await;
 }
@@ -302,7 +514,7 @@ async fn reads_a_long_item_whole_a_part_at_a_time_and_only_its_participant_s() {
                 .copy_transcript(conversation.id, &[item("long", "assistant", &whole)], 0)
                 .unwrap();
             let page = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
-            let shown = &page["history"]["conversations"][0]["items"][0];
+            let shown = &page["history"]["items"][0];
             assert_eq!(shown["cut"], json!({ "from": 0, "bytes": whole.len(), "revision": 0 }));
             let row = shown["row"].clone();
             let mut read = String::new();
@@ -375,7 +587,7 @@ async fn folds_each_delivery_from_its_message_s_opening_and_never_loads_a_body_w
             let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
             let said = answer.to_string();
             assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
-            let lines: Vec<&str> = answer["history"]["conversations"][0]["items"]
+            let lines: Vec<&str> = answer["history"]["items"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -419,7 +631,7 @@ async fn an_item_s_id_however_long_is_shown_cut_and_its_page_fits_a_frame() {
             let said = answer.to_string();
             assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
             assert!(said.len() <= PAGE_BYTES, "{} bytes", said.len());
-            let shown = &answer["history"]["conversations"][0]["items"][0];
+            let shown = &answer["history"]["items"][0];
             assert_eq!(shown["text"], "ok");
             // As a page shows it: its first characters, and "…"; the id is kept whole.
             assert_eq!(
@@ -439,10 +651,12 @@ async fn an_item_s_id_however_long_is_shown_cut_and_its_page_fits_a_frame() {
 }
 
 #[tokio::test]
-async fn pages_through_thousands_of_conversations_that_show_no_item_each_reply_held_whole() {
-    // The reviewers' case: 10,000 conversations of tools' outputs alone, the
-    // tools left out, each shown as its heading. Each reply fits a frame and
-    // says where the next goes on, and every heading comes once.
+async fn reads_past_thousands_of_conversations_that_show_no_item_to_the_one_item_before_them() {
+    // The reviewers' case, with no headings (CHF-11): the chief's first words,
+    // then 10,000 conversations of tools' outputs alone, the tools left out. No
+    // page shows a conversation that shows no item: each read goes through as
+    // much as one may and says where the next goes on, each reply fits a frame,
+    // and a few reads come to the first words.
     LocalSet::new()
         .run_until(async {
             let rig = rig();
@@ -450,6 +664,17 @@ async fn pages_through_thousands_of_conversations_that_show_no_item_each_reply_h
             register(&daemon, &rig.page, &rig.spawn);
             let harbour = project(&rig, "harbour");
             let chief = chief_of(&rig, harbour);
+            let first = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(first.id, &[item("u-1", "user", "The first words")], 0)
+                .unwrap();
             for at in 0..10_000 {
                 let conversation = rig
                     .kit
@@ -467,25 +692,52 @@ async fn pages_through_thousands_of_conversations_that_show_no_item_each_reply_h
                     )
                     .unwrap();
             }
-            let mut headed = Vec::new();
+            let mut shown = Vec::new();
+            let mut reads = 0;
             let mut asked = json!({ "project": harbour, "handle": "chief" });
-            for _ in 0..20 {
+            loop {
+                reads += 1;
+                assert!(reads <= 10, "no end");
                 let answer = ask(&app, "history.get", asked.clone()).await;
                 let said = answer.to_string();
                 assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(200)]);
                 assert!(said.len() <= PAGE_BYTES);
-                for conversation in answer["history"]["conversations"].as_array().unwrap() {
-                    assert_eq!(conversation["toolsLeftOut"], 1);
-                    headed.push(conversation["id"].as_i64().unwrap());
+                assert_eq!(headed(&answer), None, "{}", &said[..said.len().min(200)]);
+                // The 10,000 cost more than one read may go through: the first shows nothing.
+                if reads == 1 {
+                    assert_eq!(stream(&answer), [], "{}", &said[..said.len().min(200)]);
                 }
+                shown.extend(stream(&answer));
                 let older = &answer["history"]["older"];
                 if older.is_null() {
                     break;
                 }
+                // A read that stopped at its bound with nothing to show says so.
+                assert_eq!(
+                    answer["history"]["partial"],
+                    true,
+                    "{}",
+                    &said[..said.len().min(200)]
+                );
                 asked = json!({ "project": harbour, "handle": "chief", "before": older });
             }
-            let once: std::collections::HashSet<i64> = headed.iter().copied().collect();
-            assert_eq!((headed.len(), once.len()), (10_000, 10_000));
+            assert_eq!(
+                shown,
+                [(first.id, "u-1".to_owned(), "The first words".to_owned())]
+            );
+            assert!((2..=5).contains(&reads), "{reads} reads");
         })
         .await;
+}
+
+#[test]
+fn a_page_of_a_list_is_at_most_half_the_frame_the_bridge_carries() {
+    // `state-list-grows-toward-frame-cap`: the replies above are held to `PAGE_BYTES`, so a
+    // bound raised past the frame passes them as it passes itself. It is half the frame:
+    // what the page reads beside a list (a refresh asks for several) stays clear of it.
+    let frame = cf_bridge::local::DEFAULT_MAX_FRAME_BYTES;
+    assert!(
+        PAGE_BYTES * 2 <= frame,
+        "{PAGE_BYTES} bytes a page, {frame} a frame"
+    );
 }

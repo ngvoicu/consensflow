@@ -15,6 +15,9 @@ use serde_json::{json, Value};
 
 const SETTLE: i64 = 3_000;
 
+/// What the lane of a window read by the fallback says while its screen has not held still.
+const UNQUIET: &str = "at rest by its record, but what its screen shows changed within the last 3 s: its harness says nothing of its own, and a message waits for its screen to hold still";
+
 fn paced() -> Context {
     Context::made(Made {
         settle_ms: SETTLE,
@@ -257,13 +260,51 @@ fn the_look_that_lets_a_message_go_is_in_its_delivery_begun() {
     assert_eq!(look["items"], json!(1));
 }
 
+/// The lane of a window read by the fallback says a quiet screen only where the pane host
+/// says its screen has held still for the settle, as the pacing asks before a message goes:
+/// it said so of a Muse window the pacing held for six minutes (T-1081, T-1083).
 #[test]
 fn a_harness_with_no_idle_word_of_its_own_waits_for_a_quiet_screen_too_and_says_so() {
     let context = paced();
     context.adapter.idle_word.set(false);
     context
         .host
-        .set_snapshot(json!({ "bottom": [TRUST_PROMPT] }));
+        .set_snapshot(json!({ "screenQuietMs": SETTLE - 1, "bottom": [TRUST_PROMPT] }));
+    let project = chief_at_rest(&context);
+    let chief = context.id(project, "chief");
+    assert_eq!(
+        context.dispatcher.activity(chief).reason.as_deref(),
+        Some(UNQUIET)
+    );
+    let note = context.note(project, "zeus", "chief", "One");
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    assert_eq!(
+        context.dispatcher.activity(chief).reason.as_deref(),
+        Some(UNQUIET)
+    );
+    context
+        .host
+        .set_snapshot(json!({ "screenQuietMs": SETTLE, "bottom": [TRUST_PROMPT] }));
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}
+
+/// T-1083: Muse Code 1.4.14, at rest after a command it ran in the background was stopped,
+/// prints every 50 ms and changes nothing it shows. The pacing read such a window by its
+/// output, which never went quiet, and held its next message for good (the words of T-1081's
+/// live resume waited 360 s). A window read by the fallback is let in by what its screen
+/// shows: one that prints without end and shows the same reads at rest by a quiet screen, and
+/// its message goes.
+#[test]
+fn a_window_read_by_the_fallback_that_prints_and_shows_the_same_is_let_in() {
+    let context = paced();
+    context.adapter.idle_word.set(false);
+    context.host.set_snapshot(
+        json!({ "outputQuietMs": 40, "screenQuietMs": 6 * SETTLE, "bottom": [TRUST_PROMPT] }),
+    );
     let project = chief_at_rest(&context);
     let chief = context.id(project, "chief");
     assert_eq!(
@@ -271,18 +312,79 @@ fn a_harness_with_no_idle_word_of_its_own_waits_for_a_quiet_screen_too_and_says_
         Some("at rest by its record and a quiet screen: its harness says nothing of its own")
     );
     let note = context.note(project, "zeus", "chief", "One");
-    context
-        .host
-        .set_snapshot(json!({ "outputQuietMs": SETTLE - 1, "bottom": [TRUST_PROMPT] }));
     context.pass().unwrap();
     context.advance(SETTLE);
     context.pass().unwrap();
-    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
-    context
-        .host
-        .set_snapshot(json!({ "outputQuietMs": SETTLE, "bottom": [TRUST_PROMPT] }));
-    context.pass().unwrap();
     assert_eq!(pasted(&context, "chief"), [note.id]);
+    let begun = logged(&context, "delivery.begun");
+    assert_eq!(
+        (
+            &begun[0]["look"]["screenQuietMs"],
+            &begun[0]["look"]["outputQuietMs"]
+        ),
+        (&json!(6 * SETTLE), &json!(40))
+    );
+}
+
+/// T-1139's live night, T-1155: a Muse worker's task was stopped by the chief's tell inside a
+/// long command, and resumed; the turn ended and its record said so, and the pane wrote every
+/// 50 ms or so (the pacing found it printing 45 ms before) while its screen had shown the same
+/// for 4.3 s. The words that resumed the task, a `task` message and no one's urgent row, were
+/// held for four minutes and never went (the base T-1139 ran on judged the window by its
+/// output). They go at the first look the screen has held still for the settle, once, on their
+/// first attempt, the worker reading working meanwhile, and the look keeps both clocks.
+#[test]
+fn the_words_that_resumed_a_task_go_into_a_worker_whose_pane_never_stops_writing() {
+    let context = paced();
+    context.adapter.idle_word.set(false);
+    context.host.set_snapshot(
+        json!({ "outputQuietMs": 45, "screenQuietMs": 4_346, "bottom": [TRUST_PROMPT] }),
+    );
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.adapter.with("zeus", |agent| agent.settled = true);
+    context.pass().unwrap();
+    // The chief's tell stopped it; the turn that answered the tell ended.
+    context.pause_task(project.id, 1);
+    context.pass().unwrap();
+    context.resume_task(project.id, 1, "Go on");
+    let words = context
+        .task(project.id, 1)
+        .messages
+        .into_iter()
+        .find(|message| message.body == "Resumed: Go on")
+        .unwrap();
+    context.pass().unwrap();
+    assert!(
+        !pasted(&context, "zeus").contains(&words.id),
+        "the window has not rested the settle"
+    );
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        pasted(&context, "zeus")
+            .iter()
+            .filter(|&&id| id == words.id)
+            .count(),
+        1,
+        "the words went in, once"
+    );
+    let begun: Vec<Value> = logged(&context, "delivery.begun")
+        .into_iter()
+        .filter(|data| data["message"] == words.id)
+        .collect();
+    assert_eq!(begun.len(), 1, "{begun:?}");
+    assert_eq!(begun[0]["attempt"], 1, "{begun:?}");
+    assert_eq!(
+        (
+            &begun[0]["look"]["status"],
+            &begun[0]["look"]["outputQuietMs"],
+            &begun[0]["look"]["screenQuietMs"]
+        ),
+        (&json!("idle by the fallback"), &json!(45), &json!(4_346))
+    );
 }
 
 /// T-946: Muse 1.4.14 held still six seconds as it started, before its first frame, and the
@@ -297,7 +399,7 @@ fn a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_pro
     // Its screen is quiet, its harness still starting: no prompt drawn.
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": ["Muse Code 1.4.14", ""] }));
+        .set_snapshot(json!({ "screenQuietMs": 6 * SETTLE, "bottom": ["Muse Code 1.4.14", ""] }));
     let project = chief_at_rest(&context);
     let chief = context.id(project, "chief");
     let note = context.note(project, "zeus", "chief", "One");
@@ -310,7 +412,7 @@ fn a_window_read_by_the_fallback_is_not_at_rest_before_its_harness_shows_its_pro
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": [TRUST_PROMPT] }));
+        .set_snapshot(json!({ "screenQuietMs": 6 * SETTLE, "bottom": [TRUST_PROMPT] }));
     for _ in 0..3 {
         context.advance(SETTLE);
         context.pass().unwrap();
@@ -328,7 +430,7 @@ fn a_window_read_by_the_fallback_whose_record_has_items_is_not_at_rest_before_it
     // Its screen is quiet, its harness still starting: no prompt drawn.
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": ["Muse Code 1.4.14", ""] }));
+        .set_snapshot(json!({ "screenQuietMs": 6 * SETTLE, "bottom": ["Muse Code 1.4.14", ""] }));
     let project = context.with_staff(&["zeus"]);
     context.pass().unwrap();
     // Its record holds an answer before its harness has drawn its prompt.
@@ -343,7 +445,7 @@ fn a_window_read_by_the_fallback_whose_record_has_items_is_not_at_rest_before_it
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 6 * SETTLE, "bottom": [TRUST_PROMPT] }));
+        .set_snapshot(json!({ "screenQuietMs": 6 * SETTLE, "bottom": [TRUST_PROMPT] }));
     for _ in 0..3 {
         context.advance(SETTLE);
         context.pass().unwrap();

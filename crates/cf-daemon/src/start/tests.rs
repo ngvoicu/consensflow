@@ -469,14 +469,15 @@ async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_ex
         .await;
 }
 
+/// A settings file a hand edit broke stops no start, and is left as the human wrote it:
+/// the start reads nothing of it (a chief's launch reads the app's specs from it, as off).
 #[tokio::test]
-async fn an_agents_file_that_cannot_be_used_stops_no_start_and_the_log_says_why() {
+async fn a_settings_file_that_cannot_be_read_stops_no_start_and_is_left_as_it_is() {
     LocalSet::new()
         .run_until(async {
             let root = tempfile::tempdir().unwrap();
             let file = root.path().join("consensflow").join("agents.json");
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            // A hand edit's trailing comma: the roster refuses the file and saves nothing over it.
             let broken =
                 "{\"schemaVersion\": 1, \"agents\": [{\"id\": \"mine\", \"kind\": \"codex\"},]}\n";
             std::fs::write(&file, broken).unwrap();
@@ -485,16 +486,6 @@ async fn an_agents_file_that_cannot_be_used_stops_no_start_and_the_log_says_why(
                 ask(&rig.app, "ping", json!({})).await,
                 json!({ "ok": true })
             );
-            let lines = log_lines(&rig.home);
-            let at = lines
-                .iter()
-                .position(|line| said_of(line) == "error the agents file could not be used")
-                .expect("it said so");
-            assert!(
-                lines[at + 1].starts_with("    Your agents file "),
-                "{lines:?}"
-            );
-            assert!(lines[at + 1].contains("is not valid JSON"), "{lines:?}");
             assert_eq!(
                 std::fs::read_to_string(&file).unwrap(),
                 broken,

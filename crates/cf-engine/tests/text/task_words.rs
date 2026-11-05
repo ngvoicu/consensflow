@@ -19,7 +19,9 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
     let member = |agent: &str, tier: &str| NewMember {
-        agent: agent.into(),
+        model: None,
+        effort: None,
+        model_name: Some(agent.into()),
         harness: "claude-code".into(),
         designer: false,
         roles: vec!["worker".into()],
@@ -31,7 +33,8 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
             name: "app".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("apollo".into()),
+                model: Some("apollo".into()),
+                effort: None,
             },
             staff: vec![member("zeus", "critical"), member("diana", "standard")],
             gate: false,

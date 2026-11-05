@@ -263,38 +263,84 @@ fn roles_refused(offender: &str) -> LedgerError {
     )
 }
 
-/// A saved agent's id, as the roster names it: what a chief runs on, and
-/// what a member is. A member's id is its handle too, so it is never one of
-/// the handles in `taken`.
-pub fn require_agent_id(agent: &str, taken: &[&str]) -> Result<(), LedgerError> {
-    if is_agent_id(agent) && !taken.contains(&agent) {
+/// A model's id as a harness names it, what its `--model` takes: the model a chief runs
+/// on (CHF-04). Not an agent's id: Pi's holds its provider and may hold a `/` of
+/// OpenRouter's own (`openrouter/anthropic/claude-fable-5`), Claude Code's a context
+/// suffix (`[1m]`), OpenRouter's a `~`. In ASCII, 256 bytes at most, no space or control,
+/// and never begun by a `-`, which a command line would read as a flag.
+pub fn require_model_id(model: &str) -> Result<(), LedgerError> {
+    if is_model_id(model) {
         return Ok(());
     }
     Err(LedgerError::refused(
-        "invalid-agent",
-        format!("not an agent id: {}", quoted(agent)),
+        "invalid-model",
+        format!("not a model id: {}", quoted(model)),
     ))
 }
 
-/// `value` read as a saved agent's id.
-pub fn parse_agent_id(value: Option<&Value>, taken: &[&str]) -> Result<String, LedgerError> {
+/// `value` read as a model's id.
+pub fn parse_model_id(value: Option<&Value>) -> Result<String, LedgerError> {
     match value {
-        Some(Value::String(agent)) => require_agent_id(agent, taken).map(|()| agent.clone()),
+        Some(Value::String(model)) => require_model_id(model).map(|()| model.clone()),
         _ => Err(LedgerError::refused(
-            "invalid-agent",
-            format!("not an agent id: {}", printed(value)),
+            "invalid-model",
+            format!("not a model id: {}", printed(value)),
         )),
     }
 }
 
-/// `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, in ASCII.
-fn is_agent_id(agent: &str) -> bool {
-    let bytes = agent.as_bytes();
-    (1..=64).contains(&bytes.len())
-        && bytes[0].is_ascii_alphanumeric()
-        && bytes[1..]
-            .iter()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+/// `value` read as the effort a model runs at, as its harness words it (`high`, `xhigh`):
+/// none where it names none (absent or `null`), else 1 to 32 ASCII letters, digits and
+/// `-`.
+pub fn parse_effort(value: Option<&Value>) -> Result<Option<String>, LedgerError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(effort))
+            if (1..=32).contains(&effort.len())
+                && effort
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+        {
+            Ok(Some(effort.clone()))
+        }
+        _ => Err(LedgerError::refused(
+            "invalid-effort",
+            format!("not an effort: {}", printed(value)),
+        )),
+    }
+}
+
+/// `value` read as what a harness's list calls a model (`Opus`, `Claude Opus 5.5 Fast`):
+/// none where it names none, else text of 1 to 128 characters, no control among them.
+pub fn parse_model_name(value: Option<&Value>) -> Result<Option<String>, LedgerError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(name))
+            if (1..=128).contains(&name.chars().count())
+                && !name.trim().is_empty()
+                && !name.chars().any(char::is_control) =>
+        {
+            Ok(Some(name.clone()))
+        }
+        _ => Err(LedgerError::refused(
+            "invalid-model-name",
+            format!("not a model's name: {}", printed(value)),
+        )),
+    }
+}
+
+/// `^[A-Za-z0-9~][A-Za-z0-9._~/:@+\[\]-]{0,255}$`, in ASCII.
+fn is_model_id(model: &str) -> bool {
+    let bytes = model.as_bytes();
+    (1..=256).contains(&bytes.len())
+        && (bytes[0].is_ascii_alphanumeric() || bytes[0] == b'~')
+        && bytes[1..].iter().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'.' | b'_' | b'-' | b'~' | b'/' | b':' | b'@' | b'+' | b'[' | b']'
+                )
+        })
 }
 
 /// Whether a role fits an agent, by its designer flag: an image designer is
@@ -304,7 +350,8 @@ pub fn fits_role(designer: bool, role: &str) -> bool {
     (role == "designer") == designer
 }
 
-/// Refuses roles that do not fit `agent`, a designer or not, saying which way.
+/// Refuses roles that do not fit the member named `agent`, a designer or not, saying
+/// which way.
 pub fn require_fitting_roles(
     agent: &str,
     designer: bool,
@@ -412,10 +459,6 @@ mod tests {
             refusal(parse_roles(Some(&json!(["chief"])))).1,
             r#"a member is one or more of worker, advisor, reviewer, tester, designer, not ["chief"]"#
         );
-        assert_eq!(
-            refusal(parse_agent_id(Some(&json!("chief")), &["human", "chief"])).1,
-            r#"not an agent id: "chief""#
-        );
     }
 
     #[test]
@@ -450,23 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn takes_an_agent_id_of_the_roster_s_shape_and_none_of_the_taken_handles() {
-        assert_eq!(
-            parse_agent_id(Some(&json!("zeus.v2_a-b")), &[]).unwrap(),
-            "zeus.v2_a-b"
-        );
-        for wrong in [
-            json!(""),
-            json!("-zeus"),
-            json!("no such!"),
-            json!("a".repeat(65)),
-            json!(42),
-        ] {
-            assert_eq!(
-                refusal(parse_agent_id(Some(&wrong), &[])).0,
-                Some("invalid-agent")
-            );
-        }
+    fn takes_an_image_designer_for_an_image_model_alone() {
         assert!(require_fitting_roles("pygmalion", true, &["designer"]).is_ok());
         assert_eq!(
             refusal(require_fitting_roles("hera", false, &["designer"])).1,

@@ -26,15 +26,11 @@
 settings-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "specs::"]
 settings-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
 settings-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "specs"]
-settings-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--lib", "roster::"]
+settings-daemon-app = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "app_settings::"]
 # Node's recorded roster, whose files this build leaves as Node did but for a later build's keys.
-settings-catalog-goldens = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "roster_goldens"]
 settings-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "specs::"]
 settings-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "specmint::bundled"]
-settings-daemon-roster = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "roster::"]
 settings-daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::app_specs"]
-settings-daemon-agents-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::pages"]
-settings-daemon-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::tests::routes"]
 # The case of the rig (a real daemon and pane host, a stand-in chief) that holds a launch to what Settings says.
 settings-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "specs::what_settings_says"]
 # The dialog Settings opens, and the Specs section of Project settings and of New project, in the browser.
@@ -104,7 +100,7 @@ replace = "let on = own.and_then(|own| own.on).unwrap_or(false);"
 [[plant]]
 name = "specs settings: a folder may climb out of the project with `..`"
 meant = "a_folder_that_leaves_the_project_is_refused"
-runs = ["settings-proto", "settings-catalog", "settings-ledger"]
+runs = ["settings-proto", "settings-daemon-app", "settings-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/specs/check.rs"
@@ -139,90 +135,60 @@ replace = '''pub struct AppSpecs {
 [[plant]]
 name = "specs settings: a folder that leaves the project is kept as the app's"
 meant = "a_part_refused_is_said_in_a_project_s_words_with_its_own_code_and_keeps_nothing"
-runs = ["settings-catalog", "settings-daemon-page"]
+runs = ["settings-daemon-app", "settings-daemon-page"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = "        next.folder = folder_said(folder)?;"
 replace = "        next.folder = folder.as_str().map(str::to_owned);"
 
 [[plant]]
 name = "specs settings: a variant that is none of the four is let through as none"
 meant = "a_part_refused_is_said_in_a_project_s_words_with_its_own_code_and_keeps_nothing"
-runs = ["settings-catalog", "settings-daemon-page"]
+runs = ["settings-daemon-app", "settings-daemon-page"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = "        Value::String(name) => check::variant(name).map(Some).map_err(refused),"
 replace = "        Value::String(name) => Ok(Variant::from_name(name)),"
 
 [[plant]]
 name = "specs settings: the app's switch is read from another key than the page says it by"
-meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
-runs = ["settings-catalog", "settings-daemon-page"]
+meant = "each_part_said_is_kept_only_where_it_says_something_and_every_other_choice_stays"
+runs = ["settings-daemon-app", "settings-daemon-page"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = '    if let Some(on) = said.get("on") {'
 replace = '    if let Some(on) = said.get("specs") {'
 
 [[plant]]
 name = "specs settings: a folder a file edited by hand names, outside the project, is the app's"
 meant = "a_folder_or_a_variant_a_file_edited_by_hand_cannot_have_is_read_as_none"
-runs = ["settings-catalog", "settings-daemon-roster"]
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = '        folder: text("folder", EARLIER[0]).and_then(|folder| check::folder(folder).ok().flatten()),'
 replace = '        folder: text("folder", EARLIER[0]).map(str::to_owned),'
 
 [[plant]]
 name = "specs settings: the variant the agents file names is never read"
 meant = "each_part_is_read_apart_and_only_true_itself_turns_them_on"
-runs = ["settings-catalog", "settings-daemon-roster"]
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = '        variant: text("variant", EARLIER[1]).and_then(Variant::from_name),'
 replace = "        variant: None,"
 
 [[plant]]
-name = "specs settings: a set of the app's specs drops the roster's choice from the file"
-meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
-runs = ["settings-catalog", "settings-daemon-page"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
-find = "    let preferences = preferences_of(&document);"
-replace = "    let preferences = cf_proto::agents::Preferences { own_harness_only: false };"
-
-[[plant]]
-name = "specs settings: a set of the roster's choice drops the app's specs from the file"
-meant = "the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_keeps_what_a_later_build_kept"
-runs = ["settings-catalog", "settings-daemon-route"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/roster/preferences.rs"
-find = "    let app = app_specs_of(&document);"
-replace = "    let app = AppSpecs::default();"
-
-[[plant]]
-name = "specs settings: the screens' route takes the app's switch as a choice about the roster"
-meant = "the_app_s_specs_are_no_choice_about_the_roster_and_are_refused_by_name_leaving_the_file"
-runs = ["settings-catalog", "settings-daemon-route"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/roster/preferences.rs"
-find = 'const PREFERENCE_KEYS: [&str; 1] = ["ownHarnessOnly"];'
-replace = 'const PREFERENCE_KEYS: [&str; 2] = ["ownHarnessOnly", "specs"];'
-
-[[plant]]
 name = "specs settings: the variant is never written to the agents file"
-meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
-runs = ["settings-catalog", "settings-daemon-page"]
+meant = "each_part_said_is_kept_only_where_it_says_something_and_every_other_choice_stays"
+runs = ["settings-daemon-app", "settings-daemon-page"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = '''    if let Some(variant) = app.variant {
         defaults.insert(
             "variant".to_owned(),
@@ -234,11 +200,11 @@ replace = ""
 
 [[plant]]
 name = "specs settings: the folder is written to the agents file whatever it is, as null where none"
-meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
-runs = ["settings-catalog"]
+meant = "each_part_said_is_kept_only_where_it_says_something_and_every_other_choice_stays"
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = '''    if let Some(folder) = &app.folder {
         defaults.insert("folder".to_owned(), Value::String(folder.clone()));
     }
@@ -278,9 +244,9 @@ runs = ["settings-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = "            self.seams.roster.app_specs()\n"
+find = "            self.seams.app_settings.app_specs()\n"
 replace = '''            AppSpecs {
-                on: self.seams.roster.app_specs().on,
+                on: self.seams.app_settings.app_specs().on,
                 ..AppSpecs::default()
             }
 '''
@@ -288,13 +254,13 @@ replace = '''            AppSpecs {
 [[plant]]
 name = "specs settings: a launch reads of the agents file only the switch for every project"
 meant = "the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_launch"
-runs = ["settings-daemon-roster"]
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/roster.rs"
-find = "        self.roster().app_specs().unwrap_or_default()"
+file = "crates/cf-daemon/src/app_settings.rs"
+find = "        SettingsFile::app_specs(self).unwrap_or_default()"
 replace = '''        AppSpecs {
-            on: self.roster().app_specs().unwrap_or_default().on,
+            on: SettingsFile::app_specs(self).unwrap_or_default().on,
             ..AppSpecs::default()
         }'''
 
@@ -305,10 +271,10 @@ runs = ["settings-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/roster.rs"
-find = "        self.roster().app_specs().unwrap_or_default()"
+file = "crates/cf-daemon/src/app_settings.rs"
+find = "        SettingsFile::app_specs(self).unwrap_or_default()"
 replace = '''        AppSpecs {
-            on: self.roster().app_specs().unwrap_or_default().on,
+            on: SettingsFile::app_specs(self).unwrap_or_default().on,
             ..AppSpecs::default()
         }'''
 
@@ -419,37 +385,6 @@ file = "app/src-tauri/src/commands.rs"
 find = '''    "specs.get",
 '''
 replace = ""
-
-[[plant]]
-name = "specs settings: the screens' list of the agents says the app's switch again"
-meant = "the_app_s_specs_kept_beside_the_choice_are_neither_said_nor_taken_by_the_screens_and_a_set_keeps_them"
-runs = ["settings-daemon-route"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/agents.rs"
-find = '            "preferences": roster.preferences().map_err(words)?,'
-replace = '            "preferences": json!({ "ownHarnessOnly": roster.preferences().map_err(words)?.own_harness_only, "specs": roster.app_specs().map_err(words)?.on }),'
-
-[[plant]]
-name = "specs settings: the Agents page has the box for specs again"
-meant = "the_agents_page_has_one_choice_about_the_roster_and_none_about_specs"
-runs = ["settings-daemon-agents-page"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/pages/agents.html"
-find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and Devin</label>
-'''
-replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and Devin</label>
-  <label class="own-harness"><input type="checkbox" name="specs"> Plan big work as specs in every project that does not say otherwise</label>
-'''
-
-[[plant.edit]]
-file = "crates/cf-daemon/tests/goldens/pages/agents.html"
-find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and Devin</label>
-'''
-replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and Devin</label>
-  <label class="own-harness"><input type="checkbox" name="specs"> Plan big work as specs in every project that does not say otherwise</label>
-'''
 
 # --- the page: Settings, Specs ---
 
@@ -792,7 +727,7 @@ replace = '''      `Specmint ${specmint.version}, brought with this app.`'''
 # dispatcher after the change: one that closed the chief to give it the new specs passed it.
 [[plant]]
 name = "specs settings: a pass closes a chief at work where the app has specs on, for its next window to have them"
-meant = "a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_next_launch"
+meant = "a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_running_chief_and_the_next_launch"
 runs = ["settings-engine"]
 
 [[plant.edit]]
@@ -875,75 +810,78 @@ replace = '''        this.#folderRefused = words
 [[plant]]
 name = "specs settings: the folder and the variant are kept in preferences, where 3.0.4 drops them"
 meant = "a_file_this_build_wrote_keeps_the_defaults_once_the_released_3_0_4_has_saved_it"
-runs = ["settings-catalog"]
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/preferences.rs"
-find = '''    document.set("preferences", Value::Object(kept));
-    keep_defaults(document, app);
+file = "crates/cf-daemon/src/app_settings.rs"
+find = '''    file.insert("preferences".to_owned(), Value::Object(preferences));
 '''
 replace = '''    if let Some(folder) = &app.folder {
-        kept.insert("specsFolder".to_owned(), Value::String(folder.clone()));
+        preferences.insert("specsFolder".to_owned(), Value::String(folder.clone()));
     }
     if let Some(variant) = app.variant {
-        kept.insert("specsVariant".to_owned(), Value::String(variant.as_str().to_owned()));
+        preferences.insert("specsVariant".to_owned(), Value::String(variant.as_str().to_owned()));
     }
-    document.set("preferences", Value::Object(kept));
+    file.insert("preferences".to_owned(), Value::Object(preferences));
+    let app = &AppSpecs::default();
 '''
 
 [[plant]]
 name = "specs settings: what a later build keeps in preferences is dropped"
-meant = "what_a_later_build_keeps_in_preferences_and_beside_the_defaults_survives_every_write_of_this_one"
-runs = ["settings-catalog", "settings-catalog-goldens"]
+meant = "what_the_file_keeps_besides_survives_every_write_the_saved_agents_of_an_older_build_among_them"
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/preferences.rs"
-find = "        kept.extend(later.map(|(key, value)| (key.clone(), value.clone())));"
-replace = "        let _ = later;"
+file = "crates/cf-daemon/src/app_settings.rs"
+find = "        Some(Value::Object(before)) => before.clone(),"
+replace = "        Some(Value::Object(_)) => Map::new(),"
 
 [[plant]]
 name = "specs settings: what a later build keeps beside the defaults is dropped"
-meant = "what_a_later_build_keeps_in_preferences_and_beside_the_defaults_survives_every_write_of_this_one"
-runs = ["settings-catalog"]
+meant = "what_the_file_keeps_besides_survives_every_write_the_saved_agents_of_an_older_build_among_them"
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = "        defaults.extend(later.map(|(key, value)| (key.clone(), value.clone())));"
 replace = "        let _ = later;"
 
 [[plant]]
 name = "specs settings: where an earlier build of this one kept them is not read"
 meant = "where_an_earlier_build_of_this_one_kept_them_they_are_read_unless_specs_defaults_says_them"
-runs = ["settings-catalog"]
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
-find = "            .or_else(|| kept(document, earlier))\n"
-replace = "            .or_else(|| kept(document, earlier).filter(|_| false))\n"
+file = "crates/cf-daemon/src/app_settings.rs"
+find = "            .or_else(|| kept(file, earlier))\n"
+replace = "            .or_else(|| kept(file, earlier).filter(|_| false))\n"
 
 [[plant]]
 name = "specs settings: a write leaves where an earlier build of this one kept them, which then outlives a change"
 meant = "where_an_earlier_build_of_this_one_kept_them_they_are_read_unless_specs_defaults_says_them"
-runs = ["settings-catalog"]
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/preferences.rs"
-find = '''            !matches!(key.as_str(), "ownHarnessOnly" | "specs") && !EARLIER.contains(&key.as_str())'''
-replace = '''            !matches!(key.as_str(), "ownHarnessOnly" | "specs")'''
+file = "crates/cf-daemon/src/app_settings.rs"
+find = '''    for earlier in EARLIER {
+        preferences.shift_remove(earlier);
+    }
+'''
+replace = ''''''
 
 [[plant]]
 name = "specs settings: the defaults' key stays, empty, where neither is named"
-meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
-runs = ["settings-catalog"]
+meant = "each_part_said_is_kept_only_where_it_says_something_and_every_other_choice_stays"
+runs = ["settings-daemon-app"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/app_specs.rs"
+file = "crates/cf-daemon/src/app_settings.rs"
 find = '''    if defaults.is_empty() {
-        document.remove(DEFAULTS);
+        file.shift_remove(DEFAULTS);
     } else {
-        document.set(DEFAULTS, Value::Object(defaults));
+        file.insert(DEFAULTS.to_owned(), Value::Object(defaults));
     }'''
-replace = '''    document.set(DEFAULTS, Value::Object(defaults));'''
+replace = '''    file.insert(DEFAULTS.to_owned(), Value::Object(defaults));'''
 
 # --- what Astra and Sol found at their third look (2026-10-16) ---
 

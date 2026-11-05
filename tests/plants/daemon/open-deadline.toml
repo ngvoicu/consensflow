@@ -87,13 +87,23 @@ runs = ["od-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        if !self.end_abandoned(record).await? {\n            return Ok(());\n        }\n        record.window.borrow_mut().launches += 1;"
-replace = "        let _ = self.end_abandoned(record).await?;\n        record.window.borrow_mut().launches += 1;"
+find = '''
+        if !self.end_abandoned(record).await? {
+            return Ok(());
+        }
+        // A chief the update could not tell the model of'''
+replace = '''
+        let _ = self.end_abandoned(record).await?;
+        // A chief the update could not tell the model of'''
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "        if !self.end_abandoned(&record).await? {\n            return Ok(());\n        }"
-replace = "        let _ = self.end_abandoned(&record).await?;"
+find = '''
+        if !self.end_abandoned(&record).await? {
+            return Ok(());
+        }'''
+replace = '''
+        let _ = self.end_abandoned(&record).await?;'''
 
 [[plant]]
 name = "open deadline: a member with nothing more for it is not stepped, and the kill of its window given up on is never asked again"

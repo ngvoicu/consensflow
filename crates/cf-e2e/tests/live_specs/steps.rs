@@ -21,6 +21,7 @@ use crate::judge::BoardTask;
 use crate::launched;
 use crate::plan::Step;
 use crate::planning;
+use crate::project::Apply;
 
 /// What the human asks of the chief for a small thing: one file, one task for a
 /// worker, no plan.
@@ -139,12 +140,14 @@ fn off(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
     Ok(())
 }
 
-/// Specs on, which takes effect at the chief's next launch: the daemon says so in
-/// its events, and the window is launched with the section of specs that names the
-/// folder and the skill of the variant, which is the harness's own copy where it has
-/// the variant installed and ConsensFlow's where it has not. A Codex chief's own
-/// record then holds the section too, which its launch cannot say: its thread keeps
-/// the instructions it began with.
+/// Specs on. By default the chief is told while its window is open (`--apply now`):
+/// the note that tells it is delivered at its rest, whole, in its own window, and
+/// names the folder and the skill of the variant, which is the harness's own copy where
+/// it has the variant installed and ConsensFlow's where it has not; no window is
+/// opened for it. With `--apply launch` the project is closed and resumed, and the
+/// window is launched with the section of specs; a Codex chief's own record then holds
+/// the section too, which its launch cannot say: its thread keeps the instructions it
+/// began with.
 fn source(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
     let frame = ctx.with_specs_on()?;
     let logged = Trace::read(ctx.rig)
@@ -160,16 +163,26 @@ fn source(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
             None => Err("it logged no project.specs event".to_owned()),
         },
     ));
-    let text = match ctx.role_text(&frame) {
-        Ok(text) => text,
-        Err(why) => {
-            checks.push(ctx.held("the chief's launch has the section of specs", Err(why)));
+    let (text, what) = match (ctx.settings.apply, ctx.note()) {
+        (Apply::Now, Some(note)) => (note, "the note that told the running chief"),
+        (Apply::Now, None) => {
+            checks.push(ctx.held(
+                "the running chief was told of the specs",
+                Err("no note told it".to_owned()),
+            ));
             return Ok(());
         }
+        (Apply::Launch, _) => match ctx.role_text(&frame) {
+            Ok(text) => (text, "the chief's launch"),
+            Err(why) => {
+                checks.push(ctx.held("the chief's launch has the section of specs", Err(why)));
+                return Ok(());
+            }
+        },
     };
     checks.push(
         ctx.held(
-            "the chief's launch has the section of specs",
+            &format!("{what} has the section of specs"),
             launched::has_the_section(&text)
                 .then_some(())
                 .ok_or_else(|| "its text has no section of specs".to_owned()),
@@ -189,7 +202,7 @@ fn source(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
     // A Codex thread keeps the instructions it began with, so what its launch says
     // is not what the chief was told: its own record, after the Resume, must hold
     // the section.
-    if ctx.planned.chief == Harness::Codex {
+    if ctx.planned.chief == Harness::Codex && ctx.settings.apply == Apply::Launch {
         checks.push(
             ctx.judged(
                 "the chief's own record holds the section of specs after the Resume",

@@ -9,8 +9,8 @@
 # - a turn a refusal for quota ended is read at work while the look is not at rest
 #   (T-502);
 # - Claude's look says nothing of its record's word that the turn is over;
-# - a close is told to the human and to the requester, two notes of one event;
-# - a close of a task the human gave goes to the chief, or in the chief's words
+# - a kept window is told to the human twice, two notes of one event;
+# - a kept window of a task the human gave is told to the chief, or in the chief's words
 #   (the human arm of the notes);
 # - whoever asked the stop, the human pausing a task the chief gave or the chief
 #   telling one the human gave, is not told their act closed the window (T-650);
@@ -80,7 +80,7 @@ replace = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(
 
 [[plant]]
 name = "nothing to stop: a turn a refusal for quota ended is at work"
-meant = "a_task_held_for_its_job_whose_next_turn_is_refused_presses_no_key_and_goes_on_there_at_the_reset"
+meant = "a_pause_whose_turn_a_refusal_for_quota_ended_before_any_look_presses_no_key"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -99,8 +99,8 @@ find = "observed(at_rest, over, waiting, by_press, at_prompt)"
 replace = "observed(at_rest, Over::No, waiting, by_press, at_prompt)"
 
 [[plant]]
-name = "nothing to stop: a close is told to the human and to the requester"
-meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+name = "nothing to stop: a kept window is told twice to the human who gave its task"
+meant = "a_window_kept_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -123,8 +123,8 @@ replace = """        let _ = (count, seconds, wake, woken);
         return reply_to(&agents[3], window);"""
 
 [[plant]]
-name = "nothing to stop: a close of a task the human gave is told in the chief's words"
-meant = "a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task"
+name = "nothing to stop: a kept window of a task the human gave is told in the chief's words"
+meant = "a_window_kept_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -133,8 +133,8 @@ find = """            let body = if to == "human" {"""
 replace = """            let body = if to != "human" {"""
 
 [[plant]]
-name = "nothing to stop: a close of a task the human gave goes to the chief"
-meant = "a_window_closed_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task"
+name = "nothing to stop: a kept window of a task the human gave is told to the chief"
+meant = "a_window_kept_for_a_stop_it_ignored_is_told_once_to_the_human_who_gave_its_task"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -145,8 +145,8 @@ replace = """        let mut readers = vec![requester
             .unwrap_or_else(|| "chief".to_owned())];"""
 
 [[plant]]
-name = "nothing to stop: whoever asked the stop is not told their act closed the window"
-meant = "the_human_whose_pause_closed_a_chief_given_tasks_window_is_told_too_once"
+name = "nothing to stop: whoever asked the stop is not told their act kept the window"
+meant = "the_chief_whose_tell_kept_a_human_given_tasks_window_is_told_too_once"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -161,8 +161,10 @@ runs = ["ledger-receipt-sessions"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = """            "SELECT json_extract(data, '$.by') FROM event"""
-replace = """            "SELECT NULL FROM event"""
+find = """            "SELECT json_extract(data, '$.by') FROM event
+             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)"""
+replace = """            "SELECT NULL FROM event
+             WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)"""
 
 [[plant]]
 name = "nothing to stop: a turn the record says is over a moment ago is pressed again"
@@ -208,7 +210,7 @@ replace = "    pressed.is_some_and(|pressed| last_message(observed).is_some_and(
 
 [[plant]]
 name = "nothing to stop: a turn passed is read from the last item of any kind"
-meant = "a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_closed"
+meant = "a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_kept"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -218,7 +220,7 @@ replace = "        .find(|item| !item.compaction)"
 
 [[plant]]
 name = "nothing to stop: a compaction's summary is a message of the user's"
-meant = "a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_closed"
+meant = "a_turn_that_writes_and_is_compacted_through_its_rounds_is_no_turn_passed_and_is_kept"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]

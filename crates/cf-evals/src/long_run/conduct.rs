@@ -17,6 +17,7 @@
 //! harnesses it found, each break's and each unresolved's key as it is found, the
 //! summary, where the report is), and the report keeps the rest.
 
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -698,7 +699,11 @@ fn conduct(
         hold: (options.every / 4).clamp(Duration::from_secs(15), Duration::from_secs(60)),
         switch_to: options
             .switch_target(&cast.names)
-            .map(|harness| format!("long-{harness}-1")),
+            .map(|harness| format!("long-{harness}-1"))
+            .and_then(|id| {
+                let agent = cast.staff.agents.iter().find(|agent| agent.id == id)?;
+                Some((id, json!({ "harness": agent.kind, "model": agent.model })))
+            }),
         within: WITHIN,
         every: EVERY,
     };
@@ -777,7 +782,14 @@ fn conduct(
                     every: options.look,
                     looked: Instant::now(),
                 };
-                play::play(stage, &mut watching, disruption, &choice.target, &with)?
+                play::play(
+                    stage,
+                    &mut watching,
+                    disruption,
+                    &choice.target,
+                    choice.recompact,
+                    &with,
+                )?
             };
             run.came_of(floor, &choice, begun.elapsed(), outcome)?;
             changed = Instant::now();

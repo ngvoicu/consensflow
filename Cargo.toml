@@ -9,6 +9,8 @@
 [workspace]
 resolver = "2"
 members = ["app/src-tauri", "crates/*", "tools/*"]
+# Probes are scripts that read the harnesses, kept to be run again: no crate.
+exclude = ["tools/probes"]
 
 [workspace.package]
 version = "3.0.7-alpha.2"
@@ -24,7 +26,6 @@ cf-bridge = { path = "crates/cf-bridge" }
 cf-panes = { path = "crates/cf-panes" }
 cf-base = { path = "crates/cf-base" }
 cf-board = { path = "crates/cf-board" }
-cf-catalog = { path = "crates/cf-catalog" }
 cf-engine = { path = "crates/cf-engine" }
 cf-harness = { path = "crates/cf-harness" }
 cf-process = { path = "crates/cf-process" }

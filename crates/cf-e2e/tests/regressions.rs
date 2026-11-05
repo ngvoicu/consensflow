@@ -71,6 +71,10 @@ mod a_follow_up_after_a_restart_lost_its_windows_conversation;
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_follow_up_whose_window_never_began_read_working_for_an_hour.rs"]
 mod a_follow_up_whose_window_never_began_read_working_for_an_hour;
+#[path = "regressions/a_harness_dialog_in_a_workers_window_went_unseen.rs"]
+mod a_harness_dialog_in_a_workers_window_went_unseen;
+#[path = "regressions/a_held_workers_write_up_was_lost_when_its_jobs_end_woke_a_short_turn.rs"]
+mod a_held_workers_write_up_was_lost_when_its_jobs_end_woke_a_short_turn;
 #[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
 mod a_job_that_still_ran_was_taken_for_ended;
 #[path = "regressions/a_job_the_agent_detached_was_never_seen_and_a_close_ended_it_unnamed.rs"]
@@ -81,6 +85,10 @@ mod a_ledger_of_a_harness_this_build_does_not_run;
 mod a_message_the_chief_took_was_typed_in_again_under_load;
 #[path = "regressions/a_monitor_claude_ended_by_its_shell_held_its_task.rs"]
 mod a_monitor_claude_ended_by_its_shell_held_its_task;
+// The rig's Muse is a script that runs the machine's Muse, so Unix's.
+#[path = "regressions/a_muse_worker_whose_pane_repainted_at_rest_never_got_the_words_that_resumed_its_task.rs"]
+#[cfg(unix)]
+mod a_muse_worker_whose_pane_repainted_at_rest_never_got_the_words_that_resumed_its_task;
 #[path = "regressions/a_parent_agents_session_reached_every_window.rs"]
 mod a_parent_agents_session_reached_every_window;
 #[path = "regressions/a_paste_devin_held_pasted_again_after_a_switch_and_a_restart.rs"]
@@ -93,6 +101,8 @@ mod a_pause_a_hung_worker_ignored_stranded_its_task;
 mod a_question_the_chief_answered_was_typed_in_later;
 #[path = "regressions/a_quota_wait_ended_failed.rs"]
 mod a_quota_wait_ended_failed;
+#[path = "regressions/a_reopen_or_a_quota_wait_closed_a_window_still_on_its_turn.rs"]
+mod a_reopen_or_a_quota_wait_closed_a_window_still_on_its_turn;
 #[path = "regressions/a_reopened_window_with_no_task_read_working_for_good.rs"]
 mod a_reopened_window_with_no_task_read_working_for_good;
 #[path = "regressions/a_reply_written_before_the_tools_of_a_tells_turn_reached_nobody.rs"]
@@ -137,6 +147,8 @@ mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
 mod a_workers_question_in_its_last_words_was_given_as_its_result;
 #[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
 mod a_workers_still_going_was_given_as_its_result;
+#[path = "regressions/a_workers_write_up_was_lost_when_its_question_was_still_out.rs"]
+mod a_workers_write_up_was_lost_when_its_question_was_still_out;
 #[path = "regressions/an_idle_quit_with_a_message_queued_read_as_a_cut_turn.rs"]
 mod an_idle_quit_with_a_message_queued_read_as_a_cut_turn;
 #[path = "regressions/claude_continues_by_itself_after_its_limit.rs"]

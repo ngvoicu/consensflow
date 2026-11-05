@@ -6,14 +6,22 @@
 //! It holds the release to what T-862 checked by hand on 3.0.6-alpha.3:
 //!
 //! 1. every file against the release's `SHA256SUMS`: each file it lists is in the
-//!    release and hashes as listed, and the release holds no file it does not list;
-//! 2. the update archive's `.sig` against the public key pinned in
+//!    release and hashes as listed, and the release holds no file it does not list
+//!    but `SHA256SUMS` itself and `SHA256SUMS.sig`, the list's own signature, which
+//!    the list cannot name;
+//! 2. `SHA256SUMS.sig` under the public key pinned in `app/src-tauri/tauri.conf.json`
+//!    **at the release's tag**, as the installers check a release's sums and
+//!    cf-publish checks the one it publishes: the list's signature and the trusted
+//!    comment's both, the comment naming the release's
+//!    `ConsensFlow_<version>_SHA256SUMS`. A release holds one at all: the
+//!    installers take nothing of a release whose sums is not signed;
+//! 3. the update archive's `.sig` against the public key pinned in
 //!    `app/src-tauri/tauri.conf.json` **at the release's tag** (what an app of that
 //!    version carries), the file's signature and the trusted comment's both, by the
 //!    crate Tauri's updater verifies with; and, once the archive verified, as a
 //!    control that a copy of it with one byte changed is refused, so that a check
 //!    which accepts anything is told;
-//! 3. each feed that serves this version: its `latest.json` is the release's, its
+//! 4. each feed that serves this version: its `latest.json` is the release's, its
 //!    signature for the Mac is the `.sig`, and the archive its address gives is the
 //!    release's, byte for byte. A feed that serves a later release is told and left
 //!    alone (it no longer serves this one); one that serves an earlier one, or none,
@@ -32,6 +40,7 @@ use std::path::Path;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use cf_publish::digest::hex;
+use cf_publish::sums::{check_signature as check_signed_sums, signed_name, SIGNATURE, SUMS};
 use cf_publish::version::{named_release, Version};
 use minisign_verify::{PublicKey, Signature};
 use serde_json::Value;
@@ -164,6 +173,7 @@ impl Release<'_> {
         }
         let mut report = Report::default();
         self.check_sums(folder, &names, &mut report)?;
+        self.check_sums_signature(version, tag, folder, &names, &mut report)?;
 
         let archive = format!("ConsensFlow_{version}_aarch64.app.tar.gz");
         let signature = format!("{archive}.sig");
@@ -222,7 +232,7 @@ impl Release<'_> {
             }
         }
         for name in names {
-            if name != "SHA256SUMS" && !listed.contains_key(name) {
+            if name != SUMS && name != SIGNATURE && !listed.contains_key(name) {
                 report.problems.push(format!(
                     "{name} is in the release and SHA256SUMS does not list it"
                 ));
@@ -233,6 +243,49 @@ impl Release<'_> {
                 "SHA256SUMS lists {} files, each in the release and hashing as listed",
                 listed.len()
             ));
+        }
+        Ok(())
+    }
+
+    /// The release's `SHA256SUMS.sig`, which the sums cannot list, under the key
+    /// the tag pins, checked the way the installers check it — cf-publish's own
+    /// check of the signature, held to every one it publishes: the list's
+    /// signature and the trusted comment's both, the comment naming the
+    /// release's `ConsensFlow_<version>_SHA256SUMS`. One missing is a release
+    /// the installers take nothing of.
+    fn check_sums_signature(
+        &mut self,
+        version: &str,
+        tag: &str,
+        folder: &Path,
+        names: &[String],
+        report: &mut Report,
+    ) -> Result<(), Error> {
+        if !names.iter().any(|name| name == SIGNATURE) {
+            report.problems.push(format!(
+                "{SIGNATURE} is not in the release, and the installers need it"
+            ));
+            return Ok(());
+        }
+        let text = self.pinned_key_text(tag)?;
+        let key = text.lines().nth(1).unwrap_or_default();
+        let read = |name: &str| -> Result<Vec<u8>, Error> {
+            let path = folder.join(name);
+            fs::read(&path).map_err(|source| Error::File {
+                action: "read",
+                path,
+                source,
+            })
+        };
+        let version = Version::parse(version).map_err(|cause| refused(cause.to_string()))?;
+        let name = signed_name(&version);
+        match check_signed_sums(key, &read(SIGNATURE)?, &read(SUMS)?, &name) {
+            Ok(()) => report.held.push(format!(
+                "{SIGNATURE} signs {SUMS} under the key {tag}'s tauri.conf.json pins, as {name}"
+            )),
+            Err(why) => report
+                .problems
+                .push(format!("{SIGNATURE} does not hold: {why}")),
         }
         Ok(())
     }
@@ -307,9 +360,10 @@ impl Release<'_> {
         Ok(())
     }
 
-    /// The updater's public key as the tag's `tauri.conf.json` pins it: what an app
-    /// of that version carries. A tag the checkout lacks is fetched by name first.
-    fn pinned_key(&mut self, tag: &str) -> Result<PublicKey, Error> {
+    /// The updater's public key as the tag's `tauri.conf.json` pins it, its text
+    /// (the comment's line and the key's): what an app of that version carries.
+    /// A tag the checkout lacks is fetched by name first.
+    fn pinned_key_text(&mut self, tag: &str) -> Result<String, Error> {
         let spec = format!("{tag}:{CONF}");
         let conf = match self.git(&["show", &spec]) {
             Ok(conf) => conf,
@@ -337,12 +391,21 @@ impl Release<'_> {
             .pointer("/plugins/updater/pubkey")
             .and_then(Value::as_str)
             .ok_or_else(|| unusable("plugins.updater.pubkey is not there".to_owned()))?;
-        let text = STANDARD
+        STANDARD
             .decode(pinned.trim())
             .ok()
             .and_then(|bytes| String::from_utf8(bytes).ok())
-            .ok_or_else(|| unusable("it is not the base64 of a minisign public key".to_owned()))?;
-        PublicKey::decode(&text).map_err(|cause| unusable(cause.to_string()))
+            .ok_or_else(|| unusable("it is not the base64 of a minisign public key".to_owned()))
+    }
+
+    /// The same, as the key it is.
+    fn pinned_key(&mut self, tag: &str) -> Result<PublicKey, Error> {
+        let text = self.pinned_key_text(tag)?;
+        PublicKey::decode(&text).map_err(|cause| {
+            refused(format!(
+                "{CONF} at {tag} pins no usable updater key: {cause}"
+            ))
+        })
     }
 
     /// What a feed serves, held to the release when it serves this version.

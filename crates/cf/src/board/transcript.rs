@@ -191,7 +191,7 @@ fn shown(listed: &[Value], find: Option<&str>) -> String {
             let role = match item.get("role").and_then(Value::as_str) {
                 Some("user") => "Sent to the window".into(),
                 Some("assistant") => "The agent".into(),
-                Some("tool") => "Tool output".into(),
+                Some("tool") => tool(item).into(),
                 Some("custom") => "Note".into(),
                 _ => js::text(item.get("role")),
             };
@@ -209,6 +209,27 @@ fn shown(listed: &[Value], find: Option<&str>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// What a tool's item is said as: its output, and where its reader said it, the call it
+/// answers (its header), how it ended and how long it took (chief-harness, T-486). An item
+/// copied before the copy kept them is a tool's output and no more.
+fn tool(item: &Value) -> String {
+    let mut said = vec!["Tool output".to_owned()];
+    if let Some(header) = item.get("header").and_then(Value::as_str) {
+        said.push(header.to_owned());
+    }
+    match item.get("status").and_then(Value::as_str) {
+        Some("failed") => said.push("failed".to_owned()),
+        Some("running") => said.push("running".to_owned()),
+        _ => {}
+    }
+    if let Some(took) = item.get("tookMs").and_then(Value::as_u64) {
+        #[allow(clippy::cast_precision_loss)]
+        let seconds = took as f64 / 1_000.0;
+        said.push(format!("took {seconds:.1} s"));
+    }
+    said.join(" · ")
 }
 
 /// `text` cut to `units` UTF-16 units, with an ellipsis when it was longer.

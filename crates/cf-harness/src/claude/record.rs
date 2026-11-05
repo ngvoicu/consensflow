@@ -84,6 +84,7 @@ use super::paths::transcript;
 use crate::shared::quota::Quota;
 use crate::shared::record::boundary::Boundary;
 use crate::shared::record::cache::{Look, Options};
+use crate::shared::record::calls::LastCall;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -225,6 +226,8 @@ struct Transcript {
     active_assistant: Option<Arc<str>>,
     /// The latest turn failed: the API refused it, in these words.
     failure: Option<String>,
+    /// The last tool call the main conversation made, as a line (`calls::describe`).
+    last_call: Option<Arc<LastCall>>,
     quota: Option<Arc<Quota>>,
     /// The model the main conversation's assistant last answered from, and the move away
     /// from it that nobody asked for (MUS-24).
@@ -252,6 +255,9 @@ struct Transcript {
     /// The turn ended at such a cancel, and Claude Code put the `/compact` back in
     /// its input box (`Lines::put_back`), until a record moves the turn again.
     put_back: bool,
+    /// The tokens the latest compaction's boundary said it compacted from, until the summary
+    /// that follows it takes them.
+    compacted_from: Option<u64>,
 }
 
 /// A `/compact` as it was typed: the record it is a child of.
@@ -316,6 +322,7 @@ impl Transcript {
             terminal: None,
             active_assistant: None,
             failure: None,
+            last_call: None,
             quota: None,
             model: None,
             launch_model: None,
@@ -330,6 +337,7 @@ impl Transcript {
             last_at: None,
             typed_compact: None,
             put_back: false,
+            compacted_from: None,
         }
     }
 
@@ -480,12 +488,14 @@ impl Answer for Transcript {
         }
         let settlement = self.settlement();
         let mut record = Record::new();
-        let (items, places) = self.items.sorted()?;
+        let (items, places, beside) = self.items.timeline(&self.open_tools)?;
         record.items = items;
         record.lines.places = Some(places);
+        record.beside = beside;
         record.in_flight = settlement == Settlement::InFlight;
         record.failed = self.failure.is_some();
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
+        record.last_call.clone_from(&self.last_call);
         record.quota = self.quota.clone();
         record.model_moved.clone_from(&self.model_moved);
         record.model_drift.clone_from(&self.model_drift);
@@ -506,6 +516,7 @@ impl Answer for Transcript {
             noticed: self.jobs.noticed_count(),
         };
         record.monitors = self.jobs.monitors();
+        record.commands = self.jobs.commands();
         record.lines.put_back = self.put_back && settlement == Settlement::Settled;
         record.lines.held_by_notices = settlement == Settlement::InFlight && self.held_by_notices();
         Ok(record)

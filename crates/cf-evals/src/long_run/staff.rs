@@ -18,8 +18,7 @@ use crate::plan::{harness, Agent, Member, Staff};
 use crate::{Error, Result};
 
 /// What each harness's members run on unless `--models` says otherwise: models the
-/// harness has here, a strong one beside its cheap one (the catalog's presets and
-/// the evals' own cheap models).
+/// harness has here, a strong one beside its cheap one.
 pub const MODELS: [(&str, &[&str]); 4] = [
     ("claude", &["claude-sonnet-5-5", "claude-opus-5-5"]),
     ("codex", &["gpt-5.6-luna", "gpt-6.1-sol"]),

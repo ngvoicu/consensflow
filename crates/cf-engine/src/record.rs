@@ -13,7 +13,9 @@ use std::rc::Rc;
 
 use crate::chief_switch::PendingSwitch;
 use crate::deliveries::DeliveryPart;
+use crate::dialogs::DialogWatch;
 use crate::never_began::Unbegun;
+use crate::privacy::PrivacyPart;
 use crate::runtime::Hold;
 use crate::scheduler::QuotaPart;
 use crate::transcripts::Copied;
@@ -36,6 +38,14 @@ pub(crate) struct Record {
     /// The latest message of its working task, where its record shows nothing after it
     /// (`never_began`).
     pub(crate) never_began: RefCell<Option<Unbegun>>,
+    /// A relaunch of its window for a message it began no turn on, to be told once the
+    /// window is opened again, as it opens (`stops`).
+    pub(crate) relaunching: RefCell<Option<crate::stops::Relaunching>>,
+    /// What the looks found of a dialog of its harness's that waits for a key (`dialogs`).
+    pub(crate) dialog: RefCell<DialogWatch>,
+    /// What a macOS privacy dialog raised in the app's name for a process of its window
+    /// holds it for (`privacy`).
+    pub(crate) privacy: RefCell<PrivacyPart>,
 }
 
 impl Record {
@@ -51,6 +61,9 @@ impl Record {
             pending_switch: RefCell::new(None),
             held: RefCell::new(HeldPart::default()),
             never_began: RefCell::new(None),
+            relaunching: RefCell::new(None),
+            dialog: RefCell::new(DialogWatch::default()),
+            privacy: RefCell::new(PrivacyPart::default()),
         })
     }
 }

@@ -25,6 +25,16 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The field of a `pane.snapshot` answer that says how long, in milliseconds, what the
+/// pane's screen shows has not changed: null where its screen has shown nothing yet. This,
+/// not how long the pane has printed nothing (`outputQuietMs`), is how a window's screen is
+/// read at rest or still being drawn: a harness can print without end and change nothing a
+/// person sees (Muse Code 1.4.14 at rest after a command it ran in the background was
+/// stopped, T-1083). What still asks for the output's own quiet is a paste's Enter, which
+/// waits for the window to have done with the paste, and a reader of an input box asking
+/// whether the window answered the human's last key at all.
+pub const SCREEN_QUIET_MS: &str = "screenQuietMs";
+
 /// The kinds of bytes a write of the human's path into a pane can hold, as the host
 /// names them in a snapshot's `humanWrites`: characters typed; a bracketed paste; Enter;
 /// Backspace or Ctrl+U; another control key; an escape sequence (an arrow, a function key,
@@ -352,6 +362,67 @@ pub struct PaneExit {
         skip_serializing_if = "Option::is_none"
     )]
     pub survivor: Option<u32>,
+}
+
+/// The event the pane host sends when a process of the app waits on a macOS privacy dialog
+/// (`pane.tcc`, [`TccPrompt`]): on a Mac, every window's process has the app as its
+/// responsible process, so a gated folder or library that a worker's command touches is asked
+/// in the app's name, on the Mac's screen, and the command waits for an answer (T-1194).
+pub const TCC_PROMPT_EVENT: &str = "pane.tcc";
+
+/// The event the host sends once when it cannot read the system's log of those dialogs
+/// (`pane.tcc_unreadable`, [`TccUnreadable`]): none is then told of.
+pub const TCC_UNREADABLE_EVENT: &str = "pane.tcc_unreadable";
+
+/// `pane.tcc`'s body: a process of the app is waiting on a privacy dialog. The system's log
+/// names the process and the service; the host says which window's tree the process is in,
+/// where it is in one. A body without `service`, `pid` or `program` is no prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TccPrompt {
+    /// The window whose tree holds the process: none for a process of the app's that is
+    /// no window's (a job a shell detached, or the app's own).
+    #[serde(
+        default,
+        deserialize_with = "or_unsaid",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "or_unsaid",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub generation: Option<u64>,
+    /// The service the system asks about, as it names it without its `kTCCService`
+    /// (`MediaLibrary`, `Photos`, `SystemPolicyDocumentsFolder`).
+    pub service: String,
+    /// The process that waits, by its number.
+    pub pid: u32,
+    /// The program it runs, by its file's name (`ls`, `find`, `claude`).
+    pub program: String,
+}
+
+/// `pane.tcc_unreadable`'s body: the host could not read the system's log of privacy dialogs,
+/// and says why in the words the reader printed. `id` and `generation` name a window that was
+/// open, so the daemon can tell its project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TccUnreadable {
+    #[serde(
+        default,
+        deserialize_with = "or_unsaid",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "or_unsaid",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub generation: Option<u64>,
+    /// What the reader said before it ended (empty where it said nothing).
+    pub said: String,
 }
 
 /// A list as it should be, or an empty one: what is not a list of `T` was not said.
@@ -733,6 +804,46 @@ mod tests {
             serde_json::from_value::<SnapshotRequest>(body).unwrap(),
             asking
         );
+    }
+
+    #[test]
+    fn a_tcc_prompt_names_the_window_when_the_host_found_one_and_none_when_it_did_not() {
+        let held = TccPrompt {
+            id: Some("p1-zeus".to_owned()),
+            generation: Some(2),
+            service: "MediaLibrary".to_owned(),
+            pid: 22913,
+            program: "ls".to_owned(),
+        };
+        let body = json!({
+            "id": "p1-zeus", "generation": 2, "service": "MediaLibrary", "pid": 22913,
+            "program": "ls"
+        });
+        assert_eq!(serde_json::to_value(&held).unwrap(), body);
+        assert_eq!(serde_json::from_value::<TccPrompt>(body).unwrap(), held);
+        // A process of the app that no window holds says no window.
+        let loose = TccPrompt {
+            id: None,
+            generation: None,
+            ..held
+        };
+        let body = json!({ "service": "MediaLibrary", "pid": 22913, "program": "ls" });
+        assert_eq!(serde_json::to_value(&loose).unwrap(), body);
+        assert_eq!(serde_json::from_value::<TccPrompt>(body).unwrap(), loose);
+        // A body that says no service is no prompt.
+        assert!(serde_json::from_value::<TccPrompt>(json!({ "pid": 1, "program": "ls" })).is_err());
+    }
+
+    #[test]
+    fn an_unreadable_log_says_what_the_reader_printed() {
+        let said = TccUnreadable {
+            id: None,
+            generation: None,
+            said: "log: Must be admin to run 'stream' command".to_owned(),
+        };
+        let body = json!({ "said": "log: Must be admin to run 'stream' command" });
+        assert_eq!(serde_json::to_value(&said).unwrap(), body);
+        assert_eq!(serde_json::from_value::<TccUnreadable>(body).unwrap(), said);
     }
 
     #[test]

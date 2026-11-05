@@ -111,7 +111,7 @@ fn a_job_its_record_holds_or_its_turn_left_running_holds_the_first() {
         conversation,
         4,
         "user",
-        "<task-notification>\n<task-id>b7x2</task-id>\n</task-notification>",
+        "<task-notification>\n<task-id>b7x2</task-id>\n<status>completed</status>\n</task-notification>",
         true,
         &t(6, 0),
     );
@@ -808,10 +808,113 @@ fn a_jobs_end_written_a_moment_after_the_result_is_seen_within_the_settle_time()
             json!({ "timestamp": t(1, 0), "type": "user", "toolUseResult": { "backgroundTaskId": "b33m" },
                     "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "x",
                     "content": "Command running in background with ID: b33m" }] } }),
-            json!({ "timestamp": t(2, 4), "type": "queue-operation", "operation": "enqueue", "content": B33M_ENDED }),
+            // Claude Code delivers it at rest as the turn it begins by itself, a user's record
+            // from the system: a notification only queued ends no job.
+            json!({ "timestamp": t(2, 4), "type": "user", "promptSource": "system", "turnOrigin": "task_notification",
+                    "message": { "role": "user", "content": B33M_ENDED } }),
         ]
         .map(|line| line.to_string())
         .join("\n"),
     );
     assert!(found(&scene.look_with(ms(10, 0), conversation, record), 2).is_empty());
+}
+
+/// The delivery of T-14's brief as Claude Code's record holds a long paste, which the copy
+/// holds as the record does: Claude's wrapper around it (2.1.303 on), and before it the
+/// placeholders of the images Claude attached (2.1.308), when there are any.
+fn wrapped_brief(placeholders: &str) -> String {
+    format!(
+        "{placeholders}<pasted_content id=\"4868\">\n[ConsensFlow m-120 · T-14 · task from @chief]\nRun the mutations\n</pasted_content id=\"4868\">\n"
+    )
+}
+
+#[test]
+fn a_brief_claude_code_wrapped_in_its_paste_tag_is_the_turns_prompt_the_records_end_is_judged_by() {
+    // T-1069 (T-695): the worker's brief went into Claude's window as a paste, and its record
+    // and the copy hold it wrapped. The turn's prompt was read as none, fell to the result's
+    // own creation time, and the record, which ends a moment before the result was written,
+    // held "nothing after the turn's prompt": 17 final UNRESOLVED entries in two runs.
+    for placeholders in ["", "[Image #1] [Image #2]\n\n"] {
+        let (scene, conversation, _) = job_then_result("claude-code");
+        scene.copied(
+            conversation,
+            0,
+            "user",
+            &wrapped_brief(placeholders),
+            &t(0, 30),
+        );
+        // The record's last word is 0.3 s before the result (10:02:00.000).
+        let record = Record::claude(
+            &json!({ "timestamp": "2026-10-15T10:01:59.700Z", "type": "assistant", "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Going." }] } })
+                .to_string(),
+        );
+        let look = scene.look_with(ms(10, 0), conversation, record);
+        assert!(
+            unjudged_second(&look).is_empty(),
+            "{placeholders:?}: {:?}",
+            unjudged_second(&look)
+        );
+    }
+}
+
+/// A Claude worker's own record of T-14's job: started at 10:01 (`b33m`), and the `TaskStop`
+/// call at 10:01:20 (`ts1`, or a call of another tool) with its result `result`.
+fn stopped_job(call: &str, result: serde_json::Value) -> Record {
+    let lines = [
+        json!({ "timestamp": t(1, 0), "type": "user", "toolUseResult": { "backgroundTaskId": "b33m" },
+                "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "bg1",
+                "content": "Command running in background with ID: b33m" }] } }),
+        json!({ "timestamp": t(1, 20), "type": "assistant", "message": { "role": "assistant", "stop_reason": "tool_use",
+                "content": [{ "type": "tool_use", "id": "ts1", "name": call, "input": { "task_id": "b33m" } }] } }),
+        result,
+    ];
+    Record::claude(
+        &lines
+            .iter()
+            .map(serde_json::Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+/// The result of the call `ts1`, as Claude Code writes one that stopped the job `b33m`.
+fn stop_result(error: bool) -> serde_json::Value {
+    json!({ "timestamp": t(1, 21), "type": "user", "toolUseResult": { "task_id": "b33m", "message": "Successfully stopped task: b33m" },
+            "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "ts1",
+            "is_error": error, "content": "Successfully stopped task: b33m" }] } })
+}
+
+#[test]
+fn a_job_the_worker_stopped_with_taskstop_is_no_job_still_running_when_its_result_was_taken() {
+    // T-1069 (T-695): "b7vfwgo5o stopped 2026-11-01T19:57:32Z before result …": the product's
+    // reader ends a job at a `TaskStop` call's successful result, and the watch did not.
+    let (scene, conversation, _) = job_then_result("claude-code");
+    let look = scene.look_with(
+        ms(10, 0),
+        conversation,
+        stopped_job("TaskStop", stop_result(false)),
+    );
+    assert!(found(&look, 2).is_empty(), "{:?}", found(&look, 2));
+    // What is no stop, as the product reads it, leaves the job running: a result that is an
+    // error, one that answers a call of another tool, and one answering no call.
+    for (call, result) in [
+        ("TaskStop", stop_result(true)),
+        ("Bash", stop_result(false)),
+    ] {
+        let (scene, conversation, _) = job_then_result("claude-code");
+        let look = scene.look_with(ms(10, 0), conversation, stopped_job(call, result));
+        assert_eq!(found(&look, 2).len(), 1, "{call}");
+    }
+    let (scene, conversation, _) = job_then_result("claude-code");
+    let record = stopped_job("TaskStop", stop_result(false));
+    let mut orphan = stop_result(false);
+    orphan["message"]["content"][0]["tool_use_id"] = json!("never-called");
+    let unanswered = stopped_job("TaskStop", orphan);
+    drop(record);
+    let look = scene.look_with(ms(10, 0), conversation, unanswered);
+    assert_eq!(
+        found(&look, 2).len(),
+        1,
+        "a result of a call that was never made"
+    );
 }

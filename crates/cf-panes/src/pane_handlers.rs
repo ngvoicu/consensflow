@@ -175,6 +175,13 @@ pub fn register_pane_handlers(
         Ok(opened)
     });
 
+    // How many alerts of the system's notification centre are on screen: a privacy dialog
+    // raised in the app's name is one, and its being gone is how the daemon knows a window's wait
+    // on it is over (T-1194). Null where the system gives no list of windows.
+    builder.on("pane.alerts", |_bridge, _body| {
+        Ok(json!({"ok":true,"alerts":crate::alerts::on_screen()}))
+    });
+
     // Keys typed into a pane, in their order; and an emulator's replies (a page-less peer
     // answers a cursor query itself), past whatever the pane's keys wait on
     // (`InputWork::Reply`).
@@ -372,6 +379,7 @@ fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
         "typed":snapshot.typed,
         "typedQuietMs":snapshot.typed_quiet_ms,
         "outputQuietMs":snapshot.output_quiet_ms,
+        "screenQuietMs":snapshot.screen_quiet_ms,
         "pasteQuietMs":snapshot.paste_quiet_ms,
         "humanWrites":writes,
     })
@@ -434,8 +442,8 @@ fn stream_to_page(
             tree,
         } = streamed;
         for message in stream {
-            printed.note();
-            screen.feed(&message.bytes);
+            let changed = screen.feed(&message.bytes);
+            printed.note(changed);
             output.publish(message.into());
         }
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
@@ -575,6 +583,63 @@ mod tests {
     #[cfg(unix)]
     use crate::output_hub::PaneOutputMessage;
 
+    /// What a test of a window that repaints what it shows reads of it, on either
+    /// platform's pane host (and `windows_tests`' twin).
+    pub(super) mod quiet_by_screen {
+        use std::time::{Duration, Instant};
+
+        use serde_json::Value;
+
+        /// What the stand-in's box reads before its character is changed, and after.
+        pub(crate) const BOX: &str = "> Ask anything";
+        pub(crate) const CHANGED: &str = "> Tsk anything";
+
+        /// Two looks at the stand-in: two seconds after its box shows, while it repaints
+        /// it; and once its character has changed. `look` is a `pane.snapshot` with its
+        /// tail, and `shows` whether a snapshot's tail holds a line.
+        pub(crate) fn watch(
+            look: &mut dyn FnMut() -> Value,
+            shows: &dyn Fn(&Value, &str) -> bool,
+        ) -> (Value, Value) {
+            let mut until = |text: &str| {
+                let deadline = Instant::now() + Duration::from_secs(45);
+                loop {
+                    let snapshot = look();
+                    if shows(&snapshot, text) {
+                        return snapshot;
+                    }
+                    assert!(Instant::now() < deadline, "{text} never showed: {snapshot}");
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            };
+            until(BOX);
+            std::thread::sleep(Duration::from_secs(2));
+            let repainting = until(BOX);
+            (repainting, until(CHANGED))
+        }
+
+        /// The stand-in's screen was quiet while it repainted its box, though (where
+        /// `printed_on`, as on a Unix pty, which passes every byte) its output never was;
+        /// and its changed character is a change.
+        pub(crate) fn check(repainting: &Value, changed: &Value, printed_on: bool) {
+            let quiet = |snapshot: &Value, name: &str| snapshot[name].as_u64();
+            if printed_on {
+                assert!(
+                    quiet(repainting, "outputQuietMs").is_some_and(|ms| ms < 1_000),
+                    "the stand-in printed all along: {repainting}"
+                );
+            }
+            assert!(
+                quiet(repainting, "screenQuietMs").is_some_and(|ms| ms >= 1_500),
+                "a screen printed again as it is, is quiet: {repainting}"
+            );
+            assert!(
+                quiet(changed, "screenQuietMs").is_some_and(|ms| ms < 1_500),
+                "a character changed is a change: {changed}"
+            );
+        }
+    }
+
     #[test]
     fn open_request_requires_absolute_launch_inputs() {
         // A directory and a program that are absolute here: `/tmp` and
@@ -656,6 +721,7 @@ mod tests {
             typed: 2,
             typed_quiet_ms: Some(40),
             output_quiet_ms: None,
+            screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: vec![
                 crate::arbiter::HumanWrite {
@@ -682,6 +748,58 @@ mod tests {
             (&answer["typed"], &answer["typedQuietMs"], &answer["unsent"]),
             (&json!(2), &json!(40), &json!(true))
         );
+    }
+
+    /// The daemon asks how many alerts of the system's notification centre are on screen (a
+    /// privacy dialog is one) to end the wait it holds a window in (T-1194): the host answers a
+    /// number, or null where the system gives no list of windows.
+    #[cfg(unix)]
+    #[test]
+    fn the_host_says_how_many_alerts_the_system_has_on_screen() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut frame = serde_json::to_vec(
+            &json!({"v":1,"id":"n-alerts-1","kind":"req","op":"pane.alerts","body":{}}),
+        )
+        .expect("serialize request");
+        frame.push(b'\n');
+        node_stream.write_all(&frame).expect("write request");
+        let answer = loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read response");
+            let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+            if frame["kind"] == "res" && frame["id"] == "n-alerts-1" {
+                break frame["body"].clone();
+            }
+        };
+        assert_eq!(answer["ok"], true, "{answer}");
+        assert!(
+            answer
+                .get("alerts")
+                .is_some_and(|alerts| alerts.is_null() || alerts.is_u64()),
+            "{answer}"
+        );
+        drop(connected);
     }
 
     /// Over the bridge as the daemon speaks it: its own keys are not the
@@ -917,6 +1035,93 @@ mod tests {
         assert!(answers.iter().any(|id| id == "n-typed"), "{answers:?}");
 
         panes.kill(&key).expect("kill the pane");
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// A window that prints every 50 ms and changes nothing it shows is quiet by its
+    /// screen, though never by its output: the stand-in draws its box, then writes what
+    /// Muse Code 1.4.14 wrote at rest after a command it ran in the background was stopped
+    /// (colour resets and a move of the cursor to where it is) and its box again, every 50
+    /// ms, as T-1081's pty probe saw. Then it changes one character, and its screen is not
+    /// quiet (T-1083: the daemon judged such a window by its output, so it never let its
+    /// next message in).
+    #[cfg(unix)]
+    #[test]
+    fn a_window_that_repaints_what_it_shows_is_quiet_by_its_screen_and_not_by_its_output() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            arbiter,
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut ask = |op: &str, body: Value| -> Value {
+            number += 1;
+            let id = format!("n-quiet-{number}");
+            let mut frame =
+                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
+                    .expect("serialize request");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("write request");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read response");
+                let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
+                if frame["kind"] == "res" && frame["id"] == id.as_str() {
+                    return frame["body"].clone();
+                }
+            }
+        };
+        // The box, then 80 repaints 50 ms apart (4 s); then one character of it changed,
+        // and that box repainted on. Nothing here reads its output, so its backlog holds
+        // all of it.
+        let script = r#"repaint() { printf '\033[17;1H%s\033[18;3H' "$2"; i=0; while [ $i -lt $1 ]; do
+  printf '\033[39m\033[49m\033[59m\033[0m\033[18;3H\033[17;1H%s\033[18;3H' "$2"
+  /bin/sleep 0.05; i=$((i+1)); done; }
+repaint 80 '> Ask anything'; repaint 1200 '> Tsk anything'"#;
+        let pane = json!({"id":"repaint-pane","generation":1});
+        let opened = ask(
+            "pane.open",
+            json!({"id":"repaint-pane","generation":1,"cwd":"/tmp","argv":["/bin/sh","-c",script],
+                   "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1 << 20}),
+        );
+        assert_eq!(opened["ok"], true, "{opened}");
+        let shows = |snapshot: &Value, text: &str| {
+            snapshot["tail"]
+                .as_array()
+                .is_some_and(|lines| lines.iter().any(|line| line.as_str() == Some(text)))
+        };
+        let mut look = || {
+            let mut body = pane.clone();
+            body["tail"] = json!(4);
+            ask("pane.snapshot", body)
+        };
+        let (repainting, changed) = quiet_by_screen::watch(&mut look, &shows);
+        quiet_by_screen::check(&repainting, &changed, true);
+
+        panes
+            .kill(&PaneKey::new("repaint-pane", 1))
+            .expect("kill the pane");
         inputs.close_and_drain();
         drop(reader);
         drop(node_stream);

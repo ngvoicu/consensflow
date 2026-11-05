@@ -30,7 +30,6 @@
 
 use std::thread::sleep;
 
-use cf_e2e::files;
 use cf_e2e::live::trace::at_ms;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
@@ -47,7 +46,7 @@ pub(crate) fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "devin-worker", "kind": "devin", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// When the first of the daemon's events of `kind` that `matching` takes was written,

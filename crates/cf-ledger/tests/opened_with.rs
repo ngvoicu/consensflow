@@ -45,7 +45,8 @@ fn project(name: &str) -> NewProject {
         name: name.into(),
         chief: NewChief {
             harness: "claude-code".into(),
-            agent: Some("apollo".into()),
+            model: Some("apollo".into()),
+            effort: None,
         },
         staff: Vec::new(),
         gate: false,
@@ -249,7 +250,7 @@ fn a_request_in_json_says_its_calls_and_specs_after_the_rest_and_is_refused_in_t
     let asked = json!({
         "directory": "/work/app",
         "name": "app",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         "staff": [],
         "wakeUp": { "on": true, "every": 3, "unit": "days", "text": "Still there?" },
         "specs": { "on": true, "folder": "docs/specs", "variant": "core-html" },

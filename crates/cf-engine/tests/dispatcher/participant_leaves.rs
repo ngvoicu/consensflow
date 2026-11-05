@@ -23,7 +23,12 @@ fn add_worker(context: &Context, project: i64, agent: &str) -> ParticipantView {
         .add_member(
             project,
             &NewMember {
-                agent: agent.to_owned(),
+                model: cf_engine::testing::MODELS
+                    .iter()
+                    .find(|(name, _)| *name == agent)
+                    .map(|(_, model)| (*model).to_owned()),
+                effort: None,
+                model_name: Some(agent.to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],
@@ -172,7 +177,7 @@ fn keeps_the_chief_of_a_project_created_while_a_deleted_one_still_closes_its_win
     let opening = context.begin_open_project(json!({
         "directory": "/work/api",
         "name": "api",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
     }));
     let fresh = context.finish(opening).unwrap().unwrap();
     let chief = fresh

@@ -17,11 +17,11 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        pause(store, &task, detail, false)?;
+        pause(store, &task, detail, false, Stops::NotAsked)?;
         store.db.execute(
             "UPDATE task SET held_until = ? WHERE id = ?",'''
 replace = '''
-        pause(store, &task, detail, false)?;
+        pause(store, &task, detail, false, Stops::NotAsked)?;
         store.db.execute(
             "UPDATE message SET state = 'cancelled', reason = 'held' WHERE task_id = ? AND state IN ('queued', 'gated')",
             [task.id],
@@ -46,8 +46,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '"UPDATE task SET paused_at = updated_at, stop_seq = stop_seq + 1 WHERE id = ?",'
-replace = '"UPDATE task SET paused_at = updated_at WHERE id = ?",'
+find = '    let asked = i64::from(stops == Stops::Asked);'
+replace = '    let asked = 0_i64;'
 
 [[plant]]
 name = "pause: a door is left open by a pause"
@@ -261,7 +261,7 @@ replace = '''        if !self.in_open_project(message.project_id)? {
 
 [[plant]]
 name = "pause: what the activity says gates the interrupt again"
-meant = "a_window_out_of_quota_and_still_at_work_is_interrupted_while_its_activity_says_it_is_out"
+meant = "a_pause_of_a_window_at_work_whose_member_goes_out_meanwhile_is_pressed_while_its_activity_says_it_is_out"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]
@@ -280,7 +280,7 @@ replace = '''
 
 [[plant]]
 name = "pause: a stop is tried once, not in three rounds"
-meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+meant = "three_rounds_ignored_keep_the_window_said_once_its_task_paused_and_asked_again_every_minute"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]

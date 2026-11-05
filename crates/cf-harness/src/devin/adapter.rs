@@ -55,7 +55,8 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
-use cf_proto::panes::{HumanInput, SilentPaste};
+use cf_proto::models::ModelListing;
+use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS};
 use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
@@ -68,8 +69,9 @@ use super::paths;
 use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, Observed, Over, Pane,
-    PaneHost, Prepared, Readiness, Records, Skill, Window, Work, STAFF_RULES_HEADING,
+    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, LaunchId, Observed, Over,
+    Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
+    STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -110,8 +112,8 @@ const NORMAL: &str = "normal";
 const SWITCHING: &str =
     "Devin's window is in its normal permission mode, and /bypass was sent to switch it to full permission";
 
-/// How long a window's output holds still before `/bypass` is pasted into it:
-/// what the engine takes for a screen that is drawn. A host that cannot tell is
+/// How long what a window's screen shows holds still before `/bypass` is pasted into it:
+/// what the engine takes for a screen that is drawn (`screenQuietMs`, T-1083). A host that cannot tell is
 /// taken as drawn, as the engine takes it.
 const DRAWN_QUIET_MS: f64 = 1_500.0;
 
@@ -279,6 +281,37 @@ const DEVIN_PASTE: SilentPaste = SilentPaste {
 };
 
 impl Adapter for DevinAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
+        Box::pin(super::models::listed(
+            &self.services.env,
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(
+        &'a self,
+        session: &'a str,
+        _asked: Option<&'a str>,
+    ) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, &self.services.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window and press opt+↵ to keep it to that conversation: ↵ alone makes it your Devin default.")
+    }
+
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        let env = &self.services.env;
+        Box::pin(async move { super::models::default_model(env) })
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let env = &self.services.env;
@@ -428,6 +461,10 @@ impl Adapter for DevinAdapter {
             paths::global_specmint(env, variant),
         )
     }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Devin, &self.services.env, Some(*specs), id).map(|_| ())
+    }
 }
 
 /// A Devin window, and what the engine told it of itself.
@@ -556,7 +593,7 @@ impl DevinWindow {
             return Readiness::Unfit(stayed_in_normal());
         }
         let drawn = snapshot
-            .get("outputQuietMs")
+            .get(SCREEN_QUIET_MS)
             .is_none_or(|quiet| quiet.as_f64().is_some_and(|ms| ms >= DRAWN_QUIET_MS));
         let due = switch
             .entered

@@ -2,13 +2,13 @@
 
 use super::Ledger;
 use crate::{
-    staff, Candidate, LedgerError, MemberView, NewMember, ParticipantView, ProjectView,
-    RemovedMember, StaffMember, TierChange,
+    staff, Candidate, LedgerError, MemberEdit, MemberView, NewMember, ParticipantView, ProjectView,
+    RemovedMember, StaffMember,
 };
 
 impl Ledger {
-    /// A member joins the staff, or rejoins it in the roles, harness,
-    /// designer flag and tier given now.
+    /// A member joins the staff, named by its model, or one that left on the same
+    /// harness, model and effort rejoins it in the roles and tier given now.
     pub fn add_member(
         &mut self,
         project_id: i64,
@@ -17,16 +17,18 @@ impl Ledger {
         staff::add_member(&mut self.store, project_id, member)
     }
 
-    /// Each active member's tier becomes its saved agent's now (`tier_of`
-    /// answers it, or none for an agent the roster no longer has): the members that changed.
-    pub fn refresh_member_tiers(
+    /// A member runs on another model, effort or tier from its next window (T-1143); so
+    /// do its sessions. Its handle stays.
+    pub fn edit_member(
         &mut self,
-        tier_of: impl FnMut(&str) -> Option<String>,
-    ) -> Result<Vec<TierChange>, LedgerError> {
-        staff::refresh_member_tiers(&mut self.store, tier_of)
+        project_id: i64,
+        handle: &str,
+        edit: &MemberEdit,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::edit_member(&mut self.store, project_id, handle, edit)
     }
 
-    /// A member's roles change in place; a role it gains must fit its agent.
+    /// A member's roles change in place; a role it gains must fit it.
     pub fn set_roles<S: AsRef<str>>(
         &mut self,
         project_id: i64,

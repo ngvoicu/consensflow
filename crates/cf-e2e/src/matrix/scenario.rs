@@ -17,6 +17,7 @@ use super::machine::Fact;
 use super::observe::{Bind, Bindings, Snapshot, SMOKE};
 use super::oracle::{self, Judged};
 
+mod branches;
 mod deliveries;
 mod field;
 mod interrupts;
@@ -25,6 +26,9 @@ mod order;
 mod phase2;
 mod questions;
 mod reports;
+mod seat_fields;
+mod seats;
+mod window_life;
 
 pub use field::field;
 pub use interrupts::interrupts;
@@ -42,6 +46,10 @@ pub fn all() -> Vec<Scenario> {
     all.extend(field());
     all.extend(reports::reports());
     all.extend(deliveries::deliveries());
+    all.extend(branches::branches());
+    all.extend(window_life::window_life());
+    all.extend(seats::seats());
+    all.extend(seat_fields::seat_fields());
     all
 }
 
@@ -103,6 +111,10 @@ pub struct Step {
     /// What the human does on the page instead of asking the chief (a member taken off the
     /// staff), where the step is that: the board is waited for as for an ask.
     pub human: Option<fn(&crate::live::members::Members) -> Result<()>>,
+    /// Whether the app is quit and started again on the same home before the step, as the
+    /// human's quit does (every window ends with it), and the project resumed from the page
+    /// ([`crate::matrix::run`]): the step is then asked, or done, as any other.
+    pub restarts: bool,
     pub name: &'static str,
     /// What the human types to a real chief, after the step's marker, with the tasks bound so
     /// far (a step that names a task names the number the board gave it).
@@ -158,6 +170,9 @@ pub struct Scenario {
     /// How long the scenario waits by design on the stand-ins (minutes of wake-up calls), which
     /// their deadline grants it on top of its own ([`crate::matrix::run::stand_in_deadline`]).
     pub waits: Duration,
+    /// Whether the app's daemon starts on the `PATH` the Finder gives it, its login shell too
+    /// slow to give it its own (the slow login shell of 2026-10-15).
+    pub finder: bool,
 }
 
 /// A member besides a board's five: its agent's id, its one role and its tier.
@@ -211,6 +226,13 @@ impl Scenario {
     #[must_use]
     pub fn with_extra(mut self, extra: &'static [Extra]) -> Self {
         self.extra = extra;
+        self
+    }
+
+    /// The same scenario, its app's daemon started on the Finder's `PATH`.
+    #[must_use]
+    pub fn started_by_the_finder(mut self) -> Self {
+        self.finder = true;
         self
     }
 
@@ -280,6 +302,7 @@ pub fn smoke() -> Scenario {
         steps: vec![
             Step {
                 human: None,
+                restarts: false,
                 name: "advice",
                 asks: |_| {
                     "This project has greet.cjs and check.cjs: `node check.cjs` prints OK once greet(\"Ada\") returns exactly \"Hello, Ada!\", and it does not yet. Before anything changes, get advice: put one advice task on the board for our advisor, with `cf task add --advice --tier standard \"...\"`, asking how greet.cjs should change so that the check passes. Every member of our staff is at tier standard. Change no file yourself, ask me nothing, and tell me in one line when the advice is back.".to_owned()
@@ -291,6 +314,7 @@ pub fn smoke() -> Scenario {
             },
             Step {
                 human: None,
+                restarts: false,
                 name: "change",
                 asks: |_| {
                     "Now have our worker make that change: put one task on the board with `cf task add --tier standard \"...\"` to change greet.cjs so that `node check.cjs` prints OK, leaving check.cjs as it is. Do not make the change yourself, and tell me in one line when the worker's result is back.".to_owned()
@@ -302,6 +326,7 @@ pub fn smoke() -> Scenario {
             },
             Step {
                 human: None,
+                restarts: false,
                 name: "review and test",
                 asks: |_| {
                     "Have the change checked: put one review task on the board for our reviewer with `cf task add --review --tier standard \"...\"` to read greet.cjs, and one test task for our tester with `cf task add --test --tier standard \"...\"` to run `node check.cjs` and say what it prints. Tell me in one line when both results are back.".to_owned()
@@ -315,6 +340,7 @@ pub fn smoke() -> Scenario {
             },
             Step {
                 human: None,
+                restarts: false,
                 name: "accept",
                 asks: |_| {
                     "If the review and the test found nothing wrong, accept the four tasks: the advice, the change, the review and the test, each with `cf task accept`. Tell me in one line when they are accepted.".to_owned()
@@ -345,6 +371,7 @@ pub fn smoke() -> Scenario {
         daemon_vars: &[],
         extra: &[],
         waits: Duration::ZERO,
+        finder: false,
     }
 }
 

@@ -28,14 +28,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::TurnLeft;
-use cf_harness::records::{Options, Reading, Role};
+use cf_harness::records::{LastCall, Options, Reading, Role};
 use cf_ledger::MessageView;
 use cf_proto::agents::Harness;
 use cf_proto::cf_word::CfWord;
 use serde_json::json;
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::{delivery_text_beside, is_paste_of, marker_of};
+use crate::delivery_text::{
+    arrival_boundary, arrived_among, delivery_text_beside, is_paste_of, marker_of,
+};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{caught, returning};
@@ -281,15 +283,20 @@ impl Dispatcher {
             .and_then(|conversation| conversation.native_session);
         let pasted = pasted.filter(|pasted| current.as_deref() != Some(*pasted));
         let first = self.brief_given_first(message)?;
+        let before = arrival_boundary(message);
         let copied = self
             .seams
             .ledger
             .borrow()
-            .copied_items_with(message.recipient_id, &marker_of(message.id))?
-            .into_iter()
-            .find(|(_, text)| is_paste_of(text, message.id, first.as_deref()));
+            .copied_items_with(message.recipient_id, &marker_of(message.id))?;
+        let copied = arrived_among(
+            &copied,
+            before,
+            |(item, _)| item,
+            |(_, text)| is_paste_of(text, message.id, first.as_deref()),
+        );
         match copied {
-            Some((item, _)) => Ok(Some(item)),
+            Some((item, _)) => Ok(Some(item.clone())),
             // An `async` method: its answer reaches this a turn after it was made.
             None => match pasted {
                 // Boxed, so that the work of an operation that settles it stays small.
@@ -299,11 +306,18 @@ impl Dispatcher {
                         session,
                         message.id,
                         first,
+                        before,
                     )))
                     .await
                 }
                 None => {
-                    returning(self.recorded_paste_of(message.recipient_id, message.id, first)).await
+                    returning(self.recorded_paste_of(
+                        message.recipient_id,
+                        message.id,
+                        first,
+                        before,
+                    ))
+                    .await
                 }
             },
         }
@@ -311,13 +325,15 @@ impl Dispatcher {
 
     /// The first item a participant's harness recorded it was given that is
     /// the paste of `message` ([`is_paste_of`]), behind `first` where that is
-    /// what its window was given ahead of it, read with no window open: none
-    /// when none is, or when its record cannot be read.
+    /// what its window was given ahead of it, and after `before` where the record holds
+    /// it ([`arrived_among`]), read with no window open: none when none is, or when its
+    /// record cannot be read.
     pub(crate) async fn recorded_paste_of(
         &self,
         participant: i64,
         message: i64,
         first: Option<String>,
+        before: Option<&str>,
     ) -> Result<Option<String>, EngineError> {
         let Some((harness, session)) = self.readable(participant)? else {
             return Ok(None);
@@ -330,7 +346,7 @@ impl Dispatcher {
                 .look(harness, &session, &Options::default()),
         )
         .await;
-        Ok(paste_in(&reading, message, first.as_deref()))
+        Ok(paste_in(&reading, message, first.as_deref(), before))
     }
 
     /// The record of `session`, one of a participant's harness's conversations, read
@@ -363,9 +379,10 @@ impl Dispatcher {
         session: &str,
         message: i64,
         first: Option<String>,
+        before: Option<&str>,
     ) -> Result<Option<String>, EngineError> {
         let reading = self.record_left(participant, session).await?;
-        Ok(reading.and_then(|reading| paste_in(&reading, message, first.as_deref())))
+        Ok(reading.and_then(|reading| paste_in(&reading, message, first.as_deref(), before)))
     }
 
     /// Whether a participant's harness's record of its current conversation,
@@ -377,6 +394,15 @@ impl Dispatcher {
             return Ok(None);
         };
         Ok(self.seams.records.turn_cut(harness, &session).await)
+    }
+
+    /// The last tool call a participant's current conversation shows, as a line
+    /// (`Record::last_call`), read with no window open: what its window was doing when it
+    /// closed under its task, for the note of the close (T-823). None where the record shows
+    /// no call, cannot be read, or the participant has no conversation to read.
+    pub(crate) async fn last_call_of(&self, participant: i64) -> Option<Arc<LastCall>> {
+        let (harness, session) = self.readable(participant).ok()??;
+        self.seams.records.last_call(harness, &session).await
     }
 
     /// The harness and the session a participant's current conversation is on,
@@ -405,14 +431,22 @@ impl Dispatcher {
 
 /// The first item of `reading`, a record, that is the paste of `message`
 /// ([`is_paste_of`]), behind `first` where that is what its window was given ahead of
-/// it: none when none is, or when the record could not be read.
-fn paste_in(reading: &Reading, message: i64, first: Option<&str>) -> Option<String> {
+/// it, after `before` where the record holds it ([`arrived_among`]): none when none is, or
+/// when the record could not be read.
+fn paste_in(
+    reading: &Reading,
+    message: i64,
+    first: Option<&str>,
+    before: Option<&str>,
+) -> Option<String> {
     let Reading::Known(record) = reading else {
         return None;
     };
-    record
-        .items
-        .iter()
-        .find(|item| item.role == Role::User && is_paste_of(&item.text, message, first))
-        .map(|item| item.id.to_string())
+    arrived_among(
+        &record.items,
+        before,
+        |item| &item.id,
+        |item| item.role == Role::User && is_paste_of(&item.text, message, first),
+    )
+    .map(|item| item.id.to_string())
 }

@@ -80,6 +80,7 @@ fn tarball(scratch: &Path, context: &Context, identity: &str, command: &str, id:
         command,
         env: &[],
         node: r"C:\Program Files\nodejs",
+        machine: "zeewin2",
         limits: None,
     });
     let into = scratch.join(id);
@@ -231,6 +232,7 @@ fn start_after(
         command: "",
         env: &[],
         node: r"C:\Program Files\nodejs",
+        machine: "zeewin2",
         limits: None,
     });
     let file = scratch.join(format!("run-{id}.ps1"));

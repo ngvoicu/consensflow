@@ -94,7 +94,20 @@ const RECEIPT_NEW_WINDOW: &str = "the receipt of `cf task add` says the task sta
 /// a tier nobody holds, whose reply names the members of the tier it went to; and the ones
 /// that print the receipt of `cf task add`, which says where the task goes now. Found by playing them against
 /// the daemon.
+/// A member holds its own model (harness-models): the staff says it, with the name its
+/// harness gives it, where Node's said its saved agent's.
+const STAFF_ON_ITS_OWN_MODEL: &str = "`cf staff` says the model, its name and the effort each member holds itself (none for a member a test named by its agent alone), where Node's API read them off the member's saved agent";
+
+/// A lane says the model and effort its participant runs on (harness-models), and
+/// `cf task list` says it after the role in each lane's head.
+const LANE_RUNS_ON: &str = "a lane of the board says the model and effort its participant runs on, and `cf task list` says it in the lane's head, where Node's said the handle and role alone";
+
 const DEPARTED: &[Departed] = &[
+    ("cf-board-014", LANE_RUNS_ON),
+    ("cf-board-016", LANE_RUNS_ON),
+    ("cf-board-018", STAFF_ON_ITS_OWN_MODEL),
+    ("cf-board-021", LANE_RUNS_ON),
+    ("cf-board-027", STAFF_ON_ITS_OWN_MODEL),
     ("core-api-003", RESULT_ACCEPTED),
     ("core-api-005", ANSWERED_AS_IT_WAITED),
     (

@@ -9,7 +9,7 @@ use cf_engine::testing::Context;
 use cf_harness::contract::Pane;
 use cf_ledger::{NewNote, NewTask};
 
-use crate::fixtures::Tiers;
+use crate::fixtures::{hold_notes, Tiers};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["a window that closes"];
@@ -98,6 +98,10 @@ fn is_killed_once_when_its_member_leaves_the_staff_though_its_exit_comes_late() 
 fn closed_with_its_task_done_and_its_exit_late_pauses_nothing_its_session_is_given_meanwhile() {
     for reopen in [false, true] {
         let context = Context::new();
+        // The host proves each window's program gone, as the app's does, but late: the
+        // session's next task goes on with its conversation (`ownership`), as this test is
+        // about the exit's lateness.
+        context.host.exits_showing(Some(0), None, None);
         context.host.hold_exits.set(true);
         let tiers = Tiers::new(&context, &["zeus"]);
         let project = tiers.project.id;
@@ -149,6 +153,68 @@ fn closed_with_its_task_done_and_its_exit_late_pauses_nothing_its_session_is_giv
             "in a window of its own"
         );
     }
+}
+
+/// The same, where the late exit proves nothing of the program: it still pauses nothing of the task
+/// it closed with, but the follow-up the session was given meanwhile, which no window had, is held
+/// for the chief's word, in one note, and goes to a window of its own once the chief sends it on.
+#[test]
+fn closed_with_its_task_done_and_an_exit_late_that_proves_nothing_holds_the_follow_up_for_the_chiefs_word(
+) {
+    let context = Context::new();
+    context.host.hold_exits.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let window = context.host.last(&session).unwrap().pane;
+    context.adapter.answer(&session, "Parser done");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(kills(&context, &window), 1, "its window is closed");
+
+    context.accept_if_done(project, 1);
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Now the lexer".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    assert_eq!(tiers.task(2).task.state, "queued");
+    context.exit(&session);
+    assert_eq!(
+        tiers.task(2).task.state,
+        "queued",
+        "the late exit pauses nothing"
+    );
+    assert_eq!(tiers.task(1).task.state, "accepted");
+
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held: no proof of the exit"
+    );
+    assert_eq!(hold_notes(&context, project, 2).len(), 1);
+    assert_eq!(
+        tiers.notes("chief").len(),
+        1,
+        "told once, in the note of the hold alone: {:?}",
+        tiers.notes("chief")
+    );
+
+    context.resume_task(project, 2, "Go on in a window of your own.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working");
+    let next = context.host.last(&session).unwrap().pane;
+    assert_ne!(next.generation, window.generation, "in a window of its own");
 }
 
 /// A member's window that closes by itself (its harness crashed) with a note the chief

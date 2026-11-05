@@ -37,6 +37,10 @@ pub struct Launch {
     pub settings: Option<String>,
     /// The first message: the last word that is neither an option nor a value.
     pub seed: Option<String>,
+    /// The model and the effort it was launched on (`--model`, `--effort`), which its
+    /// answers' records say, as Claude's do.
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// Whether `arg` names the stand-in's own file (`own`), by its file name: the
@@ -60,12 +64,19 @@ pub fn parse(args: &[String], own: Option<&Path>) -> Result<Launch, String> {
     let mut resuming = false;
     let mut settings = None;
     let mut seed = None;
+    let (mut model, mut effort) = (None, None);
     let mut at = 0;
     while at < args.len() {
         let arg = args[at].as_str();
         let value = args.get(at + 1).cloned();
         if arg == "--settings" {
             settings = value.clone();
+        }
+        if arg == "--model" {
+            model = value.clone();
+        }
+        if arg == "--effort" {
+            effort = value.clone();
         }
         if VALUE_FLAGS.contains(&arg) {
             at += 1;
@@ -84,6 +95,8 @@ pub fn parse(args: &[String], own: Option<&Path>) -> Result<Launch, String> {
             resuming,
             settings,
             seed,
+            model,
+            effort,
         }),
         _ => Err("the fake agent needs --session-id or --resume".to_owned()),
     }
@@ -116,6 +129,8 @@ mod tests {
                 resuming: false,
                 settings: Some("/s.json".into()),
                 seed: Some("HELLO".into()),
+                model: Some("fake".into()),
+                effort: Some("high".into()),
             }
         );
     }

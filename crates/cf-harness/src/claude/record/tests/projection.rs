@@ -88,7 +88,8 @@ fn unread() -> Value {
 }
 
 /// `record` with something nothing reads in every place a record says things:
-/// the record, its message, each block of its content, its attachment.
+/// the record, its message, each block of its content, its attachment. A `tool_use`'s name and
+/// input are read, for the last call the transcript shows (T-823).
 fn noisy(mut record: Value) -> Value {
     let add = |fields: &mut Map<String, Value>, names: &[&str]| {
         for name in names {
@@ -129,14 +130,9 @@ fn noisy(mut record: Value) -> Value {
                 if let Value::Object(block) = block {
                     add(
                         block,
-                        &[
-                            "input",
-                            "caller",
-                            "name",
-                            "signature",
-                            "thinking",
-                            "is_error",
-                        ],
+                        // A call's `input` and `name`, a thinking block's words and a
+                        // result's `is_error` are read (what the history draws of them).
+                        &["caller", "signature"],
                     );
                 }
             }
@@ -166,6 +162,7 @@ fn variant(projected: &Projected) -> &'static str {
         Projected::User(_) => "user",
         Projected::Output(_) => "output",
         Projected::Boundary(_) => "boundary",
+        Projected::Compacted(_) => "compacted",
     }
 }
 
@@ -284,6 +281,7 @@ fn what_nothing_reads_of_a_record_changes_neither_how_it_waits_nor_the_reading()
         "user",
         "output",
         "boundary",
+        "compacted",
     ];
     assert_eq!(
         seen,

@@ -4,9 +4,7 @@
 //! The order matters, and is held: the home and the files with their start
 //! line; the ledger, whose lock refuses a second daemon on the same home; the
 //! launch folders swept and the projects that were open suspended, only once
-//! this daemon holds the ledger; the agents file folded into
-//! its shape and the members' tiers read again, a failure written down and no
-//! more; the UI token and the HTTP front; the stop armed; then the handle line,
+//! this daemon holds the ledger; the app's settings file found; the UI token and the HTTP front; the stop armed; then the handle line,
 //! the first thing on the standard output, the app reads it to find the daemon;
 //! the bridge, the host, the engine, the pass loop and its throttles and the
 //! page's operations, every handler on before the bridge is first polled and
@@ -29,7 +27,6 @@ use std::time::Duration;
 use cf_base::env::Env;
 use cf_base::file::{make_folder, Mkdir};
 use cf_base::home::config_root;
-use cf_catalog::{roster_path, Catalog, CatalogError};
 use cf_engine::runtime::begin;
 use cf_engine::seams::{EngineError, Limits, Seams};
 use cf_engine::Dispatcher;
@@ -48,15 +45,16 @@ use tokio::sync::watch;
 use crate::api;
 use crate::api::context::Context;
 use crate::api::credentials::{random_hex, Credentials};
+use crate::app_settings::{settings_path, SettingsFile};
 use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
 use crate::files::{Log, Trace};
-use crate::host::{daemon_bridge, watch_exits, BridgeHost};
+use crate::host::{daemon_bridge, watch_exits, watch_privacy, BridgeHost, PrivacyEvent};
 use crate::machine;
+use crate::models::ModelLists;
 use crate::page::{self, Page};
 use crate::pass::{throttle, PassLoop};
-use crate::roster::Agents;
 use crate::screens::network::HttpsFeed;
 use crate::screens::Screens;
 use crate::seams::{
@@ -126,8 +124,6 @@ pub enum StartError {
     /// failures.
     #[error("{0}")]
     Ledger(#[from] LedgerError),
-    #[error("{0}")]
-    Catalog(#[from] CatalogError),
 }
 
 /// A daemon that is running.
@@ -233,16 +229,11 @@ async fn run(
         ));
     }
     ledger.borrow_mut().suspend_for_restart()?;
-    // What the app ships is what the roster has, with the human's own agents,
-    // and every member's tier is read again from its agent. An agents file that
-    // cannot be read or rewritten stops no start.
-    let agents = Rc::new(Agents::new(
-        Catalog::bundled()?,
-        roster_path(&env).ok_or(StartError::NoHome)?,
+    // What the app says, which a chief's launch reads afresh: a file that cannot be read
+    // stops no start, and says nothing.
+    let settings = Rc::new(SettingsFile::new(
+        settings_path(&env).ok_or(StartError::NoHome)?,
     ));
-    if let Err(cause) = agents.normalize_and_follow(&mut ledger.borrow_mut()) {
-        log.error("the agents file could not be used", Some(&cause));
-    }
 
     // Where the engine's work runs, driven from here on.
     let spawn = Rc::new(DaemonSpawn::new(Rc::clone(&errors)));
@@ -287,7 +278,6 @@ async fn run(
         kick: Rc::clone(&kick),
         finish: finishing::of(&engine, &spawn),
         closing: crate::api::context::Closing::new(),
-        roster: Rc::clone(&agents) as Rc<dyn crate::api::context::AgentRows>,
         log: Rc::clone(&log),
         trace: Rc::clone(&trace),
         tooling_calls: crate::api::calls::switched_on(env.os(crate::api::calls::TOOLING_API_CALLS)),
@@ -301,24 +291,6 @@ async fn run(
     let time = Rc::new(DaemonTime::new(Rc::clone(&spawn)));
     let screens = Rc::new(Screens {
         token: token.clone(),
-        on_roster_change: {
-            let (agents, ledger, bridge, kick) = (
-                Rc::clone(&agents),
-                Rc::clone(&ledger),
-                bridge.clone(),
-                Rc::clone(&kick),
-            );
-            Rc::new(move || {
-                let moved = agents.follow(&mut ledger.borrow_mut())?;
-                if !moved.is_empty() {
-                    bridge.event("state.changed", json!({ "reason": "roster" }));
-                }
-                kick();
-                Ok(())
-            })
-        },
-        env: env.clone(),
-        agents: Rc::clone(&agents),
         admin: HarnessAdmin::new(
             env.clone(),
             Rc::clone(&time) as _,
@@ -362,11 +334,12 @@ async fn run(
     let opening = Duration::from_millis(u64::try_from(limits.open_ms).unwrap_or_default());
     let host = Rc::new(BridgeHost::new(bridge.clone(), env.clone()).opening_within(opening));
     let computer_use = Rc::new(MachineComputerUse::new(env.clone()));
+    let adapters = Rc::new(HarnessAdapters::new(&services));
     let seams = Seams {
         ledger: Rc::clone(&ledger),
         host: Rc::clone(&host) as _,
         background: host as _,
-        adapters: Rc::new(HarnessAdapters::new(&services)),
+        adapters: Rc::clone(&adapters) as _,
         records: Rc::clone(&records) as _,
         time: Rc::clone(&time) as _,
         launch_ids: Rc::new(RandomLaunchIds),
@@ -375,7 +348,7 @@ async fn run(
             WindowEnv::new(&env, api.url(), &options.bundle.bin.to_string_lossy())
                 .with_cf(&options.bundle.pane_cf, cfg!(windows)),
         ),
-        roster: Rc::clone(&agents) as _,
+        app_settings: Rc::clone(&settings) as _,
         roles: Rc::new(RoleTexts::new(env.clone(), options.bundle.pane_cf.clone())),
         trace: Rc::clone(&trace) as _,
         log: Rc::clone(&log) as _,
@@ -467,11 +440,19 @@ async fn run(
             open: system_opener(env.clone()),
             grants_of: crate::computer_use::grants_of(&env),
         },
+        models: Rc::new(ModelLists::new(adapters, env.clone())),
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);
     watch_exits(&bridge, Rc::clone(&spawn), move |pane| {
         exiting.pane_exited(pane)
+    });
+    // A macOS privacy dialog raised in the app's name for a window's process, which the host
+    // reads from the system's log, is told to the human and to whoever gave the window's task.
+    let privacy = Rc::clone(&dispatcher);
+    watch_privacy(&bridge, Rc::clone(&spawn), move |event| match event {
+        PrivacyEvent::Prompt(prompt) => privacy.privacy_prompt(prompt),
+        PrivacyEvent::Unreadable(unreadable) => privacy.privacy_unreadable(unreadable),
     });
     errors.spawn("the bridge's task failed", connection);
 

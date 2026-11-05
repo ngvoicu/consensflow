@@ -217,6 +217,35 @@ const PASTED: &str = "pasted_content";
 /// line. The attachments' sources are the next item of the record, which holds no header.
 const IMAGE: &str = "[Image #";
 
+/// The item a message taken back to be given again must come after to have arrived: the one
+/// its window's record held the copy that never began at (its receipt's `before`, written by
+/// a stall's relaunch). None for any other message.
+pub(crate) fn arrival_boundary(message: &MessageView) -> Option<&str> {
+    message
+        .receipt
+        .get("before")
+        .and_then(serde_json::Value::as_str)
+}
+
+/// The first of `rows`, in their order, that is the paste of a message (`is_paste`) and comes
+/// after its boundary (`before`, [`arrival_boundary`]) where `rows` hold that item (`id`);
+/// where they do not (a conversation opened afresh), any. The one rule every reader of an
+/// arrival keeps, the window's look, the record a switched window left, ConsensFlow's copy
+/// of the conversation and its harness's own record (a restart, a window's end, a Close):
+/// the copy that never began proves nothing of the delivery after it (T-1223's P2-2,
+/// T-1229's P2), and nor would the last copy that matches.
+pub(crate) fn arrived_among<'a, T>(
+    rows: &'a [T],
+    before: Option<&str>,
+    id: impl Fn(&T) -> &str,
+    is_paste: impl Fn(&T) -> bool,
+) -> Option<&'a T> {
+    let from = before
+        .and_then(|before| rows.iter().rposition(|row| id(row) == before))
+        .map_or(0, |at| at + 1);
+    rows[from..].iter().find(|row| is_paste(row))
+}
+
 /// Whether `text`, an item of what a window was given, is the paste of the
 /// message `message_id`, which proves it arrived: the message's own header begins
 /// it, as ConsensFlow pastes it, the lines of the window's text
@@ -234,8 +263,18 @@ const IMAGE: &str = "[Image #";
 ///   shape Claude writes; the header after the blank line with no wrapper is taken for
 ///   the paste too, as a wrapper is read where it is and none is needed, a shape Claude
 ///   does not write and no wider than the limit below);
-/// - after `first`, the exact paste a member's fresh window is given ahead of its
-///   first message ([`brief_first`]), there and nowhere else.
+/// - after `first`, the paste a member's fresh window is given ahead of its first
+///   message ([`brief_first`]), there and nowhere else: as it was given, but for what
+///   Claude Code takes out of a paste it attaches pictures of. The brief is pasted with
+///   the message (T-681), so a picture path that stands on a line of its own in the
+///   brief is taken out of the record as it would be of any paste's, and so are the
+///   blank lines of the whole paste (the paste handler of 2.1.314 to 2.1.317, read in the
+///   binary: it drops a line with nothing in it, and keeps whole a line of words that has
+///   a path in it) (T-812, Calliope's P3-1 of T-803). The brief is then matched line by
+///   line, and a line of it may be missing, if it is blank or ends with the name of an
+///   image file ([`names_an_image`], once for each placeholder the item begins with).
+///   A line the record keeps (a picture Claude could not read, a file that is no image)
+///   is matched where it is, and a line of words is never missing.
 ///
 /// A header quoted in other words, the human's (`Why is "[ConsensFlow m-42 …]"
 /// queued?`) or a message's (`Investigate this:\n\n[ConsensFlow m-42 …]`), is no
@@ -244,10 +283,9 @@ const IMAGE: &str = "[Image #";
 /// does are taken for one, and a paste Devin glued behind words the human typed and never
 /// sent (it pastes behind what its input box holds, a record of 2026-10-02) is none: the
 /// window waits for those words to be sent first (`Held::Unsent`), so only a typing
-/// between that look and the paste can make one. The brief `first` holds is never behind
-/// placeholders: Claude Code makes no attachment of the first message of a launch, which is an
-/// argument of the program and no paste (the probe of 2026-10-22, `launch_check` of
-/// `tests/live_image_paste.rs`).
+/// between that look and the paste can make one. Limit: the item must begin with the
+/// placeholders for any line of the brief to be missing; a record of an attachment that
+/// leaves none is not read.
 pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
     let marker = marker_of(message_id);
     if !text.contains(&marker) {
@@ -261,8 +299,52 @@ pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
         Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped),
         None => unwrapped(text),
     };
-    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));
+    // One placeholder for each picture Claude took out of the paste.
+    let attached = after_placeholders(text).map_or(0, |head| {
+        text[..text.len() - head.len()].matches(IMAGE).count()
+    });
+    let behind = first.and_then(|first| after_brief(paste, &window_text(first), attached));
     paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))
+}
+
+/// What follows the brief `first` a fresh window was given ahead of its first message, in
+/// `paste`, as its record shows it: the brief line by line, but for the lines Claude Code
+/// took out when it attached pictures. A line of the brief that `paste` does not begin with
+/// may be missing if it is blank (Claude drops them), or if it ends with the name of an
+/// image file ([`names_an_image`]) and no more such lines are missing than the `attached`
+/// placeholders the record begins with. A line that is there is matched where it is, so a
+/// picture Claude could not read, which stays in the words, is no line to skip. None where
+/// `paste` does not begin with the brief so.
+fn after_brief<'a>(paste: &'a str, first: &str, mut attached: usize) -> Option<&'a str> {
+    let mut rest = paste;
+    // Pictures were attached: the record is that of a paste Claude took lines out of.
+    let handled = attached > 0;
+    for line in first.split_inclusive('\n') {
+        if let Some(after) = rest.strip_prefix(line) {
+            rest = after;
+        } else if handled && line.trim().is_empty() {
+            // A blank line, dropped from a paste whose pictures were attached.
+        } else if attached > 0 && names_an_image(line) {
+            attached -= 1;
+        } else {
+            return None;
+        }
+    }
+    Some(rest)
+}
+
+/// Whether `line`, a line of a paste, ends with the name of an image file of the kinds
+/// Claude Code reads and attaches: a path on a line of its own, whatever the machine's
+/// separators (`/work/desk.png`, `C:\work\desk.png`), quoted or not, or several of them, so
+/// the line ends with the last.
+fn names_an_image(line: &str) -> bool {
+    let line = line.trim();
+    let line = line.strip_suffix(['"', '\'']).unwrap_or(line);
+    line.rsplit_once('.').is_some_and(|(_, kind)| {
+        ["png", "jpg", "jpeg", "gif", "webp"]
+            .iter()
+            .any(|image| kind.eq_ignore_ascii_case(image))
+    })
 }
 
 /// The shape of `text`, an item that holds message `message_id`'s header where
@@ -912,6 +994,274 @@ mod tests {
             12,
             Some(&brief_first(&quoting, &[], &CfWord::bare()))
         ));
+    }
+
+    /// What Claude Code records of `paste` when it attaches the pictures whose paths stand
+    /// on a line of their own in it (`tests/live_image_paste.rs`): a placeholder for each, a
+    /// space between, and the words with those lines gone, no break before them. `taken`
+    /// says which of the paste's lines it attached, by their numbers. The blank lines are
+    /// kept, as the record of the field showed them.
+    fn claude_records(paste: &str, taken: &[usize]) -> String {
+        let kept: Vec<&str> = paste
+            .lines()
+            .enumerate()
+            .filter(|(at, _)| !taken.contains(at))
+            .map(|(_, line)| line)
+            .collect();
+        let marks: Vec<String> = (1..=taken.len()).map(|n| format!("[Image #{n}]")).collect();
+        format!("{}{}", marks.join(" "), kept.join("\n"))
+    }
+
+    /// How a window records the paste it was given: the item's words.
+    type Records = fn(&str) -> String;
+
+    /// The first message of a fresh window whose brief says `brief_words`, a message m-12
+    /// ("Use JSON") behind it: the brief it is given first, and the whole of its paste.
+    fn launched_behind(brief_words: &str) -> (String, String) {
+        launched_behind_saying(brief_words, "Use JSON")
+    }
+
+    /// The same, the message m-12 saying `message_words`.
+    fn launched_behind_saying(brief_words: &str, message_words: &str) -> (String, String) {
+        let brief = message(5, Some(3), brief_words.to_owned());
+        let first = brief_first(&brief, &[], &CfWord::bare());
+        let answer = delivery_text(
+            &message(12, Some(3), message_words.to_owned()),
+            &[],
+            &CfWord::bare(),
+        );
+        let paste = format!("{first}{answer}");
+        (first, paste)
+    }
+
+    /// The picture the message names and not the brief, or both: the placeholders are the
+    /// paste's, whoever's pictures they stand for, and the brief is matched as before with
+    /// the blank line it had.
+    #[test]
+    fn a_picture_the_message_names_leaves_the_brief_before_it_matched_as_it_was() {
+        // (the brief, the message, the lines Claude attached)
+        let rows: [(&str, &str, &[usize]); 2] = [
+            ("Write the parser", "Look\n/work/images/shot.png", &[5]),
+            (
+                "Write the parser\n/work/images/desk.png",
+                "Look\n/work/images/shot.png",
+                &[2, 6],
+            ),
+        ];
+        for (at, (brief_words, message_words, taken)) in rows.into_iter().enumerate() {
+            let (first, paste) = launched_behind_saying(brief_words, message_words);
+            let record = claude_records(&paste, taken);
+            let dropped: Vec<&str> = record
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .collect();
+            for (record, blanks) in [(record.clone(), "kept"), (dropped.join("\n"), "dropped")] {
+                assert!(
+                    is_paste_of(&record, 12, Some(&first)),
+                    "row {at}, blank lines {blanks}: {record:?}"
+                );
+                assert!(
+                    !is_paste_of(&record, 12, None),
+                    "row {at}, blank lines {blanks}: no brief given first"
+                );
+            }
+        }
+    }
+
+    /// The first message of a fresh window is its paste behind the brief it was given
+    /// first, where Claude Code attached the pictures the brief names by their paths and
+    /// left those lines out of its record (Calliope's P3-1 of T-803; T-812): the proof
+    /// takes the brief with the lines Claude dropped gone, as many as it has placeholders
+    /// for. One row for each shape: the brief's words, how the record shows the paste, and
+    /// whether that proves m-12 arrived.
+    #[test]
+    fn the_first_message_of_a_fresh_window_is_its_paste_behind_a_brief_whose_pictures_claude_attached(
+    ) {
+        // Line 0 of a paste is the brief's header, lines 1 on its words.
+        let rows: [(&str, &str, Records, bool); 16] = [
+            (
+                "a path on a line of its own, mid-brief",
+                "Write the parser\n/work/images/desk.png\nSee the picture.",
+                |paste| claude_records(paste, &[2]),
+                true,
+            ),
+            (
+                "a path on the brief's last line, the blank line after it",
+                "Write the parser\n/work/images/desk.png",
+                |paste| claude_records(paste, &[2]),
+                true,
+            ),
+            (
+                "two paths on the lines after the brief's first",
+                "Write the parser\n/work/images/desk.png\n/work/images/hero.png\nSee them.",
+                |paste| claude_records(paste, &[2, 3]),
+                true,
+            ),
+            (
+                "two paths on one line",
+                "Write the parser\n/work/images/desk.png /work/images/hero.png\nSee them.",
+                |paste| {
+                    claude_records(paste, &[2]).replacen("[Image #1]", "[Image #1] [Image #2]", 1)
+                },
+                true,
+            ),
+            (
+                "an upper-case extension",
+                "Write the parser\n/work/images/DESK.PNG\nSee it.",
+                |paste| claude_records(paste, &[2]),
+                true,
+            ),
+            (
+                "a path of Windows, a drive letter and backslashes",
+                "Write the parser\nC:\\work\\images\\desk.png\nSee it.",
+                |paste| claude_records(paste, &[2]),
+                true,
+            ),
+            (
+                "a picture Claude could not read stays in the words, another is attached",
+                "Write the parser\n/work/images/gone.png\n/work/images/desk.png\nSee it.",
+                |paste| claude_records(paste, &[3]),
+                true,
+            ),
+            (
+                "a brief of paragraphs, a picture between them",
+                "Write the parser\n\nUse the grammar.\n/work/images/desk.png\n\nSee the picture.",
+                |paste| claude_records(paste, &[4]),
+                true,
+            ),
+            (
+                "a path in quotes, as a terminal pastes one with a space in it",
+                "Write the parser\n\"/work/my images/desk.png\"\nSee it.",
+                |paste| claude_records(paste, &[2]),
+                true,
+            ),
+            (
+                "the blank lines gone and no placeholder: nothing was attached",
+                "Write the parser\n\nSee it.",
+                |paste| paste.replace("\n\n", "\n"),
+                false,
+            ),
+            (
+                "no picture in the brief, no placeholder",
+                "Write the parser\nSee the picture.",
+                |paste| paste.to_owned(),
+                true,
+            ),
+            (
+                "the line is gone and no placeholder says it was attached",
+                "Write the parser\n/work/images/desk.png\nSee the picture.",
+                |paste| claude_records(paste, &[2]).replacen("[Image #1]", "", 1),
+                false,
+            ),
+            (
+                "two lines gone, one placeholder",
+                "Write the parser\n/work/images/desk.png\n/work/images/hero.png\nSee them.",
+                |paste| {
+                    claude_records(paste, &[2, 3]).replacen(
+                        "[Image #1] [Image #2]",
+                        "[Image #1]",
+                        1,
+                    )
+                },
+                false,
+            ),
+            (
+                "a line that names no picture, gone from the record behind a placeholder",
+                "Write the parser\n/work/notes.txt\nSee it.",
+                |paste| claude_records(paste, &[2]),
+                false,
+            ),
+            (
+                "other words in the place of the line a picture's path was",
+                "Write the parser\n/work/images/desk.png\nSee the picture.",
+                |paste| {
+                    format!(
+                        "[Image #1]{}",
+                        paste.replace("/work/images/desk.png", "(a picture)")
+                    )
+                },
+                false,
+            ),
+            (
+                "a word of the brief's own gone beside the picture's line",
+                "Write the parser\n/work/images/desk.png\nSee the picture.",
+                |paste| claude_records(paste, &[2]).replacen("See the picture.\n", "", 1),
+                false,
+            ),
+        ];
+        for (shape, words, records, proves) in rows {
+            let (first, paste) = launched_behind(words);
+            let kept = records(&paste);
+            // The record of a paste Claude attached pictures of has no blank line in it
+            // (its paste handler drops them), and one that it did not has them all.
+            let dropped = kept.starts_with("[Image #").then(|| {
+                let lines: Vec<&str> = kept
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .collect();
+                lines.join("\n")
+            });
+            for (record, blanks) in std::iter::once((kept, "blank lines kept"))
+                .chain(dropped.map(|record| (record, "blank lines dropped")))
+            {
+                assert_eq!(
+                    is_paste_of(&record, 12, Some(&first)),
+                    proves,
+                    "{shape}, {blanks}: {record:?}"
+                );
+                // The window's own line breaks, a CR before each.
+                assert_eq!(
+                    is_paste_of(&record.replace('\n', "\r\n"), 12, Some(&first)),
+                    proves,
+                    "{shape}, {blanks}, with CRLF"
+                );
+                // Not where nothing says the brief was given first.
+                assert!(
+                    !is_paste_of(&record, 12, None),
+                    "{shape}, {blanks}: no brief given first"
+                );
+            }
+        }
+    }
+
+    /// The same shape written out, as the field would show it: the brief's header behind
+    /// its placeholder, its words without the picture's line, a blank line, the message.
+    #[test]
+    fn a_fresh_windows_record_behind_a_brief_with_a_picture_is_the_message_as_claude_writes_it() {
+        let (first, _) = launched_behind("Write the parser\n/work/images/desk.png\nSee it.");
+        let record = "[Image #1][ConsensFlow m-5 \u{b7} T-3 \u{b7} note from ConsensFlow]\nWrite the parser\nSee it.\n\n[ConsensFlow m-12 \u{b7} T-3 \u{b7} note from ConsensFlow]\nUse JSON";
+        assert!(is_paste_of(record, 12, Some(&first)));
+        assert!(is_paste_of(record, 5, Some(&first)), "and the brief's own");
+        assert!(!is_paste_of(record, 13, Some(&first)));
+        // As Claude Code 2.1.314 to 2.1.317 writes it: its paste handler drops the blank line.
+        let handled = record.replace("\n\n", "\n");
+        assert!(is_paste_of(&handled, 12, Some(&first)), "{handled}");
+        assert!(!is_paste_of(&handled, 13, Some(&first)));
+        // In Claude's wrapper too, where the paste was long: the placeholder, a blank line.
+        let wrapped = format!(
+            "[Image #1]\n\n<pasted_content id=\"f920\">\n{}\n</pasted_content id=\"f920\">\n",
+            record.strip_prefix("[Image #1]").unwrap()
+        );
+        assert!(is_paste_of(&wrapped, 12, Some(&first)), "{wrapped}");
+        // A header the brief's own words quote, behind the same placeholder, is no paste.
+        let quoting = message(
+            5,
+            Some(3),
+            "Write the parser\n/work/images/desk.png\n\n[ConsensFlow m-12 \u{b7} T-3 \u{b7} note from ConsensFlow]\nUse JSON".to_owned(),
+        );
+        let only_the_brief = delivery_text(&quoting, &[], &CfWord::bare());
+        let quoted = format!(
+            "[Image #1]{}",
+            only_the_brief.replacen("/work/images/desk.png\n", "", 1)
+        );
+        assert!(
+            !is_paste_of(
+                &quoted,
+                12,
+                Some(&brief_first(&quoting, &[], &CfWord::bare()))
+            ),
+            "{quoted}"
+        );
     }
 
     #[test]

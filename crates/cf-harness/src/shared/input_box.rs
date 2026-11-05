@@ -81,7 +81,7 @@ pub(crate) fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>)
         Harness::Claude => crate::claude::input_box::MARK,
         Harness::Devin => crate::devin::input_box::MARK,
         // Muse's rules are drawn shorter than Claude's and Devin's: its own reader.
-        Harness::Muse => return crate::muse::input_box_words(screen),
+        Harness::Muse => return crate::muse::input_box_words(screen, cursor),
         Harness::Codex | Harness::Pi => return None,
     };
     match read(harness, screen, cursor)? {
@@ -262,6 +262,9 @@ pub(crate) async fn unsent(
 pub(crate) fn read_unsent(harness: Harness, snapshot: &Value) -> Unsent {
     let quiet = |name: &str| snapshot.get(name).and_then(Value::as_u64);
     let settled = quiet("typedQuietMs").is_some_and(|typed| {
+        // Whether the window answered the last key at all, by its output and not by what
+        // its screen shows: a key that changes nothing shown (Backspace in an empty box)
+        // is answered all the same, and would hold the read the whole UNDRAWN_MS (T-1083).
         let drawn = quiet("outputQuietMs").is_some_and(|printed| printed < typed);
         typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)
     });
@@ -317,5 +320,25 @@ mod tests {
             read += 1;
         }
         assert!(read > 0, "no screen was read");
+    }
+
+    /// Whether the window answered the human's last key is asked of its output, not of what
+    /// its screen shows (T-1083): a key that changed nothing shown (Backspace in an empty box)
+    /// was answered all the same, and the box is read a second after it, not at UNDRAWN_MS.
+    #[test]
+    fn a_key_the_window_answered_with_no_change_shown_lets_its_box_be_read() {
+        let screens = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/screens/claude-2.1.312-keys-cleared-at-rest.json");
+        let mut snapshot: Value =
+            serde_json::from_str(&std::fs::read_to_string(screens).unwrap()).unwrap();
+        let typed = snapshot["typed"].as_u64().unwrap();
+        // The last key 2 s ago, printed after at once, the screen as it was 60 s ago.
+        snapshot["typedQuietMs"] = Value::from(2_000);
+        snapshot["outputQuietMs"] = Value::from(1_990);
+        snapshot["screenQuietMs"] = Value::from(60_000);
+        assert_eq!(
+            read_unsent(Harness::Claude, &snapshot),
+            Unsent::ReadEmpty(typed)
+        );
     }
 }

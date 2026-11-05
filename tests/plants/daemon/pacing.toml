@@ -170,8 +170,8 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/pacing.rs"
-find = "        if fallback && output_quiet_ms.is_none_or(|quiet| quiet < settle) {"
-replace = "        if fallback && output_quiet_ms.is_none_or(|quiet| quiet < 0) {"
+find = "        if fallback && screen_quiet_ms.is_none_or(|quiet| quiet < settle) {"
+replace = "        if fallback && screen_quiet_ms.is_none_or(|quiet| quiet < 0) {"
 
 [[plant]]
 name = "pacing gate: a harness's busy refusal spends an attempt"
