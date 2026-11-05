@@ -1001,11 +1001,14 @@ mod tests {
         let framed = blocks(&hard_role(0));
         let log = log_with(dir.path(), &[(0, &framed[0]), (1, &framed[1])]);
         let mut text = fs::read_to_string(&log).unwrap();
-        // A line of a tool's output many megabytes long, with the mark inside it, is passed.
-        text += &format!(
-            "{{\"x\":\"context_block_updated hook:session_start:session:5 {}\"}}\n",
-            "z".repeat(LONGEST_LINE + 10)
-        );
+        // A line many megabytes long that would be a block of ours at number 5 (a tool's
+        // output that quotes one) is passed: no block of the hooks is that long.
+        text += &json!({ "payload": { "kind": "run", "event": {
+            "kind": "context_block_updated",
+            "id": "hook:session_start:session:5",
+            "text": format!("{MARK} 00000000 part 6{}", "z".repeat(LONGEST_LINE + 10)) }}})
+        .to_string();
+        text += "\n";
         text += "{\"payload\":{\"event\":{\"kind\":\"context_block_updated\",\"id\":\"hook:session_start:session:3\",\"text\":\"<<consensflow-r";
         fs::write(&log, text).unwrap();
         assert_eq!(
