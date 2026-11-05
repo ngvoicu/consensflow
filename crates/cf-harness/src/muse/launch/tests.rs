@@ -329,9 +329,21 @@ fn a_launch_resuming_a_longer_role_has_hooks_for_the_blocks_it_left_after_the_ow
     };
     // The owner's give three blocks (0 to 2); a role of 2 parts that was 5 (blocks 0 to 7).
     assert_eq!(ours(2, 0), 2, "a new conversation: a hook for a part");
-    assert_eq!(ours(2, 5), 2, "a role that did not shrink: nothing to write over");
-    assert_eq!(ours(2, 8), 5, "three blocks left (5 to 7): three hooks more");
-    assert_eq!(ours(3, 8), 5, "the same blocks, now say its third part and two nothing");
+    assert_eq!(
+        ours(2, 5),
+        2,
+        "a role that did not shrink: nothing to write over"
+    );
+    assert_eq!(
+        ours(2, 8),
+        5,
+        "three blocks left (5 to 7): three hooks more"
+    );
+    assert_eq!(
+        ours(3, 8),
+        5,
+        "the same blocks, now say its third part and two nothing"
+    );
     assert_eq!(
         ours(2, 100),
         crate::muse::MOST_PARTS,
@@ -349,15 +361,11 @@ fn the_most_parts_on_windows_paths_as_long_as_a_launch_has_fit_a_command_line() 
     let launch = r"C:\Users\someone-with-a-long-name\AppData\Roaming\consensflow\integrations\muse\11111111-1111-4111-8111-111111111111";
     let role = format!(r"{launch}\role\.claude\skills\consensflow-chief\SKILL.md");
     let said = format!(r"{launch}\sessions.jsonl");
-    let group = added_hooks(
-        cf,
-        &role,
-        &said,
-        true,
-        crate::muse::MOST_PARTS,
-    )
-    .unwrap();
-    let argument = format!("hooks={}", js::stringify(&json!({ "SessionStart": [group] })));
+    let group = added_hooks(cf, &role, &said, true, crate::muse::MOST_PARTS).unwrap();
+    let argument = format!(
+        "hooks={}",
+        js::stringify(&json!({ "SessionStart": [group] }))
+    );
     // What else is on the line: the program, the model, the flags, a long folder or two.
     let rest = 4_000;
     assert!(

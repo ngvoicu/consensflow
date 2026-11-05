@@ -32,9 +32,10 @@ const STAFF: usize = 25;
 /// A rig whose Muse windows run the machine's Muse, or why there is none.
 fn muse_rig() -> Option<Config> {
     match muse::installed() {
-        Ok(install) => {
-            Some(config().muse(install.through(env!("CARGO_BIN_EXE_muse-stand-in")), TURN_MS))
-        }
+        Ok(install) => Some(config().muse(
+            install.through(env!("CARGO_BIN_EXE_muse-stand-in")),
+            TURN_MS,
+        )),
         Err(why) => {
             #[allow(clippy::print_stderr)] // Said in the output of the case it skips.
             {
@@ -136,14 +137,21 @@ fn covers(role: &str, blocks: &[(u32, String)]) -> Result<(), String> {
         if at == 0 && !gap.is_empty() {
             return Err(format!("the role begins with {gap:?}"));
         }
-        rest = after_break
-            .strip_prefix(text.as_str())
-            .ok_or_else(|| format!("block {number} ({}…) is not what comes next in the role: {:?}", head(text), head(after_break)))?;
+        rest = after_break.strip_prefix(text.as_str()).ok_or_else(|| {
+            format!(
+                "block {number} ({}…) is not what comes next in the role: {:?}",
+                head(text),
+                head(after_break)
+            )
+        })?;
     }
     if rest.chars().all(|character| character == '\n') {
         Ok(())
     } else {
-        Err(format!("the role goes on after the last block: {:?}", head(rest)))
+        Err(format!(
+            "the role goes on after the last block: {:?}",
+            head(rest)
+        ))
     }
 }
 
@@ -188,9 +196,14 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
         "one block for each hook, from the first"
     );
     assert!(
-        blocks.iter().all(|(_, text)| text.len() <= MUSE_HOOK_OUTPUT_LIMIT),
+        blocks
+            .iter()
+            .all(|(_, text)| text.len() <= MUSE_HOOK_OUTPUT_LIMIT),
         "{:?}",
-        blocks.iter().map(|(_, text)| text.len()).collect::<Vec<_>>()
+        blocks
+            .iter()
+            .map(|(_, text)| text.len())
+            .collect::<Vec<_>>()
     );
     if let Err(why) = covers(&role, &blocks) {
         panic!("the blocks are not the role text: {why}");
@@ -307,11 +320,17 @@ fn muse_takes_16384_bytes_of_a_hooks_output_and_no_more_plain_or_in_json() {
         assert_eq!(runs.len(), 1, "{name}: {runs:?}");
         assert_eq!(runs[0].0, "failed", "{name}");
         assert!(
-            runs[0].1.as_deref().is_some_and(|said| said.starts_with("output_too_large:")
-                && said.contains("16384-byte ceiling")),
+            runs[0]
+                .1
+                .as_deref()
+                .is_some_and(|said| said.starts_with("output_too_large:")
+                    && said.contains("16384-byte ceiling")),
             "{name}: {runs:?}"
         );
-        assert!(hook_blocks(&over).is_empty(), "{name}: nothing of it is kept");
+        assert!(
+            hook_blocks(&over).is_empty(),
+            "{name}: nothing of it is kept"
+        );
     }
 }
 
@@ -328,7 +347,9 @@ fn muse_keeps_each_hooks_text_as_a_block_of_its_own_numbered_in_order_with_its_w
         [b"THREE ".as_slice(), &bytes_of(15_994)].concat(),
     );
     let log = muse_run(&[&first, &second, &third], None).unwrap();
-    assert!(hook_runs(&log).iter().all(|(status, _)| status == "completed"));
+    assert!(hook_runs(&log)
+        .iter()
+        .all(|(status, _)| status == "completed"));
     let blocks = hook_blocks(&log);
     assert_eq!(
         blocks,
@@ -357,7 +378,10 @@ fn muse_keeps_each_hooks_text_as_a_block_of_its_own_numbered_in_order_with_its_w
     .unwrap();
     assert_eq!(
         hook_blocks(&log),
-        [(0, "lead\n  two\n\t tab".to_owned()), (1, "next".to_owned())],
+        [
+            (0, "lead\n  two\n\t tab".to_owned()),
+            (1, "next".to_owned())
+        ],
         "a hook that printed only blanks gave no block, and the numbers are of the blocks"
     );
 }

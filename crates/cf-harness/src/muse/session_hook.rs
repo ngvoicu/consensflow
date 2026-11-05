@@ -161,7 +161,10 @@ pub(crate) fn blocks_given(log: &Path) -> usize {
     let Ok(file) = fs::File::open(log) else {
         return 0;
     };
-    if file.metadata().map_or(true, |meta| meta.len() > LONGEST_LOG) {
+    if file
+        .metadata()
+        .map_or(true, |meta| meta.len() > LONGEST_LOG)
+    {
         return 0;
     }
     let mut reader = BufReader::new(file);
@@ -379,13 +382,7 @@ mod tests {
         // A folder it cannot write in: the role text all the same.
         let nowhere = launch.said.with_file_name("no/such/folder/sessions.jsonl");
         assert_eq!(
-            session_hook(
-                &mut line.as_bytes(),
-                Some(&launch.role),
-                Some(&nowhere),
-                0
-            )
-            .as_deref(),
+            session_hook(&mut line.as_bytes(), Some(&launch.role), Some(&nowhere), 0).as_deref(),
             Some(ROLE)
         );
         assert_eq!(
@@ -518,7 +515,8 @@ mod tests {
     #[test]
     fn a_part_is_cut_before_a_line_muse_would_lose_no_indentation_of_where_the_role_has_one() {
         // Items indented under a heading: each part after the first begins at a heading.
-        let role = "## Heading\n  - an indented item of the list\n  - and another one\n".repeat(700);
+        let role =
+            "## Heading\n  - an indented item of the list\n  - and another one\n".repeat(700);
         let cut = parts(&role);
         assert!(cut.len() > 2, "{}", role.len());
         for part in &cut[1..] {
@@ -527,7 +525,10 @@ mod tests {
         // What Muse keeps of each, in order, with the line breaks it cut between them put
         // back, is the role: nothing but a line break is lost at a seam.
         assert_eq!(
-            cut.iter().map(|part| kept(part)).collect::<Vec<_>>().join("\n"),
+            cut.iter()
+                .map(|part| kept(part))
+                .collect::<Vec<_>>()
+                .join("\n"),
             role.trim_end()
         );
         // A block with no line that begins with a letter is cut at a line break all the same
@@ -536,7 +537,9 @@ mod tests {
         let code = format!("start\n{}", "    a line of code\n".repeat(2_000));
         let cut = parts(&code);
         assert!(cut.len() > 2);
-        assert!(cut.iter().all(|part| part.ends_with('\n') || *part == cut[cut.len() - 1]));
+        assert!(cut
+            .iter()
+            .all(|part| part.ends_with('\n') || *part == cut[cut.len() - 1]));
         assert_eq!(cut.concat(), code);
     }
 
@@ -557,7 +560,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_past_the_roles_last_says_there_is_no_more_and_only_the_first_writes_the_session_down() {
+    fn a_part_past_the_roles_last_says_there_is_no_more_and_only_the_first_writes_the_session_down()
+    {
         let launch = launch();
         let role = role_of('a', 70, 480);
         let last = parts(&role).len();
@@ -596,7 +600,11 @@ mod tests {
             .join("\n"),
         )
         .unwrap();
-        assert_eq!(blocks_given(&log), 12, "11 is the highest, read past a torn last line");
+        assert_eq!(
+            blocks_given(&log),
+            12,
+            "11 is the highest, read past a torn last line"
+        );
         fs::write(&log, "{}\n").unwrap();
         assert_eq!(blocks_given(&log), 0, "no block");
     }

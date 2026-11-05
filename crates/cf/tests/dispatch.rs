@@ -121,7 +121,12 @@ fn muses_session_hook_says_the_part_its_command_line_names() {
     fs::write(&role, &text).unwrap();
     let event = r#"{"hook_event_name":"SessionStart","session_id":"01a17bc7-6aab-75a0-bfae-b627eaa5ecd8","source":"startup"}"#;
     let part = |number: Option<&str>| {
-        let mut words = vec!["hook", "muse-session", role.to_str().unwrap(), said.to_str().unwrap()];
+        let mut words = vec![
+            "hook",
+            "muse-session",
+            role.to_str().unwrap(),
+            said.to_str().unwrap(),
+        ];
         words.extend(number);
         let ran = cf(&words, &[], event);
         assert_eq!(ran.status.code(), Some(0));
@@ -134,7 +139,10 @@ fn muses_session_hook_says_the_part_its_command_line_names() {
     let parts = cf_harness::muse::parts(&text);
     assert_eq!(parts.len(), 3);
     assert_eq!(part(Some("1")), parts[1]);
-    assert!(!said.exists(), "only the first part writes the session down");
+    assert!(
+        !said.exists(),
+        "only the first part writes the session down"
+    );
     assert_eq!(part(Some("2")), parts[2]);
     assert_eq!(part(Some("3")), cf_harness::muse::NO_MORE);
     assert_eq!(part(None), parts[0], "no part named is the first");

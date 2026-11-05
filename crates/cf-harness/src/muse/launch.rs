@@ -197,7 +197,12 @@ fn owner_starts(owner: &Map<String, Value>) -> usize {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .map(|entry| entry.get("hooks").and_then(Value::as_array).map_or(1, Vec::len))
+        .map(|entry| {
+            entry
+                .get("hooks")
+                .and_then(Value::as_array)
+                .map_or(1, Vec::len)
+        })
         .sum()
 }
 

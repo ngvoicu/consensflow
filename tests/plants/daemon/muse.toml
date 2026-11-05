@@ -3312,8 +3312,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''    if windows {'''
-replace = '''    if false {'''
+find = '''    let words = if windows {'''
+replace = '''    let words = if false {'''
 
 [[plant]]
 name = "muse: a Windows hook off Windows"
@@ -3322,8 +3322,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''    if windows {'''
-replace = '''    if true {'''
+find = '''    let words = if windows {'''
+replace = '''    let words = if true {'''
 
 [[plant]]
 name = "muse: a blank is a word of cmd's"

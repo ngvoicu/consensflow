@@ -857,7 +857,11 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
     };
     for (cf, shape) in [(a_mac(), "a Mac"), (a_windows(), "Windows")] {
         let chief = |rows, specs, rules: Option<&str>| a_chiefs_role_for(&cf, rows, specs, rules);
-        on(&format!("a chief with no staff on {shape}"), &chief(0, false, None), 2);
+        on(
+            &format!("a chief with no staff on {shape}"),
+            &chief(0, false, None),
+            2,
+        );
         on(
             &format!("the largest chief (25 staff, specs, the most rules) on {shape}"),
             &chief(25, true, Some(&most)),
@@ -867,7 +871,11 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
             let text = role_instructions(&Env::default(), role, &[], &cf, None)
                 .map(|text| with_staff_rules(text, role, Some(&most)))
                 .unwrap();
-            on(&format!("the {role} with the most rules on {shape}"), &text, 1);
+            on(
+                &format!("the {role} with the most rules on {shape}"),
+                &text,
+                1,
+            );
         }
     }
 }

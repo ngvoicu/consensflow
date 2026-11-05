@@ -74,11 +74,7 @@ fn prepared(env: &Env, resume: Option<&str>) -> Result<Prepared, String> {
 }
 
 /// [`prepared`] for a window whose role text is `instructions`.
-fn prepared_with(
-    env: &Env,
-    resume: Option<&str>,
-    instructions: &str,
-) -> Result<Prepared, String> {
+fn prepared_with(env: &Env, resume: Option<&str>, instructions: &str) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
     let mut launch = launch(&id, resume);
     launch.instructions = instructions;
@@ -503,8 +499,16 @@ fn a_resumed_conversation_whose_role_got_shorter_is_given_hooks_over_the_blocks_
     };
     let two = role_of(300);
     assert_eq!(crate::muse::parts(&two).len(), 2);
-    assert_eq!(hooks(&two, None), 2, "a new conversation has no blocks to write over");
-    assert_eq!(hooks(&two, Some(session)), 5, "three blocks left: a hook for each");
+    assert_eq!(
+        hooks(&two, None),
+        2,
+        "a new conversation has no blocks to write over"
+    );
+    assert_eq!(
+        hooks(&two, Some(session)),
+        5,
+        "three blocks left: a hook for each"
+    );
     assert_eq!(
         hooks(&two, Some("01a17bc9-0000-7000-8000-000000000000")),
         2,
