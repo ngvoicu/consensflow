@@ -139,7 +139,7 @@ fn a_project_that_chose_no_size_launches_every_member_as_it_always_did() {
 }
 
 #[test]
-fn only_a_claude_member_is_given_the_size_whatever_the_harness_of_the_other_members() {
+fn every_member_is_given_the_size_whatever_its_harness_and_no_chief_is() {
     for harness in HARNESSES {
         let context = Context::made(Made {
             harnesses: HARNESSES.to_vec(),
@@ -154,11 +154,7 @@ fn only_a_claude_member_is_given_the_size_whatever_the_harness_of_the_other_memb
         context.pass().unwrap();
         for (role, _) in MEMBERS {
             let launch = member_launch(&context, role);
-            if harness == "claude-code" {
-                assert_eq!(launch["compaction"], json!(SIZE), "{harness}: {role}");
-            } else {
-                assert_eq!(launch.get("compaction"), None, "{harness}: {role}");
-            }
+            assert_eq!(launch["compaction"], json!(SIZE), "{harness}: {role}");
         }
         relaunch(&context, project);
         let chief = chief_launches(&context);

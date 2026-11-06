@@ -70,6 +70,8 @@ async function setup(
     pendingMessages = false,
     watchInbox,
     pollMs,
+    compaction,
+    usage,
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
@@ -91,6 +93,7 @@ async function setup(
     logger: { error: (...args) => logs.push(args.join(' ')) },
     ...(watchInbox ? { watchInbox } : {}),
     ...(pollMs ? { pollMs } : {}),
+    ...(compaction !== undefined ? { compaction } : {}),
   })
   let currentIdle = idle
   const ctx = context(() => currentIdle)
@@ -99,6 +102,12 @@ async function setup(
   ctx.hasPendingMessages = () => pendingMessages
   ctx.sessionManager.getLeafEntry = () => leaf
   ctx.ui = { getEditorText: () => editor }
+  // Pi's own context reading and compaction (ExtensionContext, Pi 1.4.0 and 1.5.0): the
+  // reading the test gives, and each compaction asked, which the test ends itself.
+  let currentUsage = usage
+  const compactions = []
+  ctx.getContextUsage = () => currentUsage
+  ctx.compact = (options) => compactions.push(options)
   const payload =
     typeof record?.id === 'string' &&
     /^m-[a-f0-9]+$/.test(record.id) &&
@@ -127,6 +136,10 @@ async function setup(
     setEditor(value) {
       editor = value
     },
+    setUsage(value) {
+      currentUsage = value
+    },
+    compactions,
     ctx,
   }
 }
@@ -535,4 +548,97 @@ it('a Pi session switch at admission reports a retryable zero-byte refusal', {
   } finally {
     await s.close()
   }
+})
+
+// The size a project chose for its members to compact at (smaller-contexts, SCX-28 to
+// SCX-30, T-1265): Pi has no flag or variable for it, so ConsensFlow's extension asks Pi
+// to compact at the window's next rest once its context is past the size. `ctx.compact()`
+// aborts a turn at work, so it is asked only at a rest: idle, nothing pending, the turn not
+// aborted by the human. A size at or above the model's window leaves Pi's own point.
+describe('compaction at a rest', () => {
+  const window = 1_000_000
+  const past = { tokens: 150_005, contextWindow: window, percent: 15 }
+
+  const settle = (s, event = {}) => s.pi.handlers.get('agent_settled')(event, s.ctx)
+
+  it('asks Pi once to compact at a rest once the context is past the size', async () => {
+    const s = await setup(null, { compaction: 100_000, usage: past })
+    try {
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      // A second rest while the first compaction is at work asks for none.
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+    } finally {
+      await s.close()
+    }
+  })
+
+  for (const [name, options, event] of [
+    ['a project that chose no size', { usage: past }, {}],
+    ['a context at the size or under it', { compaction: 150_005, usage: past }, {}],
+    [
+      'a size at or above the model window',
+      { compaction: 300_000, usage: { tokens: 290_000, contextWindow: 262_144, percent: 99 } },
+      {},
+    ],
+    [
+      'a context Pi cannot say yet (just after a compaction)',
+      { compaction: 100_000, usage: { tokens: null, contextWindow: window, percent: null } },
+      {},
+    ],
+    ['no reading at all', { compaction: 100_000, usage: undefined }, {}],
+    ['a turn the human aborted', { compaction: 100_000, usage: past }, { aborted: true }],
+    ['a window not idle', { compaction: 100_000, usage: past, idle: false }, {}],
+    ['messages pending', { compaction: 100_000, usage: past, pendingMessages: true }, {}],
+  ]) {
+    it(`asks for no compaction for ${name}`, async () => {
+      const s = await setup(null, options)
+      try {
+        await settle(s, event)
+        assert.equal(s.compactions.length, 0)
+      } finally {
+        await s.close()
+      }
+    })
+  }
+
+  it('refuses a delivery as busy while its compaction runs, and delivers it once it is over', async () => {
+    const s = await setup(null, { compaction: 100_000, usage: past })
+    try {
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      await writeFile(
+        join(s.inbox, `${envelopeRecord.id}.json`),
+        `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`,
+      )
+      await s.extension.consume()
+      assert.deepEqual(s.pi.sent, [], 'nothing goes in while Pi compacts')
+      // Pi's own word for a window at work: no attempt of the message is spent on it.
+      assert.equal((await waitFor(join(s.ack, `${envelopeRecord.id}.json`))).reason, 'chief busy')
+      s.compactions[0].onComplete({ tokensBefore: 150_005, summary: 'the summary' })
+      await rm(join(s.ack, `${envelopeRecord.id}.json`))
+      await writeFile(
+        join(s.inbox, 'm-00000000000000000000000000000052.json'),
+        `${JSON.stringify({ ...envelopeRecord, id: 'm-00000000000000000000000000000052', expiresAt: Date.now() + 30_000 })}\n`,
+      )
+      await s.extension.consume()
+      assert.deepEqual(s.pi.sent, [envelope])
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('asks again at a later rest after a compaction that failed', async () => {
+    const s = await setup(null, { compaction: 100_000, usage: past })
+    try {
+      await settle(s)
+      s.compactions[0].onError(new Error('Nothing to compact (session too small)'))
+      await settle(s)
+      assert.equal(s.compactions.length, 2)
+      assert.ok(s.logs.some((line) => line.includes('Nothing to compact')))
+    } finally {
+      await s.close()
+    }
+  })
 })

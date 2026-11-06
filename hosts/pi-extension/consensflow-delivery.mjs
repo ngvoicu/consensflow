@@ -109,9 +109,14 @@ export function createDeliveryExtension(
     // lands (a loaded test machine lost one again and again, 2026-09-28).
     watchInbox = (path, onChange) => watch(path, { persistent: false }, onChange),
     pollMs = 1000,
+    // The size the project chose for its members to compact at, in tokens, or none:
+    // Pi's own point.
+    compaction,
   } = {},
 ) {
   let context
+  // Whether a compaction this extension asked for is at work: a delivery waits for it.
+  let compacting = false
   let watcher
   let poller
   let running = false
@@ -330,7 +335,11 @@ export function createDeliveryExtension(
             continue
           }
           if (context?.isIdle?.() !== true) break
-          const tui = nativeTuiState(context, record.session)
+          // Pi's own word for a window at work: the message is refused before it is sent,
+          // and no attempt of it is spent on that.
+          const tui = compacting
+            ? { ready: false, reason: 'chief busy' }
+            : nativeTuiState(context, record.session)
           if (tui.ready !== true) {
             await refuseBeforeSend(path, file, id, tui.reason)
             continue
@@ -392,9 +401,51 @@ export function createDeliveryExtension(
   pi.on('agent_start', newWork)
   pi.on('turn_start', newWork)
   pi.on('message_start', observeMessage)
-  pi.on('agent_settled', async (_event, ctx) => {
+  /**
+   * Asks Pi to compact the window's conversation at this rest, once its context is past
+   * the size the project chose (smaller-contexts, SCX-28 to SCX-30): Pi has no flag or
+   * variable for it, and its settings are the owner's. `ctx.compact()` aborts a turn at
+   * work, so it is asked only at a rest (idle, nothing pending, the turn not aborted by the
+   * human), and Pi's own compaction does the rest; a long turn grows meanwhile, to Pi's own
+   * point at most. A size at or above the model's window, or a context Pi cannot say yet,
+   * asks for none. A compaction that fails is said, and the next rest asks again.
+   */
+  const compactAtRest = (event, ctx) => {
+    if (!Number.isInteger(compaction) || compaction <= 0 || compacting) return
+    if (event?.aborted === true) return
+    if (ctx?.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false) return
+    let usage
+    try {
+      usage = ctx.getContextUsage?.()
+    } catch {
+      return
+    }
+    const tokens = usage?.tokens
+    if (!Number.isFinite(tokens) || tokens <= compaction) return
+    if (!(compaction < usage.contextWindow)) return
+    compacting = true
+    const over = () => {
+      compacting = false
+      void consume()
+    }
+    try {
+      ctx.compact({
+        onComplete: over,
+        onError: (cause) => {
+          logError(`compaction at ${compaction} tokens failed: ${cause?.message ?? String(cause)}`)
+          over()
+        },
+      })
+    } catch (cause) {
+      logError(`compaction at ${compaction} tokens failed: ${cause?.message ?? String(cause)}`)
+      compacting = false
+    }
+  }
+
+  pi.on('agent_settled', async (event, ctx) => {
     context = ctx ?? context
     await writeSettlement()
+    compactAtRest(event, context)
     await consume()
   })
   pi.on('session_shutdown', async () => {
@@ -422,5 +473,13 @@ export default function consensflowDelivery(pi) {
     settled: process.env.CF_DELIVERY_SETTLED,
     expired: process.env.CF_DELIVERY_EXPIRED,
     launchId: process.env.CF_DELIVERY_LAUNCH_ID,
+    compaction: tokensOf(process.env.CF_COMPACTION_TOKENS),
   })
+}
+
+/** `text` as a whole number of tokens above nought, or none. */
+function tokensOf(text) {
+  if (typeof text !== 'string' || !/^[1-9][0-9]*$/.test(text)) return undefined
+  const tokens = Number(text)
+  return Number.isSafeInteger(tokens) ? tokens : undefined
 }

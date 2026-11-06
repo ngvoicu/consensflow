@@ -1280,12 +1280,13 @@ impl Dispatcher {
             },
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
-            // The size the project chose for its Claude members' windows to compact at:
-            // a Claude member's launch is given it, at launch and on resume alike; the
-            // chief's never is, and no other harness's member.
-            compaction: project.claude_compaction.filter(|_| {
-                participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
-            }),
+            // The size the project chose for its members' windows to compact at: every
+            // member's launch is given it, whatever its harness, at launch and on resume
+            // alike, and each adapter gives it its harness by its own route; the chief's
+            // launch never is (2026-10-31).
+            compaction: project
+                .claude_compaction
+                .filter(|_| participant.role != "chief"),
             first_message_ms: self.seams.limits.launch_ms,
             starts_given_up: record.window.borrow().starts_given_up,
         };

@@ -366,6 +366,7 @@ impl Adapter for DevinAdapter {
             argv.extend(invocation.args);
             let mut vars = integration.env;
             vars.push(("CF_DEVIN_ROLE_FILE".to_owned(), role.file));
+            vars.extend(compaction_thresholds(launch.compaction));
             Ok(Prepared {
                 argv,
                 env: vars,
@@ -849,6 +850,21 @@ impl Window for DevinWindow {
             })
         })
     }
+}
+
+/// The size the project chose for its members to compact at, as Devin is given it for the
+/// launch alone (at launch and on resume): the variable of its own `--compaction-thresholds`,
+/// a summary begun at the size and no step past it until the summary is in. Devin ignores
+/// thresholds a model cannot take ("Ignoring invalid compaction thresholds for model …",
+/// 3000.11.234), which leaves its own point. None where the project chose none, and for the
+/// chief, whose launch is never given one.
+fn compaction_thresholds(size: Option<u32>) -> Option<(String, String)> {
+    size.map(|size| {
+        (
+            "DEVIN_COMPACTION_THRESHOLDS".to_owned(),
+            format!("{size},{size}"),
+        )
+    })
 }
 
 #[cfg(test)]
