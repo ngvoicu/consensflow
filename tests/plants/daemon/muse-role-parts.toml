@@ -1,8 +1,8 @@
 # A Muse window's role in parts (T-1246): Muse Code 1.4.14 takes at most 16,384 bytes of a
 # SessionStart hook's output, and every chief's role is longer, so the launch gives Muse a hook for
-# each part of the role, framed, first among its hooks, and a hook for every block of ours the
-# conversation has (`crates/cf-harness/src/muse/session_hook.rs`: `parts`, `blocks`, `filler`,
-# `cover_of`, the hook that says one block; `muse/launch.rs`: `hooks`, `added_hooks`,
+# each part of the role, framed, first among its hooks, and a filler for each of the hooks past them,
+# eight in all whatever the role needs (`crates/cf-harness/src/muse/session_hook.rs`: `parts`,
+# `blocks`, `FILLER`, the hook that says one block; `muse/launch.rs`: `hooks`, `added_hooks`,
 # `integration`; `muse/adapter.rs`: the count and the refusal; `cf hook muse-session`'s third
 # word, in `crates/cf/src/hook.rs`), the sizes of the roles ConsensFlow makes held against it
 # (`cf-engine`'s `role_change` tests), and the rig's cases on the machine's own Muse
@@ -20,6 +20,7 @@ mrp-pins = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_chan
 mrp-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_role::a_muse_chief_with_the_largest_role"]
 mrp-rig-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_role::a_resumed_muse_chief"]
 mrp-rig-member = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_role::a_resumed_muse_member"]
+mrp-rig-window = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_role::a_window_that_resumes"]
 
 # What a part may say: a hook of Muse's takes 16,384 bytes.
 [[plant]]
@@ -173,20 +174,8 @@ runs = ["mrp-hook"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''        .get(part)
-        .cloned()'''
-replace = '''        .first()
-        .cloned()'''
-
-[[plant]]
-name = "muse role parts: a hook past the last part says nothing over the block an old role left"
-meant = "a_hook_past_the_roles_last_part_says_it_has_none_and_only_the_first_writes_the_session_down"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''        .unwrap_or_else(|| filler(&id_of(&instructions), part + 1, blocks.len()));'''
-replace = '''        .unwrap_or_else(|| " ".to_owned());'''
+find = '''    let block = blocks.get(part).map_or(FILLER, String::as_str);'''
+replace = '''    let block = blocks.first().map_or(FILLER, String::as_str);'''
 
 [[plant]]
 name = "muse role parts: every part's hook writes the session down, not the first alone"
@@ -198,90 +187,6 @@ file = "crates/cf-harness/src/muse/session_hook.rs"
 find = '''    if let (0, Some(said)) = (part, said) {'''
 replace = '''    if let (_, Some(said)) = (part, said) {'''
 
-[[plant]]
-name = "muse role parts: a filler has no mark, so no log knows it for ours"
-meant = "a_block_is_a_role_of_ours_by_its_mark_or_by_the_front_matter_of_an_unframed_role"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''        "{MARK} {id} part {part}: there is no part {part} of this role, which has {of} part{}>>",'''
-replace = '''        "{id} part {part}: there is no part {part} of this role, which has {of} part{}>>",'''
-
-# What the conversation has of ours: the cover.
-[[plant]]
-name = "muse role parts: no block is known for ours by its mark"
-meant = "the_blocks_of_ours_a_conversation_has_are_the_highest_block_whose_last_text_is_ours_and_no_owners"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''    text.starts_with(MARK) || text.starts_with(FRONT_MATTER)'''
-replace = '''    text.starts_with(FRONT_MATTER)'''
-
-[[plant]]
-name = "muse role parts: every block of the log is counted for ours, the owner's too"
-meant = "the_blocks_of_ours_a_conversation_has_are_the_highest_block_whose_last_text_is_ours_and_no_owners"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''    text.starts_with(MARK) || text.starts_with(FRONT_MATTER)'''
-replace = '''    !text.is_empty()'''
-
-[[plant]]
-name = "muse role parts: the first text a block had is the one counted, not the last"
-meant = "the_blocks_of_ours_a_conversation_has_are_the_highest_block_whose_last_text_is_ours_and_no_owners"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''                    last.insert(number, ours(&text));'''
-replace = '''                    last.entry(number).or_insert(ours(&text));'''
-
-[[plant]]
-name = "muse role parts: a log that cannot be opened is a log with no block of ours"
-meant = "a_log_that_cannot_be_counted_is_none_so_the_launch_covers_every_block_a_role_could_have"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''    let file = fs::File::open(log).ok()?;'''
-replace = '''    let Ok(file) = fs::File::open(log) else {
-        return Some(0);
-    };'''
-
-[[plant]]
-name = "muse role parts: the count of a log has no time limit"
-meant = "a_log_that_cannot_be_counted_is_none_so_the_launch_covers_every_block_a_role_could_have"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''        if began.elapsed() > within {'''
-replace = '''        if began.elapsed() > within && false {'''
-
-[[plant]]
-name = "muse role parts: a log of any length is counted"
-meant = "a_log_that_cannot_be_counted_is_none_so_the_launch_covers_every_block_a_role_could_have"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''    if file.metadata().ok()?.len() > LONGEST_LOG {'''
-replace = '''    if file.metadata().ok()?.len() > u64::MAX - 1 {'''
-
-[[plant]]
-name = "muse role parts: a line of any length is held and looked into"
-meant = "the_log_is_counted_past_a_torn_last_line_and_a_line_too_long_to_hold"
-runs = ["mrp-hook"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''            if line.len() + take > LONGEST_LINE {'''
-replace = '''            if line.len() + take > usize::MAX - 1 {'''
-
-# The hooks of a launch: ours first, numbered, as many as the adapter says.
 [[plant]]
 name = "muse role parts: the hook's command line leaves out the number of its part"
 meant = "a_role_in_parts_has_a_hook_for_each_numbered_from_0_on_both_lines"
@@ -319,7 +224,7 @@ runs = ["mrp-launch"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''pub const MOST_PARTS: usize = 20;'''
+find = '''pub const MOST_PARTS: usize = 8;'''
 replace = '''pub const MOST_PARTS: usize = 60;'''
 
 # The count: what the role needs, and what the conversation has of ours.
@@ -344,49 +249,6 @@ find = '''            if parts > session_hook::MOST_PARTS {'''
 replace = '''            if false {'''
 
 [[plant]]
-name = "muse role parts: a resumed conversation's log is never counted"
-meant = "a_resumed_conversation_is_given_a_hook_for_every_block_of_ours_it_has_and_for_all_where_none_can_be_counted"
-runs = ["mrp-adapter"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''                    .and_then(|log| session_hook::cover_of(&log, COUNT_WITHIN))'''
-replace = '''                    .and_then(|_| Some(0))'''
-
-[[plant]]
-name = "muse role parts: a log that cannot be counted covers no block"
-meant = "a_resumed_conversation_is_given_a_hook_for_every_block_of_ours_it_has_and_for_all_where_none_can_be_counted"
-runs = ["mrp-adapter"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''                    .unwrap_or(session_hook::MOST_PARTS),'''
-replace = '''                    .unwrap_or(0),'''
-
-[[plant]]
-name = "muse role parts: the blocks an earlier launch wrote are no part of the hooks a launch is given"
-meant = "a_resumed_conversation_is_given_a_hook_for_every_block_of_ours_it_has_and_for_all_where_none_can_be_counted"
-runs = ["mrp-adapter"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''                parts.max(earlier),'''
-replace = '''                parts,'''
-
-[[plant]]
-name = "muse role parts: the rig's resumed chief is given hooks for its parts alone, and keeps an old block"
-meant = "a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and_however_its_role_changes"
-runs = ["mrp-rig-chief"]
-harnesses = ["muse"]
-builds = true
-platforms = ["macos"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''                parts.max(earlier),'''
-replace = '''                parts,'''
-
-[[plant]]
 name = "muse role parts: the rig's resumed chief has its role after its owner's hooks"
 meant = "a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and_however_its_role_changes"
 runs = ["mrp-rig-chief"]
@@ -399,8 +261,83 @@ file = "crates/cf-harness/src/muse/launch.rs"
 find = '''    starts.insert(0, added);'''
 replace = '''    starts.push(added);'''
 
+# What a hook past the role's parts says: a filler over any block an older role left.
 [[plant]]
-name = "muse role parts: the rig's resumed member keeps the second block of a longer role"
+name = "muse role parts: a hook past the last part says a blank, which is no block and moves the ones after it"
+meant = "a_hook_past_the_roles_last_part_says_it_has_none_and_only_the_first_writes_the_session_down"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    let block = blocks.get(part).map_or(FILLER, String::as_str);'''
+replace = '''    let block = blocks.get(part).map_or(" ", String::as_str);'''
+
+[[plant]]
+name = "muse role parts: the filler has no mark, so nothing knows it for ConsensFlow's"
+meant = "a_hook_past_the_roles_last_part_says_it_has_none_and_only_the_first_writes_the_session_down"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''pub const FILLER: &str = "<<consensflow-role: empty>>";'''
+replace = '''pub const FILLER: &str = "empty";'''
+
+[[plant]]
+name = "muse role parts: the hooks every launch gives are as many as Muse could take, the cost chosen forgotten"
+meant = "the_numbers_are_those_measured_on_muse_1_4_14"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''pub const MOST_PARTS: usize = 8;'''
+replace = '''pub const MOST_PARTS: usize = 20;'''
+
+# The count: every launch gives all the hooks, so a window put on any conversation (a human's
+# `/resume` inside it) leaves no block of an older role.
+[[plant]]
+name = "muse role parts: a launch is given hooks for its role's parts alone, and no filler"
+meant = "every_window_is_given_all_the_hooks_the_role_s_parts_first_and_a_filler_for_each_past_them"
+runs = ["mrp-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''                &role.file,
+                session_hook::MOST_PARTS,'''
+replace = '''                &role.file,
+                parts,'''
+
+[[plant]]
+name = "muse role parts: the rig's window put on an older, longer conversation keeps its second block"
+meant = "a_window_that_resumes_a_conversation_of_more_role_blocks_than_its_own_leaves_no_old_role_text"
+runs = ["mrp-rig-window"]
+harnesses = ["muse"]
+builds = true
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''                &role.file,
+                session_hook::MOST_PARTS,'''
+replace = '''                &role.file,
+                parts,'''
+
+[[plant]]
+name = "muse role parts: the rig's resumed chief is given hooks for its parts alone"
+meant = "a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and_however_its_role_changes"
+runs = ["mrp-rig-chief"]
+harnesses = ["muse"]
+builds = true
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''                &role.file,
+                session_hook::MOST_PARTS,'''
+replace = '''                &role.file,
+                parts,'''
+
+[[plant]]
+name = "muse role parts: the rig's resumed member is given hooks for its parts alone"
 meant = "a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_text"
 runs = ["mrp-rig-member"]
 harnesses = ["muse"]
@@ -409,8 +346,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''                parts.max(earlier),'''
-replace = '''                parts,'''
+find = '''                &role.file,
+                session_hook::MOST_PARTS,'''
+replace = '''                &role.file,
+                parts,'''
 
 # `cf hook muse-session`'s third word.
 [[plant]]

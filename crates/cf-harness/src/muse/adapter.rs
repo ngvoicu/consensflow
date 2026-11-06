@@ -44,10 +44,6 @@ use crate::shared::paths::agents_skills;
 use crate::shared::role::write_role;
 use crate::shared::{specmint, window_args};
 
-/// How long a resumed conversation's log is read for the blocks of ours it has, at the
-/// most: past it the launch covers every block a role could have.
-const COUNT_WITHIN: std::time::Duration = std::time::Duration::from_secs(3);
-
 /// Withholds Muse's question tools for the run: a member asks with `cf ask`.
 const NO_QUESTION_TOOL: &str = "--disable-request-user-input";
 
@@ -137,9 +133,10 @@ impl Adapter for MuseAdapter {
             // is kept for every launch.
             specmint::write_own(Harness::Muse, env, launch)?;
             // A hook may say 16,384 bytes and a role is longer: a hook for each part
-            // (T-1246), and a hook for every block of ours a resumed conversation has,
-            // which the new role writes over. Where its log cannot be read or counted in
-            // time, a hook for every block a role could have.
+            // (T-1246), and past them a hook that writes a filler over each block an older
+            // role may have left, up to the most a role may have: whatever conversation
+            // the window is put on (a resume, or a human's `/resume` inside it), no block
+            // of an older role stays.
             let parts = session_hook::parts(launch.instructions).len();
             if parts > session_hook::MOST_PARTS {
                 return Err(format!(
@@ -150,21 +147,13 @@ impl Adapter for MuseAdapter {
                     session_hook::OUTPUT_LIMIT,
                 ));
             }
-            let earlier = match launch.resume {
-                None => 0,
-                Some(session) => paths::transcript(session, env)
-                    .ok()
-                    .flatten()
-                    .and_then(|log| session_hook::cover_of(&log, COUNT_WITHIN))
-                    .unwrap_or(session_hook::MOST_PARTS),
-            };
             let integration = launch::integration(
                 env,
                 launch.id,
                 &executable,
                 &self.services.bundle.pane_cf,
                 &role.file,
-                parts.max(earlier),
+                session_hook::MOST_PARTS,
             )?;
             let agent = launch.agent.unwrap_or_default();
             let open = if launch.resume.is_none() {

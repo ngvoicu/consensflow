@@ -139,6 +139,13 @@ const MARK: &str = "<<consensflow-role";
 /// How an unframed role begins: the front matter of its skill file.
 const FRONT_MATTER: &str = "---\nname: consensflow-";
 
+/// What a hook says over the block of a part its role has none of (`cf_harness::muse::FILLER`).
+const FILLER: &str = "<<consensflow-role: empty>>";
+
+/// The hooks of ConsensFlow's every launch gives, so the blocks of ours every conversation has
+/// (`cf_harness::muse::MOST_PARTS`).
+const HOOKS: usize = 8;
+
 /// What a role's blocks look like in a session's log, once checked (`layout`): how many parts
 /// the role has, and how many blocks of ConsensFlow's the conversation has (a role that got
 /// shorter leaves fillers over the old blocks).
@@ -162,33 +169,15 @@ fn head_of(text: &str) -> Option<(String, usize, usize)> {
     Some((id.to_owned(), number.parse().ok()?, of.parse().ok()?))
 }
 
-/// Judges `rest`, the blocks of ConsensFlow's after a role's parts (`of` of them): each a filler
-/// over the block of its number, saying the role has `of` parts, of the one id (`id`, or the
-/// first filler's where the role is no framed one).
-fn fillers(rest: &[&(u32, String)], id: Option<&str>, of: usize) -> Result<(), String> {
-    let mut id = id.map(str::to_owned);
+/// Judges `rest`, the blocks of ConsensFlow's after a role's parts: each the filler, and no text
+/// of any older role.
+fn fillers(rest: &[&(u32, String)]) -> Result<(), String> {
     for (number, text) in rest {
-        let slot = number + 1;
-        let (said, ends) = (
-            format!("{MARK} "),
-            format!(
-                " part {slot}: there is no part {slot} of this role, which has {of} part{}>>",
-                if of == 1 { "" } else { "s" }
-            ),
-        );
-        let this = text
-            .strip_prefix(said.as_str())
-            .and_then(|rest| rest.strip_suffix(ends.as_str()))
-            .filter(|this| this.len() == 8 && this.bytes().all(|byte| byte.is_ascii_hexdigit()));
-        let Some(this) = this else {
+        if text != FILLER {
             return Err(format!(
-                "block {number} is no filler of {}: {}",
-                id.as_deref().unwrap_or("this role"),
+                "block {number} is no filler: {}",
                 &text[..text.len().min(90)]
             ));
-        };
-        if *id.get_or_insert_with(|| this.to_owned()) != this {
-            return Err(format!("block {number} is a filler of another id: {this}"));
         }
     }
     Ok(())
@@ -223,7 +212,7 @@ fn layout(role: &str, blocks: &[(u32, String)], old: &[String]) -> Result<Layout
                     role.len()
                 ));
             }
-            fillers(&mine[1..], None, 1)?;
+            fillers(&mine[1..])?;
             1
         }
         Some((id, 1, of)) => {
@@ -256,7 +245,7 @@ fn layout(role: &str, blocks: &[(u32, String)], old: &[String]) -> Result<Layout
                     mine.len()
                 ));
             }
-            fillers(&mine[of..], Some(&id), of)?;
+            fillers(&mine[of..])?;
             of
         }
         Some((_, part, _)) => return Err(format!("the first block says part {part}")),
@@ -347,6 +336,7 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
     );
     let laid = layout(&role, &blocks, &[]).map_err(|why| format!("the blocks: {why}"))?;
     assert!(laid.parts >= 2, "{laid:?}");
+    assert_eq!(laid.blocks, HOOKS, "{laid:?}");
     // Muse puts its blocks in a request by their `order`, and gives a hook's block the one of
     // its place: each part is where its number says, ascending, and every byte is in the
     // request's developer context (the one message of the wire's `context` lane).
@@ -495,7 +485,6 @@ fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and
         (Some(heavy_rules("G")), [None, Some("OWNER-TWO-G")]),
     ];
     let mut old: Vec<String> = Vec::new();
-    let mut covered = 0;
     let mut conversation: Option<String> = None;
     for (at, (rules, says)) in steps.iter().enumerate() {
         let launch = at + 1;
@@ -513,10 +502,9 @@ fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and
             if heavy { 3 } else { 2 },
             "launch {launch}: {laid:?}"
         );
-        covered = covered.max(laid.parts);
         assert_eq!(
-            laid.blocks, covered,
-            "launch {launch}: a block of ours for every part ever said"
+            laid.blocks, HOOKS,
+            "launch {launch}: a block of ours for every hook, fillers past the parts"
         );
         // What the owner's hooks print this launch is after ours.
         for text in says.iter().flatten() {
@@ -587,7 +575,6 @@ fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_te
         (None, None, 1),
     ];
     let mut old: Vec<String> = Vec::new();
-    let mut covered = 1;
     for (at, (rules, says, parts)) in steps.iter().enumerate() {
         let number = at + 1;
         set_rules(&rig, &project, rules.as_deref())?;
@@ -613,10 +600,9 @@ fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_te
         let laid = layout(&role, &blocks, &old)
             .map_err(|why| format!("task {number} ({}): {why}", rules_tag(&role)))?;
         assert_eq!(laid.parts, *parts, "task {number}: {laid:?}");
-        covered = covered.max(laid.parts);
         assert_eq!(
-            laid.blocks, covered,
-            "task {number}: a block of ours for every part ever said"
+            laid.blocks, HOOKS,
+            "task {number}: a block of ours for every hook, fillers past the parts"
         );
         remember(&mut old, &role);
     }
@@ -644,16 +630,7 @@ fn the_judge_of_a_conversations_blocks_takes_the_right_ones_and_refuses_each_wro
     let right: Vec<(u32, String)> = (0..3)
         .map(|at| (at as u32, block("abcd1234", at + 1, 3, inner[at])))
         .collect();
-    let filler = |number: u32, id: &str| {
-        (
-            number,
-            format!(
-                "{MARK} {id} part {}: there is no part {} of this role, which has 3 parts>>",
-                number + 1,
-                number + 1
-            ),
-        )
-    };
+    let filler = |number: u32| (number, FILLER.to_owned());
     let judged = |blocks: &[(u32, String)], old: &[&str]| {
         let old: Vec<String> = old.iter().map(|text| (*text).to_owned()).collect();
         layout(role, blocks, &old)
@@ -679,7 +656,7 @@ fn the_judge_of_a_conversations_blocks_takes_the_right_ones_and_refuses_each_wro
         })
     );
     assert_eq!(
-        judged(&with(filler(3, "abcd1234")), &[]),
+        judged(&with(filler(3)), &[]),
         Ok(Layout {
             parts: 3,
             blocks: 4
@@ -708,13 +685,15 @@ fn the_judge_of_a_conversations_blocks_takes_the_right_ones_and_refuses_each_wro
     let mut changed = right.clone();
     changed[1].1 = block("abcd1234", 2, 3, "```\nfenced\n```");
     assert!(judged(&changed, &[]).is_err());
-    // Wrong: a part of another role's id; a filler of another id; a part that says another place.
+    // Wrong: a part of another role's id; a part of an older role where a filler belongs (the
+    // review's case); a part that says another place.
     let mut stale = right.clone();
     stale[2].1 = block("ffff0000", 3, 3, inner[2]);
     assert!(judged(&stale, &[]).unwrap_err().contains("ffff0000"));
-    assert!(judged(&with(filler(3, "ffff0000")), &[])
+    let older = block("0ddba11d", 2, 2, "OLD-RULE-DO-NOT-KEEP");
+    assert!(judged(&with((3, older)), &[])
         .unwrap_err()
-        .contains("another id"));
+        .contains("no filler"));
     let mut misplaced = right.clone();
     misplaced[1].1 = block("abcd1234", 3, 3, inner[1]);
     assert!(judged(&misplaced, &[]).is_err());
@@ -743,56 +722,193 @@ fn the_judge_of_a_conversations_blocks_takes_the_right_ones_and_refuses_each_wro
         })
     );
     assert!(layout(&format!("{small}y\n"), &one, &[]).is_err());
-    // Fillers over the blocks a longer role left, after a role of one block: of one id, saying
-    // this role has one part.
-    let one_part = |number: u32, id: &str| {
-        (
-            number,
-            format!(
-                "{MARK} {id} part {}: there is no part {} of this role, which has 1 part>>",
-                number + 1,
-                number + 1
-            ),
-        )
-    };
+    // Fillers over the blocks a longer role left, after a role of one block: only the filler.
     assert_eq!(
         layout(
             small,
-            &[
-                one[0].clone(),
-                one_part(1, "abcd1234"),
-                one_part(2, "abcd1234")
-            ],
-            &[]
+            &[one[0].clone(), filler(1), filler(2)],
+            &["OLD-RULE-DO-NOT-KEEP".to_owned()]
         ),
         Ok(Layout {
             parts: 1,
             blocks: 3
         })
     );
-    assert!(
-        layout(small, &[one[0].clone(), filler(1, "abcd1234")], &[]).is_err(),
-        "a filler that says 3 parts"
-    );
-    assert!(
-        layout(
-            small,
-            &[
-                one[0].clone(),
-                one_part(1, "abcd1234"),
-                one_part(2, "ffff0000")
-            ],
-            &[]
-        )
-        .is_err(),
-        "fillers of two ids"
-    );
+    // A part of an older, longer role where a filler belongs, after a role of one block: the
+    // in-window resume's case.
+    let older = (1, block("0ddba11d", 2, 2, "OLD-RULE-DO-NOT-KEEP"));
+    assert!(layout(small, &[one[0].clone(), older], &[])
+        .unwrap_err()
+        .contains("no filler"));
     assert!(layout(
         small,
         &[one[0].clone(), (1, "an owner's words".to_owned())],
         &[]
     )
     .is_ok());
+}
+
+/// The hooks (`-c hooks=`) the first Muse window of the rig was launched with: ConsensFlow's, as
+/// the product wrote them for that window, and the owner's after them. They name the window's
+/// role file and `cf` by their paths, so they run for as long as the window lives.
+fn launched_hooks(rig: &Rig) -> Option<Value> {
+    let argv = rig.muse_launches().into_iter().next()?;
+    let word = argv.iter().find_map(|word| word.strip_prefix("hooks="))?;
+    serde_json::from_str(word).ok()
+}
+
+/// The hooks a window of the rig opened for a task is launched with, with a worker whose turn lasts
+/// long enough to have them run while it lives: the project, its hooks, and its role text.
+fn a_workers_hooks(rig: &Rig) -> cf_e2e::Result<(Value, String)> {
+    let project = project(rig, &echo_worker())?;
+    rig.tell(
+        project.id(),
+        "DISPATCH --tier standard Reply with exactly: T1_DONE",
+    )?;
+    let said = |why: &str| cf_e2e::Error::Daemon(why.to_owned());
+    rig.wait_for("the worker's window to be launched", secs(120), || {
+        Ok(launched_hooks(rig).is_some() && the_latest_role(rig, "worker").is_some())
+    })?;
+    let hooks = launched_hooks(rig).ok_or_else(|| said("no hooks were launched"))?;
+    let role = the_latest_role(rig, "worker").ok_or_else(|| said("the worker has no role"))?;
+    Ok((hooks, role))
+}
+
+/// A conversation that an older ConsensFlow gave a role of two parts, the second with rules
+/// (`OLD-RULE-DO-NOT-KEEP`) the current role does not say: its blocks as ConsensFlow's hooks wrote
+/// them, in the home `home`, as the session `session`.
+fn an_older_conversation(home: &tempfile::TempDir, session: &str) -> Found<Vec<Value>> {
+    let block = |part: usize, inner: &str| {
+        let more = if part == 1 {
+            ": your role is these 2 parts"
+        } else {
+            ""
+        };
+        format!(
+            "{MARK} 0ddba11d part {part} of 2{more}>>\n{inner}\n<<end of consensflow-role 0ddba11d part {part} of 2>>"
+        )
+    };
+    let first = block(1, "---\nname: consensflow-worker\n---\n# An older role\n");
+    let second = block(
+        2,
+        "## The rules of an older project\nOLD-RULE-DO-NOT-KEEP: do as these say.",
+    );
+    muse_run_in(home, &[first.as_bytes(), second.as_bytes()], Some(session))
+}
+
+#[test]
+fn a_window_that_resumes_a_conversation_of_more_role_blocks_than_its_own_leaves_no_old_role_text(
+) -> Outcome {
+    let Some(config) = muse_rig_of(60_000) else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    // The window of a worker with a role of one part, at work for a minute.
+    let (hooks, role) = a_workers_hooks(&rig)?;
+    // A conversation an older ConsensFlow gave two role blocks, whose window's hooks are not the
+    // ones of this role. The human types `/resume` into it from the worker's window: the hooks of
+    // the window run on it, as they ran at its start. (The same run on the session, by id.)
+    let home = tempfile::tempdir()?;
+    let session = "11111111-2222-7333-8444-555555555555";
+    let before = an_older_conversation(&home, session)?;
+    assert!(
+        hook_blocks(&before)
+            .iter()
+            .any(|(_, text)| text.contains("OLD-RULE-DO-NOT-KEEP")),
+        "the older conversation holds its old rule"
+    );
+    let after = muse_exec(&home, &hooks, Some(session))?;
+    let blocks = hook_blocks(&after);
+    let laid = layout(&role, &blocks, &["OLD-RULE-DO-NOT-KEEP".to_owned()])
+        .map_err(|why| format!("after the window's hooks ran on the older conversation: {why}"))?;
+    assert_eq!(laid.parts, 1, "{laid:?}");
+    assert!(
+        hook_runs(&after)
+            .iter()
+            .all(|(status, _)| status == "completed"),
+        "{:?}",
+        hook_runs(&after)
+    );
+    rig.close()?;
+    Ok(())
+}
+
+/// The median of `values`.
+fn median(mut values: Vec<u64>) -> u64 {
+    values.sort_unstable();
+    values[values.len() / 2]
+}
+
+/// A timing, not a check: what the hooks of a start cost, for the one-part worker role of the
+/// product's own hooks (8) cut to 1, 3, 5 and 8, and lengthened with fillers to 10 and 20: how long Muse's hooks take (the longest of
+/// them, by Muse's own record), how long a whole start takes (Muse's on `echo`, which is the
+/// same few seconds with any), and the bytes the blocks add to a request's developer context
+/// (the first request's `context` lane). Five runs each, medians; the machine's Muse and the
+/// product's `cf`, as the daemon gave them to a worker's window.
+///
+/// `cargo test -p cf-e2e --test rig the_cost_of_the_hooks_of_a_start -- --ignored --nocapture`
+#[test]
+#[ignore = "a timing: run by hand with --ignored --nocapture"]
+fn the_cost_of_the_hooks_of_a_start() -> Outcome {
+    let Some(config) = muse_rig_of(60_000) else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    let (hooks, role) = a_workers_hooks(&rig)?;
+    println!(
+        "TIMING the role is {} bytes; the product's hooks: {}",
+        role.len(),
+        hooks["SessionStart"][0]["hooks"]
+            .as_array()
+            .map_or(0, Vec::len)
+    );
+    for count in [1, 3, 5, 8, 10, 20] {
+        let mut cut = hooks.clone();
+        // Cut to `count`, or lengthened with copies of the last, which says a filler: a hook
+        // past the role's parts says it whatever its number.
+        if let Some(of) = cut["SessionStart"][0]["hooks"].as_array_mut() {
+            let last = of.last().cloned();
+            while let (true, Some(last)) = (of.len() < count, last.clone()) {
+                of.push(last);
+            }
+            of.truncate(count);
+        }
+        let (mut walls, mut longest, mut context, mut given) = (vec![], vec![], vec![], vec![]);
+        for _ in 0..5 {
+            let home = tempfile::tempdir()?;
+            let began = std::time::Instant::now();
+            let log = muse_exec(&home, &cut, None)?;
+            walls.push(began.elapsed().as_millis() as u64);
+            longest.push(
+                log.iter()
+                    .filter(|record| muse::kind(record) == "run/hook_run_terminal")
+                    .filter_map(|record| record["payload"]["event"]["duration_ms"].as_u64())
+                    .max()
+                    .unwrap_or(0),
+            );
+            context.push(
+                muse::request_context_bytes(&log)
+                    .first()
+                    .copied()
+                    .unwrap_or(0),
+            );
+            given.push(
+                hook_blocks(&log)
+                    .iter()
+                    .map(|(_, text)| text.len() as u64)
+                    .sum(),
+            );
+        }
+        println!(
+            "TIMING {count:>2} hooks: a start {} ms, the longest hook {} ms, the blocks {} bytes, the request's context {} bytes",
+            median(walls),
+            median(longest),
+            median(given),
+            median(context)
+        );
+    }
+    rig.close()?;
+    Ok(())
 }
 
 // What the machine's Muse does with a SessionStart hook's output, measured on it as the cases
@@ -814,7 +930,6 @@ fn muse_run_in(
     printing: &[&[u8]],
     session: Option<&str>,
 ) -> Found<Vec<Value>> {
-    let install = muse::installed()?;
     let at = |below: &str| home.path().join(below);
     let mut hooks = Vec::new();
     for (number, bytes) in printing.iter().enumerate() {
@@ -828,7 +943,24 @@ fn muse_run_in(
             "timeout": 10,
         }));
     }
-    let settings = json!({ "SessionStart": [{ "matcher": "", "hooks": hooks }] });
+    muse_exec(
+        home,
+        &json!({ "SessionStart": [{ "matcher": "", "hooks": hooks }] }),
+        session,
+    )
+}
+
+/// One run of the machine's Muse on its echo model in the home `home`, with the hooks object
+/// `settings` (`-c hooks=`: events to groups of hooks), on the session `session` where given: a
+/// run on a session an earlier run began is a start of it again, as a resume is. The records
+/// are those of the session the last run wrote.
+fn muse_exec(
+    home: &tempfile::TempDir,
+    settings: &Value,
+    session: Option<&str>,
+) -> Found<Vec<Value>> {
+    let install = muse::installed()?;
+    let at = |below: &str| home.path().join(below);
     let workspace = at("work");
     fs::create_dir_all(&workspace)?;
     let mut run = cf_e2e::process::Run::new(&install.binary)

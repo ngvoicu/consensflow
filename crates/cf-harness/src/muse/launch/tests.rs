@@ -328,7 +328,7 @@ fn a_launch_gives_count_hooks_of_ours_first_whatever_the_owner_has() {
         assert_eq!(starts.len(), 3, "ours and the owner's two entries");
         (starts[0]["hooks"].as_array().unwrap().len(), starts)
     };
-    for count in [1, 2, 5, 20] {
+    for count in [1, 2, 5, crate::muse::MOST_PARTS] {
         let (ours, starts) = hooks_of(count);
         assert_eq!(ours, count);
         assert_eq!(starts[1]["hooks"][0]["command"], "a", "the owner's follow");

@@ -193,11 +193,10 @@ pub(super) fn hooks(env: &Env, added: Value) -> Result<Value, String> {
     Ok(Value::Object(hooks))
 }
 
-/// What the window of `launch` runs with, its role in `role_file`, said by `count` hooks (a
-/// hook for each block of ours the conversation is to have: [`super::session_hook::parts`],
-/// and the blocks an earlier launch of it wrote that this one writes over,
-/// [`super::session_hook::cover_of`]): its folder made, the program it runs, and the
-/// hooks it is given.
+/// What the window of `launch` runs with, its role in `role_file`, said by `count` hooks (every
+/// launch gives [`super::session_hook::MOST_PARTS`]: a hook for each part of the role and, past
+/// them, one that writes a filler over each block an older role may have left): its folder
+/// made, the program it runs, and the hooks it is given.
 pub(super) fn integration(
     env: &Env,
     launch: &LaunchId,

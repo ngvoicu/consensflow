@@ -173,7 +173,8 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no
         command.contains(&format!("'{}'", role.display())),
         "{command}"
     );
-    // Its role fits in a hook: one hook, for the role's first and only part.
+    // Its role fits in a hook: the first hook says it, and the hooks past it, every launch's
+    // eight, write a filler over any block an older role left.
     assert!(
         command.ends_with(&format!(
             "'{}' '0'",
@@ -183,7 +184,7 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no
     );
     assert_eq!(
         hooks["SessionStart"][0]["hooks"].as_array().unwrap().len(),
-        1,
+        crate::muse::MOST_PARTS,
         "{hooks}"
     );
     assert_eq!(fs::read_to_string(role).unwrap(), "# ConsensFlow worker");
@@ -415,156 +416,72 @@ fn a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch
 
 /// T-1246: Muse takes at most 16,384 bytes of a hook's output, and a chief's role is longer,
 /// so a window whose role needs more than one hook is given one for each part, numbered, all
-/// of them on the one role file: the part a hook says is its last word.
+/// of them on the one role file: the part a hook says is its last word. And every window is
+/// given all of them, whatever its role needs: a window can be put on a conversation an older
+/// role left blocks in (a human's `/resume` inside it), and the hooks past the role's parts
+/// write a filler over each.
 #[test]
-fn a_role_longer_than_a_hook_may_say_is_given_a_hook_for_each_part_of_it() {
+fn every_window_is_given_all_the_hooks_the_role_s_parts_first_and_a_filler_for_each_past_them() {
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), Some("1.4.14-R7309.1"));
-    // 480 lines of 71 bytes: 34 KB, three parts.
-    let role = role_of(480);
-    let prepared = prepared_with(&env, None, &role).unwrap();
-    let hooks = hooks_of(&prepared.argv);
-    let given = hooks["SessionStart"][0]["hooks"].as_array().unwrap();
-    assert_eq!(given.len(), crate::muse::parts(&role).len());
-    assert_eq!(given.len(), 3);
-    let numbers: Vec<_> = given
-        .iter()
-        .map(|hook| {
-            let command = hook["command"].as_str().unwrap();
-            command.rsplit_once(' ').unwrap().1.to_owned()
-        })
-        .collect();
-    assert_eq!(numbers, ["'0'", "'1'", "'2'"]);
-    // Each says its part of the file the launch wrote, the same for every one.
-    let files: Vec<_> = given
-        .iter()
-        .map(|hook| {
-            hook["command"]
-                .as_str()
-                .unwrap()
-                .split(" '")
-                .nth(1)
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
-    assert!(files.windows(2).all(|pair| pair[0] == pair[1]), "{files:?}");
+    for (name, role, parts) in [
+        ("a role of one part", "# ConsensFlow worker".to_owned(), 1),
+        // 480 lines of 71 bytes: 34 KB, three parts.
+        ("a role of three", role_of(480), 3),
+    ] {
+        assert_eq!(crate::muse::parts(&role).len(), parts, "{name}");
+        for resume in [None, Some("01a17bc9-e758-77f3-ac8d-a725edf373ae")] {
+            let prepared = prepared_with(&env, resume, &role).unwrap();
+            let hooks = hooks_of(&prepared.argv);
+            let given = hooks["SessionStart"][0]["hooks"].as_array().unwrap();
+            assert_eq!(
+                given.len(),
+                crate::muse::MOST_PARTS,
+                "{name}, resume {resume:?}"
+            );
+            let numbers: Vec<String> = given
+                .iter()
+                .map(|hook| {
+                    let command = hook["command"].as_str().unwrap();
+                    command.rsplit_once(' ').unwrap().1.to_owned()
+                })
+                .collect();
+            let wanted: Vec<String> = (0..crate::muse::MOST_PARTS)
+                .map(|at| format!("'{at}'"))
+                .collect();
+            assert_eq!(numbers, wanted, "{name}");
+            // Each says its block of the file the launch wrote, the same for every one.
+            let files: Vec<_> = given
+                .iter()
+                .map(|hook| {
+                    hook["command"]
+                        .as_str()
+                        .unwrap()
+                        .split(" '")
+                        .nth(1)
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect();
+            assert!(files.windows(2).all(|pair| pair[0] == pair[1]), "{files:?}");
+        }
+    }
 }
 
 #[test]
 fn a_role_that_needs_more_hooks_than_muse_was_measured_to_take_is_refused_in_words() {
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), Some("1.4.14-R7309.1"));
-    // Past 20 parts of 16,000 bytes.
+    // Past the most parts: 355 KB is about 23 parts of 16,000 bytes.
     let role = role_of(5_000);
     let refused = prepared_with(&env, None, &role).err().unwrap();
     assert!(
-        refused.contains("355000 bytes") && refused.contains("20 hooks"),
+        refused.contains("355000 bytes")
+            && refused.contains(&format!("{} hooks", crate::muse::MOST_PARTS)),
         "{refused}"
     );
-    let allowed = role_of(4_000);
+    // 106 KB is 7 parts: the most a role that fits has is 8.
+    let allowed = role_of(1_500);
+    assert_eq!(crate::muse::parts(&allowed).len(), 7);
     assert!(prepared_with(&env, None, &allowed).is_ok());
-}
-
-/// A resumed conversation has the blocks the hooks of its earlier launches gave it, until a
-/// hook of the same number writes them again: a role that fits in fewer parts than the one
-/// before it has hooks for the blocks of ours it lost, which say it has no such part. What
-/// the owner's hooks printed is no part of the count, and a log that cannot be counted gives
-/// a hook for every block a role could have (T-1246's review: P1).
-#[test]
-fn a_resumed_conversation_is_given_a_hook_for_every_block_of_ours_it_has_and_for_all_where_none_can_be_counted(
-) {
-    let home = tempfile::tempdir().unwrap();
-    let env = installed(home.path(), Some("1.4.14-R7309.1"));
-    let session = "01a17bc9-e758-77f3-ac8d-a725edf373ae";
-    let folder = home
-        .path()
-        .join("data")
-        .join("muse")
-        .join("sessions")
-        .join("2026")
-        .join("11")
-        .join("05")
-        .join(session);
-    fs::create_dir_all(&folder).unwrap();
-    let log = folder.join("session.jsonl");
-    let block = |number: usize, text: &str| {
-        json!({ "payload": { "kind": "run", "event": {
-            "kind": "context_block_updated",
-            "id": format!("hook:session_start:session:{number}"),
-            "text": text,
-        }}})
-        .to_string()
-    };
-    let write = |blocks: &[(usize, &str)]| {
-        let lines: Vec<String> = blocks.iter().map(|(n, t)| block(*n, t)).collect();
-        fs::write(&log, lines.join("\n") + "\n").unwrap();
-    };
-    let hooks = |instructions: &str, resume: Option<&str>| {
-        let prepared = prepared_with(&env, resume, instructions).unwrap();
-        hooks_of(&prepared.argv)["SessionStart"][0]["hooks"]
-            .as_array()
-            .unwrap()
-            .len()
-    };
-    let two = role_of(300);
-    let five = role_of(1_000);
-    assert_eq!(crate::muse::parts(&two).len(), 2);
-    assert_eq!(crate::muse::parts(&five).len(), 5);
-    let framed = crate::muse::blocks(&five);
-    let filler = crate::muse::filler("00000000", 2, 1);
-    // A new conversation has no blocks to write over.
-    assert_eq!(hooks(&two, None), 2);
-    // The launch before gave five blocks of ours: the new role of two parts writes over all five.
-    write(&[
-        (0, &framed[0]),
-        (1, &framed[1]),
-        (2, &framed[2]),
-        (3, &framed[3]),
-        (4, &framed[4]),
-    ]);
-    assert_eq!(hooks(&two, Some(session)), 5);
-    assert_eq!(hooks(&five, Some(session)), 5, "a role that did not shrink");
-    // The owner's blocks above ours, or before: no part of the count, whatever they were.
-    write(&[
-        (0, &framed[0]),
-        (1, &framed[1]),
-        (2, "what an owner's hook printed"),
-        (6, "and another"),
-    ]);
-    assert_eq!(hooks(&two, Some(session)), 2);
-    // A filler an earlier launch wrote is ours: its block is covered while the log has it.
-    write(&[(0, &framed[0]), (3, &filler)]);
-    assert_eq!(hooks(&two, Some(session)), 4);
-    // No block at all: the role's parts alone.
-    write(&[(0, "an owner's words")]);
-    assert_eq!(hooks(&two, Some(session)), 2);
-    // A log that cannot be counted: a hook for every block a role could have.
-    assert_eq!(
-        hooks(&two, Some("01a17bc9-0000-7000-8000-000000000000")),
-        crate::muse::MOST_PARTS,
-        "a conversation Muse has no log of"
-    );
-    let big = fs::File::options().write(true).open(&log).unwrap();
-    big.set_len(1024 * 1024 * 1024 + 1).unwrap();
-    assert_eq!(
-        hooks(&two, Some(session)),
-        crate::muse::MOST_PARTS,
-        "a log too long to count"
-    );
-    big.set_len(0).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        write(&[(0, &framed[0])]);
-        fs::set_permissions(&log, fs::Permissions::from_mode(0o000)).unwrap();
-        if fs::File::open(&log).is_err() {
-            assert_eq!(
-                hooks(&two, Some(session)),
-                crate::muse::MOST_PARTS,
-                "a log it cannot open"
-            );
-        }
-        fs::set_permissions(&log, fs::Permissions::from_mode(0o600)).unwrap();
-    }
 }

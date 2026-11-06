@@ -110,7 +110,7 @@ fn muses_session_hook_reads_its_files_from_its_command_line_and_writes_the_sessi
 /// T-1246: a hook of Muse's may say 16,384 bytes and a role is longer, so the launch gives
 /// Muse a hook for each block of the role and each names its number on its command line:
 /// the hook of block 1 says the second part, framed, and writes nothing down, and one past
-/// the last says the role has no such part; where none is named it is the first.
+/// the last says nothing, with the filler; where none is named it is the first.
 #[test]
 fn muses_session_hook_says_the_block_its_command_line_names() {
     let dir = tempfile::tempdir().unwrap();
@@ -149,8 +149,8 @@ fn muses_session_hook_says_the_block_its_command_line_names() {
         "only the first block writes the session down"
     );
     assert_eq!(block(Some("2")), blocks[2]);
-    let id = blocks[0].split(' ').nth(1).unwrap();
-    assert_eq!(block(Some("3")), cf_harness::muse::filler(id, 4, 3));
+    assert_eq!(block(Some("3")), cf_harness::muse::FILLER);
+    assert_eq!(block(Some("7")), cf_harness::muse::FILLER);
     assert_eq!(block(None), blocks[0], "no number named is the first");
     assert_eq!(fs::read_to_string(&said).unwrap().lines().count(), 1);
 }

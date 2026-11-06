@@ -45,18 +45,21 @@
 //! that a block of another role (the `id` is a digest of the whole text) is an old one. A
 //! role that fits in one hook is given as it always was.
 //!
-//! **A conversation that is resumed keeps the blocks its earlier launches wrote,** and a
-//! role that now needs fewer parts would leave the tail of the old one where the model
-//! may act on it. So the launch gives a hook for every block of ours the conversation
-//! has ([`cover_of`]: the highest block of the session's log whose last text is ours, and
-//! all [`MOST_PARTS`] where the log cannot be read or counted in time), and a hook past
-//! the role's last part writes [`filler`] over its block. Nothing of this depends on what
-//! the owner's hooks print.
+//! **A conversation keeps the blocks its earlier launches wrote, and a window can be put on any
+//! conversation** (a human's `/resume` inside it runs this window's hooks on a conversation
+//! given a longer role by an earlier launch, or an older ConsensFlow). A role that now needs
+//! fewer parts would leave the tail of the old one where the model may act on it. So **every
+//! launch gives [`MOST_PARTS`] hooks, whatever its role needs**: the hook past the role's last
+//! part writes [`FILLER`] over its block, and no block a ConsensFlow role could have left
+//! stays, whatever the conversation, the owner's hooks or the launch before. (A count from
+//! the session's log at the launch was tried first and was not enough: it knew the
+//! conversation the window began with, not the one it was put on.) A filler is 27 bytes of
+//! text, and a block's own cost in the context is a few tens of bytes more: measured at the
+//! launch in `muse_role.rs`.
 
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::Path;
-use std::time::{Duration, Instant};
 
 use cf_base::js;
 use cf_base::json::{from_slice_lossy, js_order};
@@ -75,19 +78,22 @@ pub const OUTPUT_LIMIT: usize = 16_384;
 /// a line break or a byte more than 1.4.14 did still takes it.
 const PART_OUTPUT: usize = 16_000;
 
-/// The most parts a role may be given in, and the most hooks of ours a launch has: the
-/// most hooks of one event measured (T-1246: 20 hooks of 16,000 bytes, and 64 smaller).
-/// A role that needs more is refused at its launch in words, not started with none of it.
-pub const MOST_PARTS: usize = 20;
+/// The most parts a role may be given in, and the hooks every launch gives (a hook for each
+/// part and a filler past them, so no block a role could have left stays): a role that needs
+/// more is refused at its launch in words, not started with none of it. Muse takes more (20 hooks
+/// of 16,000 bytes and 64 small ones were all taken, T-1246), so this is a choice of cost: each
+/// hook costs about 45 ms of a start on a Mac and 20 ms on Windows and 30 bytes of context
+/// (measured, `muse_role.rs`), and 8 is 2.7 times the 3 parts of the largest role there is
+/// (37,760 bytes of answer; the pins keep every role at half of this or fewer).
+pub const MOST_PARTS: usize = 8;
 
-/// What every block of ours begins with, a part's frame and a filler alike: how a block of
-/// the session's log is known for a ConsensFlow role's, which no hook of the owner's says.
+/// What every block of ours begins with, a part's frame and the filler alike: how a block of a
+/// session's log is known for a ConsensFlow role's, which no hook of the owner's says.
 pub const MARK: &str = "<<consensflow-role";
 
-/// How an unframed role (one hook's worth) begins: the front matter of its skill file. A
-/// conversation begun by a ConsensFlow that gave its role so, after the owner's hooks, has
-/// it at a block of that number still.
-const FRONT_MATTER: &str = "---\nname: consensflow-";
+/// What a hook says over the block of a part its role does not have: an older, longer role's
+/// may have left one in a conversation. Short, and the same for every block: 27 bytes.
+pub const FILLER: &str = "<<consensflow-role: empty>>";
 
 /// What a hook prints to give `text` as the context a session starts with: Claude's
 /// answer (`additionalContext`), which Muse reads as it reads plain words (the block it
@@ -133,15 +139,6 @@ fn head(id: &str, part: usize, of: usize) -> String {
 /// The line that ends the block of part `part` of `of`, of the role `id`.
 fn tail(id: &str, part: usize, of: usize) -> String {
     format!("<<end of consensflow-role {id} part {part} of {of}>>")
-}
-
-/// What a hook for part `part` (the first is 1) of a role of `of` parts, `id`, says where
-/// the role has none: over the block an older, longer role left in a conversation.
-pub fn filler(id: &str, part: usize, of: usize) -> String {
-    format!(
-        "{MARK} {id} part {part}: there is no part {part} of this role, which has {of} part{}>>",
-        if of == 1 { "" } else { "s" }
-    )
 }
 
 /// The bytes a frame takes at the most in a hook's answer: a first part's head and a last
@@ -266,7 +263,7 @@ pub fn blocks(role: &str) -> Vec<String> {
 /// with, and, for the first, before that a line of `{session, source}` appended to
 /// `said`, the launch's word of the sessions its window showed. Muse reads a JSON
 /// answer's `additionalContext` (Claude's shape) as it reads plain words: the block it
-/// keeps is the text alone. A number past the role's last prints [`filler`].
+/// keeps is the text alone. A number past the role's last prints [`FILLER`].
 pub fn session_hook(
     input: &mut dyn Read,
     role_file: Option<&Path>,
@@ -285,101 +282,8 @@ pub fn session_hook(
     if blocks.is_empty() {
         return None;
     }
-    let block = blocks
-        .get(part)
-        .cloned()
-        .unwrap_or_else(|| filler(&id_of(&instructions), part + 1, blocks.len()));
-    Some(hook_output(&block))
-}
-
-/// Whether `text`, a block of a session's log, is a ConsensFlow role's: a part or a filler
-/// of ours ([`MARK`]), or a role given as it is.
-fn ours(text: &str) -> bool {
-    text.starts_with(MARK) || text.starts_with(FRONT_MATTER)
-}
-
-/// The longest log [`cover_of`] reads: past it the answer is that it cannot tell.
-const LONGEST_LOG: u64 = 1024 * 1024 * 1024;
-
-/// The longest line of a log [`cover_of`] looks into: a block of a role is a few tens of
-/// thousands of bytes, and a line of a tool's output may be many megabytes.
-const LONGEST_LINE: usize = 4 * 1024 * 1024;
-
-/// How many hooks of ours a conversation's earlier launches wrote blocks for, which this
-/// launch's hooks must write over: one more than the highest block number of the session's
-/// log `log` whose last text is ours ([`ours`]); none where it has no block of ours. None
-/// where it cannot tell: the log cannot be opened or read, is past [`LONGEST_LOG`], or
-/// takes more than `within` to read; the launch then covers every block a role could have
-/// ([`MOST_PARTS`]). The owner's blocks are no part of it: a block counts for its last
-/// text, and an owner's text is no role of ours.
-pub(crate) fn cover_of(log: &Path, within: Duration) -> Option<usize> {
-    const BLOCKS: &[u8] = b"hook:session_start:session:";
-    const WRITTEN: &[u8] = b"context_block_updated";
-    let began = Instant::now();
-    let file = fs::File::open(log).ok()?;
-    if file.metadata().ok()?.len() > LONGEST_LOG {
-        return None;
-    }
-    let mut reader = BufReader::with_capacity(1024 * 1024, file);
-    let mut last: std::collections::BTreeMap<usize, bool> = std::collections::BTreeMap::new();
-    let (mut line, mut too_long) = (Vec::new(), false);
-    loop {
-        if began.elapsed() > within {
-            return None;
-        }
-        let chunk = reader.fill_buf().ok()?;
-        let end = chunk.is_empty();
-        let newline = memchr::memchr(b'\n', chunk);
-        let take = newline.unwrap_or(chunk.len());
-        if !too_long {
-            if line.len() + take > LONGEST_LINE {
-                too_long = true;
-                line.clear();
-            } else {
-                line.extend_from_slice(&chunk[..take]);
-            }
-        }
-        let consumed = newline.map_or(chunk.len(), |at| at + 1);
-        reader.consume(consumed);
-        if newline.is_some() || end {
-            if !too_long
-                && memchr::memmem::find(&line, WRITTEN).is_some()
-                && memchr::memmem::find(&line, BLOCKS).is_some()
-            {
-                if let Some((number, text)) = block_of(&line) {
-                    last.insert(number, ours(&text));
-                }
-            }
-            line.clear();
-            too_long = false;
-        }
-        if end {
-            break;
-        }
-    }
-    Some(
-        last.iter()
-            .rev()
-            .find(|(_, is_ours)| **is_ours)
-            .map_or(0, |(number, _)| number + 1),
-    )
-}
-
-/// The number and the text of the block a log's line writes (a `context_block_updated`
-/// of `hook:session_start:session:<n>`), none for any other line.
-fn block_of(line: &[u8]) -> Option<(usize, String)> {
-    let record: Value = serde_json::from_slice(line).ok()?;
-    let event = record.get("payload")?.get("event")?;
-    if event.get("kind")?.as_str()? != "context_block_updated" {
-        return None;
-    }
-    let number = event
-        .get("id")?
-        .as_str()?
-        .strip_prefix("hook:session_start:session:")?
-        .parse::<usize>()
-        .ok()?;
-    Some((number, event.get("text")?.as_str()?.to_owned()))
+    let block = blocks.get(part).map_or(FILLER, String::as_str);
+    Some(hook_output(block))
 }
 
 /// The session the event on `input` starts, and its source (none said is `startup`):
@@ -604,13 +508,13 @@ mod tests {
 
     /// The numbers the module rests on, measured on Muse Code 1.4.14-R7309.1 with its echo model
     /// (T-1246; the rig's `muse_role` cases hold them on the machine's Muse): a hook may say
-    /// 16,384 bytes, a part is given 16,000, and 20 hooks of one start were all taken. A Muse
+    /// 16,384 bytes, a part is given 16,000, and 20 hooks of one start were all taken (8 are given). A Muse
     /// that changes them is the cases' to fail, and these to be changed with them.
     #[test]
     fn the_numbers_are_those_measured_on_muse_1_4_14() {
         assert_eq!(OUTPUT_LIMIT, 16_384);
         assert_eq!(PART_OUTPUT, 16_000);
-        assert_eq!(MOST_PARTS, 20);
+        assert_eq!(MOST_PARTS, 8);
         assert_eq!(hook_output("").len(), 78, "the wrapper of a JSON answer");
         assert!(
             frame_most() < 400,
@@ -696,12 +600,12 @@ mod tests {
     }
 
     /// A role of everything that has cost a cut a meaning: a fence of lines that end in two
-    /// spaces, text indented under it, a line longer than three parts, two-, three- and
+    /// spaces, text indented under it, a line longer than a part and a half, two-, three- and
     /// four-byte characters, quotes and backslashes (two bytes each in the answer), tabs and
     /// carriage returns, and blank lines, each many times over, `shift` characters in.
     fn hard_role(shift: usize) -> String {
         let mut role = format!("{}\n", "s".repeat(shift));
-        for section in 0..4 {
+        for section in 0..2 {
             role += &format!("## Section {section}\n\n");
             role += "```text\n";
             for line in 0..120 {
@@ -711,7 +615,7 @@ mod tests {
             for line in 0..60 {
                 role += &format!("    indented {line}: code that Muse would cut the indent of\n");
             }
-            role += &format!("\n{}\n\n", "a".repeat(40_000));
+            role += &format!("\n{}\n\n", "a".repeat(30_000));
             for _ in 0..40 {
                 role += "é é é é 日本語の行 😀 😀 \"quoted\" \\back\\slash\ttab\r\n\n";
             }
@@ -853,7 +757,7 @@ mod tests {
         let role = hard_role(0);
         let blocks = blocks(&role);
         let last = blocks.len();
-        let (id, said) = (id_of(&role), |part| {
+        let said = |part| {
             fs::write(&launch.role, &role).unwrap();
             let printed = session_hook(
                 &mut event("SessionStart", "s1").to_string().as_bytes(),
@@ -867,7 +771,7 @@ mod tests {
                 .as_str()
                 .expect("its text")
                 .to_owned()
-        });
+        };
         for (at, block) in blocks.iter().enumerate().skip(1) {
             assert_eq!(&said(at), block);
         }
@@ -876,9 +780,11 @@ mod tests {
             "only the first writes the session down"
         );
         assert_eq!(said(0), blocks[0]);
-        let over = said(last + 3);
-        assert_eq!(over, filler(&id, last + 4, last));
-        assert!(over.starts_with(MARK) && ours(&over) && !over.contains("part 1 of"));
+        // Every hook past the role's parts, up to the last there is, says the same short text.
+        for part in [last, last + 3, MOST_PARTS - 1] {
+            assert_eq!(said(part), FILLER, "block {part}");
+        }
+        assert!(FILLER.starts_with(MARK) && FILLER.len() < 40, "{FILLER}");
         assert_eq!(fs::read_to_string(&launch.said).unwrap().lines().count(), 1);
         // No role text says nothing, whatever the block.
         assert_eq!(
@@ -890,265 +796,6 @@ mod tests {
             ),
             None
         );
-    }
-
-    #[test]
-    fn a_block_is_a_role_of_ours_by_its_mark_or_by_the_front_matter_of_an_unframed_role() {
-        let role = hard_role(0);
-        assert!(blocks(&role).iter().all(|block| ours(block)));
-        assert!(ours(&filler("0123abcd", 3, 2)));
-        assert!(ours("---\nname: consensflow-chief\ndescription: x\n---\n"));
-        assert!(!ours("the owner's own words"));
-        assert!(
-            !ours("# A skill\n---\nname: consensflow-chief"),
-            "not at its start"
-        );
-        assert!(!ours(""));
-        assert_eq!(id_of("a role").len(), 8);
-        assert_ne!(id_of("a role"), id_of("a role."));
-    }
-
-    /// A log with the block records `blocks` say (number, text), each a `context_block_updated`
-    /// of `hook:session_start:session:<number>` as Muse writes it, with others around them.
-    fn log_with(dir: &Path, blocks: &[(usize, &str)]) -> std::path::PathBuf {
-        let log = dir.join("session.jsonl");
-        let mut lines = vec![
-            r#"{"payload_type":"runtime.session","payload":{"kind":"run","event":{"kind":"context_block_diagnostic","block_id":"hook:session_start:session:9"}}}"#.to_owned(),
-        ];
-        for (number, text) in blocks {
-            lines.push(
-                json!({
-                    "payload_type": "runtime.session",
-                    "payload": { "kind": "run", "event": {
-                        "kind": "context_block_updated",
-                        "id": format!("hook:session_start:session:{number}"),
-                        "text": text,
-                    }},
-                })
-                .to_string(),
-            );
-            lines.push(
-                r#"{"payload":{"kind":"run","event":{"kind":"assistant_message_committed"}}}"#
-                    .to_owned(),
-            );
-        }
-        fs::write(&log, lines.join("\n") + "\n").unwrap();
-        log
-    }
-
-    const SOON: Duration = Duration::from_secs(30);
-
-    #[test]
-    fn the_blocks_of_ours_a_conversation_has_are_the_highest_block_whose_last_text_is_ours_and_no_owners(
-    ) {
-        let dir = tempfile::tempdir().unwrap();
-        let framed = blocks(&hard_role(0));
-        let ours_at = |log: &[(usize, &str)]| cover_of(&log_with(dir.path(), log), SOON);
-        assert_eq!(ours_at(&[]), Some(0), "no block");
-        assert_eq!(
-            ours_at(&[(0, "an owner's words")]),
-            Some(0),
-            "an owner's block is none of ours"
-        );
-        // Two parts of ours, and an owner's block above them that prints this launch.
-        assert_eq!(
-            ours_at(&[
-                (0, &framed[0]),
-                (1, &framed[1]),
-                (2, "an owner's words"),
-                (7, "more")
-            ]),
-            Some(2),
-            "what is above ours is the owner's, and no part of the count"
-        );
-        // A filler is ours, and an unframed role is, at any number (a legacy launch).
-        assert_eq!(
-            ours_at(&[(0, &framed[0]), (4, &filler("00000000", 5, 1))]),
-            Some(5)
-        );
-        assert_eq!(
-            ours_at(&[(3, "---\nname: consensflow-worker\n---\nx")]),
-            Some(4)
-        );
-        // The last text of a block counts: an owner's words written over ours.
-        assert_eq!(
-            ours_at(&[
-                (0, &framed[0]),
-                (1, &framed[1]),
-                (1, "an owner's words now")
-            ]),
-            Some(1)
-        );
-        assert_eq!(
-            ours_at(&[(1, "an owner's words"), (1, &framed[1]), (0, &framed[0])]),
-            Some(2)
-        );
-    }
-
-    #[test]
-    fn a_log_that_cannot_be_counted_is_none_so_the_launch_covers_every_block_a_role_could_have() {
-        let dir = tempfile::tempdir().unwrap();
-        let framed = blocks(&hard_role(0));
-        assert_eq!(
-            cover_of(&dir.path().join("none.jsonl"), SOON),
-            None,
-            "no log"
-        );
-        assert_eq!(cover_of(dir.path(), SOON), None, "a folder is no log");
-        let log = log_with(dir.path(), &[(0, &framed[0]), (1, &framed[1])]);
-        assert_eq!(cover_of(&log, SOON), Some(2));
-        assert_eq!(cover_of(&log, Duration::ZERO), None, "no time to count in");
-        // Past the longest log it reads: a sparse file, nothing written.
-        let huge = dir.path().join("huge.jsonl");
-        let file = fs::File::create(&huge).unwrap();
-        file.set_len(LONGEST_LOG + 1).unwrap();
-        assert_eq!(cover_of(&huge, SOON), None);
-        // At the longest it reads, it reads: sparse zeros are no line of a log.
-        file.set_len(0).unwrap();
-        // A log a person cannot read is none (not under a user who can read anything).
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&log, fs::Permissions::from_mode(0o000)).unwrap();
-            let unreadable = fs::File::open(&log).is_err();
-            if unreadable {
-                assert_eq!(cover_of(&log, SOON), None, "a log it cannot open");
-            }
-            fs::set_permissions(&log, fs::Permissions::from_mode(0o600)).unwrap();
-        }
-    }
-
-    #[test]
-    fn the_log_is_counted_past_a_torn_last_line_and_a_line_too_long_to_hold() {
-        let dir = tempfile::tempdir().unwrap();
-        let framed = blocks(&hard_role(0));
-        let log = log_with(dir.path(), &[(0, &framed[0]), (1, &framed[1])]);
-        let mut text = fs::read_to_string(&log).unwrap();
-        // A line many megabytes long that would be a block of ours at number 5 (a tool's
-        // output that quotes one) is passed: no block of the hooks is that long.
-        text += &json!({ "payload": { "kind": "run", "event": {
-            "kind": "context_block_updated",
-            "id": "hook:session_start:session:5",
-            "text": format!("{MARK} 00000000 part 6{}", "z".repeat(LONGEST_LINE + 10)) }}})
-        .to_string();
-        text += "\n";
-        text += "{\"payload\":{\"event\":{\"kind\":\"context_block_updated\",\"id\":\"hook:session_start:session:3\",\"text\":\"<<consensflow-r";
-        fs::write(&log, text).unwrap();
-        assert_eq!(
-            cover_of(&log, SOON),
-            Some(2),
-            "neither the long line nor the torn one is a block"
-        );
-    }
-
-    /// A log of about `megabytes` MiB: lines like a long session's (a model request's
-    /// bookkeeping of a few KB, a tool's result of a few hundred KB now and then, a
-    /// diagnostic that names a block of the hooks, as every request writes for each), and the
-    /// blocks of ours (`framed`, one of them first, and one near each boundary of the
-    /// reader's buffer) among them. Written to `log`.
-    fn long_log(log: &Path, megabytes: usize, framed: &[String]) {
-        let mut out = std::io::BufWriter::new(fs::File::create(log).unwrap());
-        let record = |number: usize, text: &str| {
-            json!({ "payload": { "kind": "run", "event": {
-                "kind": "context_block_updated",
-                "id": format!("hook:session_start:session:{number}"),
-                "text": text }}})
-            .to_string()
-        };
-        let bookkeeping = format!(
-            "{{\"payload_type\":\"runtime.session\",\"payload\":{{\"kind\":\"run\",\"event\":{{\"kind\":\"model_request_configured\",\"toolset\":\"{}\"}}}}}}\n",
-            "t".repeat(3_000)
-        );
-        let diagnostic = "{\"payload\":{\"kind\":\"run\",\"event\":{\"kind\":\"context_block_diagnostic\",\"block_id\":\"hook:session_start:session:1\",\"message\":\"context block observed\"}}}\n";
-        let result = format!("{{\"payload\":{{\"kind\":\"run\",\"event\":{{\"kind\":\"tool_result\",\"output\":\"{}\"}}}}}}\n", "r".repeat(300_000));
-        for (number, text) in framed.iter().enumerate() {
-            writeln!(out, "{}", record(number, text)).unwrap();
-        }
-        let target = megabytes * 1024 * 1024;
-        let (mut written, mut turn) = (0, 0);
-        while written < target {
-            let line: &str = match turn % 40 {
-                0 => &result,
-                n if n % 3 == 0 => diagnostic,
-                _ => &bookkeeping,
-            };
-            out.write_all(line.as_bytes()).unwrap();
-            written += line.len();
-            turn += 1;
-        }
-        out.flush().unwrap();
-    }
-
-    #[test]
-    fn a_log_of_many_megabytes_is_counted_across_the_boundaries_of_its_buffer() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("session.jsonl");
-        let framed = blocks(&hard_role(0));
-        long_log(&log, 20, &framed);
-        assert_eq!(cover_of(&log, SOON), Some(framed.len()));
-        // A block whose line begins just before a boundary of the 1 MiB buffer and ends past it.
-        let mut text = fs::read_to_string(&log).unwrap();
-        let line = |number: usize| {
-            json!({ "payload": { "kind": "run", "event": {
-                "kind": "context_block_updated",
-                "id": format!("hook:session_start:session:{number}"),
-                "text": framed[0] }}})
-            .to_string()
-                + "\n"
-        };
-        // Pad with lines of one byte and two to a place just before a boundary of the buffer.
-        let boundary = text.len() / (1024 * 1024) * (1024 * 1024) + 1024 * 1024;
-        let padding = boundary - 40 - text.len();
-        text += &"x\n".repeat(padding / 2);
-        if padding % 2 == 1 {
-            text += "\n";
-        }
-        assert_eq!(text.len(), boundary - 40);
-        let above = framed.len() + 4;
-        text += &line(above);
-        fs::write(&log, text).unwrap();
-        assert_eq!(cover_of(&log, SOON), Some(above + 1));
-    }
-
-    /// A timing, not a check: how long the count of a long session's log takes at a resume
-    /// launch (T-1246's review). `CF_COVER_LOG=<a real session.jsonl>` repeats a real log;
-    /// else a synthetic one of `CF_COVER_MIB` MiB (512) is made.
-    ///
-    /// `cargo test -p cf-harness --lib muse::session_hook::tests::timing -- --ignored --nocapture`
-    #[test]
-    #[ignore = "a timing: run by hand with --ignored --nocapture"]
-    #[allow(clippy::disallowed_methods)] // The knobs of a timing run by hand, read where it is.
-    fn timing_of_the_count_on_a_long_log() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("session.jsonl");
-        let framed = blocks(&hard_role(0));
-        let mib: usize = std::env::var("CF_COVER_MIB")
-            .ok()
-            .and_then(|mib| mib.parse().ok())
-            .unwrap_or(512);
-        match std::env::var("CF_COVER_LOG") {
-            Ok(real) => {
-                let one = fs::read(&real).unwrap();
-                let mut out = std::io::BufWriter::new(fs::File::create(&log).unwrap());
-                let mut written = 0;
-                while written < mib * 1024 * 1024 {
-                    out.write_all(&one).unwrap();
-                    written += one.len();
-                }
-                out.flush().unwrap();
-            }
-            Err(_) => long_log(&log, mib, &framed),
-        }
-        let size = fs::metadata(&log).unwrap().len();
-        for pass in ["first (the file just written, in the cache)", "second"] {
-            let began = Instant::now();
-            let found = cover_of(&log, Duration::from_secs(60));
-            println!(
-                "TIMING {} MiB, {pass}: {found:?} in {} ms",
-                size / 1024 / 1024,
-                began.elapsed().as_millis()
-            );
-        }
     }
 
     #[test]
