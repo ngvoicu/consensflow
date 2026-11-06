@@ -319,6 +319,7 @@ fn going() -> Going {
         ledger: None,
         prober: Box::new(Asked::default()),
         edge: Edge::default(),
+        extra: Vec::new(),
     }
 }
 
@@ -554,6 +555,8 @@ fn a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_r
         filled: &run.keeper.filled,
         timeline: &run.timeline,
         stalls: &run.stalls,
+        extra: &[],
+        extra_listed: 2,
         ending: DONE.to_owned(),
         error: None,
         login: None,
@@ -669,6 +672,8 @@ fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its
         filled: &run.keeper.filled,
         timeline: &run.timeline,
         stalls: &run.stalls,
+        extra: &[],
+        extra_listed: 2,
         ending: DONE.to_owned(),
         error: Some(format!("the rig could not close: {secret}")),
         login: None,

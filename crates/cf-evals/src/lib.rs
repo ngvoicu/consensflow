@@ -81,7 +81,7 @@ usage: cf-evals <command> [flags]
              [--effort LEVEL] [--staff-effort LEVEL] [--hours N] [--every-min N]
              [--look-sec N] [--idle-min N] [--dialog-min N] [--quiet-min N] [--wake-min N]
              [--switch-to HARNESS] [--quiet] [--pause] [--kill] [--switch] [--compact]
-             [--restart] [--devin-cut] [--suspend] [--ask real|stand-in] [--reports DIR]
+             [--restart] [--devin-cut] [--suspend] [--ask real|stand-in|stand-in-fast] [--reports DIR]
   summary  write the table of the reports kept in evals/reports (evals/RESULTS.md)
              [--reports DIR] [--results FILE]
   watch    look at a project that is running

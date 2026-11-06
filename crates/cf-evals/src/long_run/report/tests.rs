@@ -92,6 +92,8 @@ fn kept<'a>(scene: &'a Scene, breaks: &'a [Break], error: Option<String>) -> Kep
         filled: &[],
         timeline: &scene.timeline,
         stalls: &scene.stalls,
+        extra: &[],
+        extra_listed: 2,
         ending: "the project is done".to_owned(),
         error,
         login: None,

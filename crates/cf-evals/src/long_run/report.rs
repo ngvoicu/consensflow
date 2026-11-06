@@ -64,6 +64,10 @@ pub struct Kept<'a> {
     /// What the run kept of a window that stalled, and of every window at an end the
     /// project did not reach: evidence, which fails nothing.
     pub stalls: &'a Stalls,
+    /// When the owner gave a piece of extra work, in milliseconds, in turn, and how many pieces
+    /// the scenario lists.
+    pub extra: &'a [i64],
+    pub extra_listed: usize,
     /// How the run ended: `the project is done`, `time ran out`…
     pub ending: String,
     /// What stopped the run before its end, if anything did.

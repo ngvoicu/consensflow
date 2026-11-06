@@ -62,6 +62,30 @@ pub struct Seen {
     pub dialog: bool,
     /// Whether nothing is on the board.
     pub board_empty: bool,
+    /// What the run's schedule of disruptions still asks of the project.
+    pub owed: Owed,
+}
+
+/// What a run's schedule of disruptions still asks of the project at one look: a disruption
+/// that waits for its shape needs the staff at work, so a project that went quiet before the
+/// schedule was played is not over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owed {
+    /// Nothing: every disruption was played, or cannot be, or the run has none.
+    Nothing,
+    /// A disruption waits, and its time has not come.
+    Later,
+    /// A disruption waits, and it is due.
+    Due,
+}
+
+/// A piece of real work the owner may give once more to a project that went quiet before its
+/// schedule was played, and how long the piece takes to be done (it is given only where the
+/// budget has that much left, so that the run does not end with it half done).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Piece {
+    pub say: String,
+    pub takes: Duration,
 }
 
 /// What the owner does next.
@@ -75,6 +99,8 @@ pub enum Step {
     Nudge(String),
     /// Say the next thing of the conversation.
     Next(FollowUp),
+    /// Say this piece of extra work: the project is quiet and a disruption waits for its shape.
+    More(String),
     /// The run is over: nothing has moved for the scenario's quiet time.
     Over,
     /// The run is over: time is up.
@@ -96,6 +122,9 @@ pub struct Owner {
     pub dialogs: i64,
     /// How many follow-up messages it typed.
     pub follow_ups_sent: i64,
+    extra: Vec<Piece>,
+    /// How many pieces of extra work it gave.
+    pub extra_sent: i64,
 }
 
 impl Owner {
@@ -108,7 +137,17 @@ impl Owner {
             replies: 0,
             dialogs: 0,
             follow_ups_sent: 0,
+            extra: Vec::new(),
+            extra_sent: 0,
         }
+    }
+
+    /// The owner with `pieces` of extra work to give, in turn and again from the first, to a
+    /// project that goes quiet while a disruption of its schedule waits.
+    #[must_use]
+    pub fn with_extra_work(mut self, pieces: Vec<Piece>) -> Self {
+        self.extra = pieces;
+        self
     }
 
     /// The owner's next step. `question` is the chief's open question in its

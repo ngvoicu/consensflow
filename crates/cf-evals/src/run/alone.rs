@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 
 use super::floor::{settled, Floor};
 use super::login;
-use super::owner::{Owner, Seen, Step};
+use super::owner::{Owed, Owner, Seen, Step};
 use super::report::{keep, Bare, Said};
 use super::{start, Plan};
 use crate::bare::{asking_turn_end, bare_metrics};
@@ -251,6 +251,7 @@ fn conduct(
             busy,
             dialog: false,
             board_empty: true,
+            owed: Owed::Nothing,
         };
         let step = owner.step(scenario, &seen, options.timeout, &mut || {
             Ok(asking_turn_end(items, ends).map(|end| OpenQuestion {
@@ -289,7 +290,7 @@ fn conduct(
                     "a bare chief has no card to be switched from".to_owned(),
                 ));
             }
-            Step::Next(FollowUp::Say(next)) => {
+            Step::Next(FollowUp::Say(next)) | Step::More(next) => {
                 floor.note(format!(
                     "the owner's next message ({}): {}",
                     owner.follow_ups_sent,
