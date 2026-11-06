@@ -384,8 +384,8 @@ runs = ["ch-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '        let listing = ModelListing::after(kept, adapter.models(refresh).await);'
-replace = '        let listing = ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await);'
+find = '        let listing = without_credentials(ModelListing::after(kept, adapter.models(refresh).await));'
+replace = '        let listing = without_credentials(ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await));'
 
 # A chief is a harness and a model (Phase 1, CHF-04 to CHF-10, T-729): the ledger's chief
 # model and its switch (crates/cf-ledger), each harness's last_used reader and its words for a

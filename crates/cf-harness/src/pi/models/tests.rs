@@ -4,9 +4,12 @@ use cf_process::Failed;
 use serde_json::json;
 
 use super::*;
-use crate::testing::{finished, ChildScript, Ends, ManualTime, ScriptedProcesses};
+use crate::testing::{finished, ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
 
+mod failures;
 mod homes;
+mod refresh;
+mod standin;
 
 /// When a test's list is read.
 const AT: i64 = 1_793_000_000_000;
@@ -18,12 +21,7 @@ const SIGNED_OUT: &str =
     include_str!("../../../tests/fixtures/models/pi-get-available-models-signed-out.json");
 
 fn recorded() -> ModelListing {
-    parse(
-        &serde_json::from_str(RECORDED).unwrap(),
-        AT,
-        &Setup::default(),
-    )
-    .unwrap()
+    parse(&serde_json::from_str(RECORDED).unwrap(), AT, String::new).unwrap()
 }
 
 fn efforts_of(models: &ModelListing, model: &str) -> Vec<String> {
@@ -81,20 +79,16 @@ fn a_contributor_model_pi_lists_is_marked_and_never_the_default() {
 
 #[test]
 fn pi_with_no_login_lists_no_model_and_says_why() {
-    let signed_out = parse(
-        &serde_json::from_str(SIGNED_OUT).unwrap(),
-        AT,
-        &Setup::default(),
-    );
+    let signed_out = parse(&serde_json::from_str(SIGNED_OUT).unwrap(), AT, || {
+        Setup::default().unlisted()
+    });
     assert_eq!(signed_out, Err(Setup::default().unlisted()));
     assert!(signed_out
         .unwrap_err()
         .starts_with("Pi lists no model: no provider is set up ("));
-    let refused = parse(
-        &json!({ "success": false, "error": "bad" }),
-        AT,
-        &Setup::default(),
-    );
+    let refused = parse(&json!({ "success": false, "error": "bad" }), AT, || {
+        unreachable!("a refusal is not an empty list")
+    });
     assert_eq!(
         refused,
         Err("pi refused get_available_models: bad".to_owned())
@@ -131,17 +125,39 @@ fn listed_with(
     if let Some(update) = update {
         processes.run_answer("pi update --models", update);
     }
-    let answer = json!({ "type": "response", "id": "models", "success": true,
-        "data": { "models": [{ "provider": "meta", "id": "spark", "name": "Spark" }] } });
+    let answer = |id: &str| {
+        json!({ "type": "response", "id": id, "success": true,
+            "data": { "models": [{ "provider": "meta", "id": "spark", "name": "Spark" }] } })
+        .to_string()
+    };
+    // A Refresh asks twice, with its hold between: Pi's packages have their moment.
+    let lines = if fetch {
+        vec![answer("models"), answer("models-again")]
+    } else {
+        vec![answer("models")]
+    };
     processes.child(
         "pi",
         ChildScript {
-            lines: vec![answer.to_string()],
+            lines,
             ends: Ends::Asked,
         },
     );
-    let time = ManualTime::new(0);
-    let listed = finished(Box::pin(listed(&env, &*processes, &time, fetch)));
+    let time = Rc::new(ManualTime::new(0));
+    let mut driver = Driver::default();
+    let (asked_env, asked_processes, asked_time) =
+        (env.clone(), Rc::clone(&processes), Rc::clone(&time));
+    driver.begin(0, async move {
+        listed(&asked_env, &*asked_processes, &*asked_time, fetch).await
+    });
+    if fetch {
+        assert!(
+            driver.run().is_empty(),
+            "the session is held for the packages"
+        );
+        assert!(time.fire_next(i64::MAX), "the hold is armed");
+    }
+    let listed = driver.run().remove(0).1;
     let ran = processes
         .take_ran()
         .iter()
@@ -299,84 +315,4 @@ fn a_pi_window_on_a_model_its_provider_lacks_fails_in_that_providers_words() {
     assert!(!gone(codex, "openai-codex/gpt-6-luna"));
     let anthropic = r#"404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-gone-9"},"request_id":"req_0"}"#;
     assert!(gone(anthropic, "anthropic/claude-gone-9"));
-}
-
-/// What a read that failed says of itself: where Pi ended before it answered, its own words,
-/// from the run that asks it again; where that says nothing, the failure alone; and where Pi
-/// was still loading at the bound, that a package or extension may be what it waits for.
-#[test]
-fn a_failed_read_says_what_pi_said_and_a_slow_one_names_what_pi_loads() {
-    let program = program(PathBuf::from("pi"), &Env::default());
-    let ended = "pi --mode rpc ended before it answered".to_owned();
-    let said = |processes: &ScriptedProcesses, failed: &str| {
-        finished(Box::pin(super::said(
-            processes,
-            program.clone(),
-            failed.to_owned(),
-        )))
-    };
-
-    let processes = ScriptedProcesses::default();
-    let command = "pi --mode rpc --no-session --no-mcp --offline";
-    processes.run_answer(
-        command,
-        Err(Failed {
-            message: format!(
-                "Command failed: {command}\nwarning: x\nError: Failed to load extension \"/p/e.ts\": boom\n\nHint: Start without extensions using \"pi -ne\".\n"
-            ),
-            code: Some(1),
-            killed: false,
-            stdout: String::new(),
-        }),
-    );
-    assert_eq!(
-        said(&processes, &ended),
-        format!(
-            "{ended}; Pi said: warning: x Error: Failed to load extension \"/p/e.ts\": boom Hint: Start without extensions using \"pi -ne\"."
-        )
-    );
-
-    // Pi started on the second go and was given up on: what it printed while it loaded is not
-    // why the first one ended.
-    let processes = ScriptedProcesses::default();
-    processes.run_answer(
-        command,
-        Err(Failed {
-            message: format!("Command failed: {command}\nwarning: still loading\n"),
-            code: None,
-            killed: true,
-            stdout: String::new(),
-        }),
-    );
-    assert_eq!(said(&processes, &ended), ended);
-    // Nothing to run again (the stand-in is not there): the same.
-    assert_eq!(said(&ScriptedProcesses::default(), &ended), ended);
-
-    let slow = said(
-        &ScriptedProcesses::default(),
-        "pi --mode rpc did not answer within 30 s",
-    );
-    assert!(
-        slow.starts_with("pi --mode rpc did not answer within 30 s: "),
-        "{slow}"
-    );
-    assert!(slow.contains("packages and extensions"), "{slow}");
-    // Any other failure is as it was.
-    assert_eq!(
-        said(&ScriptedProcesses::default(), "spawn pi ENOENT"),
-        "spawn pi ENOENT"
-    );
-}
-
-#[test]
-fn what_pi_said_is_kept_to_its_last_lines_and_a_few_hundred_bytes() {
-    let long = (1..=9)
-        .map(|n| format!("line {n}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(tail(&long), "line 6 line 7 line 8 line 9");
-    let wide = "é".repeat(2000);
-    let cut = tail(&wide);
-    assert_eq!(cut.chars().count(), 601);
-    assert!(cut.ends_with('…'));
 }

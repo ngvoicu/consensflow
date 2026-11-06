@@ -11,6 +11,8 @@ pub(crate) struct Live {
     /// Whether the program has been waited for: its pid, and the id of its group, may be
     /// another's now.
     exited: Cell<bool>,
+    /// The code it exited with, where it exited with one.
+    code: Cell<Option<i32>>,
     job: Job,
 }
 
@@ -18,6 +20,7 @@ impl Live {
     pub(crate) fn new(job: Job) -> Self {
         Self {
             exited: Cell::new(false),
+            code: Cell::new(None),
             job,
         }
     }
@@ -31,6 +34,15 @@ impl Live {
     pub(crate) fn set_exited(&self) {
         self.job.release();
         self.exited.set(true);
+    }
+
+    /// The code the program exited with, said before it is [set exited](Self::set_exited).
+    pub(crate) fn set_code(&self, code: Option<i32>) {
+        self.code.set(code);
+    }
+
+    pub(crate) fn code(&self) -> Option<i32> {
+        self.code.get()
     }
 
     pub(crate) fn job(&self) -> &Job {

@@ -259,8 +259,11 @@ impl Dispatcher {
             Ok(None) => format!(
                 "The chief's model, {gone}, is no longer available in {harness}: the chief starts on {harness}'s own default model instead. Switch the chief to pick another."
             ),
+            // What the harness said (a Pi read that failed quotes Pi's error stream) can carry
+            // a credential it was given: it is hidden before it is a note.
             Err(why) => format!(
-                "The chief's model, {gone}, is no longer available in {harness}, and ConsensFlow found no other to start it on ({why}): switch the chief to another model."
+                "The chief's model, {gone}, is no longer available in {harness}, and ConsensFlow found no other to start it on ({}): switch the chief to another model.",
+                crate::shown::masked(why)
             ),
         };
         self.seams.ledger.borrow_mut().note(

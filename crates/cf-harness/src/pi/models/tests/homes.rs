@@ -94,7 +94,7 @@ fn recorded(name: &str) -> Value {
 }
 
 /// A `pi` that answers as the recorded one did, by whether it is started with Pi's extensions
-/// left out. One that ended answers the rerun that asks why with its recorded error stream.
+/// left out. One that ended says what the recorded one said on its error stream.
 struct RecordedPi {
     answers: Value,
     scripted: ScriptedProcesses,
@@ -115,34 +115,13 @@ impl RecordedPi {
 }
 
 impl Processes for RecordedPi {
+    /// Pi is started once, to be asked, and never run to its end to be asked why it failed.
     fn run(
         &self,
         program: Program,
         _limits: Limits,
     ) -> crate::contract::Work<'_, Result<String, cf_process::Failed>> {
-        let answer = self.answer(&program).clone();
-        let command = crate::testing::named(&program);
-        Box::pin(async move {
-            // A Pi that started waits for its input until it is given up on; one that did not
-            // ends with its code and what it said.
-            match answer["exit"].as_i64() {
-                Some(code) => Err(cf_process::Failed {
-                    message: format!(
-                        "Command failed: {command}\n{}",
-                        answer["stderr"].as_str().unwrap_or("")
-                    ),
-                    code: i32::try_from(code).ok(),
-                    killed: false,
-                    stdout: String::new(),
-                }),
-                None => Err(cf_process::Failed {
-                    message: format!("Command failed: {command}\n"),
-                    code: None,
-                    killed: true,
-                    stdout: String::new(),
-                }),
-            }
-        })
+        panic!("a second start of Pi: {}", crate::testing::named(&program))
     }
 
     fn spawn(
@@ -159,6 +138,14 @@ impl Processes for RecordedPi {
                 ends: Ends::Asked,
             }
         } else {
+            // Pi ended: what it said on its error stream, and the code it exited with.
+            self.scripted.child_said(
+                "pi",
+                answer["stderr"].as_str().unwrap_or_default(),
+                answer["exit"]
+                    .as_i64()
+                    .and_then(|code| i32::try_from(code).ok()),
+            );
             ChildScript {
                 lines: Vec::new(),
                 ends: Ends::Itself,
@@ -273,18 +260,45 @@ fn an_extension_pi_cannot_load_is_pi_s_own_error() {
     let why = listing_of(&home("extension-fails")).unwrap_err();
     assert!(why.contains("ended before it answered"), "{why}");
     assert!(
-        why.contains("Pi said: Error: Failed to load extension"),
+        why.contains("it said: Error: Failed to load extension"),
         "{why}"
     );
     assert!(why.contains("this extension fails to load"), "{why}");
     assert!(!why.contains("no provider"), "{why}");
 }
 
-/// The environment a real Pi is read in by the tests below: this process's, with no provider key
-/// of the person running them, and `agent` as Pi's folder. `CF_PI` names the `pi` to run.
-fn real_env(agent: &Path) -> (Env, PathBuf) {
-    let base = Env::from_process().without_vars(|name| name.ends_with("_API_KEY"));
-    let pi = PathBuf::from(base.text("CF_PI").unwrap_or("pi"));
+/// What of this process's environment a real Pi is read in by the tests below (F7 of the review
+/// T-1270): where to find programs and the home, the temporary folder, and what Windows needs
+/// to start one. Everything else is left out, a credential of the person running the tests
+/// among it (`HF_TOKEN`, `ANTHROPIC_OAUTH_TOKEN`, a path to a credentials file), not only the
+/// variables that end in `_API_KEY`.
+const KEPT: [&str; 17] = [
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME",
+    "LANG",
+    "LC_ALL",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+];
+
+/// The environment a real Pi is read in: `process`'s, but what [`KEPT`] names, and `agent` as
+/// Pi's folder. `CF_PI` names the `pi` to run, and its folder goes first on the PATH.
+fn real_env(process: &Env, agent: &Path) -> (Env, PathBuf) {
+    let base = process
+        .clone()
+        .without_vars(|name| !KEPT.iter().any(|kept| kept.eq_ignore_ascii_case(name)));
+    let pi = PathBuf::from(process.text("CF_PI").unwrap_or("pi"));
     let mut env = base.with_var("PI_CODING_AGENT_DIR", &agent.to_string_lossy());
     if let Some(bin) = pi.parent().filter(|bin| !bin.as_os_str().is_empty()) {
         let rest = env
@@ -298,6 +312,30 @@ fn real_env(agent: &Path) -> (Env, PathBuf) {
         env = env.with_var("PATH", &joined.to_string_lossy());
     }
     (env, pi)
+}
+
+/// The digest of every file under `root`, by name: what a read of a copy must leave as it
+/// found it. Names are all that is ever said of it.
+fn digests(root: &Path) -> BTreeMap<String, String> {
+    use sha2::{Digest, Sha256};
+    fn walk(at: &Path, root: &Path, into: &mut BTreeMap<String, String>) {
+        for entry in std::fs::read_dir(at).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, root, into);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                let name = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                into.insert(name, format!("{:x}", Sha256::digest(bytes)));
+            }
+        }
+    }
+    let mut into = BTreeMap::new();
+    walk(root, root, &mut into);
+    into
 }
 
 fn block_on<T>(work: impl std::future::Future<Output = T>) -> T {
@@ -324,7 +362,7 @@ fn recorded_homes_answer_as_the_installed_pi_does() {
         let agent = folder.path().join("agent");
         std::fs::create_dir_all(&agent).unwrap();
         make(&home, &agent);
-        let (mut env, pi) = real_env(&agent);
+        let (mut env, pi) = real_env(&Env::from_process(), &agent);
         for (name, value) in &home.env {
             env = env.with_var(name, value);
         }
@@ -333,7 +371,7 @@ fn recorded_homes_answer_as_the_installed_pi_does() {
             let mut program = program(pi.clone(), &env);
             program.cwd = Some(folder.path().to_path_buf());
             program.args.extend(extra.map(str::to_owned));
-            let read = block_on(read(&processes, &SystemTime, program));
+            let read = block_on(read(&processes, &SystemTime, program, None));
             let kept = &recorded(&home.name)[way];
             let at = format!("{} {way}", home.name);
             match (read, kept["exit"].is_null()) {
@@ -386,11 +424,13 @@ fn recorded_homes_answer_as_the_installed_pi_does() {
 }
 
 /// The app's own read, through the system's processes and clock, of the Pi folder `CF_PI_HOME`
-/// names, which must be a copy and never the human's own (HMD-13: this Mac's, with the
+/// names, which must be a copy and never the human's own, neither the default `~/.pi/agent` nor
+/// the one this process's `PI_CODING_AGENT_DIR` names (HMD-13: this Mac's, with the
 /// `pi-cliproxyapi-provider` package, lists its CLIProxyAPI models; zeewin2's lists its `openai`
 /// login's). `CF_PI_EXPECT` names the providers it must list, comma between, `CF_PI` the `pi`.
-/// Nothing is spent: a list is no turn. Run by hand: `CF_PI_HOME=… CF_PI_EXPECT=cliproxyapi cargo
-/// test -p cf-harness --lib the_app_reads -- --ignored --nocapture`.
+/// The copy is digested before and after, and the read must leave it as it found it. Nothing is
+/// spent: a list is no turn. Run by hand: `CF_PI_HOME=… CF_PI_EXPECT=cliproxyapi cargo test -p
+/// cf-harness --lib the_app_reads -- --ignored --nocapture`.
 #[test]
 #[ignore = "runs the installed Pi on a copy of a Pi folder, offline, with no model turn"]
 fn the_app_reads_a_copy_of_the_human_s_pi_folder_as_a_window_would_start() {
@@ -401,32 +441,55 @@ fn the_app_reads_a_copy_of_the_human_s_pi_folder_as_a_window_would_start() {
             .text("CF_PI_HOME")
             .expect("CF_PI_HOME names a copy of a Pi folder"),
     );
-    let own = process
-        .text("HOME")
-        .or_else(|| process.text("USERPROFILE"))
-        .map(|home| Path::new(home).join(".pi").join("agent"))
-        .unwrap();
-    assert_ne!(
-        std::fs::canonicalize(&copy).unwrap(),
-        std::fs::canonicalize(&own).unwrap_or(own),
-        "a copy, never the human's own folder"
-    );
-    let (env, _) = real_env(&copy);
+    let copy_is = std::fs::canonicalize(&copy).unwrap();
+    let owners = [
+        process
+            .text("HOME")
+            .or_else(|| process.text("USERPROFILE"))
+            .map(|home| Path::new(home).join(".pi").join("agent")),
+        process.text("PI_CODING_AGENT_DIR").map(PathBuf::from),
+    ];
+    for owner in owners.into_iter().flatten() {
+        assert_ne!(
+            copy_is,
+            std::fs::canonicalize(&owner).unwrap_or(owner),
+            "a copy, never the human's own folder"
+        );
+    }
+    let (env, _) = real_env(&process, &copy);
+    for credential in ["HF_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "OPENROUTER_API_KEY"] {
+        assert!(
+            env.os(credential).is_none(),
+            "{credential} is not Pi's to have"
+        );
+    }
+    let before = digests(&copy);
     let processes = SystemProcesses::new(env.clone());
     let started = std::time::Instant::now();
     let listed = block_on(listed(&env, &processes, &SystemTime, false));
     let took = started.elapsed();
+    let after = digests(&copy);
+    let changed: Vec<&String> = before
+        .keys()
+        .chain(after.keys())
+        .filter(|name| before.get(*name) != after.get(*name))
+        .collect();
+    assert!(
+        changed.is_empty(),
+        "the read left the copy changed: {changed:?}"
+    );
     let listing = listed.unwrap_or_else(|why| panic!("the read failed after {took:?}: {why}"));
     let models: Vec<String> = listing.models.iter().map(ModelChoice::model).collect();
     let found = providers(&models);
     println!(
-        "{} models from {} providers {:?} in {took:?}; the first: {:?}",
+        "{} models from {} providers {:?} in {took:?}; the first: {:?}; the copy ({} files) unchanged",
         models.len(),
         found.len(),
         found,
-        &models[..models.len().min(3)]
+        &models[..models.len().min(3)],
+        after.len()
     );
-    if let Some(expect) = env.text("CF_PI_EXPECT") {
+    if let Some(expect) = process.text("CF_PI_EXPECT") {
         for provider in expect.split(',').filter(|provider| !provider.is_empty()) {
             assert!(
                 found.iter().any(|found| found == provider),
@@ -434,4 +497,43 @@ fn the_app_reads_a_copy_of_the_human_s_pi_folder_as_a_window_would_start() {
             );
         }
     }
+}
+
+/// A provider of an extension that lists what it holds at once and its fetched catalog after
+/// 2 s, as the CLIProxyAPI package does, on the installed Pi (F6 of the review T-1270): an
+/// ordinary read stops at the first answer and lists the first; a Refresh's hold lists the
+/// second. The hold here is 4 s, not [`REFRESH_HOLD`]: the extension's 2 s are the measure.
+#[test]
+#[ignore = "runs the installed Pi, offline, with no model turn"]
+fn a_provider_that_lists_late_is_listed_by_a_refresh_s_hold_and_not_by_a_plain_read() {
+    use crate::seams::{SystemProcesses, SystemTime};
+    let late = r#"export default function (pi: any) {
+  const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8000, maxTokens: 1000 });
+  const list = (ids: string[]) => pi.registerProvider("late", {
+    baseUrl: "http://127.0.0.1:9/v1", apiKey: "none", api: "openai-completions", models: ids.map(model) });
+  list(["cached"]);
+  setTimeout(() => list(["cached", "fetched"]), 2000);
+}
+"#;
+    let folder = tempfile::tempdir().unwrap();
+    let agent = folder.path().join("agent");
+    std::fs::create_dir_all(agent.join("extensions")).unwrap();
+    std::fs::write(agent.join("extensions").join("late.ts"), late).unwrap();
+    let (env, pi) = real_env(&Env::from_process(), &agent);
+    let processes = SystemProcesses::new(env.clone());
+    let read = |hold: Option<std::time::Duration>| {
+        let mut program = program(pi.clone(), &env);
+        program.cwd = Some(folder.path().to_path_buf());
+        let listing = block_on(read(&processes, &SystemTime, program, hold)).unwrap();
+        let models: Vec<String> = listing.models.iter().map(ModelChoice::model).collect();
+        let stale = listing.is_stale();
+        (models, listing.how, stale)
+    };
+    let (plain, how, stale) = read(None);
+    assert_eq!(plain, ["late/cached"], "the first answer");
+    assert_eq!((how.as_str(), stale), (HOW, false));
+    let (held, how, stale) = read(Some(std::time::Duration::from_secs(4)));
+    assert_eq!(held, ["late/cached", "late/fetched"], "the second answer");
+    assert_eq!((how.as_str(), stale), (HOW_REFRESHED, false));
 }

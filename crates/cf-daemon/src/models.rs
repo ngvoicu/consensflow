@@ -17,7 +17,7 @@ use cf_engine::seams::Adapters;
 use cf_harness::detect::harness_path;
 use cf_ledger::Ledger;
 use cf_proto::agents::Harness;
-use cf_proto::models::ModelListing;
+use cf_proto::models::{Freshness, ModelListing};
 use tokio::sync::Mutex;
 
 /// The harnesses' model lists of this daemon's life.
@@ -60,14 +60,14 @@ impl ModelLists {
             .map_err(|failed| failed.to_string())?;
         if !refresh && self.read.borrow().contains(&harness) {
             if let Some(kept) = kept {
-                return Ok(kept);
+                return Ok(without_credentials(kept));
             }
         }
         let adapter = self
             .adapters
             .adapter(harness.kind())
             .ok_or_else(|| format!("{} has no adapter", harness.as_str()))?;
-        let listing = ModelListing::after(kept, adapter.models(refresh).await);
+        let listing = without_credentials(ModelListing::after(kept, adapter.models(refresh).await));
         ledger
             .borrow_mut()
             .keep_model_listing(harness.as_str(), &listing)
@@ -75,6 +75,19 @@ impl ModelLists {
         self.read.borrow_mut().insert(harness);
         Ok(listing)
     }
+}
+
+/// `listing` with what looks like a credential hidden from the reason it is stale. A harness
+/// quotes what its program said when a read fails (Pi's error stream, a package's source in a
+/// reason), and what a program said can carry what it was given: the reason is kept in the
+/// ledger, which the page reads, and told to the human (the review T-1270, F2).
+fn without_credentials(mut listing: ModelListing) -> ModelListing {
+    if let Freshness::Stale { why } = &listing.freshness {
+        listing.freshness = Freshness::Stale {
+            why: cf_engine::masked(why),
+        };
+    }
+    listing
 }
 
 impl ModelLists {

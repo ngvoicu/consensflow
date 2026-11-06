@@ -115,3 +115,109 @@ fn a_program_that_does_not_start_says_why() {
     )));
     assert_eq!(answer, Err("spawn harness ENOENT".to_owned()));
 }
+
+/// What a conversation of one question, started as `streams` says, came to.
+fn asked_as(
+    streams: Streams,
+    ends: Ends,
+    processes: &Rc<ScriptedProcesses>,
+    time: &Rc<ManualTime>,
+) -> Driver<Result<Value, String>> {
+    processes.child(
+        "harness",
+        ChildScript {
+            lines: Vec::new(),
+            ends,
+        },
+    );
+    let mut driver = Driver::default();
+    let (processes, clock) = (Rc::clone(processes), Rc::clone(time));
+    driver.begin(0, async move {
+        conversation_as(
+            &*processes,
+            &*clock,
+            program(),
+            streams,
+            "the harness",
+            BOUND_MS,
+            async |child| {
+                ask(child, "the harness", &json!({ "id": 2 }), |line| {
+                    line["id"] == 2
+                })
+                .await
+            },
+        )
+        .await
+    });
+    driver
+}
+
+#[test]
+fn a_conversation_that_ended_says_the_code_and_the_last_words_of_the_one_start() {
+    for (streams, said) in [
+        (
+            Streams::Conversation,
+            "the harness ended before it answered (exit 2); it said: loading Error: no such \
+             thing Hint: try this",
+        ),
+        // Any other kind keeps nothing of what its program said, and says as it always did.
+        (Streams::Lines, "the harness ended before it answered"),
+    ] {
+        let (processes, time) = (
+            Rc::new(ScriptedProcesses::default()),
+            Rc::new(ManualTime::new(0)),
+        );
+        processes.child_said(
+            "harness",
+            "loading\n    at frame (file.js:1:2)\nError: no such thing\n\nHint: try this\n",
+            Some(2),
+        );
+        let mut driver = asked_as(streams, Ends::Itself, &processes, &time);
+        assert_eq!(driver.run(), [(0, Err(said.to_owned()))], "{streams:?}");
+        assert_eq!(processes.take_spawned().len(), 1, "started once");
+    }
+}
+
+#[test]
+fn a_conversation_given_up_on_says_what_the_program_had_said_and_no_code() {
+    let (processes, time) = (
+        Rc::new(ScriptedProcesses::default()),
+        Rc::new(ManualTime::new(0)),
+    );
+    processes.child_said("harness", "still loading the package\n", None);
+    let mut driver = asked_as(Streams::Conversation, Ends::Asked, &processes, &time);
+    assert!(driver.run().is_empty());
+    assert!(time.fire_next(i64::MAX));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Err(
+                "the harness did not answer within 30 s; it said: still loading the package"
+                    .to_owned()
+            )
+        )]
+    );
+}
+
+#[test]
+fn what_a_program_said_is_quoted_by_its_last_lines_that_are_no_frame_and_cut_to_a_length() {
+    assert_eq!(quoted(""), None);
+    assert_eq!(quoted("\n  \n"), None);
+    assert_eq!(
+        quoted("    at one (a.js:1:1)\n    at two (b.js:2:2)\n"),
+        None
+    );
+    let many = (1..=9)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        quoted(&many).as_deref(),
+        Some("line 6 line 7 line 8 line 9")
+    );
+    let wide = "é".repeat(2_000);
+    let cut = quoted(&wide).unwrap();
+    assert_eq!(cut.chars().count(), QUOTE_CHARS + 1);
+    assert!(cut.ends_with('…'));
+}

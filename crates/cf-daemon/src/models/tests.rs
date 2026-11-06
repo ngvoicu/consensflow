@@ -223,3 +223,195 @@ fn two_harnesses_are_read_one_after_the_other() {
     };
     assert_eq!(devin_list.unwrap().models[0].id, "swe-2");
 }
+
+/// What a harness quotes of its own error stream or a package's source can carry a credential
+/// (T-1270): an extension's error that echoes the header it was given, a git URL with a token
+/// in it. None reaches the ledger, which the page reads, or the caller.
+const BEARER: &str = "SYNTHETICSTDERRTOKEN0123456789";
+const URL_TOKEN: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
+
+fn assert_no_credential(words: &str) {
+    for leaked in [BEARER, URL_TOKEN] {
+        assert!(!words.contains(leaked), "{leaked} in {words}");
+    }
+    assert!(words.contains("[masked]"), "something was hidden: {words}");
+}
+
+#[test]
+fn a_failure_that_quotes_a_credential_is_kept_and_returned_without_it() {
+    let home = home(&["pi"]);
+    let failure = format!(
+        "pi --mode rpc ended before it answered (exit 1); it said: Error: Failed to load \
+         extension: Authorization: Bearer {BEARER}"
+    );
+    let pi = Listing::answering([Err(failure)]);
+    let lists = lists(&home, ByKind(vec![("pi", pi)]));
+    let listing = done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
+    let Freshness::Stale { why } = &listing.freshness else {
+        panic!("a failed read is stale: {listing:?}");
+    };
+    assert_no_credential(why);
+    assert!(
+        why.contains("Failed to load extension"),
+        "the rest is said: {why}"
+    );
+    let kept = home.ledger.borrow().model_listing("pi").unwrap().unwrap();
+    let Freshness::Stale { why } = &kept.freshness else {
+        panic!("{kept:?}");
+    };
+    assert_no_credential(why);
+}
+
+#[test]
+fn a_stale_listing_a_harness_answers_is_kept_without_the_credential_in_its_reason() {
+    let home = home(&["pi"]);
+    let stale = models(&["a/b"], 1_000).stale(format!(
+        "Pi's own catalog: pi update --models failed: https://user:{URL_TOKEN}@example.invalid/x"
+    ));
+    let pi = Listing::answering([Ok(stale)]);
+    let lists = lists(&home, ByKind(vec![("pi", pi)]));
+    let listing = done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
+    let Freshness::Stale { why } = &listing.freshness else {
+        panic!("{listing:?}");
+    };
+    assert_no_credential(why);
+    assert_eq!(listing.models.len(), 1, "the models are as they were");
+    let kept = home.ledger.borrow().model_listing("pi").unwrap().unwrap();
+    assert_eq!(kept, listing, "what the page reads is what was returned");
+}
+
+/// A listing an older build kept (a reason with a credential in it, as nothing hid it then) is
+/// told without it: what the ledger holds is not what the page is shown.
+#[test]
+fn a_listing_kept_by_an_older_build_is_told_without_the_credential_in_its_reason() {
+    let home = home(&["pi"]);
+    let pi = Listing::answering([Ok(models(&["a/b"], 1_000))]);
+    let lists = lists(&home, ByKind(vec![("pi", pi)]));
+    done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
+    let older = models(&["a/b"], 1_000).stale(format!("failed: Authorization: Bearer {BEARER}"));
+    home.ledger
+        .borrow_mut()
+        .keep_model_listing("pi", &older)
+        .unwrap();
+    let told = done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
+    let Freshness::Stale { why } = &told.freshness else {
+        panic!("{told:?}");
+    };
+    assert_no_credential(why);
+}
+
+/// The real Pi adapter, over a Pi folder and a Pi that is scripted, kept by the daemon's
+/// lists into a ledger: what the page reads of why Pi listed no model, from end to end
+/// (the three the review T-1270 named: a token in a git package's URL, one in an
+/// extension's error, one in the environment).
+mod from_pi_to_the_ledger {
+    use cf_harness::pi::PiAdapter;
+    use cf_harness::testing::{ChildScript, Ends, Fakes};
+
+    use super::*;
+
+    struct RealPi(Rc<dyn Adapter>);
+
+    impl Adapters for RealPi {
+        fn adapter(&self, harness: &str) -> Option<Rc<dyn Adapter>> {
+            (harness == "pi").then(|| Rc::clone(&self.0))
+        }
+    }
+
+    /// What the page reads of Pi's list, when Pi has `files` in its folder and `vars` in its
+    /// environment, and starts as `child` says (the lines it writes, and what it says on its error
+    /// stream and the code it exits with).
+    fn why_pi_listed_none(
+        files: &[(&str, &str)],
+        vars: &[(&str, &str)],
+        child: (&[&str], Ends, Option<(&str, i32)>),
+    ) -> String {
+        let home = home(&["pi"]);
+        let agent = home._folder.path().join("agent");
+        std::fs::create_dir_all(&agent).unwrap();
+        for (name, text) in files {
+            std::fs::write(agent.join(name), text).unwrap();
+        }
+        let env = vars.iter().fold(
+            home.env
+                .clone()
+                .with_var("PI_CODING_AGENT_DIR", &agent.to_string_lossy()),
+            |env, (name, value)| env.with_var(name, value),
+        );
+        let fakes = Fakes::new(&env);
+        let (lines, ends, said) = child;
+        fakes.processes.child(
+            "pi",
+            ChildScript {
+                lines: lines.iter().map(|line| (*line).to_owned()).collect(),
+                ends,
+            },
+        );
+        if let Some((said, code)) = said {
+            fakes.processes.child_said("pi", said, Some(code));
+        }
+        let services = fakes.services(&env, home._folder.path());
+        let adapter: Rc<dyn Adapter> = Rc::new(PiAdapter::new(&services));
+        let lists = ModelLists::new(Rc::new(RealPi(adapter)), env);
+        let listing = done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
+        let kept = home.ledger.borrow().model_listing("pi").unwrap().unwrap();
+        assert_eq!(kept, listing, "the page reads what the daemon told");
+        let Freshness::Stale { why } = kept.freshness else {
+            panic!("Pi listed none: the listing is stale for why");
+        };
+        why
+    }
+
+    const EMPTY: &str = r#"{"type":"response","id":"models","success":true,"data":{"models":[]}}"#;
+
+    #[test]
+    fn a_token_in_a_git_packages_url_is_in_neither_the_ledger_nor_the_page() {
+        let settings = serde_json::json!({ "packages": [
+            format!("git:https://user:{URL_TOKEN}@example.invalid/t/p.git?token={URL_TOKEN}#r")
+        ] })
+        .to_string();
+        let why = why_pi_listed_none(
+            &[("settings.json", &settings)],
+            &[],
+            (&[EMPTY], Ends::Asked, None),
+        );
+        assert!(!why.contains(URL_TOKEN) && !why.contains("user:"), "{why}");
+        assert!(
+            why.contains("git:https://example.invalid/t/p.git"),
+            "the package is named: {why}"
+        );
+    }
+
+    #[test]
+    fn a_token_in_an_extensions_error_is_in_neither_the_ledger_nor_the_page() {
+        let said = format!(
+            "Error: Failed to load extension \"/x/e.ts\": Authorization: Bearer {BEARER}\n"
+        );
+        let why = why_pi_listed_none(&[], &[], (&[], Ends::Itself, Some((&said, 1))));
+        assert_no_credential(&why);
+        assert!(why.contains("ended before it answered (exit 1)"), "{why}");
+        assert!(
+            why.contains("Failed to load extension"),
+            "the rest is said: {why}"
+        );
+    }
+
+    #[test]
+    fn a_token_in_the_environment_is_in_neither_the_ledger_nor_the_page() {
+        let why = why_pi_listed_none(
+            &[],
+            &[
+                ("OPENROUTER_API_KEY", URL_TOKEN),
+                ("ANTHROPIC_OAUTH_TOKEN", BEARER),
+            ],
+            (&[EMPTY], Ends::Asked, None),
+        );
+        for leaked in [URL_TOKEN, BEARER] {
+            assert!(!why.contains(leaked), "{leaked} in {why}");
+        }
+        assert!(
+            why.contains("OPENROUTER_API_KEY"),
+            "the key is named: {why}"
+        );
+    }
+}

@@ -1069,6 +1069,7 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
             started["streams"] = json!(match streams {
                 Streams::Lines => "lines",
                 Streams::Quiet => "quiet",
+                Streams::Conversation => "conversation",
             });
             started
         })

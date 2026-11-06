@@ -62,6 +62,15 @@ pub trait Child {
     }
     /// Asks or forces it to end, not waiting (Windows: its whole tree).
     fn terminate(&self, how: Ending);
+    /// The last bytes of its error stream, as text, where it was started to keep them
+    /// ([`Streams::Conversation`]); nothing of any other.
+    fn said(&self) -> String {
+        String::new()
+    }
+    /// The code it exited with, once it has; none while it runs or where a signal ended it.
+    fn code(&self) -> Option<i32> {
+        None
+    }
 }
 
 /// The system's programs, started as this process's children: on Windows
@@ -172,6 +181,14 @@ impl Child for cf_process::Child {
 
     fn terminate(&self, how: Ending) {
         cf_process::Child::terminate(self, how);
+    }
+
+    fn said(&self) -> String {
+        cf_process::Child::said(self)
+    }
+
+    fn code(&self) -> Option<i32> {
+        cf_process::Child::code(self)
     }
 }
 

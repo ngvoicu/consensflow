@@ -76,12 +76,24 @@ pub struct ScriptedProcesses {
     always: RefCell<HashMap<String, Result<String, Failed>>>,
     every: RefCell<HashMap<String, Result<String, Failed>>>,
     children: RefCell<HashMap<String, VecDeque<ChildScript>>>,
+    /// What the next child of a name keeps of its error stream and the code it exits with,
+    /// for a child started to keep them ([`Streams::Conversation`]).
+    said: RefCell<HashMap<String, (String, Option<i32>)>>,
     ran: RefCell<Vec<(Program, Limits)>>,
     spawned: RefCell<Vec<(Program, Streams)>>,
     written: Rc<RefCell<Vec<String>>>,
 }
 
 impl ScriptedProcesses {
+    /// Scripts what the children of the program `name` say on their error stream and the code
+    /// they exit with: kept by a child started with [`Streams::Conversation`], and by no other,
+    /// as a real one is.
+    pub fn child_said(&self, name: &str, said: &str, code: Option<i32>) {
+        self.said
+            .borrow_mut()
+            .insert(name.to_owned(), (said.to_owned(), code));
+    }
+
     /// Scripts what `named` (`codex --version`) answers when run.
     pub fn run_answer(&self, named: &str, answer: Result<String, Failed>) {
         self.runs
@@ -188,11 +200,18 @@ impl Processes for ScriptedProcesses {
         if script.ends == Ends::Itself && script.lines.is_empty() {
             ended.open();
         }
+        let (said, code) = if streams == Streams::Conversation {
+            self.said.borrow().get(&name).cloned().unwrap_or_default()
+        } else {
+            Default::default()
+        };
         Ok(Box::new(ScriptedChild {
             lines: RefCell::new(script.lines.into()),
             ends: script.ends,
             written: Rc::clone(&self.written),
             ended,
+            said,
+            code,
         }))
     }
 }
@@ -203,6 +222,8 @@ struct ScriptedChild {
     ends: Ends,
     written: Rc<RefCell<Vec<String>>>,
     ended: Latch,
+    said: String,
+    code: Option<i32>,
 }
 
 impl Child for ScriptedChild {
@@ -234,6 +255,14 @@ impl Child for ScriptedChild {
 
     fn exited(&self) -> bool {
         self.ended.is_open()
+    }
+
+    fn said(&self) -> String {
+        self.said.clone()
+    }
+
+    fn code(&self) -> Option<i32> {
+        self.code.filter(|_| self.ended.is_open())
     }
 
     fn closed(&self) -> Work<'_, ()> {

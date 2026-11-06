@@ -59,7 +59,8 @@ fn each_source_of_a_provider_is_named_by_its_names_only() {
             ),
             (
                 "settings.json",
-                r#"{"packages":["npm:@router-for-me/pi-cliproxyapi-provider",{"source":"git:github.com/x/y","extensions":["a.ts"]},7]}"#,
+                r#"{"packages":["npm:@router-for-me/pi-cliproxyapi-provider",{"source":"git:github.com/x/y","extensions":["a.ts"],"token":"SECRET-PKG"},7,null],
+                    "extensions":["./declared.ts","-./off.ts"],"theme":"SECRET-THEME"}"#,
             ),
             ("extensions/provider.ts", ""),
             ("extensions/.hidden", ""),
@@ -79,8 +80,9 @@ fn each_source_of_a_provider_is_named_by_its_names_only() {
                 "npm:@router-for-me/pi-cliproxyapi-provider",
                 "git:github.com/x/y"
             ]),
-            extensions: names(&["pack", "provider.ts"]),
+            extensions: names(&["pack", "provider.ts", "./declared.ts"]),
             keys: names(&["OPENAI_API_KEY"]),
+            unread: Vec::new(),
         }
     );
     let said = setup.unlisted();
@@ -102,16 +104,30 @@ fn each_source_of_a_provider_is_named_by_its_names_only() {
 }
 
 #[test]
-fn a_file_that_is_not_json_or_not_a_table_names_nothing() {
+fn a_file_that_is_there_and_not_what_pi_s_files_are_is_unread_and_never_nothing() {
     let setup = setup_of(
         &[
             ("auth.json", "not json"),
             ("models.json", r#"{"providers":["x"]}"#),
             ("settings.json", r#"{"packages":"npm:x"}"#),
+            ("extensions", "a file where the folder should be"),
         ],
         &[],
     );
-    assert!(setup.is_empty(), "{setup:?}");
+    assert_eq!(
+        setup.unread,
+        names(&["auth.json", "models.json", "extensions", "settings.json"])
+    );
+    assert!(
+        !setup.is_empty(),
+        "a setup that could not be read is not an empty one"
+    );
+    let said = setup.unlisted();
+    assert!(
+        said.contains("could not read auth.json, models.json, extensions, settings.json"),
+        "{said}"
+    );
+    assert!(!said.contains("no provider is set up"), "{said}");
 }
 
 #[test]
@@ -130,4 +146,86 @@ fn with_no_home_and_no_folder_named_only_the_environment_is_looked_at() {
     let setup = Setup::read(&Env::from_vars([("GROQ_API_KEY", "x")]));
     assert_eq!(setup.keys, names(&["GROQ_API_KEY"]));
     assert!(setup.logins.is_empty() && setup.packages.is_empty());
+}
+
+#[test]
+fn the_extensions_of_the_settings_are_the_ones_that_declare_one() {
+    for (entry, declares) in [
+        ("./prov.ts", Some("./prov.ts")),
+        ("  ~/ext/dir ", Some("~/ext/dir")),
+        ("+./pinned.ts", Some("./pinned.ts")),
+        ("-./off.ts", None),
+        ("!glob/*", None),
+        ("builtin:llama.cpp", None),
+        ("+builtin:mcp", None),
+        ("-builtin:mcp", None),
+        ("", None),
+    ] {
+        assert_eq!(declares_one(entry).as_deref(), declares, "{entry:?}");
+    }
+}
+
+/// A package source is shown without the user and password of its URL, its query and its
+/// fragment, and with whatever names the package.
+#[test]
+fn a_source_is_shown_without_what_could_carry_a_credential() {
+    for (source, shown_as) in [
+        (
+            "git:https://user:TOKEN@host.invalid/team/p.git?k=v#frag",
+            "git:https://host.invalid/team/p.git",
+        ),
+        ("https://TOKEN@host.invalid/o/r", "https://host.invalid/o/r"),
+        (
+            "https://user:TOKEN@host.invalid:8443/o/r@v1",
+            "https://host.invalid:8443/o/r@v1",
+        ),
+        ("ssh://git@host.invalid/o/r", "ssh://host.invalid/o/r"),
+        ("git@host.invalid:o/r", "host.invalid:o/r"),
+        ("git:TOKEN@host.invalid/o/r@v2", "git:host.invalid/o/r@v2"),
+        ("git:git@host.invalid:o/r", "git:host.invalid:o/r"),
+        ("git:host.invalid/o/r@ref", "git:host.invalid/o/r@ref"),
+        ("git://host.invalid/o/r", "git://host.invalid/o/r"),
+        ("npm:@scope/name@1.2.3", "npm:@scope/name@1.2.3"),
+        ("npm:name", "npm:name"),
+        (
+            "npm:name@https://u:TOKEN@host.invalid/x.tgz",
+            "npm:name@https://host.invalid/x.tgz",
+        ),
+        ("./pi-tools", "./pi-tools"),
+        ("/Users/me/c#/pkg?", "/Users/me/c#/pkg?"),
+        (r"C:\work\pkg", r"C:\work\pkg"),
+    ] {
+        let shown = shown(source);
+        assert_eq!(shown, shown_as, "{source}");
+        assert!(!shown.contains("TOKEN"), "{shown}");
+    }
+}
+
+/// A pipe where a file should be is not opened (it waits for a writer for ever), and a file
+/// larger than a setup is is not read.
+#[cfg(unix)]
+#[test]
+fn a_pipe_and_a_file_too_large_are_unread_and_never_opened_whole() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tell, told) = mpsc::channel();
+    std::thread::spawn(move || {
+        let folder = tempfile::tempdir().unwrap();
+        #[allow(clippy::disallowed_methods)] // `mkfifo` makes the pipe: nothing else of std can.
+        let made = std::process::Command::new("/usr/bin/mkfifo")
+            .arg(folder.path().join("models.json"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let big = format!(r#"{{"x":"{}"}}"#, "y".repeat(FILE_CAP as usize));
+        std::fs::write(folder.path().join("auth.json"), big).unwrap();
+        let env = Env::from_vars([("PI_CODING_AGENT_DIR", folder.path().as_os_str())]);
+        let _ = tell.send(Setup::read(&env));
+    });
+    let setup = told
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the read ended: it opened no pipe");
+    assert_eq!(setup.unread, names(&["auth.json", "models.json"]));
+    assert!(setup.logins.is_empty());
 }
