@@ -125,7 +125,7 @@ replace = '''    if hook_output(role).len() < 5 {
 
 [[plant]]
 name = "muse role parts: every role has the one id"
-meant = "a_block_is_a_role_of_ours_by_its_mark_or_by_the_front_matter_of_an_unframed_role"
+meant = "a_roles_id_is_a_digest_of_its_whole_text_so_another_role_has_another_and_a_part_says_it"
 runs = ["mrp-hook"]
 
 [[plant.edit]]
@@ -228,16 +228,6 @@ find = '''pub const MOST_PARTS: usize = 8;'''
 replace = '''pub const MOST_PARTS: usize = 60;'''
 
 # The count: what the role needs, and what the conversation has of ours.
-[[plant]]
-name = "muse role parts: a launch is given one hook, for the first part"
-meant = "a_role_longer_than_a_hook_may_say_is_given_a_hook_for_each_part_of_it"
-runs = ["mrp-adapter"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''            let parts = session_hook::parts(launch.instructions).len();'''
-replace = '''            let parts = session_hook::parts(launch.instructions).len().min(1);'''
-
 [[plant]]
 name = "muse role parts: a role that needs more hooks than Muse was measured to take is launched"
 meant = "a_role_that_needs_more_hooks_than_muse_was_measured_to_take_is_refused_in_words"

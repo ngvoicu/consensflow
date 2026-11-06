@@ -524,6 +524,23 @@ mod tests {
     }
 
     #[test]
+    fn a_roles_id_is_a_digest_of_its_whole_text_so_another_role_has_another_and_a_part_says_it() {
+        assert_eq!(id_of("a role").len(), 8);
+        assert_ne!(id_of("a role"), id_of("a role."));
+        let (one, other) = (hard_role(0), hard_role(1));
+        let heads = |role: &str| {
+            blocks(role)
+                .iter()
+                .map(|block| unframed(block).3)
+                .collect::<Vec<_>>()
+        };
+        let (first, second) = (heads(&one), heads(&other));
+        assert!(first.iter().all(|id| *id == id_of(&one)), "{first:?}");
+        assert!(second.iter().all(|id| *id == id_of(&other)), "{second:?}");
+        assert_ne!(first[0], second[0], "two roles, two ids");
+    }
+
+    #[test]
     fn the_room_a_frame_takes_is_at_least_what_any_frame_takes_in_an_answer() {
         let id = "0123abcd";
         for of in 1..=MOST_PARTS {
