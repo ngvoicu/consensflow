@@ -18,6 +18,7 @@ mi-daemon-routes = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a
 mi-cf-board = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
 mi-page-selects = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "model selects of New project"]
 mi-page-cards = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "card says its role"]
+mi-page-last-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a new project's staff on the model"]
 mi-page-edit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Edit member to another model renames"]
 mi-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "every name a member had|member that joined in alpha.2"]
 
@@ -392,4 +393,19 @@ find = '''
 '''
 replace = '''
   const names = participant.agent ? [participant.agent] : []
+'''
+
+[[plant]]
+name = "model ids: New project's last staff picks Devin's launch id, which no list holds"
+meant = "starts a new project's staff on the model as its harness's list names it, which is not Devin's launch id for the effort"
+runs = ["mi-page-last-staff"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+          model: member.modelName || member.model,
+'''
+replace = '''
+          model: member.model,
 '''

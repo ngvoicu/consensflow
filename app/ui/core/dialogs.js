@@ -789,7 +789,9 @@ export class NewProjectDialog {
       .flatMap((member) =>
         member.roles.map((role) => ({
           harness: member.harness,
-          model: member.model,
+          // The model as its harness's list names it (`modelName`): what the daemon takes for
+          // a pick. Devin's `model` is the launch id for the effort, which no list holds.
+          model: member.modelName || member.model,
           effort: member.effort,
           tier: member.tier,
           modelName: member.modelName,

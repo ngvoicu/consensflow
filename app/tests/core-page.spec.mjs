@@ -51,7 +51,7 @@ const RUNS = {
 const lastMember = (name, harness, roles, tier = 'standard') => ({
   harness,
   ...RUNS[name],
-  modelName: name,
+  modelName: RUNS[name].model,
   designer: false,
   tier,
   role: roles[0],
@@ -4147,7 +4147,10 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
       ),
   ).toEqual(['directory', 'The chief', 'Staff', 'Human approval', 'Wake-up calls', 'Specs'])
   // The defaults: the last project's staff, approval off, wake-ups off and specs following the app's setting.
-  await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/, /zeus.*Reviewer/])
+  await expect(made.staff.locator('tbody tr')).toHaveText([
+    /claude-sonnet-5.*Worker/,
+    /claude-sonnet-5.*Reviewer/,
+  ])
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
   await expect(made.calls.every).toHaveValue('1')
@@ -4322,7 +4325,7 @@ test('New project: a start the daemon refuses is said in the dialog in the daemo
   await expect(made.chief.model).toHaveValue('gpt-6-astra')
   await expect(made.specs.mode).toHaveValue('on')
   await expect(made.specs.folder).toHaveValue('../elsewhere')
-  await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/])
+  await expect(made.staff.locator('tbody tr')).toHaveText([/claude-sonnet-5.*Worker/])
   // Nothing was started: the project shown is the one that was, and the status line says nothing.
   await expect(page.locator('#project-title')).toHaveText('harbour')
   await expect(page.locator('#status')).toHaveText('')
@@ -4491,6 +4494,30 @@ test("offers a new project's chief only the harnesses installed here, and its st
     ['Pi', false],
     ['Muse Code', false],
   ])
+})
+
+test("starts a new project's staff on the model as its harness's list names it, which is not Devin's launch id for the effort", async ({
+  page,
+}) => {
+  const data = model()
+  // Devin's member holds the id its launch passes for the effort (`swe-2-max`); the list holds
+  // `swe-2`, which is what the daemon takes for a pick, with the effort beside it.
+  data.lastStaff = [
+    {
+      ...lastMember('zeus', 'devin', ['worker'], 'light'),
+      model: 'swe-2-max',
+      modelName: 'swe-2',
+      effort: 'max',
+    },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const row = dialog.locator('tr[data-model="swe-2"]')
+  await expect(row).toHaveCount(1)
+  await expect(row.locator('.member-name')).toHaveText('swe-2')
+  await expect(row.locator('.member-meta')).toHaveText('Devin · max · light')
+  await expect(dialog.locator('tr[data-model="swe-2-max"]')).toHaveCount(0)
 })
 
 test('refuses a new project when no harness is installed here, and says where to get one', async ({
@@ -8141,10 +8168,10 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   // The last staff, one row per member and role, by role and then by tier, each named by its
   // model and saying what it runs on.
   await expect(table.locator('tbody tr')).toHaveText([
-    /hera.*Codex · max · critical.*Worker/,
-    /zeus.*Claude Code · high · standard.*Worker/,
-    /diana.*Codex · low · light.*Worker/,
-    /zeus.*Reviewer/,
+    /^gpt-6-astra.*Codex · max · critical.*Worker/,
+    /^claude-sonnet-5.*Claude Code · high · standard.*Worker/,
+    /^gpt-5.6-luna.*Codex · low · light.*Worker/,
+    /^claude-sonnet-5.*Reviewer/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
@@ -8163,7 +8190,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     tier: 'light',
   })
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
+  await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
   await expect(table.locator('tbody tr')).toHaveCount(5)
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
