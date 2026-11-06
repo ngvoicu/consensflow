@@ -1,5 +1,5 @@
-//! The migration of the models (harness-models, 0031)
-//! checked on copies of real ledgers (T-1202). Not run by default: it reads the folders
+//! The migrations of the models (harness-models: 0031, and 0033 which names every member by its
+//! model's id) checked on copies of real ledgers (T-1202, T-1263). Not run by default: it reads the folders
 //! `CF_LEDGER_COPIES` names (`:`-separated), each a home as the daemon keeps it, a
 //! `consensflow.db` (with its `-wal` and `-shm` where they are) and the `agents.json` beside
 //! it. Never point it at `~/.consensflow`: it refuses to, and it works on a copy of each
@@ -18,7 +18,11 @@
 //! - an agent the file saved is run on its model and effort, one it does not have needs an
 //!   edit;
 //! - every task's and message's participants are there, as many as before;
-//! - the handles are unique in each project and the same when the ledger opens again.
+//! - the handles are unique in each project and the same when the ledger opens again;
+//! - every member with a model is named by its id and effort (its name holds them), each of its
+//!   windows by that name and two words, and a name a participant left is kept: in its row's
+//!   `former_handles`, or as its `agent` where that was the name it had;
+//! - every member's `model_name` is its model's id, a window's its member's.
 //!
 //! It writes each project's staff before and after to `CF_LEDGER_REPORT` where it is set.
 
@@ -48,6 +52,9 @@ struct Seen {
     window: bool,
     left: bool,
     needs_edit: bool,
+    model_name: Option<String>,
+    member: Option<i64>,
+    former: Vec<String>,
 }
 
 fn has(db: &Connection, column: &str) -> bool {
@@ -82,6 +89,14 @@ fn participants(db: &Connection) -> BTreeMap<i64, Seen> {
         member_id = column(db, "member_id"),
         needs_edit = column(db, "needs_edit"),
     );
+    let sql = sql.replace(
+        "FROM participant p",
+        &format!(
+            ", {}, {} FROM participant p",
+            column(db, "model_name"),
+            column(db, "former_handles")
+        ),
+    );
     db.prepare(&sql)
         .unwrap()
         .query_map([], |row| {
@@ -101,6 +116,12 @@ fn participants(db: &Connection) -> BTreeMap<i64, Seen> {
                     window: row.get::<_, Option<i64>>(11)?.is_some(),
                     left: row.get::<_, Option<String>>(12)?.is_some(),
                     needs_edit: row.get::<_, Option<i64>>(13)?.unwrap_or(0) == 1,
+                    member: row.get(11)?,
+                    model_name: row.get(14)?,
+                    former: row
+                        .get::<_, Option<String>>(15)?
+                        .and_then(|former| serde_json::from_str(&former).ok())
+                        .unwrap_or_default(),
                 },
             ))
         })
@@ -263,10 +284,36 @@ fn check_copy(
     } else {
         "as it is"
     };
+    let renamed = |windows: bool| {
+        after
+            .iter()
+            .filter(|(id, now)| {
+                now.window == windows
+                    && now.model.is_some()
+                    && !matches!(now.role.as_str(), "human" | "chief")
+                    && before.get(id).is_some_and(|then| then.handle != now.handle)
+            })
+            .count()
+    };
+    let (members_with_a_model, windows_of_them) = (
+        after
+            .values()
+            .filter(|now| {
+                !now.window
+                    && now.model.is_some()
+                    && !matches!(now.role.as_str(), "human" | "chief")
+            })
+            .count(),
+        after
+            .values()
+            .filter(|now| now.window && now.model.is_some())
+            .count(),
+    );
     writeln!(
         report,
-        "#### {name}, {label}: version {version_before} -> {version_after}; {} participants; tasks {} and messages {} before, {} and {} after; {} pointing at nobody",
-        after.len(), history_before.0, history_before.1, history_after.0, history_after.1, history_after.2
+        "#### {name}, {label}: version {version_before} -> {version_after}; {} participants; tasks {} and messages {} before, {} and {} after; {} pointing at nobody; {} of {members_with_a_model} members with a model renamed, {} of their {windows_of_them} windows",
+        after.len(), history_before.0, history_before.1, history_after.0, history_after.1, history_after.2,
+        renamed(false), renamed(true)
     )
     .unwrap();
     assert_eq!(
@@ -317,6 +364,63 @@ fn check_copy(
                 "{name}: #{id} @{} is named for a default",
                 now.handle
             );
+        }
+        // 0033: a member with a model is named by its id and effort; its windows follow; what it
+        // left is kept; its `model_name` is its id.
+        if now.model.is_some() && !now.needs_edit && !matches!(now.role.as_str(), "human" | "chief")
+        {
+            if now.window {
+                let member = &after[&now.member.unwrap()];
+                assert!(
+                    now.handle.starts_with(&format!("{}-", member.handle)),
+                    "{name}: window #{id} @{} is not named after its member @{}",
+                    now.handle,
+                    member.handle
+                );
+                assert_eq!(
+                    now.model_name, member.model_name,
+                    "{name}: window #{id} shows what its member shows"
+                );
+            } else {
+                assert!(
+                    cf_ledger::handles::names_its_model(
+                        &now.handle,
+                        now.model_name.as_deref(),
+                        now.model.as_deref(),
+                        now.harness.as_deref(),
+                        now.effort.as_deref()
+                    ),
+                    "{name}: #{id} @{} ({:?}, {:?}) is not named by its model",
+                    now.handle,
+                    now.model_name,
+                    now.effort
+                );
+                assert!(
+                    now.model_name.is_some()
+                        && now.model.as_ref().is_some_and(|model| {
+                            now.model_name.as_deref() == Some(model.as_str())
+                                || now.harness.as_deref() == Some("devin")
+                        }),
+                    "{name}: #{id} shows {:?} for {:?}, not its id",
+                    now.model_name,
+                    now.model
+                );
+            }
+            // (A row the test gave an agent of the human's own under another name has no
+            // record of the handle it had: the test made it so; a real one's agent is its name.)
+            let was_named_by_its_agent = then
+                .agent
+                .as_deref()
+                .is_none_or(|agent| agent == then.handle);
+            if now.handle != then.handle && !now.window && was_named_by_its_agent {
+                assert!(
+                    now.former.contains(&then.handle) || now.agent.as_deref() == Some(&then.handle),
+                    "{name}: #{id} was @{}, which it keeps no record of ({:?}, agent {:?})",
+                    then.handle,
+                    now.former,
+                    now.agent
+                );
+            }
         }
         if let Some((agent, runs)) = put.get(id) {
             match runs {
@@ -398,7 +502,14 @@ fn every_real_ledger_copy_migrates_with_each_participant_on_what_it_ran_on_or_ma
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| folder.to_owned());
         check_copy(&name, &from, false, &mut report, &mut problems);
-        check_copy(&name, &from, true, &mut report, &mut problems);
+        // Agents of the human's own are read by migration 0031: a copy already past it (an
+        // alpha.2 ledger, schema 32) has none left to read, so it is checked as it is.
+        let version: i64 = Connection::open(from.join("consensflow.db"))
+            .and_then(|db| db.query_row("PRAGMA user_version", [], |row| row.get(0)))
+            .unwrap_or(0);
+        if version < 31 {
+            check_copy(&name, &from, true, &mut report, &mut problems);
+        }
     }
     if let Some(path) = env.path("CF_LEDGER_REPORT") {
         std::fs::write(path, &report).unwrap();

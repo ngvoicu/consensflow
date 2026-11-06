@@ -179,10 +179,7 @@ pub fn names_its_model(
     harness: Option<&str>,
     effort: Option<&str>,
 ) -> bool {
-    let Some(shown) = model_name
-        .filter(|name| !name.trim().is_empty())
-        .or(model)
-    else {
+    let Some(shown) = model_name.filter(|name| !name.trim().is_empty()).or(model) else {
         return false;
     };
     let (_, id) = split_provider(harness.unwrap_or_default(), shown);

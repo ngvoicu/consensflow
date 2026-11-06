@@ -306,8 +306,16 @@ fn a_member_edited_while_its_window_is_at_work_renames_both_and_the_window_goes_
     let now = context.project(project.id);
     let seen = now.participants.iter().find(|p| p.id == window).unwrap();
     assert_eq!(
-        (seen.handle.as_str(), seen.former_handles.as_slice(), seen.member.as_deref()),
-        (renamed.as_str(), [old.clone()].as_slice(), Some("claude-fable-5-1-max"))
+        (
+            seen.handle.as_str(),
+            seen.former_handles.as_slice(),
+            seen.member.as_deref()
+        ),
+        (
+            renamed.as_str(),
+            [old.clone()].as_slice(),
+            Some("claude-fable-5-1-max")
+        )
     );
     let task = context.task(project.id, 1).task;
     assert_eq!(
@@ -322,7 +330,11 @@ fn a_member_edited_while_its_window_is_at_work_renames_both_and_the_window_goes_
         .unwrap();
     context.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "done");
-    assert_eq!(context.adapter.prepared().len(), launches, "the window went on");
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the window went on"
+    );
 
     // What the chief writes goes by the new name to the same participant, and the name it
     // left is no name of anybody's: a note to it is refused.

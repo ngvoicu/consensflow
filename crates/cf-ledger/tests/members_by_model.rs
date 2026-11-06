@@ -282,7 +282,12 @@ fn edit_member_moves_a_member_and_its_windows_to_another_model_and_names_them_by
         )
     );
     let logged = ledger.events(project.id, 0, 500).expect("the log");
-    let kinds: Vec<&str> = logged.iter().rev().take(2).map(|e| e.kind.as_str()).collect();
+    let kinds: Vec<&str> = logged
+        .iter()
+        .rev()
+        .take(2)
+        .map(|e| e.kind.as_str())
+        .collect();
     assert_eq!(kinds, ["member.renamed", "member.edited"]);
     assert_eq!(
         logged[logged.len() - 2].data,
@@ -392,10 +397,7 @@ fn edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too(
         "a window with a task in hand follows at once, and says its effort"
     );
     // Its task is still its own: the author is the same participant.
-    let task = ledger
-        .task(project.id, 1)
-        .expect("read")
-        .expect("the task");
+    let task = ledger.task(project.id, 1).expect("read").expect("the task");
     assert_eq!(
         (task.task.assignee.as_deref(), task.task.state.as_str()),
         (Some("gpt-6-1-sol-xhigh-amber-pine"), "queued")
