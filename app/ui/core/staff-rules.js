@@ -8,7 +8,9 @@
  * the text it keeps: trimmed), and one Save sends the whole of it for the project
  * the dialog is for. Text over a bound is not sent: the count says which, and
  * Save waits until it fits. A refusal is said in the section, where the human is
- * looking.
+ * looking. In New project there is nothing to save yet: the section holds what the human
+ * writes, `values` is what the project starts with, and `blocked` says why it cannot
+ * start while the text is over a bound.
  */
 
 /** The most bytes the rules may have: the ledger's `STAFF_RULES_MAX_BYTES`, which a test of the daemon holds this to. */
@@ -44,9 +46,10 @@ export class StaffRules {
    * change and redraws the page, `page.note` tells the human what came of it,
    * `page.report` says a refusal on the status line and `page.chiefRunning()` says
    * whether the chief of that project has a window open: it is told of a change as
-   * soon as it is at rest, every other window when it next starts.
+   * soon as it is at rest, every other window when it next starts. With no `page`
+   * (New project) the section only holds the text.
    */
-  constructor(group, page) {
+  constructor(group, page = null) {
     this.#text = group.querySelector('[name="staff-rules"]')
     this.#count = group.querySelector('.staff-rules-count')
     this.#hint = group.querySelector('.staff-rules-hint')
@@ -62,6 +65,24 @@ export class StaffRules {
     this.#text.value = project?.staffRules ?? ''
     this.#say('')
     this.#counted()
+  }
+
+  /** The section as it is for a project with no rules: a new project's start. */
+  reset() {
+    this.show(null)
+  }
+
+  /** What a new project starts with: the text as written, or none while it is blank. */
+  values() {
+    return this.#text.value.trim() === '' ? null : this.#text.value
+  }
+
+  /** Why a project cannot start with this text, or none: it is over a bound, as the count says. */
+  blocked() {
+    const { bytes, lines } = countOf(this.#text.value)
+    return bytes > MOST_BYTES || lines > MOST_LINES
+      ? `The rules for the staff are at most ${said(MOST_BYTES)} bytes and ${said(MOST_LINES)} lines.`
+      : null
   }
 
   #say(words) {

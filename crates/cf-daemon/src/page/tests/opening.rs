@@ -236,6 +236,90 @@ async fn a_setting_the_daemon_refuses_refuses_the_whole_start_in_the_dialogs_wor
         .await;
 }
 
+const RULES: &str = "- Push to origin only.\n- Tests use the .smoke bundle id.";
+
+#[tokio::test]
+async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_given_the_rules_at_its_first_launch(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let before = chief_launches(&held).len();
+            let answer = ask(
+                &held.app,
+                "project.open",
+                opening(json!({ "rules": RULES, "compaction": 250_000 })),
+            )
+            .await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            let opened = answer["project"]["id"].as_i64().unwrap();
+            assert_eq!(answer["project"]["staffRules"], RULES);
+            assert_eq!(answer["project"]["claudeCompaction"], 250_000);
+            // The chief was launched once, as the project opened, and was given the rules then.
+            let launches = chief_launches(&held);
+            assert_eq!(launches.len(), before + 1);
+            let launch = launches.last().unwrap();
+            assert_eq!(launch["project"]["id"], opened);
+            assert!(
+                launch["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Tests use the .smoke bundle id."),
+                "{launch}"
+            );
+            // The dialog of an existing project reads them back as they were said.
+            let board = ask(&held.app, "board.get", json!({ "project": opened })).await;
+            assert_eq!(board["board"]["project"]["staffRules"], RULES);
+            assert_eq!(board["board"]["project"]["claudeCompaction"], 250_000);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn rules_and_a_size_the_daemon_refuses_refuse_the_whole_start_in_the_dialogs_words_and_make_no_project(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let (project, launched) = (held.existing, chief_launches(&held).len());
+            let cases = [
+                (
+                    json!({ "rules": "x".repeat(8_001) }),
+                    json!({ "project": project, "rules": "x".repeat(8_001) }),
+                    "project.rules",
+                ),
+                (
+                    json!({ "rules": 42 }),
+                    json!({ "project": project, "rules": 42 }),
+                    "project.rules",
+                ),
+                (
+                    json!({ "compaction": 99_999 }),
+                    json!({ "project": project, "compaction": 99_999 }),
+                    "project.compaction",
+                ),
+                (
+                    json!({ "compaction": "400000" }),
+                    json!({ "project": project, "compaction": "400000" }),
+                    "project.compaction",
+                ),
+            ];
+            for (starting, saving, operation) in cases {
+                let refused = ask(&held.app, "project.open", opening(starting.clone())).await;
+                assert_eq!(refused["ok"], false, "{starting}: {refused}");
+                // The words the dialog of a project is refused in for the same.
+                let dialog = ask(&held.app, operation, saving.clone()).await;
+                assert_eq!(dialog["ok"], false, "{operation} {saving}");
+                assert_eq!(dialog["error"], refused["error"], "{operation} {saving}");
+            }
+            assert_eq!(held.rig.kicks.get(), 0, "nothing succeeded, nothing is woken");
+            let projects = held.rig.kit.ledger.borrow().projects().unwrap();
+            assert_eq!(projects.len(), 1, "only the project that was open");
+            assert_eq!(chief_launches(&held).len(), launched, "no window was asked for");
+        })
+        .await;
+}
+
 /// A chief's model is one its harness lists and runs, where the home keeps its list
 /// (CHF-08): the picker read it to offer it.
 #[tokio::test]

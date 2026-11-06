@@ -345,6 +345,8 @@ fn a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_history
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .expect("a project");
     ledger

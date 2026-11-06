@@ -30,6 +30,8 @@ fn project(harness: &str, model: Option<&str>) -> NewProject {
         gate: false,
         wake_up: None,
         specs: None,
+        staff_rules: None,
+        compaction: None,
     }
 }
 

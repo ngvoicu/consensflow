@@ -25,11 +25,12 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
 /// staff given, each member a harness, a model its harness lists, an effort and a tier, as
 /// Add member takes one, else the last staff, but its members on a harness not installed
 /// here. The gate, the wake-up calls
-/// (`wakeUp`, as `wakeup.set` takes them) and the specs (`specs`, as
-/// `project.specs` takes them) are the human's word for the project, kept in
-/// the write that makes it, so the chief's first launch has them; one the
-/// ledger refuses refuses the whole start, in the words the Project settings
-/// dialog shows for it, and no project is made.
+/// (`wakeUp`, as `wakeup.set` takes them), the specs (`specs`, as
+/// `project.specs` takes them), the rules for the staff (`rules`, as `project.rules`
+/// takes them) and the compaction (`compaction`, as `project.compaction` takes it) are
+/// the human's word for the project, kept in the write that makes it, so the chief's
+/// first launch has them; one the ledger refuses refuses the whole start, in the words
+/// the Project settings dialog shows for it, and no project is made.
 pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let directory = body.get("directory");
     let name = match body.get("name") {
@@ -60,7 +61,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         "chief".to_owned(),
         json!({ "harness": chief.harness, "model": chief.model, "effort": chief.effort }),
     );
-    for key in ["gate", "wakeUp", "specs"] {
+    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {
         if let Some(said) = body.get(key) {
             request.insert(key.to_owned(), said.clone());
         }
@@ -249,6 +250,8 @@ fn typed(request: &Map<String, Value>) -> Option<NewProject> {
         },
         wake_up: NewWakeUp::from_opening(request.get("wakeUp")).ok()?,
         specs: SpecsChange::from_opening(request.get("specs")).ok()?,
+        staff_rules: parse_staff_rules(request.get("rules")).ok()?,
+        compaction: parse_claude_compaction(request.get("compaction")).ok()?,
     })
 }
 

@@ -10,8 +10,9 @@
 
 use cf_base::time::Clock;
 use cf_ledger::{
-    open_ledger, Ledger, LedgerError, NewChief, NewProject, NewWakeUp, Options, ProjectView,
-    SpecsChange, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT,
+    open_ledger, parse_claude_compaction, parse_staff_rules, Ledger, LedgerError, NewChief,
+    NewProject, NewWakeUp, Options, ProjectView, SpecsChange, WakeUpSetting, WakeUpUnit,
+    DEFAULT_WAKE_UP_TEXT,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -52,6 +53,8 @@ fn project(name: &str) -> NewProject {
         gate: false,
         wake_up: None,
         specs: None,
+        staff_rules: None,
+        compaction: None,
     }
 }
 
@@ -333,6 +336,137 @@ fn a_request_in_json_says_its_calls_and_specs_after_the_rest_and_is_refused_in_t
         assert_eq!(
             wrong(field, value.clone()),
             (Some(code), words),
+            "{field}: {value}"
+        );
+    }
+}
+
+/// What New project says of the rules for the staff and of the compaction, as the page asks
+/// for a project to start with them (`rules`, as `project.rules` takes them, and `compaction`,
+/// as `project.compaction` does).
+fn asked_with(said: Value) -> Value {
+    let mut asked = json!({
+        "directory": "/work/app",
+        "name": "app",
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+        "staff": [],
+    });
+    asked
+        .as_object_mut()
+        .expect("an object")
+        .extend(said.as_object().cloned().expect("an object"));
+    asked
+}
+
+const RULES: &str = "- Push to origin only.\n- Tests use the .smoke bundle id.";
+
+#[test]
+fn a_project_opened_with_rules_and_a_compaction_has_them_when_it_is_first_seen_and_logs_them_as_if_said_right_after(
+) {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let request =
+        NewProject::from_json(&asked_with(json!({ "rules": RULES, "compaction": 250_000 })))
+            .expect("a request");
+    let opened = ledger.create_project(&request).expect("a project");
+    // The view the chief's launch is given, which is what the rules in its text are read from.
+    let view = serde_json::to_value(&opened).expect("the view");
+    assert_eq!(view["staffRules"], RULES);
+    assert_eq!(view["claudeCompaction"], 250_000);
+    let read = ledger
+        .project(opened.id)
+        .expect("read")
+        .expect("it is there");
+    assert_eq!(read.staff_rules.as_deref(), Some(RULES));
+    assert_eq!(read.claude_compaction, Some(250_000));
+    // Each is its own event, from none to what was said, as when the human says it right after.
+    let later = ledger.create_project(&project("later")).expect("a project");
+    ledger
+        .set_staff_rules(later.id, Some(RULES))
+        .expect("rules");
+    ledger
+        .set_claude_compaction(later.id, Some(250_000))
+        .expect("a size");
+    let kinds = ["project.staff_rules", "project.claude_compaction"];
+    let own = logged(&ledger, opened.id, &kinds);
+    assert_eq!(own.len(), 2, "{own:?}");
+    assert_eq!(own, logged(&ledger, later.id, &kinds));
+    assert_eq!(own[0].1, json!({ "from": null, "to": RULES }));
+    assert_eq!(own[1].1, json!({ "from": null, "to": 250_000 }));
+    // The project was made before either was said.
+    let events: Vec<String> = ledger
+        .events(opened.id, 0, 500)
+        .expect("the events")
+        .into_iter()
+        .map(|event| event.kind)
+        .collect();
+    let at = |kind: &str| events.iter().position(|logged| logged == kind).expect(kind);
+    for kind in kinds {
+        assert!(at("project.created") < at(kind), "{events:?}");
+    }
+}
+
+#[test]
+fn a_project_that_says_no_rules_and_no_size_has_none_and_nothing_is_logged() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    for said in [
+        json!({}),
+        json!({ "rules": null, "compaction": null }),
+        json!({ "rules": "  \n ", "compaction": null }),
+    ] {
+        let request = NewProject::from_json(&asked_with(said.clone())).expect("a request");
+        let opened = ledger.create_project(&request).expect("a project");
+        assert_eq!(opened.staff_rules, None, "{said}");
+        assert_eq!(opened.claude_compaction, None, "{said}");
+        assert_eq!(
+            opened.created_at, opened.updated_at,
+            "{said}: nothing was written after the row"
+        );
+        assert_eq!(
+            logged(
+                &ledger,
+                opened.id,
+                &["project.staff_rules", "project.claude_compaction"]
+            ),
+            [],
+            "{said}"
+        );
+    }
+}
+
+#[test]
+fn rules_and_a_size_the_ledger_refuses_refuse_the_opening_in_the_words_the_settings_are_refused_in_and_no_project_is_made(
+) {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    ledger.create_project(&project("there")).expect("a project");
+    let before = ledger.projects().expect("projects").len();
+    for (field, value) in [
+        ("rules", json!("x".repeat(8_001))),
+        ("rules", json!("a control character \u{7}")),
+        ("rules", json!(42)),
+        ("compaction", json!(99_999)),
+        ("compaction", json!(1_000_001)),
+        ("compaction", json!("400000")),
+        ("compaction", json!(250_000.5)),
+    ] {
+        let refusal = NewProject::from_json(&asked_with(json!({ field: value.clone() })))
+            .expect_err("a refusal");
+        // The words and the code the setting's own operation refuses the same value with.
+        let own = if field == "rules" {
+            parse_staff_rules(Some(&value)).expect_err("a refusal")
+        } else {
+            parse_claude_compaction(Some(&value)).expect_err("a refusal")
+        };
+        assert_eq!(
+            (refusal.code(), refusal.to_string()),
+            (own.code(), own.to_string()),
+            "{field}: {value}"
+        );
+        assert_eq!(
+            ledger.projects().expect("projects").len(),
+            before,
             "{field}: {value}"
         );
     }

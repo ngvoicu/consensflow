@@ -1,9 +1,11 @@
 import { element, redraw } from '../dom.js'
 
 /**
- * Project settings, Computer use (T-540, drawn again in T-1266): a block for each harness with
- * a computer use of its own, shown only while the project has a member on that harness, the
- * chief included, and one block for the macOS permissions those harnesses work through. Every
+ * Project settings' and New project's Computer use (T-540, drawn again in T-1266, in both
+ * dialogs since T-1268): a block for each harness with a computer use of its own, shown only
+ * while the project has a member on that harness, the chief included (in New project, the
+ * chief and the staff picked so far), and one block for the macOS permissions those harnesses
+ * work through. Every
  * block is headed the same way: its name, its status on the heading's line, and a muted line
  * under it where there is something to explain. A permission reads the same way in every row:
  * a pane's name, each app's status (allowed, not allowed, or unknown where it can't be read),
@@ -17,7 +19,8 @@ import { element, redraw } from '../dom.js'
  * for it, where it says unknown (the daemon can't read another app's permissions), so that
  * the two panes, which both apps need, are opened by one button each. Each button opens its
  * pane of System Settings (`computer_use.open`); the state is read again when the dialog opens
- * and when the human comes back to the app.
+ * and when the human comes back to the app. It is read for the project's folder, or, where
+ * there is no project yet, for the folder picked: Claude Code keeps its switch by folder.
  */
 
 /**
@@ -108,14 +111,15 @@ export class ComputerUseSection {
   #grants
   #grantsOf
   #page
-  /** What the daemon last said for the project the section is drawn for. */
+  /** What the daemon last said for the project or folder the section is drawn for. */
   #said = null
-  /** The board it was last drawn from. */
-  #board = null
+  /** The harnesses it was last drawn for. */
+  #present = new Set()
 
   /**
    * `page.daemon` asks the daemon, `page.act` runs a change and redraws, `page.report`
-   * says a refusal, and `page.project()` is the project the dialog is for, none once shut.
+   * says a refusal, and `page.scope()` is the body that names what the dialog is for, a
+   * project (`{ project }`) or a folder (`{ directory }`), none once shut.
    */
   constructor(section, page) {
     this.#section = section
@@ -127,20 +131,23 @@ export class ComputerUseSection {
     this.#page = page
     // Back from System Settings: what it was given there shows, for the project still open.
     window.addEventListener('focus', () => {
-      const project = page.project()
-      if (project === null) return
-      void this.read(project).then((said) => {
-        if (page.project() !== project) return
+      const scope = page.scope()
+      if (scope === null) return
+      void this.read(scope).then((said) => {
+        if (JSON.stringify(page.scope()) !== JSON.stringify(scope)) return
         this.show(said)
-        this.draw(this.#board)
+        this.draw(this.#present)
       })
     })
   }
 
-  /** What the daemon says for `project`; none where it cannot say, and nothing is shown. */
-  async read(project) {
+  /**
+   * What the daemon says for `scope`, `{ project }` or `{ directory }`; none where it
+   * cannot say, and nothing is shown.
+   */
+  async read(scope) {
     try {
-      return await this.#page.daemon('computer_use.get', { project })
+      return await this.#page.daemon('computer_use.get', scope)
     } catch {
       return null
     }
@@ -151,11 +158,13 @@ export class ComputerUseSection {
     this.#said = said
   }
 
-  /** Draws the section from `board`: hidden where none of its harnesses has a block. */
-  draw(board) {
-    this.#board = board
+  /**
+   * Draws the section for the harnesses `present` (their kinds, a `Set`: a project's chief and
+   * members, or what New project has picked so far): hidden where none of them has a block.
+   */
+  draw(present) {
+    this.#present = present
     const said = this.#said
-    const present = harnessesOf(board)
     const parts = Object.entries(PARTS).filter(
       ([harness]) => present.has(harness) && said?.harnesses?.[harness],
     )

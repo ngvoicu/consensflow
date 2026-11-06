@@ -428,8 +428,11 @@ async function open(page, data = model()) {
       // A project's computer use, as the daemon reads it (`computerUse` of the model, on macOS
       // with no grant and Claude Code's off, unless a test says otherwise), and the System
       // Settings panes it opens, by name.
-      'computer_use.get': ({ project }) => {
+      'computer_use.get': ({ project, directory }) => {
         const said = data.computerUse ?? {}
+        // Of a saved project's folder, or of a folder asked for before there is a project (New
+        // project): as the daemon reads Claude Code's own configuration for either.
+        const folder = directory ?? data.boards[project]?.project.directory
         return answer({
           system: said.system ?? 'macos',
           grantsOf: said.grantsOf ?? null,
@@ -440,7 +443,7 @@ async function open(page, data = model()) {
           harnesses: {
             'claude-code': {
               on: said.on ?? false,
-              folder: data.boards[project]?.project.directory,
+              folder,
             },
             codex: { setUp: said.codexSetUp ?? false },
           },
@@ -633,10 +636,54 @@ async function open(page, data = model()) {
       },
       // A start the daemon refuses is refused whole, in its words, and no project is made (a
       // test says which words with `openRefusal`).
-      'project.open': ({ directory }) =>
-        data.openRefusal
-          ? { ok: false, error: data.openRefusal }
-          : answer({ project: { id: 3, name: 'new', directory } }),
+      'project.open': (body) => {
+        if (data.openRefusal) return { ok: false, error: data.openRefusal }
+        const project = { id: 3, name: 'new', directory: body.directory }
+        // This runs in the page: a participant as the board has one, written out here.
+        const person = (id, handle, role, harness) => ({
+          id,
+          projectId: 3,
+          handle,
+          role,
+          roles: [role],
+          agent: null,
+          harness,
+          designer: false,
+          tier: null,
+          outUntil: null,
+          memberId: null,
+          member: null,
+          session: null,
+        })
+        // A test that goes on to the new project (`openMakesBoard`) has it made as the daemon makes
+        // one: what the human said in New project is kept with it, for its Project settings.
+        if (data.openMakesBoard) {
+          Object.assign(project, { state: 'open', gate: body.gate === true })
+          if (body.rules !== undefined) project.staffRules = body.rules
+          if (body.compaction !== undefined) project.claudeCompaction = body.compaction
+          data.projects.push(project)
+          data.boards[3] = {
+            project,
+            open: [],
+            lanes: [
+              {
+                participant: person(30, 'human', 'human', null),
+                tasks: [],
+                activity: { state: 'closed' },
+                pane: null,
+              },
+              {
+                participant: { ...person(31, 'chief', 'chief', body.harness), model: body.model },
+                tasks: [],
+                activity: { state: 'working' },
+                pane: { id: 'p3-chief', generation: 1 },
+              },
+            ],
+          }
+          data.inbox[3] = []
+        }
+        return answer({ project })
+      },
     }
     const invoke = async (command, args = {}) => {
       window.__calls.push([
@@ -4065,7 +4112,7 @@ async function newProject(page) {
       model: dialog.locator('[name="chiefModel"]'),
     },
     start: dialog.getByRole('button', { name: 'Start project' }),
-    refusal: dialog.getByRole('alert'),
+    refusal: dialog.locator('.dialog-refusal'),
     staff: section('Staff'),
     approval: section('Human approval').getByRole('checkbox'),
     calls: {
@@ -4083,10 +4130,31 @@ async function newProject(page) {
       version: section('Specs').locator('.specs-version'),
       save: section('Specs').getByRole('button', { name: 'Save specs' }),
     },
+    rules: {
+      group: section('Rules for the staff'),
+      text: section('Rules for the staff').getByLabel('The rules'),
+      count: section('Rules for the staff').locator('.staff-rules-count'),
+      save: section('Rules for the staff').getByRole('button', { name: 'Save rules' }),
+    },
+    compaction: {
+      group: section('Compaction for Claude members'),
+      own: section('Compaction for Claude members').getByRole('radio', {
+        name: "Claude's own point",
+      }),
+      size: section('Compaction for Claude members').getByRole('radio', { name: 'A size' }),
+      tokens: section('Compaction for Claude members').getByLabel(
+        'Size in tokens, 100,000 to 1,000,000',
+      ),
+      hint: section('Compaction for Claude members').locator('.claude-compaction-hint'),
+      save: section('Compaction for Claude members').getByRole('button', {
+        name: 'Save compaction',
+      }),
+    },
+    computerUse: section('Computer use'),
   }
 }
 
-test('New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has', async ({
+test('New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
   page,
 }) => {
   const data = model()
@@ -4094,7 +4162,7 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   await open(page, data)
   const made = await newProject(page)
   const { dialog } = made
-  // The folder, the chief, and then the four sections of Project settings, in its order.
+  // The folder, the chief, and then the sections of Project settings, in its order.
   expect(
     await dialog
       .locator('form > label, form > fieldset')
@@ -4105,7 +4173,17 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
             : node.querySelector('[name]').name,
         ),
       ),
-  ).toEqual(['directory', 'The chief', 'Staff', 'Human approval', 'Wake-up calls', 'Specs'])
+  ).toEqual([
+    'directory',
+    'The chief',
+    'Staff',
+    'Rules for the staff',
+    'Compaction for Claude members',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+    'Computer use',
+  ])
   // The defaults: the last project's staff, approval off, wake-ups off and specs following the app's setting.
   await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/, /zeus.*Reviewer/])
   await expect(made.approval).not.toBeChecked()
@@ -4123,7 +4201,17 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.variant.locator('option:checked')).toHaveText('As the app says (core)')
   await expect(made.specs.version).toHaveText('Specmint 3.0.0')
+  // The rules and the compaction as a project that never said any has them.
+  await expect(made.rules.text).toHaveValue('')
+  await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
+  await expect(made.compaction.own).toBeChecked()
+  await expect(made.compaction.size).not.toBeChecked()
+  await expect(made.compaction.tokens).toBeDisabled()
+  await expect(made.compaction.tokens).toHaveValue('')
   // Nothing is saved before there is a project: no Save, and nothing of when a change reaches the chief.
+  await expect(made.rules.save).toBeHidden()
+  await expect(made.compaction.save).toBeHidden()
+  await expect(made.rules.group.locator('.dialog-help [data-live]')).toBeHidden()
   await expect(made.calls.save).toBeHidden()
   await expect(made.specs.save).toBeHidden()
   await expect(made.specs.group.locator('.specs-help [data-live]')).toBeHidden()
@@ -4133,34 +4221,33 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   const markup = (id) =>
     page.evaluate(
       (id) =>
-        // The shared sections only: Computer use, the rules for the staff and the Claude members'
-        // compaction are Project settings' own.
-        [
-          ...document.querySelectorAll(
-            `#${id} .project-section:not(.computer-use):not(.staff-rules):not(.claude-compaction)`,
-          ),
-        ]
-          .slice(1)
-          .map((section) => {
-            const copy = section.cloneNode(true)
-            const variant = copy.querySelector('[name="specsVariant"]')
-            if (variant !== null) {
-              const [first] = variant.options
-              first.textContent = ''
-              variant.replaceChildren(first)
-              copy.querySelector('[name="specs"] [value="follow"]').textContent = ''
-              copy.querySelector('[name="specsFolder"]').removeAttribute('placeholder')
-              copy.querySelector('.specs-version').textContent = ''
-            }
-            return copy.outerHTML.replaceAll(' hidden=""', '')
-          }),
+        // Every section but Staff, which each dialog draws for itself: one markup for the rest.
+        [...document.querySelectorAll(`#${id} .project-section`)].slice(1).map((section) => {
+          const copy = section.cloneNode(true)
+          // What the section draws from what it reads, which is the dialog's own.
+          for (const drawn of copy.querySelectorAll(
+            '.computer-use-harnesses, .computer-use-apps, .computer-use-grants, .computer-use-grants-of',
+          )) {
+            drawn.replaceChildren()
+          }
+          const variant = copy.querySelector('[name="specsVariant"]')
+          if (variant !== null) {
+            const [first] = variant.options
+            first.textContent = ''
+            variant.replaceChildren(first)
+            copy.querySelector('[name="specs"] [value="follow"]').textContent = ''
+            copy.querySelector('[name="specsFolder"]').removeAttribute('placeholder')
+            copy.querySelector('.specs-version').textContent = ''
+          }
+          return copy.outerHTML.replaceAll(' hidden=""', '')
+        }),
       id,
     )
   const [here, there] = [
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(3)
+  expect(here).toHaveLength(6)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
   await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
@@ -4407,9 +4494,17 @@ test('New project opens on the defaults every time: what was set in it before is
   await made.specs.mode.selectOption('on')
   await made.specs.folder.fill('docs')
   await made.specs.variant.selectOption('tdd-html')
+  await made.rules.text.fill('Never push to upstream.')
+  await made.compaction.size.check()
+  await made.compaction.tokens.fill('250000')
   await made.dialog.getByRole('button', { name: 'Cancel' }).click()
   await expect(made.dialog).toBeHidden()
   await page.getByRole('button', { name: 'New project' }).click()
+  await expect(made.rules.text).toHaveValue('')
+  await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
+  await expect(made.compaction.own).toBeChecked()
+  await expect(made.compaction.tokens).toHaveValue('')
+  await expect(made.compaction.tokens).toBeDisabled()
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
   await expect(made.calls.every).toHaveValue('1')
@@ -4418,6 +4513,234 @@ test('New project opens on the defaults every time: what was set in it before is
   await expect(made.specs.folder).toHaveValue('')
   await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.folder).toBeEnabled()
+})
+
+/** The legends of a dialog's sections, in the order they are drawn, hidden ones too. */
+const legendsOf = (page, id) =>
+  page.evaluate(
+    (id) =>
+      [...document.querySelectorAll(`#${id} fieldset.project-section > legend`)].map(
+        (legend) => legend.textContent,
+      ),
+    id,
+  )
+
+/**
+ * The sections of Project settings that New project does not hold, by their legends, and why
+ * each stays out (T-1268). A section is in both dialogs, drawn from the one markup the page
+ * holds (`#project-sections`), or it is here with its reason: a section added to Project
+ * settings alone fails this test until it is one or the other. Staff is in both, and drawn by
+ * each for itself.
+ */
+const NEW_PROJECT_LACKS = {}
+
+test('New project holds every section Project settings holds, in its order, but those named with a reason', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['worker'])]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = await legendsOf(page, 'project-settings-dialog')
+  await page
+    .getByRole('dialog', { name: 'Project settings' })
+    .getByRole('button', { name: 'Close' })
+    .click()
+  await newProject(page)
+  const made = await legendsOf(page, 'new-project-dialog')
+  // Each exception is a section Project settings has and New project lacks, and a reason.
+  for (const [legend, reason] of Object.entries(NEW_PROJECT_LACKS)) {
+    expect(settings, legend).toContain(legend)
+    expect(made, legend).not.toContain(legend)
+    expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
+  }
+  expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
+  expect(made).toHaveLength(7)
+})
+
+test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  // Counted against the bounds as the human types, as in Project settings.
+  await made.rules.text.fill(STAFF_RULES)
+  await expect(made.rules.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
+  await expect(made.rules.group).toContainText('No secrets: no passwords, tokens or keys')
+  // A size is checked as it is typed, and a first one starts from the proposal's.
+  await made.compaction.size.check()
+  await expect(made.compaction.tokens).toBeEnabled()
+  await expect(made.compaction.tokens).toHaveValue('400000')
+  await made.compaction.tokens.fill('250000')
+  await expect(made.compaction.hint).toBeHidden()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        rules: STAFF_RULES,
+        compaction: 250000,
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  // They start with the project, in the one write that makes it: nothing is saved afterwards.
+  for (const operation of ['project.rules', 'project.compaction']) {
+    expect(await calls(page, operation), operation).toEqual([])
+  }
+})
+
+test('New project: rules over a bound, or a size that is no whole number in the range, hold the start back as they hold the save in Project settings, and say why', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  // 8,001 bytes of rules.
+  await made.rules.text.fill('x'.repeat(8_001))
+  await expect(made.rules.count).toHaveClass(/over/)
+  await expect(made.rules.text).toHaveAttribute('aria-invalid', 'true')
+  await made.start.click()
+  await expect(made.refusal).toContainText('8,000 bytes')
+  // A size outside the range.
+  await made.rules.text.fill('Short.')
+  await made.compaction.size.check()
+  await made.compaction.tokens.fill('99999')
+  await expect(made.compaction.hint).toHaveText(
+    'A size is a whole number from 100,000 to 1,000,000.',
+  )
+  await expect(made.compaction.tokens).toHaveAttribute('aria-invalid', 'true')
+  await made.start.click()
+  await expect(made.refusal).toContainText('A size is a whole number from 100,000 to 1,000,000.')
+  expect(await calls(page, 'project.open')).toEqual([])
+  // Put right, it starts, with both.
+  await made.compaction.tokens.fill('100000')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        rules: 'Short.',
+        compaction: 100000,
+      },
+    ])
+})
+
+test('New project: a project made with rules, a compaction size and computer use said opens in Project settings with them', async ({
+  page,
+}) => {
+  const data = model()
+  data.openMakesBoard = true
+  data.computerUse = { on: true, permissions: { accessibility: true, screenRecording: false } }
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await made.rules.text.fill(STAFF_RULES)
+  await made.compaction.size.check()
+  await made.compaction.tokens.fill('300000')
+  // Computer use is Claude Code's own switch for the folder, read and not written: what the dialog
+  // says of it for the folder is what the project's settings say of it once the project is there.
+  await expect(made.computerUse.getByRole('heading', { name: 'Claude Code' })).toBeVisible()
+  const said = await computerUse(made.dialog)
+  await made.start.click()
+  await expect(made.dialog).toBeHidden()
+  await expect(page.locator('#project-title')).toHaveText('new')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = (name) => dialog.getByRole('group', { name, exact: true })
+  await expect(section('Rules for the staff').getByLabel('The rules')).toHaveValue(STAFF_RULES)
+  await expect(
+    section('Compaction for Claude members').getByRole('radio', { name: 'A size' }),
+  ).toBeChecked()
+  await expect(
+    section('Compaction for Claude members').getByLabel('Size in tokens, 100,000 to 1,000,000'),
+  ).toHaveValue('300000')
+  expect(await computerUse(dialog)).toEqual(said)
+  expect(said.map(({ block }) => block)).toEqual(['claude-code', 'permissions'])
+})
+
+test("New project: computer use is read for the folder picked, shown while the chief or a member runs on a harness that has one, and opens the panes as Project settings' does", async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = {
+    on: true,
+    codexSetUp: true,
+    permissions: { accessibility: true, screenRecording: false },
+  }
+  await open(page, data)
+  const made = await newProject(page)
+  // No project yet, so the folder is what is asked about, and nothing is asked of a project.
+  await expect.poll(() => calls(page, 'computer_use.get')).toEqual([{ directory: '/work/fresh' }])
+  // No harness picked: no computer use to say.
+  await expect(made.computerUse).toBeHidden()
+  // A chief on Pi has none; on Claude Code it has, for the folder.
+  await pickChief(made.dialog, 'Pi', 'Muse Spark')
+  await expect(made.computerUse).toBeHidden()
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await expect(made.computerUse).toBeVisible()
+  expect(await computerUse(made.dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'On for this project',
+      lines: [CLAUDE_ON],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'not allowed', OPEN],
+      ],
+    },
+  ])
+  // A member on Codex adds Codex's block and its column, and the panes stay one button each.
+  await pickMember(made.dialog, {
+    role: 'worker',
+    harness: 'Codex',
+    model: 'GPT-6 Astra',
+    tier: 'standard',
+  })
+  await made.dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  expect((await computerUse(made.dialog)).map(({ block }) => block)).toEqual([
+    'claude-code',
+    'codex',
+    'permissions',
+  ])
+  await expect(made.computerUse.getByRole('button')).toHaveText([OPEN, OPEN])
+  await made.computerUse
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
+    .click()
+  await expect.poll(() => calls(page, 'computer_use.open')).toEqual([{ pane: 'screen-recording' }])
+  // The member leaves: Codex's block goes with it.
+  await made.dialog.getByRole('button', { name: /^Remove Worker/ }).click()
+  expect((await computerUse(made.dialog)).map(({ block }) => block)).toEqual([
+    'claude-code',
+    'permissions',
+  ])
+  // A start sends nothing of computer use: there is nothing of it to keep.
+  await made.start.click()
+  await expect.poll(async () => (await calls(page, 'project.open')).length).toBe(1)
+  expect(Object.keys((await calls(page, 'project.open'))[0]).sort()).toEqual([
+    'directory',
+    'gate',
+    'harness',
+    'model',
+    'staff',
+  ])
 })
 
 test("offers a new project's chief only the harnesses installed here, and its staff only members on them", async ({

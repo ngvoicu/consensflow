@@ -322,51 +322,7 @@
           <p class="staff-hint" id="staff-hint" hidden></p>
         </fieldset>
       </fieldset>
-      <!-- The rules for the staff (core/staff-rules.js): the human's own text, which every window
-           of the project is given after its role; written here only. -->
-      <fieldset class="project-section staff-rules">
-        <legend>Rules for the staff</legend>
-        <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. A change reaches the chief as soon as it is at rest, and each other window when it next starts: a new task's window, or after Resume.</p>
-        <label>The rules<textarea name="staff-rules" rows="8" spellcheck="false" aria-describedby="staff-rules-count"></textarea></label>
-        <p class="staff-rules-count" id="staff-rules-count" aria-live="polite"></p>
-        <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
-        <div class="dialog-actions"><button class="primary-button" type="button" name="staff-rules-save">Save rules</button></div>
-      </fieldset>
-      <!-- Compaction for Claude members (core/claude-compaction.js): the size at which the
-           project's Claude member windows compact, or Claude's own point; the chief never; chosen here only. -->
-      <fieldset class="project-section claude-compaction">
-        <legend>Compaction for Claude members</legend>
-        <p class="dialog-help">From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.</p>
-        <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
-        <label class="check"><input type="radio" name="claude-compaction-choice" value="own" checked>Claude's own point</label>
-        <label class="check"><input type="radio" name="claude-compaction-choice" value="size">A size</label>
-        <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="claude-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
-        <p class="staff-hint claude-compaction-hint" role="alert" hidden></p>
-        <div class="dialog-actions"><button class="primary-button" type="button" name="claude-compaction-save">Save compaction</button></div>
-      </fieldset>
       <div data-project-sections></div>
-      <!-- Computer use (core/computer-use.js): a block for each harness of the project's with a
-           computer use of its own, shown only while one of its members runs on it, and one block
-           for the macOS permissions they work through, a column for each app and a row for each
-           pane, each block headed and spaced the same. -->
-      <fieldset class="project-section computer-use" hidden>
-        <legend>Computer use</legend>
-        <p class="dialog-help">Lets an agent see and control the screen.</p>
-        <div class="computer-use-harnesses"></div>
-        <div class="computer-use-block computer-use-permissions" hidden>
-          <div class="computer-use-title">
-            <h3 class="computer-use-head">Permissions in System Settings</h3>
-          </div>
-          <p class="dialog-help computer-use-grants-of" hidden></p>
-          <table class="staff computer-use-table" aria-label="Permissions in System Settings">
-            <thead>
-              <tr class="computer-use-apps"></tr>
-            </thead>
-            <tbody class="computer-use-grants"></tbody>
-          </table>
-          <p class="dialog-help">These are the Mac's, for every project. A permission you change in System Settings may need ConsensFlow to be quit and opened again.</p>
-        </div>
-      </fieldset>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>
@@ -374,9 +330,32 @@
   </dialog>
 
   <!-- The sections of a project's settings that Project settings and New project share, one markup
-       for both: each dialog has a copy (core/project-sections.js). What only a saved project has is
-       marked data-live: New project does not show it. -->
+       for both: each dialog has a copy (core/project-sections.js), and a section is added here or
+       nowhere (T-1268). What only a saved project has (a Save, and when a change reaches the chief)
+       is marked data-live: New project does not show it. -->
   <template id="project-sections">
+    <!-- The rules for the staff (core/staff-rules.js): the human's own text, which every window
+         of the project is given after its role; written here only. -->
+    <fieldset class="project-section staff-rules">
+      <legend>Rules for the staff</legend>
+      <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. <span data-live>A change reaches the chief as soon as it is at rest, and each other window when it next starts: a new task's window, or after Resume.</span></p>
+      <label>The rules<textarea name="staff-rules" rows="8" spellcheck="false" aria-describedby="staff-rules-count"></textarea></label>
+      <p class="staff-rules-count" id="staff-rules-count" aria-live="polite"></p>
+      <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="staff-rules-save">Save rules</button></div>
+    </fieldset>
+    <!-- Compaction for Claude members (core/claude-compaction.js): the size at which the
+         project's Claude member windows compact, or Claude's own point; the chief never; chosen here only. -->
+    <fieldset class="project-section claude-compaction">
+      <legend>Compaction for Claude members</legend>
+      <p class="dialog-help">From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.</p>
+      <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
+      <label class="check"><input type="radio" name="claude-compaction-choice" value="own" checked>Claude's own point</label>
+      <label class="check"><input type="radio" name="claude-compaction-choice" value="size">A size</label>
+      <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="claude-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
+      <p class="staff-hint claude-compaction-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="claude-compaction-save">Save compaction</button></div>
+    </fieldset>
     <fieldset class="project-section">
       <legend>Human approval</legend>
       <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
@@ -416,6 +395,28 @@
       </label>
       <p class="staff-hint specs-note" role="status" hidden></p>
       <div class="dialog-actions" data-live><button class="primary-button" type="button" name="specs-save">Save specs</button></div>
+    </fieldset>
+    <!-- Computer use (core/computer-use.js): a block for each harness of the project's with a
+         computer use of its own, shown only while one of its members runs on it, and one block
+         for the macOS permissions they work through, a column for each app and a row for each
+         pane, each block headed and spaced the same. -->
+    <fieldset class="project-section computer-use" hidden>
+      <legend>Computer use</legend>
+      <p class="dialog-help">Lets an agent see and control the screen.</p>
+      <div class="computer-use-harnesses"></div>
+      <div class="computer-use-block computer-use-permissions" hidden>
+        <div class="computer-use-title">
+          <h3 class="computer-use-head">Permissions in System Settings</h3>
+        </div>
+        <p class="dialog-help computer-use-grants-of" hidden></p>
+        <table class="staff computer-use-table" aria-label="Permissions in System Settings">
+          <thead>
+            <tr class="computer-use-apps"></tr>
+          </thead>
+          <tbody class="computer-use-grants"></tbody>
+        </table>
+        <p class="dialog-help">These are the Mac's, for every project. A permission you change in System Settings may need ConsensFlow to be quit and opened again.</p>
+      </div>
     </fieldset>
   </template>
 
