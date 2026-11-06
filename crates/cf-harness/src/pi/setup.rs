@@ -119,11 +119,25 @@ pub(crate) struct Setup {
     pub unread: Vec<String>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times a setup was read on this thread: a read that lists models reads none.
+    static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many setups this thread has read (a test's).
+#[cfg(test)]
+pub(crate) fn reads() -> usize {
+    READS.with(std::cell::Cell::get)
+}
+
 impl Setup {
     /// The setup of the Pi `env` names (`PI_CODING_AGENT_DIR`, else `.pi/agent` in the home).
     /// A file that is not there names nothing and one that cannot be read is said so
     /// ([`Setup::unread`]); no file is written.
     pub(crate) fn read(env: &Env) -> Self {
+        #[cfg(test)]
+        READS.with(|reads| reads.set(reads.get() + 1));
         let keys = CREDENTIALS
             .into_iter()
             .filter(|name| env.os(name).is_some_and(|value| !value.is_empty()))

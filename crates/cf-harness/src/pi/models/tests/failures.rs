@@ -219,3 +219,34 @@ fn a_file_larger_than_a_setup_is_not_read_and_is_said_unread() {
     );
     assert!(!why.contains("a login for openai"), "{why}");
 }
+
+/// F4: a folder is read only when it is wanted: for a list that is empty, and for a read given
+/// up on; not for a list that names models, nor for a Pi whose own words say why it failed.
+#[test]
+fn the_folder_is_read_only_for_a_list_with_no_model_and_a_read_given_up_on() {
+    use super::super::super::setup::reads;
+
+    let pi = StandIn::new(&[], &[]);
+    pi.child(&[answer("models", &["openai/gpt-6-luna"])], Ends::Asked);
+    pi.read(false).unwrap();
+    assert_eq!(reads(), 0, "a list that names models");
+
+    let pi = StandIn::new(&[], &[]);
+    pi.child(&[], Ends::Itself);
+    pi.says("Error: boom\n", Some(1));
+    pi.read(false).unwrap_err();
+    assert_eq!(reads(), 0, "Pi's own words say why it ended");
+
+    let pi = StandIn::new(&[], &[]);
+    pi.child(&[empty()], Ends::Asked);
+    pi.read(false).unwrap_err();
+    assert_eq!(reads(), 1, "an empty list");
+
+    let pi = StandIn::new(&[], &[]);
+    pi.child(&[], Ends::Asked);
+    let mut driver = pi.begin(false);
+    assert!(driver.run().is_empty());
+    assert!(pi.time.fire_next(i64::MAX));
+    driver.run().remove(0).1.unwrap_err();
+    assert_eq!(reads(), 2, "a read given up on names what Pi was loading");
+}

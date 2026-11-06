@@ -69,7 +69,7 @@ replace = '    let unlisted = || Setup::default().unlisted();'
 
 [[plant]]
 name = "pi-setups: the setup is read though the list names models"
-meant = "a_list_that_names_models_reads_no_file_of_pi_s_folder"
+meant = "the_folder_is_read_only_for_a_list_with_no_model_and_a_read_given_up_on"
 runs = ["ps-models"]
 
 [[plant.edit]]
@@ -284,7 +284,7 @@ replace = '                    if false {'
 
 [[plant]]
 name = "pi-setups: the extensions of the settings are not read"
-meant = "an_extension_the_settings_declare_is_never_called_no_provider"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
 runs = ["ps-setup"]
 
 [[plant.edit]]
@@ -361,9 +361,9 @@ find = 'opened.take(FILE_CAP)'
 replace = 'opened'
 
 [[plant]]
-name = "pi-setups: a setup with a package is called no provider"
-meant = "each_source_of_a_provider_is_named_by_its_names_only"
-runs = ["ps-setup"]
+name = "pi-setups: a package source is shown whole"
+meant = "a_package_source_is_shown_without_its_userinfo_query_or_fragment"
+runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
