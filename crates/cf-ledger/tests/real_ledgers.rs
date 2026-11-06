@@ -310,7 +310,8 @@ fn check_copy(
             .count(),
     );
     // How each Devin member's listed id was found (0033): in the list this copy keeps, else with
-    // the effort's word taken out of its launch id, else it stays the launch id.
+    // the effort's word taken out of its launch id (where what is left reads as its label), else it
+    // stays the launch id.
     let kept: Vec<(String, Vec<String>)> = db
         .query_row(
             "SELECT models FROM model_list WHERE harness = 'devin'",
@@ -352,7 +353,7 @@ fn check_copy(
     }
     writeln!(
         report,
-        "#### {name}, {label}: Devin members' listed ids: {by_list} from the list, {by_hyphen} by the launch id's hyphen rule, {by_launch_id} the launch id itself"
+        "#### {name}, {label}: Devin members' listed ids: {by_list} from the list, {by_hyphen} by taking the effort's word out of the launch id, {by_launch_id} the launch id itself"
     )
     .unwrap();
     writeln!(
