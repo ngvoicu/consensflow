@@ -1,0 +1,220 @@
+# Project settings' Computer use section drawn again, and the page's own sections made alike (T-1266,
+# Gabriel, 2026-11-06: "looks like shit"): a block for each harness and one for the permissions,
+# every block headed with its status on its line and a muted line under it, the same room between
+# them; the permissions in one table, a column for each app (ConsensFlow's, read, and Codex
+# Computer Use's, unknown) and one button for each pane, whichever app needs it; no path of the
+# project; Windows with its two headings and no panes. And in the rest of the dialog: one gap
+# inside every section, Save specs as the other sections' saves are, the compaction's choices
+# read as the approval's checkbox does. One plant takes one rule out; a test of it fails. Every
+# name holds `computer use look`.
+
+[run]
+# The section and the dialog's sections, in the browser Playwright keeps.
+cul-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app|omputer use|both blocks|permissions can't be read|spaced alike inside|compaction's two choices"]
+
+[[plant]]
+name = "computer use look: the project's path is shown in the status"
+meant = "Project settings: computer use that is on says so, and on Windows says Claude Code has none there"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+          status: 'On for this project',
+'''
+replace = '''
+          status: `On for this project (${said.folder})`,
+'''
+
+[[plant]]
+name = "computer use look: a pane has a button for each app"
+meant = "Project settings: a project with Claude Code and Codex members shows both blocks, and one permissions block with a column for each app and one button for each pane"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+            opener.append(this.#opener(pane, name))
+'''
+replace = '''
+            opener.append(this.#opener(pane, name), this.#opener(pane, name))
+'''
+
+[[plant]]
+name = "computer use look: a permission that can't be read says not allowed"
+meant = "Project settings: a Claude Code member on a Mac whose permissions can't be read shows them unknown, each with its pane to open"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''STATUS[app.read(key) ?? 'unknown']'''
+replace = 'STATUS[app.read(key) === true]'
+
+[[plant]]
+name = "computer use look: the permissions are drawn on Windows too"
+meant = "Project settings: computer use that is on says so, and on Windows says Claude Code has none there"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+      said?.system === 'macos'
+        ? [
+'''
+replace = '''
+      said?.system !== undefined
+        ? [
+'''
+
+[[plant]]
+name = "computer use look: a permission that is not allowed is not marked"
+meant = "Project settings: computer use says where Claude Code turns it on, and each macOS permission opens its pane"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+  false: { state: 'missing', words: 'not allowed' },
+'''
+replace = '''
+  false: { state: 'unknown', words: 'not allowed' },
+'''
+
+[[plant]]
+name = "computer use look: Claude Code on Windows says nothing of Windows"
+meant = "Project settings: computer use that is on says so, and on Windows says Claude Code has none there"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+    show(said, system) {
+      if (system === 'windows') return { status: 'Not available on Windows', state: 'none' }
+      if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
+      if (said.on) {
+'''
+replace = '''
+    show(said, system) {
+      if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
+      if (said.on) {
+'''
+
+[[plant]]
+name = "computer use look: Claude Code is on whatever its configuration says"
+meant = "Project settings: computer use says where Claude Code turns it on, and each macOS permission opens its pane"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+      if (said.on) {
+'''
+replace = '''
+      if (true) {
+'''
+
+[[plant]]
+name = "computer use look: a block's status is not on its heading"
+meant = "Project settings: computer use says where Claude Code turns it on, and each macOS permission opens its pane"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+        title.append(element('h3', 'computer-use-head', part.name), badge)
+'''
+replace = '''
+        title.append(element('h3', 'computer-use-head', part.name))
+'''
+
+[[plant]]
+name = "computer use look: a block's muted line is left out"
+meant = "Project settings: computer use says where Claude Code turns it on, and each macOS permission opens its pane"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+        if (line !== undefined) block.append(element('p', 'dialog-help', line))
+'''
+replace = ''
+
+[[plant]]
+name = "computer use look: the note of a terminal's permissions shows with no column of ConsensFlow's"
+meant = "Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''
+    this.#grantsOf.hidden = grantsOf === null || !apps.some(({ name }) => name === 'ConsensFlow')
+'''
+replace = '''
+    this.#grantsOf.hidden = grantsOf === null
+'''
+
+[[plant]]
+name = "computer use look: the blocks of the section run into each other"
+meant = "Project settings: the blocks of computer use sit the same distance apart, however many there are"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''
+.computer-use .computer-use-harnesses { display: contents; }
+'''
+replace = '''
+.computer-use .computer-use-harnesses { display: block; }
+'''
+
+[[plant]]
+name = "computer use look: every section is spaced closer inside"
+meant = "Project settings: the sections are the same distance apart and spaced alike inside, and each that saves does so with the same button in the same place"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '.project-section { display: grid; gap: 12px;'
+replace = '.project-section { display: grid; gap: 8px;'
+
+[[plant]]
+name = "computer use look: the specs are spaced as their own"
+meant = "Project settings: the sections are the same distance apart and spaced alike inside, and each that saves does so with the same button in the same place"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '.project-specs .specs-help {'
+replace = '''
+.project-specs { gap: 10px; }
+.project-specs .specs-help {'''
+
+[[plant]]
+name = "computer use look: the dialog's sections run together"
+meant = "Project settings: the sections are the same distance apart and spaced alike inside, and each that saves does so with the same button in the same place"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '.dialog-form { display: grid; gap: 16px; padding: 22px 26px 24px; }'
+replace = '.dialog-form { display: grid; gap: 2px; padding: 22px 26px 24px; }'
+
+[[plant]]
+name = "computer use look: Save specs is the quiet button on the left again"
+meant = "Project settings: the sections are the same distance apart and spaced alike inside, and each that saves does so with the same button in the same place"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<div class="dialog-actions" data-live><button class="primary-button" type="button" name="specs-save">Save specs</button></div>'
+replace = '<button class="quiet-button" type="button" name="specs-save" data-live>Save specs</button>'
+
+[[plant]]
+name = "computer use look: the compaction's choices are muted words again"
+meant = "Project settings: the compaction's two choices read as the approval's checkbox does, in the same colour and size"
+runs = ["cul-page"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<label class="check"><input type="radio" name="claude-compaction-choice" value="own" checked>'
+replace = '<label><input type="radio" name="claude-compaction-choice" value="own" checked>'

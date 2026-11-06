@@ -1,53 +1,73 @@
 import { element, redraw } from '../dom.js'
 
 /**
- * Project settings, Computer use (T-540): for each harness with a computer use of its
- * own, whether it is on for the project, shown only while the project has a member on
- * that harness, the chief included; and ConsensFlow's two macOS permissions, which
- * Claude Code's computer use works through, shown once below the parts that need them.
+ * Project settings, Computer use (T-540, drawn again in T-1266): a block for each harness with
+ * a computer use of its own, shown only while the project has a member on that harness, the
+ * chief included, and one block for the macOS permissions those harnesses work through. Every
+ * block is headed the same way: its name, its status on the heading's line, and a muted line
+ * under it where there is something to explain. A permission reads the same way in every row:
+ * a pane's name, each app's status (allowed, not allowed, or unknown where it can't be read),
+ * and one button, whichever apps need that pane.
  *
  * The daemon says what each harness's own configuration says for the project's folder
  * (`computer_use.get`, read and never written): Claude Code keeps its switch in its own
- * configuration, which the human turns on in Claude Code itself, so the part only says
+ * configuration, which the human turns on in Claude Code itself, so the block only says
  * where. Codex's comes from the ChatGPT app, for every folder, and works through the
- * permissions of its own app, Codex Computer Use (T-548): its part leads to the same two
- * panes, where the human allows that app, and can't say whether it is allowed. Each
- * permission opens its pane of System Settings (`computer_use.open`); the state is read
- * again when the dialog opens and when the human comes back to the app.
+ * permissions of its own app, Codex Computer Use (T-548): the permissions table has a column
+ * for it, where it says unknown (the daemon can't read another app's permissions), so that
+ * the two panes, which both apps need, are opened by one button each. Each button opens its
+ * pane of System Settings (`computer_use.open`); the state is read again when the dialog opens
+ * and when the human comes back to the app.
  */
 
 /**
- * Each harness's part, by the harness's word, in the order they are shown: `ours` where
- * it works through ConsensFlow's permissions, and `own` the app whose permissions it
- * works through where they are another app's.
+ * Each harness's block, by the harness's word, in the order they are shown: `ours` where it
+ * works through ConsensFlow's permissions, and `own` the app whose permissions it works
+ * through where they are another app's.
  */
 const PARTS = {
   'claude-code': {
     name: 'Claude Code',
     ours: true,
-    /** What the part says, of `said` (its harness's answer) on `system`. */
-    lines(said, system) {
-      if (system === 'windows') return ['Claude Code has no computer use on Windows.']
-      if (system !== 'macos') return ['Claude Code has computer use only on macOS.']
-      if (said.on) return [`On for this project (${said.folder}).`]
-      return [
-        'Off for this project.',
-        `Turn it on in a Claude Code window in ${said.folder}: /mcp → computer-use → Enable.`,
-      ]
+    /**
+     * What the block says, of `said` (its harness's answer) on `system`: `status` with its
+     * `state` (`on`, `off` or `none`), and the muted `line` under the heading where there is one.
+     */
+    show(said, system) {
+      if (system === 'windows') return { status: 'Not available on Windows', state: 'none' }
+      if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
+      if (said.on) {
+        return {
+          status: 'On for this project',
+          state: 'on',
+          line: "It works through ConsensFlow's permissions, below.",
+        }
+      }
+      return {
+        status: 'Off for this project',
+        state: 'off',
+        line: 'Turn it on in a Claude Code window of this project: /mcp → computer-use → Enable.',
+      }
     },
   },
   codex: {
     name: 'Codex',
     own: 'Codex Computer Use',
-    lines(said, system) {
-      if (system === 'windows') return ['Codex has no computer use on Windows.']
-      if (system !== 'macos') return ['Codex has computer use only on macOS.']
-      return [
-        ...(said.setUp
-          ? ['Set up on this Mac, for every project.']
-          : ['Not set up on this Mac.', 'Set it up in the ChatGPT app.']),
-        "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
-      ]
+    show(said, system) {
+      if (system === 'windows') return { status: 'Not available on Windows', state: 'none' }
+      if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
+      if (said.setUp) {
+        return {
+          status: 'Set up',
+          state: 'on',
+          line: "Set up in the ChatGPT app. It works through its own app's permissions, below, which ConsensFlow can't read.",
+        }
+      }
+      return {
+        status: 'Not set up',
+        state: 'off',
+        line: 'Set it up in the ChatGPT app, then allow Codex Computer Use below.',
+      }
     },
   },
 }
@@ -61,6 +81,13 @@ const GRANTS = [
     name: 'Screen & System Audio Recording',
   },
 ]
+
+/** What a permission is said to be, by what the daemon read of it: allowed, not, or unknown. */
+const STATUS = {
+  true: { state: 'allowed', words: 'allowed' },
+  false: { state: 'missing', words: 'not allowed' },
+  unknown: { state: 'unknown', words: 'unknown' },
+}
 
 /** The harnesses the board's lanes run on: the chief's and the members'. */
 export function harnessesOf(board) {
@@ -77,6 +104,7 @@ export class ComputerUseSection {
   #section
   #harnesses
   #permissions
+  #apps
   #grants
   #grantsOf
   #page
@@ -93,6 +121,7 @@ export class ComputerUseSection {
     this.#section = section
     this.#harnesses = section.querySelector('.computer-use-harnesses')
     this.#permissions = section.querySelector('.computer-use-permissions')
+    this.#apps = section.querySelector('.computer-use-apps')
     this.#grants = section.querySelector('.computer-use-grants')
     this.#grantsOf = section.querySelector('.computer-use-grants-of')
     this.#page = page
@@ -122,7 +151,7 @@ export class ComputerUseSection {
     this.#said = said
   }
 
-  /** Draws the section from `board`: hidden where none of its harnesses has a part. */
+  /** Draws the section from `board`: hidden where none of its harnesses has a block. */
   draw(board) {
     this.#board = board
     const said = this.#said
@@ -134,56 +163,66 @@ export class ComputerUseSection {
     redraw(
       this.#harnesses,
       parts.map(([harness, part]) => {
-        const block = element('div', 'computer-use-harness')
+        const { status, state, line } = part.show(said.harnesses[harness], said.system)
+        const block = element('div', 'computer-use-block')
         block.dataset.harness = harness
-        block.append(element('h3', 'computer-use-head', part.name))
-        for (const line of part.lines(said.harnesses[harness], said.system)) {
-          block.append(element('p', 'computer-use-line', line))
-        }
-        // Another app's permissions: their panes, with no state, which ConsensFlow can't read.
-        if (part.own && said.system === 'macos') {
-          const grants = element('ul', 'computer-use-grants')
-          grants.append(
-            ...GRANTS.map(({ pane, name }) => {
-              const row = element('li', 'computer-use-grant')
-              row.dataset.grant = pane
-              row.append(element('span', 'computer-use-grant-name', name))
-              row.append(this.#opener(pane, `${name} (${part.own})`))
-              return row
-            }),
-          )
-          block.append(grants)
-        }
+        const title = element('div', 'computer-use-title')
+        const badge = element('span', 'computer-use-status', status)
+        badge.dataset.state = state
+        title.append(element('h3', 'computer-use-head', part.name), badge)
+        block.append(title)
+        if (line !== undefined) block.append(element('p', 'dialog-help', line))
         return block
       }),
     )
+    // One block for the permissions, with a column for each app the harnesses shown work
+    // through: ConsensFlow for Claude Code, whose permissions the daemon reads, and Codex
+    // Computer Use for Codex, whose it can't. A pane both need has one row and one button.
     const permissions = said?.permissions ?? null
-    this.#permissions.hidden = !parts.some(([, part]) => part.ours) || permissions === null
+    const apps =
+      said?.system === 'macos'
+        ? [
+            ...(parts.some(([, part]) => part.ours)
+              ? [{ name: 'ConsensFlow', read: (key) => permissions?.[key] }]
+              : []),
+            ...parts
+              .filter(([, part]) => part.own !== undefined)
+              .map(([, part]) => ({ name: part.own, read: () => undefined })),
+          ]
+        : []
+    this.#permissions.hidden = apps.length === 0
     // A ConsensFlow started from another app (a `cf ui` in a terminal) has that app's
     // permissions, which are the ones shown.
     const grantsOf = typeof said?.grantsOf === 'string' ? said.grantsOf : null
-    this.#grantsOf.hidden = grantsOf === null
-    this.#grantsOf.textContent =
-      grantsOf === null
-        ? ''
-        : `This ConsensFlow was started from ${grantsOf}, so these are that app's permissions, not ConsensFlow's.`
+    this.#grantsOf.hidden = grantsOf === null || !apps.some(({ name }) => name === 'ConsensFlow')
+    this.#grantsOf.textContent = this.#grantsOf.hidden
+      ? ''
+      : `This ConsensFlow was started from ${grantsOf}, so these are that app's permissions, not ConsensFlow's.`
+    // The columns: the permission, each app's status, and the button's, which has no heading.
+    redraw(this.#apps, [
+      element('th', null, 'Permission'),
+      ...apps.map(({ name }) => element('th', null, name)),
+      element('th', null, ''),
+    ])
     redraw(
       this.#grants,
-      permissions === null
+      apps.length === 0
         ? []
         : GRANTS.map(({ key, pane, name }) => {
-            const row = element('li', 'computer-use-grant')
+            const row = element('tr')
             row.dataset.grant = pane
-            const allowed = permissions[key] === true
-            row.append(
-              element('span', 'computer-use-grant-name', `${name}: `),
-              element(
-                'span',
-                allowed ? 'computer-use-allowed' : 'computer-use-missing',
-                allowed ? 'allowed' : 'not allowed',
-              ),
-            )
-            row.append(this.#opener(pane, name))
+            const head = element('th', null, name)
+            head.scope = 'row'
+            row.append(head)
+            for (const app of apps) {
+              const { state, words } = STATUS[app.read(key) ?? 'unknown']
+              const cell = element('td', 'computer-use-status', words)
+              cell.dataset.state = state
+              row.append(cell)
+            }
+            const opener = element('td')
+            opener.append(this.#opener(pane, name))
+            row.append(opener)
             return row
           }),
     )

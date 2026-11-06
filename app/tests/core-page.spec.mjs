@@ -2448,7 +2448,7 @@ test('takes a chief on another harness for no member: the board says it has none
   )
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await expect(dialog.locator('tbody tr')).toHaveText([
+  await expect(dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr')).toHaveText([
     'Nobody yet: add the members this project may use.',
   ])
   await pickMember(dialog, { harness: 'Codex', model: 'GPT-6 Astra', tier: 'critical' })
@@ -7322,19 +7322,60 @@ function allOn(data, harness) {
   }
 }
 
-/** What the Computer use section of Project settings says, line by line. */
-const computerUseLines = (dialog) =>
-  dialog.locator('fieldset.computer-use').evaluate((section) =>
-    [...section.querySelectorAll('.computer-use-head, .computer-use-line, .computer-use-grant')]
-      .filter((node) => node.closest('[hidden]') === null)
-      .map((node) =>
-        [...node.childNodes]
-          .map((child) => child.textContent)
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim(),
-      ),
-  )
+/**
+ * What the Computer use section of Project settings shows (T-1266): each block in its order, a
+ * harness's (by its word) or the permissions', with its heading, the status on its heading's
+ * line, its muted lines, and for the permissions the columns (the apps) and each pane's row:
+ * its name, each app's status, and its one button.
+ */
+const computerUse = (dialog) =>
+  dialog.locator('fieldset.computer-use').evaluate((section) => {
+    const text = (node) => node.textContent.replace(/\s+/g, ' ').trim()
+    return [...section.querySelectorAll('.computer-use-block')]
+      .filter((block) => block.closest('[hidden]') === null)
+      .map((block) => {
+        const shown = { block: block.dataset.harness ?? 'permissions' }
+        shown.heading = text(block.querySelector('.computer-use-head'))
+        const status = block.querySelector('.computer-use-title .computer-use-status')
+        if (status !== null) shown.status = text(status)
+        shown.lines = [...block.querySelectorAll('.dialog-help')]
+          .filter((line) => line.closest('[hidden]') === null && !line.hidden)
+          .map(text)
+        const columns = [...block.querySelectorAll('thead th')].map(text).filter(Boolean)
+        if (columns.length > 0) shown.columns = columns
+        const rows = [...block.querySelectorAll('tbody tr')].map((row) =>
+          [...row.children].map((cell) => text(cell)),
+        )
+        if (rows.length > 0) shown.rows = rows
+        return shown
+      })
+  })
+
+/** The distance from each block of the section to the next, in px. */
+const computerUseGaps = (dialog) =>
+  dialog.locator('fieldset.computer-use').evaluate((section) => {
+    const blocks = [...section.querySelectorAll('.computer-use-block')].filter(
+      (block) => block.closest('[hidden]') === null,
+    )
+    return blocks
+      .slice(1)
+      .map(
+        (block, at) =>
+          block.getBoundingClientRect().top - blocks[at].getBoundingClientRect().bottom,
+      )
+  })
+
+const CLAUDE_OFF =
+  'Turn it on in a Claude Code window of this project: /mcp → computer-use → Enable.'
+const CLAUDE_ON = "It works through ConsensFlow's permissions, below."
+const CODEX_SET_UP =
+  "Set up in the ChatGPT app. It works through its own app's permissions, below, which ConsensFlow can't read."
+const CODEX_NOT_SET_UP = 'Set it up in the ChatGPT app, then allow Codex Computer Use below.'
+const KEPT =
+  "These are the Mac's, for every project. A permission you change in System Settings may need ConsensFlow to be quit and opened again."
+const OPEN = 'Open System Settings'
+const ACCESSIBILITY = 'Accessibility'
+const SCREEN = 'Screen & System Audio Recording'
 
 test('Project settings: a project with no member on a harness with computer use, the chief included, shows no computer use', async ({
   page,
@@ -7395,13 +7436,27 @@ test('Project settings: computer use says where Claude Code turns it on, and eac
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Off for this project.',
-    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
-    "ConsensFlow's permissions, for every project",
-    'Accessibility: allowed Open System Settings',
-    'Screen & System Audio Recording: not allowed Open System Settings',
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Off for this project',
+      lines: [CLAUDE_OFF],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'not allowed', OPEN],
+      ],
+    },
+  ])
+  // Only what needs the human's hand is marked: the one that is not allowed.
+  await expect(dialog.locator('.computer-use-status[data-state="missing"]')).toHaveText([
+    'not allowed',
   ])
   await dialog
     .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
@@ -7422,24 +7477,42 @@ test('Project settings: computer use that is on says so, and on Windows says Cla
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'On for this project (/work/harbour).',
-    "ConsensFlow's permissions, for every project",
-    'Accessibility: allowed Open System Settings',
-    'Screen & System Audio Recording: allowed Open System Settings',
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'On for this project',
+      lines: [CLAUDE_ON],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'allowed', OPEN],
+      ],
+    },
   ])
+  // No path of the project is shown: the section is of the project the dialog is for.
+  await expect(dialog.locator('fieldset.computer-use')).not.toContainText('/work/harbour')
   await dialog.getByRole('button', { name: 'Close' }).click()
   await page.evaluate(() => {
     window.__model.computerUse = { system: 'windows', permissions: null }
   })
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Claude Code has no computer use on Windows.',
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Not available on Windows',
+      lines: [],
+    },
   ])
   await expect(dialog.locator('.computer-use-permissions')).toBeHidden()
+  await expect(dialog.locator('fieldset.computer-use').getByRole('button')).toHaveCount(0)
 })
 
 test("Project settings: a ConsensFlow started from another app says the permissions shown are that app's", async ({
@@ -7455,14 +7528,26 @@ test("Project settings: a ConsensFlow started from another app says the permissi
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Off for this project.',
-    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
-    "ConsensFlow's permissions, for every project",
-    "This ConsensFlow was started from com.apple.Terminal, so these are that app's permissions, not ConsensFlow's.",
-    'Accessibility: allowed Open System Settings',
-    'Screen & System Audio Recording: not allowed Open System Settings',
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Off for this project',
+      lines: [CLAUDE_OFF],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [
+        "This ConsensFlow was started from com.apple.Terminal, so these are that app's permissions, not ConsensFlow's.",
+        KEPT,
+      ],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'not allowed', OPEN],
+      ],
+    },
   ])
 })
 
@@ -7495,28 +7580,34 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
 }) => {
   const data = model()
   allOn(data, 'codex')
-  data.computerUse = { permissions: { accessibility: true, screenRecording: true } }
+  // Run from a terminal, ConsensFlow's permissions are that app's: said where they are shown, and
+  // nowhere else, so not for Codex, whose block has none of ConsensFlow's.
+  data.computerUse = {
+    grantsOf: 'com.apple.Terminal',
+    permissions: { accessibility: true, screenRecording: true },
+  }
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  // ConsensFlow's own permissions are not Codex's: they are not shown for it.
-  expect(await computerUseLines(dialog)).toEqual([
-    'Codex',
-    'Not set up on this Mac.',
-    'Set it up in the ChatGPT app.',
-    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
-    'Accessibility Open System Settings',
-    'Screen & System Audio Recording Open System Settings',
+  // ConsensFlow's own permissions are not Codex's: they are not shown for it, and Codex's are
+  // read by nobody, so each says unknown, with its pane to open as every row has.
+  expect(await computerUse(dialog)).toEqual([
+    { block: 'codex', heading: 'Codex', status: 'Not set up', lines: [CODEX_NOT_SET_UP] },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'Codex Computer Use'],
+      rows: [
+        [ACCESSIBILITY, 'unknown', OPEN],
+        [SCREEN, 'unknown', OPEN],
+      ],
+    },
   ])
-  await expect(dialog.locator('.computer-use-permissions')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Open System Settings for Accessibility' }).click()
   await dialog
-    .getByRole('button', { name: 'Open System Settings for Accessibility (Codex Computer Use)' })
-    .click()
-  await dialog
-    .getByRole('button', {
-      name: 'Open System Settings for Screen & System Audio Recording (Codex Computer Use)',
-    })
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
     .click()
   await expect
     .poll(() => calls(page, 'computer_use.open'))
@@ -7527,12 +7618,18 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
   })
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Codex',
-    'Set up on this Mac, for every project.',
-    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
-    'Accessibility Open System Settings',
-    'Screen & System Audio Recording Open System Settings',
+  expect(await computerUse(dialog)).toEqual([
+    { block: 'codex', heading: 'Codex', status: 'Set up', lines: [CODEX_SET_UP] },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'Codex Computer Use'],
+      rows: [
+        [ACCESSIBILITY, 'unknown', OPEN],
+        [SCREEN, 'unknown', OPEN],
+      ],
+    },
   ])
   await dialog.getByRole('button', { name: 'Close' }).click()
   await page.evaluate(() => {
@@ -7540,10 +7637,13 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
   })
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual(['Codex', 'Codex has no computer use on Windows.'])
+  expect(await computerUse(dialog)).toEqual([
+    { block: 'codex', heading: 'Codex', status: 'Not available on Windows', lines: [] },
+  ])
+  await expect(dialog.locator('fieldset.computer-use').getByRole('button')).toHaveCount(0)
 })
 
-test("Project settings: a project with Claude Code and Codex members shows both parts, and ConsensFlow's permissions once", async ({
+test('Project settings: a project with Claude Code and Codex members shows both blocks, and one permissions block with a column for each app and one button for each pane', async ({
   page,
 }) => {
   const data = model()
@@ -7558,18 +7658,185 @@ test("Project settings: a project with Claude Code and Codex members shows both 
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Off for this project.',
-    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
-    'Codex',
-    'Set up on this Mac, for every project.',
-    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
-    'Accessibility Open System Settings',
-    'Screen & System Audio Recording Open System Settings',
-    "ConsensFlow's permissions, for every project",
-    'Accessibility: not allowed Open System Settings',
-    'Screen & System Audio Recording: allowed Open System Settings',
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Off for this project',
+      lines: [CLAUDE_OFF],
+    },
+    { block: 'codex', heading: 'Codex', status: 'Set up', lines: [CODEX_SET_UP] },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'ConsensFlow', 'Codex Computer Use'],
+      rows: [
+        [ACCESSIBILITY, 'not allowed', 'unknown', OPEN],
+        [SCREEN, 'allowed', 'unknown', OPEN],
+      ],
+    },
+  ])
+  // The two panes both apps need are opened by one button each, not by one for each app.
+  const section = dialog.locator('fieldset.computer-use')
+  await expect(section.getByRole('button')).toHaveText([OPEN, OPEN])
+  await section.getByRole('button', { name: 'Open System Settings for Accessibility' }).click()
+  await section
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
+    .click()
+  await expect
+    .poll(() => calls(page, 'computer_use.open'))
+    .toEqual([{ pane: 'accessibility' }, { pane: 'screen-recording' }])
+})
+
+test('Project settings: the blocks of computer use sit the same distance apart, however many there are', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'codex')
+  data.boards[1].lanes.find((l) => l.participant.role === 'chief').participant.harness =
+    'claude-code'
+  data.computerUse = {
+    codexSetUp: true,
+    permissions: { accessibility: true, screenRecording: false },
+  }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  const gaps = await computerUseGaps(dialog)
+  expect(gaps).toHaveLength(2)
+  // Room between them, the same each time.
+  expect(gaps[0]).toBeGreaterThanOrEqual(8)
+  expect(Math.abs(gaps[0] - gaps[1])).toBeLessThan(1)
+  // Windows has the two blocks and no more, as far apart.
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.computerUse = { system: 'windows', permissions: null }
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  const windows = await computerUseGaps(dialog)
+  expect(windows).toHaveLength(1)
+  expect(Math.abs(windows[0] - gaps[0])).toBeLessThan(1)
+})
+
+test('Project settings: the sections are the same distance apart and spaced alike inside, and each that saves does so with the same button in the same place', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'claude-code')
+  data.computerUse = { permissions: { accessibility: true, screenRecording: false } }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  const sections = await dialog.evaluate((node) => {
+    const all = [...node.querySelectorAll('fieldset.project-section')].filter(
+      (section) => section.closest('[hidden]') === null && !section.hidden,
+    )
+    return all.map((section, at) => {
+      const box = section.getBoundingClientRect()
+      const style = getComputedStyle(section)
+      const save = [...section.querySelectorAll('button')].find((button) =>
+        /^Save /.test(button.textContent),
+      )
+      const inner =
+        box.right -
+        Number.parseFloat(style.paddingRight) -
+        Number.parseFloat(style.borderRightWidth)
+      return {
+        name: section.querySelector('legend').textContent,
+        above: at === 0 ? null : box.top - all[at - 1].getBoundingClientRect().bottom,
+        inside: style.rowGap,
+        save:
+          save === undefined
+            ? null
+            : {
+                text: save.textContent,
+                primary: save.classList.contains('primary-button'),
+                inActions: save.parentElement.classList.contains('dialog-actions'),
+                fromEdge: Math.round(inner - save.getBoundingClientRect().right),
+              },
+      }
+    })
+  })
+  expect(sections.map(({ name }) => name)).toEqual([
+    'Staff',
+    'Rules for the staff',
+    'Compaction for Claude members',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+    'Computer use',
+  ])
+  // The same room between the sections, and inside each, so no group runs into the next.
+  expect(new Set(sections.slice(1).map(({ above }) => Math.round(above))).size).toBe(1)
+  expect(sections[1].above).toBeGreaterThanOrEqual(12)
+  expect(new Set(sections.map(({ inside }) => inside))).toEqual(new Set(['12px']))
+  // A section that saves has one primary button, at the end of its own line of actions.
+  const saves = sections.filter(({ save }) => save !== null).map(({ name, save }) => [name, save])
+  expect(saves).toEqual([
+    ['Rules for the staff', { text: 'Save rules', primary: true, inActions: true, fromEdge: 0 }],
+    [
+      'Compaction for Claude members',
+      { text: 'Save compaction', primary: true, inActions: true, fromEdge: 0 },
+    ],
+    ['Wake-up calls', { text: 'Save wake-up calls', primary: true, inActions: true, fromEdge: 0 }],
+    ['Specs', { text: 'Save specs', primary: true, inActions: true, fromEdge: 0 }],
+  ])
+})
+
+test("Project settings: the compaction's two choices read as the approval's checkbox does, in the same colour and size", async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  const looks = (labels) =>
+    labels.evaluateAll((all) =>
+      all.map((label) => {
+        const style = getComputedStyle(label)
+        return [style.color, style.fontSize]
+      }),
+    )
+  const [approval] = await looks(dialog.locator('label:has([name="gate"])'))
+  const choices = await looks(
+    dialog
+      .getByRole('group', { name: 'Compaction for Claude members' })
+      .locator('label:has([type="radio"])'),
+  )
+  expect(choices).toEqual([approval, approval])
+})
+
+test("Project settings: a Claude Code member on a Mac whose permissions can't be read shows them unknown, each with its pane to open", async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'claude-code')
+  data.computerUse = { on: true, permissions: null }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'On for this project',
+      lines: [CLAUDE_ON],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'unknown', OPEN],
+        [SCREEN, 'unknown', OPEN],
+      ],
+    },
   ])
 })
 

@@ -667,14 +667,11 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .staff-rules textarea[aria-invalid="true"] { border-color: var(--buoy); }
 .staff-rules .staff-hint { color: var(--buoy); }
 /* The size the project's Claude members compact at: Claude's own point, or a size. */
-.claude-compaction .claude-compaction-choice { display: flex; align-items: center; gap: 8px; }
 .claude-compaction input[type="text"] { width: 10em; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px var(--mono); }
 .claude-compaction input[aria-invalid="true"] { border-color: var(--buoy); }
 .claude-compaction .staff-hint { color: var(--buoy); }
 /* The project's specs: the controls one under another. */
-.project-specs { gap: 10px; }
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
-.project-specs button { justify-self: start; }
 .project-specs :disabled { opacity: .5; }
 /* The variant's choice, with the Specmint version of the one that will be used beside it. */
 .specs-pick { display: flex; align-items: center; gap: 12px; }
@@ -683,13 +680,25 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 /* Settings, Specs: the Specmint this build brings, its version and its variants. */
 .specmint { gap: 8px; }
 .specmint .specmint-version { margin: 0; font-size: 13px; }
-.computer-use .computer-use-head { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
-.computer-use .computer-use-line { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
-.computer-use-grants { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.computer-use-grant { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
-.computer-use-grant button { margin-left: auto; }
-.computer-use-missing { color: var(--buoy); font-weight: 700; }
-.computer-use-permissions > .dialog-help { margin: 6px 0 0; }
+/* Computer use (T-1266): a block for each harness and one for the permissions, all of the one
+   shape: the heading with its status on its line, a muted line under it, and the section's own
+   gap from block to block, a hairline between. */
+.computer-use .computer-use-harnesses { display: contents; }
+.computer-use-block { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.computer-use-block .dialog-help { margin: 0; overflow-wrap: anywhere; }
+.computer-use-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.computer-use-head { margin: 0; font-size: 13px; font-weight: 650; }
+.computer-use-status { font-size: 13px; color: var(--muted); }
+.computer-use-status[data-state="on"], .computer-use-status[data-state="allowed"] { color: var(--seafoam); }
+.computer-use-status[data-state="missing"] { color: var(--buoy); font-weight: 650; }
+/* The permissions are the staff table's own component: a row for each pane, its name first, and the
+   button last, set against the block's edges. */
+.computer-use .computer-use-table { margin: 0; }
+.computer-use-table :is(th, td) { font-size: 13px; }
+.computer-use-table :is(th, td):first-child { padding-left: 0; }
+.computer-use-table :is(th, td):last-child { padding-right: 0; text-align: right; }
+.computer-use-table tbody th { padding: 10px; border-top: 1px solid var(--line-soft); font: inherit; letter-spacing: normal; text-transform: none; color: var(--foam); }
+.computer-use-table td button { white-space: nowrap; }
 .specmint .staff { margin: 0; }
 .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */
