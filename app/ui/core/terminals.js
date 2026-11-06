@@ -23,7 +23,8 @@ function about(lane, board, now, onTryAgain) {
 /**
  * The live windows beside the board: one row of terminals, scrolling
  * sideways, each as tall as the dock (how wide is the page's: the chief's
- * the whole dock beside the board, two-thirds of it with the board folded).
+ * the whole dock beside the board; with the board folded, the whole row
+ * alone and three-quarters of it once another card joins).
  * The chief's comes first, then the sessions' the human asked to see, in the
  * order they came into the dock. A terminal that comes in opens at the right end, scrolled
  * into view and with the keyboard; no terminal already open is resized or
@@ -189,8 +190,14 @@ export class TerminalsView {
     return there ? `${this.#gone.name}'s window has closed` : null
   }
 
-  /** The card at `point`, in the page's pixels, whatever is drawn over it: none under a dialog. */
+  /**
+   * The card at `point`, in the page's pixels, whatever is drawn over it: none
+   * under a dialog, and none where a window ended under the file — a card
+   * drawn over that place since is not the window the drop was meant for.
+   */
   #cardAt({ x, y }) {
+    const box = this.#gone?.box
+    if (box && x >= box.left && x < box.right && y >= box.top && y < box.bottom) return null
     return document.elementFromPoint(x, y)?.closest('.terminal-card') ?? null
   }
 

@@ -799,15 +799,19 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 /* One row of cards, each as tall as the dock: the chief's first, the others
    to its right. Beside the board, the chief's is the whole dock and each
    other two-thirds of it, a third of the window while the dock is half of
-   it; with the board folded, the chief's is two-thirds of the row and each
-   other the last third (less the 8px gap), so the first sits whole beside
-   it. A card is at least 320px, or the whole dock where that is narrower. A
-   card never shares the width with the others: one that opens goes after
-   the last, and none already open changes size; the dock scrolls sideways.
-   Its scrollbar is always there, where scrollbars take room: one that came
-   when the row first overflowed would shorten every card. A card snaps to
-   the row's padding, not its edge: snapped to the edge, the row sat 8px
-   along and the next card showed a sliver at the right. */
+   it; with the board folded, the chief's is the whole row alone and
+   three-quarters of it once another card joins, each other the last quarter
+   (less the 8px gap), so the first sits whole beside it. A card is at least
+   320px, or the whole dock where that is narrower. A card never shares the
+   width with the others: one that opens goes after the last, and none
+   already open changes size — a folded board's lone chief's alone gives up
+   a quarter of the row to one that joins, and takes the row back when the
+   last one leaves, one resize as folding the board already makes. The dock
+   scrolls sideways. Its scrollbar is always there, where scrollbars take
+   room: one that came when the row first overflowed would shorten every
+   card. A card snaps to the row's padding, not its edge: snapped to the
+   edge, the row sat 8px along and the next card showed a sliver at the
+   right. */
 .stage {
   display: flex;
   gap: 8px;
@@ -823,10 +827,13 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
   .stage > .terminal-card { flex: 0 0 max(min(100%, 320px), calc((100% - 8px) * 2 / 3)); }
   .stage > .terminal-card[data-role="chief"] { flex-basis: 100%; }
   .main[data-board="hidden"] .stage > .terminal-card {
-    flex-basis: max(min(100%, 320px), calc((100% - 8px) / 3));
+    flex-basis: max(min(100%, 320px), calc((100% - 8px) / 4));
   }
   .main[data-board="hidden"] .stage > .terminal-card[data-role="chief"] {
-    flex-basis: max(min(100%, 320px), calc((100% - 8px) * 2 / 3));
+    flex-basis: max(min(100%, 320px), calc((100% - 8px) * 3 / 4));
+  }
+  .main[data-board="hidden"] .stage > .terminal-card[data-role="chief"]:only-child {
+    flex-basis: 100%;
   }
 }
 .stage-empty { color: var(--muted); margin: 40px auto; text-align: center; }
