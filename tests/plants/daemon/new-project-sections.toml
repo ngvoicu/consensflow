@@ -8,7 +8,7 @@
 # out; a test of it fails. Every name holds `new project sections`.
 
 [run]
-nps-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project"]
+nps-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project|Enter in a field of a section of Project settings|no id is held|described by its own counter"]
 nps-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "opened_with"]
 nps-daemon-opening = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening"]
 nps-daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::computer_use"]
