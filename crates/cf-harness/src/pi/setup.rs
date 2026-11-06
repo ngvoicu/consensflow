@@ -27,8 +27,10 @@ use crate::shared::paths::set;
 
 /// The environment variables Pi takes a provider's credentials from (`providers.md`): a key or a
 /// token, or the base of a local server's address. The ones that only tune a provider that has a
-/// key (`AWS_REGION`, `AZURE_OPENAI_API_VERSION`) are left out.
-const CREDENTIALS: [&str; 41] = [
+/// key (`AWS_REGION`, `AZURE_OPENAI_API_VERSION`) are left out, and so is the key of the one
+/// provider that belongs to the harness this repository no longer names: Pi lists a provider's
+/// models whenever its key is set, so a Pi that lists nothing never has that one set.
+const CREDENTIALS: [&str; 40] = [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_OAUTH_TOKEN",
     "ANTHROPIC_AUTH_TOKEN",
@@ -46,7 +48,6 @@ const CREDENTIALS: [&str; 41] = [
     "AI_GATEWAY_API_KEY",
     "ZAI_API_KEY",
     "ZAI_CODING_CN_API_KEY",
-    "OPENCODE_API_KEY",
     "RADIUS_API_KEY",
     "TYPESAFE_API_KEY",
     "HF_TOKEN",
