@@ -223,7 +223,8 @@ fn a_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id_and_its_label
     for (model, effort, label) in [
         ("claude-opus-5-5-high-fast", Some("high"), Some("Opus")),
         ("claude-opus-5-5-high-fast", Some("high"), None),
-        ("max-model-max", Some("max"), Some("Model")),
+        // The word twice: which one is the effort's is not said, though one would read as the label.
+        ("max-model-max", Some("max"), Some("Max Model")),
         ("kimi-k3", Some("high"), Some("Kimi K3")),
         ("kimi-k3", None, Some("Kimi K3")),
         // A Pi model whose id ends with the word of the effort it runs at is that id.
