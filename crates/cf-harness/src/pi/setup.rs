@@ -222,6 +222,13 @@ pub(crate) fn reads() -> usize {
         .load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Whether a read of the folder asked for by the asking thread's reads is still on its thread (a
+/// test's).
+#[cfg(test)]
+pub(crate) fn reading_now() -> bool {
+    probe::current().reading.load(Ordering::SeqCst)
+}
+
 /// Has `hook` run where a read of the folder begins, on the thread that reads it.
 #[cfg(test)]
 pub(crate) fn before_read(hook: impl Fn() + Send + Sync + 'static) {

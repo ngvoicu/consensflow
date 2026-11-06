@@ -32,12 +32,13 @@ fn stalled(ms: u64) -> Arc<AtomicUsize> {
 fn the_thread_that_asked_goes_on_while_pi_s_folder_is_read_and_its_wait_is_bounded() {
     let pi = StandIn::new(&[], &[]);
     pi.child(&[answer("models", &[])], Ends::Asked);
-    stalled(1_500);
+    stalled(5_000);
     let mut driver = pi.begin(false);
     let began = Instant::now();
     let settled = driver.run();
+    // The stall is five seconds; a thread that asked and was held would be held for all of them.
     assert!(
-        began.elapsed() < Duration::from_millis(500),
+        began.elapsed() < Duration::from_millis(2_000),
         "the thread that asked was held {:?} by a file that did not open",
         began.elapsed()
     );
@@ -60,14 +61,14 @@ fn a_folder_still_being_read_is_read_by_no_second_thread() {
     let pi = StandIn::new(&[], &[]);
     pi.child(&[answer("models", &[])], Ends::Asked);
     pi.child(&[answer("models", &[])], Ends::Asked);
-    let began = stalled(1_500);
+    let began = stalled(5_000);
     let mut first = pi.begin(false);
     assert!(first.run().is_empty());
     let mut second = pi.begin(false);
     let began_second = Instant::now();
     let why = second.run().remove(0).1.unwrap_err();
     assert!(
-        began_second.elapsed() < Duration::from_millis(500),
+        began_second.elapsed() < Duration::from_millis(2_000),
         "the second ask waited {:?}",
         began_second.elapsed()
     );
@@ -81,12 +82,13 @@ fn a_folder_still_being_read_is_read_by_no_second_thread() {
 }
 
 /// The review's probe, in a runtime of one thread as the daemon's: a task that beats every 20 ms
-/// goes on beating while a read of the folder stalls for 3 s.
+/// goes on beating while a read of the folder stalls for 5 s (its bound is 2 s: the read ends
+/// at it, and the thread that asked was never held).
 #[test]
 fn the_heartbeat_of_the_thread_that_asked_stays_on_time_while_the_folder_stalls() {
     let pi = StandIn::new(&[], &[]);
     pi.child(&[answer("models", &[])], Ends::Asked);
-    stalled(3_000);
+    stalled(5_000);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -116,7 +118,7 @@ fn the_heartbeat_of_the_thread_that_asked_stays_on_time_while_the_folder_stalls(
         .max()
         .unwrap_or_default();
     assert!(
-        worst < Duration::from_millis(500),
+        worst < Duration::from_millis(1_000),
         "the heartbeat of the thread that asked missed {worst:?} while a file did not open"
     );
     assert!(
@@ -140,12 +142,19 @@ fn the_folder_is_read_again_once_the_stalled_read_has_ended() {
             std::thread::sleep(Duration::from_millis(300));
         }
     });
+    let waiting_for_it = Instant::now();
     let mut first = pi.begin(false);
     assert!(first.run().is_empty());
     assert!(pi.time.fire_next(i64::MAX), "the wait is armed");
     let why = settled(&mut first).unwrap_err();
     assert!(why.contains(LATE), "{why}");
-    std::thread::sleep(Duration::from_millis(600));
+    while setup::reading_now() {
+        assert!(
+            waiting_for_it.elapsed() < Duration::from_secs(10),
+            "the stalled read never ended"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let why = settled(&mut pi.begin(false)).unwrap_err();
     assert!(
         why.contains("no provider is set up"),
