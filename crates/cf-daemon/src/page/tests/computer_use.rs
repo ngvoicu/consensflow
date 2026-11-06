@@ -95,7 +95,12 @@ async fn a_folder_asked_for_before_there_is_a_project_is_read_as_a_project_of_it
                 .borrow_mut()
                 .insert("/work/fresh".to_owned());
             // New project asks about the folder the human picked: no project of it is there to ask for.
-            let answer = ask(&app, "computer_use.get", json!({ "directory": "/work/fresh" })).await;
+            let answer = ask(
+                &app,
+                "computer_use.get",
+                json!({ "directory": "/work/fresh" }),
+            )
+            .await;
             assert_eq!(answer["ok"], true, "{answer}");
             assert_eq!(
                 answer["permissions"],
@@ -107,7 +112,12 @@ async fn a_folder_asked_for_before_there_is_a_project_is_read_as_a_project_of_it
             );
             assert_eq!(answer["harnesses"]["codex"], json!({ "setUp": false }));
             // A folder Claude Code has no switch for says off.
-            let other = ask(&app, "computer_use.get", json!({ "directory": "/work/other" })).await;
+            let other = ask(
+                &app,
+                "computer_use.get",
+                json!({ "directory": "/work/other" }),
+            )
+            .await;
             assert_eq!(
                 other["harnesses"]["claude-code"],
                 json!({ "on": false, "folder": "/work/other" })
@@ -115,7 +125,10 @@ async fn a_folder_asked_for_before_there_is_a_project_is_read_as_a_project_of_it
             // The same as the project of that folder says, once there is one.
             let project = rig.kit.with_staff(&["zeus"]).id;
             let own = ask(&app, "computer_use.get", json!({ "project": project })).await;
-            let folder = own["harnesses"]["claude-code"]["folder"].as_str().unwrap().to_owned();
+            let folder = own["harnesses"]["claude-code"]["folder"]
+                .as_str()
+                .unwrap()
+                .to_owned();
             let asked = ask(&app, "computer_use.get", json!({ "directory": folder })).await;
             assert_eq!(asked, own);
             assert_eq!(rig.kicks.get(), 0, "a read wakes nothing");
@@ -128,7 +141,12 @@ async fn a_read_that_names_neither_a_project_nor_a_folder_is_refused() {
     LocalSet::new()
         .run_until(async {
             let (_daemon, app, _rig) = held();
-            for body in [json!({}), json!({ "directory": "" }), json!({ "directory": "  " }), json!({ "directory": 7 })] {
+            for body in [
+                json!({}),
+                json!({ "directory": "" }),
+                json!({ "directory": "  " }),
+                json!({ "directory": 7 }),
+            ] {
                 let refused = ask(&app, "computer_use.get", body.clone()).await;
                 assert_eq!(refused["ok"], false, "{body}: {refused}");
             }

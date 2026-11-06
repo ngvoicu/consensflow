@@ -589,12 +589,12 @@ file = "app/ui/core/dialogs.js"
 find = '''
       this.#wakeUp.read(project),
       this.#page.readSpecs(),
-      this.#computerUse.read(project),
+      this.#computerUse.read({ project }),
 '''
 replace = '''
       this.#wakeUp.read(project),
       null,
-      this.#computerUse.read(project),
+      this.#computerUse.read({ project }),
 '''
 
 [[plant]]

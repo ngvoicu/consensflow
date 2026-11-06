@@ -312,10 +312,18 @@ async fn rules_and_a_size_the_daemon_refuses_refuse_the_whole_start_in_the_dialo
                 assert_eq!(dialog["ok"], false, "{operation} {saving}");
                 assert_eq!(dialog["error"], refused["error"], "{operation} {saving}");
             }
-            assert_eq!(held.rig.kicks.get(), 0, "nothing succeeded, nothing is woken");
+            assert_eq!(
+                held.rig.kicks.get(),
+                0,
+                "nothing succeeded, nothing is woken"
+            );
             let projects = held.rig.kit.ledger.borrow().projects().unwrap();
             assert_eq!(projects.len(), 1, "only the project that was open");
-            assert_eq!(chief_launches(&held).len(), launched, "no window was asked for");
+            assert_eq!(
+                chief_launches(&held).len(),
+                launched,
+                "no window was asked for"
+            );
         })
         .await;
 }

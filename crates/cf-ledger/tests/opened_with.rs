@@ -365,9 +365,10 @@ fn a_project_opened_with_rules_and_a_compaction_has_them_when_it_is_first_seen_a
 ) {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
-    let request =
-        NewProject::from_json(&asked_with(json!({ "rules": RULES, "compaction": 250_000 })))
-            .expect("a request");
+    let request = NewProject::from_json(&asked_with(
+        json!({ "rules": RULES, "compaction": 250_000 }),
+    ))
+    .expect("a request");
     let opened = ledger.create_project(&request).expect("a project");
     // The view the chief's launch is given, which is what the rules in its text are read from.
     let view = serde_json::to_value(&opened).expect("the view");
