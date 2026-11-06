@@ -741,16 +741,6 @@ replace = '''
     let Some(listing) = kept else {'''
 
 [[plant]]
-name = "chief: the page marks no contributor model in the chief's list"
-meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
-runs = ["chm-page-pick"]
-
-[[plant.edit]]
-file = "app/ui/core/dialogs.js"
-find = '        model.contributor ? `${model.label} · Contributor` : model.label,'
-replace = '        model.label,'
-
-[[plant]]
 name = "chief: the page says no contributor warning for the chief's model"
 meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
 runs = ["chm-page-pick"]

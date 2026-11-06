@@ -318,12 +318,9 @@ class ModelPicker {
     ask.disabled = true
     const options = answer.listing.models.map((model) => {
       const id = modelOf(model)
-      // The id, exactly as the harness takes it; a contributor model its id does not say so of
-      // says so beside it.
-      const option = new Option(
-        model.contributor && !id.endsWith('-contributor') ? `${id} · Contributor` : id,
-        id,
-      )
+      // The id, exactly as the harness takes it: a contributor model's says so itself
+      // (`-contributor`), and the warning stands under the select once it is picked.
+      const option = new Option(id, id)
       // A model its harness lists and will not run is no pick, nor one taken off.
       option.disabled = model.disabled || this.#takenOff(kind, id)
       return option

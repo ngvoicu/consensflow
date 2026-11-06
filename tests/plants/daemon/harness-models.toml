@@ -378,7 +378,7 @@ replace = '''
 
 [[plant]]
 name = "harness models: a handle says an effort its model's name ends with twice"
-meant = "a_taken_handle_puts_the_harness_in_front_then_a_number_after"
+meant = "a_name_that_is_taken_puts_the_provider_of_a_pi_model_in_front_then_the_harness_then_a_number"
 runs = ["hm-ledger-handles"]
 
 [[plant.edit]]

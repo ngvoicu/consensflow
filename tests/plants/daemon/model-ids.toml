@@ -358,10 +358,10 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''
-        model.contributor && !id.endsWith('-contributor') ? `${id} · Contributor` : id,
+      const option = new Option(id, id)
 '''
 replace = '''
-        model.label,
+      const option = new Option(model.label, id)
 '''
 
 [[plant]]
