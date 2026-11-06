@@ -18,8 +18,9 @@
 //! Line by line, a value that ran over lines had its first line withheld and its continuations
 //! kept, and a cut to the last lines made before the look took the line that named a
 //! credential and left the lines of its value. So the block is taken as one text: the lines
-//! that are blank or a stack frame (`at …`, never quoted) are set aside, and if anything in the
-//! rest may hold a credential, **none of it is quoted** and [`WORDS_WITHHELD`] stands in its
+//! that are blank or a stack frame ([`FRAME`]: `at fn (file:1:2)`, `at file:1:2`,
+//! `at fn (<anonymous>)`; never quoted, so nothing in one can leak, and prose that begins with
+//! `at` is none) are set aside, and if anything in the rest may hold a credential, **none of it is quoted** and [`WORDS_WITHHELD`] stands in its
 //! place; the description before the mark, the exit code in it and the names of what Pi was
 //! loading are kept. Only a block that passed is cut, to its last [`QUOTE_LINES`] lines within
 //! [`QUOTE_CHARS`] characters, and masked.
@@ -62,6 +63,16 @@ static NAMED_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("a pattern")
 });
 
+/// A line of a stack, which is never quoted: Node's `at name (file:line:column)`, `at
+/// file:line:column`, `at name (<anonymous>)`, `at name (native)` and `at async Promise.all (index 0)`. A line that begins with
+/// `at` and is none of these is prose, and is looked at with the rest: it may be the label of
+/// the value below it.
+#[allow(clippy::expect_used)]
+static FRAME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^at\s.*(?::\d+:\d+\)?|\(<anonymous>\)|\(native\)|\(index \d+\))$")
+        .expect("a pattern")
+});
+
 /// Whether `lines`, taken as one text, may hold a credential.
 fn may_hold_a_credential(lines: &[&str]) -> bool {
     let rows: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
@@ -89,7 +100,7 @@ fn said(program: &str) -> Option<String> {
     let lines: Vec<&str> = program
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("at "))
+        .filter(|line| !line.is_empty() && !FRAME.is_match(line))
         .collect();
     if lines.is_empty() {
         return None;

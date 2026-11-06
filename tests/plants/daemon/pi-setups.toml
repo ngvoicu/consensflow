@@ -763,7 +763,7 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '.filter(|line| !line.is_empty() && !line.starts_with("at "))'
+find = '.filter(|line| !line.is_empty() && !FRAME.is_match(line))'
 replace = '.filter(|line| !line.is_empty())'
 
 [[plant]]
@@ -915,3 +915,13 @@ find = '''                crate::shown::quotable(why)
                     .replacen(cf_proto::models::IT_SAID, "; it said: ", 1)
                     .replace('\n', " / ")'''
 replace = '                crate::shown::quotable(why)'
+
+[[plant]]
+name = "pi-setups: a line that begins with at is taken for a frame"
+meant = "a_line_that_begins_with_at_and_is_no_frame_is_screened_with_the_rest"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '.filter(|line| !line.is_empty() && !FRAME.is_match(line))'
+replace = '.filter(|line| !line.is_empty() && !line.starts_with("at "))'

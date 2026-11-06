@@ -148,6 +148,35 @@ fn a_stack_frame_that_names_a_credential_word_withholds_nothing_because_it_is_ne
     );
 }
 
+/// Only a line of the shape of a frame is set aside: prose that begins with `at` is screened,
+/// for it may be the label of the value below it.
+#[test]
+fn a_line_that_begins_with_at_and_is_no_frame_is_screened_with_the_rest() {
+    for words in [
+        "at the end, token:\nabcd efgh",
+        "at least one key:\nsk-abcd",
+        "at the top: password\ncorrect horse",
+    ] {
+        assert_eq!(quotable(&pi_said(words)), withheld(), "{words}");
+    }
+    for frame in [
+        "at load (/x/e.ts:1:1)",
+        "at /x/e.ts:12:34",
+        "at async Promise.all (index 0)",
+        "at Object.<anonymous> (/x/e.js:3:9)",
+        "at new Promise (<anonymous>)",
+        "at Array.map (native)",
+        "at Module._compile (node:internal/modules/cjs/loader:1554:14)",
+    ] {
+        let said = quotable(&pi_said(&format!("Error: boom\n{frame}")));
+        assert!(
+            said == pi_said("Error: boom")
+                || said == pi_said("Error: boom\nat async Promise.all (index 0)"),
+            "{frame}: {said}"
+        );
+    }
+}
+
 #[test]
 fn the_lines_that_are_quoted_are_masked_as_a_note_masks_them() {
     let said = quotable(&pi_said(
