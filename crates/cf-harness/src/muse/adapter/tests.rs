@@ -73,6 +73,19 @@ fn prepared(env: &Env, resume: Option<&str>) -> Result<Prepared, String> {
     finished(adapter(env).prepare(&launch(&id, resume)))
 }
 
+/// [`prepared`] for a window whose role text is `instructions`.
+fn prepared_with(env: &Env, resume: Option<&str>, instructions: &str) -> Result<Prepared, String> {
+    let id = LaunchId::new(LAUNCH).unwrap();
+    let mut launch = launch(&id, resume);
+    launch.instructions = instructions;
+    finished(adapter(env).prepare(&launch))
+}
+
+/// A role text of `lines` lines of 70 characters: 71 bytes a line.
+fn role_of(lines: usize) -> String {
+    format!("{}\n", "a".repeat(70)).repeat(lines)
+}
+
 /// The hooks a command line gives Muse with `-c hooks=`.
 fn hooks_of(argv: &[String]) -> Value {
     let at = argv.iter().position(|word| word == "-c").unwrap();
@@ -160,9 +173,19 @@ fn a_fresh_window_runs_the_pinned_binary_in_full_permission_with_its_hook_and_no
         command.contains(&format!("'{}'", role.display())),
         "{command}"
     );
+    // Its role fits in a hook: the first hook says it, and the hooks past it, every launch's
+    // eight, write a filler over any block an older role left.
     assert!(
-        command.ends_with(&format!("'{}'", folder.join("sessions.jsonl").display())),
+        command.ends_with(&format!(
+            "'{}' '0'",
+            folder.join("sessions.jsonl").display()
+        )),
         "{command}"
+    );
+    assert_eq!(
+        hooks["SessionStart"][0]["hooks"].as_array().unwrap().len(),
+        crate::muse::MOST_PARTS,
+        "{hooks}"
     );
     assert_eq!(fs::read_to_string(role).unwrap(), "# ConsensFlow worker");
     assert_eq!(
@@ -389,4 +412,76 @@ fn a_chief_whose_window_is_open_is_given_the_skill_for_its_folder_where_a_launch
     let first = fs::read(&file).unwrap();
     adapter.place_specmint(&specs, &id).unwrap();
     assert_eq!(fs::read(&file).unwrap(), first);
+}
+
+/// T-1246: Muse takes at most 16,384 bytes of a hook's output, and a chief's role is longer,
+/// so a window whose role needs more than one hook is given one for each part, numbered, all
+/// of them on the one role file: the part a hook says is its last word. And every window is
+/// given all of them, whatever its role needs: a window can be put on a conversation an older
+/// role left blocks in (a human's `/resume` inside it), and the hooks past the role's parts
+/// write a filler over each.
+#[test]
+fn every_window_is_given_all_the_hooks_the_role_s_parts_first_and_a_filler_for_each_past_them() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.14-R7309.1"));
+    for (name, role, parts) in [
+        ("a role of one part", "# ConsensFlow worker".to_owned(), 1),
+        // 480 lines of 71 bytes: 34 KB, three parts.
+        ("a role of three", role_of(480), 3),
+    ] {
+        assert_eq!(crate::muse::parts(&role).len(), parts, "{name}");
+        for resume in [None, Some("01a17bc9-e758-77f3-ac8d-a725edf373ae")] {
+            let prepared = prepared_with(&env, resume, &role).unwrap();
+            let hooks = hooks_of(&prepared.argv);
+            let given = hooks["SessionStart"][0]["hooks"].as_array().unwrap();
+            assert_eq!(
+                given.len(),
+                crate::muse::MOST_PARTS,
+                "{name}, resume {resume:?}"
+            );
+            let numbers: Vec<String> = given
+                .iter()
+                .map(|hook| {
+                    let command = hook["command"].as_str().unwrap();
+                    command.rsplit_once(' ').unwrap().1.to_owned()
+                })
+                .collect();
+            let wanted: Vec<String> = (0..crate::muse::MOST_PARTS)
+                .map(|at| format!("'{at}'"))
+                .collect();
+            assert_eq!(numbers, wanted, "{name}");
+            // Each says its block of the file the launch wrote, the same for every one.
+            let files: Vec<_> = given
+                .iter()
+                .map(|hook| {
+                    hook["command"]
+                        .as_str()
+                        .unwrap()
+                        .split(" '")
+                        .nth(1)
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect();
+            assert!(files.windows(2).all(|pair| pair[0] == pair[1]), "{files:?}");
+        }
+    }
+}
+
+#[test]
+fn a_role_that_needs_more_hooks_than_muse_was_measured_to_take_is_refused_in_words() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.14-R7309.1"));
+    // Past the most parts: 355 KB is about 23 parts of 16,000 bytes.
+    let role = role_of(5_000);
+    let refused = prepared_with(&env, None, &role).err().unwrap();
+    assert!(
+        refused.contains("355000 bytes")
+            && refused.contains(&format!("{} hooks", crate::muse::MOST_PARTS)),
+        "{refused}"
+    );
+    // 106 KB is 7 parts: the most a role that fits has is 8.
+    let allowed = role_of(1_500);
+    assert_eq!(crate::muse::parts(&allowed).len(), 7);
+    assert!(prepared_with(&env, None, &allowed).is_ok());
 }

@@ -103,28 +103,26 @@ fn really(launcher: &Path) -> PathBuf {
     }
 }
 
-/// The hook ConsensFlow adds for a launch's SessionStart: `cf hook muse-session` of the
-/// window's `cf` (`pane_cf`, named in full, as Muse's hook shell has a `PATH` of its
-/// own), with the role file and the file it writes the window's sessions in. Muse runs
-/// `command` in a POSIX shell; on Windows (`windows`) it runs `commandWindows` in
-/// cmd.exe, through Rust's own quoting, so that every `"` of it reaches cmd.exe as `\"`
-/// and no quoted word survives (T-792's probe on zeewin2: "The filename, directory
-/// name, or volume label syntax is incorrect"): there each word is a path cmd.exe takes
-/// as it is, its short form where it holds a blank ([`cf_process::cmd_word`]), and a
-/// launch whose paths have neither is refused in plain words. A check that keeps a
-/// launch's hooks to ConsensFlow's knows it by this.
-pub(crate) fn added_hook(
+/// The hooks ConsensFlow adds for a launch's SessionStart, `count` of them in one group
+/// of the matcher's, the group put first ([`hooks`]): each `cf hook muse-session` of the window's `cf` (`pane_cf`, named
+/// in full, as Muse's hook shell has a `PATH` of its own), with the role file, the file it
+/// writes the window's sessions in, and the number of the part of the role it says (0 for
+/// the first; a hook may say 16,384 bytes of output and a role is longer, so each part has
+/// a hook, `session_hook`). Muse runs `command` in a POSIX shell; on Windows (`windows`) it
+/// runs `commandWindows` in cmd.exe, through Rust's own quoting, so that every `"` of it
+/// reaches cmd.exe as `\"` and no quoted word survives (T-792's probe on zeewin2: "The
+/// filename, directory name, or volume label syntax is incorrect"): there each word is a
+/// path cmd.exe takes as it is, its short form where it holds a blank
+/// ([`cf_process::cmd_word`]), and a launch whose paths have neither is refused in plain
+/// words. A check that keeps a launch's hooks to ConsensFlow's knows it by this.
+pub(crate) fn added_hooks(
     pane_cf: &str,
     role_file: &str,
     said: &str,
     windows: bool,
+    count: usize,
 ) -> Result<Value, String> {
-    let mut hook = json!({
-        "type": "command",
-        "command": cf_hook(pane_cf, "muse-session", &[role_file, said]),
-        "timeout": SESSION_HOOK_SECONDS,
-    });
-    if windows {
+    let words = if windows {
         let word = |path: &str| {
             cf_process::cmd_word(Path::new(path)).ok_or_else(|| {
                 format!(
@@ -132,14 +130,26 @@ pub(crate) fn added_hook(
                 )
             })
         };
-        hook["commandWindows"] = Value::String(format!(
-            "{} hook muse-session {} {}",
-            word(pane_cf)?,
-            word(role_file)?,
-            word(said)?
-        ));
-    }
-    Ok(json!({ "matcher": "", "hooks": [hook] }))
+        Some((word(pane_cf)?, word(role_file)?, word(said)?))
+    } else {
+        None
+    };
+    let hooks: Vec<Value> = (0..count)
+        .map(|part| {
+            let number = part.to_string();
+            let mut hook = json!({
+                "type": "command",
+                "command": cf_hook(pane_cf, "muse-session", &[role_file, said, &number]),
+                "timeout": SESSION_HOOK_SECONDS,
+            });
+            if let Some((cf, role, said)) = &words {
+                hook["commandWindows"] =
+                    Value::String(format!("{cf} hook muse-session {role} {said} {number}"));
+            }
+            hook
+        })
+        .collect();
+    Ok(json!({ "matcher": "", "hooks": hooks }))
 }
 
 /// The hooks the owner's settings give Muse, in `env`'s config: none where there is no
@@ -164,7 +174,11 @@ fn owner_hooks(env: &Env) -> Result<Map<String, Value>, String> {
 }
 
 /// The hooks a launch runs with: the owner's, each event's in its order, and
-/// ConsensFlow's SessionStart hook after the owner's own.
+/// ConsensFlow's SessionStart hooks (`added`, one group) **before** the owner's own: ours
+/// always print, so each is the block of its number whatever the owner's hooks print
+/// (Muse numbers the blocks of the hooks that printed, in the order of the hooks), and a
+/// hook of the owner's that prints only sometimes cannot move a part of the role to
+/// another block, or leave an old one in the conversation.
 pub(super) fn hooks(env: &Env, added: Value) -> Result<Value, String> {
     let mut hooks = owner_hooks(env)?;
     let mut starts = match hooks.remove("SessionStart") {
@@ -174,27 +188,31 @@ pub(super) fn hooks(env: &Env, added: Value) -> Result<Value, String> {
             return Err("the hooks of Muse Code's settings cannot take ConsensFlow's".to_owned())
         }
     };
-    starts.push(added);
+    starts.insert(0, added);
     hooks.insert("SessionStart".to_owned(), Value::Array(starts));
     Ok(Value::Object(hooks))
 }
 
-/// What the window of `launch` runs with, its role in `role_file`: its folder made, the
-/// program it runs, and the hooks it is given.
+/// What the window of `launch` runs with, its role in `role_file`, said by `count` hooks (every
+/// launch gives [`super::session_hook::MOST_PARTS`]: a hook for each part of the role and, past
+/// them, one that writes a filler over each block an older role may have left): its folder
+/// made, the program it runs, and the hooks it is given.
 pub(super) fn integration(
     env: &Env,
     launch: &LaunchId,
     executable: &str,
     pane_cf: &str,
     role_file: &str,
+    count: usize,
 ) -> Result<Integration, String> {
     let program = pinned(executable, env)?;
     let root = launch_folder("muse", env, launch)?;
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
     let said = path::join(&[&root, SAID]);
+    let count = count.min(super::session_hook::MOST_PARTS);
     let hooks = hooks(
         env,
-        added_hook(pane_cf, role_file, &said, env.on_windows())?,
+        added_hooks(pane_cf, role_file, &said, env.on_windows(), count)?,
     )?;
     let mut given = vec![(NO_UPDATE.0.to_owned(), NO_UPDATE.1.to_owned())];
     given.extend(super::paths::data_home_given(env).map(|real| ("XDG_DATA_HOME".to_owned(), real)));
