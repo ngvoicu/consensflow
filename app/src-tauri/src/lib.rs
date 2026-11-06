@@ -1,6 +1,9 @@
-// The app reads its environment, starts its processes, unwraps and prints
-// where it needs to: it is older than the rewrite's rules (clippy.toml, the
-// workspace's lints) and not moved onto them yet.
+// The app unwraps and prints where it needs to: it is older than the rewrite's
+// rules (clippy.toml, the workspace's lints) and not moved onto them yet. Where
+// it reads its environment or starts a process itself, the item says so with
+// its own `#[allow(clippy::disallowed_methods)]` and its reason; the lints that
+// refuse an HTTPS client are allowed only by the one constructor (update_page.rs)
+// and never for the crate (tools/xtask/tests/tls_clients.rs, T-1253).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

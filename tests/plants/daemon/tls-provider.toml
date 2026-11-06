@@ -55,8 +55,9 @@ if (ran.status !== 0) {
   console.log(`clippy for the app failed, and not on a rule of clippy.toml: ${text.find((line) => line.startsWith("error"))}`);
 }
 ''']
-# The test that refuses an allow of those lints for a whole module or crate, and its reader.
-tls-crate-allows = ["cargo", "test", "--offline", "-p", "xtask", "--test", "tls_clients"]
+# The test that refuses an allow of those lints for a whole module or crate, and its reader, built in
+# the folder xtask is tested in (a test of the package whole is not to replace the xtask that runs).
+tls-crate-allows = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "tls_clients"]
 
 # The feed's client is built on whatever the process has: with none, reqwest panics.
 [[plant]]
