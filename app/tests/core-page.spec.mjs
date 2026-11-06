@@ -4743,6 +4743,38 @@ test("New project: computer use is read for the folder picked, shown while the c
   ])
 })
 
+test('New project: back from System Settings, computer use is read again for the folder picked, and only while the dialog is open', async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = { on: true, permissions: { accessibility: false, screenRecording: false } }
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  const accessibility = made.computerUse.locator(
+    'tr[data-grant="accessibility"] .computer-use-status',
+  )
+  await expect(accessibility).toHaveText('not allowed')
+  // The human allows it in System Settings and comes back to the app.
+  await page.evaluate(() => {
+    window.__model.computerUse = {
+      on: true,
+      permissions: { accessibility: true, screenRecording: false },
+    }
+    window.dispatchEvent(new Event('focus'))
+  })
+  await expect(accessibility).toHaveText('allowed')
+  expect(await calls(page, 'computer_use.get')).toEqual([
+    { directory: '/work/fresh' },
+    { directory: '/work/fresh' },
+  ])
+  // A dialog that is shut asks nothing.
+  await made.dialog.getByRole('button', { name: 'Cancel' }).click()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await page.evaluate(() => new Promise((done) => setTimeout(done, 100)))
+  expect(await calls(page, 'computer_use.get')).toHaveLength(2)
+})
+
 test("offers a new project's chief only the harnesses installed here, and its staff only members on them", async ({
   page,
 }) => {
