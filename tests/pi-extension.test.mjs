@@ -704,7 +704,10 @@ describe('compaction at a rest', () => {
       join(s.inbox, `${idOf(n)}.json`),
       `${JSON.stringify({ ...envelopeRecord, id: idOf(n), expiresAt: Date.now() + 30_000, ...more })}\n`,
     )
-  const ackOf = (s, n) => waitFor(join(s.ack, `${idOf(n)}.json`))
+  // A runner's disk can be slow to remove a refused message (an antivirus scans the folder), and a
+  // read that comes meanwhile waits behind it: the answer is waited for longer than the other
+  // tests' 300 ms.
+  const ackOf = (s, n, ms = 5_000) => waitFor(join(s.ack, `${idOf(n)}.json`), ms)
   const sentWithin = async (s, count, ms = 2_000) => {
     const deadline = Date.now() + ms
     while (s.pi.sent.length < count && Date.now() < deadline) {
@@ -770,7 +773,7 @@ describe('compaction at a rest', () => {
       await s.extension.consume()
       assert.equal((await ackOf(s, 1)).reason, 'native session changed')
       assert.equal(
-        (await waitFor(join(s.expired, '..', 'ack', `${idOf(2)}.json`))).reason,
+        (await waitFor(join(s.expired, '..', 'ack', `${idOf(2)}.json`), 5_000)).reason,
         'expired-before-send',
       )
       assert.deepEqual(s.pi.sent, [])
@@ -789,7 +792,7 @@ describe('compaction at a rest', () => {
       await compaction.complete()
       await arrive(s, 2)
       await s.extension.consume()
-      await assert.rejects(ackOf(s, 2), /timed out/)
+      await assert.rejects(ackOf(s, 2, 300), /timed out/)
       assert.deepEqual(s.pi.sent, [])
     } finally {
       await s.close()
@@ -801,7 +804,7 @@ describe('compaction at a rest', () => {
     try {
       await arrive(s, 1)
       await s.extension.consume()
-      await assert.rejects(ackOf(s, 1), /timed out/)
+      await assert.rejects(ackOf(s, 1, 300), /timed out/)
       assert.deepEqual(s.pi.sent, [])
     } finally {
       await s.close()
@@ -888,9 +891,10 @@ for (const source of ['ours', "Pi's own"]) {
             envelopeRecord.text,
           )
         // Three handovers with a short life, each after the one before has expired: the
-        // compaction outlasts them all.
+        // compaction outlasts them all. The life is long enough for a slow runner's disk to
+        // answer within it (150 ms was enough on the Mac and zeewin2).
         for (const attempt of [1, 2, 3]) {
-          const result = await handover(150)
+          const result = await handover(600)
           assert.equal(
             result.ack?.reason,
             'chief busy',
@@ -898,7 +902,7 @@ for (const source of ['ours', "Pi's own"]) {
           )
           assert.equal(result.admitted, false, `attempt ${attempt}`)
           assert.equal(result.bytesWritten, 0, `attempt ${attempt}`)
-          await new Promise((resolve) => setTimeout(resolve, 200))
+          await new Promise((resolve) => setTimeout(resolve, 700))
         }
         assert.deepEqual(s.pi.sent, [], 'nothing went in while Pi compacted')
         await compaction[end]()
