@@ -41,6 +41,8 @@ mod a_cf_a_build_took_away_left_a_window_none;
 mod a_close_waited_for_a_codex_chiefs_server_to_end;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
 mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
+#[path = "regressions/a_codex_chiefs_idle_prompt_was_read_as_a_dialog.rs"]
+mod a_codex_chiefs_idle_prompt_was_read_as_a_dialog;
 #[path = "regressions/a_codex_chiefs_lost_turn_end_held_its_next_result.rs"]
 mod a_codex_chiefs_lost_turn_end_held_its_next_result;
 #[path = "regressions/a_codex_window_compacting_before_its_first_message_was_closed.rs"]

@@ -273,10 +273,17 @@ impl Agent {
     /// Tells every connection that listens `method` of the thread, as Codex notifies;
     /// one that has gone is told no more.
     fn notify(&self, method: &str, turn: &str) {
-        let notice = json!({
-            "method": method,
-            "params": { "threadId": self.thread(), "turn": { "id": turn } },
-        });
+        self.notify_of(method, turn, None);
+    }
+
+    /// [`Agent::notify`], with the words the turn began on where it is said so: the stand-in's
+    /// TUI draws them as Codex draws a message of the user's (`CF_TEST_CODEX_SCREEN`).
+    fn notify_of(&self, method: &str, turn: &str, input: Option<&str>) {
+        let mut params = json!({ "threadId": self.thread(), "turn": { "id": turn } });
+        if let Some(input) = input {
+            params["input"] = json!(input);
+        }
+        let notice = json!({ "method": method, "params": params });
         held(&self.listeners).retain(|listener| listener.send(notice.clone()).is_ok());
     }
 
@@ -340,7 +347,7 @@ impl Agent {
         let began = Instant::now();
         let turn = uuid::Uuid::new_v4().to_string();
         self.running.store(true, Ordering::Relaxed);
-        self.notify("turn/started", &turn);
+        self.notify_of("turn/started", &turn, Some(text));
         let _completed = Completed {
             agent: self,
             turn: &turn,

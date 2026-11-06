@@ -22,6 +22,7 @@
 //! the cases left.
 
 mod channel;
+mod dialogs;
 mod resumed;
 mod roles;
 mod specs;

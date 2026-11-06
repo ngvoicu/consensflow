@@ -19,7 +19,12 @@
 //! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
 //! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
 //! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
-//! end it. A thread another server still holds is resumed read-only (`agent`).
+//! end it. With `CF_TEST_CODEX_SCREEN=drawn` (and the TUI waiting) the TUI draws what Codex's
+//! draws at rest and as a turn goes (T-1240, `screen`): a message of the user's after its `›`, the
+//! model's answer after its `•`, `Worked for` and the time, and under them its composer
+//! ("› Ask Codex to do anything") and its footer, a blank line between each, as the recorded
+//! screens of Codex 0.164 show them. A thread another server still holds is resumed read-only
+//! (`agent`).
 //!
 //! The server listens where it is told, as Codex's does: on a Unix socket
 //! (`unix://<path>`), or on loopback (`ws://127.0.0.1:0`, Windows'), where it
@@ -43,6 +48,8 @@ mod arguments;
 mod children;
 #[path = "fake_codex/probes.rs"]
 mod probes;
+#[path = "fake_codex/screen.rs"]
+mod screen;
 #[path = "fake_codex/servers.rs"]
 mod servers;
 #[path = "fake_agent/terminal.rs"]
@@ -582,9 +589,18 @@ fn tui(args: &[String]) -> ExitCode {
     // among them, which stops the turn at work (T-1207).
     terminal::raw_mode();
     let typed = typed::typed();
+    let drawing = screen::drawn();
+    if drawing {
+        screen::at_rest(&[]);
+    }
     let mut asked = 3;
     loop {
         match socket.read() {
+            Ok(Message::Text(notice)) if drawing => {
+                if let Ok(notice) = serde_json::from_str::<Value>(notice.as_str()) {
+                    screen::draw(&notice);
+                }
+            }
             Ok(_) => {}
             Err(tungstenite::Error::Io(failed)) if is_a_wait(&failed) => {}
             Err(_) => return ExitCode::SUCCESS,

@@ -1,0 +1,2028 @@
+# Real screens the harnesses drew, as their rows (the empty rows and the rules in them: the corpus cuts the tail with the pane host's own
+# filter, `cf_proto::panes::word_tail`), from the probes of T-model-switch (2026-10-29), those whose last twelve lines say something and
+# have a cursor glyph on a line of words. One section a screen: `=== <harness> <file> <state>`, the state `idle` (the prompt is drawn) or
+# `dialog` (a picker, a question, a menu waits for a key). Scrubbed (T-1243): the owner's home and project paths, session ids, usage, credit
+# and reset figures and the timezone are values of the same length that are none of the owner's.
+=== codex 01-start.txt idle
+  >_ OpenAI Codex (v0.164.0)
+     /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+  permissions: YOLO mode
+
+  To get started, describe a task or try one of these commands:
+
+  /init - create an AGENTS.md file with instructions for Codex
+  /status - show current session configuration
+  /permissions - choose what Codex is allowed to do
+  /model - choose what model and reasoning effort to use
+  /review - review any changes and find issues
+
+
+
+
+                                                                      ⣀⣤⣤⣤⣀⣀
+                                                                   ⣠⣶⣿⣿⣿⣿⣿⣿⣿⣿⣦⣤⣤⣤⣤⣤⣤⡀
+                                                                 ⢀⣾⣿⣿⠿⠋⠉⠉⢉⣭⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣷⣄
+                                                                ⣀⣾⣿⣿⠃ ⣀⣴⣾⣿⣿⡿⠟⠋ ⣀⡀ ⠈⠙⢿⣿⣿⣧
+                                                             ⣀⣶⣿⣿⣿⣿⡇ ⢸⣿⣿⡿⠛⠉⢀⣠⣴⣿⣿⣿⣷⣦⣀⠈⢻⣿⣿⡇
+                                                            ⣰⣿⣿⡿⢿⣿⣿⡇ ⢸⣿⣿⢀⣤⣶⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣮⣿⣿⡷
+                                                           ⢰⣿⣿⡟⠁⢸⣿⣿⡇ ⢸⣿⣿⣿⣿⠿⠿⣿⣿⣿⣦⣄⡀⠈⠛⠿⣿⣿⣿⣧⡀
+                                                           ⣾⣿⣿⠃ ⢸⣿⣿⡇ ⢸⣿⣿⠋⠁  ⠈⠙⢻⣿⣿⣿⣶⣤⡀ ⠹⢿⣿⣷⡄
+                                                           ⢸⣿⣿⣇ ⠸⣿⣿⣷⣦⣼⣿⣿      ⢸⣿⣿⠻⢿⣿⣿⡇ ⠘⣿⣿⣿
+                                                           ⠈⢿⣿⣿⣦⡀⠈⠛⠿⣿⣿⣿⣿⣄⡀  ⢀⣠⣼⣿⣿  ⣿⣿⡇  ⣿⣿⣿⠇
+                                                             ⢻⣿⣿⣿⣷⣦⣀⠈⠙⠻⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿  ⣿⣿⡇ ⣠⣿⣿⣿
+                                                             ⢸⣿⣿⡿⢿⣿⣿⣿⣦⣠⣴⣿⣿⣿⡿⠟⠋⢸⣿⣿  ⣿⣿⣷⣴⣿⣿⣿⠃
+                                                             ⠘⣿⣿⣷ ⠈⠛⢿⣿⣿⣿⠿⠋⠉ ⣠⣴⣿⣿⣿  ⣿⣿⣿⣿⣿⠟⠁
+                                                              ⠻⣿⣿⣿⣤⣀ ⠈⠉ ⢀⣤⣶⣿⣿⣿⠿⠟⠁ ⣰⣿⣿⡟⠋⠁
+                                                               ⠈⠿⣿⣿⣿⣿⣶⣾⣿⣿⣿⣿⠟⠋⠁  ⣠⣼⣿⣿⡟
+                                                                  ⠙⠛⠛⠛⠻⠛⢿⣿⣿⣿⣿⣷⣾⣿⣿⣿⡿⠏
+                                                                         ⠈⠙⠛⠿⠿⠿⠿⠛⠉
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex 02-turn1.txt idle
+  To get started, describe a task or try one of these commands:
+
+  /init - create an AGENTS.md file with instructions for Codex
+  /status - show current session configuration
+  /permissions - choose what Codex is allowed to do
+  /model - choose what model and reasoning effort to use
+  /review - review any changes and find issues
+
+
+› Reply with exactly: CF_OK
+
+
+• CF_OK
+
+  Worked for 1s • 12:56
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex 03-tool-turn.txt idle
+› Reply with exactly: CF_OK
+
+
+• CF_OK
+
+  Worked for 1s • 12:56
+
+
+› Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+
+• Explored
+  └ List ls
+    + Show details
+
+• The ls command listed 3 files.
+
+  Worked for 2s • 12:56
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex 04-model-picker.txt dialog
+    + Show details
+
+• The ls command listed 3 files.
+
+  Worked for 2s • 12:56
+
+
+
+
+
+
+  Select Model and Effort
+
+
+  1. GPT-6.1-Sol             Latest workhorse model for coding and everyday work.
+  2. GPT-6-Astra             Frontier intelligence for the most demanding work.
+  3. GPT-6-Sol               Previous generation workhorse model.
+  4. GPT-6-Luna              Fast and affordable model for easier tasks.
+  5. GPT-5.6-Sol             Older generation workhorse model.
+  6. GPT-5.6-Terra           Older balanced model for straightforward work.
+› 7. GPT-5.6-Luna (current)  Older fast and efficient model.
+
+  enter select · esc back
+=== codex 04a-typed-model.txt idle
+› Reply with exactly: CF_OK
+
+
+• CF_OK
+
+  Worked for 1s • 12:56
+
+
+› Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+
+• Explored
+  └ List ls
+    + Show details
+
+• The ls command listed 3 files.
+
+  Worked for 2s • 12:56
+
+
+
+
+
+
+
+
+
+
+
+
+› /model  choose what model and reasoning effort to use
+
+› /model
+
+  GPT-5.6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+=== codex 05-effort-picker.txt dialog
+• Explored
+  └ List ls
+    + Show details
+
+• The ls command listed 3 files.
+
+  Worked for 2s • 12:56
+
+
+
+
+
+
+
+
+  Select Reasoning Level for GPT-6-Luna
+
+
+  1. Low               Fast responses with lighter reasoning
+› 2. Medium (default)  Balances speed and reasoning depth for everyday tasks
+  3. High              Greater reasoning depth for complex problems
+  4. Extra high        Extra high reasoning depth for complex problems
+  5. More reasoning…   Max consumes usage limits faster
+
+  enter default · s session · esc back
+=== codex 05b-effort-up.txt dialog
+• Explored
+  └ List ls
+    + Show details
+
+• The ls command listed 3 files.
+
+  Worked for 2s • 12:56
+
+
+
+
+
+
+
+
+  Select Reasoning Level for GPT-6-Luna
+
+
+› 1. Low               Fast responses with lighter reasoning
+  2. Medium (default)  Balances speed and reasoning depth for everyday tasks
+  3. High              Greater reasoning depth for complex problems
+  4. Extra high        Extra high reasoning depth for complex problems
+  5. More reasoning…   Max consumes usage limits faster
+
+  enter default · s session · esc back
+=== codex 06-after-switch-session.txt idle
+• CF_OK
+
+  Worked for 1s • 12:56
+
+
+› Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+
+• Explored
+  └ List ls
+    + Show details
+
+• The ls command listed 3 files.
+
+  Worked for 2s • 12:56
+
+• Model changed to gpt-6-luna low for this session only
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex 07-turn-on-B.txt idle
+  └ List ls
+    + Show details
+
+• The ls command listed 3 files.
+
+  Worked for 2s • 12:56
+
+• Model changed to gpt-6-luna low for this session only
+
+
+› Reply with exactly: CF_B
+
+
+• CF_B
+  └ Tip: You can run any shell command from Codex using ! (e.g. !ls)
+
+  Worked for 1s • 12:56
+
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex 08-status.txt idle
+  Permissions:         Full Access
+  Agents.md:           <none>
+  Account:             <redacted>
+  Thread name:         Reply with CF_OK
+  Collaboration mode:  Default
+  Session:             00000000-0000-4000-8000-000000000001
+
+  Context window:      55% left (55.5K used / 555K)
+  Weekly limit:        [██████████░░░░░░░░░░] 55% left (resets 12:34 on 12 Jan)
+  Credits:             55555 credits
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex 09-compact.txt idle
+  Account:             <redacted>
+  Thread name:         Reply with CF_OK
+  Collaboration mode:  Default
+  Session:             00000000-0000-4000-8000-000000000001
+
+  Context window:      55% left (55.5K used / 555K)
+  Weekly limit:        [██████████░░░░░░░░░░] 55% left (resets 12:34 on 12 Jan)
+  Credits:             55555 credits
+
+• Context compacted · 1s
+
+  Worked for 1s • 12:57
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex 10-after-compact.txt idle
+  Session:             00000000-0000-4000-8000-000000000001
+
+  Context window:      55% left (55.5K used / 555K)
+  Weekly limit:        [██████████░░░░░░░░░░] 55% left (resets 12:34 on 12 Jan)
+  Credits:             55555 credits
+
+• Context compacted · 1s
+
+  Worked for 1s • 12:57
+
+
+› Reply with exactly: CF_AFTER
+
+
+• CF_AFTER
+
+  Worked for 1s • 12:57
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                            ⚠ 1 warning · f2 to view
+=== codex E1-after-enter-default.txt idle
+     /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+  permissions: YOLO mode
+
+  To get started, describe a task or try one of these commands:
+
+  /init - create an AGENTS.md file with instructions for Codex
+  /status - show current session configuration
+  /permissions - choose what Codex is allowed to do
+  /model - choose what model and reasoning effort to use
+  /review - review any changes and find issues
+
+• Model changed to gpt-6-luna medium
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna medium · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+  ← for agents · ? for shortcuts
+=== codex R1-resume-noflags-1-opened.txt idle
+  Worked for 2s • 12:56
+
+
+› Reply with exactly: CF_B
+
+
+• CF_B
+
+  Worked for 1s • 12:56
+
+• Context compacted
+
+  Worked for 1s • 12:57
+
+
+› Reply with exactly: CF_AFTER
+
+
+• CF_AFTER
+
+  Worked for 1s • 12:57
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ← for agents · ? for shortcuts
+=== codex R1-resume-noflags-2-turn.txt idle
+  Worked for 1s • 12:56
+
+• Context compacted
+
+  Worked for 1s • 12:57
+
+
+› Reply with exactly: CF_AFTER
+
+
+• CF_AFTER
+
+  Worked for 1s • 12:57
+
+
+› Reply with exactly: CF_R1
+
+
+• CF_R1
+
+  Worked for 1s • 12:58
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ← for agents · ? for shortcuts
+=== codex R2-resume-flags-0-locked-0.txt dialog
+› Reply with exactly: CF_AFTER
+
+
+• CF_AFTER
+
+  Worked for 1s • 12:57
+
+
+› Reply with exactly: CF_R1
+
+
+• CF_R1
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R3
+
+
+• CF_R3
+
+  Worked for 1s • 12:58
+
+
+  🔒  This conversation is open in another app                                                                                            r to retry
+      Close it there and press R to continue here.
+
+   r retry   f fork   esc/⌃c/q exit   ⌃t transcript
+=== codex R2-resume-flags-1-opened.txt idle
+› Reply with exactly: CF_AFTER
+
+
+• CF_AFTER
+
+  Worked for 1s • 12:57
+
+
+› Reply with exactly: CF_R1
+
+
+• CF_R1
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R3
+
+
+• CF_R3
+
+  Worked for 1s • 12:58
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna high · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                           ⚠ 2 warnings · f2 to view
+=== codex R2-resume-flags-2-turn.txt idle
+› Reply with exactly: CF_R1
+
+
+• CF_R1
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R3
+
+
+• CF_R3
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R2
+
+
+• CF_R2
+
+  Worked for 1s • 13:01
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna high · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ? for shortcuts                                                                                                           ⚠ 2 warnings · f2 to view
+=== codex R3-resume-noflags-after-2-turn.txt idle
+› Reply with exactly: CF_AFTER
+
+
+• CF_AFTER
+
+  Worked for 1s • 12:57
+
+
+› Reply with exactly: CF_R1
+
+
+• CF_R1
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R3
+
+
+• CF_R3
+
+  Worked for 1s • 12:58
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna low · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ← for agents · ? for shortcuts
+=== codex R4-resume-noflags-after-flags-1-opened.txt idle
+› Reply with exactly: CF_R1
+
+
+• CF_R1
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R3
+
+
+• CF_R3
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R2
+
+
+• CF_R2
+
+  Worked for 1s • 13:01
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna high · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ← for agents · ? for shortcuts
+=== codex R4-resume-noflags-after-flags-2-turn.txt idle
+› Reply with exactly: CF_R3
+
+
+• CF_R3
+
+  Worked for 1s • 12:58
+
+
+› Reply with exactly: CF_R2
+
+
+• CF_R2
+
+  Worked for 1s • 13:01
+
+
+› Reply with exactly: CF_R4
+
+
+• CF_R4
+
+  Worked for 1s • 13:02
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna high · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ← for agents · ? for shortcuts
+=== codex R5-resume-noflags-config-differs-2-turn.txt idle
+› Reply with exactly: CF_R2
+
+
+• CF_R2
+
+  Worked for 1s • 13:01
+
+
+› Reply with exactly: CF_R4
+
+
+• CF_R4
+
+  Worked for 1s • 13:02
+
+
+› Reply with exactly: CF_R5
+
+
+• CF_R5
+
+  Worked for 1s • 13:30
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Luna high · /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws · Reply with CF_OK
+  ← for agents · ? for shortcuts
+=== pi 04-model-selector-scoped.txt dialog
+ b.txt
+ c.txt
+
+ Took 0.0s
+
+
+ It listed 3 files.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Scope: all | scoped
+tab scope (all/scoped)
+
+>
+
+→   muse-spark-1.3-contributor [provider-go]
+
+  Model Name: Muse Spark 1.3 Contributor
+
+  Model catalogs refreshed.
+
+  Enter to select · Ctrl+S to set as default · Escape/Ctrl+C to cancel
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+↑5.5k ↓555 R5.5k CH55.5% $5.555 5.5%/5.5M (auto)                                                                             meta/muse-spark-1.3 • low
+=== pi P3-2-selector-moved.txt dialog
+ CF_P2R
+
+
+ Reply with exactly: CF_P2R2
+
+
+ CF_P2R2
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Scope: all | scoped
+tab scope (all/scoped)
+
+>
+
+  ✓ meta/muse-spark-1.3 [openrouter]
+→   gpt-5.6-luna [openai-codex]
+
+  Model Name: GPT-5.6 Luna
+
+  Model catalogs refreshed.
+
+  Enter to select · Ctrl+S to set as default · Escape/Ctrl+C to cancel
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+↑5.5k ↓55 R5.5k CH5.5% $5.555 5.5%/5.5M (auto)                                                                  (openrouter) meta/muse-spark-1.3 • low
+=== claude 00-first-screen.txt dialog
+  WARNING: Claude Code running in Bypass Permissions mode
+
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.
+
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+
+  https://code.claude.com/docs/en/security
+
+  ❯ No, exit
+    Yes, I accept
+
+  Enter to confirm · Esc to cancel
+=== claude 02-turn1.txt idle
+ ▐▛███▛█   Claude Code v2.1.310
+▝▜██████▀  Sonnet 5.5 with low effort · Claude Xxx
+ ▝▝   ▝▝   /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+
+
+❯ Reply with exactly: CF_T445_OK
+
+⏺ CF_T445_OK
+
+✻ Sautéed for 1s · done 1:19 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                          <usage line redacted>/Zzzzzzzzz) · /usage-credits to keep using Claude Code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 03-tool-turn.txt idle
+ ▐▛███▛█   Claude Code v2.1.310
+▝▜██████▀  Sonnet 5.5 with low effort · Claude Xxx
+ ▝▝   ▝▝   /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+
+
+❯ Reply with exactly: CF_T445_OK
+
+⏺ CF_T445_OK
+
+✻ Sautéed for 1s · done 1:19 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 04-model-picker.txt dialog
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Select model
+   Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.
+
+     1. Default (recommended)  Opus 5.5 · Best for everyday, complex tasks
+     2. Opus                   Opus 5.5 · Best for everyday, complex tasks
+     3. Fable                  Fable 5.1 · Most capable for your hardest and longest-running tasks
+   ❯ 4. Sonnet ✔               Sonnet 5.5 · Efficient for routine tasks
+     5. Haiku                  Haiku 5.5 · Fastest for quick answers
+
+   ○ Low effort ←/→ to adjust
+
+   Enter to set as default · s to use this session only · Esc to cancel
+=== claude 04a-typed-model.txt idle
+✻ Baked for 1s · done 1:18 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Brewed for 2s · done 1:18 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ❯ /model                      Set the AI model for Claude Code (currently Sonnet 5.5)
+    /auto-mode-setup            Teach auto mode about your environment, plus optional rule tweaks
+    /code-review                Review the current diff or a PR for bugs and cleanups
+    /update-config              Change settings: hooks, permissions, environment variables
+    /loop                       Repeat a prompt or command on an interval (e.g. /loop 5m /foo)
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /model
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 05-picker-down.txt dialog
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Brewed for 2s · done 1:18 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Select model
+   Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.
+
+     1. Default (recommended)  Opus 5.5 · Best for everyday, complex tasks
+     2. Opus                   Opus 5.5 · Best for everyday, complex tasks
+     3. Fable                  Fable 5.1 · Most capable for your hardest and longest-running tasks
+     4. Sonnet ✔               Sonnet 5.5 · Efficient for routine tasks
+   ❯ 5. Haiku                  Haiku 5.5 · Fastest for quick answers
+
+   ○ Low effort ←/→ to adjust
+
+   Enter to set as default · s to use this session only · Esc to cancel
+=== claude 06-after-switch-session.txt dialog
+❯ Reply with exactly: CF_T445_OK
+
+⏺ CF_T445_OK
+
+✻ Baked for 1s · done 1:18 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Brewed for 2s · done 1:18 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Switch model?
+   Your next response will be slower and use more tokens
+
+   This conversation is cached for the current model. Switching to Haiku 5.5 means the full history gets re-read on your next message.
+
+   ❯ 1. Yes, switch to Haiku 5.5
+     2. No, go back
+=== claude 06-confirm-dialog.txt dialog
+❯ Reply with exactly: CF_T445_OK
+
+⏺ CF_T445_OK
+
+✻ Sautéed for 1s · done 1:19 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Switch model?
+   Your next response will be slower and use more tokens
+
+   This conversation is cached for the current model. Switching to Haiku 5.5 means the full history gets re-read on your next message.
+
+   ❯ 1. Yes, switch to Haiku 5.5
+     2. No, go back
+=== claude 06b-after-confirm.txt idle
+ ▝▝   ▝▝   /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+
+
+❯ Reply with exactly: CF_T445_OK
+
+⏺ CF_T445_OK
+
+✻ Sautéed for 1s · done 1:19 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                     ○ low · /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 07-turn-on-B.txt idle
+⏺ CF_T445_OK
+
+✻ Sautéed for 1s · done 1:19 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+❯ Reply with exactly: CF_T445_B
+
+⏺ CF_T445_B
+
+✻ Cogitated for 1s · done 1:20 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 08-effort-menu.txt dialog
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+❯ Reply with exactly: CF_T445_B
+
+⏺ CF_T445_B
+
+✻ Cogitated for 1s · done 1:20 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Effort
+
+                                            Faster                             Smarter
+                                            ─▲────────────────────────────────────────      Ultracode  off
+                                            low     medium     high     xhigh      max      Tab to toggle
+
+
+   ←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel
+=== claude 08-effort.txt dialog
+✻ Baked for 1s · done 1:18 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Brewed for 2s · done 1:18 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Effort
+
+                                            Faster                             Smarter
+                                            ─▲────────────────────────────────────────      Ultracode  off
+                                            low     medium     high     xhigh      max      Tab to toggle
+
+
+   ←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel
+=== claude 08a-typed-effort.txt idle
+⏺ CF_T445_OK
+
+✻ Baked for 1s · done 1:18 PM
+
+❯ Use your Bash tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Brewed for 2s · done 1:18 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ❯ /effort                     Set effort level for model usage
+    /code-review                Review the current diff or a PR for bugs and cleanups
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 08b-effort-right.txt dialog
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+❯ Reply with exactly: CF_T445_B
+
+⏺ CF_T445_B
+
+✻ Cogitated for 1s · done 1:20 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Effort
+
+                                            Faster                             Smarter
+                                            ────────────────────▲─────────────────────      Ultracode  off
+                                            low     medium     high     xhigh      max      Tab to toggle
+
+
+   ←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel
+=== claude 08c-effort-session.txt idle
+  Listed 1 directory
+
+⏺ ls listed 3 files: a.txt, b.txt and c.txt.
+
+✻ Churned for 2s · done 1:19 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+❯ Reply with exactly: CF_T445_B
+
+⏺ CF_T445_B
+
+✻ Cogitated for 1s · done 1:20 PM
+
+❯ /effort
+  ⎿  Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                    ● high · /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 09-turn-after-effort.txt idle
+✻ Churned for 2s · done 1:19 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 for this session only
+
+❯ Reply with exactly: CF_T445_B
+
+⏺ CF_T445_B
+
+✻ Cogitated for 1s · done 1:20 PM
+
+❯ /effort
+  ⎿  Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation
+
+❯ Reply with exactly: CF_T445_C
+
+⏺ CF_T445_C
+
+✻ Worked for 1s · done 1:20 PM
+
+
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude 10-compact.txt idle
+  ⎿  Set model to Haiku 5.5 for this session only
+
+❯ Reply with exactly: CF_T445_B
+
+⏺ CF_T445_B
+
+✻ Cogitated for 1s · done 1:20 PM
+
+❯ /effort
+  ⎿  Set effort level to high (this session only): Comprehensive implementation with extensive testing and documentation
+
+❯ Reply with exactly: CF_T445_C
+
+⏺ CF_T445_C
+
+✻ Worked for 1s · done 1:20 PM
+
+❯ /compact
+  ⎿  Compacted (ctrl+o to see full summary)
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude E1-after-enter-default.txt idle
+ ▐▛███▛█   Claude Code v2.1.310
+▝▜██████▀  Haiku 5.5 with low effort · Claude Xxx
+ ▝▝   ▝▝   /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+
+
+❯ Reply with exactly: CF_T445_E
+
+⏺ CF_T445_E
+
+✻ Crunched for 1s · done 1:23 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 and saved as your default for new sessions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                     ○ low · /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude E2-after-effort-enter.txt idle
+ ▐▛███▛█   Claude Code v2.1.310
+▝▜██████▀  Haiku 5.5 with medium effort · Claude Xxx
+ ▝▝   ▝▝   /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ws
+
+
+❯ Reply with exactly: CF_T445_E
+
+⏺ CF_T445_E
+
+✻ Crunched for 1s · done 1:23 PM
+
+❯ /model
+  ⎿  Set model to Haiku 5.5 and saved as your default for new sessions
+
+❯ /effort
+  ⎿  Set effort level to medium (saved as your default for new sessions): Balanced approach with standard implementation and testing
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                  ◐ medium · /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude R1-resume-noflags-2-turn.txt idle
+✻ Conversation compacted (ctrl+o for the summary)
+  Earlier messages are saved in /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  ojects-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/00000000-0000-4000-8000-000000000002.jsonl
+
+
+⏺ CF_T445_C
+
+✻ Worked for 1s · done 1:20 PM
+
+❯ /compact
+  ⎿  Compacted (ctrl+o to see full summary)
+
+❯ Reply with exactly: CF_T445_R1
+
+⏺ CF_T445_R1
+
+✻ Cooked for 1s · done 1:21 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                          <usage line redacted>/Zzzzzzzzz) · /usage-credits to keep using Claude Code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude R2-resume-flags-1-opened.txt idle
+✻ Conversation compacted (ctrl+o for the summary)
+  Earlier messages are saved in /home/user/work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  ojects-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/00000000-0000-4000-8000-000000000002.jsonl
+
+
+⏺ CF_T445_C
+
+✻ Worked for 1s · done 1:20 PM
+
+❯ /compact
+  ⎿  Compacted (ctrl+o to see full summary)
+
+❯ Reply with exactly: CF_T445_R1
+
+⏺ CF_T445_R1
+
+✻ Cooked for 1s · done 1:21 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                     ○ low · /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+=== claude R2-resume-flags-2-turn.txt idle
+⏺ CF_T445_C
+
+✻ Worked for 1s · done 1:20 PM
+
+❯ /compact
+  ⎿  Compacted (ctrl+o to see full summary)
+
+❯ Reply with exactly: CF_T445_R1
+
+⏺ CF_T445_R1
+
+✻ Cooked for 1s · done 1:21 PM
+
+❯ Reply with exactly: CF_T445_R2
+
+⏺ CF_T445_R2
+
+✻ Cooked for 1s · done 1:22 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                          <usage line redacted>/Zzzzzzzzz) · /usage-credits to keep using Claude Code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude R3-resume-noflags-after-1-opened.txt idle
+⏺ CF_T445_C
+
+✻ Worked for 1s · done 1:20 PM
+
+❯ /compact
+  ⎿  Compacted (ctrl+o to see full summary)
+
+❯ Reply with exactly: CF_T445_R1
+
+⏺ CF_T445_R1
+
+✻ Cooked for 1s · done 1:21 PM
+
+❯ Reply with exactly: CF_T445_R2
+
+⏺ CF_T445_R2
+
+✻ Cooked for 1s · done 1:22 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                  ◐ medium · /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+=== claude R3-resume-noflags-after-2-turn.txt idle
+  ⎿  Compacted (ctrl+o to see full summary)
+
+❯ Reply with exactly: CF_T445_R1
+
+⏺ CF_T445_R1
+
+✻ Cooked for 1s · done 1:21 PM
+
+❯ Reply with exactly: CF_T445_R2
+
+⏺ CF_T445_R2
+
+✻ Cooked for 1s · done 1:22 PM
+
+❯ Reply with exactly: CF_T445_R3
+
+⏺ CF_T445_R3
+
+✻ Cogitated for 1s · done 1:22 PM
+
+
+
+
+
+
+
+
+
+
+                          <usage line redacted>/Zzzzzzzzz) · /usage-credits to keep using Claude Code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== claude R4-resume-recorded-id-1-opened.txt idle
+  ⎿  Compacted (ctrl+o to see full summary)
+
+❯ Reply with exactly: CF_T445_R1
+
+⏺ CF_T445_R1
+
+✻ Cooked for 1s · done 1:21 PM
+
+❯ Reply with exactly: CF_T445_R2
+
+⏺ CF_T445_R2
+
+✻ Cooked for 1s · done 1:22 PM
+
+❯ Reply with exactly: CF_T445_R3
+
+⏺ CF_T445_R3
+
+✻ Cogitated for 1s · done 1:22 PM
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                    ● high · /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+=== claude R4-resume-recorded-id-2-turn.txt idle
+✻ Cooked for 1s · done 1:21 PM
+
+❯ Reply with exactly: CF_T445_R2
+
+⏺ CF_T445_R2
+
+✻ Cooked for 1s · done 1:22 PM
+
+❯ Reply with exactly: CF_T445_R3
+
+⏺ CF_T445_R3
+
+✻ Cogitated for 1s · done 1:22 PM
+
+❯ Reply with exactly: CF_T445_R4
+
+⏺ CF_T445_R4
+
+✻ Cooked for 1s · done 1:22 PM
+
+
+
+
+                          <usage line redacted>/Zzzzzzzzz) · /usage-credits to keep using Claude Code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+=== devin 00-first.txt idle
+⠀⠛⠿⠟⠻⣶⣾⣶⡄  Devin CLI
+⠀⣤⣶⣦⣴⠿⢿⠿⠃  v3000.11.92
+⠀⠻⢿⠿⠃⠀⠀⠀⠀
+
+
+
+
+  A few tips to get the most out of this tool:
+    1. Devin can set itself up (e.g. Skills and MCPs). Just ask!
+    2. Confused by all the  /model s? Here are our tips to pick (https://cli.devin.ai/docs/models#model-selection-tips).
+    3. Try  /fusion  to pair a frontier lead model with a cost-efficient sidekick. Learn more (https://docs.devin.ai/cli/fusion).
+    4. If you want to see what Devin is up to, Control + O and the down arrow key can be useful.
+
+
+You won't see this message again but you can talk to us at x.com/cognition.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Medium                                                                                                  Use /clear to start a fresh conversation
+=== devin 02-turn1.txt idle
+⠀⣤⣶⣦⣴⠿⢿⠿⠃  v3000.11.92
+⠀⠻⢿⠿⠃⠀⠀⠀⠀
+
+
+
+
+  A few tips to get the most out of this tool:
+    1. Devin can set itself up (e.g. Skills and MCPs). Just ask!
+    2. Confused by all the  /model s? Here are our tips to pick (https://cli.devin.ai/docs/models#model-selection-tips).
+    3. Try  /fusion  to pair a frontier lead model with a cost-efficient sidekick. Learn more (https://docs.devin.ai/cli/fusion).
+    4. If you want to see what Devin is up to, Control + O and the down arrow key can be useful.
+
+
+You won't see this message again but you can talk to us at x.com/cognition.
+
+❭ Reply with exactly: CF_OK
+
+ CF_OK
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Medium                                                                                                           Context: 55k / 555k tokens (5%)
+=== devin 03-tool-turn.txt idle
+    2. Confused by all the  /model s? Here are our tips to pick (https://cli.devin.ai/docs/models#model-selection-tips).
+    3. Try  /fusion  to pair a frontier lead model with a cost-efficient sidekick. Learn more (https://docs.devin.ai/cli/fusion).
+    4. If you want to see what Devin is up to, Control + O and the down arrow key can be useful.
+
+
+You won't see this message again but you can talk to us at x.com/cognition.
+
+❭ Reply with exactly: CF_OK
+
+ CF_OK
+
+❭ Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+ ⏺ Listed ./
+
+ It listed 3 files.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Medium                                                                                                           Context: 55k / 555k tokens (5%)
+=== devin 06-after-opt-enter.txt idle
+    4. If you want to see what Devin is up to, Control + O and the down arrow key can be useful.
+
+
+You won't see this message again but you can talk to us at x.com/cognition.
+
+❭ Reply with exactly: CF_OK
+
+ CF_OK
+
+❭ Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+ ⏺ Listed ./
+
+ It listed 3 files.
+
+❭ /model
+
+ ✓ Model set to SWE-2 for this session
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 High                                                                                                             Alt+Enter for multiline prompts
+=== devin 07-turn-on-B.txt idle
+❭ Reply with exactly: CF_OK
+
+ CF_OK
+
+❭ Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+ ⏺ Listed ./
+
+ It listed 3 files.
+
+❭ /model
+
+ ✓ Model set to SWE-2 for this session
+
+❭ Reply with exactly: CF_B
+
+ CF_B
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 High                                                                                                             Context: 55k / 555k tokens (5%)
+=== devin E1-after-enter.txt idle
+⠀⠛⠿⠟⠻⣶⣾⣶⡄  Devin CLI
+⠀⣤⣶⣦⣴⠿⢿⠿⠃  v3000.11.92
+⠀⠻⢿⠿⠃⠀⠀⠀⠀
+
+ Xxx · 555% remaining (resets in 12h 34m)
+
+❭ /model
+
+ ✓ Model set to SWE-2
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Max                                                                                                           See usage and cost: /session-stats
+=== devin R1-resume-noflags-1-opened.txt idle
+⠀⠛⠿⠟⠻⣶⣾⣶⡄  Devin CLI
+⠀⣤⣶⣦⣴⠿⢿⠿⠃  v3000.11.92
+⠀⠻⢿⠿⠃⠀⠀⠀⠀
+
+❭ Reply with exactly: CF_OK
+
+ CF_OK
+
+❭ Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+ ⏺ Listed ./
+
+ It listed 3 files.
+
+❭ Reply with exactly: CF_B
+
+ CF_B
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 High                                                                                                             Context: 55k / 555k tokens (5%)
+=== devin R1-resume-noflags-2-turn.txt idle
+❭ Reply with exactly: CF_OK
+
+ CF_OK
+
+❭ Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+ ⏺ Listed ./
+
+ It listed 3 files.
+
+❭ Reply with exactly: CF_B
+
+ CF_B
+
+❭ Reply with exactly: CF_R1
+
+ CF_R1
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 High                                                                                                             Context: 55k / 555k tokens (5%)
+=== devin R2-resume-model-flag-1-opened.txt idle
+❭ Reply with exactly: CF_OK
+
+ CF_OK
+
+❭ Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+ ⏺ Listed ./
+
+ It listed 3 files.
+
+❭ Reply with exactly: CF_B
+
+ CF_B
+
+❭ Reply with exactly: CF_R1
+
+ CF_R1
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Medium                                                                                  Press Ctrl+L to clear the screen, Ctrl+Shift+L to redraw
+=== devin R2-resume-model-flag-2-turn.txt idle
+❭ Use your shell tool to run ls in this folder, then tell me in one sentence how many files it listed.
+
+ ⏺ Listed ./
+
+ It listed 3 files.
+
+❭ Reply with exactly: CF_B
+
+ CF_B
+
+❭ Reply with exactly: CF_R1
+
+ CF_R1
+
+❭ Reply with exactly: CF_R2
+
+ CF_R2
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Medium                                                                                                           Context: 55k / 555k tokens (5%)
+=== devin R3-resume-noflags-after-2-turn.txt idle
+ It listed 3 files.
+
+❭ Reply with exactly: CF_B
+
+ CF_B
+
+❭ Reply with exactly: CF_R1
+
+ CF_R1
+
+❭ Reply with exactly: CF_R2
+
+ CF_R2
+
+❭ Reply with exactly: CF_R3
+
+ CF_R3
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Medium                                                                                                           Context: 55k / 555k tokens (5%)
+=== devin R4-resume-noflags-config-differs-2-turn.txt idle
+ CF_B
+
+❭ Reply with exactly: CF_R1
+
+ CF_R1
+
+❭ Reply with exactly: CF_R2
+
+ CF_R2
+
+❭ Reply with exactly: CF_R3
+
+ CF_R3
+
+❭ Reply with exactly: CF_R4
+
+ CF_R4
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── (bypass permissions on) ─
+❭ Ask Devin to build features, fix bugs, or work on your code
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+SWE-2 Medium                                                                                                           Context: 55k / 555k tokens (5%)

@@ -627,7 +627,11 @@ pub trait Window {
     }
     /// The dialog of its harness the window's last lines `screen` show, where they show one by
     /// its shape (a line of choices with the harness's cursor on one, and the words above them),
-    /// and whether its prompt is drawn below the choices. None where they show none.
+    /// and whether its prompt is drawn below the choices. None where they show none, and where
+    /// the line the cursor is on is the harness's own input box (the shared reader sees one under
+    /// a rule across the screen). Codex's window reads none by shape at all: its box draws no rule
+    /// and its words are the user's to configure (`CodexWindow::dialog`, T-1240, T-1243). The
+    /// engine's `screen` is the pane host's tail, which has no empty line.
     fn dialog(&self, screen: &[String]) -> Option<Dialog> {
         crate::shared::dialog::read(screen).map(|shown| Dialog {
             prompt_below: self.shows_prompt(&shown.below),
