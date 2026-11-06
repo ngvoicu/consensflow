@@ -26,8 +26,9 @@
 //!
 //! - `codex`: a turn that reads a file, then `exec resume` of the same thread; its rollout
 //!   must say `compacted`.
-//! - `devin`: one turn at `1000,1000`, whose store must hold a summary; one at thresholds no
-//!   model takes, whose log must say Devin ignored them.
+//! - `devin`: one turn of six sequential shell steps at `CF_DEVIN_THRESHOLDS` (`8000,8000`
+//!   unless the run says otherwise), whose store must hold a summary (`summarized_from`); it
+//!   says the `<context_usage>` notes the model was given.
 //! - `muse`: one turn at a soft threshold of 0.03; one at a provider limit of 40,000 tokens;
 //!   one at 900,000, above the model's own limit; the session logs say the thresholds in
 //!   tokens and what triggered each compaction (`CF_ONLY=<words>` runs one of them).
@@ -37,6 +38,16 @@
 //! cargo xtask live compaction-routes -- devin
 //! cargo xtask live compaction-routes -- muse
 //! ```
+//!
+//! **Measured (T-1265, 2026-11-06, the Mac).** Codex 0.166.0 (gpt-5.6-luna) at 2000: 2
+//! `compacted` records, on zeewin2 too. Muse 1.4.14 (muse-spark-1.3-contributor, minimal): soft
+//! 0.03 → soft 15,360 / hard 460,800 (so its real window is 512,000), compactions triggered at
+//! 22,505 and 39,289; a limit of 40,000 → 30,000 / 36,000, soft and blocking compactions. Devin
+//! 3000.11.234: on swe-2 a two-step turn at `1000,1000` showed the limit in its note (`of 5k`)
+//! and wrote no summary (twice); on gpt-6-luna-none a turn of one tool step at `8000,8000`
+//! showed `16k of 8k` and wrote none; on swe-2 the six-step turn at `8000,8000` compacted four
+//! times (notes 20k, 19k, 14k, 19k, 14k of 8k). Devin's summary comes in the background and is
+//! put in at a later step, so a turn needs steps after the size is passed.
 //!
 //! [`Isolation`]: cf_e2e::live::isolation::Isolation
 
@@ -54,6 +65,9 @@ const TURN: Duration = Duration::from_secs(300);
 
 /// What a turn is asked: read a file of the case's own whose words alone cross the knob.
 const ASK: &str = "Run `cat notes.txt` with your shell tool, then run `wc -l notes.txt`, then answer with the single word done.";
+
+/// What a Devin turn is asked: steps enough to pass the thresholds, each after the one before.
+const LONG_ASK: &str = "Run these shell commands one at a time, each only after the one before has finished, never two in one call: `cat notes.txt`, `wc -l notes.txt`, `cat notes.txt`, `wc -w notes.txt`, `cat notes.txt`, `wc -c notes.txt`. Then answer with the single word done.";
 
 /// A file whose words are some 12,000 tokens.
 fn notes(folder: &Path) -> Result {
@@ -218,6 +232,48 @@ fn copy_tree(from: &Path, to: &Path, left: &[&str]) {
     }
 }
 
+/// What Devin's store `file` holds of compaction: how many rows say they were summarized
+/// from others (`metadata.summarized_from`), and the `<context_usage>` notes it gave the model,
+/// each as its first line says it.
+fn devin_summaries_and_notes(file: &Path) -> Result<(usize, Vec<String>)> {
+    let fail = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", file.display()));
+    let db =
+        rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(fail)?;
+    let summaries: i64 = db
+        .query_row(
+            "SELECT count(*) FROM message_nodes WHERE json_extract(metadata, '$.summarized_from') IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(fail)?;
+    let mut notes = Vec::new();
+    let mut read = db
+        .prepare(
+            "SELECT json_extract(chat_message, '$.content') FROM message_nodes
+              WHERE chat_message LIKE '%<context_usage>%' ORDER BY row_id",
+        )
+        .map_err(fail)?;
+    let rows = read
+        .query_map([], |row| row.get::<_, Option<String>>(0))
+        .map_err(fail)?;
+    for row in rows {
+        if let Some(text) = row.map_err(fail)? {
+            let line: String = text
+                .lines()
+                .find(|line| line.contains("<context_usage>"))
+                .unwrap_or_default()
+                .chars()
+                .take(60)
+                .collect();
+            if !notes.contains(&line) {
+                notes.push(line);
+            }
+        }
+    }
+    Ok((usize::try_from(summaries).unwrap_or(0), notes))
+}
+
 /// Devin's own folders in the kit's home, below those its variables name: the run's data
 /// folder links the owner's other folders, which are never read here.
 fn devin_folders(home: &[(String, String)]) -> Vec<PathBuf> {
@@ -238,7 +294,7 @@ fn devin_folders(home: &[(String, String)]) -> Vec<PathBuf> {
 
 #[test]
 #[ignore = "opt-in: spends the machine's quota on two short Devin turns; cargo xtask live compaction-routes -- devin"]
-fn devin_compacts_at_the_thresholds_its_launch_gives_and_ignores_ones_no_model_takes() -> Result {
+fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
     let log = Log::begin("live compaction-routes devin")?;
     ask::prepare()?;
     let install = machine::installed_for(Harness::Devin, Duration::from_secs(1200))?;
@@ -250,7 +306,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives_and_ignores_ones_no_model_t
         let args = vec![
             devin.clone(),
             "-p".to_owned(),
-            ASK.to_owned(),
+            LONG_ASK.to_owned(),
             "--model".to_owned(),
             model.name.clone(),
             "--respect-workspace-trust".to_owned(),
@@ -278,31 +334,35 @@ fn devin_compacts_at_the_thresholds_its_launch_gives_and_ignores_ones_no_model_t
         ));
         Ok((scratch, folder))
     };
-    let summaries = |words: &str| -> usize {
-        devin_folders(&home)
-            .iter()
-            .map(|root| files_saying(root, words).len())
-            .sum()
-    };
-    let before = summaries("file_compactor");
-    let _low = turn("1000,1000")?;
-    let compacted = summaries("file_compactor");
-    let _high = turn("4000000000,4000000000")?;
-    let ignored: Vec<PathBuf> = devin_folders(&home)
-        .iter()
-        .flat_map(|root| files_saying(root, "Ignoring invalid compaction thresholds"))
-        .collect();
+    // The thresholds the turn is given (`CF_DEVIN_THRESHOLDS`, `8000,8000` unless the run
+    // says otherwise: Devin told a turn at `1000,1000` its limit was 5k), and its store read
+    // after it: the summaries Devin wrote (`summarized_from` in a row's metadata) and the
+    // context notes it gave the model.
+    let thresholds = own_var("CF_DEVIN_THRESHOLDS").unwrap_or_else(|| "8000,8000".to_owned());
+    let _turn = turn(&thresholds)?;
+    let store = devin_folders(&home)
+        .into_iter()
+        .map(|root| root.join("cli").join("sessions.db"))
+        .find(|file| file.exists())
+        .ok_or_else(|| Error::Daemon("Devin's store is not in the run's home".to_owned()))?;
+    let (summaries, notes) = devin_summaries_and_notes(&store)?;
     log.block(
-        &format!("devin {} on {}", install.version(), model.name),
         &format!(
-            "files holding a compactor's summary: {before} before, {compacted} after the turn at 1000,1000\nfiles that say Devin ignored the thresholds after the turn at 4000000000: {}",
-            ignored
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+            "devin {} on {} at {thresholds}",
+            install.version(),
+            model.name
+        ),
+        &format!(
+            "rows Devin wrote as a summary: {summaries}\ncontext notes the model was given: {}",
+            if notes.is_empty() {
+                "none".to_owned()
+            } else {
+                notes.join(" | ")
+            }
         ),
     );
+    let compacted = summaries;
+    let before = 0;
     // What Devin wrote in the run's home, copied out where `CF_EVIDENCE` names a folder: its
     // store and logs, never its login.
     if let Some(evidence) = own_var("CF_EVIDENCE") {
@@ -315,7 +375,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives_and_ignores_ones_no_model_t
         }
     }
     install.finish_homes()?;
-    assert!(compacted > before, "Devin never compacted at 1000,1000");
+    assert!(compacted > before, "Devin never compacted at {thresholds}");
     Ok(())
 }
 
