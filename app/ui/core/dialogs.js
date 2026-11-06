@@ -1,6 +1,6 @@
 import { button, element, redraw } from '../dom.js'
 import { HARNESS_NAMES, isMember, modelShown } from './board.js'
-import { ClaudeCompaction } from './claude-compaction.js'
+import { Compaction } from './compaction.js'
 import { ComputerUseSection } from './computer-use.js'
 import { ProjectSections } from './project-sections.js'
 import { StaffRules } from './staff-rules.js'
@@ -899,8 +899,8 @@ export class SwitchChiefDialog {
 /**
  * Project settings: the project's staff (who the chief may hand work to, drawn
  * from the project's board, and drawn again in place while open, so it stays
- * current), the rules for the staff (`StaffRules`), the size its Claude members'
- * windows compact at (`ClaudeCompaction`), and the sections New project has too
+ * current), the rules for the staff (`StaffRules`), the size its members' windows
+ * compact at, whatever their harness (`Compaction`), and the sections New project has too
  * (`ProjectSections`): human approval, wake-up calls and specs. Each saves as it
  * always did: the staff as it is added to or removed from, the approval as it is
  * ticked, the rules, the compaction, the calls and the specs by their own Save.
@@ -922,7 +922,7 @@ export class ProjectSettingsDialog {
   #specs
   /** The rules for the staff, shown as the board has them and saved as a whole. */
   #rules
-  /** The size the Claude members' windows compact at, shown as the board has it. */
+  /** The size the members' windows compact at, whatever their harness, shown as the board has it. */
   #compaction
   /** Computer use: a part for each of the project's harnesses that has one. */
   #computerUse
@@ -983,7 +983,7 @@ export class ProjectSettingsDialog {
       report: page.report,
       chiefRunning: () => this.#chiefRunning(),
     })
-    this.#compaction = new ClaudeCompaction(dialog.querySelector('.claude-compaction'), {
+    this.#compaction = new Compaction(dialog.querySelector('.members-compaction'), {
       project: () => (dialog.open ? this.#project : null),
       daemon: page.daemon,
       act: page.act,

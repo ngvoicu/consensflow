@@ -1,11 +1,11 @@
 //! The projects: listed, opened, resumed, closed, deleted, gated, renamed and
-//! described, given the rules for their staff, and told the size their Claude
-//! members' windows compact at.
+//! described, given the rules for their staff, and told the size their members'
+//! windows compact at.
 
 use cf_base::js;
 use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
-    parse_claude_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
+    parse_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
     NewProject, NewWakeUp, SpecsChange,
 };
 use serde_json::{json, Map, Value};
@@ -197,18 +197,18 @@ pub(super) async fn rules(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
 }
 
 /// `project.compaction`: the size, in tokens, at which the human has the project's
-/// Claude member windows compact, from 100,000 to 1,000,000, checked before the
-/// project is looked for. `compaction` that is left out or `null` takes the
-/// choice away: Claude's own point. Only the page chooses it: no route of the
+/// member windows compact, whatever their harness, from 100,000 to 1,000,000, checked
+/// before the project is looked for. `compaction` that is left out or `null` takes the
+/// choice away: each harness's own point. Only the page chooses it: no route of the
 /// agents' API does, so no `cf` command, the chief's or a member's, changes it.
 /// Each member window of the project is given it when it next starts (the
 /// harness's launch); the chief's never is.
 pub(super) async fn compaction(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
-    let size = parse_claude_compaction(body.get("compaction"))?;
+    let size = parse_compaction(body.get("compaction"))?;
     let project = page
         .ledger
         .borrow_mut()
-        .set_claude_compaction(body.whole("project")?, size)?;
+        .set_compaction(body.whole("project")?, size)?;
     one("project", project)
 }
 

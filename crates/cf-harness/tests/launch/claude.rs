@@ -147,7 +147,7 @@ struct Request {
     agent: Option<Agent<'static>>,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
-    /// The size the project chose for its Claude members' windows to compact at.
+    /// The size the project chose for its members' windows to compact at.
     compaction: Option<u32>,
     /// The folder its project keeps its specs in, relative to the project.
     folder: &'static str,

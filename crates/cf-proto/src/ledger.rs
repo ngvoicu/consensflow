@@ -96,12 +96,13 @@ pub struct ProjectView {
     /// always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub staff_rules: Option<String>,
-    /// The size, in tokens, at which the human has the project's Claude member
-    /// windows compact: the window each member's launch gives Claude Code. Said
-    /// only when the human chose one, so a project on Claude's own point reads as
-    /// it always did. The chief's window is never given it.
+    /// The size, in tokens, at which the human has the project's member windows
+    /// compact, whatever their harness: each member's launch gives it its harness by
+    /// that harness's own rule. Said only when the human chose one, so a project on
+    /// each harness's own point reads as it always did. The chief's window is never
+    /// given it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub claude_compaction: Option<u32>,
+    pub compaction: Option<u32>,
 }
 
 impl ProjectView {

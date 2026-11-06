@@ -1284,9 +1284,7 @@ impl Dispatcher {
             // member's launch is given it, whatever its harness, at launch and on resume
             // alike, and each adapter gives it its harness by its own route; the chief's
             // launch never is (2026-10-31).
-            compaction: project
-                .claude_compaction
-                .filter(|_| participant.role != "chief"),
+            compaction: project.compaction.filter(|_| participant.role != "chief"),
             first_message_ms: self.seams.limits.launch_ms,
             starts_given_up: record.window.borrow().starts_given_up,
         };

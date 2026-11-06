@@ -666,11 +666,11 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .staff-rules .staff-rules-count.over { color: var(--buoy); }
 .staff-rules textarea[aria-invalid="true"] { border-color: var(--buoy); }
 .staff-rules .staff-hint { color: var(--buoy); }
-/* The size the project's Claude members compact at: Claude's own point, or a size. */
-.claude-compaction .claude-compaction-choice { display: flex; align-items: center; gap: 8px; }
-.claude-compaction input[type="text"] { width: 10em; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px var(--mono); }
-.claude-compaction input[aria-invalid="true"] { border-color: var(--buoy); }
-.claude-compaction .staff-hint { color: var(--buoy); }
+/* The size the project's members compact at: each harness's own point, or a size. */
+.members-compaction .members-compaction-choice { display: flex; align-items: center; gap: 8px; }
+.members-compaction input[type="text"] { width: 10em; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px var(--mono); }
+.members-compaction input[aria-invalid="true"] { border-color: var(--buoy); }
+.members-compaction .staff-hint { color: var(--buoy); }
 /* The project's specs: the controls one under another. */
 .project-specs { gap: 10px; }
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }

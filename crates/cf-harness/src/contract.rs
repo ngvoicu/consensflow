@@ -318,10 +318,11 @@ pub struct Launch<'a> {
     /// The specs a chief plans with, when its project has them on: only a
     /// chief's launch is given any, and with none the launch is as it always was.
     pub specs: Option<Specs<'a>>,
-    /// The size, in tokens, the project chose for its Claude members' windows to
-    /// compact at (Claude Code's `autoCompactWindow`, which fires a little before
-    /// the window fills): only a member's launch is given one, and with none the
-    /// launch is as it always was. Claude's adapter is the only one that reads it.
+    /// The size, in tokens, the project chose for its members' windows to compact at,
+    /// whatever their harness: only a member's launch is given one, and with none the
+    /// launch is as it always was. Each adapter gives it its harness by its own route
+    /// (Claude's `autoCompactWindow`, Codex's `model_auto_compact_token_limit`, Devin's
+    /// thresholds, Pi's extension, Muse's context limit up to its real window).
     pub compaction: Option<u32>,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a

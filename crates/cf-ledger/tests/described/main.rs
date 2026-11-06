@@ -11,7 +11,7 @@
 #![allow(clippy::expect_used)]
 
 mod both;
-mod claude_compaction;
+mod compaction;
 mod line;
 mod migration;
 mod name;

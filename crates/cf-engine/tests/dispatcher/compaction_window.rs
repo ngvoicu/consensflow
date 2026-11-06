@@ -1,10 +1,11 @@
-//! The size a project chose for its Claude members' windows to compact at (spec
-//! smaller-contexts, SCX-25): the launch of every member of a Claude project is
-//! given it, whatever the member's role, at its first launch and each time its
-//! conversation is opened again, and the chief's never is. A project that chose
-//! none launches every window as it always did, and a harness other than Claude is
-//! given none. A size changed or taken away reaches the member's next launch. The
-//! test is not held to a Node recording: it is this build's own setting.
+//! The size a project chose for its members' windows to compact at (spec
+//! smaller-contexts, SCX-25, widened by SCX-30): the launch of every member is given
+//! it, whatever the member's role and whatever its harness, at its first launch and
+//! each time its conversation is opened again, and the chief's never is. Each
+//! harness's adapter gives it by its own route (`cf-harness`'s launch tests). A
+//! project that chose none launches every window as it always did. A size changed or
+//! taken away reaches the member's next launch. The test is not held to a Node
+//! recording: it is this build's own setting.
 
 use cf_engine::testing::{Context, Made};
 use cf_ledger::NewTask;
@@ -31,7 +32,7 @@ fn choose(context: &Context, project: i64, size: Option<u32>) {
     context
         .ledger
         .borrow_mut()
-        .set_claude_compaction(project, size)
+        .set_compaction(project, size)
         .unwrap();
 }
 

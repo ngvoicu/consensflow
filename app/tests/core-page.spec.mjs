@@ -513,21 +513,21 @@ async function open(page, data = model()) {
         }
         return answer({ project: shownProject(project)[0] })
       },
-      // The size the Claude members' windows compact at, as the daemon keeps it: a whole number
-      // of tokens from 100,000 to 1,000,000, or none (null or left out) for Claude's own point,
-      // refused in its words otherwise.
+      // The size the members' windows compact at, whatever their harness, as the daemon keeps
+      // it: a whole number of tokens from 100,000 to 1,000,000, or none (null or left out) for
+      // each harness's own point, refused in its words otherwise.
       'project.compaction': ({ project, compaction }) => {
         const size = compaction ?? null
         if (size !== null && !(Number.isInteger(size) && size >= 100000 && size <= 1000000)) {
           return {
             ok: false,
             error:
-              "the compaction window for Claude members is a whole number of tokens from 100000 to 1000000, or none for Claude's own point",
+              "the compaction size is a whole number of tokens from 100000 to 1000000, or none for each harness's own point",
           }
         }
         for (const shown of shownProject(project)) {
-          if (size === null) delete shown.claudeCompaction
-          else shown.claudeCompaction = size
+          if (size === null) delete shown.compaction
+          else shown.compaction = size
         }
         return answer({ project: shownProject(project)[0] })
       },
@@ -4137,7 +4137,7 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
         // compaction are Project settings' own.
         [
           ...document.querySelectorAll(
-            `#${id} .project-section:not(.computer-use):not(.staff-rules):not(.claude-compaction)`,
+            `#${id} .project-section:not(.computer-use):not(.staff-rules):not(.members-compaction)`,
           ),
         ]
           .slice(1)
@@ -4540,7 +4540,7 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
@@ -4555,7 +4555,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Rules for the staff',
-    'Compaction for Claude members',
+    'Compaction',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -4564,7 +4564,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
   for (const name of [
     'Staff',
     'Rules for the staff',
-    'Compaction for Claude members',
+    'Compaction',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -5084,23 +5084,23 @@ test("says a refusal of the rules for the staff in their section, in the daemon'
   await expect(section.rules).toHaveValue('a\u0007b')
 })
 
-/** Project settings open on project 1, and its section of the Claude members' compaction. */
+/** Project settings open on project 1, and its section of the members' compaction. */
 async function compactionGroup(page) {
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  const group = dialog.getByRole('group', { name: 'Compaction for Claude members' })
+  const group = dialog.getByRole('group', { name: 'Compaction', exact: true })
   return {
     dialog,
     group,
-    own: group.getByRole('radio', { name: "Claude's own point" }),
+    own: group.getByRole('radio', { name: "The harness's own point" }),
     size: group.getByRole('radio', { name: 'A size' }),
     amount: group.getByLabel('Size in tokens, 100,000 to 1,000,000'),
-    hint: group.locator('.claude-compaction-hint'),
+    hint: group.locator('.members-compaction-hint'),
     save: group.getByRole('button', { name: 'Save compaction' }),
   }
 }
 
-test("Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does", async ({
+test("Project settings offers each harness's own point for the members' compaction until the human chooses a size, and says in one line what it does", async ({
   page,
 }) => {
   await open(page)
@@ -5111,23 +5111,22 @@ test("Project settings offers Claude's own point for the Claude members' compact
   await expect(section.amount).toHaveValue('')
   await expect(section.save).toBeEnabled()
   await expect(section.hint).toBeHidden()
-  // One line, in the section: what it does and who it leaves alone.
-  await expect(section.group).toContainText(
-    "From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.",
-  )
-  // And the margin Claude keeps, which is Claude's to change: said as the version we measured it on.
-  await expect(section.group).toContainText(
-    'Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.',
-  )
+  // One line, in the section, true of every harness: what it does, what a size above a
+  // model's own window does, and who it leaves alone.
+  await expect(section.group.locator('.dialog-help')).toHaveText([
+    "From its next start, each member's harness compacts its conversation at about this size, by its own rule; a size above a model's own window leaves the harness's own point. The chief is not affected.",
+  ])
+  // Nothing of the old Claude-only section is left.
+  await expect(section.group).not.toContainText('Claude')
   // Opening sends nothing.
   expect(await calls(page, 'project.compaction')).toEqual([])
 })
 
-test("Project settings shows the size the board has for the Claude members' compaction", async ({
+test("Project settings shows the size the board has for the members' compaction", async ({
   page,
 }) => {
   const data = model()
-  data.boards[1].project.claudeCompaction = 400000
+  data.boards[1].project.compaction = 400000
   await open(page, data)
   const section = await compactionGroup(page)
   await expect(section.size).toBeChecked()
@@ -5138,7 +5137,7 @@ test("Project settings shows the size the board has for the Claude members' comp
   expect(await calls(page, 'project.compaction')).toEqual([])
 })
 
-test("saves the choice of a size by its own Save, shows what the daemon kept, and saves Claude's own point again as none", async ({
+test("saves the choice of a size by its own Save, shows what the daemon kept, and saves the harness's own point again as none", async ({
   page,
 }) => {
   await open(page)
@@ -5155,7 +5154,7 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
     .toEqual([{ project: 1, compaction: 250000 }])
   await expect(section.amount).toHaveValue('250000')
   await expect(page.locator('#status')).toHaveText(
-    "The project's Claude members compact at about 250,000 tokens: each window is given it when it next starts.",
+    "The project's members compact at about 250,000 tokens: each window is given it when it next starts.",
   )
   // No other section saved with it.
   for (const operation of ['project.rules', 'wakeup.set', 'project.specs', 'project.gate']) {
@@ -5165,7 +5164,7 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
   const again = await compactionGroup(page)
   await expect(again.size).toBeChecked()
   await expect(again.amount).toHaveValue('250000')
-  // Claude's own point again: none is saved, and the size is not kept in the field.
+  // The harness's own point again: none is saved, and the size is not kept in the field.
   await again.own.check()
   await expect(again.amount).toBeDisabled()
   await again.save.click()
@@ -5174,11 +5173,11 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
   await expect(again.own).toBeChecked()
   await expect(again.amount).toHaveValue('')
   await expect(page.locator('#status')).toHaveText(
-    "The project's Claude members use Claude's own point again: windows that start from now on are given no size.",
+    "The project's members use their harness's own point again: windows that start from now on are given no size.",
   )
 })
 
-test('holds the size to the range Claude takes, and Save back while it is not a whole number in it', async ({
+test('holds the size to the range the ledger takes, and Save back while it is not a whole number in it', async ({
   page,
 }) => {
   await open(page)
@@ -5211,7 +5210,7 @@ test('holds the size to the range Claude takes, and Save back while it is not a 
       await expect(section.amount, text).toHaveAttribute('aria-invalid', 'true')
     }
   }
-  // Claude's own point is saved whatever the field holds.
+  // The harness's own point is saved whatever the field holds.
   await section.amount.fill('99999')
   await section.own.check()
   await expect(section.save).toBeEnabled()
@@ -5219,7 +5218,7 @@ test('holds the size to the range Claude takes, and Save back while it is not a 
   expect(await calls(page, 'project.compaction')).toEqual([])
 })
 
-test("says a refusal of the Claude members' compaction in its section and keeps what was chosen", async ({
+test("says a refusal of the members' compaction in its section and keeps what was chosen", async ({
   page,
 }) => {
   await open(page)
@@ -6906,7 +6905,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Rules for the staff',
-    'Compaction for Claude members',
+    'Compaction',
     'Human approval',
     'Wake-up calls',
     'Specs',
