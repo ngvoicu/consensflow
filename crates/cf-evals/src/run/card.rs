@@ -213,6 +213,12 @@ fn conduct(
                         Some("queued" | "working" | "waiting")
                     )
                 }),
+            staff_at_work: tasks.iter().any(|task| {
+                matches!(
+                    task["state"].as_str(),
+                    Some("queued" | "working" | "waiting")
+                )
+            }),
             dialog: state == Some("waiting"),
             board_empty: tasks.is_empty(),
             owed: Owed::Nothing,

@@ -58,6 +58,8 @@ e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live:
 e2e-lib-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
 # A wait for the chief that gave up, and what it says of the chief's window.
 evals-lib-run-chief = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::chief"]
+# The owner's step at a look at the project: when the run is over, and the extra work.
+evals-lib-run-owner = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::owner"]
 # The product's reader of Claude Code's record, whose copy of a conversation B5 reads.
 harness-claude-projection = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::projection"]
 
@@ -4208,3 +4210,350 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/watcher/exits.rs"
 find = "    } else if known.quit_from.is_some_and(|from| at >= from) {"
 replace = "    } else if known.quit_from.is_some_and(|from| at < from) {"
+
+
+# The end of a run and the schedule (T-1256): a run is over when its project has ended and its
+# schedule is played, or when its budget is spent; a project that goes quiet while a disruption
+# waits for its shape is given a piece of extra work from a short fixed list, only where the
+# budget has the time to finish it. The 2-hour run on Windows (2026-11-05) ended at 53 minutes
+# of 120 with three disruptions never played.
+
+[[plant]]
+name = "long run 9: a project that went quiet with a disruption waiting for its shape is over"
+meant = "the_run_is_not_over_while_a_disruption_of_its_schedule_waits_for_its_shape"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && seen.owed == Owed::Nothing\n            && !seen.busy\n            && seen.quiet > scenario.quiet\n"
+replace = "            && !seen.busy\n            && seen.quiet > scenario.quiet\n"
+
+[[plant]]
+name = "long run 9: a project whose next disruption is not yet due is over"
+meant = "the_run_is_not_over_while_a_disruption_of_its_schedule_waits_for_its_shape"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && seen.owed == Owed::Nothing\n            && !seen.busy\n            && seen.quiet > scenario.quiet\n"
+replace = "            && seen.owed != Owed::Due\n            && !seen.busy\n            && seen.quiet > scenario.quiet\n"
+
+[[plant]]
+name = "long run 9: a run whose schedule is played is never over"
+meant = "a_conversation_goes_on_in_turn_each_message_once_the_chief_is_done_with_the_last"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && seen.owed == Owed::Nothing\n            && !seen.busy\n            && seen.quiet > scenario.quiet\n"
+replace = "            && false\n            && !seen.busy\n            && seen.quiet > scenario.quiet\n"
+
+[[plant]]
+name = "long run: extra work is given to a project whose staff are at work"
+meant = "extra_work_is_given_to_a_project_that_is_quiet_and_only_when_a_disruption_is_due"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && seen.owed == Owed::Due\n            && !seen.busy\n            && seen.quiet > FOLLOW_UP_AFTER\n"
+replace = "            && seen.owed == Owed::Due\n            && seen.quiet > FOLLOW_UP_AFTER\n"
+
+[[plant]]
+name = "long run: extra work is given before the disruption is due"
+meant = "extra_work_is_given_to_a_project_that_is_quiet_and_only_when_a_disruption_is_due"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && seen.owed == Owed::Due\n            && !seen.busy\n            && seen.quiet > FOLLOW_UP_AFTER\n"
+replace = "            && seen.owed != Owed::Nothing\n            && !seen.busy\n            && seen.quiet > FOLLOW_UP_AFTER\n"
+
+[[plant]]
+name = "long run: extra work is given the moment the project is at rest, not once it has been quiet"
+meant = "extra_work_is_given_to_a_project_that_is_quiet_and_only_when_a_disruption_is_due"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && seen.quiet > FOLLOW_UP_AFTER\n            && (self.worked_since"
+replace = "            && seen.quiet >= Duration::ZERO\n            && (self.worked_since"
+
+[[plant]]
+name = "long run: no piece of extra work is counted, and the list is given from its first piece each time"
+meant = "a_quiet_project_with_a_disruption_due_is_given_a_piece_of_extra_work_each_time_in_turn"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "                self.extra_sent += 1;\n                self.worked_since = false;\n"
+replace = "                self.worked_since = false;\n"
+
+[[plant]]
+name = "long run: the list of extra work is given once, and a disruption still waiting finds none after it"
+meant = "a_quiet_project_with_a_disruption_due_is_given_a_piece_of_extra_work_each_time_in_turn"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "usize::try_from(self.extra_sent).ok()? % self.extra.len().max(1);"
+replace = "usize::try_from(self.extra_sent).ok()?;"
+
+[[plant]]
+name = "long run 9: a piece of extra work is given with no regard to the budget, and the end breaks with it half done"
+meant = "a_piece_of_extra_work_is_given_only_where_the_budget_has_the_time_to_finish_it"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "(timeout.saturating_sub(elapsed) >= piece.takes).then(|| piece.say.clone())"
+replace = "Some(piece.say.clone())"
+
+[[plant]]
+name = "long run 9: a piece of extra work is given with exactly its time left no more"
+meant = "a_piece_of_extra_work_is_given_only_where_the_budget_has_the_time_to_finish_it"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "(timeout.saturating_sub(elapsed) >= piece.takes).then(|| piece.say.clone())"
+replace = "(timeout.saturating_sub(elapsed) > piece.takes).then(|| piece.say.clone())"
+
+[[plant]]
+name = "long run: a disruption is due before its time"
+meant = "the_schedule_owes_the_project_nothing_once_played_and_a_disruption_waits_until_it_is_due"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/disruptions.rs"
+find = "            Some(waiting) if elapsed >= waiting.due => Owed::Due,"
+replace = "            Some(waiting) if elapsed + waiting.due >= waiting.due => Owed::Due,"
+
+[[plant]]
+name = "long run: a schedule that was played still owes the project"
+meant = "the_schedule_owes_the_project_nothing_once_played_and_a_disruption_waits_until_it_is_due"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/disruptions.rs"
+find = "            None => Owed::Nothing,"
+replace = "            None => Owed::Later,"
+
+[[plant]]
+name = "long run: a look before a disruption is due is kept as a look for it"
+meant = "the_looks_after_a_disruption_is_due_that_found_no_moment_for_it_are_kept"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/disruptions.rs"
+find = "        if waiting.due > moment.elapsed {\n            return;\n        }"
+replace = "        if false {\n            return;\n        }"
+
+[[plant]]
+name = "long run: no look is kept of a Devin worker at work"
+meant = "the_looks_after_a_disruption_is_due_that_found_no_moment_for_it_are_kept"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/disruptions.rs"
+find = "        found.devin += u32::from(at_work(true));"
+replace = "        found.devin += 0;"
+
+[[plant]]
+name = "long run: a disruption not played says only that the run ended"
+meant = "a_disruption_not_played_says_what_its_shape_needed_and_what_the_looks_found_of_the_staff"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/disruptions.rs"
+find = "                    None => planned.no_shape(why),"
+replace = "                    None => why.to_owned(),"
+
+[[plant]]
+name = "long run: the report keeps no coverage"
+meant = "the_report_tells_the_project_the_time_and_the_disruptions_apart"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = "            \"coverage\": self.coverage(),"
+replace = "            \"coverage\": Value::Null,"
+
+[[plant]]
+name = "long run: the console says no coverage"
+meant = "the_report_tells_the_project_the_time_and_the_disruptions_apart"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = "        lines.push(format!(\"  coverage: {}\", self.coverage_line()));"
+replace = "        let _ = self.coverage_line();"
+
+[[plant]]
+name = "long run: the Markdown report has no coverage"
+meant = "the_report_tells_the_project_the_time_and_the_disruptions_apart"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = "        text.push_str(&self.coverage_markdown());"
+replace = "        let _ = self.coverage_markdown();"
+
+[[plant]]
+name = "long run: the coverage counts the failed as played"
+meant = "the_report_tells_the_project_the_time_and_the_disruptions_apart"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = "            played: count(|state| matches!(state, State::Played { .. })),"
+replace = "            played: count(|state| matches!(state, State::Played { .. } | State::Failed { .. } | State::NotPlayed(_))),"
+
+[[plant]]
+name = "long run 9: a project is taken to have reached its end whatever broke the end"
+meant = "a_project_that_did_not_reach_its_end_is_told_so_apart_from_a_schedule_that_was_played"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = "        !self.breaks.iter().any(|found| found.invariant == END)"
+replace = "        true"
+
+[[plant]]
+name = "long run 9: a budget spent with the project done is told as a project that did not reach its end"
+meant = "a_budget_spent_with_the_project_done_and_the_schedule_not_played_names_each_disruption"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = "            why.push(if self.project_ended() && unplayed > 0 {"
+replace = "            why.push(if false && unplayed > 0 {"
+
+[[plant]]
+name = "long run: the owner is told nothing is owed however much of the schedule waits"
+meant = "the_owner_is_told_what_the_schedule_still_owes_the_project_at_each_look"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = "        owed: schedule.owed(elapsed),"
+replace = "        owed: schedule.owed(Duration::ZERO),"
+
+[[plant]]
+name = "long run: the stand-in's extra work is none"
+meant = "the_extra_work_is_a_short_fixed_list_of_the_check_the_ask_already_has_done"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "            Self::StandIn | Self::StandInFast => stand_in_extra_work(),"
+replace = "            Self::StandIn | Self::StandInFast => Vec::new(),"
+
+[[plant]]
+name = "long run: the real ask's extra work is none"
+meant = "the_extra_work_is_a_short_fixed_list_of_the_check_the_ask_already_has_done"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "            Self::Real => real_extra_work(),"
+replace = "            Self::Real => Vec::new(),"
+
+[[plant]]
+name = "long run 9: a piece of the real extra work is said to take a minute, and is given with no time left to finish it"
+meant = "the_extra_work_is_a_short_fixed_list_of_the_check_the_ask_already_has_done"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "pub const REAL_PIECE_TAKES: Duration = Duration::from_secs(25 * 60);"
+replace = "pub const REAL_PIECE_TAKES: Duration = Duration::from_secs(60);"
+
+[[plant]]
+name = "long run: the fast stand-in project takes as long as the standard one"
+meant = "the_fast_stand_in_says_the_same_shapes_in_a_twentieth_of_the_seconds"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "            Self::StandInFast => stand_in(quiet, FAST),"
+replace = "            Self::StandInFast => stand_in(quiet, SLOW),"
+
+[[plant]]
+name = "long run: a disruption not played in a run whose time ran out says the project ended"
+meant = "a_disruption_not_played_says_how_the_run_ended_and_whether_the_owner_gave_the_staff_work"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = "        TIME_UP => \"time ran out before its moment came\","
+replace = "        TIME_UP => \"the project ended before its moment came\","
+
+[[plant]]
+name = "long run: a disruption not played never says the owner gave extra work"
+meant = "a_disruption_not_played_says_how_the_run_ended_and_whether_the_owner_gave_the_staff_work"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = "        given => format!(\"{ended}, though the owner gave {given} pieces of extra work\"),"
+replace = "        given => format!(\"{ended}, and the owner gave no extra work{}\", given * 0),"
+
+[[plant]]
+name = "long run: a chief that did nothing with a piece of extra work is handed the same work again at once"
+meant = "a_piece_the_chief_did_nothing_with_is_not_given_again_until_the_quiet_time_has_passed"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && (self.worked_since || self.extra_sent == 0 || seen.quiet > scenario.quiet)\n"
+replace = "            && (true || self.worked_since || self.extra_sent == 0 || seen.quiet > scenario.quiet)\n"
+
+[[plant]]
+name = "long run: a chief that did nothing with a piece of extra work is never asked again"
+meant = "a_piece_the_chief_did_nothing_with_is_not_given_again_until_the_quiet_time_has_passed"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "            && (self.worked_since || self.extra_sent == 0 || seen.quiet > scenario.quiet)\n"
+replace = "            && (self.worked_since || self.extra_sent == 0)\n"
+
+[[plant]]
+name = "long run: the staff at work since the last piece are not noticed, and the next piece waits for the quiet time"
+meant = "a_quiet_project_with_a_disruption_due_is_given_a_piece_of_extra_work_each_time_in_turn"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "        self.worked_since |= seen.staff_at_work;\n"
+replace = "        self.worked_since |= false;\n"
+
+[[plant]]
+name = "long run: a disruption queued behind one that was not played says only that the run ended"
+meant = "a_disruption_not_played_says_what_its_shape_needed_and_what_the_looks_found_of_the_staff"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/disruptions.rs"
+find = "                    Some(before) => planned.queued_behind(why, before),"
+replace = "                    Some(_) => why.to_owned(),"
+
+[[plant]]
+name = "long run: a disruption whose time had not come when the run ended is said to have found no moment"
+meant = "a_disruption_not_played_says_what_its_shape_needed_and_what_the_looks_found_of_the_staff"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/disruptions.rs"
+find = "        if looks == 0 {"
+replace = "        if looks == u32::MAX {"
+
+[[plant]]
+name = "long run: a chief that answered a piece of extra work in a turn of its own and put nothing on the board is taken to have put the staff at work"
+meant = "a_piece_the_chief_did_nothing_with_is_not_given_again_until_the_quiet_time_has_passed"
+runs = ["evals-lib-run-owner"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/owner.rs"
+find = "        self.worked_since |= seen.staff_at_work;\n"
+replace = "        self.worked_since |= seen.busy;\n"

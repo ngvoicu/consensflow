@@ -630,3 +630,111 @@ fn a_project_that_ends_before_its_schedule_is_given_extra_work_until_every_disru
     assert_eq!(coverage["extraWork"]["given"], extra.len(), "{coverage}");
     assert!(coverage["elapsed"]["seconds"].as_u64().unwrap() < 30 * 60);
 }
+
+/// The same project with a budget of six minutes, which the work (about five minutes) leaves
+/// no room in for a piece of extra work (it takes four): the schedule finds no shape before
+/// the time is up, and the run fails and says which disruptions it did not play and why they
+/// found none: what each needed, and what the looks after it was due found of the staff. The
+/// report keeps the project, the time and the disruptions apart.
+///
+/// ```text
+/// cargo test -p cf-evals --test long_dry_run -- --ignored --nocapture finds_no_shape
+/// ```
+#[test]
+#[ignore = "plays a short long run against the stand-ins, its budget spent: about seven minutes, and nothing spent"]
+fn a_schedule_that_finds_no_shape_before_the_budget_is_spent_fails_and_names_each_disruption() {
+    let (folder, _made) = kept_if_asked(tempfile::tempdir().unwrap());
+    let reports = folder.join("reports");
+    let ran = long_run_asking(
+        &folder,
+        "stand-in-fast",
+        &[
+            "--chief",
+            "claude",
+            "--staff",
+            "claude,devin",
+            "--model",
+            "fake-chief",
+            "--models",
+            "claude=fake+fake,devin=fake+fake",
+            "--switch-to",
+            "claude",
+            "--hours",
+            "0.1",
+            "--every-min",
+            "1.5",
+            "--look-sec",
+            "3",
+            "--quiet-min",
+            "1.5",
+            "--wake-min",
+            "5",
+            "--settle-sec",
+            "5",
+        ],
+        None,
+    );
+    assert_eq!(ran.code, Some(1), "{ran}");
+    let kept = kept_in(&reports);
+    let json = kept
+        .iter()
+        .find(|file| file.extension().is_some_and(|ext| ext == "json"))
+        .unwrap_or_else(|| panic!("no report: {kept:?}\n{ran}"));
+    let report: Value = serde_json::from_str(&std::fs::read_to_string(json).unwrap()).unwrap();
+    assert_eq!(report["verdict"], "FAIL", "{report}");
+    assert_eq!(report["ending"], "time ran out", "{report}");
+    let unplayed: Vec<&Value> = report["disruptions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|one| one["state"] == "not played")
+        .collect();
+    assert!(!unplayed.is_empty(), "{report}");
+    for one in &unplayed {
+        let said = one["said"].as_str().unwrap();
+        assert!(
+            said.starts_with(
+                "time ran out before its moment came, and the owner gave no extra work: it needs "
+            ),
+            "{said}"
+        );
+        assert!(
+            said.contains(" after its time, +")
+                || said.contains(", had not come")
+                || said.contains("it waited behind "),
+            "{said}"
+        );
+    }
+    // Each is a line of the report's why, and of the console: by name.
+    let why: Vec<&str> = report["why"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    for one in &unplayed {
+        let flag = one["disruption"].as_str().unwrap();
+        assert!(
+            why.iter()
+                .any(|line| line.starts_with(&format!("{flag} was not played: time ran out"))),
+            "{flag}: {why:?}"
+        );
+        assert!(
+            ran.stdout
+                .contains(&format!("  why: {flag} was not played")),
+            "{flag}: {ran}"
+        );
+    }
+    // No piece of extra work was given: none fit the budget. The three are told apart.
+    assert_eq!(report["coverage"]["extraWork"]["given"], 0, "{report}");
+    assert_eq!(report["coverage"]["elapsed"]["budgetSeconds"], 360);
+    assert_eq!(
+        report["coverage"]["disruptions"]["notPlayed"],
+        unplayed.len(),
+        "{report}"
+    );
+    assert!(
+        ran.stdout.contains("  coverage: project "),
+        "the console says the coverage: {ran}"
+    );
+}

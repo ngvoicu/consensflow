@@ -281,15 +281,17 @@ fn stand_in(quiet: Duration, pace: Pace) -> Scenario {
 /// How long a piece of the stand-in's extra work takes, with the chief's accepting after it.
 pub const STAND_IN_PIECE_TAKES: Duration = Duration::from_secs(4 * 60);
 
-/// The stand-in's extra work: the shapes of one complex and one light task, two minutes of work
+/// The stand-in's extra work: the shapes of one complex and one light task, 80 seconds of work
 /// each, a job running beside the complex one's turn (a tool call at work, the shape the
-/// switch and the Devin cut are for).
+/// switch and the Devin cut are for). A stand-in Claude writes nothing of a silent turn until
+/// it ends, and the product pauses a task whose window has begun no turn in two minutes
+/// (the first dry run of this work, T-26 at `SLEEP 120`): the turn stays under it.
 fn stand_in_extra_work() -> Vec<Piece> {
     (1..=2)
         .map(|at| Piece {
             say: format!(
-                "DISPATCH --tier complex JOB 150 SLEEP 120 Reply with exactly: RERUN-{at}\n\
-                 DISPATCH --tier light SLEEP 120 Reply with exactly: DEVIN-RERUN-{at}"
+                "DISPATCH --tier complex JOB 100 SLEEP 80 Reply with exactly: RERUN-{at}\n\
+                 DISPATCH --tier light SLEEP 80 Reply with exactly: DEVIN-RERUN-{at}"
             ),
             takes: STAND_IN_PIECE_TAKES,
         })
@@ -367,9 +369,108 @@ mod tests {
     fn an_ask_is_named_on_the_command_line() {
         assert_eq!(Ask::of("real").unwrap(), Ask::Real);
         assert_eq!(Ask::of("stand-in").unwrap().name(), "stand-in");
+        assert_eq!(Ask::of("stand-in-fast").unwrap(), Ask::StandInFast);
+        assert_eq!(Ask::StandInFast.name(), "stand-in-fast");
         assert_eq!(
             Ask::of("fake").unwrap_err().to_string(),
             "--ask is real, stand-in or stand-in-fast, not fake"
         );
+    }
+
+    #[test]
+    fn the_fast_stand_in_says_the_same_shapes_in_a_twentieth_of_the_seconds() {
+        let slow = Ask::StandIn.scenario(Duration::from_secs(90));
+        let fast = Ask::StandInFast.scenario(Duration::from_secs(90));
+        let shape = |line: &str| {
+            line.split_whitespace()
+                .filter(|word| word.parse::<u32>().is_err())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let (slow_tasks, fast_tasks) = (
+            terminal_answer(&slow, "Currency?"),
+            terminal_answer(&fast, "Currency?"),
+        );
+        let (slow_lines, fast_lines): (Vec<_>, Vec<_>) =
+            (slow_tasks.lines().collect(), fast_tasks.lines().collect());
+        assert_eq!(slow_lines.len(), fast_lines.len());
+        // The same verbs, tiers and words, line by line, whatever the seconds.
+        for (slow_line, fast_line) in slow_lines.iter().zip(&fast_lines) {
+            assert_eq!(shape(slow_line), shape(fast_line));
+        }
+        // And every number of seconds is smaller: under a minute for a job or a turn.
+        for line in &fast_lines {
+            for seconds in line
+                .split_whitespace()
+                .filter_map(|word| word.parse::<u32>().ok())
+            {
+                assert!(seconds <= 60, "{line}");
+            }
+        }
+        // The slow one is untouched: the standard dry run's seconds.
+        assert_eq!(slow_lines[..5], STAND_IN_SHAPES);
+        assert_eq!(slow.follow_ups.len(), fast.follow_ups.len());
+        assert_eq!((slow.fixture, fast.fixture), ("long-run", "long-run"));
+    }
+
+    #[test]
+    fn the_extra_work_is_a_short_fixed_list_of_the_check_the_ask_already_has_done() {
+        let real = Ask::Real.extra_work();
+        assert_eq!(real.len(), 2);
+        for piece in &real {
+            // The full suite and the build, with the dev server's pages, at the three tiers
+            // of the staff (a Devin worker has the light one), and a note after.
+            for shape in [
+                "npm test",
+                "npm run build",
+                "npm run dev",
+                "run_in_background",
+                "curl",
+                "tier standard",
+                "tier light",
+                "tier complex",
+                "cf note --human",
+            ] {
+                assert!(piece.say.contains(shape), "{shape}: {}", piece.say);
+            }
+            // The longest a follow-up of this kind took in the runs of 2026-11-05 was a quarter
+            // of an hour and more, still going at the 1-hour diagnostic's budget: a piece is
+            // given only with at least 20 minutes left, so that the end (9) has its time.
+            assert_eq!(piece.takes, REAL_PIECE_TAKES);
+            assert!(piece.takes >= Duration::from_secs(20 * 60));
+        }
+        assert_ne!(real[0].say, real[1].say);
+        // The stand-in's pieces are the stand-in's words: one complex job and one light turn.
+        for ask in [Ask::StandIn, Ask::StandInFast] {
+            let pieces = ask.extra_work();
+            assert_eq!(pieces.len(), 2);
+            for piece in &pieces {
+                assert_eq!(piece.say.lines().count(), 2, "{}", piece.say);
+                assert!(piece
+                    .say
+                    .lines()
+                    .all(|line| line.starts_with("DISPATCH --tier ")));
+                assert!(piece.say.contains("JOB ") && piece.say.contains("--tier light"));
+                assert_eq!(piece.takes, STAND_IN_PIECE_TAKES);
+            }
+        }
+    }
+
+    #[test]
+    fn the_real_asks_words_are_what_they_were_with_the_extra_work_besides() {
+        // The ask, its follow-up, its answer and its nudge are the owner's, byte for byte: the
+        // extra work is an addition, not a change of them.
+        let scenario = Ask::Real.scenario(Duration::from_secs(600));
+        assert!(scenario
+            .prompt
+            .starts_with("This is ledgerline, a small bookkeeping library"));
+        assert_eq!(scenario.prompt.len(), PROMPT.len());
+        assert_eq!(scenario.follow_ups, [FollowUp::Say(FOLLOW_UP.to_owned())]);
+        assert_eq!(
+            scenario.nudge,
+            Some("Go on: plan the phases and put the work on the board.")
+        );
+        assert_eq!(scenario.quiet, Duration::from_secs(600));
+        assert!(scenario.expectations.is_empty());
     }
 }

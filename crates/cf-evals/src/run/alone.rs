@@ -249,6 +249,7 @@ fn conduct(
             elapsed: floor.elapsed(),
             quiet: last_change.elapsed(),
             busy,
+            staff_at_work: false,
             dialog: false,
             board_empty: true,
             owed: Owed::Nothing,

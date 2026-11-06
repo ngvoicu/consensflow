@@ -28,6 +28,7 @@ fn at_rest(quiet: u64) -> Seen {
         elapsed: Duration::from_secs(300),
         quiet: Duration::from_secs(quiet),
         busy: false,
+        staff_at_work: false,
         dialog: false,
         board_empty: true,
         owed: Owed::Nothing,
@@ -385,20 +386,21 @@ fn owing(owed: Owed, elapsed: u64, quiet: u64) -> Seen {
 
 #[test]
 fn the_run_is_not_over_while_a_disruption_of_its_schedule_waits_for_its_shape() {
-    // The 2-hour run on Windows (2026-11-05): the project ended at 53 minutes, the follow-ups
-    // said, the board quiet for the scenario's quiet time, and the chief switch, the Devin cut
-    // and the suspension still to play. It was over. It is not.
+    // The 2-hour run on Windows (2026-11-05): the project ended at 53 minutes of its 120, the
+    // follow-ups said, the board quiet for the scenario's quiet time, and the chief switch, the
+    // Devin cut and the suspension still to play. It was over. It is not (here at 20 minutes
+    // of a 40-minute budget).
     let scenario = scenario(None, Vec::new());
     for owed in [Owed::Later, Owed::Due] {
         let mut owner = Owner::new(&scenario);
-        let step = step(&mut owner, &scenario, &owing(owed, 3177, 600), None);
+        let step = step(&mut owner, &scenario, &owing(owed, 1200, 600), None);
         assert_ne!(step, Step::Over, "{owed:?}");
         assert_eq!(step, Step::Wait, "no extra work: it waits for the budget");
     }
     // It is over once the schedule is played, as it was.
     let mut owner = Owner::new(&scenario);
     assert_eq!(
-        step(&mut owner, &scenario, &owing(Owed::Nothing, 3177, 91), None),
+        step(&mut owner, &scenario, &owing(Owed::Nothing, 1200, 91), None),
         Step::Over
     );
 }
@@ -407,17 +409,25 @@ fn the_run_is_not_over_while_a_disruption_of_its_schedule_waits_for_its_shape() 
 fn a_quiet_project_with_a_disruption_due_is_given_a_piece_of_extra_work_each_time_in_turn() {
     let scenario = scenario(None, Vec::new());
     let mut owner = Owner::new(&scenario).with_extra_work(pieces());
-    let due = owing(Owed::Due, 3000, 21);
+    let due = owing(Owed::Due, 1200, 21);
+    // The staff take each piece up: they are at work, then the project is quiet again.
+    let working = Seen {
+        busy: true,
+        staff_at_work: true,
+        ..due
+    };
     assert_eq!(
         step(&mut owner, &scenario, &due, None),
         Step::More("more one".to_owned())
     );
     assert_eq!(owner.extra_sent, 1);
+    assert_eq!(step(&mut owner, &scenario, &working, None), Step::Wait);
     assert_eq!(
         step(&mut owner, &scenario, &due, None),
         Step::More("more two".to_owned())
     );
     // The list is short and fixed: it is given again from the first while a disruption waits.
+    assert_eq!(step(&mut owner, &scenario, &working, None), Step::Wait);
     assert_eq!(
         step(&mut owner, &scenario, &due, None),
         Step::More("more one".to_owned())
@@ -433,22 +443,22 @@ fn extra_work_is_given_to_a_project_that_is_quiet_and_only_when_a_disruption_is_
     let mut owner = Owner::new(&scenario).with_extra_work(pieces());
     // Its time has not come: the schedule paces itself, and no work is given ahead of it.
     assert_eq!(
-        step(&mut owner, &scenario, &owing(Owed::Later, 3000, 600), None),
+        step(&mut owner, &scenario, &owing(Owed::Later, 1200, 600), None),
         Step::Wait
     );
     // Staff at work, or the project quiet for twenty seconds only: the work is still on.
     let busy = Seen {
         busy: true,
-        ..owing(Owed::Due, 3000, 600)
+        ..owing(Owed::Due, 1200, 600)
     };
     assert_eq!(step(&mut owner, &scenario, &busy, None), Step::Wait);
     assert_eq!(
-        step(&mut owner, &scenario, &owing(Owed::Due, 3000, 20), None),
+        step(&mut owner, &scenario, &owing(Owed::Due, 1200, 20), None),
         Step::Wait
     );
     assert_eq!(owner.extra_sent, 0);
     assert_eq!(
-        step(&mut owner, &scenario, &owing(Owed::Due, 3000, 21), None),
+        step(&mut owner, &scenario, &owing(Owed::Due, 1200, 21), None),
         Step::More("more one".to_owned())
     );
 }
@@ -457,7 +467,7 @@ fn extra_work_is_given_to_a_project_that_is_quiet_and_only_when_a_disruption_is_
 fn extra_work_comes_after_the_follow_ups_of_the_conversation() {
     let scenario = scenario(None, vec![FollowUp::Say("one".to_owned())]);
     let mut owner = Owner::new(&scenario).with_extra_work(pieces());
-    let due = owing(Owed::Due, 3000, 600);
+    let due = owing(Owed::Due, 1200, 600);
     assert_eq!(
         step(&mut owner, &scenario, &due, None),
         Step::Next(FollowUp::Say("one".to_owned()))
@@ -521,4 +531,37 @@ fn a_run_out_of_time_with_a_disruption_waiting_is_out_of_time_and_not_over() {
         ..late
     };
     assert_eq!(step(&mut owner, &scenario, &played, None), Step::Over);
+}
+
+#[test]
+fn a_piece_the_chief_did_nothing_with_is_not_given_again_until_the_quiet_time_has_passed() {
+    // A chief that answers "already done" and puts nothing on the board would otherwise be
+    // handed the same work every half a minute until the budget.
+    let scenario = scenario(None, Vec::new());
+    let mut owner = Owner::new(&scenario).with_extra_work(pieces());
+    assert_eq!(
+        step(&mut owner, &scenario, &owing(Owed::Due, 1200, 21), None),
+        Step::More("more one".to_owned())
+    );
+    // The chief took a turn on it (it is at work, as it answers "already done") and put
+    // nothing on the board: no staff at work since. The project is quiet again, and it waits,
+    // a minute and a half being the scenario's quiet time (not more than it).
+    let answering = Seen {
+        busy: true,
+        staff_at_work: false,
+        ..owing(Owed::Due, 1250, 5)
+    };
+    assert_eq!(step(&mut owner, &scenario, &answering, None), Step::Wait);
+    for quiet in [21, 60, 90] {
+        assert_eq!(
+            step(&mut owner, &scenario, &owing(Owed::Due, 1300, quiet), None),
+            Step::Wait,
+            "{quiet}"
+        );
+    }
+    assert_eq!(owner.extra_sent, 1);
+    assert_eq!(
+        step(&mut owner, &scenario, &owing(Owed::Due, 1400, 91), None),
+        Step::More("more two".to_owned())
+    );
 }
