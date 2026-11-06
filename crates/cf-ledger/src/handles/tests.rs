@@ -352,6 +352,32 @@ fn every_launch_id_of_devin_s_recorded_list_gives_its_listed_id_from_the_list_an
     assert_eq!((pairs, odd, by_label), (246, 75, 165));
 }
 
+/// What a model is shown as: the name its row holds (`model_name`: since HMD-12 its id, and in a
+/// row not yet migrated what its list called it), else the id its harness takes, else, for a member
+/// on its harness's default, that.
+#[test]
+fn a_model_is_shown_by_its_name_else_its_id_else_as_its_harness_s_default() {
+    assert_eq!(
+        model_shown(Some("Opus"), Some("claude-opus-5-5"), Some("claude-code")),
+        "Opus"
+    );
+    assert_eq!(
+        model_shown(
+            Some("swe-2-lightning"),
+            Some("swe-2-max-lightning"),
+            Some("devin")
+        ),
+        "swe-2-lightning",
+        "Devin's row holds the launch id and the listed id is what is shown"
+    );
+    assert_eq!(
+        model_shown(None, Some("claude-opus-5-5"), Some("claude-code")),
+        "claude-opus-5-5"
+    );
+    assert_eq!(model_shown(Some("  "), Some("m"), None), "m");
+    assert_eq!(model_shown(None, None, Some("codex")), "Codex default");
+}
+
 /// A ledger 0030 left, of the board's shape before the models were the harnesses' own: a
 /// chief and members of ready-made agents, a window of one with a task and a message.
 fn before_0031() -> Connection {

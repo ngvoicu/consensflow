@@ -8183,6 +8183,11 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     tier: 'light',
   })
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  // The row of the member just picked names its model by its id, as its harness takes it (Pi's
+  // with its provider), never by what the harness's list calls the model.
+  await expect(
+    table.locator('tbody tr', { hasText: 'Advisor' }).locator('.member-name'),
+  ).toHaveText('meta/muse-spark')
   await pickMember(dialog, {
     role: 'designer',
     harness: 'Codex',
@@ -8190,6 +8195,9 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     tier: 'light',
   })
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(
+    table.locator('tbody tr', { hasText: 'Image designer' }).locator('.member-name'),
+  ).toHaveText('gpt-5.6-luna')
   await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
   await expect(table.locator('tbody tr')).toHaveCount(5)
   await dialog.getByRole('button', { name: 'Start project' }).click()

@@ -28,7 +28,7 @@ hm-harness-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", 
 hm-ledger-replay = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "replay"]
 hm-engine-chief-models = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::"]
 hm-page-chief-model = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "could not tell the model of"]
-hm-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a project in a chosen folder|shows the staff as one row per member"]
+hm-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a project in a chosen folder|shows the staff as one row per member|starts a new project's staff on the model"]
 
 [[plant]]
 name = "harness models: a handle another participant has takes a number, not the harness in front"
@@ -301,10 +301,10 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''
-      .map((pick) => ({ ...pick, name: modelShown(pick) }))
+      modelName: modelOf(model),
 '''
 replace = '''
-      .map((pick) => ({ ...pick, name: pick.model }))
+      modelName: model.label,
 '''
 
 [[plant]]
