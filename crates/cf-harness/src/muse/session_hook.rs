@@ -144,11 +144,12 @@ pub fn filler(id: &str, part: usize, of: usize) -> String {
     )
 }
 
-/// The bytes a frame takes at the most: a first part's head and a last part's tail of the
-/// most parts, and the two line breaks that join them to the part.
+/// The bytes a frame takes at the most in a hook's answer: a first part's head and a last
+/// part's tail of the most parts, and the two line breaks that join them to the part, which a
+/// JSON string writes in two bytes each.
 fn frame_most() -> usize {
     let id = "0".repeat(8);
-    head(&id, 1, MOST_PARTS).len() + tail(&id, MOST_PARTS, MOST_PARTS).len() + 2
+    head(&id, 1, MOST_PARTS).len() + tail(&id, MOST_PARTS, MOST_PARTS).len() + 2 * encoded('\n')
 }
 
 /// The parts `role` is cut into, each to be said by a hook: consecutive pieces of it
@@ -616,6 +617,28 @@ mod tests {
             "a frame is lines, not a page: {}",
             frame_most()
         );
+    }
+
+    #[test]
+    fn the_room_a_frame_takes_is_at_least_what_any_frame_takes_in_an_answer() {
+        let id = "0123abcd";
+        for of in 1..=MOST_PARTS {
+            for part in 1..=of {
+                let frame =
+                    hook_output(&format!("{}\n\n{}", head(id, part, of), tail(id, part, of))).len()
+                        - hook_output("").len();
+                assert!(
+                    frame <= frame_most(),
+                    "part {part} of {of}: {frame} bytes of a frame, room for {}",
+                    frame_most()
+                );
+            }
+        }
+        // And so the fullest part of the hardest role is under the budget, to the byte.
+        let role = format!("{}\n", "a".repeat(98)).repeat(2_000);
+        for block in blocks(&role) {
+            assert!(hook_output(&block).len() <= PART_OUTPUT);
+        }
     }
 
     /// A block of a framed role as its parts are read back: the part, its number and how

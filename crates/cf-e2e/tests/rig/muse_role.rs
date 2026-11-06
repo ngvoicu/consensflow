@@ -162,6 +162,38 @@ fn head_of(text: &str) -> Option<(String, usize, usize)> {
     Some((id.to_owned(), number.parse().ok()?, of.parse().ok()?))
 }
 
+/// Judges `rest`, the blocks of ConsensFlow's after a role's parts (`of` of them): each a filler
+/// over the block of its number, saying the role has `of` parts, of the one id (`id`, or the
+/// first filler's where the role is no framed one).
+fn fillers(rest: &[&(u32, String)], id: Option<&str>, of: usize) -> Result<(), String> {
+    let mut id = id.map(str::to_owned);
+    for (number, text) in rest {
+        let slot = number + 1;
+        let (said, ends) = (
+            format!("{MARK} "),
+            format!(
+                " part {slot}: there is no part {slot} of this role, which has {of} part{}>>",
+                if of == 1 { "" } else { "s" }
+            ),
+        );
+        let this = text
+            .strip_prefix(said.as_str())
+            .and_then(|rest| rest.strip_suffix(ends.as_str()))
+            .filter(|this| this.len() == 8 && this.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let Some(this) = this else {
+            return Err(format!(
+                "block {number} is no filler of {}: {}",
+                id.as_deref().unwrap_or("this role"),
+                &text[..text.len().min(90)]
+            ));
+        };
+        if *id.get_or_insert_with(|| this.to_owned()) != this {
+            return Err(format!("block {number} is a filler of another id: {this}"));
+        }
+    }
+    Ok(())
+}
+
 /// Judges the blocks the SessionStart hooks of a session gave (`blocks`: the last text of
 /// each number, as the session's log keeps them) against the role text the launch wrote
 /// (`role`): ConsensFlow's own are blocks `0..k` with nothing of the owner's among them; the
@@ -191,6 +223,7 @@ fn layout(role: &str, blocks: &[(u32, String)], old: &[String]) -> Result<Layout
                     role.len()
                 ));
             }
+            fillers(&mine[1..], None, 1)?;
             1
         }
         Some((id, 1, of)) => {
@@ -223,15 +256,7 @@ fn layout(role: &str, blocks: &[(u32, String)], old: &[String]) -> Result<Layout
                     mine.len()
                 ));
             }
-            for (number, text) in &mine[of..] {
-                let said = format!("{MARK} {id} part {}: there is no part", number + 1);
-                if !text.starts_with(&said) {
-                    return Err(format!(
-                        "block {number} is no filler of {id}: {}",
-                        &text[..text.len().min(90)]
-                    ));
-                }
-            }
+            fillers(&mine[of..], Some(&id), of)?;
             of
         }
         Some((_, part, _)) => return Err(format!("the first block says part {part}")),
@@ -477,6 +502,8 @@ fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and
         set_rules(&rig, &project, rules.as_deref())?;
         owners_say(&files, says)?;
         let (session, role, blocks) = chief_launch(&rig, &project, launch)?;
+        // The tags of the earlier roles this one does not say again must be nowhere.
+        old.retain(|tag| !role.contains(tag.as_str()));
         let laid = layout(&role, &blocks, &old)
             .map_err(|why| format!("launch {launch} ({}): {why}", rules_tag(&role)))?;
         // Parts as the rules make them; blocks never fewer than any launch had.
@@ -501,8 +528,7 @@ fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and
                 blocks.iter().map(|(number, _)| number).collect::<Vec<_>>()
             );
         }
-        old.push(format!("RULESTAG-{}", rules_tag(&role)));
-        old.retain(|tag| !role.contains(tag.as_str()));
+        remember(&mut old, &role);
         // The one conversation went on, from the first launch to the last: each resumed it.
         assert_eq!(
             *conversation.get_or_insert(session.clone()),
@@ -517,6 +543,15 @@ fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and
     }
     rig.close()?;
     Ok(())
+}
+
+/// Adds the tag of the rules `role` says to `old`, the texts no later role may leave in a block
+/// (none where the role has no rules).
+fn remember(old: &mut Vec<String>, role: &str) {
+    let tag = rules_tag(role);
+    if !tag.is_empty() {
+        old.push(format!("RULESTAG-{tag}"));
+    }
 }
 
 /// The tag of the rules a role says (`RULESTAG-<tag>`), for a message.
@@ -574,6 +609,7 @@ fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_te
         assert_eq!(muse::terminals(&log).len(), number, "{session}");
         let role = the_latest_role(&rig, "worker").ok_or("the worker's launch wrote no role")?;
         let blocks = hook_blocks(&log);
+        old.retain(|tag| !role.contains(tag.as_str()));
         let laid = layout(&role, &blocks, &old)
             .map_err(|why| format!("task {number} ({}): {why}", rules_tag(&role)))?;
         assert_eq!(laid.parts, *parts, "task {number}: {laid:?}");
@@ -582,11 +618,181 @@ fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_te
             laid.blocks, covered,
             "task {number}: a block of ours for every part ever said"
         );
-        old.push(format!("RULESTAG-{}", rules_tag(&role)));
-        old.retain(|tag| !role.contains(tag.as_str()) && tag != "RULESTAG-");
+        remember(&mut old, &role);
     }
     rig.close()?;
     Ok(())
+}
+
+/// The judge of the regressions is itself held, with no Muse: it takes a conversation's right
+/// blocks and refuses each way they can be wrong (the review's two: an old block kept, and the
+/// white space Muse cuts off a part's end).
+#[test]
+fn the_judge_of_a_conversations_blocks_takes_the_right_ones_and_refuses_each_wrong_one() {
+    let role = "line one\nline two  \n```\nfenced\n```\nlast\n";
+    let inner = ["line one\nline two  \n", "```\nfenced\n```\n", "last\n"];
+    let block = |id: &str, part: usize, of: usize, inner: &str| {
+        let more = if part == 1 {
+            ": your role is these parts"
+        } else {
+            ""
+        };
+        format!(
+            "{MARK} {id} part {part} of {of}{more}>>\n{inner}\n<<end of consensflow-role {id} part {part} of {of}>>"
+        )
+    };
+    let right: Vec<(u32, String)> = (0..3)
+        .map(|at| (at as u32, block("abcd1234", at + 1, 3, inner[at])))
+        .collect();
+    let filler = |number: u32, id: &str| {
+        (
+            number,
+            format!(
+                "{MARK} {id} part {}: there is no part {} of this role, which has 3 parts>>",
+                number + 1,
+                number + 1
+            ),
+        )
+    };
+    let judged = |blocks: &[(u32, String)], old: &[&str]| {
+        let old: Vec<String> = old.iter().map(|text| (*text).to_owned()).collect();
+        layout(role, blocks, &old)
+    };
+    let with = |extra: (u32, String)| {
+        let mut blocks = right.clone();
+        blocks.push(extra);
+        blocks
+    };
+    assert_eq!(
+        judged(&right, &[]),
+        Ok(Layout {
+            parts: 3,
+            blocks: 3
+        })
+    );
+    // The owner's blocks after ours are no part of it, and a filler of this role's id is ours.
+    assert_eq!(
+        judged(&with((3, "an owner's words".to_owned())), &[]),
+        Ok(Layout {
+            parts: 3,
+            blocks: 3
+        })
+    );
+    assert_eq!(
+        judged(&with(filler(3, "abcd1234")), &[]),
+        Ok(Layout {
+            parts: 3,
+            blocks: 4
+        })
+    );
+    // Wrong: the owner's block in front of ours; ours past the owner's; a part short.
+    let mut owner_first = vec![(0, "an owner's words".to_owned())];
+    owner_first.extend(right.iter().map(|(n, t)| (n + 1, t.clone())));
+    assert!(judged(&owner_first, &[])
+        .unwrap_err()
+        .contains("not the first ones"));
+    assert!(judged(
+        &[
+            right[0].clone(),
+            (1, "an owner's".to_owned()),
+            (2, right[2].1.clone())
+        ],
+        &[]
+    )
+    .is_err());
+    assert!(judged(&right[..2], &[]).is_err(), "two of three parts");
+    // Wrong: the ends of a part cut by Muse (two significant spaces lost), a part of another text.
+    let mut trimmed = right.clone();
+    trimmed[0].1 = block("abcd1234", 1, 3, "line one\nline two");
+    assert!(judged(&trimmed, &[]).unwrap_err().contains("the role"));
+    let mut changed = right.clone();
+    changed[1].1 = block("abcd1234", 2, 3, "```\nfenced\n```");
+    assert!(judged(&changed, &[]).is_err());
+    // Wrong: a part of another role's id; a filler of another id; a part that says another place.
+    let mut stale = right.clone();
+    stale[2].1 = block("ffff0000", 3, 3, inner[2]);
+    assert!(judged(&stale, &[]).unwrap_err().contains("ffff0000"));
+    assert!(judged(&with(filler(3, "ffff0000")), &[])
+        .unwrap_err()
+        .contains("another id"));
+    let mut misplaced = right.clone();
+    misplaced[1].1 = block("abcd1234", 3, 3, inner[1]);
+    assert!(judged(&misplaced, &[]).is_err());
+    // Wrong: text an earlier role said, anywhere, the owner's blocks included.
+    assert!(judged(
+        &with((3, "an owner's words and RULESTAG-A".to_owned())),
+        &["RULESTAG-A"]
+    )
+    .unwrap_err()
+    .contains("old role text"));
+    assert_eq!(
+        judged(&right, &["RULESTAG-A"]),
+        Ok(Layout {
+            parts: 3,
+            blocks: 3
+        })
+    );
+    // A role of one block is that block, as Muse cuts it: it begins with its skill's front matter.
+    let small = "---\nname: consensflow-worker\n---\n# x\n";
+    let one = [(0, small.trim().to_owned())];
+    assert_eq!(
+        layout(small, &one, &[]),
+        Ok(Layout {
+            parts: 1,
+            blocks: 1
+        })
+    );
+    assert!(layout(&format!("{small}y\n"), &one, &[]).is_err());
+    // Fillers over the blocks a longer role left, after a role of one block: of one id, saying
+    // this role has one part.
+    let one_part = |number: u32, id: &str| {
+        (
+            number,
+            format!(
+                "{MARK} {id} part {}: there is no part {} of this role, which has 1 part>>",
+                number + 1,
+                number + 1
+            ),
+        )
+    };
+    assert_eq!(
+        layout(
+            small,
+            &[
+                one[0].clone(),
+                one_part(1, "abcd1234"),
+                one_part(2, "abcd1234")
+            ],
+            &[]
+        ),
+        Ok(Layout {
+            parts: 1,
+            blocks: 3
+        })
+    );
+    assert!(
+        layout(small, &[one[0].clone(), filler(1, "abcd1234")], &[]).is_err(),
+        "a filler that says 3 parts"
+    );
+    assert!(
+        layout(
+            small,
+            &[
+                one[0].clone(),
+                one_part(1, "abcd1234"),
+                one_part(2, "ffff0000")
+            ],
+            &[]
+        )
+        .is_err(),
+        "fillers of two ids"
+    );
+    assert!(layout(
+        small,
+        &[one[0].clone(), (1, "an owner's words".to_owned())],
+        &[]
+    )
+    .is_ok());
 }
 
 // What the machine's Muse does with a SessionStart hook's output, measured on it as the cases
