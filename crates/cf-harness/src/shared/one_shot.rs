@@ -93,18 +93,21 @@ pub(crate) async fn conversation_as<T>(
     outcome
 }
 
-/// `failure`, and the code `child` exited with and the last it said, as far as it has.
+/// `failure`, and the code `child` exited with and the last it said, as far as it has. What it
+/// said goes on lines of their own after `it said:`, one line to a line it said, so that the
+/// engine that keeps the words can leave out a line that may hold a credential and keep the
+/// failure, the code and the lines that hold none (`cf_engine::quotable`).
 fn with_its_words(failure: String, child: &dyn Child) -> String {
     let code = child
         .code()
         .map_or_else(String::new, |code| format!(" (exit {code})"));
     match quoted(&child.said()) {
-        Some(said) => format!("{failure}{code}; it said: {said}"),
+        Some(said) => format!("{failure}{code}; it said:\n{said}"),
         None => format!("{failure}{code}"),
     }
 }
 
-/// The last lines of `said` that are no frame of a stack (`at …`), on one line, within
+/// The last lines of `said` that are no frame of a stack (`at …`), a line to a line, within
 /// [`QUOTE_CHARS`] characters: what a program says of why it ended is at the end, and what it
 /// printed of the code that failed is not the reason.
 fn quoted(said: &str) -> Option<String> {
@@ -117,7 +120,7 @@ fn quoted(said: &str) -> Option<String> {
     if kept.is_empty() {
         return None;
     }
-    let joined = kept.join(" ");
+    let joined = kept.join("\n");
     Some(match joined.char_indices().nth(QUOTE_CHARS) {
         Some((cut, _)) => format!("{}…", &joined[..cut]),
         None => joined,

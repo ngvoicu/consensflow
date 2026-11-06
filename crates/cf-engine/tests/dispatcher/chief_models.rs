@@ -221,12 +221,15 @@ fn a_gone_model_the_harness_has_no_default_for_keeps_the_chief_closed_until_a_sw
 }
 
 /// The words of a harness that found no default (a Pi read that failed quotes what Pi said,
-/// and what Pi said can carry a credential) reach the human's note without it (T-1270).
+/// and what Pi said can carry a credential) reach the human's note without it (T-1270): a line
+/// that may hold one is withheld whole, not masked (the second reading, F2), and the lines that
+/// hold none are said, in the note's one paragraph.
 #[test]
 fn the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said() {
     let context = harness_without_the_model(Err(
-        "pi --mode rpc ended before it answered (exit 1); it said: Error: Failed to load \
-         extension: Authorization: Bearer SYNTHETICSTDERRTOKEN0123456789"
+        "pi --mode rpc ended before it answered (exit 1); it said:\nError: Failed to load \
+         extension\nextension failed: API_KEY: sk-abcd efghijkl mnopqrst\npassword: correct \
+         horse battery staple\nAuthorization: Bearer SYNTHETICSTDERRTOKEN0123456789"
             .to_owned(),
     ));
     let project = opened_on_a_gone_model(&context);
@@ -236,11 +239,34 @@ fn the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said() {
         .filter(|body| body.contains("no longer available"))
         .collect();
     assert_eq!(told.len(), 1, "{told:?}");
-    assert!(!told[0].contains("SYNTHETICSTDERRTOKEN"), "{}", told[0]);
-    assert!(told[0].contains("[masked]"), "{}", told[0]);
+    for leaked in [
+        "SYNTHETICSTDERRTOKEN",
+        "sk-abcd",
+        "efghijkl",
+        "mnopqrst",
+        "horse",
+        "battery",
+        "staple",
+    ] {
+        assert!(!told[0].contains(leaked), "{leaked} in {}", told[0]);
+    }
+    assert_eq!(
+        told[0]
+            .matches("(a line withheld: it may hold a credential)")
+            .count(),
+        3,
+        "each of the three lines is withheld: {}",
+        told[0]
+    );
     assert!(
-        told[0].contains("Failed to load extension"),
+        told[0].contains("ended before it answered (exit 1)")
+            && told[0].contains("Failed to load extension"),
         "the rest is said: {}",
+        told[0]
+    );
+    assert!(
+        !told[0].contains('\n'),
+        "a note is one paragraph: {}",
         told[0]
     );
 }

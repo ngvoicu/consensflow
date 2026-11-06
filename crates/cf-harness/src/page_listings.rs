@@ -39,10 +39,7 @@ fn listings() -> Vec<(&'static str, ModelListing)> {
         ),
         (
             "pi",
-            crate::pi::models::parse(&recorded("models/pi-get-available-models.json"), AT, || {
-                String::new()
-            })
-            .unwrap(),
+            crate::pi::models::parse(&recorded("models/pi-get-available-models.json"), AT).unwrap(),
         ),
         (
             "devin",

@@ -1,15 +1,17 @@
 //! The models each harness lists, as the home keeps them (CHF-03): read from the harness
 //! itself ([`Adapter::models`]) at the first ask of this daemon's life and again at the
-//! human's Refresh, never in the background, one harness at a time; between, what the
-//! ledger kept answers. A read that fails keeps the listing read before, stale for its
-//! reason ([`ModelListing::after`]).
+//! human's Refresh, never in the background, one read of a harness at a time; between, what
+//! the ledger kept answers, **at once, whatever is being read**: a Pi Refresh takes as long as
+//! `pi update --models` and the read take, and a Claude list the home kept does not wait for it
+//! (the review T-1270, second reading, F8). A read that fails keeps the listing read before,
+//! stale for its reason ([`ModelListing::after`]).
 //!
 //! Read at the first ask, not as the daemon starts: a daemon a test starts would run every
 //! harness its PATH and the system's folders find, and the human who opens no picker
 //! waits for nothing.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use cf_base::env::Env;
@@ -26,8 +28,10 @@ pub struct ModelLists {
     env: Env,
     /// The harnesses read since the daemon started.
     read: RefCell<HashSet<Harness>>,
-    /// Held through each read: one harness at a time (two Pi probes at once have hung).
-    reading: Mutex<()>,
+    /// One turn for each harness, held through each read of it: two probes of one harness at
+    /// once have hung (two Pi's). The harnesses do not wait for one another, and a list the
+    /// home kept waits for no turn at all.
+    reading: RefCell<HashMap<Harness, Rc<Mutex<()>>>>,
 }
 
 impl ModelLists {
@@ -36,7 +40,7 @@ impl ModelLists {
             adapters,
             env,
             read: RefCell::new(HashSet::new()),
-            reading: Mutex::new(()),
+            reading: RefCell::new(HashMap::new()),
         }
     }
 
@@ -53,16 +57,18 @@ impl ModelLists {
         if harness_path(harness, &self.env).is_none() {
             return Err(format!("{} is not installed here", harness.as_str()));
         }
-        let _turn = self.reading.lock().await;
-        let kept = ledger
-            .borrow()
-            .model_listing(harness.as_str())
-            .map_err(|failed| failed.to_string())?;
-        if !refresh && self.read.borrow().contains(&harness) {
-            if let Some(kept) = kept {
-                return Ok(without_credentials(kept));
-            }
+        // What the home kept answers a list asked for with no Refresh, with no turn to wait for:
+        // a read of this harness, or of another, may be in flight for as long as a Pi update.
+        if let Some(kept) = self.cached(ledger, harness, refresh)? {
+            return Ok(kept);
         }
+        let turn = Rc::clone(self.reading.borrow_mut().entry(harness).or_default());
+        let _turn = turn.lock().await;
+        // The read this ask waited for may have kept the list it wants.
+        if let Some(kept) = self.cached(ledger, harness, refresh)? {
+            return Ok(kept);
+        }
+        let kept = Self::kept(ledger, harness)?;
         let adapter = self
             .adapters
             .adapter(harness.kind())
@@ -75,16 +81,39 @@ impl ModelLists {
         self.read.borrow_mut().insert(harness);
         Ok(listing)
     }
+
+    /// What the home kept of `harness`, for an ask with no Refresh that this daemon has read the
+    /// harness for already: none where it asks for one, has not read it, or kept nothing.
+    fn cached(
+        &self,
+        ledger: &RefCell<Ledger>,
+        harness: Harness,
+        refresh: bool,
+    ) -> Result<Option<ModelListing>, String> {
+        if refresh || !self.read.borrow().contains(&harness) {
+            return Ok(None);
+        }
+        Ok(Self::kept(ledger, harness)?.map(without_credentials))
+    }
+
+    /// What the home kept of `harness`.
+    fn kept(ledger: &RefCell<Ledger>, harness: Harness) -> Result<Option<ModelListing>, String> {
+        ledger
+            .borrow()
+            .model_listing(harness.as_str())
+            .map_err(|failed| failed.to_string())
+    }
 }
 
-/// `listing` with what looks like a credential hidden from the reason it is stale. A harness
+/// `listing` with the lines of its stale reason that may hold a credential withheld. A harness
 /// quotes what its program said when a read fails (Pi's error stream, a package's source in a
 /// reason), and what a program said can carry what it was given: the reason is kept in the
-/// ledger, which the page reads, and told to the human (the review T-1270, F2).
+/// ledger, which the page reads, and told to the human. A line that may hold one is not masked
+/// but left out whole ([`cf_engine::quotable`]; the review T-1270, F2 and its second reading).
 fn without_credentials(mut listing: ModelListing) -> ModelListing {
     if let Freshness::Stale { why } = &listing.freshness {
         listing.freshness = Freshness::Stale {
-            why: cf_engine::masked(why),
+            why: cf_engine::quotable(why),
         };
     }
     listing

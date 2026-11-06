@@ -4,15 +4,53 @@ use cf_process::Failed;
 use serde_json::json;
 
 use super::*;
+use crate::pi::setup::Setup;
 use crate::testing::{finished, ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
 
 mod failures;
 mod homes;
+mod off_thread;
 mod refresh;
 mod standin;
 
 /// When a test's list is read.
 const AT: i64 = 1_793_000_000_000;
+
+/// The first work `driver` settles, run until it does for up to ten seconds of real time (see
+/// [`eventually`]).
+pub(super) fn settled<T>(driver: &mut Driver<T>) -> T {
+    let began = std::time::Instant::now();
+    loop {
+        if let Some((_, done)) = driver.run().into_iter().next() {
+            return done;
+        }
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(10),
+            "work that waited on nothing it was given"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// `work`, polled until it is done, for up to ten seconds of real time: a read that finds no model
+/// has Pi's folder read on a thread of its own (`setup::inspect`), which answers a moment later and
+/// has no waker to wake a test that waits on nothing else.
+pub(super) fn eventually<T>(mut work: crate::contract::Work<'_, T>) -> T {
+    let began = std::time::Instant::now();
+    loop {
+        let polled = work
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()));
+        if let std::task::Poll::Ready(done) = polled {
+            return done;
+        }
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(10),
+            "work that waited on nothing it was given"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
 
 /// What Pi 1.4.0 answered `get_available_models` with on 2026-10-28, offline, a few rows of
 /// each provider kept (`tools/probes/chief-harness/models.py pi`), and with no login.
@@ -21,7 +59,7 @@ const SIGNED_OUT: &str =
     include_str!("../../../tests/fixtures/models/pi-get-available-models-signed-out.json");
 
 fn recorded() -> ModelListing {
-    parse(&serde_json::from_str(RECORDED).unwrap(), AT, String::new).unwrap()
+    parse(&serde_json::from_str(RECORDED).unwrap(), AT).unwrap()
 }
 
 fn efforts_of(models: &ModelListing, model: &str) -> Vec<String> {
@@ -79,19 +117,21 @@ fn a_contributor_model_pi_lists_is_marked_and_never_the_default() {
 
 #[test]
 fn pi_with_no_login_lists_no_model_and_says_why() {
-    let signed_out = parse(&serde_json::from_str(SIGNED_OUT).unwrap(), AT, || {
-        Setup::default().unlisted()
-    });
-    assert_eq!(signed_out, Err(Setup::default().unlisted()));
-    assert!(signed_out
-        .unwrap_err()
+    let signed_out = parse(&serde_json::from_str(SIGNED_OUT).unwrap(), AT);
+    assert_eq!(
+        signed_out,
+        Err(Unlisted::NoModel),
+        "an empty list is told from the folder of Pi, which is read only then"
+    );
+    assert!(Setup::default()
+        .unlisted()
         .starts_with("Pi lists no model: no provider is set up ("));
-    let refused = parse(&json!({ "success": false, "error": "bad" }), AT, || {
-        unreachable!("a refusal is not an empty list")
-    });
+    let refused = parse(&json!({ "success": false, "error": "bad" }), AT);
     assert_eq!(
         refused,
-        Err("pi refused get_available_models: bad".to_owned())
+        Err(Unlisted::Said(
+            "pi refused get_available_models: bad".to_owned()
+        ))
     );
 }
 
@@ -130,12 +170,7 @@ fn listed_with(
             "data": { "models": [{ "provider": "meta", "id": "spark", "name": "Spark" }] } })
         .to_string()
     };
-    // A Refresh asks twice, with its hold between: Pi's packages have their moment.
-    let lines = if fetch {
-        vec![answer("models"), answer("models-again")]
-    } else {
-        vec![answer("models")]
-    };
+    let lines = vec![answer("models")];
     processes.child(
         "pi",
         ChildScript {
@@ -150,13 +185,6 @@ fn listed_with(
     driver.begin(0, async move {
         listed(&asked_env, &*asked_processes, &*asked_time, fetch).await
     });
-    if fetch {
-        assert!(
-            driver.run().is_empty(),
-            "the session is held for the packages"
-        );
-        assert!(time.fire_next(i64::MAX), "the hold is armed");
-    }
     let listed = driver.run().remove(0).1;
     let ran = processes
         .take_ran()

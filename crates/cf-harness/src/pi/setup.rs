@@ -19,6 +19,24 @@
 //! is read to [`ENTRIES`] entries. A file that is there and cannot be read so is *unread*, and is
 //! said so: a setup that could not be read is never called "no provider is set up".
 //!
+//! **On a thread of its own** (the second reading, F4). The daemon runs every project's
+//! requests, timers and deliveries on one thread, and a file that does not open (a stalled
+//! network mount) held all of them for as long as it stalled: a 3 s stall was a 3.035 s gap in
+//! the heartbeat, with a bound of 1 s on the read. [`inspect`] reads the folder on a thread
+//! made for the one read, waits [`WAIT_MS`] for its answer, and says "Pi's folder could not be
+//! read in time" where it has none. One read at a time: while a read is stalled on its thread no
+//! other is started beside it, so a mount that never answers holds one thread, not one for every
+//! list; the next asks are told the same, at once. The records' reads are on a thread of
+//! their own too (`records/thread.rs`).
+//!
+//! **Words that are no credential's** (the second reading, F2). The words of a setup reach the
+//! ledger and the page, where the engine withholds a line that may hold a credential
+//! (`cf_engine::quotable`): ConsensFlow's own words here use none of the words that rule takes
+//! for one. A variable of the environment is named by whose it is (`OPENROUTER` for
+//! `OPENROUTER_API_KEY`, [`provider_of`]), the logins file is not named, and Pi is told how to
+//! give a provider without a variable's name. A test in the daemon holds each of these words to
+//! it.
+//!
 //! Pi (1.5.0, `model-runtime.js`, `resource-loader.js`) has its models from, in the order the
 //! docs give them:
 //! - a login in the agent folder's `auth.json`, an OAuth one or an API key, one entry a provider;
@@ -31,18 +49,28 @@
 //!
 //! A project's own `.pi` folder can name more of each; a read from here knows no project.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+#[cfg(not(test))]
+use std::sync::LazyLock;
 
 use cf_base::env::Env;
 use cf_base::path;
 use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::Deserialize;
+use tokio::sync::oneshot;
 
 use super::paths::agent_dir;
+use crate::seams::{arm, Time};
+
+/// How long the answer of a read of the folder is waited for. Its files are some kilobytes of
+/// a local disk: past this a file is not opening, and the words say so.
+pub(crate) const WAIT_MS: u64 = 2_000;
 
 /// The largest file of Pi's folder that is read: a setup's files are some kilobytes.
 const FILE_CAP: u64 = 1 << 20;
@@ -98,6 +126,35 @@ const CREDENTIALS: [&str; 40] = [
     "LLAMA_BASE_URL",
 ];
 
+/// The words of a credential variable's name that say it is a key.
+const SAYING_KEY: [&str; 9] = [
+    "API",
+    "KEY",
+    "TOKEN",
+    "OAUTH",
+    "AUTH",
+    "BEARER",
+    "CREDENTIALS",
+    "ACCESS",
+    "ID",
+];
+
+/// The provider a credential variable is for, as the words name it: the variable's name without
+/// the words that say it is a key (`OPENROUTER_API_KEY` is `OPENROUTER`, `QWEN_TOKEN_PLAN_API_KEY`
+/// is `QWEN_PLAN`, `AWS_ACCESS_KEY_ID` is `AWS`). The name of a variable says "key", "token" or
+/// "credentials", and a line of a harness's words that says them is withheld, not quoted.
+fn provider_of(name: &str) -> String {
+    let parts: Vec<&str> = name
+        .split('_')
+        .filter(|part| !SAYING_KEY.contains(part))
+        .collect();
+    if parts.is_empty() {
+        name.to_owned()
+    } else {
+        parts.join("_")
+    }
+}
+
 /// What the Pi folder and the environment name as the sources of Pi's providers: each list the
 /// names of one source, empty where it has none.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -112,23 +169,120 @@ pub(crate) struct Setup {
     /// What stands in the agent folder's `extensions` folder, and the extensions
     /// `settings.json` names.
     pub extensions: Vec<String>,
-    /// The credential variables set in the environment, by name.
+    /// The providers whose credential variable is set in the environment, by name
+    /// ([`provider_of`]): never the variable's own name or its value.
     pub keys: Vec<String>,
     /// The files that are there and could not be read: not a regular file, larger than a setup
     /// is, or not what Pi's files are. By name.
     pub unread: Vec<String>,
+    /// The folder was not read in time: a file did not open, or an earlier read is still
+    /// stalled on its thread ([`inspect`]). Nothing is known of it.
+    pub late: bool,
 }
 
+/// What a test sees and does of the reads of the folder its thread asks for. A read is on a
+/// thread of its own ([`inspect`]), so what a test sets and counts is the asking thread's, handed
+/// to the reading one.
 #[cfg(test)]
-thread_local! {
-    /// How many times a setup was read on this thread: a read that lists models reads none.
-    static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+mod probe {
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use std::sync::Arc;
+
+    pub(super) type Hook = Arc<dyn Fn() + Send + Sync>;
+
+    #[derive(Clone, Default)]
+    pub(super) struct Probe {
+        /// What runs where a read begins: a test's stall of a file that does not open.
+        pub before: Option<Hook>,
+        /// How many setups were read: a read that lists models reads none.
+        pub reads: Arc<AtomicUsize>,
+        /// Whether a read is on its thread (each test has its own, as it has its own thread).
+        pub reading: Arc<AtomicBool>,
+    }
+
+    thread_local! {
+        static PROBE: RefCell<Probe> = RefCell::new(Probe::default());
+    }
+
+    pub(super) fn current() -> Probe {
+        PROBE.with(|probe| probe.borrow().clone())
+    }
+
+    pub(super) fn adopt(probe: Probe) {
+        PROBE.with(|slot| *slot.borrow_mut() = probe);
+    }
 }
 
-/// How many setups this thread has read (a test's).
+/// How many setups the asking thread's reads have read (a test's).
 #[cfg(test)]
 pub(crate) fn reads() -> usize {
-    READS.with(std::cell::Cell::get)
+    probe::current()
+        .reads
+        .load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Has `hook` run where a read of the folder begins, on the thread that reads it.
+#[cfg(test)]
+pub(crate) fn before_read(hook: impl Fn() + Send + Sync + 'static) {
+    let mut current = probe::current();
+    current.before = Some(std::sync::Arc::new(hook));
+    probe::adopt(current);
+}
+
+/// Whether a read of the folder is on its thread: the process's one.
+fn reading() -> Arc<AtomicBool> {
+    #[cfg(not(test))]
+    {
+        static READING: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
+        Arc::clone(&READING)
+    }
+    #[cfg(test)]
+    {
+        probe::current().reading
+    }
+}
+
+/// Clears the flag of a read that ends, however it ends.
+struct Done(Arc<AtomicBool>);
+
+impl Drop for Done {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The setup of the Pi `env` names, read on a thread of its own and waited for [`WAIT_MS`]:
+/// the thread that asks is the daemon's, which runs every project's requests, timers and
+/// deliveries, and is not held by a file that does not open. Where the folder does not answer in
+/// time, or an earlier read of it is still stalled on its thread (one at a time, so that a
+/// mount that never answers holds one thread and no more), the setup is [`Setup::late`].
+pub(crate) async fn inspect(time: &dyn Time, env: &Env) -> Setup {
+    let reading = reading();
+    if reading.swap(true, Ordering::SeqCst) {
+        return Setup::late();
+    }
+    let (answer, answered) = oneshot::channel();
+    let env = env.clone();
+    #[cfg(test)]
+    let probe = probe::current();
+    let done = Done(Arc::clone(&reading));
+    let worker = std::thread::Builder::new()
+        .name("pi-setup".to_owned())
+        .spawn(move || {
+            let _done = done;
+            #[cfg(test)]
+            probe::adopt(probe);
+            let _ = answer.send(Setup::read(&env));
+        });
+    if worker.is_err() {
+        // The closure, and the flag it held, went with the thread that did not start.
+        return Setup::late();
+    }
+    match arm(time, WAIT_MS).bound(answered).await {
+        Some(Ok(setup)) => setup,
+        _ => Setup::late(),
+    }
 }
 
 impl Setup {
@@ -137,12 +291,21 @@ impl Setup {
     /// ([`Setup::unread`]); no file is written.
     pub(crate) fn read(env: &Env) -> Self {
         #[cfg(test)]
-        READS.with(|reads| reads.set(reads.get() + 1));
-        let keys = CREDENTIALS
-            .into_iter()
-            .filter(|name| env.os(name).is_some_and(|value| !value.is_empty()))
-            .map(str::to_owned)
-            .collect();
+        {
+            let probe = probe::current();
+            probe.reads.fetch_add(1, Ordering::SeqCst);
+            if let Some(hook) = probe.before {
+                hook();
+            }
+        }
+        let keys = sorted(
+            CREDENTIALS
+                .into_iter()
+                .filter(|name| env.os(name).is_some_and(|value| !value.is_empty()))
+                .map(provider_of)
+                .collect::<BTreeSet<_>>()
+                .into_iter(),
+        );
         let Ok(agent) = agent_dir(env) else {
             return Self {
                 keys,
@@ -158,7 +321,7 @@ impl Setup {
         match parsed::<HashMap<String, IgnoredAny>>(&in_agent("auth.json")) {
             Got::Found(table) => logins = sorted(table.into_keys()),
             Got::Absent => {}
-            Got::Unread => unread.push("auth.json".to_owned()),
+            Got::Unread => unread.push("the file of logins".to_owned()),
         }
         match parsed::<Models>(&in_agent("models.json")) {
             Got::Found(models) => custom = sorted(models.providers.into_keys()),
@@ -200,6 +363,15 @@ impl Setup {
             extensions,
             keys,
             unread,
+            late: false,
+        }
+    }
+
+    /// A setup nothing is known of: the folder was not read in time ([`inspect`]).
+    fn late() -> Self {
+        Self {
+            late: true,
+            ..Self::default()
         }
     }
 
@@ -225,12 +397,21 @@ impl Setup {
     /// What Pi's empty list is to be told as: that no provider is set up and how to give one
     /// where that is true, else what is set up that listed nothing, and what could not be read.
     pub(crate) fn unlisted(&self) -> String {
+        if self.late {
+            return "Pi lists no model, and Pi's folder could not be read in time: it cannot say \
+                    whether a provider is set up there (a file of it did not open, or an earlier \
+                    read of it is still waiting for one)"
+                .to_owned();
+        }
         if self.is_empty() {
-            return "Pi lists no model: no provider is set up (no login in auth.json, no provider \
-                    in models.json, no installed package or extension, no provider key in the \
-                    environment). Run pi and sign in with /login, or set a provider key such as \
-                    OPENROUTER_API_KEY, or add a provider to models.json (Pi's providers.md and \
-                    models.md say how)"
+            // No name of a variable, of a file of logins or of a key: a line that says one is a
+            // line the engine withholds (`cf_engine::quotable`), and this is the commonest
+            // message of all.
+            return "Pi lists no model: no provider is set up (no login, no provider in \
+                    models.json, no installed package or extension, no provider key in the \
+                    environment). Run pi and sign in with /login, or set the variable of a \
+                    provider's key in the environment, or add a provider to models.json (Pi's \
+                    providers.md and models.md say how)"
                 .to_owned();
         }
         let parts: Vec<String> = [
@@ -238,7 +419,7 @@ impl Setup {
             ("custom providers", &self.custom),
             ("packages", &self.packages),
             ("extensions", &self.extensions),
-            ("provider keys", &self.keys),
+            ("a key in the environment for", &self.keys),
         ]
         .into_iter()
         .filter(|(_, names)| !names.is_empty())

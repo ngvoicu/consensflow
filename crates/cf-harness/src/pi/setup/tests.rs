@@ -33,7 +33,7 @@ fn a_folder_that_holds_nothing_is_no_provider_set_up() {
         "{said}"
     );
     // How to give Pi one, in the three ways the human has.
-    for way in ["/login", "OPENROUTER_API_KEY", "models.json"] {
+    for way in ["/login", "providers.md", "models.json"] {
         assert!(said.contains(way), "{way} in {said}");
     }
     // A folder that is not there at all is the same.
@@ -81,8 +81,9 @@ fn each_source_of_a_provider_is_named_by_its_names_only() {
                 "git:github.com/x/y"
             ]),
             extensions: names(&["pack", "provider.ts", "./declared.ts"]),
-            keys: names(&["OPENAI_API_KEY"]),
+            keys: names(&["OPENAI"]),
             unread: Vec::new(),
+            late: false,
         }
     );
     let said = setup.unlisted();
@@ -95,7 +96,10 @@ fn each_source_of_a_provider_is_named_by_its_names_only() {
         said.contains("packages npm:@router-for-me/pi-cliproxyapi-provider, git:github.com/x/y"),
         "{said}"
     );
-    assert!(said.contains("provider keys OPENAI_API_KEY"), "{said}");
+    assert!(
+        said.contains("a key in the environment for OPENAI"),
+        "{said}"
+    );
     assert!(!said.contains("STRIPE"), "{said}");
     assert!(
         !said.contains("SECRET"),
@@ -116,7 +120,12 @@ fn a_file_that_is_there_and_not_what_pi_s_files_are_is_unread_and_never_nothing(
     );
     assert_eq!(
         setup.unread,
-        names(&["auth.json", "models.json", "extensions", "settings.json"])
+        names(&[
+            "the file of logins",
+            "models.json",
+            "extensions",
+            "settings.json"
+        ])
     );
     assert!(
         !setup.is_empty(),
@@ -124,7 +133,7 @@ fn a_file_that_is_there_and_not_what_pi_s_files_are_is_unread_and_never_nothing(
     );
     let said = setup.unlisted();
     assert!(
-        said.contains("could not read auth.json, models.json, extensions, settings.json"),
+        said.contains("could not read the file of logins, models.json, extensions, settings.json"),
         "{said}"
     );
     assert!(!said.contains("no provider is set up"), "{said}");
@@ -133,18 +142,14 @@ fn a_file_that_is_there_and_not_what_pi_s_files_are_is_unread_and_never_nothing(
 #[test]
 fn a_provider_key_in_the_environment_alone_is_a_provider_set_up() {
     let setup = setup_of(&[], &[("OPENROUTER_API_KEY", "x"), ("META_API_KEY", "")]);
-    assert_eq!(
-        setup.keys,
-        names(&["OPENROUTER_API_KEY"]),
-        "an empty one is none"
-    );
+    assert_eq!(setup.keys, names(&["OPENROUTER"]), "an empty one is none");
     assert!(!setup.is_empty());
 }
 
 #[test]
 fn with_no_home_and_no_folder_named_only_the_environment_is_looked_at() {
     let setup = Setup::read(&Env::from_vars([("GROQ_API_KEY", "x")]));
-    assert_eq!(setup.keys, names(&["GROQ_API_KEY"]));
+    assert_eq!(setup.keys, names(&["GROQ"]));
     assert!(setup.logins.is_empty() && setup.packages.is_empty());
 }
 
@@ -226,6 +231,109 @@ fn a_pipe_and_a_file_too_large_are_unread_and_never_opened_whole() {
     let setup = told
         .recv_timeout(Duration::from_secs(10))
         .expect("the read ended: it opened no pipe");
-    assert_eq!(setup.unread, names(&["auth.json", "models.json"]));
+    assert_eq!(setup.unread, names(&["the file of logins", "models.json"]));
     assert!(setup.logins.is_empty());
+}
+
+#[test]
+fn a_credential_variable_is_named_by_its_provider_and_no_label_says_key_token_or_credentials() {
+    for (variable, provider) in [
+        ("OPENROUTER_API_KEY", "OPENROUTER"),
+        ("ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC"),
+        ("ANT_LING_API_KEY", "ANT_LING"),
+        ("QWEN_TOKEN_PLAN_API_KEY", "QWEN_PLAN"),
+        ("AWS_ACCESS_KEY_ID", "AWS"),
+        ("AWS_BEARER_TOKEN_BEDROCK", "AWS_BEDROCK"),
+        ("GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_APPLICATION"),
+        ("HF_TOKEN", "HF"),
+        ("LLAMA_BASE_URL", "LLAMA_BASE_URL"),
+        ("AWS_PROFILE", "AWS_PROFILE"),
+    ] {
+        assert_eq!(provider_of(variable), provider, "{variable}");
+    }
+    for variable in CREDENTIALS {
+        let label = provider_of(variable).to_lowercase();
+        for word in WITHHELD_WORDS {
+            assert!(!label.contains(word), "{variable} is {label}");
+        }
+    }
+    // Two variables of one provider are one provider.
+    let setup = setup_of(
+        &[],
+        &[("ANTHROPIC_API_KEY", "x"), ("ANTHROPIC_OAUTH_TOKEN", "x")],
+    );
+    assert_eq!(setup.keys, names(&["ANTHROPIC"]));
+}
+
+/// The words the engine's rule takes a line for (`cf_engine::quotable`: a secret-like word, or a
+/// credential's word with a value after it), as substrings and so more than it takes: none of
+/// the words ConsensFlow says of a setup holds one. The daemon holds the same words to the
+/// engine itself (`none_of_the_words_about_a_setup_is_taken_for_a_credential`).
+const WITHHELD_WORDS: [&str; 13] = [
+    "password",
+    "passwd",
+    "passphrase",
+    "pwd",
+    "apikey",
+    "api_key",
+    "api key",
+    "private key",
+    "credential",
+    "secret",
+    "token",
+    "auth",
+    "bearer",
+];
+
+#[test]
+fn no_word_said_of_a_setup_is_a_word_a_line_is_withheld_for() {
+    let many = Setup {
+        logins: names(&["openai", "openrouter"]),
+        custom: names(&["mylocal"]),
+        packages: names(&["npm:@scope/slow-provider@1.2.3"]),
+        extensions: names(&["pack", "./declared.ts"]),
+        keys: names(&["OPENAI", "AWS_BEDROCK"]),
+        unread: names(&[
+            "the file of logins",
+            "models.json",
+            "extensions",
+            "settings.json",
+        ]),
+        late: false,
+    };
+    let said = [
+        Setup::default().unlisted(),
+        Setup::late().unlisted(),
+        many.unlisted(),
+        Setup {
+            unread: names(&["the file of logins"]),
+            ..Setup::default()
+        }
+        .unlisted(),
+        many.loading().unwrap(),
+    ];
+    let valued_key = regex::Regex::new(r"key\s*[:=]").unwrap();
+    for words in said {
+        let lower = words.to_lowercase();
+        for word in WITHHELD_WORDS {
+            assert!(!lower.contains(word), "{word} in {words}");
+        }
+        assert!(
+            !valued_key.is_match(&lower),
+            "a key with a value after it in {words}"
+        );
+    }
+}
+
+#[test]
+fn a_folder_not_read_in_time_is_said_so_and_is_never_called_empty() {
+    let late = Setup::late();
+    assert!(!late.is_empty());
+    let said = late.unlisted();
+    assert!(
+        said.starts_with("Pi lists no model, and Pi's folder could not be read in time"),
+        "{said}"
+    );
+    assert!(!said.contains("no provider is set up"), "{said}");
+    assert_eq!(late.loading(), None, "nothing is known of what Pi loads");
 }

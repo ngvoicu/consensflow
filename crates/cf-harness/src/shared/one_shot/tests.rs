@@ -157,8 +157,8 @@ fn a_conversation_that_ended_says_the_code_and_the_last_words_of_the_one_start()
     for (streams, said) in [
         (
             Streams::Conversation,
-            "the harness ended before it answered (exit 2); it said: loading Error: no such \
-             thing Hint: try this",
+            "the harness ended before it answered (exit 2); it said:\nloading\nError: no such \
+             thing\nHint: try this",
         ),
         // Any other kind keeps nothing of what its program said, and says as it always did.
         (Streams::Lines, "the harness ended before it answered"),
@@ -193,7 +193,7 @@ fn a_conversation_given_up_on_says_what_the_program_had_said_and_no_code() {
         [(
             0,
             Err(
-                "the harness did not answer within 30 s; it said: still loading the package"
+                "the harness did not answer within 30 s; it said:\nstill loading the package"
                     .to_owned()
             )
         )]
@@ -214,7 +214,7 @@ fn what_a_program_said_is_quoted_by_its_last_lines_that_are_no_frame_and_cut_to_
         .join("\n");
     assert_eq!(
         quoted(&many).as_deref(),
-        Some("line 6 line 7 line 8 line 9")
+        Some("line 6\nline 7\nline 8\nline 9")
     );
     let wide = "é".repeat(2_000);
     let cut = quoted(&wide).unwrap();

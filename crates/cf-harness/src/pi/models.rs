@@ -2,8 +2,10 @@
 //! (`get_available_models`): one bounded `pi --mode rpc --offline`, no turn (research-02
 //! §2: 469 models in about 300 KB, 0.3 s). Offline, Pi answers from its bundled catalog
 //! and the copy it keeps, and fetches nothing: a fresh catalog is the human's Refresh,
-//! which runs `pi update --models` first ([`UPDATE`]), and then holds Pi's session open for
-//! [`REFRESH_HOLD`] and asks again, for what the providers of its packages fetch ([`read`]).
+//! which runs `pi update --models` first ([`UPDATE`]) and then reads the list once, as any
+//! read does. A package that fills its catalog a few seconds after Pi starts shows its new
+//! models at the next Refresh: holding Pi's session for it took a Refresh past the app's 30 s
+//! bridge deadline (the review T-1270, second reading, F6 and F8).
 //!
 //! Pi lists the models of the providers it has set up, whatever sets them up: a login or a
 //! provider key, a custom provider in `models.json`, and the providers that its installed
@@ -19,10 +21,10 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
-use cf_proto::models::{Freshness, ModelChoice, ModelListing};
+use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
-use super::setup::Setup;
+use super::setup::inspect;
 use crate::detect::executable;
 use crate::seams::processes::{Limits, Processes, Program, Streams};
 use crate::seams::Time;
@@ -30,10 +32,6 @@ use crate::shared::one_shot::{ask, conversation_as, BOUND_MS};
 
 /// How the list is read, as the human could run it.
 pub(crate) const HOW: &str = "pi --mode rpc --offline: get_available_models";
-
-/// How a Refresh's list is read: asked again once Pi's packages have had [`REFRESH_HOLD`].
-pub(crate) const HOW_REFRESHED: &str =
-    "pi --mode rpc --offline: get_available_models, asked again after the packages' 10 s";
 
 /// What the human's Refresh runs first: the catalogs fetched again.
 pub(crate) const UPDATE: [&str; 2] = ["update", "--models"];
@@ -46,18 +44,6 @@ pub(crate) const UPDATE_LIMITS: Limits = Limits {
 
 /// Pi's thinking levels, from the lowest (`ThinkingLevel` of `pi-ai`).
 const LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-/// How long a Refresh keeps Pi's session open after its first answer, and asks again
-/// (the review T-1270, F6). A provider of a package lists what it holds at once and fetches
-/// its catalog after: the installed CLIProxyAPI package answers its cache, asks its server in
-/// the background, and lists what comes (on Pi 1.5.0, held 8 s past its answer, its cache file
-/// was rewritten). `pi update --models` does not load a package's providers, so a read that
-/// stops at the first answer would give the old catalog, again and again, as a fresh one.
-const REFRESH_HOLD: Duration = Duration::from_secs(10);
-
-/// How long the second question of a Refresh has to be answered: Pi answers it from what it
-/// holds, so that a Pi that is there answers at once.
-const AGAIN_MS: u64 = 5_000;
 
 /// The program the list is read from: `pi` at `executable` in rpc mode, offline, with no
 /// session and no MCP server, and with the packages and extensions the human has, as a
@@ -94,22 +80,28 @@ fn levels(model: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Why a `get_available_models` answer lists no model.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Unlisted {
+    /// Pi said so: it refused the request.
+    Said(String),
+    /// Pi answered with no model: no provider is set up, or the providers it has listed none.
+    /// Which of the two is told from Pi's folder ([`super::setup::Setup`]), read only then.
+    NoModel,
+}
+
 /// What a `get_available_models` answer lists, read at `at`. Fails where Pi refused, or
-/// lists no model: then in the words `unlisted` gives, which tell a Pi with no provider set
-/// up from one whose providers listed nothing. They are asked for only then: a Pi that lists
-/// models has its folder left alone.
-pub(crate) fn parse(
-    answer: &Value,
-    at: i64,
-    unlisted: impl FnOnce() -> String,
-) -> Result<ModelListing, String> {
+/// lists no model ([`Unlisted`]).
+pub(crate) fn parse(answer: &Value, at: i64) -> Result<ModelListing, Unlisted> {
     if answer.get("success") == Some(&Value::Bool(false)) {
         let said = answer["error"].as_str().unwrap_or("no reason given");
-        return Err(format!("pi refused get_available_models: {said}"));
+        return Err(Unlisted::Said(format!(
+            "pi refused get_available_models: {said}"
+        )));
     }
     let rows = answer["data"]["models"]
         .as_array()
-        .ok_or("Pi's answer has no models")?;
+        .ok_or_else(|| Unlisted::Said("Pi's answer has no models".to_owned()))?;
     let text = |row: &Value, name: &str| row.get(name).and_then(Value::as_str).map(str::to_owned);
     let models: Vec<ModelChoice> = rows
         .iter()
@@ -125,94 +117,67 @@ pub(crate) fn parse(
         })
         .collect();
     if models.is_empty() {
-        return Err(unlisted());
+        return Err(Unlisted::NoModel);
     }
     Ok(ModelListing::read(models, at, HOW))
 }
 
 /// The models `program` lists: one bounded conversation, no turn, one start of Pi.
 ///
-/// Where `hold` (a Refresh), Pi's session is kept open for it after the first answer, and
-/// `get_available_models` is asked again: the second answer is the list, as the providers of
-/// Pi's packages have it after they fetched. Where Pi does not answer the second time, the
-/// first answer stands, stale, for why.
-///
 /// A read that fails says what Pi said (its error stream and its exit code are kept from the
 /// one start, and nothing is started again to find out); one that waited for Pi in vain says
 /// which packages and extensions it was loading. One that finds no model says whether Pi has a
-/// provider set up ([`Setup`]), reading its folder only then.
+/// provider set up ([`super::setup::Setup`]), reading its folder only then, and on a thread of its own
+/// ([`inspect`]).
 pub(crate) async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
-    hold: Option<Duration>,
 ) -> Result<ModelListing, String> {
-    let mut at = time.wall_ms();
+    let at = time.wall_ms();
     let env = program.env.clone();
-    let asked = |id: &str| json!({ "id": id, "type": "get_available_models" });
-    let answers =
-        |id: &'static str| move |line: &Value| line["type"] == "response" && line["id"] == id;
-    let hold_ms = hold.map_or(0, |hold| u64::try_from(hold.as_millis()).unwrap_or(0));
-    // The first answer has the bound of any read; a Refresh adds its hold and its second ask.
-    let bound = BOUND_MS + hold.map_or(0, |_| hold_ms + AGAIN_MS);
-    let (answer, again) = conversation_as(
+    let asked = json!({ "id": "models", "type": "get_available_models" });
+    let answer = match conversation_as(
         processes,
         time,
         program,
         Streams::Conversation,
         "pi --mode rpc",
-        bound,
+        BOUND_MS,
         async |child| {
-            let first = ask(child, "pi --mode rpc", &asked("models"), answers("models")).await?;
-            let Some(hold) = hold else {
-                return Ok((first, None));
-            };
-            time.sleep(hold).await;
-            let second = match crate::seams::arm(time, AGAIN_MS)
-                .bound(ask(
-                    child,
-                    "pi --mode rpc",
-                    &asked("models-again"),
-                    answers("models-again"),
-                ))
-                .await
-            {
-                Some(second) => second,
-                None => Err("pi --mode rpc did not answer within 5 s".to_owned()),
-            };
-            Ok((first, Some(second)))
+            ask(child, "pi --mode rpc", &asked, |line| {
+                line["type"] == "response" && line["id"] == "models"
+            })
+            .await
         },
     )
     .await
-    .map_err(|failed| waiting_on(failed, &env))?;
-    let unlisted = || Setup::read(&env).unlisted();
-    match again {
-        None => parse(&answer, at, unlisted),
-        Some(Ok(second)) => {
-            at = time.wall_ms();
-            let mut listing = parse(&second, at, unlisted)?;
-            HOW_REFRESHED.clone_into(&mut listing.how);
-            Ok(listing)
-        }
-        Some(Err(why)) => Ok(parse(&answer, at, unlisted)?.stale(format!(
-            "Pi did not list again after the {} s hold, so the list is its first answer, which \
-             a package's provider may give from its cache: {why}",
-            hold_ms / 1000
-        ))),
+    {
+        Ok(answer) => answer,
+        Err(failed) => return Err(waiting_on(failed, time, &env).await),
+    };
+    match parse(&answer, at) {
+        Ok(listing) => Ok(listing),
+        Err(Unlisted::Said(why)) => Err(why),
+        Err(Unlisted::NoModel) => Err(inspect(time, &env).await.unlisted()),
     }
 }
 
 /// A failed read, and where Pi was given up on, what it was loading: the packages and
 /// extensions of its folder, by name, for one of them may be what it waited for.
-fn waiting_on(failed: String, env: &Env) -> String {
+async fn waiting_on(failed: String, time: &dyn Time, env: &Env) -> String {
     if !failed.contains("did not answer within") {
         return failed;
     }
-    let loading = Setup::read(env)
+    let loading = inspect(time, env)
+        .await
         .loading()
         .map_or_else(String::new, |loading| format!(" ({loading})"));
+    // Pi's own words, where the failure has them, stand on lines of their own: this goes after
+    // them on one of its own.
+    let apart = if failed.contains('\n') { "\n" } else { ". " };
     format!(
-        "{failed}. Pi loads the packages and extensions it has before it lists, and one of \
+        "{failed}{apart}Pi loads the packages and extensions it has before it lists, and one of \
          them may be waiting for something{loading}"
     )
 }
@@ -237,29 +202,13 @@ pub(crate) async fn listed(
         };
         fetched = processes.run(update, UPDATE_LIMITS).await.map(|_| ());
     }
-    let listing = read(
-        processes,
-        time,
-        program(executable, env),
-        fetch.then_some(REFRESH_HOLD),
-    )
-    .await?;
+    let listing = read(processes, time, program(executable, env)).await?;
     Ok(match fetched {
         Ok(()) => listing,
-        Err(failed) => {
-            let why = format!(
-                "Pi's own catalog: pi update --models failed: {}",
-                failed.message.lines().last().unwrap_or_default()
-            );
-            // A list already stale for why Pi did not list again is stale for both.
-            match &listing.freshness {
-                Freshness::Stale { why: earlier } => {
-                    let both = format!("{earlier}; {why}");
-                    listing.stale(both)
-                }
-                Freshness::Fresh => listing.stale(why),
-            }
-        }
+        Err(failed) => listing.stale(format!(
+            "Pi's own catalog: pi update --models failed: {}",
+            failed.message.lines().last().unwrap_or_default()
+        )),
     })
 }
 

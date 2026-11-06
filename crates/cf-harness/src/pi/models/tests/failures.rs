@@ -47,7 +47,9 @@ fn a_read_that_ended_before_it_answered_is_one_start_and_says_what_that_start_sa
         "started to keep what Pi says and to end whatever it started"
     );
     assert!(
-        why.starts_with("pi --mode rpc ended before it answered (exit 1); it said: Error: Failed to load extension"),
+        why.starts_with(
+            "pi --mode rpc ended before it answered (exit 1); it said:\nError: Failed to load extension"
+        ),
         "{why}"
     );
     assert!(why.contains("boom") && why.contains("pi -ne"), "{why}");
@@ -64,14 +66,14 @@ fn a_read_given_up_on_says_what_pi_had_said_so_far_and_names_what_it_was_loading
     let mut driver = pi.begin(false);
     assert!(driver.run().is_empty(), "it waits for Pi");
     assert!(pi.time.fire_next(i64::MAX), "the bound is armed");
-    let why = driver.run().remove(0).1.unwrap_err();
+    let why = settled(&mut driver).unwrap_err();
     assert!(pi.processes.take_ran().is_empty(), "no second start");
     assert!(
         why.starts_with("pi --mode rpc did not answer within 30 s"),
         "{why}"
     );
     assert!(
-        why.contains("it said: warming the provider's cache"),
+        why.contains("it said:\nwarming the provider's cache"),
         "{why}"
     );
     assert!(why.contains("npm:@scope/slow-provider@1.2.3"), "{why}");
@@ -108,7 +110,9 @@ fn a_package_source_is_shown_without_its_userinfo_query_or_fragment() {
     }
 }
 
-/// F2: a provider key in the environment is a name in the words, and its value is in none.
+/// F2: a provider key in the environment is named by its provider in the words (not by the
+/// name of its variable, which says "key" and "token": the engine withholds a line that does),
+/// and its value is in none.
 #[test]
 fn a_provider_key_of_the_environment_is_named_and_its_value_is_never_said() {
     let pi = StandIn::new(
@@ -122,10 +126,14 @@ fn a_provider_key_of_the_environment_is_named_and_its_value_is_never_said() {
     pi.child(&[empty()], Ends::Asked);
     let why = pi.read(false).unwrap_err();
     assert!(
-        why.contains("OPENROUTER_API_KEY") && why.contains("ANTHROPIC_OAUTH_TOKEN"),
+        why.contains("a key in the environment for ANTHROPIC, OPENROUTER:"),
         "{why}"
     );
-    assert!(!why.contains("GROQ_API_KEY"), "an empty one is none: {why}");
+    assert!(
+        !why.contains("API_KEY") && !why.contains("OAUTH_TOKEN"),
+        "no variable is named: {why}"
+    );
+    assert!(!why.contains("GROQ"), "an empty one is none: {why}");
     assert!(
         !why.contains(ENV_TOKEN) && !why.contains("SYNTHETICENV"),
         "{why}"
@@ -198,7 +206,7 @@ mod unread {
             .expect("the read ended: it opened no pipe")
             .unwrap_err();
         assert!(
-            why.contains("could not read") && why.contains("auth.json"),
+            why.contains("could not read") && why.contains("the file of logins"),
             "{why}"
         );
         assert!(!why.contains("no provider is set up"), "{why}");
@@ -214,7 +222,7 @@ fn a_file_larger_than_a_setup_is_not_read_and_is_said_unread() {
     pi.child(&[empty()], Ends::Asked);
     let why = pi.read(false).unwrap_err();
     assert!(
-        why.contains("could not read") && why.contains("auth.json"),
+        why.contains("could not read") && why.contains("the file of logins"),
         "{why}"
     );
     assert!(!why.contains("a login for openai"), "{why}");
@@ -247,6 +255,6 @@ fn the_folder_is_read_only_for_a_list_with_no_model_and_a_read_given_up_on() {
     let mut driver = pi.begin(false);
     assert!(driver.run().is_empty());
     assert!(pi.time.fire_next(i64::MAX));
-    driver.run().remove(0).1.unwrap_err();
+    settled(&mut driver).unwrap_err();
     assert_eq!(reads(), 2, "a read given up on names what Pi was loading");
 }

@@ -354,8 +354,8 @@ runs = ["ch-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '        if !refresh && self.read.borrow().contains(&harness) {'
-replace = '        if false {'
+find = '        if refresh || !self.read.borrow().contains(&harness) {'
+replace = '        if true {'
 
 [[plant]]
 name = 'listing: daemon: a harness not installed here is asked'
@@ -368,14 +368,14 @@ find = '        if harness_path(harness, &self.env).is_none() {'
 replace = '        if false {'
 
 [[plant]]
-name = 'listing: daemon: two harnesses are read at once'
-meant = "two_harnesses_are_read_one_after_the_other"
+name = 'listing: daemon: two reads of one harness are made at once'
+meant = "two_reads_of_one_harness_are_one_after_the_other"
 runs = ["ch-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '        let _turn = self.reading.lock().await;'
-replace = '        let _turn = ();'
+find = '        let _turn = turn.lock().await;'
+replace = '        let _turn = turn.try_lock().ok();'
 
 [[plant]]
 name = 'listing: daemon: a failed read drops the listing kept before'

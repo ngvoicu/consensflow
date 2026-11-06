@@ -56,6 +56,7 @@
 mod call;
 pub(crate) mod mask;
 mod ours;
+mod quotable;
 mod screen;
 mod secret;
 #[cfg(test)]
@@ -73,17 +74,11 @@ use sha2::{Digest, Sha256};
 
 use mask::mask;
 
-/// `words` with what looks like a key or a token hidden ([`mask`]): for the words of a program
-/// that are quoted outside a screen, where a harness's own error can echo what it was given
-/// (the model list a harness could not read, the reason a chief has no other model). The same
-/// hiding, and no more: a screen that names a secret is left out whole ([`Shown`]).
-pub fn masked(words: &str) -> String {
-    mask(words).text
-}
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
+pub use quotable::{quotable, WITHHELD_LINE};
 
 /// The most lines of a screen a note quotes: the last ones.
 const QUOTE_LINES: usize = 6;

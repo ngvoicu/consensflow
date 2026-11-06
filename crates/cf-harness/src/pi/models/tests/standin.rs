@@ -8,7 +8,7 @@ use cf_base::env::Env;
 use serde_json::json;
 
 use super::*;
-use crate::testing::{finished, ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
+use crate::testing::{ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
 
 /// The line Pi answers `get_available_models` with, of `ids` (`provider/id`), to the request
 /// whose id is `request`.
@@ -84,7 +84,7 @@ impl StandIn {
 
     /// The read, for a Pi that needs no clock.
     pub fn read(&self, fetch: bool) -> Result<ModelListing, String> {
-        finished(Box::pin(listed(
+        eventually(Box::pin(listed(
             &self.env,
             &*self.processes,
             &*self.time,
