@@ -8,63 +8,201 @@ fn none_taken(_: &str) -> bool {
 }
 
 #[test]
-fn a_handle_is_the_model_s_name_and_its_effort_in_lowercase_words() {
-    for (shown, effort, handle) in [
-        ("Opus", Some("high"), "opus-high"),
-        ("GPT-6-Astra", Some("max"), "gpt-6-astra-max"),
-        ("GPT-6.1-Sol", Some("xhigh"), "gpt-6-1-sol-xhigh"),
-        ("SWE-2", Some("max"), "swe-2-max"),
-        ("Adaptive", None, "adaptive"),
+fn a_handle_is_the_model_s_id_and_its_effort_in_lowercase_words() {
+    for (harness, model, effort, handle) in [
+        ("claude-code", "claude-opus-5-5", Some("high"), "claude-opus-5-5-high"),
+        ("codex", "gpt-6-astra", Some("max"), "gpt-6-astra-max"),
+        ("codex", "gpt-6.1-sol", Some("xhigh"), "gpt-6-1-sol-xhigh"),
+        ("codex", "gpt-5.6-luna", Some("low"), "gpt-5-6-luna-low"),
+        ("devin", "swe-2", Some("max"), "swe-2-max"),
+        ("devin", "swe-2-lightning", Some("max"), "swe-2-lightning-max"),
+        ("devin", "gpt-6-astra-priority", Some("high"), "gpt-6-astra-priority-high"),
+        ("devin", "adaptive", None, "adaptive"),
+        ("muse", "muse-spark-1.3", Some("high"), "muse-spark-1-3-high"),
+        // Pi's name leaves its provider out; an OpenRouter id holds a `/` of its own.
+        ("pi", "anthropic/claude-opus-5-5", Some("high"), "claude-opus-5-5-high"),
         (
-            "Claude Haiku 4.5 (latest)",
-            Some("off"),
-            "claude-haiku-4-5-latest-off",
+            "pi",
+            "openrouter/anthropic/claude-fable-5.1",
+            Some("low"),
+            "anthropic-claude-fable-5-1-low",
         ),
         (
-            "muse-spark-1.3-contributor",
-            Some("max"),
-            "muse-spark-1-3-contributor-max",
+            "pi",
+            "meta/muse-spark-1.2-contributor",
+            Some("xhigh"),
+            "muse-spark-1-2-contributor-xhigh",
         ),
-        ("Codex default", None, "codex-default"),
-        ("Ünïcode ✓", None, "n-code"),
-        ("✓", None, "member"),
+        // Whatever is no letter, digit or hyphen is a hyphen, in a run one.
+        ("codex", "Model_v2:β (new)", None, "model-v2-new"),
+        ("codex", "Codex default", None, "codex-default"),
+        ("codex", "✓", None, "member"),
     ] {
         assert_eq!(
-            member_handle(shown, effort, "claude-code", none_taken),
+            model_handle(model, effort, harness, none_taken),
             handle,
-            "{shown}"
+            "{harness} {model} {effort:?}"
         );
     }
 }
 
 #[test]
-fn a_taken_handle_puts_the_harness_in_front_then_a_number_after() {
+fn a_name_that_is_taken_puts_the_provider_of_a_pi_model_in_front_then_the_harness_then_a_number() {
     let taken = [
-        "opus-high",
-        "claude-code-opus-high",
-        "claude-code-opus-high-2",
+        "claude-opus-5-5-high",
+        "anthropic-claude-opus-5-5-high",
+        "pi-anthropic-claude-opus-5-5-high",
     ];
+    let is_taken = |h: &str| taken.contains(&h);
+    // Another harness: its own in front.
     assert_eq!(
-        member_handle("Opus", Some("high"), "claude-code", |h| taken.contains(&h)),
-        "claude-code-opus-high-3"
+        model_handle("claude-opus-5-5", Some("high"), "devin", is_taken),
+        "devin-claude-opus-5-5-high"
     );
+    // Pi: its provider first, where two names would collide.
     assert_eq!(
-        member_handle("Opus", Some("high"), "devin", |h| taken.contains(&h)),
-        "devin-opus-high"
+        model_handle("openrouter/claude-opus-5-5", Some("high"), "pi", is_taken),
+        "openrouter-claude-opus-5-5-high"
     );
-    // A name that says its effort already says it once.
+    // Then its harness before the provider, then a number.
     assert_eq!(
-        member_handle("claude-opus-5-5-max", Some("max"), "devin", none_taken),
+        model_handle("anthropic/claude-opus-5-5", Some("high"), "pi", is_taken),
+        "pi-anthropic-claude-opus-5-5-high-2"
+    );
+    // A name that says its effort already says it once (a Devin launch id kept whole).
+    assert_eq!(
+        model_handle("claude-opus-5-5-max", Some("max"), "devin", none_taken),
         "claude-opus-5-5-max"
+    );
+    // A Pi model with no provider is only an id.
+    assert_eq!(
+        model_handle("local-model", Some("low"), "pi", |h| h == "local-model-low"),
+        "pi-local-model-low"
     );
 }
 
 #[test]
 fn a_handle_is_short_enough_for_its_windows_and_ends_on_a_word() {
-    let long = "a very long model name that some harness may send one day 123456789";
-    let handle = member_handle(long, Some("high"), "pi", none_taken);
+    let long = "a-very-long-model-id-that-some-harness-may-send-one-day-123456789";
+    let handle = model_handle(long, Some("high"), "pi", none_taken);
     assert!(handle.len() <= MEMBER_HANDLE_MAX, "{handle}");
     assert!(!handle.ends_with('-'), "{handle}");
+}
+
+/// A name holds its model when its id and effort stand in it as words: whatever is in front
+/// (a harness, a provider) or after (a number, a window's two words) does not matter.
+#[test]
+fn a_name_holds_its_model_where_the_id_and_effort_stand_in_it_as_words() {
+    let holds = |handle: &str, model: Option<&str>, harness: &str, effort: Option<&str>| {
+        names_its_model(handle, model, model, Some(harness), effort)
+    };
+    let opus = Some("claude-opus-5-5");
+    assert!(holds("claude-opus-5-5-high", opus, "claude-code", Some("high")));
+    assert!(holds("devin-claude-opus-5-5-high", opus, "devin", Some("high")));
+    assert!(holds("devin-claude-opus-5-5-high-2", opus, "devin", Some("high")));
+    assert!(holds("claude-opus-5-5-high-amber-pine", opus, "claude-code", Some("high")));
+    assert!(holds(
+        "anthropic-claude-opus-5-5-high",
+        Some("anthropic/claude-opus-5-5"),
+        "pi",
+        Some("high")
+    ));
+    assert!(holds("adaptive", Some("adaptive"), "devin", None));
+    // A name from before, or of another effort or model, holds nothing of it.
+    assert!(!holds("opus-high", opus, "claude-code", Some("high")));
+    assert!(!holds("claude-opus-5-5-high", opus, "claude-code", Some("max")));
+    assert!(!holds("claude-opus-5-5-high", Some("gpt-6.1-sol"), "codex", Some("high")));
+    // No model, no name for one to hold.
+    assert!(!names_its_model("codex-default", None, None, Some("codex"), None));
+}
+
+/// The listed id of a Devin row: from the home's list, else with the effort's word taken out
+/// of the launch id, else the launch id; any other harness's row holds it already.
+#[test]
+fn a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id() {
+    let list: DevinList = vec![
+        (
+            "swe-2-lightning".to_owned(),
+            vec!["swe-2-high-lightning".to_owned(), "swe-2-max-lightning".to_owned()],
+        ),
+        ("adaptive".to_owned(), vec![]),
+        ("twin-a".to_owned(), vec!["shared-high".to_owned()]),
+        ("twin-b".to_owned(), vec!["shared-high".to_owned()]),
+    ];
+    let listed = |model: &str, effort: Option<&str>| listed_model("devin", model, effort, &list);
+    assert_eq!(
+        listed("swe-2-max-lightning", Some("max")),
+        ("swe-2-lightning".to_owned(), Listed::FromList)
+    );
+    assert_eq!(listed("adaptive", None), ("adaptive".to_owned(), Listed::FromList));
+    // The list has two models with that launch id: the launch id stands for it.
+    assert_eq!(
+        listed("shared-high", Some("high")),
+        ("shared-high".to_owned(), Listed::LaunchId)
+    );
+    // Not in the list: the effort's word, once among the launch id's words, goes.
+    assert_eq!(
+        listed("claude-opus-5-5-high-fast", Some("high")),
+        ("claude-opus-5-5-fast".to_owned(), Listed::ByHyphen)
+    );
+    // Twice, or not at all: the launch id.
+    assert_eq!(
+        listed("max-model-max", Some("max")),
+        ("max-model-max".to_owned(), Listed::LaunchId)
+    );
+    assert_eq!(listed("kimi-k3", Some("high")), ("kimi-k3".to_owned(), Listed::LaunchId));
+    assert_eq!(listed("kimi-k3", None), ("kimi-k3".to_owned(), Listed::LaunchId));
+    // Any other harness: the row holds the id its list names.
+    assert_eq!(
+        listed_model("codex", "gpt-6.1-sol", Some("high"), &list),
+        ("gpt-6.1-sol".to_owned(), Listed::AsTaken)
+    );
+}
+
+/// This Mac's Devin list as it was recorded on 2026-11-06 (68 models, 246 efforts that have
+/// a launch id, 75 of them with the effort before a suffix): every launch id of it gives its
+/// listed id from the list, and the hyphen rule alone gives the same one for every one.
+#[test]
+fn every_launch_id_of_devin_s_recorded_list_gives_its_listed_id_both_ways() {
+    let recorded: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/devin-models-2026-11-06.json"))
+            .unwrap();
+    let list: DevinList = recorded["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|model| {
+            (
+                model["id"].as_str().unwrap().to_owned(),
+                model["launchIds"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|ids| ids.values())
+                    .map(|launch| launch.as_str().unwrap().to_owned())
+                    .collect(),
+            )
+        })
+        .collect();
+    let (mut pairs, mut odd) = (0, 0);
+    for model in recorded["models"].as_array().unwrap() {
+        let id = model["id"].as_str().unwrap();
+        for (effort, launch) in model["launchIds"].as_object().into_iter().flatten() {
+            let launch = launch.as_str().unwrap();
+            pairs += 1;
+            odd += usize::from(launch != format!("{id}-{effort}"));
+            assert_eq!(
+                listed_model("devin", launch, Some(effort), &list),
+                (id.to_owned(), Listed::FromList),
+                "{launch}"
+            );
+            assert_eq!(
+                listed_model("devin", launch, Some(effort), &Vec::new()),
+                (id.to_owned(), Listed::ByHyphen),
+                "{launch} without the list"
+            );
+        }
+    }
+    assert_eq!((pairs, odd), (246, 75));
 }
 
 #[test]
@@ -126,7 +264,7 @@ type Row = (
 #[test]
 fn migration_0031_runs_each_ready_made_agent_s_member_on_its_model_and_names_it_by_it() {
     let db = before_0031();
-    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS[..32]).unwrap();
     let rows: Vec<Row> = db
         .prepare(
             "SELECT id, handle, agent, harness, model, effort, model_name, tier FROM participant ORDER BY id",
@@ -286,7 +424,7 @@ fn migration_0031_puts_the_harness_in_front_of_a_name_two_members_share() {
            (3, 1, 'mine', 'worker', '[]', 'mine', 'claude-code', 'complex', 't');",
     )
     .unwrap();
-    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS[..32]).unwrap();
     let handles: Vec<String> = db
         .prepare("SELECT handle FROM participant ORDER BY id")
         .unwrap()
@@ -382,7 +520,7 @@ fn runs_on(db: &Connection) -> Vec<RunsOn> {
 #[test]
 fn migration_0031_runs_each_agent_of_the_human_s_own_on_what_the_agents_file_saved_for_it() {
     let (_dir, db) = custom_0030(Some(their_agents()));
-    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS[..32]).unwrap();
     let s = |text: &str| Some(text.to_owned());
     assert_eq!(
         runs_on(&db),
@@ -460,7 +598,7 @@ fn migration_0031_runs_each_agent_of_the_human_s_own_on_what_the_agents_file_sav
 fn migration_0031_keeps_an_agent_it_cannot_read_as_it_was_and_turns_none_into_a_default() {
     // No agents file beside the ledger: the human's own agents are read nowhere.
     let (_dir, db) = custom_0030(None);
-    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS[..32]).unwrap();
     let s = |text: &str| Some(text.to_owned());
     let rows = runs_on(&db);
     let row = |id: i64| rows.iter().find(|row| row.0 == id).unwrap().clone();
@@ -503,7 +641,7 @@ fn migration_0031_keeps_an_agent_it_cannot_read_as_it_was_and_turns_none_into_a_
 #[test]
 fn a_member_that_needs_an_edit_is_shown_on_no_model_never_its_harness_s_default() {
     let (dir, db) = custom_0030(None);
-    migrate(&db, &MIGRATIONS).unwrap();
+    migrate(&db, &MIGRATIONS[..32]).unwrap();
     drop(db);
     let ledger = crate::open_ledger(
         &dir.path().join("consensflow.db"),
@@ -521,9 +659,189 @@ fn a_member_that_needs_an_edit_is_shown_on_no_model_never_its_harness_s_default(
         )
     };
     assert_eq!(shown("ghost"), NEEDS_AN_EDIT);
-    assert_eq!(shown("opus-max"), "Opus · max");
+    // Opened, the ledger is at 0033: a member is named by its model's id, and shown by it.
+    assert_eq!(shown("claude-opus-5-5-max"), "claude-opus-5-5 · max");
     assert!(project
         .participants
         .iter()
         .any(|participant| participant.needs_edit));
+}
+
+/// A ledger 3.0.7-alpha.2 left (schema 32), as a board of it looks: members named by the
+/// name their harness's list gave their model, one window each of two of them, the image
+/// designer on Codex's default, a member that needs an edit, Devin's launch ids, a Pi member
+/// whose name will collide, and a task and a message whose authors are windows.
+fn alpha_2() -> Connection {
+    let db = Connection::open_in_memory().unwrap();
+    migrate(&db, &MIGRATIONS[..32]).unwrap();
+    db.execute_batch(
+        "INSERT INTO project (id, directory, name, state, created_at, updated_at)
+           VALUES (1, '/work/app', 'app', 'open', 't', 't'), (2, '/work/other', 'other', 'open', 't', 't');
+         INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, model, effort, model_name, tier, member_id, created_at, left_at, designer, needs_edit) VALUES
+           (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 0),
+           (2, 1, 'chief', 'chief', '[]', NULL, 'claude-code', 'claude-opus-5-5', 'xhigh', 'Opus', NULL, NULL, 't', NULL, 0, 0),
+           (3, 1, 'opus-high', 'worker', '[\"worker\"]', 'poseidon', 'claude-code', 'claude-opus-5-5', 'high', 'Opus', 'complex', NULL, 't', NULL, 0, 0),
+           (4, 1, 'opus-high-frosty-cliff', 'worker', '[\"worker\"]', 'poseidon', 'claude-code', 'claude-opus-5-5', 'high', 'Opus', 'complex', 3, 't', NULL, 0, 0),
+           (5, 1, 'gpt-6-astra-xhigh', 'advisor', '[\"advisor\"]', 'asteria', 'codex', 'gpt-6-astra', 'xhigh', 'GPT-6-Astra', 'critical', NULL, 't', NULL, 0, 0),
+           (6, 1, 'swe-2-lightning-max', 'worker', '[\"worker\"]', NULL, 'devin', 'swe-2-max-lightning', 'max', 'SWE-2 Lightning', 'light', NULL, 't', NULL, 0, 0),
+           (7, 1, 'claude-opus-5-5-fast-high', 'tester', '[\"tester\"]', NULL, 'devin', 'claude-opus-5-5-high-fast', 'high', 'Claude Opus 5.5 Fast', 'standard', NULL, 't', 't', 0, 0),
+           (8, 1, 'codex-default', 'designer', '[\"designer\"]', 'pygmalion', 'codex', NULL, NULL, NULL, 'light', NULL, 't', NULL, 1, 0),
+           (9, 1, 'buri', 'worker', '[\"worker\"]', 'buri', 'hermes-code', NULL, NULL, NULL, 'light', NULL, 't', NULL, 0, 1),
+           (10, 1, 'claude-opus-5-5-high', 'reviewer', '[\"reviewer\"]', NULL, 'pi', 'anthropic/claude-opus-5-5', 'high', 'Claude Opus 5.5', 'complex', NULL, 't', NULL, 0, 0),
+           (11, 2, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 0),
+           (12, 2, 'opus-high', 'worker', '[\"worker\"]', NULL, 'claude-code', 'claude-opus-5-5', 'high', 'Opus', 'complex', NULL, 't', NULL, 0, 0);
+         INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at)
+           VALUES (1, 1, 1, 'Fix', 'Fix it', 2, 4, 'working', 't', 't');
+         INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
+           VALUES (1, 1, 2, 4, 'result', 1, 'Done', 'queued', 't');
+         INSERT INTO model_list (harness, models, read_at, how) VALUES
+           ('devin', '[{\"id\":\"swe-2-lightning\",\"label\":\"SWE-2 Lightning\",\"efforts\":[\"high\",\"max\"],\"launchIds\":{\"high\":\"swe-2-high-lightning\",\"max\":\"swe-2-max-lightning\"}}]', 1, 'devin models list');",
+    )
+    .unwrap();
+    db
+}
+
+/// What the rename left of each participant: id, handle, model's name, the names it left.
+type Named = (i64, String, Option<String>, Vec<String>);
+
+fn named(db: &Connection) -> Vec<Named> {
+    db.prepare("SELECT id, handle, model_name, former_handles FROM participant ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            let former: String = row.get(3)?;
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                serde_json::from_str(&former).unwrap(),
+            ))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[test]
+fn migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_follow() {
+    let db = alpha_2();
+    migrate(&db, &MIGRATIONS).unwrap();
+    let s = |text: &str| Some(text.to_owned());
+    let was = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        named(&db),
+        [
+            (1, "human".to_owned(), None, vec![]),
+            // The chief keeps its handle, and its row's model's name as it was.
+            (2, "chief".to_owned(), s("Opus"), vec![]),
+            (3, "claude-opus-5-5-high".to_owned(), s("claude-opus-5-5"), was(&["opus-high"])),
+            // Its window: its member's new name and its own two words; the name it left kept.
+            (
+                4,
+                "claude-opus-5-5-high-frosty-cliff".to_owned(),
+                s("claude-opus-5-5"),
+                was(&["opus-high-frosty-cliff"])
+            ),
+            (5, "gpt-6-astra-xhigh".to_owned(), s("gpt-6-astra"), was(&[])),
+            // Devin's launch id (the effort before the suffix) gives the listed id from the list.
+            (
+                6,
+                "swe-2-lightning-max".to_owned(),
+                s("swe-2-lightning"),
+                was(&[])
+            ),
+            // A member that left, and a launch id the list does not have: the effort's word goes.
+            (
+                7,
+                "claude-opus-5-5-fast-high".to_owned(),
+                s("claude-opus-5-5-fast"),
+                was(&[])
+            ),
+            // No model, or an edit needed: the name stays until it has one.
+            (8, "codex-default".to_owned(), None, vec![]),
+            (9, "buri".to_owned(), None, vec![]),
+            // Pi's name leaves its provider out; the name is taken, so the provider goes in front.
+            (
+                10,
+                "anthropic-claude-opus-5-5-high".to_owned(),
+                s("anthropic/claude-opus-5-5"),
+                was(&["claude-opus-5-5-high"])
+            ),
+            (11, "human".to_owned(), None, vec![]),
+            // The same model in another project is named the same: names are a project's.
+            (12, "claude-opus-5-5-high".to_owned(), s("claude-opus-5-5"), was(&["opus-high"])),
+        ]
+    );
+    // Every author and assignee stays: they are participants by id.
+    let (assignee, sender): (i64, i64) = db
+        .query_row(
+            "SELECT t.assignee_id, m.sender_id FROM task t JOIN message m ON m.task_id = t.id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((assignee, sender), (4, 4));
+}
+
+#[test]
+fn migration_0033_counts_what_it_renamed_and_how_each_devin_id_was_found() {
+    let db = alpha_2();
+    migrate(&db, &MIGRATIONS[..32]).unwrap();
+    db.execute_batch("BEGIN").unwrap();
+    db.execute_batch(MIGRATIONS[32]).unwrap();
+    let done = name_members_by_id(&db).unwrap();
+    db.execute_batch("COMMIT").unwrap();
+    assert_eq!(
+        done,
+        Renamed {
+            members: 6,
+            changed: 3,
+            windows: 1,
+            by_list: 1,
+            by_hyphen: 1,
+            by_launch_id: 0
+        }
+    );
+}
+
+/// A ledger of alpha.1's shape goes through 0031 (the name its harness's list gave the
+/// model) and 0033 (its id): history keeps the nickname in `agent` and the name between in
+/// `former_handles`, in the order the member went by them.
+#[test]
+fn an_alpha_1_ledger_goes_by_the_names_of_both_migrations_and_keeps_both_earlier_ones() {
+    let db = before_0031();
+    migrate(&db, &MIGRATIONS).unwrap();
+    let row = |id: i64| -> (String, Option<String>, Vec<String>) {
+        db.query_row(
+            "SELECT handle, agent, former_handles FROM participant WHERE id = ?",
+            [id],
+            |row| {
+                let former: String = row.get(2)?;
+                Ok((row.get(0)?, row.get(1)?, serde_json::from_str(&former).unwrap()))
+            },
+        )
+        .unwrap()
+    };
+    // @poseidon, then @opus-high, now @claude-opus-5-5-high; its window the same.
+    assert_eq!(
+        row(3),
+        (
+            "claude-opus-5-5-high".to_owned(),
+            Some("poseidon".to_owned()),
+            vec!["opus-high".to_owned()]
+        )
+    );
+    assert_eq!(
+        row(8),
+        (
+            "claude-opus-5-5-high-frosty-cliff".to_owned(),
+            Some("poseidon".to_owned()),
+            vec!["opus-high-frosty-cliff".to_owned()]
+        )
+    );
+    // Devin's `swe-2-max` is the listed `swe-2` at max, and its name was already that.
+    assert_eq!(row(5).0, "swe-2-max");
+    assert_eq!(row(5).2, Vec::<String>::new());
+    // The designer and the member that needs an edit keep the names they had.
+    assert_eq!(row(4).0, "codex-default");
+    assert_eq!(row(6).0, "buri");
 }

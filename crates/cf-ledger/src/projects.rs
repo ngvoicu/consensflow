@@ -264,7 +264,7 @@ impl NewMember {
     /// unique in the project ([`crate::handles::member_handle`]).
     pub(crate) fn handle(&self, store: &Store, project: i64) -> Result<String, LedgerError> {
         let mut failed = None;
-        let handle = crate::handles::member_handle(
+        let handle = crate::handles::model_handle(
             &self.shown(),
             self.effort.as_deref(),
             &self.harness,

@@ -130,17 +130,17 @@ async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_th
                 }))
                 .await;
             assert_eq!(added["ok"], true, "{added}");
-            assert_eq!(added["member"]["handle"], "opus-high");
+            assert_eq!(added["member"]["handle"], "claude-opus-5-5-high");
             assert_eq!(added["member"]["agent"], json!(null), "no saved agent");
-            assert_eq!(added["member"]["modelName"], "Opus");
+            assert_eq!(added["member"]["modelName"], "claude-opus-5-5");
             assert_eq!(added["member"]["tier"], "critical");
             assert_eq!(
-                staffing.runs("opus-high"),
+                staffing.runs("claude-opus-5-5-high"),
                 (
                     "claude-code".to_owned(),
                     Some("claude-opus-5-5".into()),
                     Some("high".into()),
-                    Some("Opus".into())
+                    Some("claude-opus-5-5".into())
                 )
             );
             // The same model at the same effort is the same member: the role is one more.
@@ -153,7 +153,7 @@ async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_th
                     "roles": ["reviewer"],
                 }))
                 .await;
-            assert_eq!(again["member"]["handle"], "opus-high", "{again}");
+            assert_eq!(again["member"]["handle"], "claude-opus-5-5-high", "{again}");
             assert_eq!(again["member"]["roles"], json!(["worker", "reviewer"]));
             // Another effort is another member.
             let other = staffing
@@ -164,7 +164,7 @@ async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_th
                     "tier": "critical",
                 }))
                 .await;
-            assert_eq!(other["member"]["handle"], "opus-max", "{other}");
+            assert_eq!(other["member"]["handle"], "claude-opus-5-5-max", "{other}");
         })
         .await;
 }
@@ -245,7 +245,7 @@ async fn a_codex_member_runs_the_model_codex_lists_at_its_effort() {
                     "codex".to_owned(),
                     Some("gpt-6.1-sol".into()),
                     Some("ultra".into()),
-                    Some("GPT-6.1-Sol".into())
+                    Some("gpt-6.1-sol".into())
                 )
             );
             // GPT-6 Luna's list stops at max.
@@ -295,7 +295,7 @@ async fn a_pi_member_is_on_a_provider_pi_holds_a_login_for() {
                     "pi".to_owned(),
                     Some("openrouter/anthropic/claude-fable-5.1".into()),
                     Some("high".into()),
-                    Some("Anthropic: Claude Fable 5.1".into())
+                    Some("openrouter/anthropic/claude-fable-5.1".into())
                 )
             );
             let refused = staffing
@@ -338,7 +338,7 @@ async fn a_devin_member_holds_the_exact_id_devin_lists_for_the_effort_never_one_
                     "devin".to_owned(),
                     Some("claude-opus-5-5-medium-fast".into()),
                     Some("medium".into()),
-                    Some("Claude Opus 5.5 Fast".into())
+                    Some("claude-opus-5-5-fast".into())
                 )
             );
             // A model Devin lists with no effort at all is its own id.
@@ -352,7 +352,7 @@ async fn a_devin_member_holds_the_exact_id_devin_lists_for_the_effort_never_one_
                     "devin".to_owned(),
                     Some("adaptive".into()),
                     None,
-                    Some("Adaptive".into())
+                    Some("adaptive".into())
                 )
             );
         })
@@ -391,7 +391,7 @@ async fn a_muse_member_runs_a_model_muse_lists_at_its_effort() {
 }
 
 /// Edit member: the member runs on another model, harness and effort from its next window,
-/// in the tier chosen, under its handle and in its roles.
+/// in the tier chosen and in its roles, and is named by the model it runs on now.
 #[tokio::test]
 async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
     LocalSet::new()
@@ -405,7 +405,7 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
                 "member.edit",
                 json!({
                     "project": staffing.project,
-                    "member": "sonnet-medium",
+                    "member": "claude-sonnet-5-5-medium",
                     "harness": "codex",
                     "model": "gpt-6-astra",
                     "effort": "max",
@@ -414,19 +414,22 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
             )
             .await;
             assert_eq!(edited["ok"], true, "{edited}");
-            assert_eq!(edited["member"]["handle"], "sonnet-medium");
+            // The name holds the model it runs on: edited, the member takes the new one's, and
+            // the name it leaves is kept for History.
+            assert_eq!(edited["member"]["handle"], "gpt-6-astra-max");
+            assert_eq!(edited["member"]["formerHandles"], json!(["claude-sonnet-5-5-medium"]));
             assert_eq!(edited["member"]["tier"], "complex");
             assert_eq!(edited["member"]["roles"], json!(["worker", "tester"]));
             assert_eq!(
-                staffing.runs("sonnet-medium"),
+                staffing.runs("gpt-6-astra-max"),
                 (
                     "codex".to_owned(),
                     Some("gpt-6-astra".into()),
                     Some("max".into()),
-                    Some("GPT-6-Astra".into())
+                    Some("gpt-6-astra".into())
                 )
             );
-            assert_eq!(staffing.tier_of("sonnet-medium").as_deref(), Some("complex"));
+            assert_eq!(staffing.tier_of("gpt-6-astra-max").as_deref(), Some("complex"));
             let refused = ask(
                 &staffing.app,
                 "member.edit",

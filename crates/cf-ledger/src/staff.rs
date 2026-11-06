@@ -249,8 +249,9 @@ pub struct MemberEdit {
 }
 
 /// A member runs on another harness, model, effort or tier from its next window (T-1143),
-/// and so do its sessions: a window open now keeps what it runs on. Its handle, roles,
-/// designer flag and work stay.
+/// and so do its sessions: a window open now keeps what it runs on. Its roles, designer flag
+/// and work stay; its name follows the model it runs on (HMD-12): the member and its windows
+/// take the name its new model and effort make, and the names they leave are kept.
 pub(crate) fn edit_member(
     store: &mut Store,
     project_id: i64,
@@ -296,6 +297,44 @@ pub(crate) fn edit_member(
                 "to": { "harness": edit.harness, "model": edit.model, "effort": edit.effort, "tier": edit.tier },
             }),
         )?;
+        // The name holds the model (HMD-12): a member on a model now is named by it, its
+        // windows with it, a window at work too. One with no model keeps the name it has.
+        if let Some(model) = &edit.model {
+            let shown = crate::handles::model_shown(
+                edit.model_name.as_deref(),
+                Some(model),
+                Some(&edit.harness),
+            );
+            let renamed = crate::handles::model_handle(
+                &shown,
+                edit.effort.as_deref(),
+                &edit.harness,
+                |candidate| {
+                    candidate != member.handle
+                        && crate::handles::handle_taken(&store.db, project_id, candidate)
+                            .unwrap_or(true)
+                },
+            );
+            if renamed != member.handle {
+                let windows: i64 = store.db.query_row(
+                    "SELECT COUNT(*) FROM participant WHERE member_id = ?",
+                    [member.id],
+                    |row| row.get(0),
+                )?;
+                crate::handles::rename_member(
+                    &store.db,
+                    project_id,
+                    member.id,
+                    &member.handle,
+                    &renamed,
+                )?;
+                store.log(
+                    project_id,
+                    "member.renamed",
+                    json!({ "from": member.handle, "to": renamed, "windows": windows }),
+                )?;
+            }
+        }
         participant_view(&store.participant_row(member.id)?)
     })
 }

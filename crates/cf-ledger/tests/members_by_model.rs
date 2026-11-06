@@ -1,10 +1,11 @@
 //! A member is a harness, a model it lists, an effort and a tier (spec `harness-models`):
 //! no saved agent behind it and no catalog's tier for it. It is named by its model as its
-//! harness's list names it, with its effort (`@opus-high`); where another participant of the
-//! project has that name its harness goes in front (`@devin-claude-opus-5-5-high`), and
-//! where one has that too a number after. Its windows are named after it and run what it
-//! runs; Edit member moves it to another model, effort or tier and keeps its handle. A
-//! member's tier is the human's, and one is required.
+//! harness's list names it, its id, with its effort (`@claude-opus-5-5-high`); where another
+//! participant of the project has that name a Pi model's provider (`@anthropic-claude-opus-5-5-high`)
+//! or its harness goes in front (`@devin-claude-opus-5-5-high`), and where one has that too
+//! a number after. Its windows are named after it and run what it runs; Edit member moves
+//! it to another model, effort or tier, and renames it and its windows by the model it now
+//! runs (HMD-12). A member's tier is the human's, and one is required.
 
 #![allow(clippy::expect_used)]
 
@@ -87,30 +88,30 @@ fn a_member_is_named_by_its_model_and_effort_its_harness_in_front_where_that_is_
                 "claude-code",
                 "claude-opus-5-5",
                 Some("high"),
-                "Opus",
+                "claude-opus-5-5",
                 "complex",
             ),
             on(
                 "codex",
                 "gpt-6-astra",
                 Some("max"),
-                "GPT-6-Astra",
+                "gpt-6-astra",
                 "critical",
             ),
-            on("devin", "swe-2-max", Some("max"), "SWE-2", "light"),
-            on("devin", "adaptive", None, "Adaptive", "standard"),
+            on("devin", "swe-2-max", Some("max"), "swe-2", "light"),
+            on("devin", "adaptive", None, "adaptive", "standard"),
             on(
                 "pi",
                 "anthropic/claude-opus-5-5",
                 Some("high"),
-                "Claude Opus 5.5",
+                "anthropic/claude-opus-5-5",
                 "complex",
             ),
             on(
                 "devin",
                 "claude-opus-5-5-high",
                 Some("high"),
-                "Claude Opus 5.5",
+                "claude-opus-5-5",
                 "complex",
             ),
         ],
@@ -120,11 +121,13 @@ fn a_member_is_named_by_its_model_and_effort_its_harness_in_front_where_that_is_
         [
             "human",
             "chief",
-            "opus-high",
+            "claude-opus-5-5-high",
             "gpt-6-astra-max",
             "swe-2-max",
             "adaptive",
-            "claude-opus-5-5-high",
+            // Pi's name leaves its provider out, and takes it in front only where the
+            // name is taken.
+            "anthropic-claude-opus-5-5-high",
             "devin-claude-opus-5-5-high",
         ]
     );
@@ -142,7 +145,7 @@ fn a_member_is_named_by_its_model_and_effort_its_harness_in_front_where_that_is_
             Some("claude-code"),
             Some("claude-opus-5-5"),
             Some("high"),
-            Some("Opus"),
+            Some("claude-opus-5-5"),
             None,
             Some("complex")
         ),
@@ -156,7 +159,7 @@ fn a_member_is_named_by_its_model_and_effort_its_harness_in_front_where_that_is_
                 "devin",
                 "claude-opus-5-5-high-fast",
                 Some("high"),
-                "Claude Opus 5.5",
+                "claude-opus-5-5",
                 "light",
             ),
         )
@@ -190,7 +193,7 @@ fn a_member_s_window_runs_what_it_runs_under_its_handle_and_two_words() {
             "codex",
             "gpt-6.1-sol",
             Some("xhigh"),
-            "GPT-6.1-Sol",
+            "gpt-6.1-sol",
             "standard",
         )],
     );
@@ -232,7 +235,7 @@ fn a_member_s_window_runs_what_it_runs_under_its_handle_and_two_words() {
 }
 
 #[test]
-fn edit_member_moves_a_member_and_its_windows_to_another_model_and_keeps_its_handle() {
+fn edit_member_moves_a_member_and_its_windows_to_another_model_and_names_them_by_it() {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
     let project = project(
@@ -241,19 +244,19 @@ fn edit_member_moves_a_member_and_its_windows_to_another_model_and_keeps_its_han
             "claude-code",
             "claude-opus-5-5",
             Some("high"),
-            "Opus",
+            "claude-opus-5-5",
             "complex",
         )],
     );
     let edited = ledger
         .edit_member(
             project.id,
-            "opus-high",
+            "claude-opus-5-5-high",
             &MemberEdit {
                 harness: "codex".into(),
                 model: Some("gpt-6.1-sol".into()),
                 effort: Some("max".into()),
-                model_name: Some("GPT-6.1-Sol".into()),
+                model_name: Some("gpt-6.1-sol".into()),
                 tier: "critical".into(),
             },
         )
@@ -261,6 +264,7 @@ fn edit_member_moves_a_member_and_its_windows_to_another_model_and_keeps_its_han
     assert_eq!(
         (
             edited.handle.as_str(),
+            edited.former_handles.as_slice(),
             edited.harness.as_deref(),
             edited.model.as_deref(),
             edited.effort.as_deref(),
@@ -268,24 +272,143 @@ fn edit_member_moves_a_member_and_its_windows_to_another_model_and_keeps_its_han
             edited.tier.as_deref()
         ),
         (
-            "opus-high",
+            "gpt-6-1-sol-max",
+            ["claude-opus-5-5-high".to_owned()].as_slice(),
             Some("codex"),
             Some("gpt-6.1-sol"),
             Some("max"),
-            Some("GPT-6.1-Sol"),
+            Some("gpt-6.1-sol"),
             Some("critical")
         )
     );
     let logged = ledger.events(project.id, 0, 500).expect("the log");
-    let last = logged.last().expect("an event");
-    assert_eq!(last.kind, "member.edited");
+    let kinds: Vec<&str> = logged.iter().rev().take(2).map(|e| e.kind.as_str()).collect();
+    assert_eq!(kinds, ["member.renamed", "member.edited"]);
     assert_eq!(
-        last.data,
+        logged[logged.len() - 2].data,
         json!({
-            "handle": "opus-high",
+            "handle": "claude-opus-5-5-high",
             "from": { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "complex" },
             "to": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "max", "tier": "critical" },
         })
+    );
+    assert_eq!(
+        logged[logged.len() - 1].data,
+        json!({ "from": "claude-opus-5-5-high", "to": "gpt-6-1-sol-max", "windows": 0 })
+    );
+}
+
+/// The human's rule: the name holds the model. A member edited to another model or another
+/// effort is renamed, its windows with it, one with a task in hand included (the engine's
+/// suite holds the window at work): a window is its token's participant by id, so it goes
+/// on, and its task stays its own; the names it left are kept, oldest first. A member whose name stays right (its tier edited) keeps it, and one whose new
+/// name is taken takes the harness in front.
+#[test]
+fn edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let project = project(
+        &mut ledger,
+        vec![
+            on(
+                "codex",
+                "gpt-6.1-sol",
+                Some("high"),
+                "gpt-6.1-sol",
+                "standard",
+            ),
+            on(
+                "codex",
+                "gpt-6.1-sol",
+                Some("max"),
+                "gpt-6.1-sol",
+                "standard",
+            ),
+        ],
+    );
+    let member = named(&ledger, project.id, "gpt-6-1-sol-high");
+    ledger
+        .create_task(
+            project.id,
+            &NewTask {
+                from: "chief".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                body: "Fix the build".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("a task for it");
+    ledger
+        .assign_task(project.id, 1, member.id)
+        .expect("assigned");
+    let at_work = named(&ledger, project.id, "gpt-6-1-sol-high-amber-pine");
+    assert_eq!(at_work.member_id, Some(member.id));
+    let edit = |effort: &str, tier: &str| MemberEdit {
+        harness: "codex".into(),
+        model: Some("gpt-6.1-sol".into()),
+        effort: Some(effort.into()),
+        model_name: Some("gpt-6.1-sol".into()),
+        tier: tier.into(),
+    };
+    // Only its tier: the name is right.
+    let same = ledger
+        .edit_member(project.id, "gpt-6-1-sol-high", &edit("high", "light"))
+        .expect("edited");
+    assert_eq!(
+        (same.handle.as_str(), same.former_handles.len()),
+        ("gpt-6-1-sol-high", 0)
+    );
+    // Its effort: the member and its window at work take the new name.
+    let edited = ledger
+        .edit_member(project.id, "gpt-6-1-sol-high", &edit("xhigh", "light"))
+        .expect("edited");
+    assert_eq!(edited.handle, "gpt-6-1-sol-xhigh");
+    assert_eq!(edited.former_handles, ["gpt-6-1-sol-high"]);
+    let view = ledger
+        .project(project.id)
+        .expect("read")
+        .expect("the project");
+    let window = view
+        .participants
+        .iter()
+        .find(|participant| participant.id == at_work.id)
+        .expect("the window");
+    assert_eq!(
+        (
+            window.handle.as_str(),
+            window.member.as_deref(),
+            window.session.as_deref(),
+            window.former_handles.as_slice(),
+            window.effort.as_deref()
+        ),
+        (
+            "gpt-6-1-sol-xhigh-amber-pine",
+            Some("gpt-6-1-sol-xhigh"),
+            Some("amber-pine"),
+            ["gpt-6-1-sol-high-amber-pine".to_owned()].as_slice(),
+            Some("xhigh")
+        ),
+        "a window with a task in hand follows at once, and says its effort"
+    );
+    // Its task is still its own: the author is the same participant.
+    let task = ledger
+        .task(project.id, 1)
+        .expect("read")
+        .expect("the task");
+    assert_eq!(
+        (task.task.assignee.as_deref(), task.task.state.as_str()),
+        (Some("gpt-6-1-sol-xhigh-amber-pine"), "queued")
+    );
+    // Edited again to what another member's name already is: its harness goes in front, and
+    // both of its earlier names are kept.
+    let again = ledger
+        .edit_member(project.id, "gpt-6-1-sol-xhigh", &edit("max", "light"))
+        .expect("edited");
+    assert_eq!(again.handle, "codex-gpt-6-1-sol-max");
+    assert_eq!(
+        again.former_handles,
+        ["gpt-6-1-sol-high", "gpt-6-1-sol-xhigh"]
     );
 }
 
@@ -299,13 +422,13 @@ fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_ba
             "claude-code",
             "claude-opus-5-5",
             Some("high"),
-            "Opus",
+            "claude-opus-5-5",
             "complex",
         )],
     );
-    let first = named(&ledger, project.id, "opus-high").id;
+    let first = named(&ledger, project.id, "claude-opus-5-5-high").id;
     ledger
-        .remove_member(project.id, "opus-high")
+        .remove_member(project.id, "claude-opus-5-5-high")
         .expect("removed");
     let back = ledger
         .add_member(
@@ -314,14 +437,14 @@ fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_ba
                 "claude-code",
                 "claude-opus-5-5",
                 Some("high"),
-                "Opus",
+                "claude-opus-5-5",
                 "light",
             ),
         )
         .expect("back");
     assert_eq!(
         (back.id, back.handle.as_str(), back.tier.as_deref()),
-        (first, "opus-high", Some("light"))
+        (first, "claude-opus-5-5-high", Some("light"))
     );
     assert!(back.left_at.is_none());
     // Another effort is another member.
@@ -332,12 +455,12 @@ fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_ba
                 "claude-code",
                 "claude-opus-5-5",
                 Some("max"),
-                "Opus",
+                "claude-opus-5-5",
                 "critical",
             ),
         )
         .expect("added");
-    assert_eq!(other.handle, "opus-max");
+    assert_eq!(other.handle, "claude-opus-5-5-max");
 }
 
 /// A member that left comes back as itself, by what it ran on, and under the handle it
@@ -350,14 +473,14 @@ fn a_member_that_left_is_known_by_its_harness_model_and_effort_not_by_its_name()
         "pi",
         "anthropic/claude-opus-5-5",
         Some("high"),
-        "Claude Opus 5.5",
+        "anthropic/claude-opus-5-5",
         "complex",
     );
     let devin = on(
         "devin",
         "claude-opus-5-5-high",
         Some("high"),
-        "Claude Opus 5.5",
+        "claude-opus-5-5",
         "complex",
     );
     let project = project(&mut ledger, vec![pi.clone(), devin.clone()]);
@@ -400,7 +523,7 @@ fn a_member_that_left_is_known_by_its_harness_model_and_effort_not_by_its_name()
                 "claude-code",
                 "claude-opus-5-5",
                 Some("high"),
-                "Claude Opus 5.5",
+                "claude-opus-5-5",
                 "light",
             ),
         )
@@ -436,7 +559,7 @@ fn a_member_needs_a_tier_and_a_word_for_an_effort_and_the_staff_a_project_starts
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
     let member = NewMember::from_json(&json!({
-        "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "modelName": "GPT-6.1-Sol",
+        "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "modelName": "gpt-6.1-sol",
         "roles": ["worker", "reviewer"], "tier": "standard",
     }))
     .expect("a member");
@@ -445,7 +568,7 @@ fn a_member_needs_a_tier_and_a_word_for_an_effort_and_the_staff_a_project_starts
     assert_eq!(
         staff,
         json!([{
-            "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "modelName": "GPT-6.1-Sol",
+            "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "modelName": "gpt-6.1-sol",
             "designer": false, "tier": "standard", "role": "worker", "roles": ["worker", "reviewer"],
         }])
     );
@@ -457,7 +580,7 @@ fn a_member_needs_a_tier_and_a_word_for_an_effort_and_the_staff_a_project_starts
 fn a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add() {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
-    let untiered = on("codex", "gpt-6.1-sol", Some("high"), "GPT-6.1-Sol", "");
+    let untiered = on("codex", "gpt-6.1-sol", Some("high"), "gpt-6.1-sol", "");
     let refused = ledger
         .create_project(&NewProject {
             directory: "/work/app".into(),
@@ -503,7 +626,7 @@ fn edit_member_takes_the_mark_off_a_member_that_needs_an_edit() {
             "codex",
             "gpt-6.1-sol",
             Some("high"),
-            "GPT-6.1-Sol",
+            "gpt-6.1-sol",
             "standard",
         )],
     );
@@ -522,7 +645,7 @@ fn edit_member_takes_the_mark_off_a_member_that_needs_an_edit() {
                 harness: "codex".into(),
                 model: Some("gpt-6.1-sol".into()),
                 effort: Some("ultra".into()),
-                model_name: Some("GPT-6.1-Sol".into()),
+                model_name: Some("gpt-6.1-sol".into()),
                 tier: "standard".into(),
             },
         )

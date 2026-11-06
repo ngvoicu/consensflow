@@ -182,6 +182,7 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
     // member's own model, and 0032, what the history draws of an item).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0033(&db).unwrap();
         cf_ledger::testing::undo_migration_0032(&db).unwrap();
         cf_ledger::testing::undo_migration_0031(&db).unwrap();
         cf_ledger::testing::undo_migration_0030(&db).unwrap();

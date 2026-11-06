@@ -60,6 +60,7 @@ mod chosen_tier;
 mod compaction;
 mod described;
 mod drawn_items;
+mod former_handles;
 mod handed;
 mod harness_models;
 mod history_indexes;
@@ -79,6 +80,7 @@ pub use chief_model::undo_migration_0028;
 pub use chosen_tier::undo_migration_0030;
 pub use compaction::undo_migration_0020;
 pub use drawn_items::undo_migration_0032;
+pub use former_handles::undo_migration_0033;
 pub use handed::undo_migration_0022;
 pub use harness_models::{
     hold_apart_what_members_run_on, node_member, node_staff, undo_migration_0031,
@@ -167,6 +169,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(chief_model::COLUMNS)
         .chain(harness_models::COLUMNS)
         .chain(drawn_items::COLUMNS)
+        .chain(former_handles::COLUMNS)
     {
         take_column_out(tables, table, column);
     }
@@ -249,7 +252,8 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
                     .replace(harness_models::COLUMN_LINES, "")
-                    .replace(chief_model::COLUMN_LINES, "");
+                    .replace(chief_model::COLUMN_LINES, "")
+                    .replace(former_handles::COLUMN_LINES, "");
             }
             Some("task") => {
                 *sql = sql

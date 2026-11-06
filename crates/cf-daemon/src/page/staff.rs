@@ -237,7 +237,8 @@ pub(super) struct Resolved {
     /// The model as the launch passes it: Devin's the exact id it lists for the effort.
     pub(super) model: String,
     pub(super) effort: Option<String>,
-    /// The name the harness's list gives the model; none where its list was never kept.
+    /// The model as the harness's list names it, its id (Pi's `provider/id`, Devin's listed id
+    /// and not the launch id `model` holds); none where its list was never kept.
     pub(super) model_name: Option<String>,
 }
 
@@ -300,7 +301,9 @@ pub(super) fn resolve(
     Ok(Resolved {
         model: listed.launch_model(effort),
         effort: effort.map(str::to_owned),
-        model_name: Some(listed.label.clone()),
+        // The model as the list names it, its id: Devin's listed id, not the launch id the
+        // member's `model` holds, and Pi's `provider/id`. What the member is named by and shown as.
+        model_name: Some(listed.model()),
     })
 }
 

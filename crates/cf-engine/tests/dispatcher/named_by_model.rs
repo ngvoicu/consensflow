@@ -1,7 +1,8 @@
 //! A board that ran on ready-made agents, upgraded while a member's window was paused
 //! (spec harness-models, the chief's condition of 2026-11-03): migration 0031 names the
-//! member and its window by the model they run on (`@poseidon` is `@opus-high`, its window
-//! `@opus-high-<two words>`). The window keeps working once it is resumed: everything that
+//! member and its window by the model they run on, and 0033 by the model's id (`@poseidon` is
+//! `@opus-high`, then `@claude-opus-5-5-high`, its window `@claude-opus-5-5-high-<two
+//! words>`). The window keeps working once it is resumed: everything that
 //! finds it goes by its id (its token names it so, its conversation, its task's
 //! assignee), never by the name it had, so it is resumed on its own conversation, it is
 //! delivered what is written to it, and its `cf task done` finishes its task.
@@ -42,6 +43,7 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
     // (Opus 5.5 at high on Claude Code), and its window, named after it.
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0033(&db).unwrap();
         cf_ledger::testing::undo_migration_0032(&db).unwrap();
         cf_ledger::testing::undo_migration_0031(&db).unwrap();
         db.execute_batch(&format!(
@@ -56,7 +58,7 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
     after.settle_after_restart().unwrap();
-    let renamed = format!("opus-high-{session}");
+    let renamed = format!("claude-opus-5-5-high-{session}");
     let migrated = context.project(project.id);
     let seen = |id: i64| {
         let participant = migrated
@@ -78,10 +80,10 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
             Some("poseidon".to_owned()),
             Some("claude-opus-5-5".to_owned()),
             Some("high".to_owned()),
-            Some("Opus".to_owned()),
+            Some("claude-opus-5-5".to_owned()),
         )
     };
-    assert_eq!(seen(member), named("opus-high"));
+    assert_eq!(seen(member), named("claude-opus-5-5-high"));
     assert_eq!(seen(window), named(&renamed));
     assert_eq!(
         context.task(project.id, 1).task.assignee.as_deref(),
@@ -245,4 +247,108 @@ fn a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default() 
         .filter(|event| event.kind == "task.assigned" && event.data["task"] == 2)
         .collect();
     assert!(given.is_empty(), "{given:?}");
+}
+
+/// Edit member (HMD-12) while the member's window is at work: the member and the window take
+/// the name of the model the member runs on now, at once, and the window goes on. Everything
+/// that finds it goes by its id (its token, its conversation, its task's assignee), so the
+/// task is still its own, what the chief writes to the new name is delivered to the same
+/// window, and its result finishes the task. A window open keeps what it runs on; the name
+/// it left is kept.
+#[test]
+fn a_member_edited_while_its_window_is_at_work_renames_both_and_the_window_goes_on() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            pool: Some("worker".to_owned()),
+            tier: Some("standard".to_owned()),
+            body: "Write the parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let before = context.task(project.id, 1).task;
+    assert_eq!(before.state, "working");
+    let old = before.assignee.clone().expect("a window has it");
+    let window = context.id(project.id, &old);
+    let launches = context.adapter.prepared().len();
+    let member = context
+        .project(project.id)
+        .participants
+        .into_iter()
+        .find(|participant| participant.handle == "zeus")
+        .unwrap();
+    let edited = context
+        .ledger
+        .borrow_mut()
+        .edit_member(
+            project.id,
+            "zeus",
+            &cf_ledger::MemberEdit {
+                harness: "claude-code".to_owned(),
+                model: Some("claude-fable-5-1".to_owned()),
+                effort: Some("max".to_owned()),
+                model_name: Some("claude-fable-5-1".to_owned()),
+                tier: member.tier.clone().unwrap(),
+            },
+        )
+        .unwrap();
+    assert_eq!(edited.handle, "claude-fable-5-1-max");
+    let session = old.strip_prefix("zeus-").unwrap();
+    let renamed = format!("claude-fable-5-1-max-{session}");
+    context.pass().unwrap();
+    // The window is the same participant, under its new name, and its task is its own.
+    let now = context.project(project.id);
+    let seen = now.participants.iter().find(|p| p.id == window).unwrap();
+    assert_eq!(
+        (seen.handle.as_str(), seen.former_handles.as_slice(), seen.member.as_deref()),
+        (renamed.as_str(), [old.clone()].as_slice(), Some("claude-fable-5-1-max"))
+    );
+    let task = context.task(project.id, 1).task;
+    assert_eq!(
+        (task.state.as_str(), task.assignee.as_deref()),
+        ("working", Some(renamed.as_str()))
+    );
+    // Its result finishes the task; no second window was opened for the rename.
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(project.id, 1, "The parser writes YAML.")
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+    assert_eq!(context.adapter.prepared().len(), launches, "the window went on");
+
+    // What the chief writes goes by the new name to the same participant, and the name it
+    // left is no name of anybody's: a note to it is refused.
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project.id,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: renamed.clone(),
+                body: "Output must be YAML".to_owned(),
+                task: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(context.message(note.id).recipient_id, window);
+    let refused = context.ledger.borrow_mut().note(
+        project.id,
+        &NewNote {
+            from: Some("chief".to_owned()),
+            to: old.clone(),
+            body: "Output must be YAML".to_owned(),
+            task: None,
+        },
+    );
+    assert!(refused.is_err(), "the old name is nobody's now");
+    context.close();
 }

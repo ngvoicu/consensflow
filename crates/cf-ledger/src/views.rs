@@ -61,6 +61,8 @@ pub(crate) struct ParticipantRow {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
     pub(crate) model_name: Option<String>,
+    /// The names it left, oldest first: a JSON list of words.
+    pub(crate) former_handles: String,
     pub(crate) needs_edit: i64,
     pub(crate) launched_model: Option<String>,
     pub(crate) gone_model: Option<String>,
@@ -91,6 +93,7 @@ impl ParticipantRow {
             model: row.get("model")?,
             effort: row.get("effort")?,
             model_name: row.get("model_name")?,
+            former_handles: row.get("former_handles")?,
             needs_edit: row.get("needs_edit")?,
             launched_model: row.get("launched_model")?,
             gone_model: row.get("gone_model")?,
@@ -123,6 +126,17 @@ pub(crate) fn participant_view(row: &ParticipantRow) -> Result<ParticipantView, 
         model: row.model.clone(),
         effort: row.effort.clone(),
         model_name: row.model_name.clone(),
+        former_handles: serde_json::from_str(&row.former_handles)?,
+        // A member's name, or a window's, that holds its model: the card says no more of it.
+        name_apart: row.role != "human"
+            && row.role != "chief"
+            && !crate::handles::names_its_model(
+                &row.handle,
+                row.model_name.as_deref(),
+                row.model.as_deref(),
+                row.harness.as_deref(),
+                row.effort.as_deref(),
+            ),
         needs_edit: row.needs_edit == 1,
         launched_model: row.launched_model.clone(),
         gone_model: row.gone_model.clone(),
