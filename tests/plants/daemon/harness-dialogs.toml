@@ -24,6 +24,13 @@ hd-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared:
 hd-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::"]
 hd-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::"]
 hd-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_harness_dialog_in_a_workers_window_went_unseen::"]
+hd-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::dialogs::"]
+hd-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::window::tests::"]
+hd-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::dialogs::"]
+hd-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "panes::tests::a_tail_keeps"]
+hd-corpus = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing::corpus::tests::"]
+hd-guard = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing::corpus::guard::"]
+hd-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_chiefs_idle_prompt_was_read_as_a_dialog::"]
 
 [[plant]]
 name = "harness dialogs: the engine never watches a window's screen for one, and nobody is told"
@@ -192,8 +199,8 @@ runs = ["hd-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/dialog.rs"
-find = "    if first == at && first > 0 && is_rule(&screen[first - 1]) {"
-replace = "    if false && first == at && first > 0 && is_rule(&screen[first - 1]) {"
+find = "    if at > 0 && (is_rule(&screen[at - 1]) || tops_a_box(&screen[at - 1])) {"
+replace = "    if false && at > 0 && (is_rule(&screen[at - 1]) || tops_a_box(&screen[at - 1])) {"
 
 [[plant]]
 name = "harness dialogs: a footer drawn where a choice would be is read as one"
@@ -454,3 +461,360 @@ runs = ["hd-reader"]
 file = "crates/cf-harness/src/shared/dialog.rs"
 find = "        if rule_across(&screen[at]) || detail.len() == DETAIL_LINES {"
 replace = "        if detail.len() == DETAIL_LINES {"
+
+# A harness's own idle prompt is never a choice of a dialog (T-1240; the live matrix's
+# `question-ask-answer` with a Codex chief, 2026-11-05, T-1178), and no screen the release head read
+# as no dialog reads as one (T-1243, the review of `9a7fca6cb`). The engine reads the pane host's
+# tail, which has no empty line and no rule that says no word: Codex's composer ("› Ask Codex to do
+# anything"), its footer and the line of the conversation over them ("  Worked for 5s • 16:00") were
+# one under the other in one column, as a list of choices is, and a worker's question above them
+# became the dialog's words: the chief was held as waiting.
+#
+# - the shared reader (`shared/dialog.rs`) takes a cursor line under a rule across the screen
+#   (Devin's and Muse's rules say something, so the tail keeps them) for an input box's, and reads
+#   a numbered list, a hint of keys and a `›` as it always did: a rule that ended a numbered list at
+#   the first line that is not numbered read Pi's and Muse's transcripts as dialogs;
+# - Codex's window (`codex/adapter.rs`) reads no dialog by its screen's shape (T-1243, the second
+#   review): its footer is the user's to configure (a branch called `enter`), and the release head read
+#   none of its real dialogs off the tail either;
+# - its stand-in draws its screen as Codex does (`CF_TEST_CODEX_SCREEN=drawn`);
+# - the corpus (`cf_harness::testing::corpus`) holds the release bar: 918 labelled screens read by each
+#   window and by `5b7acff7f`'s window, frozen (`testing/base_dialog.rs`), cut with the pane host's
+#   own tail filter (`cf_proto::panes::word_tail`).
+# - the corpus's data is held clean by a guard (`testing/corpus/guard.rs`, T-1243, the third review): per
+#   class of what the scrub removed (the owner's name, paths, ids, emails, keys, usage/credit/quota/reset
+#   figures, plan names, account rows), over every file the branch adds under test; a negative control per
+#   class, and plants that disable a class (the control fails) or put another figure back into a scanned
+#   file (the scan fails).
+# `cargo xtask plants daemon "idle prompt"` runs them all.
+
+[[plant]]
+name = "harness dialogs: idle prompt: a box's first line is a choice again where its rule says something"
+meant = "the_cursor_line_under_a_rule_that_says_something_is_an_input_boxs_and_no_choice"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "    if at > 0 && (is_rule(&screen[at - 1]) || tops_a_box(&screen[at - 1])) {"
+replace = "    if first == at && first > 0 && is_rule(&screen[first - 1]) {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: Devin's box under its rule is a list of choices, and its chief is held"
+meant = "a_devin_chief_at_rest_or_on_a_question_shows_no_dialog"
+runs = ["hd-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "    if at > 0 && (is_rule(&screen[at - 1]) || tops_a_box(&screen[at - 1])) {"
+replace = "    if first == at && first > 0 && is_rule(&screen[first - 1]) {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: Muse's rule, two dashes before its voice key, is no rule over a box, and its chief is held"
+meant = "a_prompt_box_at_rest_under_a_question_is_no_dialog_and_holds_nothing"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "    if at > 0 && (is_rule(&screen[at - 1]) || tops_a_box(&screen[at - 1])) {"
+replace = "    if at > 0 && (is_rule(&screen[at - 1]) || (false && tops_a_box(&screen[at - 1]))) {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: Muse's window reads its box showing a tip as a dialog"
+meant = "a_muse_chief_at_rest_after_a_workers_question_shows_no_dialog"
+runs = ["hd-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "    if at > 0 && (is_rule(&screen[at - 1]) || tops_a_box(&screen[at - 1])) {"
+replace = "    if at > 0 && (is_rule(&screen[at - 1]) || (false && tops_a_box(&screen[at - 1]))) {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the reader ends a numbered list at the first line that is not numbered, and Pi's window reads its transcript as a dialog"
+meant = "a_pi_chief_at_rest_after_a_numbered_quoted_example_shows_no_dialog"
+runs = ["hd-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Equal if words.starts_with(char::is_alphanumeric) => {"
+replace = "            std::cmp::Ordering::Equal\n                if words.starts_with(char::is_alphanumeric)\n                    && (!numbers_its_choices || numbered(&words).0.is_some()) =>\n            {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the reader ends a numbered list at the first line that is not numbered, and Muse's window reads its numbered echo as a dialog"
+meant = "a_muse_chief_at_rest_after_a_numbered_echo_shows_no_dialog"
+runs = ["hd-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Equal if words.starts_with(char::is_alphanumeric) => {"
+replace = "            std::cmp::Ordering::Equal\n                if words.starts_with(char::is_alphanumeric)\n                    && (!numbers_its_choices || numbered(&words).0.is_some()) =>\n            {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the engine holds a Pi window and tells of a dialog over numbered quoted text"
+meant = "numbered_conversation_text_over_an_idle_prompt_is_no_dialog_and_holds_nothing"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Equal if words.starts_with(char::is_alphanumeric) => {"
+replace = "            std::cmp::Ordering::Equal\n                if words.starts_with(char::is_alphanumeric)\n                    && (!numbers_its_choices || numbered(&words).0.is_some()) =>\n            {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the reader ends choices at a hint of keys, and a quoted menu is a dialog"
+meant = "a_numbered_list_with_words_in_its_column_under_it_is_no_dialog_whatever_the_words"
+runs = ["hd-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Equal if words.starts_with(char::is_alphanumeric) => {"
+replace = "            std::cmp::Ordering::Equal\n                if words.starts_with(char::is_alphanumeric) && !hints_an_answer(&words) =>\n            {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: Codex's window reads its screen by shape again, and a chief at rest is held"
+meant = "a_codex_chief_at_rest_after_a_workers_question_shows_no_dialog"
+runs = ["hd-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "    fn dialog(&self, _screen: &[String]) -> Option<Dialog> {\n        None\n    }"
+replace = "    fn dialog(&self, screen: &[String]) -> Option<Dialog> {\n        crate::shared::dialog::read(screen).map(|shown| Dialog {\n            prompt_below: self.shows_prompt(&shown.below),\n            ..shown.dialog\n        })\n    }"
+
+[[plant]]
+name = "harness dialogs: idle prompt: Codex's window reads a draft over a footer the user configured as a dialog"
+meant = "a_draft_over_a_footer_the_user_configured_is_no_dialog"
+runs = ["hd-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "    fn dialog(&self, _screen: &[String]) -> Option<Dialog> {\n        None\n    }"
+replace = "    fn dialog(&self, screen: &[String]) -> Option<Dialog> {\n        crate::shared::dialog::read(screen).map(|shown| Dialog {\n            prompt_below: self.shows_prompt(&shown.below),\n            ..shown.dialog\n        })\n    }"
+
+[[plant]]
+name = "harness dialogs: idle prompt: a Codex chief at rest with a worker's question on its screen is held for a dialog nobody opened"
+meant = "a_codex_chief_at_rest_with_a_workers_question_on_its_screen_is_not_held_for_a_dialog"
+runs = ["hd-rig-codex"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "    fn dialog(&self, _screen: &[String]) -> Option<Dialog> {\n        None\n    }"
+replace = "    fn dialog(&self, screen: &[String]) -> Option<Dialog> {\n        crate::shared::dialog::read(screen).map(|shown| Dialog {\n            prompt_below: self.shows_prompt(&shown.below),\n            ..shown.dialog\n        })\n    }"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the corpus's Codex window reads a draft over a branch called enter as a dialog"
+meant = "the_codex_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none"
+runs = ["hd-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "    fn dialog(&self, _screen: &[String]) -> Option<Dialog> {\n        None\n    }"
+replace = "    fn dialog(&self, screen: &[String]) -> Option<Dialog> {\n        crate::shared::dialog::read(screen).map(|shown| Dialog {\n            prompt_below: self.shows_prompt(&shown.below),\n            ..shown.dialog\n        })\n    }"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the corpus's Pi window reads a transcript the release head read as none as a dialog"
+meant = "the_pi_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none"
+runs = ["hd-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "            std::cmp::Ordering::Equal if words.starts_with(char::is_alphanumeric) => {"
+replace = "            std::cmp::Ordering::Equal\n                if words.starts_with(char::is_alphanumeric)\n                    && (!numbers_its_choices || numbered(&words).0.is_some()) =>\n            {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the corpus's Devin window reads a dialog of its harness otherwise than the release head did"
+meant = "the_devin_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none"
+runs = ["hd-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/dialog.rs"
+find = "    let hinted = lines[last + 1..]"
+replace = "    let hinted = false && lines[last + 1..]"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the corpus's Claude window reads its idle screen with no prompt below it"
+meant = "the_claude_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            prompt_below: self.shows_prompt(&shown.below),\n            closes_after_s,"
+replace = "            prompt_below: false,\n            closes_after_s,"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the corpus's Claude window gives its offer another timeout than the release head's"
+meant = "the_claude_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            .then_some(OFFER_CLOSES_AFTER_S);"
+replace = "            .then_some(OFFER_CLOSES_AFTER_S + 1);"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the pane host's tail keeps the lines that say nothing"
+meant = "a_tail_keeps_the_last_lines_that_hold_a_letter_or_a_digit"
+runs = ["hd-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/panes.rs"
+find = "        .filter(|line| line.chars().any(char::is_alphanumeric))\n        .collect();"
+replace = "        .collect();"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the pane host's tail keeps every line, not the last ones"
+meant = "a_tail_keeps_the_last_lines_that_hold_a_letter_or_a_digit"
+runs = ["hd-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/panes.rs"
+find = "    lines.drain(..lines.len().saturating_sub(max));\n    lines\n}"
+replace = "    let _ = max;\n    lines\n}"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the corpus's recorded and rendered screens are cut by a truncation, not the pane host's filter"
+meant = "the_corpus_holds_what_it_says_and_each_screen_is_a_tail"
+runs = ["hd-corpus"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus.rs"
+find = "        rows.into_iter().map(|row| row.trim_end().to_owned()),\n        TAIL_LINES,\n    )"
+replace = "        rows.into_iter().map(|row| row.trim_end().to_owned()).rev().take(TAIL_LINES).collect::<Vec<_>>().into_iter().rev(),\n        usize::MAX,\n    )"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for the owner's name"
+meant = "the_name_is_found_in_any_case_inside_any_word_or_path"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Name, names),"
+replace = "    // (Class::Name, names),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for a path of a machine or a worktree"
+meant = "a_path_of_a_machine_or_a_worktree_is_found"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Path, paths),"
+replace = "    // (Class::Path, paths),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for a session id"
+meant = "a_session_id_a_run_stamp_or_a_long_hex_run_is_found"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Id, ids),"
+replace = "    // (Class::Id, ids),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for an email address"
+meant = "an_email_address_of_any_domain_is_found"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Email, emails),"
+replace = "    // (Class::Email, emails),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for a key"
+meant = "the_prefix_of_a_key_or_a_token_is_found"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Key, keys),"
+replace = "    // (Class::Key, keys),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for a usage, credit, quota or reset figure"
+meant = "a_usage_context_credit_quota_or_reset_figure_that_is_not_the_scrubs_is_found"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Figure, figures),"
+replace = "    // (Class::Figure, figures),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for a plan name"
+meant = "a_plan_name_is_found_where_the_synthetic_one_belongs"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Plan, plans),"
+replace = "    // (Class::Plan, plans),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard of the corpus's data does not look for an account row"
+meant = "an_account_row_that_is_not_redacted_is_found"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "    (Class::Account, accounts),"
+replace = "    // (Class::Account, accounts),"
+
+[[plant]]
+name = "harness dialogs: idle prompt: a context figure that is not the scrub's is back in a scanned fixture"
+meant = "the_files_the_branch_adds_under_test_hold_nothing_of_the_owners"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus.rs"
+find = "Context: 55k / 555k tokens (5%)\";"
+replace = "Context: 19k / 287k tokens (8%)\";"
+
+[[plant]]
+name = "harness dialogs: idle prompt: a plan that is not the scrub's is back in a recorded Devin usage row"
+meant = "the_files_the_branch_adds_under_test_hold_nothing_of_the_owners"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/recorded.txt"
+find = "Xxx · 555% remaining (resets in 12h 34m)"
+replace = "Yyy · 555% remaining (resets in 12h 34m)"
+
+[[plant]]
+name = "harness dialogs: idle prompt: a token count that is not the scrub's is back in a fixture's spinner"
+meant = "the_files_the_branch_adds_under_test_hold_nothing_of_the_owners"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/screens.rs"
+find = "(2s · ↓ 55 tokens)"
+replace = "(2s · ↓ 29 tokens)"
+
+[[plant]]
+name = "harness dialogs: idle prompt: stats that are not the scrub's are back in a generated bottom"
+meant = "the_files_the_branch_adds_under_test_hold_nothing_of_the_owners"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus.rs"
+find = "↑5.5k ↓555 R55k CH55.5% $5.555 5.5%/5.5M (auto)"
+replace = "↑1.2k ↓345 R4.8k CH89.0% $0.123 4.5%/7.9M (auto)"
+
+[[plant]]
+name = "harness dialogs: idle prompt: the guard does not look for a figure with a unit wherever it stands"
+meant = "a_figure_with_a_unit_is_found_with_its_label_on_another_line_or_none"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/corpus/guard.rs"
+find = "        if !fives_or_zeros(number) {"
+replace = "        if false && !fives_or_zeros(number) {"
+
+[[plant]]
+name = "harness dialogs: idle prompt: a context tuple with its unit stands on a line of its own in a fixture file, its label on another"
+meant = "the_files_the_branch_adds_under_test_hold_nothing_of_the_owners"
+runs = ["hd-guard"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/testing/screens.rs"
+find = "pub const QUESTION: &str = \"Which format should I use for my reply: JSON or text?\";"
+replace = "pub const QUESTION: &str = \"Which format should I use for my reply: JSON or text?\";\n#[allow(dead_code)]\nconst STRAY: &str = \"19k / 287k\";"

@@ -45,7 +45,7 @@ use cf_proto::specs::Variant;
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, FirstMessage, Held, Launch, LaunchId, Observed, Over, Pane,
+    Adapter, Admission, Agent, Dialog, FirstMessage, Held, Launch, LaunchId, Observed, Over, Pane,
     PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
@@ -405,6 +405,30 @@ impl Window for CodexWindow {
     /// its status line says it.
     fn compacting(&self, screen: &[String]) -> bool {
         compacting::drawn(screen, &compacting::CODEX)
+    }
+
+    /// Codex reads no dialog of its harness off its screen by shape (3.0.7-alpha.2, T-1240, T-1243).
+    ///
+    /// The engine reads the pane host's tail: no empty line and no rule that says no word. In it Codex's
+    /// composer ("› Ask Codex to do anything"), its footer and the last line of the conversation ("  Worked
+    /// for 5s • 16:00") are one under the other in one column, as a list of choices is, and by their shape
+    /// the shared reader took them for three, with a worker's question above them for the dialog's
+    /// words: a chief at rest was held for a dialog nobody had opened (the live matrix's
+    /// `question-ask-answer`, 2026-11-05). No rule on the screen's words keeps a composer apart from a
+    /// dialog, because the words are the user's: the footer is configured (`tui.status_line`, a
+    /// branch's name that is `enter` or `esc`), Codex hides its line of keys while a draft is in the
+    /// composer, and what the user typed is numbered or quoted as they like. A rule that took a list
+    /// with its keys under it for a dialog (T-1243, `fd1837385`) read such a draft as one, where the
+    /// release head read none.
+    ///
+    /// And the release head read no real Codex dialog off the tail at all: its nudge to switch models,
+    /// its pickers and 27 upstream snapshots of its dialogs were unread, their title and hint lines
+    /// being taken for choices. So reading none loses no dialog that was read, adds no false one, and
+    /// fixes the field's bug. Codex's nudge and install offers stay off at launch (`OFFERS`), and its
+    /// own question tool is the board's. Reading Codex's real dialogs from evidence beyond its footer
+    /// is a follow-up: `issues/codex-dialogs-are-not-read-from-its-screen.md` in consensflow-sme.
+    fn dialog(&self, _screen: &[String]) -> Option<Dialog> {
+        None
     }
 
     fn follow(&self, session: &str) {

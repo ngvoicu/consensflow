@@ -1,0 +1,119 @@
+# Pi 1.5.0's own renderings of the markdown of bodies.txt, offline (no model, no session): its `UserMessageComponent` and
+# `AssistantMessageComponent` at width 100 with the dark theme, control sequences taken out, each row right-trimmed, the empty rows
+# kept. One section a body: `=== <id>`. Made offline with Pi's own components by a script of the branch's author, kept with the T-1243 evidence.
+=== question
+
+ Which format should I use for my reply: JSON or text?
+=== delivered-question
+
+ [ConsensFlow m-2 · T-1 · question from @worker]
+ Which format should I use for my reply: JSON or text?
+
+ Run in your shell: /tmp/consensflow/bundle/bin/cf answer m-2 "…"
+=== numbered
+
+ Which approach should we take?
+
+ 1. Use the table
+ 2. Test it first
+=== numbered-then-text
+
+ Which approach should we take?
+
+ 1. Use the table
+ 2. Test it first
+
+ This is sample text
+=== numbered-then-question
+
+ 1. Use the table
+ 2. Test it first
+
+ Which approach should we take?
+=== quoted-list
+
+ Which approach should we take?
+
+ │ 1. Use the table
+ │ 2. Test it first
+ │    This is sample quoted text
+=== quoted-words
+
+ Which approach should we take?
+
+ │ the table
+ │ the state machine
+=== fenced-quote
+
+ Which approach should we take?
+
+ ```
+   > 1. Use the table
+     2. Test it first
+     This is sample quoted text
+ ```
+=== fenced-codex-menu
+
+ Which one do you want?
+
+ ```
+   › 1. Use the table
+     2. Test it first
+     Press enter to confirm or esc to go back
+ ```
+=== fenced-arrow-menu
+
+ Which one do you want?
+
+ ```
+   → 1. Use the table
+     2. Test it first
+     Press enter to confirm
+ ```
+=== bullets
+
+ Which approach should we take?
+
+ - the table
+ - the state machine
+=== nested
+
+ Which approach should we take?
+
+ 1. Use the table
+     - because it is fast
+     - because it is small
+ 2. Test it first
+=== tool-numbers
+
+ Did that work?
+
+ ```
+   1. cargo build
+   2. cargo test
+   3. 4 failures
+ ```
+=== hint-words
+
+ Which one do you want?
+
+ Press enter to confirm or esc to go back
+=== user-numbered
+
+ 1. Use the table
+ 2. Test it first
+    please decide?
+=== user-two-lines
+
+ Which format should I use?
+ JSON or text
+=== user-quote
+
+ │ 1. Use the table
+ │ 2. Test it first
+ │    which one?
+=== user-menu
+
+ › 1. Use the table
+   2. Test it first
+ which one?

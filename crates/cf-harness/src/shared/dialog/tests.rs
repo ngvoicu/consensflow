@@ -54,7 +54,7 @@ fn claude_codes_lsp_offer_is_a_dialog_with_its_question_and_four_choices() {
 /// The same offer as Claude Code 2.1.317 drew it in a member's window mid-turn, numbered and
 /// unframed, over its spinner, as the pane host's snapshot had it (`cargo xtask live
 /// harness-dialogs`, 2026-11-03).
-const CLAUDE_LSP_LIVE: &str = " LSP plugin recommendation\n\n   LSP provides code intelligence like go-to-definition and error checking\n\n   Plugin: clangd-lsp\n   Marketplace: claude-plugins-official\n   Triggered by: .c files\n   Description: C/C++ language server (clangd) for code intelligence\n\n   Would you like to install this LSP plugin?\n\n   \u{276f} 1. Yes, install\n     2. No, not now\n     3. Never for this plugin\n     4. Disable all LSP recommendations\n\n\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)";
+const CLAUDE_LSP_LIVE: &str = " LSP plugin recommendation\n\n   LSP provides code intelligence like go-to-definition and error checking\n\n   Plugin: clangd-lsp\n   Marketplace: claude-plugins-official\n   Triggered by: .c files\n   Description: C/C++ language server (clangd) for code intelligence\n\n   Would you like to install this LSP plugin?\n\n   \u{276f} 1. Yes, install\n     2. No, not now\n     3. Never for this plugin\n     4. Disable all LSP recommendations\n\n\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 55 tokens)";
 
 #[test]
 fn claude_codes_lsp_offer_as_a_live_window_drew_it_is_read_numbers_and_spinner_and_all() {
@@ -323,4 +323,81 @@ fn a_dialogs_detail_stops_at_its_rule_and_at_ten_lines() {
             .detail,
         Vec::<String>::new()
     );
+}
+
+// ─── A harness's own prompt is no list of choices (T-1240) ─────────────────────────────────────
+//
+// The engine reads the pane host's tail: no empty line and no rule that says no word. The screens
+// are `crate::testing::screens`: each harness's last lines at rest after a worker's question,
+// drawn as its recorded screens draw them, and the dialogs the inventory lists.
+
+use crate::testing::screens::{
+    lines as screen, DEVIN_BOX_HOLDING_LINES, DEVIN_IDLE_AFTER_QUESTION, DEVIN_ON_THE_QUESTION,
+    MUSE_BOX_HOLDING_LINES, MUSE_IDLE_AFTER_QUESTION, PI_IDLE_AFTER_QUESTION,
+};
+
+#[test]
+fn the_cursor_line_under_a_rule_that_says_something_is_an_input_boxs_and_no_choice() {
+    // Muse's rule names the voice key, Devin's the mode and the conversation: the tail keeps
+    // them, a column in from the box's words, among the lines the choices took in.
+    for (what, drawn) in [
+        ("Muse, its tip", MUSE_IDLE_AFTER_QUESTION),
+        ("Muse, two lines typed", MUSE_BOX_HOLDING_LINES),
+        ("Devin, two lines typed", DEVIN_BOX_HOLDING_LINES),
+        ("Devin, over its box", DEVIN_ON_THE_QUESTION),
+        ("Devin, at rest", DEVIN_IDLE_AFTER_QUESTION),
+    ] {
+        assert_eq!(read(&screen(drawn)), None, "{what}");
+    }
+    // Without the rule the same lines are a list, as any conversation's is.
+    let ruled = lines(
+        "◆ Which way do you want it?\n❯ The parser first\n  The tests first\n── Voice input (⌥ + v to start) ──────────────",
+    );
+    assert!(read(&ruled).is_some());
+    let boxed = lines(
+        "◆ Which way do you want it?\n── Voice input (⌥ + v to start) ──────────────\n❯ The parser first\n  The tests first",
+    );
+    assert_eq!(read(&boxed), None);
+}
+
+/// What T-1240's first try did and T-1243 took out: the reader ends a list at a line that is not
+/// numbered, or at a hint of keys, and so reads, as a dialog, what the conversation of a harness
+/// draws (Pi 1.5.0's own rendering of a fenced example, with its footer under it, was one: `5b7acff7f`
+/// read none). The reader reads such a list as it always did, and a window that knows its dialogs'
+/// shape reads them (Codex's: `CodexWindow::dialog`).
+#[test]
+fn a_numbered_list_with_words_in_its_column_under_it_is_no_dialog_whatever_the_words() {
+    // Pi 1.5.0's rendering of a question and a fenced example, its footer under it.
+    let pi = screen(&[
+        " Which approach should we take?",
+        "   > 1. Use the table",
+        "     2. Test it first",
+        "     This is sample quoted text",
+        "/work/app",
+        "↑5.5k ↓555 R55k CH55.5% $5.555 5.5%/5.5M (auto)                       meta/muse-spark-1.3 • low",
+    ]);
+    assert_eq!(read(&pi), None);
+    // A user's numbered message in Muse, the status of its box in the column of the words.
+    let muse = screen(&[
+        "❯ 1. Use the table",
+        "  2. Test it first",
+        "  please decide?",
+        "── Voice input (⌥ + v to start) ────────────────────────────────────────────────",
+        "  muse-spark-1.3 · minimal · /p/w/app · YOLO",
+    ]);
+    assert_eq!(read(&muse), None);
+    // A hint of keys in the column of numbered choices is one of them, as it was.
+    let quoted = screen(&[
+        "Which one do you want?",
+        "› 1. Use the table",
+        "  2. Test it first",
+        "  Press enter to confirm or esc to go back",
+    ]);
+    assert_eq!(read(&quoted), None);
+}
+
+#[test]
+fn a_screen_with_no_cursor_on_words_shows_none_whatever_it_asks() {
+    // Pi draws no cursor on its box, and the line of its stats is no choice.
+    assert_eq!(read(&screen(PI_IDLE_AFTER_QUESTION)), None);
 }

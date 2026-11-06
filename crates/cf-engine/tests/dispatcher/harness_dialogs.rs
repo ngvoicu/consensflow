@@ -34,7 +34,7 @@ const LSP: [&str; 12] = [
     "     2. No, not now",
     "     3. Never for this plugin",
     "     4. Disable all LSP recommendations",
-    "\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)",
+    "\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 55 tokens)",
 ];
 
 const QUESTION: &str = "Would you like to install this LSP plugin?";
@@ -227,6 +227,104 @@ fn choices_a_conversation_lists_above_the_prompt_are_no_dialog() {
     passes(&context, 12, 1_000);
     assert_eq!(of_dialogs(&tiers.notes("chief")), Vec::<String>::new());
     assert!(!context.host.screen_looks().is_empty());
+}
+
+/// A window at rest whose prompt is drawn the way a harness draws its own, with a worker's
+/// question on its screen above it (T-1240): the box's first line carries the harness's cursor
+/// (`❯ Ask to monitor a running build…`, one of Muse's tips) and the status under it is in the
+/// column of its words, and the engine reads the pane host's tail, which has no empty line. By
+/// their shape alone they were two choices, and the question above them the dialog's words: a
+/// chief at rest was held as waiting for a dialog nobody had opened, and its workers' results
+/// waited for it (the live matrix's `question-ask-answer` with a Codex chief, 2026-11-05).
+#[test]
+fn a_prompt_box_at_rest_under_a_question_is_no_dialog_and_holds_nothing() {
+    use cf_harness::testing::screens::{
+        DEVIN_BOX_HOLDING_LINES, MUSE_BOX_HOLDING_LINES, MUSE_IDLE_AFTER_QUESTION,
+    };
+    for (what, screen) in [
+        ("a Muse box showing a tip", MUSE_IDLE_AFTER_QUESTION),
+        ("a Muse box holding two lines", MUSE_BOX_HOLDING_LINES),
+        ("a Devin box holding two lines", DEVIN_BOX_HOLDING_LINES),
+    ] {
+        let context = Context::new();
+        let tiers = at_work(&context, screen);
+        passes(&context, 20, 1_000);
+        assert_eq!(
+            of_dialogs(&tiers.notes("chief")),
+            Vec::<String>::new(),
+            "{what}"
+        );
+        assert_eq!(
+            of_dialogs(&to_human(&context, tiers.project.id)),
+            Vec::<String>::new(),
+            "{what}"
+        );
+        let activity = context.dispatcher.activity(tiers.id(&tiers.assignee(1)));
+        assert_ne!(
+            activity.state,
+            ActivityState::Waiting,
+            "{what}: {activity:?}"
+        );
+        assert!(
+            !context.host.screen_looks().is_empty(),
+            "{what}: never looked"
+        );
+        // Nothing is held: zeus's result goes to the chief.
+        let chief_before = crate::fixtures::given(&context, "chief").len();
+        context.adapter.answer("zeus", "Parser done");
+        passes(&context, 12, 1_000);
+        assert_eq!(tiers.task(1).task.state, "done", "{what}");
+        assert!(
+            crate::fixtures::given(&context, "chief").len() > chief_before,
+            "{what}: the result waited"
+        );
+    }
+}
+
+/// T-1243 (the review of `9a7fca6cb`): numbered conversation text over an idle prompt, in Pi's and in
+/// Muse's windows (the reader every window but Codex's has), is no dialog: `5b7acff7f` read none, a rule
+/// that ended a numbered list at the first line that is not numbered read one, and the window was held
+/// and the chief and the human were told of a dialog nobody had opened.
+#[test]
+fn numbered_conversation_text_over_an_idle_prompt_is_no_dialog_and_holds_nothing() {
+    use cf_harness::testing::screens::{MUSE_NUMBERED_ECHO_AT_REST, PI_QUOTED_EXAMPLE_AT_REST};
+    for (what, screen) in [
+        ("Pi's numbered quoted example", PI_QUOTED_EXAMPLE_AT_REST),
+        ("Muse's numbered echo", MUSE_NUMBERED_ECHO_AT_REST),
+    ] {
+        let context = Context::new();
+        let tiers = at_work(&context, screen);
+        passes(&context, 20, 1_000);
+        assert_eq!(
+            of_dialogs(&tiers.notes("chief")),
+            Vec::<String>::new(),
+            "{what}"
+        );
+        assert_eq!(
+            of_dialogs(&to_human(&context, tiers.project.id)),
+            Vec::<String>::new(),
+            "{what}"
+        );
+        let activity = context.dispatcher.activity(tiers.id(&tiers.assignee(1)));
+        assert_ne!(
+            activity.state,
+            ActivityState::Waiting,
+            "{what}: {activity:?}"
+        );
+        assert!(
+            !context.host.screen_looks().is_empty(),
+            "{what}: never looked"
+        );
+        // Nothing is held: zeus's result goes to the chief.
+        let chief_before = crate::fixtures::given(&context, "chief").len();
+        context.adapter.answer("zeus", "Parser done");
+        passes(&context, 12, 1_000);
+        assert_eq!(tiers.task(1).task.state, "done", "{what}");
+        assert!(
+            crate::fixtures::given(&context, "chief").len() > chief_before,
+            "{what}: the result waited"
+        );
+    }
 }
 
 #[test]

@@ -37,7 +37,16 @@
 //! finds it gone, or drawn otherwise, presses nothing, and a key the window did not take is not
 //! pressed again. A dialog that goes and comes again is told again.
 //!
-//! The screen is read through [`crate::host::EngineHost::screen`], which no Node trace holds.
+//! The screen is read through [`crate::host::EngineHost::screen`], which no Node trace holds: the
+//! pane host's tail, the last twelve lines with a letter or a digit in them, so no empty line and
+//! no rule that says no word. A harness's own prompt is no dialog, and the reader has to tell it
+//! from one on that tail (T-1240: Codex's composer, its footer and the last line of the
+//! conversation were one under the other in one column, as a list of choices is, and a worker's
+//! question above them was the dialog's words; a chief at rest was held for a dialog nobody had
+//! opened): the cursor of an input box is the first line under a rule (`cf_harness::shared::
+//! dialog`); Codex, whose box draws no rule and whose footer is the user's to configure, has its window
+//! read no dialog by shape at all (`CodexWindow::dialog`), as the release head read none of its real
+//! ones off the tail.
 //! Limits: a dialog that opens and closes between two looks is not seen, and a dialog drawn in
 //! a shape the reader does not know (no cursor on a choice, a question that does not ask) is
 //! not read off a screen whose harness says nothing of it.

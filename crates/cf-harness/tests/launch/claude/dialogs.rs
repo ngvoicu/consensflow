@@ -30,7 +30,7 @@ fn lines(text: &str) -> Vec<String> {
 }
 
 /// Claude Code 2.1.317's offer to install an LSP plugin, as a live member's window drew it.
-const LSP: &str = " LSP plugin recommendation\n   Plugin: clangd-lsp\n   Triggered by: .c files\n\n   Would you like to install this LSP plugin?\n\n   \u{276f} 1. Yes, install\n     2. No, not now\n     3. Never for this plugin\n     4. Disable all LSP recommendations\n\n\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)";
+const LSP: &str = " LSP plugin recommendation\n   Plugin: clangd-lsp\n   Triggered by: .c files\n\n   Would you like to install this LSP plugin?\n\n   \u{276f} 1. Yes, install\n     2. No, not now\n     3. Never for this plugin\n     4. Disable all LSP recommendations\n\n\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 55 tokens)";
 
 #[test]
 fn a_dialog_its_status_says_is_open_is_one_of_claude_codes_and_its_question_tools_is_the_windows_own(
@@ -184,4 +184,53 @@ fn a_hooks_ask_is_answered_no_after_ten_minutes_and_the_window_told_to_go_on_wit
     let no_no = HOOK_ASK.replace("2. No", "2. Later");
     let no_no = plan.window.dialog(&lines(&no_no)).expect("the ask");
     assert_eq!(plan.window.safe_decline(&no_no), None);
+}
+
+/// A Claude Code chief's last lines at rest after a worker's question (T-1240), as the engine
+/// reads them (the pane host's tail: no empty line, and no rule that says no word): the line
+/// under its box that says it is in full-permission mode is the prompt it draws below any
+/// conversation's list, and its dialogs never draw it.
+#[test]
+fn a_claude_chief_at_rest_after_a_workers_question_shows_no_dialog() {
+    use cf_harness::testing::screens::{
+        reads_no_dialog, CLAUDE_BOX_HOLDING_LINES, CLAUDE_IDLE_AFTER_QUESTION,
+    };
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    reads_no_dialog(&*plan.window, "at rest", CLAUDE_IDLE_AFTER_QUESTION);
+    reads_no_dialog(
+        &*plan.window,
+        "two lines typed under a question",
+        CLAUDE_BOX_HOLDING_LINES,
+    );
+}
+
+#[test]
+fn its_offer_to_install_a_plugin_and_its_hooks_ask_are_dialogs_still() {
+    use cf_harness::testing::screens::{reads_a_dialog, CLAUDE_HOOK_ASK, CLAUDE_LSP};
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let offer = reads_a_dialog(&*plan.window, "the LSP offer", CLAUDE_LSP);
+    assert_eq!(offer.options.len(), 4);
+    let ask = reads_a_dialog(&*plan.window, "the hook's ask", CLAUDE_HOOK_ASK);
+    assert_eq!(ask.question, "Do you want to proceed?");
+    assert_eq!(ask.options, ["Yes", "No"]);
+}
+
+/// T-1243's release bar, over the whole corpus (`cf_harness::testing::corpus`): this window reads no
+/// screen as a dialog that `5b7acff7f`'s window read as none, reads every screen labelled a dialog as
+/// that window did, lets only idle prompts and conversations read less,
+/// and reads none of the idle screens of its own harness as a dialog the engine counts.
+#[test]
+fn the_claude_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none() {
+    use cf_harness::testing::corpus::{assert_no_regression, say};
+    use cf_proto::agents::Harness;
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let window = &*plan.window;
+    let audit = assert_no_regression(window, Harness::Claude, false);
+    for (name, how) in &audit.changed {
+        println!("claude window, {how}: {name}");
+    }
+    println!("{}", say(&audit, Harness::Claude));
 }
