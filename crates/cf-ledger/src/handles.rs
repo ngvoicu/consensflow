@@ -109,7 +109,8 @@ fn slug(words: &[&str]) -> String {
 /// without its `provider`), at `effort`, on `harness` (its kind), where `taken` says which
 /// handles the project has: the name and the effort; with the provider in front where
 /// that is taken (a Pi model has one); with the harness in front where that is taken; and
-/// with a number after where that is too.
+/// with a number after where that is too. No handle is longer than [`MEMBER_HANDLE_MAX`],
+/// the number included.
 pub fn member_handle(
     shown: &str,
     provider: Option<&str>,
@@ -137,9 +138,22 @@ pub fn member_handle(
         return with_harness;
     }
     (2..)
-        .map(|n| format!("{with_harness}-{n}"))
+        .map(|n| numbered(&with_harness, n))
         .find(|handle| !taken(handle))
         .unwrap_or(with_harness)
+}
+
+/// `name` and a number after it, within [`MEMBER_HANDLE_MAX`] characters as a whole: the name
+/// is cut to leave room for `-n`, at a word's end where a `-` would be left before the number.
+fn numbered(name: &str, n: usize) -> String {
+    let number = format!("-{n}");
+    let room = MEMBER_HANDLE_MAX.saturating_sub(number.len());
+    // A name is ASCII (`slug`): a cut falls between characters.
+    let cut = name
+        .get(..room.min(name.len()))
+        .unwrap_or(name)
+        .trim_end_matches('-');
+    format!("{cut}{number}")
 }
 
 /// A model as its harness takes it, split into the provider that a name leaves out and the id
@@ -440,6 +454,8 @@ fn list_of(db: &Connection, kind: &str) -> Result<ModelsList, LedgerError> {
 pub struct Renamed {
     /// Members with a model, whose name is now its model's id and effort.
     pub members: usize,
+    /// Chiefs with a model, whose row now says it by its id: a chief's name is its role and stays.
+    pub chiefs: usize,
     /// Of them, those whose name changed.
     pub changed: usize,
     /// The windows of those that changed, named after them.
@@ -451,43 +467,52 @@ pub struct Renamed {
 }
 
 /// Migration 0033's part SQL cannot do: every member with a model (a member of the staff or
-/// gone from it, not the chief or the human) takes the name its model's id and effort make,
-/// in the order the members joined, and each of its windows its member's new name with the
-/// window's own two words after. A member's `model_name` becomes the model as its harness's
-/// list names it ([`listed_model`]). A member on its harness's default, and one that needs
-/// an edit, keep the name they have until they get a model. Each name a participant leaves
-/// is kept in `former_handles`; tasks, messages and every other row point at participants
-/// by id, so their authors stay.
+/// gone from it) takes the name its model's id and effort make, in the order the members
+/// joined, and each of its windows its member's new name with the window's own two words
+/// after. A participant's `model_name` becomes the model as its harness's list names it
+/// ([`listed_model`]): the chief's too, with its handle as it is (a chief's name is its role),
+/// so that no reader shows a chief by a label where every member is shown by its id. A member
+/// on its harness's default, and one that needs an edit, keep the name they have until they get
+/// a model, and a chief with none has none. Each name a participant leaves is kept in
+/// `former_handles`; tasks, messages and every other row point at participants by id, so their
+/// authors stay.
 pub(crate) fn name_members_by_id(db: &Connection) -> Result<Renamed, LedgerError> {
-    let members = db
+    let rows = db
         .prepare(
-            "SELECT id, project_id, handle, harness, model, effort, model_name FROM participant
-             WHERE member_id IS NULL AND role NOT IN ('human', 'chief') AND needs_edit = 0
+            "SELECT id, project_id, handle, harness, model, effort, model_name, role = 'chief'
+             FROM participant
+             WHERE member_id IS NULL AND role <> 'human' AND needs_edit = 0
                AND model IS NOT NULL AND harness IS NOT NULL
              ORDER BY project_id, id",
         )?
         .query_map([], |row| {
-            Ok(Member {
-                id: row.get(0)?,
-                project: row.get(1)?,
-                handle: row.get(2)?,
-                harness: row.get(3)?,
-                model: row.get(4)?,
-                effort: row.get(5)?,
-                model_name: row.get(6)?,
-            })
+            Ok((
+                Member {
+                    id: row.get(0)?,
+                    project: row.get(1)?,
+                    handle: row.get(2)?,
+                    harness: row.get(3)?,
+                    model: row.get(4)?,
+                    effort: row.get(5)?,
+                    model_name: row.get(6)?,
+                },
+                row.get::<_, bool>(7)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut done = Renamed::default();
     let mut lists: std::collections::HashMap<String, ModelsList> = std::collections::HashMap::new();
-    // Every member's old handle goes first, so a new one may be one an old one was.
-    for member in &members {
-        db.execute(
-            "UPDATE participant SET handle = ? WHERE id = ?",
-            params![format!("\u{1}{}", member.id), member.id],
-        )?;
+    // Every member's old handle goes first, so a new one may be one an old one was. A chief
+    // keeps its handle.
+    for (member, chief) in &rows {
+        if !chief {
+            db.execute(
+                "UPDATE participant SET handle = ? WHERE id = ?",
+                params![format!("\u{1}{}", member.id), member.id],
+            )?;
+        }
     }
-    for member in &members {
+    for (member, chief) in &rows {
         let harness = member.harness.as_deref().unwrap_or_default();
         let model = member.model.as_deref().unwrap_or_default();
         let list = match lists.get(harness) {
@@ -512,6 +537,10 @@ pub(crate) fn name_members_by_id(db: &Connection) -> Result<Renamed, LedgerError
             "UPDATE participant SET model_name = ? WHERE id = ? OR member_id = ?",
             params![listed, member.id, member.id],
         )?;
+        if *chief {
+            done.chiefs += 1;
+            continue;
+        }
         let handle = model_handle(&listed, member.effort.as_deref(), harness, |handle| {
             handle_taken(db, member.project, handle).unwrap_or(true)
         });

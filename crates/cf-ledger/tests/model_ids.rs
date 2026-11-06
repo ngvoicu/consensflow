@@ -88,6 +88,19 @@ fn an_alpha_2_ledger_opens_with_each_member_named_by_its_model_s_id_and_its_wind
     // What the board shows of the model is its id; and the card says no more of a name that
     // holds it, and says what the designer runs on.
     assert_eq!(say("claude-opus-5-5-high")["modelName"], "claude-opus-5-5");
+    // The chief is shown by its id as every member is, and keeps its handle, which is its role:
+    // what `cf task list` says its lane runs on, and every reader of `runs_on`, reads the id.
+    let chief = view
+        .participants
+        .iter()
+        .find(|p| p.handle == "chief")
+        .unwrap();
+    assert_eq!(chief.model_name.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(
+        cf_ledger::handles::runs_on(chief),
+        "claude-opus-5-5 · xhigh",
+        "not `Opus · xhigh`"
+    );
     assert_eq!(say("claude-opus-5-5-high").get("nameApart"), None);
     assert_eq!(say("codex-default")["nameApart"], true);
     // The task and the message keep their authors, by id.
@@ -199,4 +212,161 @@ fn edit_member_names_a_member_and_its_windows_by_the_model_it_runs_now() {
         .unwrap();
     assert_eq!(kept.handle, "claude-fable-5-1-max");
     assert!(view.participants.iter().any(|p| p.handle == "chief"));
+}
+
+/// A Pi model's id of exactly `len` characters (a model id may be 256): `openrouter/aaa…`.
+fn long_id(len: usize) -> String {
+    format!("openrouter/{}", "a".repeat(len - "openrouter/".len()))
+}
+
+/// A Pi member on `model`, whose list names it by its id (`model_name`, HMD-12).
+fn pi_member(model: &str, model_name: &str) -> NewMember {
+    NewMember {
+        harness: "pi".into(),
+        model: Some(model.into()),
+        effort: Some("high".into()),
+        model_name: Some(model_name.into()),
+        designer: false,
+        roles: vec!["worker".into()],
+        tier: "complex".into(),
+    }
+}
+
+fn chief() -> NewChief {
+    NewChief {
+        harness: "claude-code".into(),
+        model: Some("claude-opus-5-5".into()),
+        effort: None,
+    }
+}
+
+/// `model_name` holds the model's id now (`resolve` stores it), and a model id may be 256
+/// characters: Add member and New project take an id of 128, 129 and 256 characters, and refuse
+/// a name of 257, which no id is. Edit member and the JSON a request is read from agree.
+#[test]
+fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_is_refused() {
+    for len in [128, 129, 200, 256] {
+        let id = long_id(len);
+        let dir = tempfile::tempdir().unwrap();
+        let mut ledger =
+            open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
+        // Add member.
+        let started = ledger
+            .create_project(&NewProject {
+                directory: "/work/app".into(),
+                name: "app".into(),
+                chief: chief(),
+                staff: Vec::new(),
+                gate: false,
+                wake_up: None,
+                specs: None,
+            })
+            .unwrap();
+        let added = ledger
+            .add_member(started.id, &pi_member(&id, &id))
+            .unwrap_or_else(|failed| panic!("add_member at {len}: {failed}"));
+        assert_eq!(added.model_name.as_deref(), Some(id.as_str()), "{len}");
+        // A handle is never longer than 40, whatever the id.
+        assert!(added.handle.len() <= 40, "{len}: {}", added.handle);
+        // Edit member to the same id.
+        ledger
+            .edit_member(
+                started.id,
+                &added.handle,
+                &MemberEdit {
+                    harness: "pi".into(),
+                    model: Some(id.clone()),
+                    effort: Some("max".into()),
+                    model_name: Some(id.clone()),
+                    tier: "light".into(),
+                },
+            )
+            .unwrap_or_else(|failed| panic!("edit_member at {len}: {failed}"));
+        // New project, the member in its staff.
+        let dir = tempfile::tempdir().unwrap();
+        let mut other =
+            open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
+        let project = other
+            .create_project(&NewProject {
+                directory: "/work/other".into(),
+                name: "other".into(),
+                chief: chief(),
+                staff: vec![pi_member(&id, &id)],
+                gate: false,
+                wake_up: None,
+                specs: None,
+            })
+            .unwrap_or_else(|failed| panic!("create_project at {len}: {failed}"));
+        let staffed = project
+            .participants
+            .iter()
+            .find(|p| p.role == "worker")
+            .unwrap();
+        assert_eq!(staffed.model_name.as_deref(), Some(id.as_str()), "{len}");
+        // The JSON a request is read from takes it too.
+        NewMember::from_json(&json!({
+            "harness": "pi", "model": id, "effort": "high", "modelName": id,
+            "roles": ["worker"], "tier": "complex",
+        }))
+        .unwrap_or_else(|failed| panic!("from_json at {len}: {failed}"));
+    }
+    // 257 characters is no model id: the model is refused, and so is a name that long on a model.
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
+    let started = ledger
+        .create_project(&NewProject {
+            directory: "/work/app".into(),
+            name: "app".into(),
+            chief: chief(),
+            staff: Vec::new(),
+            gate: false,
+            wake_up: None,
+            specs: None,
+        })
+        .unwrap();
+    let (id, too_long) = (long_id(256), long_id(257));
+    let refused = ledger
+        .add_member(started.id, &pi_member(&id, &too_long))
+        .expect_err("a name of 257");
+    assert_eq!(refused.code(), Some("invalid-model-name"));
+    let refused = ledger
+        .add_member(started.id, &pi_member(&too_long, &id))
+        .expect_err("a model of 257");
+    assert_eq!(refused.code(), Some("invalid-model"));
+    let refused = ledger
+        .create_project(&NewProject {
+            directory: "/work/other".into(),
+            name: "other".into(),
+            chief: chief(),
+            staff: vec![pi_member(&id, &too_long)],
+            gate: false,
+            wake_up: None,
+            specs: None,
+        })
+        .expect_err("a name of 257 at a start");
+    assert_eq!(refused.code(), Some("invalid-model-name"));
+    let refused = NewMember::from_json(&json!({
+        "harness": "pi", "model": id, "modelName": too_long, "roles": ["worker"], "tier": "light",
+    }))
+    .expect_err("from_json at 257");
+    assert_eq!(refused.code(), Some("invalid-model-name"));
+}
+
+/// A row from before keeps working: a name of 128 characters, spaces and all, which a harness's
+/// list gave a model, is still a name.
+#[test]
+fn a_label_a_row_from_before_holds_is_still_a_valid_name() {
+    let label = format!("{} é", "Claude Opus 5.5 ".repeat(7).trim_end());
+    assert!(label.chars().count() <= 128);
+    NewMember::from_json(&json!({
+        "harness": "claude-code", "model": "claude-opus-5-5", "modelName": label,
+        "roles": ["worker"], "tier": "light",
+    }))
+    .expect("a legacy label");
+    let full: String = "é".repeat(128);
+    NewMember::from_json(&json!({
+        "harness": "claude-code", "model": "claude-opus-5-5", "modelName": full,
+        "roles": ["worker"], "tier": "light",
+    }))
+    .expect("128 characters of two bytes each");
 }

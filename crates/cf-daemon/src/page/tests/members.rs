@@ -314,6 +314,56 @@ async fn a_pi_member_is_on_a_provider_pi_holds_a_login_for() {
         .await;
 }
 
+/// A model id may be 256 characters (`provider/id`, Pi's), and a member's `model_name` is that id
+/// (HMD-12): Add member and New project take a listed model of 129 and of 256 characters, which
+/// the old 128 of a display name refused, and name the member within 40.
+#[tokio::test]
+async fn a_member_on_a_listed_model_with_a_long_id_is_added_and_starts_a_project() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let long = |len: usize| format!("openrouter/{}", "a".repeat(len - "openrouter/".len()));
+            let mut listing = recorded("pi");
+            for len in [129, 256] {
+                let mut model = cf_proto::models::ModelChoice::new(
+                    long(len).strip_prefix("openrouter/").unwrap(),
+                    "A long one",
+                );
+                model.provider = Some("openrouter".to_owned());
+                model.efforts = vec!["high".to_owned()];
+                listing.models.push(model);
+            }
+            staffing
+                .rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .keep_model_listing("pi", &listing)
+                .unwrap();
+            for len in [129, 256] {
+                let added = staffing
+                    .add(json!({ "harness": "pi", "model": long(len), "effort": "high", "tier": "complex" }))
+                    .await;
+                assert_eq!(added["ok"], true, "add at {len}: {added}");
+                assert_eq!(added["member"]["modelName"], long(len).as_str());
+                let handle = added["member"]["handle"].as_str().unwrap();
+                assert!(handle.len() <= 40, "{handle}");
+                let opened = ask(
+                    &staffing.app,
+                    "project.open",
+                    json!({
+                        "directory": format!("/work/long-{len}"),
+                        "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high",
+                        "staff": [{ "harness": "pi", "model": long(len), "effort": "high", "tier": "light", "roles": ["worker"] }],
+                    }),
+                )
+                .await;
+                assert_eq!(opened["ok"], true, "project.open at {len}: {opened}");
+            }
+        })
+        .await;
+}
+
 /// Devin writes the effort into the id, before a suffix (`claude-opus-5-5-medium-fast`): the
 /// member holds the exact `model_uid` Devin lists for that effort, never one joined
 /// (`claude-opus-5-5-fast-medium`), and the effort beside it for the page to say.

@@ -310,13 +310,20 @@ pub fn parse_effort(value: Option<&Value>) -> Result<Option<String>, LedgerError
     }
 }
 
-/// `value` read as what a harness's list calls a model (`Opus`, `Claude Opus 5.5 Fast`):
-/// none where it names none, else text of 1 to 128 characters, no control among them.
+/// The most characters a model's name holds: the most a model id may have ([`is_model_id`]),
+/// which is what the field holds now (`resolve` stores the id its harness's list names the model
+/// by, HMD-12), and so more than the 128 of the display names it held before. A row from before
+/// holds one of those, which this still takes.
+pub const MODEL_NAME_MAX: usize = 256;
+
+/// `value` read as the name a harness's list gives a model, which is its id (`claude-opus-5-5`,
+/// Pi's `provider/id`), or, in a row from before, what the list called it (`Opus`): none where
+/// it names none, else text of 1 to [`MODEL_NAME_MAX`] characters, no control among them.
 pub fn parse_model_name(value: Option<&Value>) -> Result<Option<String>, LedgerError> {
     match value {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(name))
-            if (1..=128).contains(&name.chars().count())
+            if (1..=MODEL_NAME_MAX).contains(&name.chars().count())
                 && !name.trim().is_empty()
                 && !name.chars().any(char::is_control) =>
         {

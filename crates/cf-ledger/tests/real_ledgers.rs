@@ -22,7 +22,15 @@
 //! - every member with a model is named by its id and effort (its name holds them), each of its
 //!   windows by that name and two words, and a name a participant left is kept: in its row's
 //!   `former_handles`, or as its `agent` where that was the name it had;
-//! - every member's `model_name` is its model's id, a window's its member's.
+//! - every member's `model_name` is its model's id, a window's its member's, a chief's its model's
+//!   (its handle, which is its role, is as it was);
+//! - every ownership link is as it was, exactly: each foreign key the schema declares (tasks'
+//!   requesters and assignees, messages' senders, recipients, tasks and carriers, windows'
+//!   members, conversations' participants, History's items' conversations, task needs, and
+//!   what a message was pasted into), row by row against a copy of the ledger taken before the
+//!   migration, and every row of tasks, messages, conversations and task needs whole, and
+//!   each participant's project, member, role, roles, harness, tier, designer, times and quota
+//!   marks.
 //!
 //! It writes each project's staff before and after to `CF_LEDGER_REPORT` where it is set.
 
@@ -226,6 +234,174 @@ fn put_in_custom_agents(home: &Path) -> BTreeMap<i64, (String, Option<(String, S
     put
 }
 
+/// The tables of `db`.
+fn tables(db: &Connection) -> Vec<String> {
+    db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .unwrap()
+    .query_map([], |row| row.get::<_, String>(0))
+    .unwrap()
+    .map(Result::unwrap)
+    .collect()
+}
+
+/// The columns of `table`, as the schema says them.
+fn columns_of(db: &Connection, table: &str) -> Vec<String> {
+    db.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// The columns of `table` that are a foreign key, whatever they refer to.
+fn foreign_keys_of(db: &Connection, table: &str) -> Vec<String> {
+    db.prepare(&format!(
+        "SELECT DISTINCT \"from\" FROM pragma_foreign_key_list('{table}') ORDER BY 1"
+    ))
+    .unwrap()
+    .query_map([], |row| row.get::<_, String>(0))
+    .unwrap()
+    .map(Result::unwrap)
+    .collect()
+}
+
+/// `table`'s rows read at `columns`, each as the text of its values: by its `id` where it has
+/// one, else the rows themselves, sorted (a table of pairs has no row to name).
+fn rows_at(db: &Connection, table: &str, columns: &[String]) -> BTreeMap<String, String> {
+    let keyed = columns_of(db, table).iter().any(|name| name == "id");
+    let list = columns
+        .iter()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = if keyed {
+        format!("SELECT id, {list} FROM \"{table}\"")
+    } else {
+        format!("SELECT {list} FROM \"{table}\"")
+    };
+    let mut read = db.prepare(&sql).unwrap();
+    let skip = usize::from(keyed);
+    let mut found = BTreeMap::new();
+    let mut rows = read.query([]).unwrap();
+    let mut number = 0_u64;
+    while let Some(row) = rows.next().unwrap() {
+        let text = (0..columns.len())
+            .map(|at| {
+                let value: rusqlite::types::Value = row.get(at + skip).unwrap();
+                format!("{}={value:?}", columns[at])
+            })
+            .collect::<Vec<_>>()
+            .join(";");
+        let key = if keyed {
+            format!("{:020}", row.get::<_, i64>(0).unwrap())
+        } else {
+            // Rows with no id are a set: the text names the row, and a repeat counts again.
+            number += 1;
+            format!("{text}#{number}")
+        };
+        found.insert(key, text);
+    }
+    if !keyed {
+        // Order does not matter for a set of rows: key them by their text, in order of it.
+        let mut texts: Vec<String> = found.into_values().collect();
+        texts.sort();
+        return texts
+            .into_iter()
+            .enumerate()
+            .map(|(at, text)| (format!("{at:012}"), text))
+            .collect();
+    }
+    found
+}
+
+/// What `before` and `after` hold of every ownership link, exactly, and of the rows that name
+/// who did what whole: how many tables and rows were compared, and every difference, said.
+fn compare_links(
+    name: &str,
+    before: &Connection,
+    after: &Connection,
+    problems: &mut Vec<String>,
+) -> (usize, usize) {
+    // The tables that say who did what and what came of it: their rows are compared whole, not
+    // only the columns that are a foreign key (a task's number, a message's words, a
+    // conversation's session, a follow-up's carrier).
+    const WHOLE: [&str; 4] = ["task", "message", "conversation", "task_need"];
+    let in_before = tables(before);
+    let (mut compared_tables, mut compared_rows) = (0, 0);
+    for table in tables(after) {
+        if !in_before.contains(&table) {
+            continue;
+        }
+        let had = columns_of(before, &table);
+        let mut wanted: Vec<String> = foreign_keys_of(after, &table)
+            .into_iter()
+            .filter(|column| had.contains(column))
+            .collect();
+        if WHOLE.contains(&table.as_str()) {
+            wanted = columns_of(after, &table)
+                .into_iter()
+                .filter(|column| had.contains(column))
+                .collect();
+        }
+        if table == "participant" {
+            // Who each participant is and belongs to: all but what 0031 and 0033 write (its
+            // handle, its model, its effort, its model's name, the names it left, the mark of
+            // one that needs an edit).
+            wanted = [
+                "project_id",
+                "role",
+                "roles",
+                "harness",
+                "tier",
+                "member_id",
+                "designer",
+                "created_at",
+                "left_at",
+                "out_until",
+                "out_since",
+                "agent",
+            ]
+            .iter()
+            .filter(|column| had.iter().any(|name| name == *column))
+            .map(|column| (*column).to_owned())
+            .collect();
+        }
+        if wanted.is_empty() {
+            continue;
+        }
+        let (was, is) = (
+            rows_at(before, &table, &wanted),
+            rows_at(after, &table, &wanted),
+        );
+        compared_tables += 1;
+        compared_rows += was.len();
+        if was != is {
+            let moved: Vec<String> = was
+                .iter()
+                .filter(|(key, text)| is.get(*key) != Some(text))
+                .take(3)
+                .map(|(key, text)| {
+                    format!(
+                        "{key}: was {text}; is {}",
+                        is.get(key).map_or("gone", String::as_str)
+                    )
+                })
+                .collect();
+            problems.push(format!(
+                "{name}: {table} ({}) differs after the migration: {} rows before, {} after; {}",
+                wanted.join(", "),
+                was.len(),
+                is.len(),
+                moved.join(" | ")
+            ));
+        }
+    }
+    (compared_tables, compared_rows)
+}
+
 /// The checks of one copy, as it is or with agents of the human's own put in; what they
 /// came to said into `report`.
 fn check_copy(
@@ -242,6 +418,9 @@ fn check_copy(
     } else {
         BTreeMap::new()
     };
+    // The ledger as it is before anything opens it, for every link to be compared with.
+    let witness = tempfile::tempdir().unwrap();
+    copy_home(dir.path(), witness.path());
     let file = dir.path().join("consensflow.db");
     let (before, history_before, version_before) = {
         let db = Connection::open(&file).unwrap();
@@ -279,6 +458,10 @@ fn check_copy(
         .unwrap();
     let after = participants(&db);
     let history_after = history(&db);
+    let witnessed = Connection::open(witness.path().join("consensflow.db")).unwrap();
+    let problems_before = problems.len();
+    let (link_tables, link_rows) = compare_links(name, &witnessed, &db, problems);
+    let link_differences = problems.len() - problems_before;
     let label = if custom {
         "with agents of the human's own"
     } else {
@@ -351,6 +534,29 @@ fn check_copy(
             by_launch_id += 1;
         }
     }
+    let chiefs: Vec<String> = after
+        .values()
+        .filter(|now| now.role == "chief" && now.model.is_some() && !now.needs_edit)
+        .map(|now| {
+            format!(
+                "{} {}",
+                now.harness.as_deref().unwrap_or("-"),
+                now.model_name.as_deref().unwrap_or("-")
+            )
+        })
+        .collect();
+    writeln!(
+        report,
+        "#### {name}, {label}: {} chiefs with a model, each shown by its id: {}",
+        chiefs.len(),
+        chiefs.join(", ")
+    )
+    .unwrap();
+    writeln!(
+        report,
+        "#### {name}, {label}: ownership links: {link_rows} rows of {link_tables} tables compared exactly with the ledger before, {link_differences} differ"
+    )
+    .unwrap();
     writeln!(
         report,
         "#### {name}, {label}: Devin members' listed ids: {by_list} from the list, {by_hyphen} by taking the effort's word out of the launch id, {by_launch_id} the launch id itself"
@@ -410,6 +616,25 @@ fn check_copy(
                 !(now.handle.ends_with("-default") && !now.designer),
                 "{name}: #{id} @{} is named for a default",
                 now.handle
+            );
+        }
+        // A chief keeps its handle (its role), and its model is shown by its id, as a member's.
+        if matches!(now.role.as_str(), "human" | "chief") {
+            assert_eq!(
+                now.handle, then.handle,
+                "{name}: #{id} {} keeps its handle",
+                then.handle
+            );
+        }
+        if now.role == "chief" && now.model.is_some() && !now.needs_edit {
+            let model = now.model.as_deref().unwrap();
+            assert!(
+                now.model_name.as_deref().is_some_and(|shown| {
+                    shown == model || now.harness.as_deref() == Some("devin")
+                }),
+                "{name}: the chief #{id} shows {:?} for {:?}, not its id",
+                now.model_name,
+                now.model
             );
         }
         // 0033: a member with a model is named by its id and effort; its windows follow; what it
@@ -524,6 +749,111 @@ fn check_copy(
         }
     }
     writeln!(report).unwrap();
+}
+
+/// A small ledger at this build's schema with every kind of link in it: a project of a human,
+/// a chief and two workers (`a`, `b`), a window of `a`, tasks that need each other, a task taken
+/// from `a`, messages (a question and the answer to it, carried by another), and a conversation
+/// of the window.
+fn linked() -> Connection {
+    let db = Connection::open_in_memory().unwrap();
+    cf_ledger::migrate(&db, &cf_ledger::MIGRATIONS).unwrap();
+    db.execute_batch(
+        "INSERT INTO project (id, directory, name, state, created_at, updated_at)
+           VALUES (1, '/w', 'w', 'open', 't', 't'), (2, '/v', 'v', 'open', 't', 't');
+         INSERT INTO event (id, project_id, at, kind, data) VALUES (1, 1, 't', 'member.added', '{}');
+         INSERT INTO participant (id, project_id, handle, role, roles, harness, model, tier, member_id, created_at) VALUES
+           (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, 't'),
+           (2, 1, 'chief', 'chief', '[]', 'claude-code', 'claude-opus-5-5', NULL, NULL, 't'),
+           (3, 1, 'a', 'worker', '[\"worker\"]', 'codex', 'gpt-6-astra', 'light', NULL, 't'),
+           (4, 1, 'b', 'worker', '[\"worker\"]', 'codex', 'gpt-6-luna', 'light', NULL, 't'),
+           (5, 1, 'a-amber-pine', 'worker', '[\"worker\"]', 'codex', 'gpt-6-astra', 'light', 3, 't');
+         INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, taken_from_id, state, created_at, updated_at) VALUES
+           (1, 1, 1, 'One', 'First', 2, 5, NULL, 'working', 't', 't'),
+           (2, 1, 2, 'Two', 'Second', 2, 4, 3, 'queued', 't', 't');
+         INSERT INTO task_need (task_id, needs_id) VALUES (2, 1);
+         INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, reply_to, body, state, created_at) VALUES
+           (1, 1, 2, 5, 'question', 1, NULL, 'Which?', 'delivered', 't'),
+           (2, 1, 5, 2, 'answer', 1, 1, 'This.', 'queued', 't'),
+           (3, 1, 2, 5, 'result', 1, NULL, 'Done', 'queued', 't');
+         INSERT INTO conversation (id, participant_id, harness, native_session, started_at)
+           VALUES (1, 5, 'codex', 'session-1', 't');",
+    )
+    .unwrap();
+    db
+}
+
+/// The comparison that stands behind "nothing points at nobody" is not one that passes
+/// whatever happens: each link moved to another participant that exists, a row lost, a word
+/// changed in a task, a message or a conversation, and a participant who was somebody else's
+/// each make it say which table changed; the same ledger twice makes it say nothing.
+#[test]
+fn the_link_comparison_finds_a_link_moved_to_another_participant_that_exists() {
+    let mut problems = Vec::new();
+    let (tables, rows) = compare_links("same", &linked(), &linked(), &mut problems);
+    assert!(problems.is_empty(), "{problems:?}");
+    // 5 participants, 2 tasks, 3 messages, 1 conversation, 1 need and 1 event: every row is read.
+    assert!(tables >= 6 && rows == 13, "{tables} tables, {rows} rows");
+    for (change, table) in [
+        ("UPDATE task SET assignee_id = 3 WHERE id = 1", "task"),
+        ("UPDATE task SET requester_id = 4 WHERE id = 2", "task"),
+        ("UPDATE task SET taken_from_id = 4 WHERE id = 2", "task"),
+        ("UPDATE task SET title = 'Other' WHERE id = 1", "task"),
+        ("UPDATE message SET sender_id = 3 WHERE id = 1", "message"),
+        (
+            "UPDATE message SET recipient_id = 4 WHERE id = 2",
+            "message",
+        ),
+        ("UPDATE message SET task_id = 2 WHERE id = 3", "message"),
+        ("UPDATE message SET reply_to = 3 WHERE id = 2", "message"),
+        ("UPDATE message SET body = 'That.' WHERE id = 2", "message"),
+        ("UPDATE conversation SET participant_id = 4", "conversation"),
+        (
+            "UPDATE conversation SET native_session = 'session-2'",
+            "conversation",
+        ),
+        // A table that is read for its links alone: the log's project.
+        ("UPDATE event SET project_id = 2", "event"),
+        ("DELETE FROM task_need", "task_need"),
+        (
+            "UPDATE task_need SET needs_id = 2, task_id = 1",
+            "task_need",
+        ),
+        (
+            "UPDATE participant SET member_id = 4 WHERE id = 5",
+            "participant",
+        ),
+        (
+            "UPDATE participant SET tier = 'critical' WHERE id = 4",
+            "participant",
+        ),
+        (
+            "UPDATE participant SET left_at = 't' WHERE id = 3",
+            "participant",
+        ),
+    ] {
+        let changed = linked();
+        changed.execute_batch(change).unwrap();
+        let mut found = Vec::new();
+        compare_links("changed", &linked(), &changed, &mut found);
+        assert!(
+            found
+                .iter()
+                .any(|said| said.contains(&format!("{table} ("))),
+            "{change} is not found: {found:?}"
+        );
+    }
+    // What the migration does write is no difference: a handle, a model, a name left.
+    let renamed = linked();
+    renamed
+        .execute_batch(
+            "UPDATE participant SET handle = 'claude-opus-5-5-high', model_name = 'x',
+                    former_handles = '[\"opus-high\"]' WHERE id = 3",
+        )
+        .unwrap();
+    let mut found = Vec::new();
+    compare_links("renamed", &linked(), &renamed, &mut found);
+    assert!(found.is_empty(), "{found:?}");
 }
 
 #[test]

@@ -106,6 +106,63 @@ fn a_name_that_is_taken_puts_the_provider_of_a_pi_model_in_front_then_the_harnes
     );
 }
 
+/// A name that is taken takes a number after it, and the number is part of the name's 40
+/// characters: the name is cut to leave room for it, so no handle is longer than the cap, at
+/// `-2`, `-10` and `-100`, a cut never leaves a `-` before the number, and every one is new.
+#[test]
+fn a_number_after_a_taken_name_is_within_the_cap_and_so_is_every_name_it_numbers() {
+    // Ids that fill the cap on their own, with the harness in front (`devin-`) or not.
+    let ids = [
+        (
+            "devin",
+            "claude-opus-5-5-experimental-long-id-for-a-test".to_owned(),
+        ),
+        ("claude-code", "x".repeat(60)),
+        // A cut that falls on a hyphen: `devin-…-a-` is `devin-…-a` before its number.
+        ("devin", format!("{}-bbbbbbbbbbbb", "a".repeat(31))),
+        (
+            "pi",
+            "openrouter/anthropic/claude-fable-5-1-experimental-preview-model".to_owned(),
+        ),
+    ];
+    for (harness, id) in ids.iter().map(|(harness, id)| (*harness, id.as_str())) {
+        let mut kept: Vec<String> = Vec::new();
+        for _ in 0..120 {
+            let handle = model_handle(id, Some("high"), harness, |h| kept.iter().any(|k| k == h));
+            assert!(
+                handle.len() <= MEMBER_HANDLE_MAX,
+                "{harness} {id}: {handle}"
+            );
+            assert!(!handle.ends_with('-') && !handle.contains("--"), "{handle}");
+            assert!(!kept.contains(&handle), "{handle} is made twice");
+            kept.push(handle);
+        }
+        // The numbers reached 100, and each of them kept the cap.
+        for number in ["-2", "-9", "-10", "-99", "-100"] {
+            let found = kept.iter().find(|handle| handle.ends_with(number));
+            assert!(
+                found.is_some_and(|handle| handle.len() <= MEMBER_HANDLE_MAX),
+                "{harness}: none ends with {number}"
+            );
+        }
+    }
+    // A name of exactly 40 characters that is taken: the harness in front, cut, then numbered.
+    let forty = "a".repeat(40);
+    let mut kept = vec![forty.clone()];
+    for _ in 0..12 {
+        let handle = model_handle(&forty, None, "codex", |h| kept.iter().any(|k| k == h));
+        assert!(handle.len() <= MEMBER_HANDLE_MAX, "{handle}");
+        kept.push(handle);
+    }
+    assert!(kept.iter().any(|handle| handle.ends_with("-10")));
+    // Short names are as they were: the number is after the whole name.
+    assert_eq!(
+        model_handle("swe-2", None, "devin", |h| h == "swe-2"
+            || h == "devin-swe-2"),
+        "devin-swe-2-2"
+    );
+}
+
 #[test]
 fn a_handle_is_short_enough_for_its_windows_and_ends_on_a_word() {
     let long = "a-very-long-model-id-that-some-harness-may-send-one-day-123456789";
@@ -746,13 +803,17 @@ fn a_member_that_needs_an_edit_is_shown_on_no_model_never_its_harness_s_default(
 /// A ledger 3.0.7-alpha.2 left (schema 32), as a board of it looks: members named by the
 /// name their harness's list gave their model, one window each of two of them, the image
 /// designer on Codex's default, a member that needs an edit, Devin's launch ids, a Pi member
-/// whose name will collide, and a task and a message whose authors are windows.
+/// whose name will collide, a task and a message whose authors are windows, and four other
+/// boards of a chief each: one a ready-made agent of Devin's ran on (a launch id and a label), one
+/// switched in alpha.2 (no label), one marked as needing an edit.
 fn alpha_2() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     migrate(&db, &MIGRATIONS[..32]).unwrap();
     db.execute_batch(
         "INSERT INTO project (id, directory, name, state, created_at, updated_at)
-           VALUES (1, '/work/app', 'app', 'open', 't', 't'), (2, '/work/other', 'other', 'open', 't', 't');
+           VALUES (1, '/work/app', 'app', 'open', 't', 't'), (2, '/work/other', 'other', 'open', 't', 't'),
+                  (3, '/work/devin', 'devin', 'open', 't', 't'), (4, '/work/switched', 'switched', 'open', 't', 't'),
+                  (5, '/work/marked', 'marked', 'open', 't', 't');
          INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, model, effort, model_name, tier, member_id, created_at, left_at, designer, needs_edit) VALUES
            (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 0),
            (2, 1, 'chief', 'chief', '[]', NULL, 'claude-code', 'claude-opus-5-5', 'xhigh', 'Opus', NULL, NULL, 't', NULL, 0, 0),
@@ -765,7 +826,13 @@ fn alpha_2() -> Connection {
            (9, 1, 'buri', 'worker', '[\"worker\"]', 'buri', 'hermes-code', NULL, NULL, NULL, 'light', NULL, 't', NULL, 0, 1),
            (10, 1, 'claude-opus-5-5-high', 'reviewer', '[\"reviewer\"]', NULL, 'pi', 'anthropic/claude-opus-5-5', 'high', 'Claude Opus 5.5', 'complex', NULL, 't', NULL, 0, 0),
            (11, 2, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 0),
-           (12, 2, 'opus-high', 'worker', '[\"worker\"]', NULL, 'claude-code', 'claude-opus-5-5', 'high', 'Opus', 'complex', NULL, 't', NULL, 0, 0);
+           (12, 2, 'opus-high', 'worker', '[\"worker\"]', NULL, 'claude-code', 'claude-opus-5-5', 'high', 'Opus', 'complex', NULL, 't', NULL, 0, 0),
+           (13, 3, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 0),
+           (14, 3, 'chief', 'chief', '[]', 'sobek', 'devin', 'swe-2-max-lightning', 'max', 'SWE-2 Lightning', NULL, NULL, 't', NULL, 0, 0),
+           (15, 4, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 0),
+           (16, 4, 'chief', 'chief', '[]', NULL, 'claude-code', 'claude-opus-5-5', 'xhigh', NULL, NULL, NULL, 't', NULL, 0, 0),
+           (17, 5, 'human', 'human', '[]', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 0),
+           (18, 5, 'chief', 'chief', '[]', 'ghost', 'codex', NULL, NULL, NULL, NULL, NULL, 't', NULL, 0, 1);
          INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at)
            VALUES (1, 1, 1, 'Fix', 'Fix it', 2, 4, 'working', 't', 't');
          INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, body, state, created_at)
@@ -812,8 +879,8 @@ fn migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_foll
         named(&db),
         [
             (1, "human".to_owned(), None, vec![]),
-            // The chief keeps its handle, and its row's model's name as it was.
-            (2, "chief".to_owned(), s("Opus"), vec![]),
+            // The chief keeps its handle, and shows its model by its id as every member does.
+            (2, "chief".to_owned(), s("claude-opus-5-5"), vec![]),
             (
                 3,
                 "claude-opus-5-5-high".to_owned(),
@@ -865,8 +932,46 @@ fn migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_foll
                 s("claude-opus-5-5"),
                 was(&["opus-high"])
             ),
+            // A chief of Devin's: its handle stays, its model is the listed id of its launch id.
+            (13, "human".to_owned(), None, vec![]),
+            (14, "chief".to_owned(), s("swe-2-lightning"), vec![]),
+            // A chief switched in alpha.2 has no label: its row gets its id like the others'.
+            (15, "human".to_owned(), None, vec![]),
+            (16, "chief".to_owned(), s("claude-opus-5-5"), vec![]),
+            // A chief that needs an edit has no model, so none is made for it.
+            (17, "human".to_owned(), None, vec![]),
+            (18, "chief".to_owned(), None, vec![]),
         ]
     );
+    // No chief is renamed: a chief's handle is its role.
+    assert!(named(&db)
+        .iter()
+        .filter(|(id, ..)| [2, 14, 16, 18].contains(id))
+        .all(|(_, handle, _, former)| handle == "chief" && former.is_empty()));
+    // And what `cf`, the board and the chief's own card read says the id, not the label.
+    let chief_runs: String = {
+        let row = |id: i64| -> (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) {
+            db.query_row(
+                "SELECT model_name, model, harness, effort FROM participant WHERE id = ?",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap()
+        };
+        let (name, model, harness, effort) = row(2);
+        model_and_effort(
+            name.as_deref(),
+            model.as_deref(),
+            harness.as_deref(),
+            effort.as_deref(),
+        )
+    };
+    assert_eq!(chief_runs, "claude-opus-5-5 · xhigh");
     // Every author and assignee stays: they are participants by id.
     let (assignee, sender): (i64, i64) = db
         .query_row(
@@ -890,9 +995,10 @@ fn migration_0033_counts_what_it_renamed_and_how_each_devin_id_was_found() {
         done,
         Renamed {
             members: 6,
+            chiefs: 3,
             changed: 3,
             windows: 1,
-            by_list: 1,
+            by_list: 2,
             by_label: 1,
             by_launch_id: 0
         }

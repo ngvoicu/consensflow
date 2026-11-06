@@ -11,6 +11,8 @@
 [run]
 mi-ledger-handles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "handles::"]
 mi-ledger-ids = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "model_ids"]
+mi-ledger-links = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "real_ledgers"]
+mi-daemon-token = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::tests::verbs::a_window_at_work_keeps_running_cf"]
 mi-ledger-members = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "members_by_model"]
 mi-engine-named = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "named_by_model::"]
 mi-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::"]
@@ -97,7 +99,7 @@ replace = '''
 [[plant]]
 name = "model ids: a rename leaves the windows under the old name"
 meant = "edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too"
-runs = ["mi-ledger-members", "mi-ledger-ids", "mi-engine-named"]
+runs = ["mi-ledger-members", "mi-ledger-ids", "mi-engine-named", "mi-daemon-token"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/handles.rs"
@@ -459,4 +461,185 @@ find = '''
 '''
 replace = '''
             if !stripped.is_empty() {
+'''
+
+[[plant]]
+name = "model ids: a model's name holds the 128 characters of a display name, not an id's 256"
+meant = "a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_is_refused"
+runs = ["mi-ledger-ids", "mi-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = '''
+pub const MODEL_NAME_MAX: usize = 256;
+'''
+replace = '''
+pub const MODEL_NAME_MAX: usize = 128;
+'''
+
+[[plant]]
+name = "model ids: a model's name of the longest an id may be is refused"
+meant = "a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_is_refused"
+runs = ["mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = '''
+            if (1..=MODEL_NAME_MAX).contains(&name.chars().count())
+'''
+replace = '''
+            if (1..MODEL_NAME_MAX).contains(&name.chars().count())
+'''
+
+[[plant]]
+name = "model ids: a model's name one longer than an id may be is taken"
+meant = "a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_is_refused"
+runs = ["mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = '''
+            if (1..=MODEL_NAME_MAX).contains(&name.chars().count())
+'''
+replace = '''
+            if (1..=MODEL_NAME_MAX + 1).contains(&name.chars().count())
+'''
+
+[[plant]]
+name = "model ids: a number after a taken name is added past the cap"
+meant = "a_number_after_a_taken_name_is_within_the_cap_and_so_is_every_name_it_numbers"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    let room = MEMBER_HANDLE_MAX.saturating_sub(number.len());
+'''
+replace = '''
+    let room = MEMBER_HANDLE_MAX;
+'''
+
+[[plant]]
+name = "model ids: a number after a taken name leaves room for one digit"
+meant = "a_number_after_a_taken_name_is_within_the_cap_and_so_is_every_name_it_numbers"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    let room = MEMBER_HANDLE_MAX.saturating_sub(number.len());
+'''
+replace = '''
+    let room = MEMBER_HANDLE_MAX.saturating_sub(2);
+'''
+
+[[plant]]
+name = "model ids: a cut name keeps its hyphen before the number"
+meant = "a_number_after_a_taken_name_is_within_the_cap_and_so_is_every_name_it_numbers"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        .unwrap_or(name)
+        .trim_end_matches('-');
+'''
+replace = '''
+        .unwrap_or(name);
+'''
+
+[[plant]]
+name = "model ids: the migration leaves the chief's row its label"
+meant = "migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_follow"
+runs = ["mi-ledger-handles", "mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+             WHERE member_id IS NULL AND role <> 'human' AND needs_edit = 0
+'''
+replace = '''
+             WHERE member_id IS NULL AND role NOT IN ('human', 'chief') AND needs_edit = 0
+'''
+
+[[plant]]
+name = "model ids: the migration names a chief as it names a member"
+meant = "migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_follow"
+runs = ["mi-ledger-handles", "mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        if *chief {
+            done.chiefs += 1;
+            continue;
+        }
+'''
+replace = '''
+        if *chief && false {
+            done.chiefs += 1;
+            continue;
+        }
+'''
+
+[[plant]]
+name = "model ids: the migration blanks a chief's handle with the members'"
+meant = "migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_follow"
+runs = ["mi-ledger-handles", "mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        if !chief {
+            db.execute(
+'''
+replace = '''
+        if true {
+            db.execute(
+'''
+
+[[plant]]
+name = "model ids: the link comparison reads no foreign key"
+meant = "the_link_comparison_finds_a_link_moved_to_another_participant_that_exists"
+runs = ["mi-ledger-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/real_ledgers.rs"
+find = '''
+        let mut wanted: Vec<String> = foreign_keys_of(after, &table)
+            .into_iter()
+            .filter(|column| had.contains(column))
+'''
+replace = '''
+        let mut wanted: Vec<String> = foreign_keys_of(after, &table)
+            .into_iter()
+            .filter(|_| false)
+'''
+
+[[plant]]
+name = "model ids: the link comparison reads no row whole"
+meant = "the_link_comparison_finds_a_link_moved_to_another_participant_that_exists"
+runs = ["mi-ledger-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/real_ledgers.rs"
+find = '''
+    const WHOLE: [&str; 4] = ["task", "message", "conversation", "task_need"];
+'''
+replace = '''
+    const WHOLE: [&str; 0] = [];
+'''
+
+[[plant]]
+name = "model ids: the link comparison reads no participant's own columns"
+meant = "the_link_comparison_finds_a_link_moved_to_another_participant_that_exists"
+runs = ["mi-ledger-links"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/real_ledgers.rs"
+find = '''
+        if table == "participant" {
+'''
+replace = '''
+        if table == "participant" && false {
 '''
