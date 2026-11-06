@@ -117,6 +117,11 @@ export function createDeliveryExtension(
   let context
   // Whether a compaction this extension asked for is at work: a delivery waits for it.
   let compacting = false
+  // Whether Pi compacts, whoever began it (this extension, or Pi itself at its own point or
+  // to recover an overflow): Pi tells its extensions `session_before_compact`, then
+  // `session_compact` or `session_compact_failed`, and its `isIdle()` is false all along
+  // (`!this._isAgentRunActive && !this.isCompacting`, Pi 1.4.0 and 1.5.0).
+  let piCompacting = false
   let watcher
   let poller
   let running = false
@@ -334,12 +339,17 @@ export function createDeliveryExtension(
             }
             continue
           }
+          // A window that compacts is at work, though no turn runs: the message is refused
+          // before it is sent, in Pi's own word for a window at work, which spends no attempt
+          // of it (T-1272: left for later, each expired, and three spent the delivery).
+          if (compactingNow()) {
+            const reason =
+              sessionIdOf(context) === record.session ? 'chief busy' : 'native session changed'
+            await refuseBeforeSend(path, file, id, reason)
+            continue
+          }
           if (context?.isIdle?.() !== true) break
-          // Pi's own word for a window at work: the message is refused before it is sent,
-          // and no attempt of it is spent on that.
-          const tui = compacting
-            ? { ready: false, reason: 'chief busy' }
-            : nativeTuiState(context, record.session)
+          const tui = nativeTuiState(context, record.session)
           if (tui.ready !== true) {
             await refuseBeforeSend(path, file, id, tui.reason)
             continue
@@ -375,6 +385,7 @@ export function createDeliveryExtension(
 
   pi.on('session_start', async (_event, ctx) => {
     context = ctx
+    piCompacting = false
     watcher?.close()
     clearInterval(poller)
     await writeShown()
@@ -410,6 +421,18 @@ export function createDeliveryExtension(
    * point at most. A size at or above the model's window, or a context Pi cannot say yet,
    * asks for none. A compaction that fails is said, and the next rest asks again.
    */
+  /**
+   * Whether the window compacts now: a compaction this extension asked for and whose callback
+   * has not come, or one Pi said it began and has not said it ended. Pi tells no extension of
+   * an end where it finds no entry it saved, so an idle Pi is taken for one that compacts
+   * nothing.
+   */
+  const compactingNow = () => {
+    if (compacting) return true
+    if (piCompacting && context?.isIdle?.() === true) piCompacting = false
+    return piCompacting
+  }
+
   const compactAtRest = (event, ctx) => {
     if (!Number.isInteger(compaction) || compaction <= 0 || compacting) return
     if (event?.aborted === true) return
@@ -442,8 +465,21 @@ export function createDeliveryExtension(
     }
   }
 
+  pi.on('session_before_compact', (_event, ctx) => {
+    context = ctx ?? context
+    piCompacting = true
+  })
+  const compactionEnded = async (_event, ctx) => {
+    context = ctx ?? context
+    piCompacting = false
+    await consume()
+  }
+  pi.on('session_compact', compactionEnded)
+  pi.on('session_compact_failed', compactionEnded)
   pi.on('agent_settled', async (event, ctx) => {
     context = ctx ?? context
+    // No compaction runs once Pi has settled.
+    piCompacting = false
     await writeSettlement()
     compactAtRest(event, context)
     await consume()
