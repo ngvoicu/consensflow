@@ -2,7 +2,6 @@
 // where it needs to: it is older than the rewrite's rules (clippy.toml, the
 // workspace's lints) and not moved onto them yet.
 #![allow(
-    clippy::disallowed_methods,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::print_stdout,
@@ -92,10 +91,12 @@ mod selftest {
 
     /// Read at every call, not cached: the guard is the environment the app
     /// was started with, and nothing in the process may widen it later.
+    #[allow(clippy::disallowed_methods)] // The packaged smoke's own CONSENSFLOW_SELFTEST_* variables, read here: older than cf_base::env::Env.
     pub fn enabled() -> bool {
         matches!(std::env::var("CONSENSFLOW_SELFTEST").as_deref(), Ok("1"))
     }
 
+    #[allow(clippy::disallowed_methods)] // The packaged smoke's own CONSENSFLOW_SELFTEST_* variables, read here: older than cf_base::env::Env.
     pub fn config() -> Option<Config> {
         if !enabled() {
             return None;
@@ -119,6 +120,7 @@ mod selftest {
     /// A wedged run must never leave a maximized window sitting on someone's
     /// screen waiting to be noticed, so the app is its own dead man's switch
     /// and exits non-zero, which the smoke reads as the failure it is.
+    #[allow(clippy::disallowed_methods)] // The packaged smoke's own CONSENSFLOW_SELFTEST_* variables, read here: older than cf_base::env::Env.
     fn deadline_ms() -> u64 {
         std::env::var("CONSENSFLOW_SELFTEST_DEADLINE_MS")
             .ok()
@@ -371,6 +373,7 @@ fn inherited_variables<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a 
 /// environment, which every program it starts is given: the daemon, the login shell it asks
 /// for the human's environment, the terminals' panes, the opener, and the app an update
 /// restarts. Before any thread exists, as nothing may read the environment meanwhile.
+#[allow(clippy::disallowed_methods)] // Reads the app's own environment to clean it, before cf_base::env::Env has one.
 fn remove_inherited_variables() {
     let names: Vec<String> = std::env::vars_os()
         .filter_map(|(name, _)| name.into_string().ok())
@@ -388,6 +391,7 @@ const ERROR_LOG_LIMIT: u64 = 10 * 1024 * 1024;
 /// home, as the daemon finds it), with one previous file kept once it passes
 /// its limit. A Finder-launched app's stderr is /dev/null and a windowed app
 /// on Windows has none, so panics and daemon errors used to leave no trace.
+#[allow(clippy::disallowed_methods)] // Finds ConsensFlow's home (CONSENSFLOW_HOME) itself, as the daemon does.
 pub(crate) fn error_log() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("CONSENSFLOW_HOME")
         .filter(|home| !home.is_empty())
@@ -533,6 +537,7 @@ pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::disallowed_methods)] // The app's start settles its home from the environment, before any thread.
 pub fn run() {
     std::hint::black_box(BUILT_IDENTITY);
     // The process's one TLS provider, before the plugins, any client or any thread exists: reqwest
@@ -836,6 +841,7 @@ mod tests {
     /// macOS build pointed its stderr at the log. The test runs in a child,
     /// its own binary again, since the redirect is for good.
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
     fn the_hosts_own_errors_reach_the_error_log() {
         const LOG: &str = "CONSENSFLOW_TEST_ERROR_LOG";
         if let Some(log) = std::env::var_os(LOG) {
@@ -869,6 +875,7 @@ mod tests {
     /// process, so the test runs in one of its own, its binary run again.
     #[cfg(target_os = "macos")]
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
     fn the_apps_end_leaves_every_descriptor_close_on_exec_for_the_restart_after_it() {
         const ENDED: &str = "CONSENSFLOW_TEST_AT_EXIT";
         if std::env::var_os(ENDED).is_some() {
@@ -966,6 +973,7 @@ mod tests {
     /// app an update installed, and the marking must come all the same (T-929).
     #[cfg(target_os = "macos")]
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
     fn a_shutdown_that_panics_still_leaves_every_descriptor_close_on_exec() {
         const ENDED: &str = "CONSENSFLOW_TEST_AT_EXIT_PANICS";
         if std::env::var_os(ENDED).is_some() {
