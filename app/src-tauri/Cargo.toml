@@ -41,6 +41,9 @@ tempfile = "3"
 tar = "0.4"
 flate2.workspace = true
 reqwest = { version = "0.13.4", default-features = false }
+# The TLS provider the app installs for its process (tls.rs): ring, the one the updater's plugin
+# builds rustls on, and the one the feed's client needs on every platform.
+rustls.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

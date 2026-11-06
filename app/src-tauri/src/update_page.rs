@@ -18,12 +18,7 @@ const FEED_MAX_BYTES: usize = 1024 * 1024;
 /// The feed at `endpoint`, read over HTTPS within 20 seconds. One that is
 /// not there is said as the updater says it.
 pub async fn read_feed(endpoint: url::Url, channel: Channel) -> Result<Value, String> {
-    let client = reqwest::Client::builder()
-        .https_only(true)
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let response = client
+    let response = client()?
         .get(endpoint)
         .send()
         .await
@@ -36,6 +31,20 @@ pub async fn read_feed(endpoint: url::Url, channel: Channel) -> Result<Value, St
         return Err("The update feed is larger than a release's metadata".into());
     }
     serde_json::from_slice(&body).map_err(|e| e.to_string())
+}
+
+/// The client the feed is read with: HTTPS only, and a call that takes no more than 20 seconds.
+/// It is built on the process's TLS provider, which the app installs at its start (`run`); it is
+/// installed here too, where nothing has installed it, so that this client is built whatever
+/// reaches it first: reqwest panics at the build of a client where the process has none, and the
+/// updater's plugin, which installs ring before its own client, is not on this path (T-1247).
+fn client() -> Result<reqwest::Client, String> {
+    crate::tls::install_ring_as_default();
+    reqwest::Client::builder()
+        .https_only(true)
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 /// The release `document` names, if it is newer than `current`, checked as
@@ -131,6 +140,29 @@ mod tests {
             page_of(&found.version),
             "https://github.com/ngvoicu/consensflow/releases/tag/v3.0.0-alpha.77"
         );
+    }
+
+    /// The feed's client is made in a process that has done nothing else with TLS, as the app's is
+    /// on Windows, where no check goes through the updater's plugin (the Mac's does, and the plugin
+    /// installs ring as the process's provider before it builds its own client). The provider is
+    /// the process's, and other tests of this binary run the plugin's check, so this test runs in
+    /// a process of its own, its binary run again.
+    #[test]
+    fn the_feeds_client_is_built_in_a_process_that_has_installed_no_tls_provider() {
+        const CHILD: &str = "CONSENSFLOW_TEST_FEED_CLIENT";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(
+                rustls::crypto::CryptoProvider::get_default().is_none(),
+                "the child starts with no TLS provider installed"
+            );
+            client().expect("the feed's client");
+            return;
+        }
+        let ran = crate::testing::in_a_child(
+            "update_page::tests::the_feeds_client_is_built_in_a_process_that_has_installed_no_tls_provider",
+            CHILD,
+        );
+        assert!(ran.status.success(), "{}", crate::testing::said(&ran));
     }
 
     #[test]
