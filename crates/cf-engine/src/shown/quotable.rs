@@ -1,40 +1,59 @@
-//! The words of a harness's program, as they may be quoted outside a screen.
+//! The reason a harness's model list failed, as it may be kept and told outside a screen.
 //!
-//! A harness's own error can echo what it was given: Pi's error stream quotes an extension's
-//! failure, which can carry the header it was sent, and a read that fails says what the program
-//! said. Those words are kept (the ledger's reason a model list is stale, which the page reads)
-//! and told (the note of a model that is gone). **A line that may hold a credential is withheld
-//! whole, and no part of it is quoted** (the review T-1270, second reading, F2): masking a value
-//! left the rest of a key with a blank in it (`API_KEY: sk-abcd efghijkl mnopqrst`) and the words
-//! of a password after its first (`password: correct horse battery staple`), and no masker
-//! holds every syntax a secret is written in (the screens' reviews found one gap after another,
-//! [`super::screen`]).
+//! A reason is the harness's own description and, where it started a program that loads code of
+//! the human's (Pi: its extensions and packages), after [`IT_SAID`] the words of that program:
+//! what Pi's error stream held, what `pi update --models` said, the `error` of Pi's refusal.
+//! Those words can carry what the program was given (an extension's error that echoes a header,
+//! a package's URL), and they are kept in the ledger, which the page reads, and told in the
+//! note of a chief whose model is gone.
 //!
-//! The rule is the screens' own, one line at a time, before the line is quoted or cut
-//! ([`screen::withheld`]: a secret-like word, a token's beginning, a key's body, a value in
-//! groups), and a credential's word with a value after it (`key: abc`, `token=…`, `"secret":
-//! "…"`, `Authorization: …`, `bearer …`, in any case): a bare `key` is no secret in a sentence
-//! ("key not found"), but `key:` or `key=` followed by something holds what it names. What a
-//! line that is quoted shows is masked as a note masks it ([`mask`]).
+//! **A reason with no mark is ConsensFlow's, or another harness's own words, and is masked as
+//! a note masks** ([`mask`]): the login, key and billing messages of Claude Code, Codex, Devin
+//! and Muse tell the user what to do (`Invalid API key · Please run /login`, `Not logged in.
+//! Run `devin auth login``, `No Meta credentials were found. Run `muse login``) and are not
+//! looked at as a program's words (the third reading of T-1270, F9: the rule of a screen,
+//! applied to them, withheld each of those).
 //!
-//! The cost is the lines that name a credential and hold none ("Invalid key: expected string"):
-//! they are left out, as a screen that names one is. The words of a harness that name nothing
-//! of the kind come out as they went in.
+//! **The words after the mark are screened whole, and cut after** (F2 of the third reading).
+//! Line by line, a value that ran over lines had its first line withheld and its continuations
+//! kept, and a cut to the last lines made before the look took the line that named a
+//! credential and left the lines of its value. So the block is taken as one text: the lines
+//! that are blank or a stack frame (`at …`, never quoted) are set aside, and if anything in the
+//! rest may hold a credential, **none of it is quoted** and [`WORDS_WITHHELD`] stands in its
+//! place; the description before the mark, the exit code in it and the names of what Pi was
+//! loading are kept. Only a block that passed is cut, to its last [`QUOTE_LINES`] lines within
+//! [`QUOTE_CHARS`] characters, and masked.
+//!
+//! What may hold a credential is the screens' own rule on the lines as one text
+//! ([`screen::withheld`]: a secret-like word on any line, a token's beginning, a key's body, a
+//! value in groups, whatever the wrap does to them) and a credential's word with a value after
+//! it, on the same line or the next (`key: abc`, `"secret": "a b"`, `API_KEY=…`, `token:` and
+//! the value below, in any case). The cost is the blocks that name a credential and hold none
+//! (`Invalid key: expected string`): they are left out whole, with the description and the code.
+//! Nothing before the first mark can be a program's, so a forged mark among its words only
+//! makes the block longer.
 
 use std::sync::LazyLock;
 
+use cf_proto::models::IT_SAID;
 use regex::Regex;
 
 use super::mask::mask;
 use super::screen;
 
-/// What a line [`quotable`] withholds is replaced with.
-pub const WITHHELD_LINE: &str = "(a line withheld: it may hold a credential)";
+/// What stands in place of the words of a program that may hold a credential.
+pub const WORDS_WITHHELD: &str = "(Pi's words withheld: they may hold a credential)";
+
+/// The most lines of the words of a program that are quoted: the last ones.
+const QUOTE_LINES: usize = 4;
+/// The most characters they take; the rest is cut and says so.
+const QUOTE_CHARS: usize = 600;
 
 /// A credential's word, the delimiter that gives it a value, and the value's first character:
-/// `key: abc`, `"token" = "a b"`, `API_KEY=…`, `Authorization: …`. A name that has the word
-/// anywhere in it counts (`ssh_key`, `x-api-key`), and so does one that has it as a piece of
-/// another word (`monkey: 1`): a false alarm costs a line, a miss a credential.
+/// `key: abc`, `"token" = "a b"`, `API_KEY=…`, `Authorization: …`, and a value on the next line.
+/// A name that has the word anywhere in it counts (`ssh_key`, `x-api-key`), and so does one
+/// that has it as a piece of another word (`monkey: 1`): a false alarm costs a block, a miss
+/// a credential.
 #[allow(clippy::expect_used)]
 static NAMED_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -43,25 +62,47 @@ static NAMED_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("a pattern")
 });
 
-/// Whether `line` may hold a credential.
-fn may_hold_a_credential(line: &str) -> bool {
-    screen::withheld(&[line.to_owned()]).is_some() || NAMED_VALUE.is_match(line)
+/// Whether `lines`, taken as one text, may hold a credential.
+fn may_hold_a_credential(lines: &[&str]) -> bool {
+    let rows: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))
 }
 
-/// `words` with each line that may hold a credential replaced by [`WITHHELD_LINE`], and the
-/// others masked ([`mask`]), in the order they came, joined with `\n`.
-pub fn quotable(words: &str) -> String {
-    words
+/// `reason` as it may be kept and told: masked, and where it carries the words of a program
+/// after [`IT_SAID`], those screened whole and then cut (see the module). The lines of the words
+/// that are quoted stand on lines of their own, joined with `\n`.
+pub fn quotable(reason: &str) -> String {
+    let Some((own, program)) = reason.split_once(IT_SAID) else {
+        return mask(reason).text;
+    };
+    let own = mask(own).text;
+    match said(program) {
+        Some(said) => format!("{own}{IT_SAID}{said}"),
+        None => own,
+    }
+}
+
+/// The words of a program, screened whole before they are cut: none where it said nothing that
+/// is quoted, [`WORDS_WITHHELD`] where anything it said may hold a credential, else its last
+/// lines, masked.
+fn said(program: &str) -> Option<String> {
+    let lines: Vec<&str> = program
         .lines()
-        .map(|line| {
-            if may_hold_a_credential(line) {
-                WITHHELD_LINE.to_owned()
-            } else {
-                mask(line).text
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("at "))
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    if may_hold_a_credential(&lines) {
+        return Some(WORDS_WITHHELD.to_owned());
+    }
+    let kept = &lines[lines.len().saturating_sub(QUOTE_LINES)..];
+    let joined = mask(&kept.join("\n")).text;
+    Some(match joined.char_indices().nth(QUOTE_CHARS) {
+        Some((cut, _)) => format!("{}…", &joined[..cut]),
+        None => joined,
+    })
 }
 
 #[cfg(test)]

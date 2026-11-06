@@ -6,6 +6,7 @@
 //! An answer is the first line, read as JSON, that the asker's test takes for it: the
 //! notifications and the answers to other requests that come between are passed over.
 
+use cf_proto::models::IT_SAID;
 use serde_json::Value;
 
 use crate::seams::processes::{Child, Processes, Program, Streams};
@@ -22,11 +23,6 @@ const LINE_LIMIT: usize = 16 << 20;
 /// How long a program that ended before it answered is given to finish saying why: its error
 /// stream is read apart, and closes a moment after the program has gone.
 const SAYING_WHY_MS: u64 = 2_000;
-
-/// How much of what a program said is quoted in a failure: its last lines that are no frame of
-/// a stack, within a few hundred characters.
-const QUOTE_LINES: usize = 4;
-const QUOTE_CHARS: usize = 600;
 
 /// What `talk` makes of the program `program` starts, which `what` names in a failure
 /// (`codex app-server`). Fails with the reason where it does not start, ends, or is still
@@ -93,38 +89,24 @@ pub(crate) async fn conversation_as<T>(
     outcome
 }
 
-/// `failure`, and the code `child` exited with and the last it said, as far as it has. What it
-/// said goes on lines of their own after `it said:`, one line to a line it said, so that the
-/// engine that keeps the words can leave out a line that may hold a credential and keep the
-/// failure, the code and the lines that hold none (`cf_engine::quotable`).
+/// `failure`, and the code `child` exited with, and after [`IT_SAID`] **all** it has said that
+/// is kept (the last `SAID_KEPT` bytes of its error stream, by cf-process), as it said it: not
+/// cut to its last lines here. The words of a program can carry a credential, and a cut made
+/// before they are looked at takes the line that names it and leaves the lines of its value
+/// (the third reading of T-1270, F2); whoever keeps or tells the failure looks at the whole
+/// block first and cuts it after (`cf_engine::quotable`), and what the program wrote never
+/// stands before the mark, where ConsensFlow's own words are.
 fn with_its_words(failure: String, child: &dyn Child) -> String {
     let code = child
         .code()
         .map_or_else(String::new, |code| format!(" (exit {code})"));
-    match quoted(&child.said()) {
-        Some(said) => format!("{failure}{code}; it said:\n{said}"),
-        None => format!("{failure}{code}"),
+    let said = child.said();
+    let said = said.trim();
+    if said.is_empty() {
+        format!("{failure}{code}")
+    } else {
+        format!("{failure}{code}{IT_SAID}{said}")
     }
-}
-
-/// The last lines of `said` that are no frame of a stack (`at …`), a line to a line, within
-/// [`QUOTE_CHARS`] characters: what a program says of why it ended is at the end, and what it
-/// printed of the code that failed is not the reason.
-fn quoted(said: &str) -> Option<String> {
-    let lines: Vec<&str> = said
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("at "))
-        .collect();
-    let kept = &lines[lines.len().saturating_sub(QUOTE_LINES)..];
-    if kept.is_empty() {
-        return None;
-    }
-    let joined = kept.join("\n");
-    Some(match joined.char_indices().nth(QUOTE_CHARS) {
-        Some((cut, _)) => format!("{}…", &joined[..cut]),
-        None => joined,
-    })
 }
 
 /// Writes `line`, then reads until the line `answers` takes: that line, as JSON. Fails

@@ -105,11 +105,12 @@ impl ModelLists {
     }
 }
 
-/// `listing` with the lines of its stale reason that may hold a credential withheld. A harness
-/// quotes what its program said when a read fails (Pi's error stream, a package's source in a
-/// reason), and what a program said can carry what it was given: the reason is kept in the
-/// ledger, which the page reads, and told to the human. A line that may hold one is not masked
-/// but left out whole ([`cf_engine::quotable`]; the review T-1270, F2 and its second reading).
+/// `listing` with its stale reason as it may be kept and told ([`cf_engine::quotable`]). A harness
+/// quotes what its program said when a read fails, and what a program said can carry what it
+/// was given: Pi's words (after the mark a failure of Pi's read carries) are screened whole and
+/// withheld whole if anything in them may hold a credential, then cut; the reason of any other
+/// harness, which has none, is only masked, and says what it said (`Invalid API key · Please run
+/// /login`). The reason is kept in the ledger, which the page reads, and told to the human.
 fn without_credentials(mut listing: ModelListing) -> ModelListing {
     if let Freshness::Stale { why } = &listing.freshness {
         listing.freshness = Freshness::Stale {

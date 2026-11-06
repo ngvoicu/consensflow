@@ -78,7 +78,7 @@ use mask::mask;
 pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
-pub use quotable::{quotable, WITHHELD_LINE};
+pub use quotable::{quotable, WORDS_WITHHELD};
 
 /// The most lines of a screen a note quotes: the last ones.
 const QUOTE_LINES: usize = 6;

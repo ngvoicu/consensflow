@@ -68,15 +68,14 @@ fn a_read_given_up_on_says_what_pi_had_said_so_far_and_names_what_it_was_loading
     assert!(pi.time.fire_next(i64::MAX), "the bound is armed");
     let why = settled(&mut driver).unwrap_err();
     assert!(pi.processes.take_ran().is_empty(), "no second start");
-    assert!(
-        why.starts_with("pi --mode rpc did not answer within 30 s"),
-        "{why}"
+    // ConsensFlow's own words, with what Pi was loading by name, come first; Pi's words come
+    // last, after the mark, so that they can be screened whole (the third reading, F2).
+    assert_eq!(
+        why,
+        "pi --mode rpc did not answer within 30 s. Pi loads the packages and extensions it has \
+         before it lists, and one of them may be waiting for something (packages \
+         npm:@scope/slow-provider@1.2.3); it said:\nwarming the provider's cache"
     );
-    assert!(
-        why.contains("it said:\nwarming the provider's cache"),
-        "{why}"
-    );
-    assert!(why.contains("npm:@scope/slow-provider@1.2.3"), "{why}");
 }
 
 /// F2: a package source is shown without what could carry a credential: the user and password

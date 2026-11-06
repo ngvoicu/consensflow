@@ -6,6 +6,7 @@ use serde_json::json;
 
 use super::*;
 use crate::testing::{ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
+use cf_proto::models::IT_SAID;
 
 fn program() -> Program {
     Program {
@@ -153,12 +154,12 @@ fn asked_as(
 }
 
 #[test]
-fn a_conversation_that_ended_says_the_code_and_the_last_words_of_the_one_start() {
+fn a_conversation_that_ended_says_the_code_and_what_the_one_start_said_whole() {
     for (streams, said) in [
         (
             Streams::Conversation,
-            "the harness ended before it answered (exit 2); it said:\nloading\nError: no such \
-             thing\nHint: try this",
+            "the harness ended before it answered (exit 2); it said:\nloading\n    at frame \
+             (file.js:1:2)\nError: no such thing\n\nHint: try this",
         ),
         // Any other kind keeps nothing of what its program said, and says as it always did.
         (Streams::Lines, "the harness ended before it answered"),
@@ -200,24 +201,45 @@ fn a_conversation_given_up_on_says_what_the_program_had_said_and_no_code() {
     );
 }
 
+/// The third reading of T-1270 (F2, "cut before filter"): the words of the program are handed on
+/// whole, after the mark, and are not cut to their last lines here. Whoever keeps or tells the
+/// failure screens the block before it cuts it, and a cut made first takes the line that names a
+/// credential and leaves the lines of its value.
 #[test]
-fn what_a_program_said_is_quoted_by_its_last_lines_that_are_no_frame_and_cut_to_a_length() {
-    assert_eq!(quoted(""), None);
-    assert_eq!(quoted("\n  \n"), None);
-    assert_eq!(
-        quoted("    at one (a.js:1:1)\n    at two (b.js:2:2)\n"),
-        None
+fn what_a_program_said_is_handed_on_whole_after_the_mark_and_cut_by_no_one_here() {
+    let (processes, time) = (
+        Rc::new(ScriptedProcesses::default()),
+        Rc::new(ManualTime::new(0)),
     );
-    let many = (1..=9)
-        .map(|n| format!("line {n}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_eq!(
-        quoted(&many).as_deref(),
-        Some("line 6\nline 7\nline 8\nline 9")
-    );
-    let wide = "é".repeat(2_000);
-    let cut = quoted(&wide).unwrap();
-    assert_eq!(cut.chars().count(), QUOTE_CHARS + 1);
-    assert!(cut.ends_with('…'));
+    let said: Vec<String> = std::iter::once("password: correct".to_owned())
+        .chain((1..=9).map(|n| format!("line {n}")))
+        .collect();
+    processes.child_said("harness", &format!("{}\n", said.join("\n")), Some(1));
+    let mut driver = asked_as(Streams::Conversation, Ends::Itself, &processes, &time);
+    let failed = driver.run().remove(0).1.unwrap_err();
+    let (own, program) = failed.split_once(IT_SAID).expect("the mark");
+    assert_eq!(own, "the harness ended before it answered (exit 1)");
+    assert_eq!(program, said.join("\n"), "all ten lines, the label first");
+    // Nothing the program wrote stands before the mark, where ConsensFlow's own words are.
+    assert!(!own.contains("password") && !own.contains("line "), "{own}");
+}
+
+#[test]
+fn a_program_that_said_nothing_has_no_mark() {
+    for said in ["", "\n  \n"] {
+        let (processes, time) = (
+            Rc::new(ScriptedProcesses::default()),
+            Rc::new(ManualTime::new(0)),
+        );
+        processes.child_said("harness", said, Some(3));
+        let mut driver = asked_as(Streams::Conversation, Ends::Itself, &processes, &time);
+        assert_eq!(
+            driver.run(),
+            [(
+                0,
+                Err("the harness ended before it answered (exit 3)".to_owned())
+            )],
+            "{said:?}"
+        );
+    }
 }

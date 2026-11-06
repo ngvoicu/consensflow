@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
-use cf_proto::models::{ModelChoice, ModelListing};
+use cf_proto::models::{ModelChoice, ModelListing, IT_SAID};
 use serde_json::{json, Value};
 
 use super::setup::inspect;
@@ -94,10 +94,16 @@ pub(crate) enum Unlisted {
 /// lists no model ([`Unlisted`]).
 pub(crate) fn parse(answer: &Value, at: i64) -> Result<ModelListing, Unlisted> {
     if answer.get("success") == Some(&Value::Bool(false)) {
-        let said = answer["error"].as_str().unwrap_or("no reason given");
-        return Err(Unlisted::Said(format!(
-            "pi refused get_available_models: {said}"
-        )));
+        // What Pi gives as the reason is Pi's words, which an extension of the human's can
+        // write: they stand after the mark, whole, for whoever tells them to screen.
+        return Err(Unlisted::Said(
+            match answer["error"].as_str().map(str::trim) {
+                Some(said) if !said.is_empty() => {
+                    format!("pi refused get_available_models{IT_SAID}{said}")
+                }
+                _ => "pi refused get_available_models: no reason given".to_owned(),
+            },
+        ));
     }
     let rows = answer["data"]["models"]
         .as_array()
@@ -164,22 +170,56 @@ pub(crate) async fn read(
 }
 
 /// A failed read, and where Pi was given up on, what it was loading: the packages and
-/// extensions of its folder, by name, for one of them may be what it waited for.
+/// extensions of its folder, by name, for one of them may be what it waited for. That is
+/// ConsensFlow's description, so it stands before [`IT_SAID`], where Pi's own words, which
+/// come last, begin.
 async fn waiting_on(failed: String, time: &dyn Time, env: &Env) -> String {
-    if !failed.contains("did not answer within") {
+    let (head, said) = match failed.split_once(IT_SAID) {
+        Some((head, said)) => (head, Some(said)),
+        None => (failed.as_str(), None),
+    };
+    if !head.contains("did not answer within") {
         return failed;
     }
     let loading = inspect(time, env)
         .await
         .loading()
         .map_or_else(String::new, |loading| format!(" ({loading})"));
-    // Pi's own words, where the failure has them, stand on lines of their own: this goes after
-    // them on one of its own.
-    let apart = if failed.contains('\n') { "\n" } else { ". " };
-    format!(
-        "{failed}{apart}Pi loads the packages and extensions it has before it lists, and one of \
+    let head = format!(
+        "{head}. Pi loads the packages and extensions it has before it lists, and one of \
          them may be waiting for something{loading}"
-    )
+    );
+    match said {
+        Some(said) => format!("{head}{IT_SAID}{said}"),
+        None => head,
+    }
+}
+
+/// The most of what a failed `pi update --models` said that is kept: the end of it.
+const UPDATE_SAID_BYTES: usize = 4 << 10;
+
+/// Why `pi update --models` failed, in words: its exit code and, after [`IT_SAID`], everything
+/// its error stream held (the message is `Command failed: <cmd>\n<what it wrote>`), whole, for
+/// whoever tells it to screen it before they cut it. A program that never started has only
+/// the system's words, which are ConsensFlow's to say.
+fn update_failure(failed: &cf_process::Failed) -> String {
+    let code = failed
+        .code
+        .map_or_else(String::new, |code| format!(" (exit {code})"));
+    let Some((_, said)) = failed.message.split_once('\n') else {
+        return format!("failed{code}: {}", failed.message.trim());
+    };
+    let said = said.trim();
+    let from = said.len().saturating_sub(UPDATE_SAID_BYTES);
+    let from = (from..=said.len())
+        .find(|at| said.is_char_boundary(*at))
+        .unwrap_or(said.len());
+    let said = &said[from..];
+    if said.is_empty() {
+        format!("failed{code}")
+    } else {
+        format!("failed{code}{IT_SAID}{said}")
+    }
 }
 
 /// The models the Pi installed here lists. Where `fetch` (the human's Refresh), its
@@ -206,8 +246,8 @@ pub(crate) async fn listed(
     Ok(match fetched {
         Ok(()) => listing,
         Err(failed) => listing.stale(format!(
-            "Pi's own catalog: pi update --models failed: {}",
-            failed.message.lines().last().unwrap_or_default()
+            "Pi's own catalog: pi update --models {}",
+            update_failure(&failed)
         )),
     })
 }

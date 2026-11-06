@@ -127,12 +127,36 @@ fn pi_with_no_login_lists_no_model_and_says_why() {
         .unlisted()
         .starts_with("Pi lists no model: no provider is set up ("));
     let refused = parse(&json!({ "success": false, "error": "bad" }), AT);
+    // What Pi gives as its reason is Pi's words, after the mark, whole.
     assert_eq!(
         refused,
         Err(Unlisted::Said(
-            "pi refused get_available_models: bad".to_owned()
+            "pi refused get_available_models; it said:\nbad".to_owned()
         ))
     );
+    let multiline = parse(
+        &json!({ "success": false, "error": "line one\nline two\n" }),
+        AT,
+    );
+    assert_eq!(
+        multiline,
+        Err(Unlisted::Said(
+            "pi refused get_available_models; it said:\nline one\nline two".to_owned()
+        )),
+        "not cut to a line"
+    );
+    for none in [
+        json!({ "success": false }),
+        json!({ "success": false, "error": "  " }),
+    ] {
+        assert_eq!(
+            parse(&none, AT),
+            Err(Unlisted::Said(
+                "pi refused get_available_models: no reason given".to_owned()
+            )),
+            "no words of Pi's, no mark"
+        );
+    }
 }
 
 #[test]
@@ -215,10 +239,52 @@ fn only_the_human_s_refresh_fetches_pi_s_catalogs_and_a_failed_fetch_leaves_a_st
     assert_eq!(
         listed.freshness,
         cf_proto::models::Freshness::Stale {
-            why: "Pi's own catalog: pi update --models failed: offline".to_owned()
+            why: "Pi's own catalog: pi update --models failed (exit 1); it said:\noffline"
+                .to_owned()
         }
     );
     assert_eq!(listed.models.len(), 1, "the list Pi keeps");
+}
+
+fn update_failed(message: &str, code: Option<i32>) -> String {
+    update_failure(&Failed {
+        message: message.to_owned(),
+        code,
+        killed: false,
+        stdout: String::new(),
+    })
+}
+
+/// Why `pi update --models` failed: its exit code, and after the mark everything its error
+/// stream held, whole (the third reading, F2: the last line alone left a label behind it).
+#[test]
+fn why_a_pi_update_failed_is_its_code_and_all_it_said_after_the_mark() {
+    assert_eq!(
+        update_failed(
+            "Command failed: pi update --models\nfirst\nsecond\nthird\n",
+            Some(2)
+        ),
+        "failed (exit 2); it said:\nfirst\nsecond\nthird"
+    );
+    // A program that never started has the system's words only, which are not Pi's.
+    assert_eq!(
+        update_failed("spawn pi ENOENT", None),
+        "failed: spawn pi ENOENT"
+    );
+    // One that said nothing has no mark.
+    assert_eq!(
+        update_failed("Command failed: pi update --models\n", Some(1)),
+        "failed (exit 1)"
+    );
+    // One that said a great deal is kept from the end, at a character.
+    let many = "é".repeat(UPDATE_SAID_BYTES);
+    let kept = update_failed(&format!("Command failed: pi update --models\n{many}"), None);
+    let said = kept.strip_prefix(&format!("failed{IT_SAID}")).unwrap();
+    assert!(
+        said.len() <= UPDATE_SAID_BYTES && said.chars().all(|c| c == 'é'),
+        "{}",
+        said.len()
+    );
 }
 
 /// Pi's default model, from a folder of its own whose `settings.json` says `settings`, a
