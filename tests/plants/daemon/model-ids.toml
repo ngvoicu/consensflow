@@ -19,6 +19,7 @@ mi-cf-board = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_golden
 mi-page-selects = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "model selects of New project"]
 mi-page-cards = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "card says its role"]
 mi-page-last-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a new project's staff on the model"]
+mi-page-window = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "whose window is at work and its terminal stays"]
 mi-page-edit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Edit member to another model renames"]
 mi-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "every name a member had|member that joined in alpha.2"]
 
@@ -408,4 +409,40 @@ find = '''
 '''
 replace = '''
           model: member.model,
+'''
+
+[[plant]]
+name = "model ids: a terminal's card is looked for under the handle its window had"
+meant = "Edit member renames a member whose window is at work and its terminal stays: the same card, emulator and place, under the new name"
+runs = ["mi-page-window"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''
+      const lane = board.lanes.find(
+        (lane) => lane.pane !== null && paneKey(lane.pane) === entry.key,
+      )
+      if (lane === undefined) this.#retire(entry.key)
+'''
+replace = '''
+      const lane = board.lanes.find((lane) => lane.participant.handle === entry.handle)
+      if (lane === undefined || lane.pane === null || paneKey(lane.pane) !== entry.key) {
+        this.#retire(entry.key)
+      }
+'''
+
+[[plant]]
+name = "model ids: a window the human showed is no longer shown once it is renamed"
+meant = "Edit member renames a member whose window is at work and its terminal stays: the same card, emulator and place, under the new name"
+runs = ["mi-page-window"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''
+        this.#showing.delete(showingKey(board.project.id, was))
+'''
+replace = '''
+        false
 '''

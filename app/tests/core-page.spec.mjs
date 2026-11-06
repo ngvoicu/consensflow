@@ -11238,6 +11238,49 @@ test('Edit member to another model renames the member: its rows and its windows 
 })
 
 /**
+ * A window at work when its member is edited (HMD-12): the daemon renames the member and the
+ * window, and the window goes on. The page shows its terminal by the window's pane, never by the
+ * name it had: after the edit the card is there under the new name, its emulator is not
+ * disposed, nothing says the window is gone, and it is still in the dock the human put it in.
+ */
+test('Edit member renames a member whose window is at work and its terminal stays: the same card, emulator and place, under the new name', async ({
+  page,
+}) => {
+  await open(page, shotData('after'))
+  await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+  await page
+    .getByRole('button', { name: "Show @claude-opus-5-5-high · amber-pine's terminal" })
+    .click()
+  const card = (handle) => page.locator(`#stage .terminal-card[data-handle="${handle}"]`)
+  await expect(card('claude-opus-5-5-high-amber-pine')).toHaveCount(1)
+  const emulator = () =>
+    page.evaluate(() => {
+      const found = window.__emulators.filter(
+        (one) => document.querySelector('#stage')?.contains(one.host) || one.disposed,
+      )
+      return found.map((one) => one.disposed)
+    })
+  expect(await emulator()).toEqual([false, false])
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Edit @claude-opus-5-5-high' }).first().click()
+  await pickMember(settings, {
+    harness: 'Codex',
+    model: 'gpt-6.1-sol',
+    effort: 'max',
+    tier: 'critical',
+  })
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect(page.locator('#status')).toContainText('is @gpt-6-1-sol-max now')
+  await settings.getByRole('button', { name: 'Close' }).click()
+  // The window's card is the one it was, under its new name: none went, none was made.
+  await expect(card('gpt-6-1-sol-max-amber-pine')).toHaveCount(1)
+  await expect(card('claude-opus-5-5-high-amber-pine')).toHaveCount(0)
+  await expect(page.locator('#stage .terminal-gone, #stage .stage-empty')).toHaveCount(0)
+  expect(await emulator()).toEqual([false, false])
+})
+
+/**
  * Shots for the review of the model ids (HMD-12): the staff list, New project's and Switch
  * chief's selects, and a member's card before and after an edit, in dark and light. Not a
  * check: it writes PNGs into `CF_SHOTS_DIR` where that is set, and skips where it is not.
