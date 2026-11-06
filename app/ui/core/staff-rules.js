@@ -21,6 +21,9 @@ const MOST_LINES = 150
 
 const encoder = new TextEncoder()
 
+/** How many sections have been made: the markup is cloned into every dialog that has it, so an id in it cannot be written once. */
+let made = 0
+
 /** A number as the count says it: 8,000. */
 const said = (count) => count.toLocaleString('en')
 
@@ -52,6 +55,10 @@ export class StaffRules {
   constructor(group, page = null) {
     this.#text = group.querySelector('[name="staff-rules"]')
     this.#count = group.querySelector('.staff-rules-count')
+    // The text is described by its own section's counter: an id of its own, as many sections as there are dialogs.
+    made += 1
+    this.#count.id = `staff-rules-count-${made}`
+    this.#text.setAttribute('aria-describedby', this.#count.id)
     this.#hint = group.querySelector('.staff-rules-hint')
     this.#save = group.querySelector('[name="staff-rules-save"]')
     this.#page = page

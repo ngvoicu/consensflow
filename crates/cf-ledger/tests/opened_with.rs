@@ -436,8 +436,10 @@ fn a_project_that_says_no_rules_and_no_size_has_none_and_nothing_is_logged() {
     }
 }
 
+/// A request in JSON is read by `NewProject::from_json` and refused there, before any write: it
+/// shows the words and the code, not that a write that fails leaves nothing (the next test does).
 #[test]
-fn rules_and_a_size_the_ledger_refuses_refuse_the_opening_in_the_words_the_settings_are_refused_in_and_no_project_is_made(
+fn a_request_in_json_with_rules_or_a_size_the_ledger_refuses_is_refused_in_the_words_the_settings_are_refused_in(
 ) {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
@@ -471,6 +473,84 @@ fn rules_and_a_size_the_ledger_refuses_refuse_the_opening_in_the_words_the_setti
             "{field}: {value}"
         );
     }
+}
+
+/// A project asked for by the typed request the daemon makes (`typed`), which reaches
+/// `create_project`: rules and a size it checks inside the write that makes the project.
+fn typed(name: &str, rules: Option<&str>, size: Option<u32>) -> NewProject {
+    NewProject {
+        staff_rules: rules.map(str::to_owned),
+        compaction: size,
+        ..project(name)
+    }
+}
+
+#[test]
+fn rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project_and_none_of_what_was_written_before_them(
+) {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let there = ledger.create_project(&project("there")).expect("a project");
+    ledger
+        .set_staff_rules(there.id, Some("Its own rules."))
+        .expect("rules");
+    let before = ledger.projects().expect("projects").len();
+    let too_long = "x".repeat(8_001);
+    // Each is refused by the write that makes the project, not before it: the rules are written
+    // first, the size after them, so the last two have the rules written when the size fails.
+    for (what, request, own) in [
+        (
+            "rules over a bound",
+            typed("a", Some(&too_long), None),
+            parse_staff_rules(Some(&json!(too_long))).expect_err("a refusal"),
+        ),
+        (
+            "a control character in the rules",
+            typed("b", Some("a bell \u{7}"), Some(250_000)),
+            parse_staff_rules(Some(&json!("a bell \u{7}"))).expect_err("a refusal"),
+        ),
+        (
+            "a size under the range, after good rules",
+            typed("c", Some(RULES), Some(99_999)),
+            parse_claude_compaction(Some(&json!(99_999))).expect_err("a refusal"),
+        ),
+        (
+            "a size over the range, after good rules",
+            typed("d", Some(RULES), Some(1_000_001)),
+            parse_claude_compaction(Some(&json!(1_000_001))).expect_err("a refusal"),
+        ),
+    ] {
+        let refusal = ledger.create_project(&request).expect_err(what);
+        // The words and the code the setting's own operation refuses the same value with.
+        assert_eq!(
+            (refusal.code(), refusal.to_string()),
+            (own.code(), own.to_string()),
+            "{what}"
+        );
+        // No project, and nothing of one: the count is the same, and the ids go on from the one
+        // that was there (a row written and rolled back would have taken one).
+        assert_eq!(ledger.projects().expect("projects").len(), before, "{what}");
+    }
+    // Nothing was written for any of them, and what the project that was there has is its own.
+    let next = ledger.create_project(&project("next")).expect("a project");
+    assert_eq!(next.id, there.id + 1);
+    assert_eq!(
+        ledger
+            .project(there.id)
+            .expect("read")
+            .expect("it is there")
+            .staff_rules
+            .as_deref(),
+        Some("Its own rules.")
+    );
+    // Each good request after them is made whole: the rules and the size together.
+    let whole = ledger
+        .create_project(&typed("whole", Some(RULES), Some(250_000)))
+        .expect("a project");
+    assert_eq!(
+        (whole.staff_rules.as_deref(), whole.claude_compaction),
+        (Some(RULES), Some(250_000))
+    );
 }
 
 /// The file at `dir`, closed, with `trigger` made in it, and the ledger opened again on it.

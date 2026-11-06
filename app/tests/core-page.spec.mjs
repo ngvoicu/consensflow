@@ -4224,6 +4224,9 @@ test('New project has Staff, the rules for the staff, compaction, Human approval
         // Every section but Staff, which each dialog draws for itself: one markup for the rest.
         [...document.querySelectorAll(`#${id} .project-section`)].slice(1).map((section) => {
           const copy = section.cloneNode(true)
+          // What each dialog gives its own: the rules' counter's id, and the field's reference to it.
+          copy.querySelector('.staff-rules-count')?.removeAttribute('id')
+          copy.querySelector('[name="staff-rules"]')?.removeAttribute('aria-describedby')
           // What the section draws from what it reads, which is the dialog's own.
           for (const drawn of copy.querySelectorAll(
             '.computer-use-harnesses, .computer-use-apps, .computer-use-grants, .computer-use-grants-of',
@@ -4480,6 +4483,176 @@ test('Enter in the number of the wake-up calls or in the specs folder of New pro
   expect(await calls(page, 'project.specs')).toEqual([])
   await made.start.click()
   await expect.poll(() => calls(page, 'project.open')).toHaveLength(1)
+})
+
+/** Every field a person can press Enter in, in `dialog`: what is on show and not disabled. */
+const fieldsIn = (dialog) =>
+  dialog.locator(
+    'input:not([type=hidden]):not(:disabled):visible, select:not(:disabled):visible, textarea:not(:disabled):visible',
+  )
+
+/** What a field is, to say which one failed: its tag, type and name. */
+const fieldName = (field) =>
+  field.evaluate((node) =>
+    `${node.tagName.toLowerCase()}${node.type ? `[${node.type}]` : ''} ${node.name || node.getAttribute('aria-label') || ''}`.trim(),
+  )
+
+test('Enter in any field of New project starts no project, and is a new line in a text area; Start alone does', async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = {
+    on: true,
+    codexSetUp: true,
+    permissions: { accessibility: true, screenRecording: false },
+  }
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['worker'])]
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  // A size chosen, so the field that takes one can be pressed in too.
+  await made.compaction.size.check()
+  const fields = fieldsIn(made.dialog)
+  const count = await fields.count()
+  // The folder, the chief's three, the staff's, and every field of every section.
+  expect(count).toBeGreaterThanOrEqual(16)
+  for (let at = 0; at < count; at += 1) {
+    const field = fields.nth(at)
+    const name = await fieldName(field)
+    const isText = await field.evaluate((node) => node.tagName === 'TEXTAREA')
+    const before = isText ? await field.inputValue() : null
+    await field.press('Enter')
+    expect(await calls(page, 'project.open'), `Enter in ${name} started a project`).toEqual([])
+    await expect(made.dialog, `Enter in ${name} closed the dialog`).toBeVisible()
+    // A text area keeps what Enter is for: a new line.
+    if (isText) expect(await field.inputValue(), `Enter in ${name}`).toBe(`${before}\n`)
+  }
+  // None of it saved anything either: there is no project to save for.
+  for (const operation of ['wakeup.set', 'project.specs', 'project.rules', 'project.compaction']) {
+    expect(await calls(page, operation), operation).toEqual([])
+  }
+  // Enter keeps what it is for on a button: its press.
+  await made.computerUse
+    .getByRole('button', { name: 'Open System Settings for Accessibility' })
+    .press('Enter')
+  await expect.poll(() => calls(page, 'computer_use.open')).toEqual([{ pane: 'accessibility' }])
+  expect(await calls(page, 'project.open')).toEqual([])
+  await made.start.click()
+  await expect.poll(() => calls(page, 'project.open')).toHaveLength(1)
+})
+
+test('Enter in a field of a section of Project settings adds nobody to the staff, saves no other section and leaves the dialog open', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'claude-code')
+  data.computerUse = { on: true, permissions: { accessibility: true, screenRecording: false } }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  // Add a member is filled in, so a form that was submitted would add it.
+  await pickMember(dialog, {
+    role: 'worker',
+    harness: 'Codex',
+    model: 'GPT-6 Astra',
+    tier: 'standard',
+  })
+  await dialog
+    .getByRole('group', { name: 'Compaction for Claude members' })
+    .getByRole('radio', { name: 'A size' })
+    .check()
+  const sections = dialog.locator('fieldset.project-section:not(:has(> .staff))')
+  const fields = fieldsIn(sections)
+  const count = await fields.count()
+  expect(count).toBeGreaterThanOrEqual(8)
+  // What a field saves of its own section on Enter, as it always did: the number of the calls and the specs' folder.
+  const OWN = { 'wakeup-every': 'wakeup.set', specsFolder: 'project.specs' }
+  const OPERATIONS = [
+    'member.add',
+    'member.edit',
+    'member.roles',
+    'project.gate',
+    'wakeup.set',
+    'project.specs',
+    'project.rules',
+    'project.compaction',
+  ]
+  const tally = async () =>
+    Object.fromEntries(
+      await Promise.all(
+        OPERATIONS.map(async (operation) => [operation, (await calls(page, operation)).length]),
+      ),
+    )
+  for (let at = 0; at < count; at += 1) {
+    const field = fields.nth(at)
+    const name = await fieldName(field)
+    const isText = await field.evaluate((node) => node.tagName === 'TEXTAREA')
+    const before = await tally()
+    await field.press('Enter')
+    // Whatever was asked of the daemon has come back before it is counted.
+    await page.evaluate(() => new Promise((done) => setTimeout(done, 40)))
+    const after = await tally()
+    const own = OWN[await field.getAttribute('name')]
+    const expected = { ...before }
+    if (own !== undefined) expected[own] += 1
+    expect(after, `Enter in ${name}`).toEqual(expected)
+    await expect(dialog, `Enter in ${name} closed the dialog`).toBeVisible()
+    if (isText) expect(await field.inputValue()).toMatch(/\n$/)
+  }
+  expect(await calls(page, 'member.add')).toEqual([])
+})
+
+test('no id is held by two elements of the page, and what a field is described or labelled by is in its own dialog', async ({
+  page,
+}) => {
+  await open(page)
+  // The sections are one markup cloned into two dialogs: what one says by an id, the other must not share.
+  const found = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll('[id]')].map((node) => node.id)
+    const duplicates = ids.filter((id, at) => ids.indexOf(id) !== at)
+    // A description or a label is read from inside the dialog it is in (a menu's aria-controls
+    // may name another dialog, which is what it opens).
+    const strays = []
+    for (const node of document.querySelectorAll('[aria-describedby], [aria-labelledby]')) {
+      const home = node.closest('dialog') ?? document
+      for (const attribute of ['aria-describedby', 'aria-labelledby']) {
+        for (const id of (node.getAttribute(attribute) ?? '').split(/\s+/).filter(Boolean)) {
+          const target = document.getElementById(id)
+          if (target === null || !home.contains(target)) strays.push(`${attribute}=${id}`)
+        }
+      }
+    }
+    return { duplicates, strays }
+  })
+  expect(found).toEqual({ duplicates: [], strays: [] })
+})
+
+test("each dialog's rules for the staff are described by its own counter, whatever the other says", async ({
+  page,
+}) => {
+  await open(page)
+  const rulesOf = (dialog) =>
+    dialog.getByRole('group', { name: 'Rules for the staff', exact: true }).getByLabel('The rules')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await rulesOf(settings).fill('abc')
+  await expect(rulesOf(settings)).toHaveAccessibleDescription('3 of 8,000 bytes · 1 of 150 lines')
+  await settings.getByRole('button', { name: 'Close' }).click()
+  const made = await newProject(page)
+  await made.rules.text.fill('abcdef\nghi')
+  await expect(made.rules.text).toHaveAccessibleDescription('10 of 8,000 bytes · 2 of 150 lines')
+  // Two counters, one for each dialog's field: neither field names the other's.
+  const references = await page.evaluate(() =>
+    [...document.querySelectorAll('textarea[name="staff-rules"]')].map((field) => [
+      field.closest('dialog').id,
+      field.getAttribute('aria-describedby'),
+    ]),
+  )
+  expect(references.map(([dialog]) => dialog).sort()).toEqual([
+    'new-project-dialog',
+    'project-settings-dialog',
+  ])
+  expect(new Set(references.map(([, id]) => id)).size).toBe(2)
 })
 
 test('New project opens on the defaults every time: what was set in it before is not kept', async ({

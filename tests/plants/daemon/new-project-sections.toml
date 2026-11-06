@@ -323,7 +323,7 @@ replace = '            compaction: None,'
 
 [[plant]]
 name = "new project sections: rules the ledger refuses are let through to the opening"
-meant = "rules_and_a_size_the_ledger_refuses_refuse_the_opening_in_the_words_the_settings_are_refused_in_and_no_project_is_made"
+meant = "a_request_in_json_with_rules_or_a_size_the_ledger_refuses_is_refused_in_the_words_the_settings_are_refused_in"
 runs = ["nps-ledger"]
 
 [[plant.edit]]
@@ -333,7 +333,7 @@ replace = '            staff_rules: parse_staff_rules(value.get("rules")).unwrap
 
 [[plant]]
 name = "new project sections: a size the ledger refuses is let through to the opening"
-meant = "rules_and_a_size_the_ledger_refuses_refuse_the_opening_in_the_words_the_settings_are_refused_in_and_no_project_is_made"
+meant = "a_request_in_json_with_rules_or_a_size_the_ledger_refuses_is_refused_in_the_words_the_settings_are_refused_in"
 runs = ["nps-ledger"]
 
 [[plant.edit]]
@@ -400,3 +400,227 @@ runs = ["nps-daemon-computer-use"]
 file = "crates/cf-daemon/src/page/computer_use.rs"
 find = '        (None, Some(Value::String(folder))) if !folder.trim().is_empty() => folder.clone(),'
 replace = '        (None, Some(Value::String(folder))) => folder.clone(),'
+
+[[plant]]
+name = "new project sections: Enter is not held in the form of New project"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    holdEnter(this.#form)
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: Enter is not held in the fields of the shared sections"
+meant = "Enter in a field of a section of Project settings adds nobody to the staff, saves no other section and leaves the dialog open"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+    for (const section of sections.querySelectorAll('fieldset.project-section')) holdEnter(section)
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: Enter is held in text and number fields alone"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input[type=text], input[type=number]')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in the checkboxes and the radios no more"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input[type=text], input[type=number], select')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in a select no more"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset])')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in a text area, so it is no new line"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select, textarea')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held on a button, so it presses nothing"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input:not([type=submit], [type=reset]), select, button')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in no field at all"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '    if (false) {'
+
+[[plant]]
+name = "new project sections: a field of a section of Project settings submits its form on Enter"
+meant = "Enter in a field of a section of Project settings adds nobody to the staff, saves no other section and leaves the dialog open"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+    for (const section of sections.querySelectorAll('fieldset.project-section')) holdEnter(section)
+'''
+replace = '''
+    for (const section of sections.querySelectorAll('fieldset.project-section')) {
+      if (page === null) holdEnter(section)
+    }
+'''
+
+[[plant]]
+name = "new project sections: the rules' counter keeps one id for every dialog"
+meant = "no id is held by two elements of the page, and what a field is described or labelled by is in its own dialog"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+    this.#count.id = `staff-rules-count-${made}`
+'''
+replace = '''
+    this.#count.id = 'staff-rules-count'
+'''
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+    this.#text.setAttribute('aria-describedby', this.#count.id)
+'''
+replace = '''
+    this.#text.setAttribute('aria-describedby', 'staff-rules-count')
+'''
+
+[[plant]]
+name = "new project sections: a rules field is described by the first counter made"
+meant = "each dialog's rules for the staff are described by its own counter, whatever the other says"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+    this.#text.setAttribute('aria-describedby', this.#count.id)
+'''
+replace = '''
+    this.#text.setAttribute('aria-describedby', 'staff-rules-count-1')
+'''
+
+[[plant]]
+name = "new project sections: the rules are written outside the write that makes the project"
+meant = "rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project_and_none_of_what_was_written_before_them"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, made.id, Some(rules))?;
+        }
+        known_project(store, made.id)
+    })
+}'''
+
+[[plant]]
+name = "new project sections: the compaction is written outside the write that makes the project"
+meant = "rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project_and_none_of_what_was_written_before_them"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''
+        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, made.id, Some(size))?;
+        }
+        known_project(store, made.id)
+    })
+}'''
+
+[[plant]]
+name = "new project sections: both are written outside the write that makes the project"
+meant = "rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project_and_none_of_what_was_written_before_them"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''
+        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, made.id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, made.id, Some(size))?;
+        }
+        known_project(store, made.id)
+    })
+}'''

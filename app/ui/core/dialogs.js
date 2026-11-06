@@ -1,7 +1,7 @@
 import { button, element, redraw } from '../dom.js'
 import { HARNESS_NAMES, isMember, modelShown } from './board.js'
 import { harnessesOf } from './computer-use.js'
-import { ProjectSections } from './project-sections.js'
+import { holdEnter, ProjectSections } from './project-sections.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -667,6 +667,8 @@ export class NewProjectDialog {
   constructor(dialog, page) {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
+    // Start is the button's: Enter in no field of the dialog starts the project.
+    holdEnter(this.#form)
     this.#staff = dialog.querySelector('#new-project-staff')
     this.#refusal = dialog.querySelector('.dialog-refusal')
     this.#sections = new ProjectSections(

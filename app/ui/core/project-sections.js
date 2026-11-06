@@ -5,6 +5,24 @@ import { StaffRules } from './staff-rules.js'
 import { WakeUpCalls } from './wake-up.js'
 
 /**
+ * Enter in a field of `root` submits nothing: a dialog's form starts the project (New
+ * project) or adds a member (Project settings), and a field of a section is not where the
+ * human means either (T-1268). Every field that Enter would submit from is held, whatever its
+ * kind (a text, a number, a checkbox, a radio, a select), so a field added later is held too;
+ * Enter keeps what it is for in a text area (a new line) and on a button (its press). A field
+ * that does something of its own on Enter (the number of the wake-up calls and the specs'
+ * folder save their section) does it first: this only keeps the key from the form.
+ */
+export function holdEnter(root) {
+  root.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return
+    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {
+      event.preventDefault()
+    }
+  })
+}
+
+/**
  * The sections of a project's settings that Project settings and New project
  * both have, after Staff, which each dialog draws for itself: the rules for the
  * staff, the compaction, Human approval, Wake-up calls, Specs and Computer use.
@@ -55,6 +73,8 @@ export class ProjectSections {
     this.#computerUse = new ComputerUseSection(sections.querySelector('.computer-use'), screen)
     // What only a saved project has (a Save, and when a change reaches the chief) is not in New project.
     for (const live of sections.querySelectorAll('[data-live]')) live.hidden = page === null
+    // Enter in a field of a section is that section's own, never its dialog's form's.
+    for (const section of sections.querySelectorAll('fieldset.project-section')) holdEnter(section)
     mount.replaceWith(sections)
   }
 
