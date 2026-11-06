@@ -67,7 +67,7 @@ fn every_members_launch_gives_the_extension_the_size_and_nothing_else_moves() {
 }
 
 #[test]
-fn the_size_is_given_to_a_session_resumed_as_to_one_launched() {
+fn a_pi_session_resumed_gives_its_extension_the_size_as_one_launched_does() {
     let home = Home::new();
     let (adapter, _fakes) = adapter(&home);
     let resumed = prepare(

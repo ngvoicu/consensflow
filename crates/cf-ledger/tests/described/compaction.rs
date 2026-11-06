@@ -167,3 +167,33 @@ fn a_ledger_at_the_version_before_gains_no_size_in_every_project_and_keeps_every
         "each project's row, and no rules and no size at its end"
     );
 }
+
+/// Migration 0033 (smaller-contexts, Phase 7): the size a project chose for its Claude members
+/// is its members' size, whatever their harness, under the column's new name; every other
+/// value of every row is kept, and the project that chose none still has none.
+#[test]
+fn a_ledger_at_the_version_before_the_rename_keeps_each_projects_size_as_its_members_size() {
+    let at = MIGRATIONS
+        .iter()
+        .position(|sql| sql.contains("RENAME COLUMN claude_compaction TO compaction"))
+        .expect("the migration that renames the column (0033)");
+    let db = Connection::open_in_memory().expect("a database");
+    populate(&db, &MIGRATIONS[..at]);
+    db.execute_batch("UPDATE project SET claude_compaction = 400000 WHERE id = 1")
+        .expect("sizes chosen before");
+    let every = |db: &Connection| {
+        ["project", "participant", "event", "task", "message"]
+            .map(|table| rows(db, &format!("SELECT * FROM {table} ORDER BY rowid")))
+    };
+    let before = every(&db);
+    migrate(&db, &MIGRATIONS[..=at]).expect("migrated");
+    assert_eq!(every(&db), before, "every value of every row, in its place");
+    let sizes: Vec<(i64, Option<i64>)> = db
+        .prepare("SELECT id, compaction FROM project ORDER BY id")
+        .expect("the column by its new name")
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("read")
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(sizes, [(1, Some(400_000)), (2, None)]);
+}

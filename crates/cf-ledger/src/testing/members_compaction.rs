@@ -16,6 +16,9 @@ pub fn undo_migration_0033(db: &rusqlite::Connection) -> rusqlite::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
+    use super::super::hold_apart_what_node_never_had_in_its_schema;
     use crate::schema::{migrate, MIGRATIONS};
 
     /// Where migration 0033 is in the list.
@@ -88,5 +91,34 @@ mod tests {
         );
         assert!(text(&db).contains(&format!(", {}", super::COLUMN)));
         assert!(!text(&db).contains("claude_compaction"));
+    }
+
+    #[test]
+    fn the_players_hold_the_renamed_column_apart_from_what_node_s_schema_had() {
+        let project_text = |migrations: &[&str]| -> String {
+            let db = rusqlite::Connection::open_in_memory().unwrap();
+            migrate(&db, migrations).unwrap();
+            db.query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'project'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let held = |text: &str| {
+            let mut dump = json!({
+                "userVersion": 11,
+                "schema": [{ "name": "project", "sql": text }],
+                "tables": {},
+            });
+            hold_apart_what_node_never_had_in_its_schema(&mut dump);
+            dump["schema"][0]["sql"].as_str().unwrap().to_owned()
+        };
+        // Held apart, the table's text before the rename and after it are the same: neither
+        // holds the column, under either name.
+        let before = held(&project_text(&MIGRATIONS[..at()]));
+        let after = held(&project_text(&MIGRATIONS[..=at()]));
+        assert_eq!(after, before);
+        assert!(!after.contains("compaction"), "{after}");
     }
 }

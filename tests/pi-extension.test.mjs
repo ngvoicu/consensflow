@@ -3,7 +3,10 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
+import {
+  compactionOf,
+  createDeliveryExtension,
+} from '../hosts/pi-extension/consensflow-delivery.mjs'
 import { cargoMissing, rustPi } from './rust-channels.mjs'
 
 function fakePi() {
@@ -579,7 +582,9 @@ describe('compaction at a rest', () => {
     ['a context at the size or under it', { compaction: 150_005, usage: past }, {}],
     [
       'a size at or above the model window',
-      { compaction: 300_000, usage: { tokens: 290_000, contextWindow: 262_144, percent: 99 } },
+      // Pi's estimate can run past the window before Pi's own overflow handling: the size is
+      // passed, but a size at the window is no point of ours.
+      { compaction: 262_144, usage: { tokens: 270_000, contextWindow: 262_144, percent: 103 } },
       {},
     ],
     [
@@ -640,5 +645,14 @@ describe('compaction at a rest', () => {
     } finally {
       await s.close()
     }
+  })
+
+  it('reads the size its launch gave it from CF_COMPACTION_TOKENS, and nothing else as one', () => {
+    assert.equal(compactionOf({ CF_COMPACTION_TOKENS: '400000' }), 400_000)
+    for (const text of [undefined, '', '0', '-400000', '400k', '4e5', '400000.5', ' 400000']) {
+      assert.equal(compactionOf({ CF_COMPACTION_TOKENS: text }), undefined, String(text))
+    }
+    assert.equal(compactionOf({ CF_COMPACTION: '400000' }), undefined, 'another name')
+    assert.equal(compactionOf(undefined), undefined)
   })
 })

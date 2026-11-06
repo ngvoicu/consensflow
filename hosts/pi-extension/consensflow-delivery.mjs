@@ -473,12 +473,17 @@ export default function consensflowDelivery(pi) {
     settled: process.env.CF_DELIVERY_SETTLED,
     expired: process.env.CF_DELIVERY_EXPIRED,
     launchId: process.env.CF_DELIVERY_LAUNCH_ID,
-    compaction: tokensOf(process.env.CF_COMPACTION_TOKENS),
+    compaction: compactionOf(process.env),
   })
 }
 
-/** `text` as a whole number of tokens above nought, or none. */
-function tokensOf(text) {
+/**
+ * The size the launch gave the window to compact at, from its environment
+ * (`CF_COMPACTION_TOKENS`): a whole number of tokens above nought, or none, which is Pi's
+ * own point.
+ */
+export function compactionOf(env) {
+  const text = env?.CF_COMPACTION_TOKENS
   if (typeof text !== 'string' || !/^[1-9][0-9]*$/.test(text)) return undefined
   const tokens = Number(text)
   return Number.isSafeInteger(tokens) ? tokens : undefined

@@ -81,7 +81,7 @@ fn every_members_launch_is_given_the_size_as_devin_s_thresholds_and_nothing_else
 }
 
 #[test]
-fn the_size_is_given_to_a_session_resumed_as_to_one_launched() {
+fn a_devin_session_resumed_is_given_the_size_as_one_launched_is() {
     let home = Home::new();
     let adapter = home.adapter();
     let resumed = prepare(
