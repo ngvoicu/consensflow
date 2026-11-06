@@ -21,7 +21,7 @@ hm-cf-task-list = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::ta
 hm-evals-plan = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "plan"]
 hm-e2e-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
 hm-page-chief = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "asks the chief's effort"]
-hm-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "the name a member had before"]
+hm-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "every name a member had|member that joined in alpha.2"]
 hm-page-needs-edit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "could not run on what it ran on"]
 hm-page-designer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "keeps an image designer a member of its own"]
 hm-harness-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "window_args::"]
@@ -32,13 +32,13 @@ hm-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "ap
 
 [[plant]]
 name = "harness models: a handle another participant has takes a number, not the harness in front"
-meant = "a_taken_handle_puts_the_harness_in_front_then_a_number_after"
+meant = "a_name_that_is_taken_puts_the_provider_of_a_pi_model_in_front_then_the_harness_then_a_number"
 runs = ["hm-ledger-handles", "hm-ledger-members"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/handles.rs"
 find = '''
-    let with_harness = slug(&[harness, shown, effort]);
+    let with_harness = slug(&[harness, provider.unwrap_or_default(), shown, effort]);
 '''
 replace = '''
     let with_harness = plain.clone();
@@ -46,7 +46,7 @@ replace = '''
 
 [[plant]]
 name = "harness models: a handle leaves the effort out"
-meant = "a_handle_is_the_model_s_name_and_its_effort_in_lowercase_words"
+meant = "a_handle_is_the_model_s_id_and_its_effort_in_lowercase_words"
 runs = ["hm-ledger-handles"]
 
 [[plant.edit]]
@@ -67,9 +67,13 @@ runs = ["hm-ledger-handles"]
 file = "crates/cf-ledger/src/handles.rs"
 find = '''
         .filter(|name| !name.trim().is_empty())
+        .or(model)
+        .map(str::to_owned)
 '''
 replace = '''
         .filter(|_| false)
+        .or(model)
+        .map(str::to_owned)
 '''
 
 [[plant]]
@@ -159,32 +163,17 @@ replace = '''
 '''
 
 [[plant]]
-name = "harness models: a member keeps no name of its model, as its harness's list names it"
+name = "harness models: a member keeps no id of its model, as its harness's list names it"
 meant = "a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_the_human_chose"
 runs = ["hm-daemon-members"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
 find = '''
-        model_name: Some(listed.label.clone()),
+        model_name: Some(listed.model()),
 '''
 replace = '''
         model_name: None,
-'''
-
-[[plant]]
-name = "harness models: cf staff says no harness or model id beside a member's model"
-meant = "every_case_but_the_departed_asks_says_and_exits_as_node_did"
-runs = ["hm-cf-board"]
-
-[[plant.edit]]
-file = "crates/cf/src/board/mod.rs"
-find = '''
-    format!("{shown} ({}, {id})", js::text(member.get("harnessName")))
-'''
-replace = '''
-    let _ = id;
-    shown
 '''
 
 [[plant]]
@@ -195,15 +184,15 @@ runs = ["hm-daemon-tasks"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/tasks.rs"
 find = '''
-        if participant.harness.is_some() {
+        if participant.harness.is_some() && (participant.role == "chief" || participant.name_apart)
 '''
 replace = '''
-        if participant.harness.is_some() && false {
+        if participant.harness.is_some() && false
 '''
 
 [[plant]]
 name = "harness models: cf task list leaves what a lane runs on out of its head"
-meant = "a_lane_s_head_says_the_model_and_effort_it_runs_on"
+meant = "a_lane_s_head_says_the_model_and_effort_it_runs_on_where_its_name_does_not"
 runs = ["hm-cf-task-list"]
 
 [[plant.edit]]
@@ -312,25 +301,25 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''
-  [modelShown(member), member.harness && harnessOf(member.harness), member.effort, member.tier]
+      .map((pick) => ({ ...pick, name: modelShown(pick) }))
 '''
 replace = '''
-  [member.model, member.harness && harnessOf(member.harness), member.effort, member.tier]
+      .map((pick) => ({ ...pick, name: pick.model }))
 '''
 
 [[plant]]
 name = "harness models: the history viewer says nothing of the name a renamed member had"
-meant = "says beside its title the name a member had before members were named by their model"
+meant = "says beside its title every name a member had before it was named by its model's id"
 runs = ["hm-page-history"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/history-viewer.js"
 find = '''
-  return (participant.member ?? participant.handle) === participant.agent ? null : participant.agent
+  const names = participant.agent ? [participant.agent, ...left] : left
 '''
 replace = '''
-  return null
+  const names = []
 '''
 
 [[plant]]

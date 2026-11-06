@@ -1,0 +1,395 @@
+# Models are shown by their id and members are named by it (spec harness-models, HMD-12, T-1263):
+# a member's name is its model's id and effort (`@claude-opus-5-5-high`; Pi's without its provider,
+# Devin's by the id its list holds), the provider of a Pi model in front where that is taken, then
+# the harness, then a number; migration 0033 renames every member with a model, its windows after
+# it, and keeps each name it leaves; Edit member renames the member and its windows, one at work
+# too; the board says a name apart where it holds no model, and a card says its role, tier and
+# harness and no more under a name that holds the model; every select offers the id; History
+# says every earlier name. One plant takes one rule out; a test of it fails. Every name holds
+# `model ids:`: `npm run plants:daemon -- "model ids:"` runs them.
+
+[run]
+mi-ledger-handles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "handles::"]
+mi-ledger-ids = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "model_ids"]
+mi-ledger-members = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "members_by_model"]
+mi-engine-named = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "named_by_model::"]
+mi-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::"]
+mi-daemon-routes = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::"]
+mi-cf-board = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
+mi-page-selects = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "model selects of New project"]
+mi-page-cards = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "card says its role"]
+mi-page-edit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Edit member to another model renames"]
+mi-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "every name a member had|member that joined in alpha.2"]
+
+[[plant]]
+name = "model ids: a Pi model's name keeps its provider"
+meant = "a_handle_is_the_model_s_id_and_its_effort_in_lowercase_words"
+runs = ["mi-ledger-handles", "mi-ledger-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    if harness == "pi" {
+'''
+replace = '''
+    if harness == "pi-never" {
+'''
+
+[[plant]]
+name = "model ids: a Pi name taken goes straight to the harness, never the provider"
+meant = "a_name_that_is_taken_puts_the_provider_of_a_pi_model_in_front_then_the_harness_then_a_number"
+runs = ["mi-ledger-handles", "mi-ledger-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    if let Some(provider) = provider {
+'''
+replace = '''
+    if let Some(provider) = provider.filter(|_| false) {
+'''
+
+[[plant]]
+name = "model ids: a Pi name that goes on to the harness leaves its provider out"
+meant = "a_name_that_is_taken_puts_the_provider_of_a_pi_model_in_front_then_the_harness_then_a_number"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    let with_harness = slug(&[harness, provider.unwrap_or_default(), shown, effort]);
+'''
+replace = '''
+    let with_harness = slug(&[harness, shown, effort]);
+'''
+
+[[plant]]
+name = "model ids: a name holds no model, so every card says what it runs on"
+meant = "a_name_holds_its_model_where_the_id_and_effort_stand_in_it_as_words"
+runs = ["mi-ledger-handles", "mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    format!("-{handle}-").contains(&format!("-{name}-"))
+'''
+replace = '''
+    let _ = (handle, name);
+    false
+'''
+
+[[plant]]
+name = "model ids: a name holds its model only when it is nothing else"
+meant = "a_name_holds_its_model_where_the_id_and_effort_stand_in_it_as_words"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    format!("-{handle}-").contains(&format!("-{name}-"))
+'''
+replace = '''
+    handle == name
+'''
+
+[[plant]]
+name = "model ids: a rename leaves the windows under the old name"
+meant = "edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too"
+runs = ["mi-ledger-members", "mi-ledger-ids", "mi-engine-named"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    for (id, was) in windows {
+'''
+replace = '''
+    for (id, was) in windows.into_iter().filter(|_| false) {
+'''
+
+[[plant]]
+name = "model ids: a rename keeps no name the member left"
+meant = "edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too"
+runs = ["mi-ledger-members", "mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+    if old != new {
+        keep_former(db, member, old)?;
+    }
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "model ids: a rename keeps no name a window left"
+meant = "edit_member_names_a_member_and_its_windows_by_the_model_it_runs_now"
+runs = ["mi-ledger-ids", "mi-engine-named"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        keep_former(db, id, &was)?;
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "model ids: the migration names a member that has no model by a blank id"
+meant = "migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_follow"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+               AND model IS NOT NULL AND harness IS NOT NULL
+'''
+replace = '''
+               AND harness IS NOT NULL
+'''
+
+[[plant]]
+name = "model ids: the migration leaves a member's model name the label"
+meant = "migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_follow"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+"UPDATE participant SET model_name = ? WHERE id = ? OR member_id = ?",
+'''
+replace = '''
+"UPDATE participant SET model_name = model_name || substr(?, 1, 0) WHERE id = ? OR member_id = ?",
+'''
+
+[[plant]]
+name = "model ids: a Devin launch id is no longer looked up in the list"
+meant = "a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        [id] => return ((*id).to_owned(), Listed::FromList),
+'''
+replace = '''
+        [_] => {}
+'''
+
+[[plant]]
+name = "model ids: a launch id two models share is taken for the first's"
+meant = "a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        _ => return (model.to_owned(), Listed::LaunchId),
+'''
+replace = '''
+        _ => {}
+'''
+
+[[plant]]
+name = "model ids: the effort's word is taken out of a launch id wherever it stands, the last time"
+meant = "a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+        if let [at] = at.as_slice() {
+'''
+replace = '''
+        if let Some(at) = at.last() {
+'''
+
+[[plant]]
+name = "model ids: opening a ledger at schema 32 renames no member"
+meant = "migration_0033_names_every_member_with_a_model_by_its_id_and_its_windows_follow"
+runs = ["mi-ledger-handles", "mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = '''
+        crate::handles::name_members_by_id(db)?;
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "model ids: Edit member leaves the name it had"
+meant = "edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too"
+runs = ["mi-ledger-members", "mi-ledger-ids", "mi-engine-named", "mi-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+        if let Some(model) = &edit.model {
+'''
+replace = '''
+        if let Some(model) = edit.model.as_ref().filter(|_| false) {
+'''
+
+[[plant]]
+name = "model ids: Edit member to the same model gives the member another name"
+meant = "edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too"
+runs = ["mi-ledger-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                    candidate != member.handle
+'''
+replace = '''
+                    true
+'''
+
+[[plant]]
+name = "model ids: a member added by model is shown by the name its harness's list gives it"
+meant = "a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_the_human_chose"
+runs = ["mi-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''
+        model_name: Some(listed.model()),
+'''
+replace = '''
+        model_name: Some(listed.label.clone()),
+'''
+
+[[plant]]
+name = "model ids: a lane says what it runs on under a name that holds it"
+meant = "the_board_is_the_open_tasks_and_every_lane_as_summaries"
+runs = ["mi-daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+        if participant.harness.is_some() && (participant.role == "chief" || participant.name_apart)
+'''
+replace = '''
+        if participant.harness.is_some()
+'''
+
+[[plant]]
+name = "model ids: cf staff is told every name holds no model"
+meant = "a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_it_runs_on"
+runs = ["mi-daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/staff.rs"
+find = '''
+"nameApart": member.name_apart,
+'''
+replace = '''
+"nameApart": true,
+'''
+
+[[plant]]
+name = "model ids: cf staff says what every member runs on beside its name"
+meant = "every_case_but_the_departed_asks_says_and_exits_as_node_did"
+runs = ["mi-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''
+                let apart = member.get("nameApart").and_then(Value::as_bool) == Some(true);
+'''
+replace = '''
+                let apart = true;
+'''
+
+[[plant]]
+name = "model ids: the board says no name is apart from its model"
+meant = "an_alpha_2_ledger_opens_with_each_member_named_by_its_model_s_id_and_its_windows_after_it"
+runs = ["mi-ledger-ids"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = '''
+        name_apart: row.role != "human"
+'''
+replace = '''
+        name_apart: false && row.role != "human"
+'''
+
+[[plant]]
+name = "model ids: a card says what it runs on whatever its name holds"
+meant = "a member's card says its role, tier and harness under a name that holds its model, and what it runs on only under one that does not"
+runs = ["mi-page-cards"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+  const runs = nameApart(participant)
+'''
+replace = '''
+  const runs = true
+'''
+
+[[plant]]
+name = "model ids: a card says its harness by its kind, not as it is called"
+meant = "a member's card says its role, tier and harness under a name that holds its model, and what it runs on only under one that does not"
+runs = ["mi-page-cards"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+export const harnessLabel = (participant) =>
+  HARNESS_NAMES[participant.harness] ?? participant.harness
+'''
+replace = '''
+export const harnessLabel = (participant) => participant.harness
+'''
+
+[[plant]]
+name = "model ids: a model select offers the name its harness's list gives, not its id"
+meant = "the model selects of New project, Switch chief, Add member and Edit member show each model's id, as its harness takes it"
+runs = ["mi-page-selects"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+        model.contributor && !id.endsWith('-contributor') ? `${id} · Contributor` : id,
+'''
+replace = '''
+        model.label,
+'''
+
+[[plant]]
+name = "model ids: Edit member does not say the member took another name"
+meant = "Edit member to another model renames the member: its rows and its windows take the new name, and the status line says so"
+runs = ["mi-page-edit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+              member.handle === editing
+'''
+replace = '''
+              true
+'''
+
+[[plant]]
+name = "model ids: the history viewer names only the nickname a member had"
+meant = "says beside its title every name a member had before it was named by its model's id"
+runs = ["mi-page-history"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = '''
+  const names = participant.agent ? [participant.agent, ...left] : left
+'''
+replace = '''
+  const names = participant.agent ? [participant.agent] : []
+'''

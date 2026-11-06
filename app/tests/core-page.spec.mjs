@@ -11168,6 +11168,49 @@ test("a member's card says its role, tier and harness under a name that holds it
 })
 
 /**
+ * The name holds the model (HMD-12): Edit member to another model or effort renames the member,
+ * and the board shows the new name on its rows and its windows', the status line says it.
+ */
+test('Edit member to another model renames the member: its rows and its windows take the new name, and the status line says so', async ({
+  page,
+}) => {
+  await open(page, shotData('after'))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Edit @claude-opus-5-5-high' }).first().click()
+  await pickMember(settings, {
+    harness: 'Codex',
+    model: 'gpt-6.1-sol',
+    effort: 'max',
+    tier: 'critical',
+  })
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect(page.locator('#status')).toHaveText(
+    '@claude-opus-5-5-high is @gpt-6-1-sol-max now, and runs gpt-6.1-sol from its next window.',
+  )
+  expect(await calls(page, 'member.edit')).toEqual([
+    {
+      project: 1,
+      member: 'claude-opus-5-5-high',
+      harness: 'codex',
+      model: 'gpt-6.1-sol',
+      effort: 'max',
+      tier: 'critical',
+    },
+  ])
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await expect(page.locator('tr[data-handle="claude-opus-5-5-high"]')).toHaveCount(0)
+  await expect(page.locator('tr[data-handle="gpt-6-1-sol-max"] .row-name')).toHaveText([
+    '@gpt-6-1-sol-max',
+    '@gpt-6-1-sol-max',
+  ])
+  await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+  await expect(page.locator('tr[data-handle="gpt-6-1-sol-max-amber-pine"] .row-name')).toHaveText(
+    '@gpt-6-1-sol-max · amber-pine',
+  )
+})
+
+/**
  * Shots for the review of the model ids (HMD-12): the staff list, New project's and Switch
  * chief's selects, and a member's card before and after an edit, in dark and light. Not a
  * check: it writes PNGs into `CF_SHOTS_DIR` where that is set, and skips where it is not.
