@@ -525,21 +525,77 @@ find = '''    if (event?.aborted === true) return
 replace = '''
 '''
 
+# T-1272's blocker: real Pi is not idle for a whole compaction. Each plant below is caught by
+# the extension's tests on that semantics (the fake stays not idle while it compacts, and ends
+# it in Pi's order), the first through the real Rust channel (`pi-send`).
+
 [[plant]]
-name = "members compaction: the extension sends a delivery while its compaction runs"
-meant = "refuses a delivery as busy while its compaction runs, and delivers it once it is over"
+name = "members compaction: a compacting window's handover waits behind the idle check, as before T-1272"
+meant = "hands over nothing but Busy while Pi's own compaction runs, and one message after it ends (complete), through the real channel"
 runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''          const tui = compacting
-            ? { ready: false, reason: 'chief busy' }
-            : nativeTuiState(context, record.session)'''
-replace = '''          const tui = nativeTuiState(context, record.session)'''
+find = '''          if (compactingNow()) {'''
+replace = '''          if (context?.isIdle?.() !== true) break
+          if (compactingNow()) {'''
+
+[[plant]]
+name = "members compaction: the extension sends a delivery while its own compaction runs"
+meant = "refuses every delivery as busy while ours compaction runs, and delivers exactly one after it ends (complete)"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''          if (compactingNow()) {'''
+replace = '''          if (false) {'''
+
+[[plant]]
+name = "members compaction: the extension does not follow a compaction Pi began itself"
+meant = "refuses every delivery as busy while Pi's own compaction runs, and delivers exactly one after it ends (fail)"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    piCompacting = true'''
+replace = '''    void piCompacting'''
+
+[[plant]]
+name = "members compaction: an idle Pi is still taken for one that compacts"
+meant = "refuses every delivery as busy while Pi's own compaction runs, and delivers exactly one after it ends (endUntold)"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    if (piCompacting && context?.isIdle?.() === true) piCompacting = false
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "members compaction: a compaction's end leaves a turn that goes on busy"
+meant = "leaves a delivery waiting, unanswered, in a turn that goes on after Pi compacted in its middle"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    piCompacting = false
+    await consume()'''
+replace = '''    await consume()'''
+
+[[plant]]
+name = "members compaction: a handover for another session is refused busy while Pi compacts"
+meant = "keeps the expiry and session checks while Pi compacts"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''sessionIdOf(context) === record.session ? 'chief busy' : 'native session changed''''
+replace = ''''chief busy''''
 
 [[plant]]
 name = "members compaction: the extension asks for a second compaction while one runs"
-meant = "asks Pi once to compact at a rest once the context is past the size"
+meant = "asks Pi for no second compaction in the moment before the first has begun, when Pi still reads idle"
 runs = ["mc-pi-extension"]
 
 [[plant.edit]]
@@ -650,3 +706,15 @@ harnesses = ["muse"]
 file = "crates/cf-harness/src/muse/adapter.rs"
 find = '''            argv.extend(compaction_limit(launch.compaction));'''
 replace = '''            argv.extend(compaction_limit(None));'''
+
+[[plant]]
+name = "members compaction: a handover goes in before the extension's own compaction has begun"
+meant = "asks Pi for no second compaction in the moment before the first has begun, when Pi still reads idle"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    if (compacting) return true
+'''
+replace = '''
+'''

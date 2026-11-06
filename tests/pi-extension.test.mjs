@@ -75,6 +75,9 @@ async function setup(
     pollMs,
     compaction,
     usage,
+    // Pi's `compact()` awaits `abort()` before it sets its compaction state: Pi reads idle
+    // until the test says the compaction has begun (`started()`).
+    compactionStartsLater = false,
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
@@ -120,16 +123,20 @@ async function setup(
   // told `session_before_compact`. It ends complete (`session_compact`, told while Pi is still
   // compacting, then its state cleared), failed or cancelled (its state cleared, then
   // `session_compact_failed`), and only then the caller's callback, as `compact()` returns.
-  const begin = (reason, options) => {
-    piCompacting = true
-    void tell('session_before_compact', {
-      type: 'session_before_compact',
-      reason,
-      willRetry: false,
-    })
+  const begin = (reason, options, later = false) => {
+    const started = () => {
+      piCompacting = true
+      void tell('session_before_compact', {
+        type: 'session_before_compact',
+        reason,
+        willRetry: false,
+      })
+    }
+    if (!later) started()
     const handle = {
       options,
       reason,
+      started,
       complete: async (result = { tokensBefore: 150_005, summary: 'the summary' }) => {
         await tell('session_compact', { type: 'session_compact', reason, willRetry: false })
         piCompacting = false
@@ -166,7 +173,7 @@ async function setup(
     return handle
   }
   ctx.compact = (options) => {
-    begin('manual', options)
+    begin('manual', options, compactionStartsLater)
   }
   const payload =
     typeof record?.id === 'string' &&
@@ -636,6 +643,30 @@ describe('compaction at a rest', () => {
     }
   })
 
+  it('asks Pi for no second compaction in the moment before the first has begun, when Pi still reads idle', async () => {
+    const s = await setup(null, { compaction: 100_000, usage: past, compactionStartsLater: true })
+    try {
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      assert.equal(s.ctx.isIdle(), true, 'Pi has not set its compaction state yet')
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      // And a handover in that moment is refused busy: a message sent then would start a turn
+      // that the compaction's own abort() ends.
+      await arrive(s, 1)
+      await s.extension.consume()
+      assert.equal((await ackOf(s, 1)).reason, 'chief busy')
+      s.compactions[0].started()
+      await s.compactions[0].complete()
+      await arrive(s, 2)
+      await s.extension.consume()
+      await sentWithin(s, 1)
+      assert.deepEqual(s.pi.sent, [envelope])
+    } finally {
+      await s.close()
+    }
+  })
+
   for (const [name, options, event] of [
     ['a project that chose no size', { usage: past }, {}],
     ['a context at the size or under it', { compaction: 150_005, usage: past }, {}],
@@ -742,6 +773,23 @@ describe('compaction at a rest', () => {
         (await waitFor(join(s.expired, '..', 'ack', `${idOf(2)}.json`))).reason,
         'expired-before-send',
       )
+      assert.deepEqual(s.pi.sent, [])
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('leaves a delivery waiting, unanswered, in a turn that goes on after Pi compacted in its middle', async () => {
+    const s = await setup(null, { idle: false })
+    try {
+      const compaction = s.piCompacts('threshold')
+      await arrive(s, 1)
+      await s.extension.consume()
+      assert.equal((await ackOf(s, 1)).reason, 'chief busy')
+      await compaction.complete()
+      await arrive(s, 2)
+      await s.extension.consume()
+      await assert.rejects(ackOf(s, 2), /timed out/)
       assert.deepEqual(s.pi.sent, [])
     } finally {
       await s.close()

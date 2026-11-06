@@ -385,7 +385,6 @@ export function createDeliveryExtension(
 
   pi.on('session_start', async (_event, ctx) => {
     context = ctx
-    piCompacting = false
     watcher?.close()
     clearInterval(poller)
     await writeShown()
@@ -469,6 +468,7 @@ export function createDeliveryExtension(
     context = ctx ?? context
     piCompacting = true
   })
+  // Ended: a turn the compaction came in the middle of goes on as any turn does.
   const compactionEnded = async (_event, ctx) => {
     context = ctx ?? context
     piCompacting = false
@@ -478,8 +478,6 @@ export function createDeliveryExtension(
   pi.on('session_compact_failed', compactionEnded)
   pi.on('agent_settled', async (event, ctx) => {
     context = ctx ?? context
-    // No compaction runs once Pi has settled.
-    piCompacting = false
     await writeSettlement()
     compactAtRest(event, context)
     await consume()
