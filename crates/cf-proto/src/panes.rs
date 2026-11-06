@@ -109,6 +109,23 @@ pub const TAIL_LINES: usize = 12;
 /// The most lines of a screen as drawn (`bottom`) a snapshot sends.
 pub const BOTTOM_LINES: usize = 40;
 
+/// The last `max` of `lines` that say something, the oldest first: no empty line, and no line that is
+/// only drawing (a border, a rule, a prompt's `$`) with no letter or digit in it. A pane host's tail of
+/// its screen (`Screen::tail` of cf-panes), and so what the engine reads of a window's screen: the
+/// dialog reader's corpus cuts its screens with it too (T-1243), for a screen is not the same one with
+/// its empty lines and its rules in.
+pub fn word_tail<I>(lines: I, max: usize) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut lines: Vec<String> = lines
+        .into_iter()
+        .filter(|line| line.chars().any(char::is_alphanumeric))
+        .collect();
+    lines.drain(..lines.len().saturating_sub(max));
+    lines
+}
+
 /// How long the host gives a window's programs, once asked to end, before what is left
 /// of them is killed: a close that finds them all gone sooner does not wait, and on
 /// Windows, where nothing is asked, there is no grace (`cf-panes`' `close`). A kill is
@@ -512,6 +529,40 @@ fn per_character_ms(us: u64, characters: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    /// What the pane host sends as a screen's tail: the lines that say something, the last twelve, the
+    /// oldest first; the empty lines and the rules are not in it, and no line is cut.
+    #[test]
+    fn a_tail_keeps_the_last_lines_that_hold_a_letter_or_a_digit() {
+        let drawn =
+            |lines: &[&str]| -> Vec<String> { lines.iter().map(|l| (*l).to_owned()).collect() };
+        let screen = drawn(&[
+            "",
+            "  Worked for 5s • 16:00",
+            "",
+            "────────────────────",
+            "› Ask Codex to do anything",
+            "› ",
+            "  ? for shortcuts",
+            "⏵⏵ ───",
+            "  42",
+        ]);
+        assert_eq!(
+            word_tail(screen.clone(), 12),
+            [
+                "  Worked for 5s • 16:00",
+                "› Ask Codex to do anything",
+                "  ? for shortcuts",
+                "  42"
+            ]
+        );
+        assert_eq!(
+            word_tail(screen, 2),
+            ["  ? for shortcuts", "  42"],
+            "the last lines, the oldest first"
+        );
+        assert!(word_tail(drawn(&["", "───", "▌"]), 12).is_empty());
+    }
+
     /// A silent paste's wait is its pace and its cap for the paste's length, and goes on the
     /// wire in the words the pane host reads.
     #[test]

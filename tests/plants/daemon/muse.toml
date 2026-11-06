@@ -896,16 +896,17 @@ file = "crates/cf-harness/src/muse/launch.rs"
 find = '''    let mut hooks = owner_hooks(env)?;'''
 replace = '''    let mut hooks = owner_hooks(env).map(|_| Map::new())?;'''
 
-# The hooks of a launch: ConsensFlow's after the owner's own.
+# The hooks of a launch: ConsensFlow's before the owner's own (T-1246), so that part k of a role is
+# block k whatever the owner's hooks print.
 [[plant]]
-name = "muse: ConsensFlow's SessionStart hook goes before the owner's"
-meant = "the_owner_s_hooks_run_with_consensflow_s_after_them_and_their_file_is_never_written"
+name = "muse: ConsensFlow's SessionStart hook goes after the owner's"
+meant = "consensflow_s_hooks_run_before_the_owner_s_so_their_blocks_are_the_first_and_the_owner_s_file_is_never_written"
 runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''    starts.push(added);'''
-replace = '''    starts.insert(0, added);'''
+find = '''    starts.insert(0, added);'''
+replace = '''    starts.push(added);'''
 
 # The hook: a child agent's start is not the window's.
 [[plant]]
@@ -3312,8 +3313,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''    if windows {'''
-replace = '''    if false {'''
+find = '''    let words = if windows {'''
+replace = '''    let words = if false {'''
 
 [[plant]]
 name = "muse: a Windows hook off Windows"
@@ -3322,8 +3323,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''    if windows {'''
-replace = '''    if true {'''
+find = '''    let words = if windows {'''
+replace = '''    let words = if true {'''
 
 [[plant]]
 name = "muse: a blank is a word of cmd's"

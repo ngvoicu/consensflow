@@ -13,6 +13,19 @@
 //! ([`Dialog::asks`]): its words above ask, or a hint below the choices says how to answer them
 //! (Devin's dialog of a call asks nothing above its list, T-1192). A screen with no cursor on a
 //! line of choices, or with fewer than two choices, shows none.
+//!
+//! A harness's own prompt is no dialog (T-1240). Its input box is drawn with the same cursor
+//! as its choices (Codex's `› ` and the hint "Ask Codex to do anything", Devin's `❭`, Muse's
+//! `❯` with one of its tips), and the engine reads the pane host's tail, which has no empty
+//! line and no rule that says no word: the box, the status under it and the last line of the
+//! conversation are one under the other in one column, as a list of choices is. The reader takes
+//! the cursor line directly under a rule across the screen for an input box's, and no choice
+//! (Devin's and Muse's rules say something, the mode or the voice key, and so are in the tail).
+//! Nothing else here is T-1240's: a numbered list, a hint of keys and a `›` are what the
+//! conversation of any harness may hold, and the reader reads them as it always did (T-1243: a
+//! rule that ended a numbered list at the first line that is not numbered read Pi's and Muse's
+//! transcripts as dialogs). Codex's box draws no rule and its words are the user's to configure,
+//! so its window reads no dialog by shape at all (`CodexWindow::dialog`).
 
 use super::input_box::is_rule;
 use crate::contract::Dialog;
@@ -83,6 +96,16 @@ fn rule_across(line: &str) -> bool {
     const RULES: [char; 7] = ['─', '━', '═', '╌', '┄', '┈', '-'];
     !line.chars().any(char::is_alphanumeric)
         && line.chars().filter(|at| RULES.contains(at)).count() >= 4
+}
+
+/// Whether `line` is a rule that tops an input box: `─` from its start to its end, four or
+/// more of them, a label in it at most (Devin's names its mode and its conversation, Muse's the
+/// voice key: "── Voice input (⌥ + v to start) ──").
+fn tops_a_box(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("──")
+        && line.ends_with('─')
+        && line.chars().filter(|at| *at == '─').count() >= 4
 }
 
 /// Whether `line` is a dialog's hint of how it is answered, drawn under its choices: Enter, or
@@ -161,8 +184,10 @@ pub(crate) fn read(screen: &[String]) -> Option<Shown> {
     }
     above.reverse();
     // An input box is drawn under a rule across the screen, its mark on its first line (Claude
-    // Code's `❯`, Devin's `❭`): what it holds, a line or more, is no choice (`input_box`).
-    if first == at && first > 0 && is_rule(&screen[first - 1]) {
+    // Code's `❯`, Devin's `❭`, Muse's `❯`): what it holds, a line or more, is no choice
+    // (`input_box`). A rule that says something (Devin's mode, Muse's voice key) is one of the
+    // lines the choices took in, drawn a column in; the cursor line is under it either way.
+    if at > 0 && (is_rule(&screen[at - 1]) || tops_a_box(&screen[at - 1])) {
         return None;
     }
     let mut last = at;

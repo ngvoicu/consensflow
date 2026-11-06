@@ -34,9 +34,12 @@ use crate::records::{self, Boundary, Cache, Options, Reading, IDLE_MS};
 use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 
 mod admin;
+pub mod base_dialog;
 mod children;
+pub mod corpus;
 mod paste;
 mod peer;
+pub mod screens;
 pub mod server;
 
 pub use admin::{

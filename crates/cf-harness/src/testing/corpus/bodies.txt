@@ -1,0 +1,96 @@
+## question assistant
+Which format should I use for my reply: JSON or text?
+## delivered-question user
+[ConsensFlow m-2 · T-1 · question from @worker]
+Which format should I use for my reply: JSON or text?
+
+Run in your shell: /tmp/consensflow/bundle/bin/cf answer m-2 "…"
+## numbered assistant
+Which approach should we take?
+
+1. Use the table
+2. Test it first
+## numbered-then-text assistant
+Which approach should we take?
+
+1. Use the table
+2. Test it first
+
+This is sample text
+## numbered-then-question assistant
+1. Use the table
+2. Test it first
+
+Which approach should we take?
+## quoted-list assistant
+Which approach should we take?
+
+> 1. Use the table
+> 2. Test it first
+> This is sample quoted text
+## quoted-words assistant
+Which approach should we take?
+
+> the table
+> the state machine
+## fenced-quote assistant
+Which approach should we take?
+
+```
+> 1. Use the table
+  2. Test it first
+  This is sample quoted text
+```
+## fenced-codex-menu assistant
+Which one do you want?
+
+```
+› 1. Use the table
+  2. Test it first
+  Press enter to confirm or esc to go back
+```
+## fenced-arrow-menu assistant
+Which one do you want?
+
+```
+→ 1. Use the table
+  2. Test it first
+  Press enter to confirm
+```
+## bullets assistant
+Which approach should we take?
+
+- the table
+- the state machine
+## nested assistant
+Which approach should we take?
+
+1. Use the table
+   - because it is fast
+   - because it is small
+2. Test it first
+## tool-numbers assistant
+Did that work?
+
+    1. cargo build
+    2. cargo test
+    3. 4 failures
+## hint-words assistant
+Which one do you want?
+
+Press enter to confirm or esc to go back
+## user-numbered user
+1. Use the table
+2. Test it first
+please decide?
+## user-two-lines user
+Which format should I use?
+JSON or text
+## user-quote user
+> 1. Use the table
+> 2. Test it first
+which one?
+## user-menu user
+› 1. Use the table
+  2. Test it first
+which one?

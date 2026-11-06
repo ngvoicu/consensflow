@@ -97,14 +97,7 @@ impl Screen {
     /// `$`) with no letter or digit in it, and each without the blanks that
     /// end it. A text that wrapped at the edge of the screen is one line.
     pub fn tail(&self, max: usize) -> Vec<String> {
-        let mut lines: Vec<String> = self
-            .grid
-            .lines()
-            .into_iter()
-            .filter(|line| line.chars().any(char::is_alphanumeric))
-            .collect();
-        lines.drain(..lines.len().saturating_sub(max));
-        lines
+        cf_proto::panes::word_tail(self.grid.lines(), max)
     }
 
     /// The last `max` lines of the screen as it is drawn, the oldest first,

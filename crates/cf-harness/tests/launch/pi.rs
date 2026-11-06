@@ -12,6 +12,7 @@
 //! Where Node's test stood in the records of a conversation, a stand-in
 //! `Records` does here. The Specmint skill a chief is given is `specs`'s.
 
+mod dialogs;
 mod specs;
 
 use std::cell::RefCell;

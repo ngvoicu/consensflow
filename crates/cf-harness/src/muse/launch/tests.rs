@@ -135,17 +135,19 @@ fn configured(dir: &Path) -> Env {
 }
 
 fn ours() -> Value {
-    added_hook(
+    added_hooks(
         "/app/cf",
         "/launch/role/SKILL.md",
         "/launch/sessions.jsonl",
         false,
+        1,
     )
     .unwrap()
 }
 
 #[test]
-fn the_owner_s_hooks_run_with_consensflow_s_after_them_and_their_file_is_never_written() {
+fn consensflow_s_hooks_run_before_the_owner_s_so_their_blocks_are_the_first_and_the_owner_s_file_is_never_written(
+) {
     let dir = tempfile::tempdir().unwrap();
     let settings = dir.path().join("muse/settings.json");
     fs::create_dir_all(settings.parent().unwrap()).unwrap();
@@ -166,11 +168,13 @@ fn the_owner_s_hooks_run_with_consensflow_s_after_them_and_their_file_is_never_w
     );
     let starts = hooks["SessionStart"].as_array().unwrap();
     assert_eq!(starts.len(), 2);
+    // Ours first (T-1246): Muse numbers the blocks of the hooks that printed in this order, ours
+    // always print, so part k of a role is block k whatever the owner's hooks print.
+    assert_eq!(starts[0], ours(), "ConsensFlow's first");
     assert_eq!(
-        starts[0], owner["hooks"]["SessionStart"][0],
-        "the owner's first"
+        starts[1], owner["hooks"]["SessionStart"][0],
+        "the owner's after"
     );
-    assert_eq!(starts[1], ours());
     assert_eq!(
         fs::read_to_string(&settings).unwrap(),
         text,
@@ -208,16 +212,17 @@ fn with_no_settings_or_no_hooks_there_is_consensflow_s_alone_and_a_settings_file
 
 #[test]
 fn the_hook_names_its_files_on_its_command_line_quoted_for_the_hook_s_shell() {
-    let hook = added_hook(
+    let hook = added_hooks(
         "/Apps/Consens Flow/cf",
         "/l/it's/SKILL.md",
         "/l/sessions.jsonl",
         false,
+        1,
     )
     .unwrap();
     assert_eq!(
         hook["hooks"][0]["command"],
-        r"'/Apps/Consens Flow/cf' hook muse-session '/l/it'\''s/SKILL.md' '/l/sessions.jsonl'"
+        r"'/Apps/Consens Flow/cf' hook muse-session '/l/it'\''s/SKILL.md' '/l/sessions.jsonl' '0'"
     );
     assert_eq!(hook["matcher"], "");
 }
@@ -230,25 +235,134 @@ fn the_hook_names_its_files_on_its_command_line_quoted_for_the_hook_s_shell() {
 #[test]
 fn on_windows_the_hook_is_a_cmd_line_of_words_with_no_quote_and_a_path_cmd_cannot_take_is_refused()
 {
-    let hook = added_hook(
+    let hook = added_hooks(
         r"C:\Apps\ConsensFlow\cf.exe",
         r"C:\Users\Zoë\l\it's\SKILL.md",
         r"C:\Users\Zoë\l\sessions.jsonl",
         true,
+        1,
     )
     .unwrap();
     assert_eq!(
         hook["hooks"][0]["commandWindows"],
-        r"C:\Apps\ConsensFlow\cf.exe hook muse-session C:\Users\Zoë\l\it's\SKILL.md C:\Users\Zoë\l\sessions.jsonl"
+        r"C:\Apps\ConsensFlow\cf.exe hook muse-session C:\Users\Zoë\l\it's\SKILL.md C:\Users\Zoë\l\sessions.jsonl 0"
     );
     assert_eq!(hook["hooks"][0]["timeout"], 10);
-    let off = added_hook("/a/cf", "/l/SKILL.md", "/l/sessions.jsonl", false).unwrap();
+    let off = added_hooks("/a/cf", "/l/SKILL.md", "/l/sessions.jsonl", false, 1).unwrap();
     assert!(off["hooks"][0].get("commandWindows").is_none(), "{off}");
     for unsayable in [r"Z:\no such folder\cf.exe", r"Z:\a&b\cf.exe"] {
-        let refused = added_hook(unsayable, r"C:\l\SKILL.md", r"C:\l\s.jsonl", true).unwrap_err();
+        let refused =
+            added_hooks(unsayable, r"C:\l\SKILL.md", r"C:\l\s.jsonl", true, 1).unwrap_err();
         assert!(
             refused.contains("cmd.exe") && refused.contains(unsayable),
             "{refused}"
         );
     }
+}
+
+/// A role is longer than a hook may say (16,384 bytes, T-1246), so each part of it has a hook
+/// of its own, in the one group, named by its number; and the number is on Windows' line too.
+#[test]
+fn a_role_in_parts_has_a_hook_for_each_numbered_from_0_on_both_lines() {
+    let group = added_hooks("/app/cf", "/l/SKILL.md", "/l/s.jsonl", false, 3).unwrap();
+    let hooks = group["hooks"].as_array().unwrap();
+    assert_eq!(group["matcher"], "");
+    assert_eq!(hooks.len(), 3);
+    for (part, hook) in hooks.iter().enumerate() {
+        assert_eq!(
+            hook["command"],
+            format!("'/app/cf' hook muse-session '/l/SKILL.md' '/l/s.jsonl' '{part}'")
+        );
+        assert_eq!(hook["timeout"], 10);
+    }
+    let group = added_hooks(r"C:\cf.exe", r"C:\l\SKILL.md", r"C:\l\s.jsonl", true, 2).unwrap();
+    let lines: Vec<_> = group["hooks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hook| hook["commandWindows"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            r"C:\cf.exe hook muse-session C:\l\SKILL.md C:\l\s.jsonl 0",
+            r"C:\cf.exe hook muse-session C:\l\SKILL.md C:\l\s.jsonl 1"
+        ]
+    );
+}
+
+/// Which hook says what, in the launch's configuration: each of ours is one `cf hook
+/// muse-session` of its number, and `count` of them are given, first.
+#[test]
+fn a_launch_gives_count_hooks_of_ours_first_whatever_the_owner_has() {
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = install(dir.path(), "1.4.14-R7309.1", &["muse-bin-1.4.14-R7309.1"]);
+    let settings = dir.path().join("muse/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"a"},{"type":"command","command":"b"}]},{"command":"c"}]}}"#,
+    )
+    .unwrap();
+    let env = Env::from_vars([
+        ("HOME", "/h"),
+        ("XDG_CONFIG_HOME", dir.path().to_str().unwrap()),
+        (
+            "CONSENSFLOW_HOME",
+            dir.path().join("consensflow").to_str().unwrap(),
+        ),
+    ]);
+    let hooks_of = |count: usize| {
+        let given = integration(
+            &env,
+            &LaunchId::new("11111111-1111-4111-8111-111111111111").unwrap(),
+            &launcher,
+            "/app/cf",
+            "/l/SKILL.md",
+            count,
+        )
+        .unwrap();
+        let hooks: Value =
+            serde_json::from_str(given.args[1].strip_prefix("hooks=").unwrap()).unwrap();
+        let starts = hooks["SessionStart"].as_array().unwrap().clone();
+        assert_eq!(starts.len(), 3, "ours and the owner's two entries");
+        (starts[0]["hooks"].as_array().unwrap().len(), starts)
+    };
+    for count in [1, 2, 5, crate::muse::MOST_PARTS] {
+        let (ours, starts) = hooks_of(count);
+        assert_eq!(ours, count);
+        assert_eq!(starts[1]["hooks"][0]["command"], "a", "the owner's follow");
+        assert_eq!(starts[2]["command"], "c");
+    }
+    assert_eq!(
+        hooks_of(500).0,
+        crate::muse::MOST_PARTS,
+        "never past the most hooks Muse was measured to take"
+    );
+}
+
+/// A Windows process takes a command line of at most 32,767 characters, and the hooks are on
+/// Muse's (`-c hooks=<json>`): a hook for each part of a role, each with the window's `cf`,
+/// the role's file and the sessions' file on both of its lines, backslashes doubled in the
+/// JSON. The most parts, with paths as long as a launch's are, leave the line room.
+#[test]
+fn the_most_parts_on_windows_paths_as_long_as_a_launch_has_fit_a_command_line() {
+    let cf = r"C:\Users\someone-with-a-long-name\AppData\Local\ConsensFlow\cli\bin\cf.exe";
+    let launch = r"C:\Users\someone-with-a-long-name\AppData\Roaming\consensflow\integrations\muse\11111111-1111-4111-8111-111111111111";
+    let role = format!(r"{launch}\role\.claude\skills\consensflow-chief\SKILL.md");
+    let said = format!(r"{launch}\sessions.jsonl");
+    let group = added_hooks(cf, &role, &said, true, crate::muse::MOST_PARTS).unwrap();
+    let argument = format!(
+        "hooks={}",
+        js::stringify(&json!({ "SessionStart": [group] }))
+    );
+    // What else is on the line: the program, the model, the flags, a long folder or two.
+    let rest = 4_000;
+    assert!(
+        argument.len() + rest < 32_767,
+        "{} hooks of {} characters leave {} for the rest of the line",
+        crate::muse::MOST_PARTS,
+        argument.len(),
+        32_767 - argument.len()
+    );
 }

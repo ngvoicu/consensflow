@@ -58,11 +58,17 @@ pub fn run(
             env.path("CHISEL_PURE_ACP_WIRE_LOG"),
         ),
         // Muse runs its hooks with an environment of its own: the launch names the
-        // role file and the file of the window's sessions on the command line.
+        // role file and the file of the window's sessions on the command line, and
+        // which part of the role this hook says (a hook may say 16,384 bytes, a role
+        // is longer: one hook for each part, the first where none is named).
         Some("muse-session") => muse::session_hook(
             input,
             args.first().map(Path::new),
             args.get(1).map(Path::new),
+            args.get(2)
+                .and_then(|part| part.to_str())
+                .and_then(|part| part.parse().ok())
+                .unwrap_or(0),
         ),
         _ => None,
     };
