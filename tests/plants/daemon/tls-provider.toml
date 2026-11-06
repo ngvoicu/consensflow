@@ -7,13 +7,56 @@
 # built on ring. These plants are the fix's own: the install taken out of each place that makes it.
 # Every name here begins `tls provider:`, so `npm run plants:daemon -- "tls provider"` runs them.
 #
-# A rule over the sources, that every client names its provider, was tried (the sources read as
-# Rust) and left out of the release; the lock's test, `tools/xtask/tests/tls_lock.rs`, has no plant:
-# cargo rewrites a `Cargo.lock` that holds a package nothing needs before any test reads it.
+# The class itself, that every HTTPS client has its provider, is held by clippy (T-1253): a client is
+# built only by its crate's one approved constructor (cf-daemon's `screens::network::client`, the
+# app's `update_page::client`), and clippy.toml refuses every other construction, as methods
+# (`Client::new`, `Client::builder`, `ClientBuilder::new`, `reqwest::get`, rustls'
+# `ClientConfig::builder`...) and as types (`reqwest::Client`, `ClientBuilder`: the only way to refuse
+# a `Default` impl, an alias or a derive). The plants named `tls provider lint:` are the rules':
+#   - a client built beside the approved constructor in the daemon and in the app, in each way
+#     the rule names, and in a place that only holds the type;
+#   - each entry of clippy.toml taken out in turn: the fixtures of `screens/network/rules.rs`
+#     expect every refused shape, so clippy ends on an expectation it did not meet;
+#   - an allow of these lints for a whole module or crate, which tools/xtask/tests/tls_clients.rs
+#     refuses, and that test's own reader.
+# A rule that read the sources to judge where a provider comes from was tried (T-1247) and left out
+# of the release: aliases, scopes, closures, conditional installs and `Default::default()` each
+# escaped it. The lock's test, `tools/xtask/tests/tls_lock.rs`, has no plant: cargo rewrites a
+# `Cargo.lock` that holds a package nothing needs before any test reads it.
 
 [run]
 tls-app-client = ["cargo", "xtask", "app", "test", "update_page::tests::the_feeds_client_is_built"]
 tls-app-install = ["cargo", "xtask", "app", "test", "tls::tests::"]
+# The lints a plant of a rule is tried with, the gate's: clippy over the daemon, and over the app, with
+# warnings denied. A plant that does not build, or fails clippy on another lint, is no catch of a rule:
+# node says the first line of a rule's denial and ends with 1, and for any other failure says so and
+# ends with 0, so that the plant is MISSED where it is read, and never taken for caught.
+tls-daemon-lint = ["node", "-e", '''
+const ran = require("child_process").spawnSync("cargo", ["clippy", "--offline", "-p", "cf-daemon", "--all-targets", "--", "-D", "warnings"], { encoding: "utf8" });
+if (ran.status !== 0) {
+  const text = `${ran.stderr}\n${ran.stdout}`.split("\n");
+  const denied = text.find((line) => /^error: (use of a disallowed|this lint expectation is unfulfilled)/.test(line));
+  if (denied) {
+    console.log(`clippy denied: ${denied}`);
+    process.exit(1);
+  }
+  console.log(`clippy failed, and not on a rule of clippy.toml: ${text.find((line) => line.startsWith("error"))}`);
+}
+''']
+tls-app-lint = ["node", "-e", '''
+const ran = require("child_process").spawnSync("cargo", ["xtask", "app", "clippy"], { encoding: "utf8" });
+if (ran.status !== 0) {
+  const text = `${ran.stderr}\n${ran.stdout}`.split("\n");
+  const denied = text.find((line) => /^error: (use of a disallowed|this lint expectation is unfulfilled)/.test(line));
+  if (denied) {
+    console.log(`clippy for the app denied: ${denied}`);
+    process.exit(1);
+  }
+  console.log(`clippy for the app failed, and not on a rule of clippy.toml: ${text.find((line) => line.startsWith("error"))}`);
+}
+''']
+# The test that refuses an allow of those lints for a whole module or crate, and its reader.
+tls-crate-allows = ["cargo", "test", "--offline", "-p", "xtask", "--test", "tls_clients"]
 
 # The feed's client is built on whatever the process has: with none, reqwest panics.
 [[plant]]
@@ -82,3 +125,562 @@ replace = '''
     .expect("error while building the ConsensFlow app");
     tls::install_ring_as_default();
 '''
+
+[[plant]]
+name = "tls provider lint: a second client is built in the daemon beside the approved constructor"
+meant = "disallowed_methods"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() -> reqwest::Client {
+    reqwest::Client::new()
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+[[plant]]
+name = "tls provider lint: a client builder is started in the daemon beside the approved constructor"
+meant = "disallowed_methods"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() {
+    let _ = reqwest::Client::builder().build();
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+[[plant]]
+name = "tls provider lint: a client is built in the daemon under an alias of its type"
+meant = "disallowed_methods"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() {
+    use reqwest::Client as Http;
+    let _ = Http::new();
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+[[plant]]
+name = "tls provider lint: a client is held in the daemon by a derived Default"
+meant = "disallowed_types"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+#[allow(dead_code)]
+#[derive(Default)]
+struct SecondHolder {
+    client: reqwest::Client,
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+[[plant]]
+name = "tls provider lint: a client is made in the daemon by Default::default"
+meant = "disallowed_types"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() -> reqwest::Client {
+    Default::default()
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+[[plant]]
+name = "tls provider lint: a request is made in the daemon by reqwest::get"
+meant = "disallowed_methods"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+#[allow(dead_code)]
+async fn second_get() {
+    let _ = reqwest::get("https://example.invalid/").await;
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+[[plant]]
+name = "tls provider lint: a rustls config is built in the daemon on the default provider"
+meant = "disallowed_methods"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_config() {
+    let _ = rustls::ClientConfig::builder();
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+[[plant]]
+name = "tls provider lint: a second client is built in the app beside the approved constructor"
+meant = "disallowed_methods"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() -> reqwest::Client {
+    reqwest::Client::new()
+}
+
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+
+[[plant]]
+name = "tls provider lint: a client builder is started in the app beside the approved constructor"
+meant = "disallowed_methods"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() {
+    let _ = reqwest::Client::builder().build();
+}
+
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+
+[[plant]]
+name = "tls provider lint: a client is built in the app under an alias of its type"
+meant = "disallowed_methods"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() {
+    use reqwest::Client as Http;
+    let _ = Http::new();
+}
+
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+
+[[plant]]
+name = "tls provider lint: a client is held in the app by a derived Default"
+meant = "disallowed_types"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+replace = '''
+#[allow(dead_code)]
+#[derive(Default)]
+struct SecondHolder {
+    client: reqwest::Client,
+}
+
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+
+[[plant]]
+name = "tls provider lint: a client is made in the app by Default::default"
+meant = "disallowed_types"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() -> reqwest::Client {
+    Default::default()
+}
+
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+
+[[plant]]
+name = "tls provider lint: a request is made in the app by reqwest::get"
+meant = "disallowed_methods"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+replace = '''
+#[allow(dead_code)]
+async fn second_get() {
+    let _ = reqwest::get("https://example.invalid/").await;
+}
+
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+
+[[plant]]
+name = "tls provider lint: a rustls config is built in the app on the default provider"
+meant = "disallowed_methods"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_config() {
+    let _ = rustls::ClientConfig::builder();
+}
+
+/// The release `document` names, if it is newer than `current`, checked as
+'''
+
+[[plant]]
+name = "tls provider lint: a client is built in another module of the app"
+meant = "disallowed_methods"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = '''
+fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
+'''
+replace = '''
+#[allow(dead_code)]
+fn second_client() -> reqwest::Client {
+    reqwest::Client::new()
+}
+
+fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
+'''
+
+[[plant]]
+name = "tls provider lint: the daemon's approved constructor is no longer excused"
+meant = "disallowed_methods"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+#[allow(clippy::disallowed_methods, clippy::disallowed_types)] // The approved constructor.
+fn client() -> Result<reqwest::Client, String> {
+'''
+replace = '''
+fn client() -> Result<reqwest::Client, String> {
+'''
+
+[[plant]]
+name = "tls provider lint: the app's approved constructor is no longer excused"
+meant = "disallowed_methods"
+runs = ["tls-app-lint"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+#[allow(clippy::disallowed_methods, clippy::disallowed_types)] // The approved constructor.
+fn client() -> Result<reqwest::Client, String> {
+'''
+replace = '''
+fn client() -> Result<reqwest::Client, String> {
+'''
+
+[[plant]]
+name = "tls provider lint: a client is built in the daemon's accessor, which is excused for the type only"
+meant = "disallowed_methods"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+            .get_or_init(client)
+'''
+replace = '''
+            .get_or_init(|| Ok(reqwest::Client::new()))
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses reqwest::Client::new"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "reqwest::Client::new", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses reqwest::Client::builder"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "reqwest::Client::builder", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses reqwest::ClientBuilder::new"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "reqwest::ClientBuilder::new", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses reqwest::get"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "reqwest::get", reason = "reqwest::get builds a client of its own, on no provider of ours: ask through the crate's approved client (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses rustls::ClientConfig::builder"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "rustls::ClientConfig::builder", reason = "a rustls client config names its provider: ClientConfig::builder_with_provider (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses rustls::ClientConfig::builder_with_protocol_versions"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "rustls::ClientConfig::builder_with_protocol_versions", reason = "a rustls client config names its provider: ClientConfig::builder_with_provider (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses rustls_platform_verifier::ConfigVerifierExt::with_platform_verifier"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "rustls_platform_verifier::ConfigVerifierExt::with_platform_verifier", reason = "this builds a rustls client config on the process's default provider: use builder_with_provider and Verifier::new (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses reqwest::Client"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "reqwest::Client", reason = "an HTTPS client is built and held only by its crate's approved constructor, which gives it a TLS provider; its Default impl builds one with none (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: clippy.toml no longer refuses reqwest::ClientBuilder"
+meant = "unfulfilled"
+runs = ["tls-daemon-lint"]
+
+[[plant.edit]]
+file = "clippy.toml"
+find = '''
+  { path = "reqwest::ClientBuilder", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "tls provider lint: the app allows the lints for its whole crate"
+meant = "no_attribute_of_a_whole_module_or_crate_allows_the_lints_that_refuse_a_client"
+runs = ["tls-crate-allows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''
+#![allow(
+    clippy::unwrap_used,'''
+replace = '''
+#![allow(
+    clippy::disallowed_methods,
+    clippy::unwrap_used,'''
+
+[[plant]]
+name = "tls provider lint: the daemon's network module allows the lints for itself"
+meant = "no_attribute_of_a_whole_module_or_crate_allows_the_lints_that_refuse_a_client"
+runs = ["tls-crate-allows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+//! [`Feed`]: cf_harness::admin::feed::Feed
+'''
+replace = '''
+//! [`Feed`]: cf_harness::admin::feed::Feed
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
+'''
+
+[[plant]]
+name = "tls provider lint: a module of the app allows the types for itself"
+meant = "no_attribute_of_a_whole_module_or_crate_allows_the_lints_that_refuse_a_client"
+runs = ["tls-crate-allows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = '''
+use crate::runtime::AppRuntime;
+use semver::Version;
+'''
+replace = '''
+#![allow(clippy::disallowed_types)]
+use crate::runtime::AppRuntime;
+use semver::Version;
+'''
+
+[[plant]]
+name = "tls provider lint: the reader of attributes does not skip a line comment"
+meant = "a_blanket_allow_is_found_and_a_comment_or_a_string_that_names_one_is_not"
+runs = ["tls-crate-allows"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/tls_clients.rs"
+find = '''
+(Some('/'), Some('/')) => {'''
+replace = '''
+(Some('/'), Some('/')) if false => {'''
+
+[[plant]]
+name = "tls provider lint: the reader of attributes takes an expect for no blanket allow"
+meant = "a_blanket_allow_is_found_and_a_comment_or_a_string_that_names_one_is_not"
+runs = ["tls-crate-allows"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/tls_clients.rs"
+find = '''
+(words.contains("allow(") || words.contains("expect("))'''
+replace = '''
+words.contains("allow(")'''
+
+[[plant]]
+name = "tls provider lint: the reader of attributes takes the types for no client lint"
+meant = "a_blanket_allow_is_found_and_a_comment_or_a_string_that_names_one_is_not"
+runs = ["tls-crate-allows"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/tls_clients.rs"
+find = '''
+["disallowed_methods", "disallowed_types"]'''
+replace = '''
+["disallowed_methods", "disallowed_methods"]'''
+
+[[plant]]
+name = "tls provider lint: the crates that build clients are none"
+meant = "no_attribute_of_a_whole_module_or_crate_allows_the_lints_that_refuse_a_client"
+runs = ["tls-crate-allows"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/tls_clients.rs"
+find = '''
+name.starts_with("reqwest")'''
+replace = '''
+name.starts_with("reqwest_")'''
