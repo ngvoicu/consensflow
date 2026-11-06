@@ -1,0 +1,218 @@
+# Pi lists its models in every setup Pi itself can run in (HMD-13, T-1264): the list is read as a
+# Pi window starts, with the packages and extensions the human has (crates/cf-harness/src/pi/
+# models.rs), a failure says what Pi said, and a Pi that lists nothing says whether any provider
+# is set up (crates/cf-harness/src/pi/setup.rs). `npm run plants:daemon -- "pi-setups:"` runs them.
+
+[run]
+ps-models = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::models::"]
+ps-setup = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::setup::"]
+
+[[plant]]
+name = "pi-setups: the list is read with Pi's extensions left out"
+meant = "every_setup_pi_can_run_in_lists_its_models"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = 'let args = ["--mode", "rpc", "--no-session", "--no-mcp", "--offline"];'
+replace = 'let args = ["--mode", "rpc", "--no-session", "--no-mcp", "--no-extensions", "--offline"];'
+
+[[plant]]
+name = "pi-setups: the list is read with Pi's extensions left out by their short flag"
+meant = "the_list_is_read_offline_with_the_packages_and_extensions_a_window_starts_with"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = 'let args = ["--mode", "rpc", "--no-session", "--no-mcp", "--offline"];'
+replace = 'let args = ["--mode", "rpc", "--no-session", "--no-mcp", "-ne", "--offline"];'
+
+[[plant]]
+name = "pi-setups: Pi may install a package the list needs"
+meant = "the_list_is_read_offline_with_the_packages_and_extensions_a_window_starts_with"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = 'let args = ["--mode", "rpc", "--no-session", "--no-mcp", "--offline"];'
+replace = 'let args = ["--mode", "rpc", "--no-session", "--no-mcp"];'
+
+[[plant]]
+name = "pi-setups: an empty list is told as no login"
+meant = "a_package_whose_provider_listed_nothing_is_not_called_no_provider"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "        return Err(setup.unlisted());"
+replace = '        return Err("Pi lists no model: it holds no login for any provider".to_owned());'
+
+[[plant]]
+name = "pi-setups: the setup is read from no folder"
+meant = "a_package_whose_provider_listed_nothing_is_not_called_no_provider"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    parse(&answer, at, &Setup::read(&env))"
+replace = "    parse(&answer, at, &Setup::default())"
+
+[[plant]]
+name = "pi-setups: a Pi that ended is not asked why"
+meant = "an_extension_pi_cannot_load_is_pi_s_own_error"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    if failed.ends_with(ENDED) {"
+replace = "    if false && failed.ends_with(ENDED) {"
+
+[[plant]]
+name = "pi-setups: what a Pi given up on printed is its reason"
+meant = "a_failed_read_says_what_pi_said_and_a_slow_one_names_what_pi_loads"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "            (Some(_), false) => ended.message"
+replace = "            _ => ended.message"
+
+[[plant]]
+name = "pi-setups: a read that waited says nothing of what Pi loads"
+meant = "a_failed_read_says_what_pi_said_and_a_slow_one_names_what_pi_loads"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    if failed.contains(WAITED) {"
+replace = "    if false && failed.contains(WAITED) {"
+
+[[plant]]
+name = "pi-setups: Pi's reason is its first lines"
+meant = "what_pi_said_is_kept_to_its_last_lines_and_a_few_hundred_bytes"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "lines.len().saturating_sub(4)"
+replace = "0"
+
+[[plant]]
+name = "pi-setups: a setup with a package is called no provider"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = 'file("settings.json")'
+replace = 'file("settings-is-not-read.json")'
+
+[[plant]]
+name = "pi-setups: a login in auth.json is not read"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '            logins: names(file("auth.json").as_ref()),'
+replace = "            logins: Vec::new(),"
+
+[[plant]]
+name = "pi-setups: a custom provider of models.json is not read"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "custom: names(providers.as_ref()),"
+replace = "custom: Vec::new(),"
+
+[[plant]]
+name = "pi-setups: an extension of the agent folder is not read"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "            extensions,\n            keys,"
+replace = "            extensions: Vec::new(),\n            keys,"
+
+[[plant]]
+name = "pi-setups: a hidden file of the extensions folder is an extension"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = ".filter(|name| !name.starts_with('.'))"
+replace = ".filter(|_| true)"
+
+[[plant]]
+name = "pi-setups: every provider variable is taken as set"
+meant = "a_folder_that_holds_nothing_is_no_provider_set_up"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "            .filter(|name| set(env, name).is_some())"
+replace = "            .filter(|_| true)"
+
+[[plant]]
+name = "pi-setups: an empty provider variable is a provider key"
+meant = "a_provider_key_in_the_environment_alone_is_a_provider_set_up"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "            .filter(|name| set(env, name).is_some())"
+replace = "            .filter(|name| env.os(name).is_some())"
+
+[[plant]]
+name = "pi-setups: the environment is not looked at"
+meant = "a_provider_key_in_the_environment_alone_is_a_provider_set_up"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "            .filter(|name| set(env, name).is_some())"
+replace = "            .filter(|_| false)"
+
+[[plant]]
+name = "pi-setups: a setup is called empty whatever it holds"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "        *self == Self::default()"
+replace = "        true"
+
+[[plant]]
+name = "pi-setups: a setup that holds nothing is not called empty"
+meant = "a_folder_that_holds_nothing_is_no_provider_set_up"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "        *self == Self::default()"
+replace = "        false"
+
+[[plant]]
+name = "pi-setups: a login's token is named in the words"
+meant = "each_source_of_a_provider_is_named_by_its_names_only"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '            ("a login for", &self.logins),'
+replace = '            ("a login for", &self.logins.iter().map(|name| format!("{name} SECRET-ACCESS")).collect()),'
+
+[[plant]]
+name = "pi-setups: no word of how to give Pi a provider"
+meant = "a_folder_that_holds_nothing_is_no_provider_set_up"
+runs = ["ps-setup"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = "environment). Run pi and sign in with /login, or set a provider key such as"
+replace = "environment). Run pi and sign in, or set a provider key such as"

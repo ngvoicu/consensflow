@@ -279,7 +279,7 @@ replace = '    if fetch || true {'
 
 [[plant]]
 name = 'listing: pi: the list is read online'
-meant = "the_list_is_read_offline_with_nothing_of_pi_s_own"
+meant = "the_list_is_read_offline_with_the_packages_and_extensions_a_window_starts_with"
 runs = ["ch-harness"]
 
 [[plant.edit]]

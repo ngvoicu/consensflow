@@ -4,8 +4,14 @@
 //! and the copy it keeps, and fetches nothing: a fresh catalog is the human's Refresh,
 //! which runs `pi update --models` first ([`UPDATE`]).
 //!
-//! Pi lists only the providers it holds a login for, so a model is a provider and an id,
-//! kept apart (an OpenRouter id holds a `/` of its own): `--model` takes them joined.
+//! Pi lists the models of the providers it has set up, whatever sets them up: a login or a
+//! provider key, a custom provider in `models.json`, and the providers that its installed
+//! packages and its extensions register as they load (HMD-13). So the list is read as a
+//! Pi window starts, with the packages and the extensions the human has: Pi's
+//! `--no-extensions` also leaves out `settings.json`'s packages, and with them a provider
+//! such as this Mac's only one, `@router-for-me/pi-cliproxyapi-provider`. A model is a
+//! provider and an id, kept apart (an OpenRouter id holds a `/` of its own): `--model`
+//! takes them joined.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -15,6 +21,7 @@ use cf_proto::agents::Harness;
 use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
+use super::setup::Setup;
 use crate::detect::executable;
 use crate::seams::processes::{Limits, Processes, Program};
 use crate::seams::Time;
@@ -35,17 +42,21 @@ pub(crate) const UPDATE_LIMITS: Limits = Limits {
 /// Pi's thinking levels, from the lowest (`ThinkingLevel` of `pi-ai`).
 const LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+/// How long Pi has to say why it would not start, once a read has found it ended: it says
+/// it at once, or it started, and the second start is given up on.
+const WHY_LIMITS: Limits = Limits {
+    timeout: Duration::from_secs(10),
+    max_buffer: 1 << 16,
+};
+
 /// The program the list is read from: `pi` at `executable` in rpc mode, offline, with no
-/// session, extension or MCP server of its own.
+/// session and no MCP server, and with the packages and extensions the human has, as a
+/// window starts. Offline keeps Pi from installing a package that is missing and from
+/// fetching a catalog; it does not stop a package's provider from listing its models
+/// from its own cache, or from a server it asks itself (measured on Pi 1.5.0 with the
+/// `pi-cliproxyapi-provider` package, offline, with its cache and without).
 pub(crate) fn program(executable: PathBuf, env: &Env) -> Program {
-    let args = [
-        "--mode",
-        "rpc",
-        "--no-session",
-        "--no-extensions",
-        "--no-mcp",
-        "--offline",
-    ];
+    let args = ["--mode", "rpc", "--no-session", "--no-mcp", "--offline"];
     Program {
         executable,
         args: args.map(str::to_owned).to_vec(),
@@ -74,8 +85,9 @@ fn levels(model: &Value) -> Vec<String> {
 }
 
 /// What a `get_available_models` answer lists, read at `at`. Fails where Pi refused, or
-/// lists no model (it holds no login for any provider).
-pub(crate) fn parse(answer: &Value, at: i64) -> Result<ModelListing, String> {
+/// lists no model: then in the words of `setup`, which tells a Pi with no provider set up
+/// from one whose providers listed nothing.
+pub(crate) fn parse(answer: &Value, at: i64, setup: &Setup) -> Result<ModelListing, String> {
     if answer.get("success") == Some(&Value::Bool(false)) {
         let said = answer["error"].as_str().unwrap_or("no reason given");
         return Err(format!("pi refused get_available_models: {said}"));
@@ -98,18 +110,21 @@ pub(crate) fn parse(answer: &Value, at: i64) -> Result<ModelListing, String> {
         })
         .collect();
     if models.is_empty() {
-        return Err("Pi lists no model: it holds no login for any provider".to_owned());
+        return Err(setup.unlisted());
     }
     Ok(ModelListing::read(models, at, HOW))
 }
 
-/// The models `program` lists: one bounded conversation, no turn.
+/// The models `program` lists: one bounded conversation, no turn. A read that fails says what
+/// Pi said ([`said`]); one that finds no model says whether Pi has a provider set up
+/// ([`Setup`]).
 pub(crate) async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
 ) -> Result<ModelListing, String> {
     let at = time.wall_ms();
+    let (env, again) = (program.env.clone(), program.clone());
     let request = json!({ "id": "models", "type": "get_available_models" });
     let answer = conversation(
         processes,
@@ -124,8 +139,62 @@ pub(crate) async fn read(
             .await
         },
     )
-    .await?;
-    parse(&answer, at)
+    .await;
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(failed) => return Err(said(processes, again, failed).await),
+    };
+    parse(&answer, at, &Setup::read(&env))
+}
+
+/// A failed read, with what Pi said of it. Pi ends at once, with its reason on its error
+/// stream, where a package or an extension of the human's fails to load (`Failed to load
+/// extension …`), and a read keeps no error stream: so a read that ended before it answered
+/// is run once more, to its end, and its last lines are the reason. A read still waiting at
+/// its bound says that a package or extension may be what it waits for.
+async fn said(processes: &dyn Processes, program: Program, failed: String) -> String {
+    if failed.ends_with(ENDED) {
+        let Err(ended) = processes.run(program, WHY_LIMITS).await else {
+            return failed;
+        };
+        // `Command failed: <command>\n<error stream>` is a program that ended with a code; a
+        // program that did not start, or was given up on, said nothing.
+        let said = match (ended.code, ended.killed) {
+            (Some(_), false) => ended.message.split_once('\n').map(|(_, said)| said.trim()),
+            _ => None,
+        };
+        return match said.filter(|said| !said.is_empty()) {
+            Some(said) => format!("{failed}; Pi said: {}", tail(said)),
+            None => failed,
+        };
+    }
+    if failed.contains(WAITED) {
+        return format!(
+            "{failed}: Pi loads the packages and extensions it has before it lists, and one of \
+             them may be waiting for something"
+        );
+    }
+    failed
+}
+
+/// What `ask` says of a program that ended first, and what `conversation` says of one that
+/// was still talking at its bound.
+const ENDED: &str = "ended before it answered";
+const WAITED: &str = "did not answer within";
+
+/// The last lines of what Pi said, within a few hundred bytes: the reason is at the end.
+fn tail(said: &str) -> String {
+    let lines: Vec<&str> = said
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let kept = &lines[lines.len().saturating_sub(4)..];
+    let joined = kept.join(" ");
+    match joined.char_indices().nth(600) {
+        Some((cut, _)) => format!("{}…", &joined[..cut]),
+        None => joined,
+    }
 }
 
 /// The models the Pi installed here lists. Where `fetch` (the human's Refresh), its
