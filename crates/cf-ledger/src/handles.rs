@@ -142,18 +142,14 @@ pub fn member_handle(
         .unwrap_or(with_harness)
 }
 
-/// A model as its harness takes it, split into the provider that a name leaves out and the
-/// id it is made of: a Pi model is `provider/id` (the id may hold a `/` of its own, as an
-/// OpenRouter one does), any other is only an id.
-pub fn split_provider<'a>(harness: &str, model: &'a str) -> (Option<&'a str>, &'a str) {
-    if harness == "pi" {
-        if let Some((provider, id)) = model.split_once('/') {
-            if !provider.is_empty() && !id.is_empty() {
-                return (Some(provider), id);
-            }
-        }
+/// A model as its harness takes it, split into the provider that a name leaves out and the id
+/// it is made of: a model that holds a `/` is `provider/id` (Pi's; the id may hold a `/` of its
+/// own, as an OpenRouter one does), any other is only an id. No other harness's id holds one.
+pub fn split_provider(model: &str) -> (Option<&str>, &str) {
+    match model.split_once('/') {
+        Some((provider, id)) if !provider.is_empty() && !id.is_empty() => (Some(provider), id),
+        _ => (None, model),
     }
-    (None, model)
 }
 
 /// The handle of a member on `model` (its id as its harness lists it: [`model_shown`]), at
@@ -164,7 +160,7 @@ pub fn model_handle(
     harness: &str,
     taken: impl FnMut(&str) -> bool,
 ) -> String {
-    let (provider, id) = split_provider(harness, model);
+    let (provider, id) = split_provider(model);
     member_handle(id, provider, effort, harness, taken)
 }
 
@@ -176,13 +172,12 @@ pub fn names_its_model(
     handle: &str,
     model_name: Option<&str>,
     model: Option<&str>,
-    harness: Option<&str>,
     effort: Option<&str>,
 ) -> bool {
     let Some(shown) = model_name.filter(|name| !name.trim().is_empty()).or(model) else {
         return false;
     };
-    let (_, id) = split_provider(harness.unwrap_or_default(), shown);
+    let (_, id) = split_provider(shown);
     let effort = effort
         .filter(|effort| !slug(&[id]).ends_with(&format!("-{}", slug(&[effort]))))
         .unwrap_or_default();
@@ -345,41 +340,41 @@ fn keep_former(db: &Connection, participant: i64, handle: &str) -> Result<(), Le
     Ok(())
 }
 
-/// How a Devin row's listed model was found ([`listed_model`]).
+/// How a row's listed model was found ([`listed_model`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Listed {
-    /// A harness whose row holds the id its list names (every one but Devin).
+    /// The row holds the id its list names, or nothing says it holds another.
     AsTaken,
-    /// The home's list has the row: the listed id whose launch ids hold it, or that is it.
+    /// The home's list holds the row's launch id (the id that has its effort in it) under
+    /// one listed id: that is it.
     FromList,
-    /// The list does not have the row; the launch id has its effort among its words, once:
-    /// that word taken out leaves the listed id.
-    ByHyphen,
-    /// Neither gave exactly one listed id: the launch id stands for it.
+    /// The list has no such row; the launch id has its effort's word among its words once, and
+    /// what is left of it is the model's name its row keeps (its label's words).
+    ByLabel,
+    /// The list has the launch id under more than one listed id: the launch id stands for it.
     LaunchId,
 }
 
-/// The models a Devin list holds, each as its listed id and the launch ids it has by effort.
-pub type DevinList = Vec<(String, Vec<String>)>;
+/// The models a harness's list holds, each as its listed id and the launch ids it has by effort.
+pub type ModelsList = Vec<(String, Vec<String>)>;
 
-/// The listed id of a row that holds `model` at `effort` on `harness`, and how it was found.
-/// Only Devin's row holds another id than the list names: its launch id, which has the
-/// effort in it (`swe-2-max-lightning` for the listed `swe-2-lightning` at `max`). Where
-/// `list` (the home's, if it ever read one) has the row, the listed id is read from it;
-/// where it does not, the effort's word is taken out of the launch id if it is among its
-/// words once; where neither gives exactly one listed id, the launch id stands for it.
+/// The listed id of a row that holds `model` at `effort`, and how it was found. A harness whose
+/// launch passes the effort inside the id (Devin's `model_uid`: `swe-2-max-lightning` for the
+/// listed `swe-2-lightning` at `max`) is known by its list holding launch ids, not by its name:
+/// where `list` (the home's, for the row's harness) holds the row's launch id under one listed
+/// id, that is it; under several, the launch id stands for it. Where the list has no such row,
+/// the effort's word is taken out of the launch id if it is among its words once and what is
+/// left reads as the row's own label does (`label`'s words), the label being the name the list
+/// gave the model when the row was made. Any other row is taken as it is.
 pub fn listed_model(
-    harness: &str,
     model: &str,
     effort: Option<&str>,
-    list: &DevinList,
+    label: Option<&str>,
+    list: &ModelsList,
 ) -> (String, Listed) {
-    if harness != "devin" {
-        return (model.to_owned(), Listed::AsTaken);
-    }
     let mut found: Vec<&str> = list
         .iter()
-        .filter(|(id, launches)| id == model || launches.iter().any(|launch| launch == model))
+        .filter(|(_, launches)| launches.iter().any(|launch| launch == model))
         .map(|(id, _)| id.as_str())
         .collect();
     found.dedup();
@@ -388,26 +383,33 @@ pub fn listed_model(
         [] => {}
         _ => return (model.to_owned(), Listed::LaunchId),
     }
-    if let Some(effort) = effort {
+    if list.iter().any(|(id, _)| id == model) {
+        return (model.to_owned(), Listed::AsTaken);
+    }
+    if let (Some(effort), Some(label)) = (effort, label) {
         let words: Vec<&str> = model.split('-').collect();
         let at: Vec<usize> = (0..words.len()).filter(|at| words[*at] == effort).collect();
         if let [at] = at.as_slice() {
             let mut rest = words.clone();
             rest.remove(*at);
-            if !rest.is_empty() {
-                return (rest.join("-"), Listed::ByHyphen);
+            let stripped = rest.join("-");
+            if !stripped.is_empty() && slug(&[&stripped]) == slug(&[label]) {
+                return (stripped, Listed::ByLabel);
             }
         }
     }
-    (model.to_owned(), Listed::LaunchId)
+    (model.to_owned(), Listed::AsTaken)
 }
 
-/// The Devin list the home ledger holds, if it holds one.
-fn devin_list(db: &Connection) -> Result<DevinList, LedgerError> {
+/// The list the home ledger holds for the harness `kind` (as a row names it), if it holds one.
+fn list_of(db: &Connection, kind: &str) -> Result<ModelsList, LedgerError> {
+    let Some(harness) = cf_proto::agents::Harness::from_kind(kind) else {
+        return Ok(Vec::new());
+    };
     let models: Option<String> = db
         .query_row(
-            "SELECT models FROM model_list WHERE harness = 'devin'",
-            [],
+            "SELECT models FROM model_list WHERE harness = ?",
+            [harness.as_str()],
             |row| row.get(0),
         )
         .optional()?;
@@ -442,9 +444,9 @@ pub struct Renamed {
     pub changed: usize,
     /// The windows of those that changed, named after them.
     pub windows: usize,
-    /// Devin rows by how their listed id was found.
+    /// Rows that hold a launch id, by how their listed id was found.
     pub by_list: usize,
-    pub by_hyphen: usize,
+    pub by_label: usize,
     pub by_launch_id: usize,
 }
 
@@ -457,10 +459,9 @@ pub struct Renamed {
 /// is kept in `former_handles`; tasks, messages and every other row point at participants
 /// by id, so their authors stay.
 pub(crate) fn name_members_by_id(db: &Connection) -> Result<Renamed, LedgerError> {
-    let list = devin_list(db)?;
     let members = db
         .prepare(
-            "SELECT id, project_id, handle, harness, model, effort FROM participant
+            "SELECT id, project_id, handle, harness, model, effort, model_name FROM participant
              WHERE member_id IS NULL AND role NOT IN ('human', 'chief') AND needs_edit = 0
                AND model IS NOT NULL AND harness IS NOT NULL
              ORDER BY project_id, id",
@@ -473,11 +474,12 @@ pub(crate) fn name_members_by_id(db: &Connection) -> Result<Renamed, LedgerError
                 harness: row.get(3)?,
                 model: row.get(4)?,
                 effort: row.get(5)?,
-                model_name: None,
+                model_name: row.get(6)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut done = Renamed::default();
+    let mut lists: std::collections::HashMap<String, ModelsList> = std::collections::HashMap::new();
     // Every member's old handle goes first, so a new one may be one an old one was.
     for member in &members {
         db.execute(
@@ -488,10 +490,21 @@ pub(crate) fn name_members_by_id(db: &Connection) -> Result<Renamed, LedgerError
     for member in &members {
         let harness = member.harness.as_deref().unwrap_or_default();
         let model = member.model.as_deref().unwrap_or_default();
-        let (listed, how) = listed_model(harness, model, member.effort.as_deref(), &list);
+        let list = match lists.get(harness) {
+            Some(list) => list,
+            None => lists
+                .entry(harness.to_owned())
+                .or_insert(list_of(db, harness)?),
+        };
+        let (listed, how) = listed_model(
+            model,
+            member.effort.as_deref(),
+            member.model_name.as_deref(),
+            list,
+        );
         match how {
             Listed::FromList => done.by_list += 1,
-            Listed::ByHyphen => done.by_hyphen += 1,
+            Listed::ByLabel => done.by_label += 1,
             Listed::LaunchId => done.by_launch_id += 1,
             Listed::AsTaken => {}
         }

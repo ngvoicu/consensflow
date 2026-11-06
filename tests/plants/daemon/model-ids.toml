@@ -31,10 +31,10 @@ runs = ["mi-ledger-handles", "mi-ledger-members"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/handles.rs"
 find = '''
-    if harness == "pi" {
+        Some((provider, id)) if !provider.is_empty() && !id.is_empty() => (Some(provider), id),
 '''
 replace = '''
-    if harness == "pi-never" {
+        Some((provider, id)) if false && !provider.is_empty() && !id.is_empty() => (Some(provider), id),
 '''
 
 [[plant]]
@@ -168,7 +168,7 @@ replace = '''
 
 [[plant]]
 name = "model ids: a Devin launch id is no longer looked up in the list"
-meant = "a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id"
+meant = "a_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id_and_its_label"
 runs = ["mi-ledger-handles"]
 
 [[plant.edit]]
@@ -182,7 +182,7 @@ replace = '''
 
 [[plant]]
 name = "model ids: a launch id two models share is taken for the first's"
-meant = "a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id"
+meant = "a_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id_and_its_label"
 runs = ["mi-ledger-handles"]
 
 [[plant.edit]]
@@ -195,8 +195,8 @@ replace = '''
 '''
 
 [[plant]]
-name = "model ids: the effort's word is taken out of a launch id wherever it stands, the last time"
-meant = "a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id"
+name = "model ids: the effort's word is taken out of a launch id where it stands twice, the last time"
+meant = "a_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id_and_its_label"
 runs = ["mi-ledger-handles"]
 
 [[plant.edit]]
@@ -445,4 +445,18 @@ find = '''
 '''
 replace = '''
         false
+'''
+
+[[plant]]
+name = "model ids: a launch id loses its effort's word whatever its label says"
+meant = "a_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id_and_its_label"
+runs = ["mi-ledger-handles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/handles.rs"
+find = '''
+            if !stripped.is_empty() && slug(&[&stripped]) == slug(&[label]) {
+'''
+replace = '''
+            if !stripped.is_empty() {
 '''

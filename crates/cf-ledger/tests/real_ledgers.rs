@@ -433,7 +433,6 @@ fn check_copy(
                         &now.handle,
                         now.model_name.as_deref(),
                         now.model.as_deref(),
-                        now.harness.as_deref(),
                         now.effort.as_deref()
                     ),
                     "{name}: #{id} @{} ({:?}, {:?}) is not named by its model",

@@ -118,8 +118,8 @@ fn a_handle_is_short_enough_for_its_windows_and_ends_on_a_word() {
 /// (a harness, a provider) or after (a number, a window's two words) does not matter.
 #[test]
 fn a_name_holds_its_model_where_the_id_and_effort_stand_in_it_as_words() {
-    let holds = |handle: &str, model: Option<&str>, harness: &str, effort: Option<&str>| {
-        names_its_model(handle, model, model, Some(harness), effort)
+    let holds = |handle: &str, model: Option<&str>, _harness: &str, effort: Option<&str>| {
+        names_its_model(handle, model, model, effort)
     };
     let opus = Some("claude-opus-5-5");
     assert!(holds(
@@ -168,20 +168,15 @@ fn a_name_holds_its_model_where_the_id_and_effort_stand_in_it_as_words() {
         Some("high")
     ));
     // No model, no name for one to hold.
-    assert!(!names_its_model(
-        "codex-default",
-        None,
-        None,
-        Some("codex"),
-        None
-    ));
+    assert!(!names_its_model("codex-default", None, None, None));
 }
 
-/// The listed id of a Devin row: from the home's list, else with the effort's word taken out
-/// of the launch id, else the launch id; any other harness's row holds it already.
+/// The listed id of a row that holds a launch id: from the home's list where it holds it, else
+/// with the effort's word taken out of it where what is left reads as the row's label; a row
+/// that holds the id its list names, or that nothing says holds another, is taken as it is.
 #[test]
-fn a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id() {
-    let list: DevinList = vec![
+fn a_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id_and_its_label() {
+    let list: ModelsList = vec![
         (
             "swe-2-lightning".to_owned(),
             vec![
@@ -193,55 +188,72 @@ fn a_devin_row_s_listed_id_is_read_from_the_list_else_from_its_launch_id() {
         ("twin-a".to_owned(), vec!["shared-high".to_owned()]),
         ("twin-b".to_owned(), vec!["shared-high".to_owned()]),
     ];
-    let listed = |model: &str, effort: Option<&str>| listed_model("devin", model, effort, &list);
+    let listed = |model: &str, effort: Option<&str>, label: Option<&str>| {
+        listed_model(model, effort, label, &list)
+    };
     assert_eq!(
-        listed("swe-2-max-lightning", Some("max")),
+        listed("swe-2-max-lightning", Some("max"), None),
         ("swe-2-lightning".to_owned(), Listed::FromList)
     );
+    // A row that holds a listed id is taken as it is.
     assert_eq!(
-        listed("adaptive", None),
-        ("adaptive".to_owned(), Listed::FromList)
+        listed("adaptive", None, None),
+        ("adaptive".to_owned(), Listed::AsTaken)
     );
     // The list has two models with that launch id: the launch id stands for it.
     assert_eq!(
-        listed("shared-high", Some("high")),
+        listed("shared-high", Some("high"), Some("Shared")),
         ("shared-high".to_owned(), Listed::LaunchId)
     );
-    // Not in the list: the effort's word, once among the launch id's words, goes.
+    // Not in the list: the effort's word, once among the launch id's words, goes where what is
+    // left is the row's label.
     assert_eq!(
-        listed("claude-opus-5-5-high-fast", Some("high")),
-        ("claude-opus-5-5-fast".to_owned(), Listed::ByHyphen)
-    );
-    // Twice, or not at all: the launch id.
-    assert_eq!(
-        listed("max-model-max", Some("max")),
-        ("max-model-max".to_owned(), Listed::LaunchId)
-    );
-    assert_eq!(
-        listed("kimi-k3", Some("high")),
-        ("kimi-k3".to_owned(), Listed::LaunchId)
+        listed(
+            "claude-opus-5-5-high-fast",
+            Some("high"),
+            Some("Claude Opus 5.5 Fast")
+        ),
+        ("claude-opus-5-5-fast".to_owned(), Listed::ByLabel)
     );
     assert_eq!(
-        listed("kimi-k3", None),
-        ("kimi-k3".to_owned(), Listed::LaunchId)
+        listed("swe-2-max", Some("max"), Some("SWE-2")),
+        ("swe-2".to_owned(), Listed::ByLabel)
     );
-    // Any other harness: the row holds the id its list names.
-    assert_eq!(
-        listed_model("codex", "gpt-6.1-sol", Some("high"), &list),
-        ("gpt-6.1-sol".to_owned(), Listed::AsTaken)
-    );
+    // A label that does not read so, no label, no effort, the word twice or not at all: as taken.
+    for (model, effort, label) in [
+        ("claude-opus-5-5-high-fast", Some("high"), Some("Opus")),
+        ("claude-opus-5-5-high-fast", Some("high"), None),
+        ("max-model-max", Some("max"), Some("Model")),
+        ("kimi-k3", Some("high"), Some("Kimi K3")),
+        ("kimi-k3", None, Some("Kimi K3")),
+        // A Pi model whose id ends with the word of the effort it runs at is that id.
+        (
+            "openrouter/openai/o3-mini-high",
+            Some("high"),
+            Some("OpenAI: o3 Mini High"),
+        ),
+    ] {
+        assert_eq!(
+            listed(model, effort, label),
+            (model.to_owned(), Listed::AsTaken),
+            "{model}"
+        );
+    }
 }
 
-/// This Mac's Devin list as it was recorded on 2026-11-06 (68 models, 246 efforts that have
-/// a launch id, 75 of them with the effort before a suffix): every launch id of it gives its
-/// listed id from the list, and the hyphen rule alone gives the same one for every one.
+/// This Mac's Devin list as it was recorded on 2026-11-06 (68 models, 246 efforts that have a
+/// launch id, 75 of them with the effort before a suffix): every launch id of it gives its
+/// listed id from the list; with no list, the label-verified rule gives it for the 165 whose
+/// label reads as the id once the effort's word is out, never a wrong one, and takes the other
+/// 81 (a `priority` model that is called Fast, `glm-5-2` that is called High) as they are.
 #[test]
-fn every_launch_id_of_devin_s_recorded_list_gives_its_listed_id_both_ways() {
+fn every_launch_id_of_devin_s_recorded_list_gives_its_listed_id_from_the_list_and_none_a_wrong_one_without(
+) {
     let recorded: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/devin-models-2026-11-06.json"
     ))
     .unwrap();
-    let list: DevinList = recorded["models"]
+    let list: ModelsList = recorded["models"]
         .as_array()
         .unwrap()
         .iter()
@@ -257,40 +269,29 @@ fn every_launch_id_of_devin_s_recorded_list_gives_its_listed_id_both_ways() {
             )
         })
         .collect();
-    let (mut pairs, mut odd) = (0, 0);
+    let (mut pairs, mut odd, mut by_label) = (0, 0, 0);
     for model in recorded["models"].as_array().unwrap() {
         let id = model["id"].as_str().unwrap();
+        let label = model["label"].as_str();
         for (effort, launch) in model["launchIds"].as_object().into_iter().flatten() {
             let launch = launch.as_str().unwrap();
             pairs += 1;
             odd += usize::from(launch != format!("{id}-{effort}"));
             assert_eq!(
-                listed_model("devin", launch, Some(effort), &list),
+                listed_model(launch, Some(effort), label, &list),
                 (id.to_owned(), Listed::FromList),
                 "{launch}"
             );
-            assert_eq!(
-                listed_model("devin", launch, Some(effort), &Vec::new()),
-                (id.to_owned(), Listed::ByHyphen),
-                "{launch} without the list"
-            );
+            match listed_model(launch, Some(effort), label, &Vec::new()) {
+                (found, Listed::ByLabel) => {
+                    assert_eq!(found, id, "{launch} without the list");
+                    by_label += 1;
+                }
+                (found, how) => assert_eq!((found.as_str(), how), (launch, Listed::AsTaken)),
+            }
         }
     }
-    assert_eq!((pairs, odd), (246, 75));
-}
-
-#[test]
-fn a_model_is_shown_by_its_name_else_its_id_else_as_its_harness_s_default() {
-    assert_eq!(
-        model_shown(Some("Opus"), Some("claude-opus-5-5"), Some("claude-code")),
-        "Opus"
-    );
-    assert_eq!(
-        model_shown(None, Some("claude-opus-5-5"), Some("claude-code")),
-        "claude-opus-5-5"
-    );
-    assert_eq!(model_shown(Some("  "), Some("m"), None), "m");
-    assert_eq!(model_shown(None, None, Some("codex")), "Codex default");
+    assert_eq!((pairs, odd, by_label), (246, 75, 165));
 }
 
 /// A ledger 0030 left, of the board's shape before the models were the harnesses' own: a
@@ -891,7 +892,7 @@ fn migration_0033_counts_what_it_renamed_and_how_each_devin_id_was_found() {
             changed: 3,
             windows: 1,
             by_list: 1,
-            by_hyphen: 1,
+            by_label: 1,
             by_launch_id: 0
         }
     );
