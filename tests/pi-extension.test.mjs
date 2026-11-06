@@ -627,7 +627,12 @@ describe('compaction at a rest', () => {
         join(s.inbox, 'm-00000000000000000000000000000052.json'),
         `${JSON.stringify({ ...envelopeRecord, id: 'm-00000000000000000000000000000052', expiresAt: Date.now() + 30_000 })}\n`,
       )
+      // The read the compaction's end began may be at work: this one then waits behind it.
       await s.extension.consume()
+      const deadline = Date.now() + 2_000
+      while (s.pi.sent.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
       assert.deepEqual(s.pi.sent, [envelope])
     } finally {
       await s.close()
