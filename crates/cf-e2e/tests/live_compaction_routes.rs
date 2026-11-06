@@ -66,6 +66,9 @@ const TURN: Duration = Duration::from_secs(300);
 /// What a turn is asked: read a file of the case's own whose words alone cross the knob.
 const ASK: &str = "Run `cat notes.txt` with your shell tool, then run `wc -l notes.txt`, then answer with the single word done.";
 
+/// What the resumed Codex turn is asked: words the resume's turn is found by in the rollout.
+const AGAIN: &str = "Answer with the single word again.";
+
 /// What a Devin turn is asked: steps enough to pass the thresholds, each after the one before.
 const LONG_ASK: &str = "Run these shell commands one at a time, each only after the one before has finished, never two in one call: `cat notes.txt`, `wc -l notes.txt`, `cat notes.txt`, `wc -w notes.txt`, `cat notes.txt`, `wc -c notes.txt`. Then answer with the single word done.";
 
@@ -178,6 +181,7 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
     first.push(ASK.to_owned());
     let ran = run(first)?;
     log.say(format!("codex exec: exit {:?}", ran.code));
+    let first_code = ran.code;
     let mut second = vec![
         codex_program.clone(),
         "exec".to_owned(),
@@ -185,27 +189,42 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
         "--last".to_owned(),
     ];
     second.extend(words);
-    second.push("Answer with the single word again.".to_owned());
+    second.push(AGAIN.to_owned());
     let ran = run(second)?;
     log.say(format!("codex exec resume: exit {:?}", ran.code));
+    let second_code = ran.code;
     let rollouts = rollout::rollouts(&codex_home);
     let mut compacted = 0;
+    // The resume's own turn: whether the thread was compacted between its start and its
+    // message, as Codex compacts a thread past the limit at the start of its next turn.
+    let mut resumed = None;
     for path in &rollouts {
-        let text = rollout::read(path)?;
-        compacted += rollout::records(&text)
+        let records = rollout::records(&rollout::read(path)?);
+        compacted += records
             .iter()
             .filter(|record| record["type"] == "compacted")
             .count();
+        let turn = rollout::turn_taking(&records, AGAIN);
+        if turn.taken {
+            resumed = Some(turn);
+        }
     }
     log.block(
         &format!("codex {} on {}", install.version(), model.name),
         &format!(
-            "{} rollout(s); `compacted` records: {compacted}",
+            "{} rollout(s); `compacted` records: {compacted}; the resume's turn: {resumed:?}",
             rollouts.len()
         ),
     );
     install.finish_homes()?;
+    assert_eq!(first_code, Some(0), "codex exec failed");
+    assert_eq!(second_code, Some(0), "codex exec resume failed");
     assert!(compacted > 0, "Codex never compacted at a limit of 2000");
+    let resumed = resumed.expect("the resume's message is in the thread's rollout");
+    assert!(
+        resumed.compacted.is_some(),
+        "the resumed turn was not compacted at its start: {resumed:?}"
+    );
     Ok(())
 }
 
@@ -462,15 +481,24 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
     let before = digest(&owner);
     let model = agents::model(Harness::Muse);
     let mut said = Vec::new();
-    for (name, knobs) in [
-        ("soft 0.03", vec!["context_compaction.soft_threshold=0.03"]),
+    let mut failed = Vec::new();
+    // Each case, its knobs, and whether its short turn must compact: the low limits must; the
+    // limit above the model's own window may not, and proves nothing either way.
+    for (name, knobs, compacts) in [
+        (
+            "soft 0.03",
+            vec!["context_compaction.soft_threshold=0.03"],
+            true,
+        ),
         (
             "provider limit 40000",
             vec!["context_compaction.provider_context_limit_tokens=40000"],
+            true,
         ),
         (
             "provider limit 900000",
             vec!["context_compaction.provider_context_limit_tokens=900000"],
+            false,
         ),
     ] {
         // `CF_ONLY` runs the cases whose name holds its words, and no other.
@@ -524,6 +552,13 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             .limit(TURN)
             .run()?;
         let lines = muse_compaction_lines(&scratch.0.join("data"));
+        if ran.code != Some(0) {
+            failed.push(format!("{name}: muse exec ended {:?}", ran.code));
+        }
+        // A compaction Muse began is a record that says what triggered it.
+        if compacts && !lines.iter().any(|line| line.contains("\"trigger\":")) {
+            failed.push(format!("{name}: no compaction was triggered"));
+        }
         said.push(format!(
             "{name}: exit {:?}\n  {}",
             ran.code,
@@ -540,5 +575,6 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
         before,
         "the run changed a file of the owner's ~/.config/muse"
     );
+    assert!(failed.is_empty(), "{}", failed.join("; "));
     Ok(())
 }
