@@ -4,7 +4,10 @@
 # with `update_page::read_feed`, and only the updater's plugin, which the Mac's check goes through,
 # installs ring before it builds its client. Now the app installs ring for its process (`tls.rs`:
 # at the start of `run`, and in the feed's client) and the daemon hands its client a rustls config
-# built on ring; `tools/xtask/tests/tls_provider.rs` holds the rule over the workspace.
+# built on ring; `tools/xtask/tests/tls_provider.rs` holds the rule over the workspace, reading its
+# sources as Rust and judging each construction on its own (the plants of its second half are the
+# escapes the review of T-1247 found: a second client with no provider beside a configured one, and
+# a constructor reached through an alias).
 # Every name here begins `tls provider:`, so `npm run plants:daemon -- "tls provider"` runs them.
 #
 # The lock's test, `the_build_holds_ring_as_its_only_tls_provider`, has no plant: cargo rewrites a
@@ -96,7 +99,7 @@ find = "        .tls_backend_preconfigured(tls)"
 replace = ""
 
 [[plant]]
-name = "tls provider: a client is built in a file the rule does not name"
+name = "tls provider: a client with no provider is built in the app's updater"
 meant = "every_client_the_product_builds_says_where_its_provider_comes_from"
 runs = ["tls-rule"]
 
@@ -135,4 +138,98 @@ replace = '''
     let _ = provider;
     let config = ServerConfig::builder()
         .with_no_client_auth()
+'''
+
+# The feed's client, seen by the rule: no install before it in its function, no config of its own.
+[[plant]]
+name = "tls provider: the rule sees the feed's client install nothing"
+meant = "every_client_the_product_builds_says_where_its_provider_comes_from"
+runs = ["tls-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+    crate::tls::install_ring_as_default();
+    reqwest::Client::builder()
+'''
+replace = '''
+    reqwest::Client::builder()
+'''
+
+# The escapes the review of T-1247 found. A second client beside the daemon's configured one: the
+# file holds the first one's config, and the second is a client of its own.
+[[plant]]
+name = "tls provider: a second client with no provider is added beside the daemon's configured one"
+meant = "every_client_the_product_builds_says_where_its_provider_comes_from"
+runs = ["tls-rule"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''
+/// An answer whose head is in.
+struct Reply {
+'''
+replace = '''
+fn another_client() -> reqwest::Client {
+    reqwest::Client::new()
+}
+
+/// An answer whose head is in.
+struct Reply {
+'''
+
+# A constructor reached through an alias of the type, of the crate, or in a macro's arguments.
+[[plant]]
+name = "tls provider: a client is built through an alias of reqwest's Client"
+meant = "every_client_the_product_builds_says_where_its_provider_comes_from"
+runs = ["tls-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {"
+replace = '''
+fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {
+    use reqwest::Client as Http;
+    let _http = Http::new();
+'''
+
+[[plant]]
+name = "tls provider: a client is built through an alias of the reqwest crate"
+meant = "every_client_the_product_builds_says_where_its_provider_comes_from"
+runs = ["tls-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {"
+replace = '''
+fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {
+    use reqwest as http;
+    let _http = http::Client::builder().build();
+'''
+
+[[plant]]
+name = "tls provider: a client is built in the arguments of a macro"
+meant = "every_client_the_product_builds_says_where_its_provider_comes_from"
+runs = ["tls-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {"
+replace = '''
+fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {
+    let _said = format!("{:?}", reqwest::Client::new());
+'''
+
+[[plant]]
+name = "tls provider: a config is built on the default provider through an alias of rustls's ClientConfig"
+meant = "no_tls_config_is_built_on_the_default_provider"
+runs = ["tls-rule"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {"
+replace = '''
+fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {
+    use rustls::ClientConfig as Tls;
+    let _tls = Tls::builder();
 '''

@@ -71,6 +71,12 @@ tempfile.workspace = true
 # SHA256SUMS (`cf_publish::testing::signing`, which asks Node for the Ed25519).
 [dev-dependencies]
 cf-publish = { workspace = true, features = ["test-support"] }
+# The rule that every HTTPS client has its TLS provider (tests/tls_provider.rs) reads the
+# workspace's sources as Rust, so that a comment or a string is never code and an alias of
+# a constructor is still the constructor. Both are in the lock already (serde's derive, tokio's
+# macros): no package is added.
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
 
 # The smoke's input to an app is a FIFO, and the stops' tests raise signals (what the smoke ends,
 # it ends as cf_process::Started).
