@@ -309,6 +309,52 @@ fn check_copy(
             .filter(|now| now.window && now.model.is_some())
             .count(),
     );
+    // How each Devin member's listed id was found (0033): in the list this copy keeps, else with
+    // the effort's word taken out of its launch id, else it stays the launch id.
+    let kept: Vec<(String, Vec<String>)> = db
+        .query_row(
+            "SELECT models FROM model_list WHERE harness = 'devin'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|models| serde_json::from_str::<Value>(&models).ok())
+        .and_then(|models| models.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|model| {
+            let launches = model["launchIds"].as_object().map_or_else(Vec::new, |ids| {
+                ids.values()
+                    .filter_map(|id| id.as_str().map(str::to_owned))
+                    .collect()
+            });
+            Some((model["id"].as_str()?.to_owned(), launches))
+        })
+        .collect();
+    let (mut by_list, mut by_hyphen, mut by_launch_id) = (0, 0, 0);
+    for now in after.values().filter(|now| {
+        !now.window
+            && now.harness.as_deref() == Some("devin")
+            && now.model.is_some()
+            && !matches!(now.role.as_str(), "human" | "chief")
+    }) {
+        let model = now.model.as_deref().unwrap_or_default();
+        if kept
+            .iter()
+            .any(|(id, launches)| id == model || launches.iter().any(|l| l == model))
+        {
+            by_list += 1;
+        } else if now.model_name.as_deref() != Some(model) {
+            by_hyphen += 1;
+        } else {
+            by_launch_id += 1;
+        }
+    }
+    writeln!(
+        report,
+        "#### {name}, {label}: Devin members' listed ids: {by_list} from the list, {by_hyphen} by the launch id's hyphen rule, {by_launch_id} the launch id itself"
+    )
+    .unwrap();
     writeln!(
         report,
         "#### {name}, {label}: version {version_before} -> {version_after}; {} participants; tasks {} and messages {} before, {} and {} after; {} pointing at nobody; {} of {members_with_a_model} members with a model renamed, {} of their {windows_of_them} windows",
