@@ -126,6 +126,8 @@ mod live_members;
 mod live_support;
 #[path = "rig/meeting.rs"]
 mod meeting;
+#[path = "rig/members_compaction.rs"]
+mod members_compaction;
 #[path = "rig/muse_role.rs"]
 mod muse_role;
 #[path = "rig/muse_window.rs"]
