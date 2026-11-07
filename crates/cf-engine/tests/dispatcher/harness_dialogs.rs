@@ -15,6 +15,9 @@ use cf_engine::testing::{
 use cf_engine::ActivityState;
 use cf_harness::contract::Waiting;
 use cf_harness::records::Role;
+use cf_harness::testing::screens::{
+    CLAUDE_LSP_AT_WORK as LSP_AT_WORK, CLAUDE_LSP_TURN_ENDED as LSP_TURN_ENDED,
+};
 use serde_json::json;
 
 use crate::chiefs::to_human;
@@ -70,13 +73,14 @@ fn keys_to(context: &Context, tiers: &Tiers<'_>) -> Vec<serde_json::Value> {
 }
 
 /// T-1 given to zeus and at work in its window, its screen showing `screen`.
-fn at_work<'a>(context: &'a Context, screen: &[&str]) -> Tiers<'a> {
+fn at_work<'a, S: AsRef<str>>(context: &'a Context, screen: &[S]) -> Tiers<'a> {
     let tiers = Tiers::new(context, &["zeus"]);
     tiers.open();
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working");
-    context.host.set_snapshot(json!({ "tail": screen }));
+    let lines: Vec<&str> = screen.iter().map(AsRef::as_ref).collect();
+    context.host.set_snapshot(json!({ "tail": lines }));
     tiers
 }
 
@@ -564,4 +568,438 @@ fn a_hooks_ask_whose_window_shows_another_dialog_at_its_ten_minutes_is_never_pre
     passes(&context, 8, 60_000);
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
     assert_eq!(answered(&tiers), Vec::<String>::new());
+}
+
+// ----- Claude Code's countdown and its LSP offer are told once (T-1277) -----
+//
+// A dialog is told of once, and a decline is pressed only into the dialog that was told of. The two
+// are held to what the dialog's own window says tells it from another read of its screen
+// (`Window::dialog_identity`): Claude Code's window blanks the time in its own warning line, and
+// begins its LSP offer at the offer's own title; every other window's identity is the words as
+// they were read. Telling a dialog twice is a nuisance; telling two dialogs as one is a failure
+// (the second request is never told, and a decline meant for the first is pressed on it). The
+// tests that say "two notices" are those of T-1273's reviews of T-1261: they hold on `967dbd48b`
+// and must go on holding.
+
+/// zeus's turn ends under the dialog on its screen: the tail slides, and the harness says a
+/// dialog of its own is open.
+fn turn_ends_under(context: &Context, screen: &[&str]) {
+    context.host.set_snapshot(json!({ "tail": screen }));
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some(DIALOG_OPEN.to_owned()),
+        });
+    });
+}
+
+/// The notes to the chief and to the human that tell of a dialog in zeus's window.
+fn told_counts(context: &Context, tiers: &Tiers<'_>) -> (usize, usize) {
+    (
+        of_dialogs(&tiers.notes("chief")).len(),
+        of_dialogs(&to_human(context, tiers.project.id)).len(),
+    )
+}
+
+#[test]
+fn an_offer_whose_turn_ends_under_it_is_told_once_and_declined_by_its_key_once() {
+    // The kit's runs of 2026-11-06 (T-1178, T-1261): told at its second look with the turn at
+    // work; the turn ended before the look the decline waited for, and the line that closes a
+    // turn slid into the words above the offer. Nothing was pressed, and the offer closed by
+    // itself after its 30 s, counting against the owner's own offers.
+    let context = Context::new();
+    let tiers = at_work(&context, LSP_AT_WORK);
+    until_told(&context, &tiers);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    turn_ends_under(&context, LSP_TURN_ENDED);
+    // At the next look, as the offer's 30 s leave no room to wait for a second one.
+    passes(&context, 6, 1_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")], "\"No, not now\"");
+    passes(&context, 12, 1_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")], "once");
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+}
+
+#[test]
+fn an_offer_closing_by_itself_as_its_status_flips_back_is_not_told_again() {
+    // The failed run's second pair of notes: the offer had closed, the status went from
+    // `waiting` back to `busy` in a step that was no look, and the stale read of the slid tail was
+    // counted as a dialog told of the first time. Every step of a five-second span is tried.
+    for offset in 0..5 {
+        let context = Context::new();
+        let tiers = at_work(&context, LSP_AT_WORK);
+        until_told(&context, &tiers);
+        turn_ends_under(&context, LSP_TURN_ENDED);
+        passes(&context, 12 + offset, 1_000);
+        context.adapter.with("zeus", |agent| agent.waiting = None);
+        context.host.set_snapshot(json!({ "tail": [TRUST_PROMPT] }));
+        passes(&context, 12, 1_000);
+        assert_eq!(told_counts(&context, &tiers), (1, 1), "offset {offset}");
+    }
+}
+
+#[test]
+fn an_offer_whose_status_says_nothing_is_told_once_though_its_tail_slides() {
+    // Where its harness says nothing of it, the screen alone: the slid tail is the same offer.
+    let context = Context::new();
+    let tiers = at_work(&context, LSP_AT_WORK);
+    until_told(&context, &tiers);
+    context.host.set_snapshot(json!({ "tail": LSP_TURN_ENDED }));
+    passes(&context, 30, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")], "declined once");
+}
+
+/// Claude Code 2.1.319's permission prompt of a dangerous `rm`, as the pane host's tail showed it
+/// in a worker's window on the owner's board on 2026-11-06 (T-1268: alpha.2 told it twice, two
+/// minutes apart), `left` the time the line under its command says is left before Claude Code
+/// blocks the request by itself. The paths and the clock are placeholders. The warning is the
+/// line nearest the question (its margin is a blank line, which the tail does not keep).
+fn rm_prompt(command: &str, left: &str) -> Vec<String> {
+    vec![
+        " Bash command".to_owned(),
+        format!("   {command}"),
+        "   Dangerous rm operation on possibly-empty variable path: \"$S/$l\" in `rm \"$S/$l\"` (rewrite it as \"${S:?}/${l:?}\" or use a literal path)".to_owned(),
+        format!(" \u{26a0} Claude Code will automatically block this request in {left}, to avoid holding up an unattended session"),
+        " Do you want to proceed?".to_owned(),
+        " \u{276f} 1. Yes".to_owned(),
+        "   2. No".to_owned(),
+    ]
+}
+
+const RM_COMMAND: &str =
+    "$T/tree/app/tests/shots/make.mjs $T/tree/app/tests/shots/windows.cjs $T/scratch/ && ls $T/scratch";
+
+/// The clock Claude Code draws for `seconds` left: `m:ss`.
+fn clock(seconds: u32) -> String {
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// zeus's window shows `screen(left)` for each of the seconds from `from` down to `to`, a pass of
+/// a second each, as a countdown ticks; `each` is called before the pass.
+fn counting_down(
+    context: &Context,
+    from: u32,
+    to: u32,
+    screen: impl Fn(u32) -> Vec<String>,
+    mut each: impl FnMut(u32),
+) {
+    for left in (to..=from).rev() {
+        context.host.set_snapshot(json!({ "tail": screen(left) }));
+        each(left);
+        passes(context, 1, 1_000);
+    }
+}
+
+#[test]
+fn a_permission_prompt_whose_countdown_ticks_is_told_once_though_its_status_goes_from_open_to_nothing(
+) {
+    // The field's shape (the owner's board, 2026-11-06): the status says a dialog is open all
+    // along, and for the last seconds it says nothing, as the prompt is answered by Claude Code's
+    // own block; the read then differs from the one told of in the clock alone.
+    let context = Context::new();
+    let tiers = at_work(&context, &rm_prompt(RM_COMMAND, "1:57"));
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some(DIALOG_OPEN.to_owned()),
+        });
+    });
+    until_told(&context, &tiers);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    counting_down(
+        &context,
+        117,
+        3,
+        |left| rm_prompt(RM_COMMAND, &clock(left)),
+        |left| {
+            if left == 8 {
+                context.adapter.with("zeus", |agent| agent.waiting = None);
+            }
+        },
+    );
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    // The note still quotes the words as they were read, the clock of that look in them.
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert!(
+        told[0].contains("block this request in 1:57,"),
+        "{}",
+        told[0]
+    );
+}
+
+#[test]
+fn a_dialog_only_its_screen_shows_whose_countdown_ticks_is_told_once() {
+    // Where its harness says nothing of it, every look reads another clock.
+    let context = Context::new();
+    let tiers = at_work(&context, &rm_prompt(RM_COMMAND, "1:57"));
+    counting_down(
+        &context,
+        117,
+        3,
+        |left| rm_prompt(RM_COMMAND, &clock(left)),
+        |_| {},
+    );
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+}
+
+#[test]
+fn a_countdown_the_screen_wraps_before_its_time_is_told_once() {
+    // A narrow screen breaks the warning after "in": its second row begins with the time.
+    let wrapped = |left: u32| {
+        let mut lines = rm_prompt(RM_COMMAND, "-");
+        lines[3] = " \u{26a0} Claude Code will automatically block this request in".to_owned();
+        lines.insert(
+            4,
+            format!(
+                " {}, to avoid holding up an unattended session",
+                clock(left)
+            ),
+        );
+        lines
+    };
+    let context = Context::new();
+    let tiers = at_work(&context, &wrapped(117));
+    counting_down(&context, 117, 3, wrapped, |_| {});
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+}
+
+#[test]
+fn a_dialog_that_follows_another_with_other_words_is_told_though_both_count_down() {
+    // The clock is no part of what makes a dialog this one: its command is. Two prompts that
+    // differ in a figure that is no clock, one after the other, are two dialogs.
+    let first = "$T/tree/scripts/shots.sh $T/scratch/x && rm -rf \"${S:?}/build1\"";
+    let second = "$T/tree/scripts/shots.sh $T/scratch/x && rm -rf \"${S:?}/build2\"";
+    let context = Context::new();
+    let tiers = at_work(&context, &rm_prompt(first, "1:57"));
+    counting_down(
+        &context,
+        117,
+        88,
+        |left| rm_prompt(first, &clock(left)),
+        |_| {},
+    );
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    counting_down(
+        &context,
+        117,
+        88,
+        |left| rm_prompt(second, &clock(left)),
+        |_| {},
+    );
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert_eq!(told.len(), 2, "{told:?}");
+    assert!(
+        told[0].contains("build1") && !told[0].contains("build2"),
+        "{}",
+        told[0]
+    );
+    assert!(told[1].contains("build2"), "{}", told[1]);
+}
+
+// T-1273's cases: two different requests are two dialogs, whatever words they share, and the
+// first one's pending decline is never pressed into the second. These held on `967dbd48b`
+// (the exact words) and are the ones a broad rule about times broke.
+
+/// A hook's ask whose command is `command`, as a worker's window shows it.
+fn hook_command(command: &str) -> Vec<String> {
+    vec![
+        " Hook tool.check requires confirmation for this command:".into(),
+        format!(" {command}"),
+        " [plugin:review-example]".into(),
+        " Do you want to proceed?".into(),
+        " \u{276f} 1. Yes".into(),
+        "   2. No".into(),
+    ]
+}
+
+#[test]
+fn a_command_that_says_a_time_is_another_request_when_the_time_differs() {
+    // `retry in 5s`, `retry in 10s`: neither is a countdown, both are the request.
+    let context = Context::new();
+    let tiers = at_work(&context, &rm_prompt("printf 'retry in 5s'", "1:57"));
+    until_told(&context, &tiers);
+    context
+        .host
+        .set_snapshot(json!({ "tail": rm_prompt("printf 'retry in 10s'", "1:57") }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}
+
+#[test]
+fn two_plain_commands_are_two_requests() {
+    let context = Context::new();
+    let tiers = at_work(&context, &rm_prompt("sleep 30", "1:57"));
+    until_told(&context, &tiers);
+    context
+        .host
+        .set_snapshot(json!({ "tail": rm_prompt("sleep 45", "1:57") }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+}
+
+#[test]
+fn a_question_about_a_duration_is_not_a_countdown() {
+    let context = Context::new();
+    let tiers = at_work(&context, &[" Retry in 5s?", " \u{276f} 1. Yes", "   2. No"]);
+    until_told(&context, &tiers);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [" Retry in 10s?", " \u{276f} 1. Yes", "   2. No"] }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+}
+
+#[test]
+fn a_hooks_ask_for_another_command_never_has_the_first_ones_decline_pressed_into_it() {
+    let context = Context::new();
+    let tiers = at_work(&context, &hook_command("printf 'retry in 5s'"));
+    until_told(&context, &tiers);
+    passes(&context, 1, 595_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    context
+        .host
+        .set_snapshot(json!({ "tail": hook_command("printf 'retry in 10s'") }));
+    passes(&context, 1, 5_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+    // It has its own ten minutes, from its own note.
+    passes(&context, 9, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    passes(&context, 2, 60_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
+}
+
+#[test]
+fn a_hooks_ask_whose_command_row_is_cut_from_one_read_is_not_the_one_that_follows() {
+    // The command row (the one line that tells `sleep 30` from `sleep 45`) is above the tail for
+    // one look: that read is a dialog of its own (told, nothing pressed), and the next request
+    // is another. Three notes, none of them lost, and no key into the wrong one.
+    let a = hook_command("sleep 30");
+    let b = hook_command("sleep 45");
+    let mut cut = a.clone();
+    cut.remove(1);
+    let context = Context::new();
+    let tiers = at_work(&context, &a);
+    until_told(&context, &tiers);
+    context.host.set_snapshot(json!({ "tail": cut }));
+    passes(&context, 1, 5_000);
+    context.host.set_snapshot(json!({ "tail": b }));
+    passes(&context, 12, 1_000);
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert_eq!(told.len(), 3, "{told:?}");
+    assert!(told[2].contains("sleep 45"), "{}", told[2]);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}
+
+#[test]
+fn a_hooks_ask_for_another_command_after_a_cut_read_does_not_spend_the_first_ones_deadline() {
+    let a = hook_command("sleep 30");
+    let b = hook_command("sleep 45");
+    let mut cut = a.clone();
+    cut.remove(1);
+    let context = Context::new();
+    let tiers = at_work(&context, &a);
+    until_told(&context, &tiers);
+    passes(&context, 1, 590_000);
+    context.host.set_snapshot(json!({ "tail": cut }));
+    passes(&context, 1, 5_000);
+    context.host.set_snapshot(json!({ "tail": b }));
+    passes(&context, 1, 5_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert!(told.last().is_some_and(|note| note.contains("sleep 45")));
+}
+
+#[test]
+fn a_hooks_ask_whose_command_sits_above_the_tail_is_told_as_another_dialog_and_nothing_is_pressed()
+{
+    // The next request's command is long and its rows are pushed above the twelve lines of the
+    // tail by rows under the question: what is left is the first one's explanation, question and
+    // choices, and not the row that told it from the first.
+    let a = hook_command("sleep 30");
+    let mut b = a.clone();
+    b.remove(1);
+    b.extend([
+        " ctrl+o to expand".to_owned(),
+        " 1 background task".to_owned(),
+        " shift+tab to cycle permissions".to_owned(),
+    ]);
+    let context = Context::new();
+    let tiers = at_work(&context, &a);
+    until_told(&context, &tiers);
+    passes(&context, 1, 590_000);
+    context.host.set_snapshot(json!({ "tail": b }));
+    passes(&context, 6, 5_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}
+
+#[test]
+fn devins_commands_that_differ_in_a_time_are_two_dialogs() {
+    // Devin's command is the parsed question, not a line above it.
+    use cf_harness::testing::screens::DEVIN_CALL;
+    let make = |duration: &str| {
+        DEVIN_CALL
+            .iter()
+            .map(|line| {
+                line.replace(
+                    "echo ran > shell.txt",
+                    &format!("printf 'retry in {duration}'"),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let context = Context::new();
+    let tiers = at_work(&context, &make("5s"));
+    until_told(&context, &tiers);
+    context.host.set_snapshot(json!({ "tail": make("10s") }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+}
+
+#[test]
+fn pis_untimed_selectors_titled_with_a_time_are_two_dialogs() {
+    // Pi 1.5.0's selector built without a timeout draws its title as it was given: the 30 and the
+    // 45 are the request's, not seconds left. (T-1273: the pane host's rows of the real
+    // component.) Pi's window takes nothing out of the words.
+    let selector = |seconds: u32| {
+        vec![
+            format!(" Run the health check? ({seconds}s)"),
+            " \u{2192} Yes".to_owned(),
+            "   No".to_owned(),
+            " \u{2191}\u{2193} navigate  enter select  escape/ctrl+c cancel".to_owned(),
+        ]
+    };
+    let context = Context::new();
+    let tiers = at_work(&context, &selector(30));
+    until_told(&context, &tiers);
+    context.host.set_snapshot(json!({ "tail": selector(45) }));
+    passes(&context, 360, 5_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}
+
+#[test]
+fn hook_reasons_that_say_about_two_and_about_three_minutes_are_two_requests() {
+    // T-1273's finding 7: a row of a hook's reason that begins with a time and goes on ", to
+    // avoid …" is a hook's own words, and no Claude warning is above it.
+    let hook = |minutes: u32| {
+        vec![
+            "\u{2502} sleep 30".to_owned(),
+            "\u{2502} Hook tool.check requires confirmation for this command:".to_owned(),
+            format!("\u{2502} about {minutes} minutes, to avoid interrupting the deployment"),
+            "\u{2502} [plugin:review-deployment]".to_owned(),
+            "Do you want to proceed?".to_owned(),
+            "\u{276f} 1. Yes".to_owned(),
+            "  2. No".to_owned(),
+        ]
+    };
+    let context = Context::new();
+    let tiers = at_work(&context, &hook(2));
+    until_told(&context, &tiers);
+    context.host.set_snapshot(json!({ "tail": hook(3) }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
 }

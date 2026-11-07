@@ -234,3 +234,138 @@ fn the_claude_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_n
     }
     println!("{}", say(&audit, Harness::Claude));
 }
+
+/// Claude Code 2.1.319's permission prompt of a dangerous `rm`, as the pane host's tail showed it
+/// on the owner's board on 2026-11-06 (T-1268), the paths and the clock placeholders: the line
+/// under the command counts down from `left`.
+fn rm_prompt(command: &str, left: &str) -> Vec<String> {
+    vec![
+        " Bash command".to_owned(),
+        format!("   {command}"),
+        "   Dangerous rm operation on possibly-empty variable path: \"$S/$l\" in `rm \"$S/$l\"`".to_owned(),
+        format!(" \u{26a0} Claude Code will automatically block this request in {left}, to avoid holding up an unattended session"),
+        " Do you want to proceed?".to_owned(),
+        " \u{276f} 1. Yes".to_owned(),
+        "   2. No".to_owned(),
+    ]
+}
+
+/// What a Claude Code window says tells its dialogs apart (T-1277): the time in its own warning
+/// line, the offer from its title down, and no time of a request.
+#[test]
+fn a_claude_window_blanks_the_time_of_its_own_warning_and_no_time_of_a_request() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let window = &plan.window;
+    let read = |screen: &[String]| window.dialog(screen).expect("a dialog");
+    let command = "$T/tree/shots/make.mjs $T/scratch/";
+    // The same request at another clock, in either of the forms Claude Code draws it.
+    let first = window.dialog_identity(&read(&rm_prompt(command, "1:57")));
+    for left in ["0:03", "9:59", "about 2 minutes", "about 3 seconds"] {
+        assert_eq!(
+            window.dialog_identity(&read(&rm_prompt(command, left))),
+            first,
+            "{left}"
+        );
+    }
+    // A time in the command is the request's own: two requests.
+    let five = window.dialog_identity(&read(&rm_prompt("printf 'retry in 5s'", "1:57")));
+    let ten = window.dialog_identity(&read(&rm_prompt("printf 'retry in 10s'", "1:57")));
+    assert_ne!(five, ten);
+    let clock = |at: &str| {
+        window.dialog_identity(&read(&rm_prompt(
+            &format!("printf 'retry in {at}'"),
+            "1:57",
+        )))
+    };
+    assert_ne!(clock("1:30"), clock("2:30"));
+    // The warning wrapped before its time: the row under it is the same line.
+    let wrapped = |left: &str| {
+        let mut screen = rm_prompt(command, "-");
+        screen[3] = format!(" \u{26a0} Claude Code will automatically block this request in");
+        screen.insert(
+            4,
+            format!(" {left}, to avoid holding up an unattended session"),
+        );
+        window.dialog_identity(&read(&screen))
+    };
+    assert_eq!(wrapped("1:57"), wrapped("0:03"));
+}
+
+/// T-1273's finding 7: a row of a hook's own reason that begins with a time and goes on ", to avoid
+/// …" is the hook's words, with no warning of Claude Code's above it.
+#[test]
+fn a_claude_windows_hook_reasons_that_say_two_and_three_minutes_are_two_requests() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let window = &plan.window;
+    let hook = |minutes: u32| {
+        let screen: Vec<String> = [
+            "\u{2502} sleep 30".to_owned(),
+            "\u{2502} Hook tool.check requires confirmation for this command:".to_owned(),
+            format!("\u{2502} about {minutes} minutes, to avoid interrupting the deployment"),
+            "\u{2502} [plugin:review-deployment]".to_owned(),
+            "Do you want to proceed?".to_owned(),
+            "\u{276f} 1. Yes".to_owned(),
+            "  2. No".to_owned(),
+        ]
+        .to_vec();
+        let dialog = window.dialog(&screen).expect("the hook's ask");
+        // It is on the list of safe declines, as the real hook's ask is.
+        let decline = window.safe_decline(&dialog).expect("a hook's ask");
+        assert_eq!(decline.key, b"2");
+        window.dialog_identity(&dialog)
+    };
+    assert_ne!(hook(2), hook(3));
+}
+
+/// The offer as the pane host's tail showed it in the kit's live runs (T-1261), the turn at work
+/// and once it ended: one dialog, and the decline of the one is the decline of the other. A tail
+/// that cut the title off is another read, and the window still declines it.
+#[test]
+fn a_claude_windows_offer_is_one_dialog_from_its_title_down_and_a_cut_one_is_still_declined() {
+    use cf_harness::testing::screens::{CLAUDE_LSP_AT_WORK, CLAUDE_LSP_TURN_ENDED};
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let window = &plan.window;
+    let read = |screen: &[&str]| {
+        window
+            .dialog(
+                &screen
+                    .iter()
+                    .map(|line| (*line).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+            .expect("the offer")
+    };
+    let at_work = read(CLAUDE_LSP_AT_WORK);
+    let ended = read(CLAUDE_LSP_TURN_ENDED);
+    assert_ne!(
+        at_work.detail, ended.detail,
+        "the reader sees the line above"
+    );
+    assert_eq!(
+        window.dialog_identity(&at_work),
+        window.dialog_identity(&ended)
+    );
+    assert_eq!(
+        window
+            .dialog_identity(&ended)
+            .detail
+            .first()
+            .map(String::as_str),
+        Some("LSP plugin recommendation")
+    );
+    // The same decline in either.
+    assert_eq!(window.safe_decline(&at_work), window.safe_decline(&ended));
+    assert_eq!(window.safe_decline(&ended).expect("a decline").key, b"2");
+    // A tail that cut the title (one line more under the offer): another read, still declined.
+    let mut cut: Vec<&str> = CLAUDE_LSP_AT_WORK[1..].to_vec();
+    cut.push(" (a second status line)");
+    let cut = read(&cut);
+    assert_ne!(
+        window.dialog_identity(&cut),
+        window.dialog_identity(&at_work)
+    );
+    assert!(window.safe_decline(&cut).is_some());
+}

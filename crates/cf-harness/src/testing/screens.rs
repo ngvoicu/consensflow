@@ -427,6 +427,43 @@ pub const CLAUDE_LSP: &[&str] = &[
     "✽ Honking… (2s · ↓ 55 tokens)",
 ];
 
+/// Claude Code 2.1.319's offer to install an LSP plugin as the pane host's tail (the engine's: the
+/// last twelve lines with a letter or a digit, no empty line) showed it in the kit's live runs of
+/// 2026-11-06 (T-1261), the turn at work: the offer's eleven lines and the spinner under them fill
+/// the twelve. The spinner's figures are placeholders.
+pub const CLAUDE_LSP_AT_WORK: &[&str] = &[
+    " LSP plugin recommendation",
+    "   LSP provides code intelligence like go-to-definition and error checking",
+    "   Plugin: clangd-lsp",
+    "   Marketplace: claude-plugins-official",
+    "   Triggered by: .c files",
+    "   Description: C/C++ language server (clangd) for code intelligence",
+    "   Would you like to install this LSP plugin?",
+    "   \u{276f} 1. Yes, install",
+    "     2. No, not now",
+    "     3. Never for this plugin",
+    "     4. Disable all LSP recommendations",
+    "\u{b7} Mustering\u{2026} (2s \u{b7} \u{2193} 55 tokens)",
+];
+
+/// The same offer once the turn under it ended (the status said `waiting`, "dialog open"): the
+/// spinner is gone, so the tail slid down a line, and the line that closes a turn is the first line
+/// above the offer's title (the time and the seconds are placeholders).
+pub const CLAUDE_LSP_TURN_ENDED: &[&str] = &[
+    "\u{273b} Baked for 9s \u{b7} done 8:21 AM \u{b7} 1 shell still running",
+    " LSP plugin recommendation",
+    "   LSP provides code intelligence like go-to-definition and error checking",
+    "   Plugin: clangd-lsp",
+    "   Marketplace: claude-plugins-official",
+    "   Triggered by: .c files",
+    "   Description: C/C++ language server (clangd) for code intelligence",
+    "   Would you like to install this LSP plugin?",
+    "   \u{276f} 1. Yes, install",
+    "     2. No, not now",
+    "     3. Never for this plugin",
+    "     4. Disable all LSP recommendations",
+];
+
 /// Claude Code 2.1.317's ask of a plugin's PreToolUse hook on a Bash call (the owner's kluris
 /// board, 2026-11-03, T-1198).
 pub const CLAUDE_HOOK_ASK: &[&str] = &[

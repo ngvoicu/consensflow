@@ -42,6 +42,12 @@ mod peer;
 pub mod screens;
 pub mod server;
 
+/// Claude Code's window's identity of a dialog ([`crate::contract::Window::dialog_identity`]),
+/// for a test window that stands in for it, so that the engine's tests hold the real rules.
+pub fn claude_dialog_identity(dialog: &crate::contract::Dialog) -> crate::contract::Dialog {
+    crate::claude::dialog_identity::identity(dialog)
+}
+
 pub use admin::{
     Asked, BodyEnding, Delivery, Response, Said, ScriptedCapture, ScriptedLatest, ScriptedNetwork,
     Told,

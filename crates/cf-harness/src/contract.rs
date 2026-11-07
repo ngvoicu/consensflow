@@ -638,6 +638,18 @@ pub trait Window {
             ..shown.dialog
         })
     }
+    /// `dialog` (as [`Window::dialog`] read it off a screen) as this harness's window tells it
+    /// from another read of the screen: the engine holds two reads to one dialog, and a decline to
+    /// the dialog it was meant for, by plain equality of what this returns (`cf_engine::dialogs`).
+    /// The default is the dialog as it was read, every word of it: a figure, a time, a line of a
+    /// dialog is part of what it asks, and another is another dialog (T-1273). A window says
+    /// otherwise only of what its harness draws of its own and redraws while the dialog stays, by
+    /// that exact shape and in its place, and of where a dialog of its harness's begins (Claude
+    /// Code's countdown to the block of a request, and its offer to install an LSP plugin from its
+    /// title down, T-1277). A note still quotes the read as it was, never this.
+    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
+        dialog.clone()
+    }
     /// The decline ConsensFlow makes of `dialog`, where it is on the harness's list of safe
     /// declines: none for any other (the default), which is never pressed.
     fn safe_decline(&self, _dialog: &Dialog) -> Option<Decline> {
