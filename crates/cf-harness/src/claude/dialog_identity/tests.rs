@@ -438,7 +438,9 @@ fn a_quoted_warning_above_the_native_one_keeps_its_time_and_the_native_one_is_bl
     let screen = |quoted: &str, native: &str| -> Vec<String> {
         owned(&[
             " Bash command",
-            &format!("\u{2502} printf '{GLYPH} Claude Code will automatically block this request in {quoted}, to avoid holding up an unattended session'"),
+            "\u{2502} cat <<'NOTICE'",
+            &format!("\u{2502} {GLYPH} Claude Code will automatically block this request in {quoted}, to avoid holding up an unattended session"),
+            "\u{2502} NOTICE",
             &format!(" {}", blocks(native).trim()),
             " Do you want to proceed?",
             " \u{276f} 1. Yes",
