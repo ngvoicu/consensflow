@@ -1,3 +1,4 @@
+import { WEB_ADDRESS } from './link-pattern.js'
 import { FitAddon, Terminal, WebLinksAddon } from './vendor/xterm.js'
 
 /**
@@ -72,7 +73,9 @@ export class XtermEmulator {
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)
     // The addon opens a click with `activate`, and takes the `hover` and `leave` of its options.
-    this.terminal.loadAddon(new WebLinksAddon(link.activate, link))
+    // What it reads as an address is `WEB_ADDRESS`'s, not its own pattern, which cut an address
+    // short at a parenthesis or a caret (T-1307).
+    this.terminal.loadAddon(new WebLinksAddon(link.activate, { ...link, urlRegex: WEB_ADDRESS }))
     this.terminal.open(host)
     this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
     this.humanDataPending = 0

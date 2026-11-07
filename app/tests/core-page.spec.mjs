@@ -3464,6 +3464,34 @@ const placeOf = (page, words, row = 0) =>
   )
 
 /**
+ * Where `words` are in the row `row` (from 0): their middle, or with `after` the cell just past
+ * them. Found by the text the row holds, which its spans split as links and colours do.
+ */
+const placeInRow = (page, row, words, after = false) =>
+  page.evaluate(
+    ([row, words, after]) => {
+      const rows = document.querySelector('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+      const walker = document.createTreeWalker(rows.children[row], NodeFilter.SHOW_TEXT)
+      const nodes = []
+      let text = ''
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        nodes.push([node, text.length])
+        text += node.data
+      }
+      const at = text.indexOf(words)
+      if (at < 0) return null
+      const index = after ? at + words.length : at + Math.floor(words.length / 2)
+      const [node, start] = nodes.findLast(([, from]) => from <= index)
+      const range = document.createRange()
+      range.setStart(node, index - start)
+      range.setEnd(node, index - start + 1)
+      const box = range.getBoundingClientRect()
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    },
+    [row, words, after],
+  )
+
+/**
  * How the terminal draws the text under `place`: its text decoration, line and style. A link's text
  * under the pointer is "underline solid"; an OSC 8 link's text is "underline dashed" otherwise,
  * whatever it points to (xterm marks all of it), and other text "none solid". The rows take no
@@ -3652,6 +3680,100 @@ for (const [system, agent, key, other] of [
       await clickWith(page, place)
       await clickWith(page, place, [key])
       await expect.poll(() => linksOpened(page)).toEqual([url])
+    })
+
+    // What the review of T-1291 found (T-1301): the addon's own pattern stopped a plain address at
+    // a parenthesis or a caret, so a Wikipedia page opened as its first half. Each of these is
+    // printed as a program prints it, and the address the page asks the app to open is the whole
+    // of it, but for what a sentence puts after it.
+    test(`${named}+click opens the whole address of a plain link, and not the marks a sentence puts around it`, async ({
+      page,
+    }) => {
+      const cases = [
+        // [as printed, the address that opens, the mark after it that is no part of it]
+        ['https://example.com/a', 'https://example.com/a', null],
+        ['HTTPS://example.com/a', 'HTTPS://example.com/a', null],
+        ['hTtPs://example.com/a', 'hTtPs://example.com/a', null],
+        ['https://xn--bcher-kva.example/a', 'https://xn--bcher-kva.example/a', null],
+        ['https://[2001:db8::1]/a', 'https://[2001:db8::1]/a', null],
+        ['http://[::1]', 'http://[::1]', null],
+        ['http://a@b/a', 'http://a@b/a', null],
+        ['https://example.com/a,b^c', 'https://example.com/a,b^c', null],
+        [
+          'https://example.com/?x=1,/root,C:/Windows/',
+          'https://example.com/?x=1,/root,C:/Windows/',
+          null,
+        ],
+        ['https://example.com/%00%0A%0D', 'https://example.com/%00%0A%0D', null],
+        [
+          'https://en.wikipedia.org/wiki/Function_(mathematics)',
+          'https://en.wikipedia.org/wiki/Function_(mathematics)',
+          null,
+        ],
+        [
+          'https://en.wikipedia.org/wiki/Foo_(bar_(baz))',
+          'https://en.wikipedia.org/wiki/Foo_(bar_(baz))',
+          null,
+        ],
+        ['https://example.com/?a[]=1&a[]=2', 'https://example.com/?a[]=1&a[]=2', null],
+        ['See https://example.com/a.', 'https://example.com/a', '.'],
+        ['https://example.com/a, then', 'https://example.com/a', ','],
+        ['(https://example.com/a)', 'https://example.com/a', ')'],
+        [
+          '(https://en.wikipedia.org/wiki/Function_(mathematics)).',
+          'https://en.wikipedia.org/wiki/Function_(mathematics)',
+          ')',
+        ],
+        ['[docs](https://example.com/a?b=1&c=2)', 'https://example.com/a?b=1&c=2', ')'],
+        ['"https://example.com/a"', 'https://example.com/a', '"'],
+      ]
+      await printing(page, `${cases.map(([printed]) => printed).join('\r\n')}\r\n`, cases.at(-1)[0])
+      const opened = []
+      for (const [row, [printed, address, mark]] of cases.entries()) {
+        const place = await placeInRow(page, row, address)
+        await page.mouse.move(place.x, place.y)
+        await expect(page.locator(CHIEF_TERMINAL), printed).toHaveAttribute(
+          'title',
+          `${named}+click to open ${address}`,
+        )
+        if (mark !== null) {
+          // The mark after the address is outside it: the pointer there is on no link.
+          const outside = await placeInRow(page, row, address, true)
+          await page.mouse.move(outside.x, outside.y)
+          await expect(page.locator(CHIEF_TERMINAL), `${printed}: ${mark}`).not.toHaveAttribute(
+            'title',
+            /.*/,
+          )
+        }
+        await clickWith(page, place, [key])
+        opened.push(address)
+        await expect.poll(() => linksOpened(page), printed).toEqual(opened)
+      }
+    })
+
+    test('a plain address with a host in letters of its own language or without its slashes is text, and its OSC 8 form opens whole', async ({
+      page,
+    }) => {
+      // The addon reads the host it parsed (punycode) against the one printed; those two forms
+      // are not links as plain text, and the program that wants one makes it an OSC 8 link.
+      const idn = 'https://bücher.example/a'
+      const bare = 'http:example.com/a'
+      await printing(
+        page,
+        `${idn}\r\n${bare}\r\n${hyperlink(idn, 'Büchersuche')}\r\n${hyperlink(bare, 'Bare')}\r\n`,
+        'Bare',
+      )
+      for (const [row, words] of [
+        [0, idn],
+        [1, bare],
+      ]) {
+        const place = await placeInRow(page, row, words)
+        await clickWith(page, place, [key])
+        await expect(page.locator(CHIEF_TERMINAL), words).not.toHaveAttribute('title', /.*/)
+      }
+      await clickWith(page, await placeInRow(page, 2, 'Büchersuche'), [key])
+      await clickWith(page, await placeInRow(page, 3, 'Bare'), [key])
+      await expect.poll(() => linksOpened(page)).toEqual([idn, bare])
     })
 
     test('a refusal of the app shows in the status line, and the link goes on working', async ({

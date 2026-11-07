@@ -14,7 +14,21 @@
 #   control character in what was printed (the parser would drop a tab or a line break from the middle
 #   of it), and hands the system's opener the address as the parser writes it, as one argument and
 #   no shell between (`app/src-tauri/src/link.rs`, the update's download page opened the same way);
-#   a refusal is said in the status line.
+#   a refusal is said in the status line;
+# - and what the review of T-1291 found (T-1301, mended in T-1307): on Windows the system's opener
+#   is `ShellExecuteW` with the verb `open`, the address as the file and no parameters (Explorer
+#   read a comma and an equals sign of a checked address as its own arguments), its answer is read
+#   and 32 or less is a refusal the status line shows; a plain address is read whole by
+#   `app/ui/link-pattern.js` (parentheses, brackets and braces in pairs, commas, carets, any letters
+#   of the scheme, an IPv6 host), without the marks a sentence puts around it, and not as the
+#   addon's own pattern cut it at a parenthesis; a test build opens no page unless the test stands
+#   an opener in, and never reaches the system's own.
+#
+# A plant that falls through to the system's opener runs a harmless stand-in in its place: the
+# plant of the fail-closed rule says "opens" with `|_| Ok(())`, for a plant that really opened
+# a page would do on the machine of whoever runs it what the rule is there to stop (T-1291's first
+# run opened `file:///etc/passwd` on the Mac). The plant that sends Windows back to Explorer is
+# harmless for the same reason: `update_page::open` opens nothing in a test build.
 #
 # One plant takes one rule out; a test of it fails. The page's run the browser's, the app's the tests
 # of the link module on this system; the xterm they stand on is the tracked `app/ui/vendor`, so no
@@ -23,6 +37,7 @@
 [run]
 pl-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pane links"]
 pl-app = ["cargo", "xtask", "app", "test", "link::"]
+pl-pattern = ["node", "--test", "tests/web-address.test.mjs"]
 
 # --- the page: when a click opens a link ---
 
@@ -65,7 +80,7 @@ runs = ["pl-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "    this.terminal.loadAddon(new WebLinksAddon(link.activate, link))\n"
+find = "    this.terminal.loadAddon(new WebLinksAddon(link.activate, { ...link, urlRegex: WEB_ADDRESS }))\n"
 replace = ""
 
 [[plant]]
@@ -217,3 +232,160 @@ find = "    let mut command = Command::new(opener);\n"
 replace = '''    let mut command = Command::new("/bin/sh");
     command.arg("-c").arg(format!("{} {}", opener.display(), page));
 '''
+
+# --- Windows: the shell opens the page, and says if it could not (T-1307) ---
+
+[[plant]]
+name = "pane links: Windows opens a page through Explorer again"
+meant = "on_windows_the_system_opener_is_shellexecute_with_the_address_as_the_file"
+runs = ["pl-app"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = """        shell::open(address)
+"""
+replace = """        crate::update_page::open(address)
+"""
+
+[[plant]]
+name = "pane links: the shell is asked for another verb"
+meant = "the_shell_is_asked_to_open_the_address_as_the_file_with_no_parameters"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = """        verb: wide("open"),
+        file: wide(address),"""
+replace = """        verb: wide("explore"),
+        file: wide(address),"""
+
+[[plant]]
+name = "pane links: the shell is given the address as its parameters too"
+meant = "the_shell_is_asked_to_open_the_address_as_the_file_with_no_parameters"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = """        file: wide(address),
+        parameters: None,"""
+replace = """        file: wide(address),
+        parameters: Some(wide(address)),"""
+
+[[plant]]
+name = "pane links: an answer of 32 from the shell is taken for a start"
+meant = "an_answer_of_32_or_less_is_a_refusal_the_page_is_told"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    if code > 32 {"
+replace = "    if code >= 32 {"
+
+[[plant]]
+name = "pane links: any answer of the shell above 0 is taken for a start"
+meant = "an_answer_of_32_or_less_is_a_refusal_the_page_is_told"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    if code > 32 {"
+replace = "    if code > 0 {"
+
+[[plant]]
+name = "pane links: the shell's answer is not read"
+meant = "an_answer_of_32_or_less_is_a_refusal_the_page_is_told"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    result_of(execute(&call_for(address)))"
+replace = """    execute(&call_for(address));
+    Ok(())"""
+
+# --- a test build never reaches the system's opener ---
+
+[[plant]]
+name = "pane links: a test build with no stand-in opener falls through to the system's"
+meant = "a_test_build_with_no_stand_in_opener_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = """            None => Err("a test build opens no page unless the test stands an opener in".into()),"""
+replace = """            None => open_with(|_| Ok(()), address),"""
+
+# --- the page: a plain address is read whole ---
+
+[[plant]]
+name = "pane links: the addon reads addresses with its own pattern"
+meant = "pane links on a Mac › Cmd+click opens the whole address of a plain link, and not the marks a sentence puts around it"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "{ ...link, urlRegex: WEB_ADDRESS }"
+replace = "link"
+
+[[plant]]
+name = "pane links: a pair of parentheses is not part of an address"
+meant = "https://en.wikipedia.org/wiki/Function_(mathematics) is found whole"
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = """  ['\\\\(', '\\\\)'],
+"""
+replace = ""
+
+[[plant]]
+name = "pane links: a closing parenthesis alone is part of an address"
+meant = '"(https://example.com/a)" holds ["https://example.com/a"]'
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = "const BRACKETS = '()\\\\[\\\\]{}'"
+replace = "const BRACKETS = '(\\\\[\\\\]{}'"
+
+[[plant]]
+name = "pane links: the full stop of a sentence is part of the address before it"
+meant = '"See https://example.com/a." holds ["https://example.com/a"]'
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = "const AFTER = '.,:;!?*~^|'"
+replace = "const AFTER = ',:;!?*~^|'"
+
+[[plant]]
+name = "pane links: a comma or a caret ends an address"
+meant = "https://example.com/a,b^c is found whole"
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = "const QUOTES = '\"\\'`"
+replace = "const QUOTES = ',^\"\\'`"
+
+[[plant]]
+name = "pane links: the letters of the scheme must be lower case"
+meant = "hTtPs://example.com/a is found whole"
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = """  'i',
+)"""
+replace = """  '',
+)"""
+
+[[plant]]
+name = "pane links: a pair of brackets holds no pair"
+meant = "https://en.wikipedia.org/wiki/Foo_(bar_(baz)) is found whole"
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = "const DEPTH = 3"
+replace = "const DEPTH = 1"

@@ -6,9 +6,18 @@
 //! OSC 8 hyperlink), so what may open is decided here, whatever the page checked: a web page
 //! (`http` or `https`, never `file:`, `javascript:`, `data:` or an app's own scheme), of no more
 //! than 2,048 characters, with no control character in it.
+//!
+//! What opens it is the system's own way to open a page, the update's download page's on a Mac
+//! (`open`, one argument and no shell) and `ShellExecuteW` on Windows (`shell`), which reads no
+//! command line: the first version started Explorer there, whose own grammar of commas and
+//! equals signs could take a checked address for a folder (the review of T-1291, T-1301).
 
 use serde_json::{json, Value};
 use url::Url;
+
+// Windows' opener; its arguments and its answers are tested everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod shell;
 
 /// The most characters an address may have, counted as characters and not bytes.
 const MAX_CHARS: usize = 2048;
@@ -44,9 +53,9 @@ pub(crate) fn open_with(
     open(checked(address)?.as_str())
 }
 
-/// What opens a page in the tests of the command: none by default, and then the system's own,
-/// which a test must never reach with an address that may open (it would open a page in the
-/// browser of the machine it runs on). A test of the command stands one in.
+/// What opens a page in the tests of the command. A test build never reaches the system's own
+/// opener, the one that opens a page in the browser of the machine the test runs on: with no
+/// stand-in here it opens nothing and says so, and a test that opens a page stands one in.
 #[cfg(test)]
 pub(crate) static TEST_OPENER: std::sync::Mutex<Option<Opener>> = std::sync::Mutex::new(None);
 
@@ -54,14 +63,31 @@ pub(crate) static TEST_OPENER: std::sync::Mutex<Option<Opener>> = std::sync::Mut
 #[cfg(test)]
 pub(crate) type Opener = fn(&str) -> Result<(), String>;
 
-/// Opens `address` in the default browser, the way the update's download page is opened: one
-/// argument to the system's opener, never through a shell.
+/// The system's own way to open a web page `address`, which has been checked.
+#[cfg_attr(test, allow(dead_code))]
+fn system_open(address: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        shell::open(address)
+    }
+    #[cfg(not(windows))]
+    {
+        crate::update_page::open(address)
+    }
+}
+
+/// Opens `address` in the human's browser, if it may open.
 pub(crate) fn open(address: &str) -> Result<(), String> {
     #[cfg(test)]
-    if let Some(stand_in) = *TEST_OPENER.lock().expect("the stand-in opener") {
-        return open_with(stand_in, address);
+    {
+        let stand_in = *TEST_OPENER.lock().expect("the stand-in opener");
+        match stand_in {
+            Some(stand_in) => open_with(stand_in, address),
+            None => Err("a test build opens no page unless the test stands an opener in".into()),
+        }
     }
-    open_with(crate::update_page::open, address)
+    #[cfg(not(test))]
+    open_with(system_open, address)
 }
 
 /// The page's ask to open a link a program printed in a window.
@@ -283,6 +309,29 @@ mod tests {
         "tauri://localhost"
     };
 
+    /// One test at a time has its own opener in the place of the system's.
+    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The system's opener replaced by `opener` (none: the test build's own refusal) until this
+    /// is dropped, so that a test that fails leaves nothing standing for the next.
+    struct Standing(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+    fn standing(opener: Option<Opener>) -> Standing {
+        let turn = TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *TEST_OPENER.lock().expect("the stand-in") = opener;
+        Standing(turn)
+    }
+
+    impl Drop for Standing {
+        fn drop(&mut self) {
+            *TEST_OPENER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    }
+
     /// What the command's stand-in opener was given.
     static OPENED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
@@ -297,7 +346,8 @@ mod tests {
     /// writes it and answered with ok.
     #[test]
     fn the_page_is_told_why_an_address_did_not_open_and_one_that_may_is_opened() {
-        *TEST_OPENER.lock().expect("the stand-in") = Some(record);
+        let _standing = standing(Some(record));
+        OPENED.lock().expect("the record").clear();
         let app = crate::with_page(tauri::test::mock_builder())
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
@@ -352,6 +402,71 @@ mod tests {
             *OPENED.lock().expect("the record"),
             ["https://example.com/a?x=1&y=%20z#frag"]
         );
-        *TEST_OPENER.lock().expect("the stand-in") = None;
+    }
+
+    /// A test build reaches no system opener (T-1307, the review of T-1291): with no stand-in
+    /// in its place an address that may open opens nothing, and says so. A test of the command
+    /// that forgot to stand one in used to open a page in the browser of the machine it ran on.
+    #[test]
+    fn a_test_build_with_no_stand_in_opener_opens_nothing() {
+        let _standing = standing(None);
+        for address in ["https://example.com/", "http://127.0.0.1:1/a?b=c#d"] {
+            assert_eq!(
+                open(address),
+                Err("a test build opens no page unless the test stands an opener in".to_owned()),
+                "{address}"
+            );
+        }
+    }
+
+    /// What the stand-in shell was asked, the file of each call.
+    #[cfg(windows)]
+    static ASKED_OF_THE_SHELL: std::sync::Mutex<Vec<Vec<u16>>> = std::sync::Mutex::new(Vec::new());
+
+    #[cfg(windows)]
+    fn shell_starts_it(call: &shell::Call) -> isize {
+        assert_eq!(call.verb, shell::wide("open"));
+        assert_eq!(call.parameters, None);
+        ASKED_OF_THE_SHELL
+            .lock()
+            .expect("the record")
+            .push(call.file.clone());
+        42
+    }
+
+    #[cfg(windows)]
+    fn shell_finds_no_program(_: &shell::Call) -> isize {
+        31
+    }
+
+    /// On Windows the system's opener is the shell's `ShellExecuteW` with the address as the
+    /// file to open, and not Explorer started with it as an argument: an address that holds
+    /// `,/root,C:/Windows/` is a web page to the shell and a folder to Explorer. The call is the
+    /// test build's stand-in (`shell::TEST_SHELL`), which reads what it was asked and answers as
+    /// the shell does, and the shell's refusal reaches the page.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_system_opener_is_shellexecute_with_the_address_as_the_file() {
+        let address = "https://example.com/?x=1,/root,C:/Windows/";
+        ASKED_OF_THE_SHELL.lock().expect("the record").clear();
+        *shell::TEST_SHELL.lock().expect("the stand-in") = Some(shell_starts_it);
+        let started = open_with(system_open, address);
+        *shell::TEST_SHELL.lock().expect("the stand-in") = Some(shell_finds_no_program);
+        let refused = open_with(system_open, address);
+        *shell::TEST_SHELL.lock().expect("the stand-in") = None;
+        assert_eq!(started, Ok(()));
+        assert_eq!(
+            *ASKED_OF_THE_SHELL.lock().expect("the record"),
+            [shell::wide(address)],
+            "the shell was asked once, for the address"
+        );
+        assert_eq!(
+            refused,
+            Err(
+                "Windows could not open the address: no program is set to open web addresses \
+                 (ShellExecute answered 31)"
+                    .to_owned()
+            )
+        );
     }
 }

@@ -88,8 +88,20 @@ pub fn page_of(version: &str) -> String {
     format!("https://github.com/ngvoicu/consensflow/releases/tag/v{version}")
 }
 
-/// Opens `page` in the browser.
+/// Opens `page` in the browser. A test build opens nothing: a page opened is a page in the browser
+/// of the machine the test runs on, and a test of the opener starts its own (`open_with`).
 pub fn open(page: &str) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        Err(format!("a test build opens no page: {page}"))
+    }
+    #[cfg(not(test))]
+    open_system(page)
+}
+
+/// Opens `page` with the system's opener.
+#[cfg(not(test))]
+fn open_system(page: &str) -> Result<(), String> {
     let opener = if cfg!(windows) {
         "explorer.exe"
     } else if cfg!(target_os = "macos") {
@@ -102,6 +114,7 @@ pub fn open(page: &str) -> Result<(), String> {
 
 /// Opens `page` with `opener`. Explorer answers 1 even when the page
 /// opened: only a start that failed is a failure.
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) fn open_with(opener: &Path, page: &str) -> Result<(), String> {
     let mut command = Command::new(opener);
     // Started while the app's other threads open sockets and pipes.
