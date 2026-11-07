@@ -958,8 +958,15 @@ runs = ["engine-shown", "engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if names_a_secret(&joined) || begins_a_token(&joined) || begins_a_token(&spaced) {'''
-replace = '''    if begins_a_token(&joined) || begins_a_token(&spaced) {'''
+find = '''    if names_a_secret(&joined)
+        || begins_a_token(&joined)
+        || begins_a_token(&spaced)
+        || splits_url_credentials(&rows, &joined)
+    {'''
+replace = '''    if begins_a_token(&joined)
+        || begins_a_token(&spaced)
+        || splits_url_credentials(&rows, &joined)
+    {'''
 
 [[plant]]
 name = "windows close: a token's prefix split over rows is looked for in the rows apart only"
@@ -968,8 +975,15 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if names_a_secret(&joined) || begins_a_token(&joined) || begins_a_token(&spaced) {'''
-replace = '''    if names_a_secret(&joined) || begins_a_token(&spaced) {'''
+find = '''    if names_a_secret(&joined)
+        || begins_a_token(&joined)
+        || begins_a_token(&spaced)
+        || splits_url_credentials(&rows, &joined)
+    {'''
+replace = '''    if names_a_secret(&joined)
+        || begins_a_token(&spaced)
+        || splits_url_credentials(&rows, &joined)
+    {'''
 
 [[plant]]
 name = "windows close: a prefix after a row that ends in a letter is not looked for"
@@ -978,8 +992,15 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if names_a_secret(&joined) || begins_a_token(&joined) || begins_a_token(&spaced) {'''
-replace = '''    if names_a_secret(&joined) || begins_a_token(&joined) {'''
+find = '''    if names_a_secret(&joined)
+        || begins_a_token(&joined)
+        || begins_a_token(&spaced)
+        || splits_url_credentials(&rows, &joined)
+    {'''
+replace = '''    if names_a_secret(&joined)
+        || begins_a_token(&joined)
+        || splits_url_credentials(&rows, &joined)
+    {'''
 
 [[plant]]
 name = "windows close: the frame of a row is part of it"

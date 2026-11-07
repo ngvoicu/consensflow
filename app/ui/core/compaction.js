@@ -1,9 +1,10 @@
 /**
- * The "Compaction for Claude members" section of Project settings: the size at
- * which the human has the project's Claude member windows compact, or Claude's own
- * point (the default, which changes nothing). It is the window each member's launch
- * gives Claude Code, which compacts a little before it fills, from 100,000 to
- * 1,000,000 tokens, the range Claude takes. The chief is never given it. Only the
+ * The "Compaction" section of Project settings: the size at which the human has every
+ * member window of the project compact, whatever its harness, or each harness's own
+ * point (the default, which changes nothing). Each member's launch gives it its harness
+ * by that harness's own rule (smaller-contexts, SCX-28 to SCX-30), from 100,000 to
+ * 1,000,000 tokens; a size above a model's own window leaves the harness's own point.
+ * The chief is never given it. Only the
  * human chooses it, here: no `cf` command does. The section shows the choice the
  * project's board has when the dialog opens, checks a size as the human types
  * (a whole number in the range; Save waits until it is one), and one Save sends the
@@ -11,10 +12,10 @@
  * the human is looking.
  */
 
-/** The smallest size: the ledger's `CLAUDE_COMPACTION_MIN`, which a test of the daemon holds this to. */
+/** The smallest size: the ledger's `COMPACTION_MIN`, which a test of the daemon holds this to. */
 const LEAST = 100_000
 
-/** The largest size: the ledger's `CLAUDE_COMPACTION_MAX`. */
+/** The largest size: the ledger's `COMPACTION_MAX`. */
 const MOST = 1_000_000
 
 /** The size a first choice starts from: the one the project proposal measured. */
@@ -34,7 +35,7 @@ export function sizeOf(text) {
   return size >= LEAST && size <= MOST ? size : null
 }
 
-export class ClaudeCompaction {
+export class Compaction {
   #own
   #size
   #amount
@@ -49,11 +50,11 @@ export class ClaudeCompaction {
    * `page.report` says a refusal on the status line.
    */
   constructor(group, page) {
-    this.#own = group.querySelector('[name="claude-compaction-choice"][value="own"]')
-    this.#size = group.querySelector('[name="claude-compaction-choice"][value="size"]')
-    this.#amount = group.querySelector('[name="claude-compaction-size"]')
-    this.#hint = group.querySelector('.claude-compaction-hint')
-    this.#save = group.querySelector('[name="claude-compaction-save"]')
+    this.#own = group.querySelector('[name="members-compaction-choice"][value="own"]')
+    this.#size = group.querySelector('[name="members-compaction-choice"][value="size"]')
+    this.#amount = group.querySelector('[name="members-compaction-size"]')
+    this.#hint = group.querySelector('.members-compaction-hint')
+    this.#save = group.querySelector('[name="members-compaction-save"]')
     this.#page = page
     for (const choice of [this.#own, this.#size]) {
       choice.addEventListener('change', () => this.#chosen())
@@ -63,9 +64,9 @@ export class ClaudeCompaction {
     this.show(null)
   }
 
-  /** Shows the choice `project` has, as its board says it: Claude's own point for a project with none. */
+  /** Shows the choice `project` has, as its board says it: the harness's own point for a project with none. */
   show(project) {
-    const size = project?.claudeCompaction
+    const size = project?.compaction
     this.#own.checked = size === undefined
     this.#size.checked = size !== undefined
     this.#amount.value = size === undefined ? '' : String(size)
@@ -78,7 +79,7 @@ export class ClaudeCompaction {
     this.#hint.hidden = words === ''
   }
 
-  /** A choice between Claude's own point and a size: a first size starts from the proposal's. */
+  /** A choice between the harness's own point and a size: a first size starts from the proposal's. */
   #chosen() {
     if (this.#size.checked && this.#amount.value.trim() === '') {
       this.#amount.value = String(START_AT)
@@ -98,6 +99,23 @@ export class ClaudeCompaction {
     this.#say(bad ? `A size is a whole number from ${said(LEAST)} to ${said(MOST)}.` : '')
   }
 
+  /** The section as it is for a project with no choice: a new project's start. */
+  reset() {
+    this.show(null)
+  }
+
+  /** What a new project starts with: the size chosen, or none for each harness's own point. */
+  values() {
+    return this.#size.checked ? sizeOf(this.#amount.value) : null
+  }
+
+  /** Why a project cannot start with this choice, or none: a size is chosen and is no size. */
+  blocked() {
+    return this.#size.checked && sizeOf(this.#amount.value) === null
+      ? `A size is a whole number from ${said(LEAST)} to ${said(MOST)}.`
+      : null
+  }
+
   /**
    * Saves what the section shows, for the project the dialog is for, by its id. What the
    * daemon answers is shown only while the dialog is still for that project, and a refusal
@@ -110,11 +128,11 @@ export class ClaudeCompaction {
       try {
         const answer = await this.#page.daemon('project.compaction', { project, compaction })
         if (this.#page.project() === project) this.show(answer.project)
-        const kept = answer.project.claudeCompaction
+        const kept = answer.project.compaction
         this.#page.note(
           kept === undefined
-            ? "The project's Claude members use Claude's own point again: windows that start from now on are given no size."
-            : `The project's Claude members compact at about ${said(kept)} tokens: each window is given it when it next starts.`,
+            ? "The project's members use their harness's own point again: windows that start from now on are given no size."
+            : `The project's members compact at about ${said(kept)} tokens: each window is given it when it next starts.`,
         )
       } catch (cause) {
         const words = cause instanceof Error ? cause.message : String(cause)

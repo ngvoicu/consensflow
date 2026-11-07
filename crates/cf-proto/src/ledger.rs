@@ -29,10 +29,22 @@ pub struct ParticipantView {
     /// The effort it runs its model at. Said only where there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
-    /// What its harness's list calls its model (`Opus`): what it is shown as, with its
-    /// effort. Said only where there is one.
+    /// The model as its harness's list names it, its id (`claude-opus-5-5`; Pi's
+    /// `provider/id`; Devin's listed id, which its `model` does not hold once an effort is
+    /// part of it): what it is shown as, beside its effort. Said only where there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_name: Option<String>,
+    /// Every name the participant went by before this one, the oldest first: a member renamed
+    /// by its model's id (`opus-high`), and its windows. History says them with `agent`.
+    /// Said only where there is one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub former_handles: Vec<String>,
+    /// A member's, or a window's, name that holds no model and effort of the ones it runs
+    /// on (a designer on its harness's default, a member the update could not tell the model
+    /// of): what it runs on is said beside it. Never said of the chief and the human; said
+    /// only where it is so.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub name_apart: bool,
     /// A member from before the models were the harnesses' own whose agent the update
     /// could not resolve (T-1202): it keeps the name it had and runs on nothing until the
     /// human edits it. Said only where it is so.
@@ -96,12 +108,13 @@ pub struct ProjectView {
     /// always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub staff_rules: Option<String>,
-    /// The size, in tokens, at which the human has the project's Claude member
-    /// windows compact: the window each member's launch gives Claude Code. Said
-    /// only when the human chose one, so a project on Claude's own point reads as
-    /// it always did. The chief's window is never given it.
+    /// The size, in tokens, at which the human has the project's member windows
+    /// compact, whatever their harness: each member's launch gives it its harness by
+    /// that harness's own rule. Said only when the human chose one, so a project on
+    /// each harness's own point reads as it always did. The chief's window is never
+    /// given it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub claude_compaction: Option<u32>,
+    pub compaction: Option<u32>,
 }
 
 impl ProjectView {
@@ -769,6 +782,8 @@ mod tests {
             model: None,
             effort: None,
             model_name: None,
+            former_handles: Vec::new(),
+            name_apart: false,
             needs_edit: false,
             launched_model: None,
             gone_model: None,
@@ -805,6 +820,8 @@ mod tests {
             model: Some("openrouter/anthropic/claude-fable-5".into()),
             effort: None,
             model_name: None,
+            former_handles: Vec::new(),
+            name_apart: false,
             needs_edit: false,
             launched_model: Some("openai/gpt-6-luna".into()),
             gone_model: None,

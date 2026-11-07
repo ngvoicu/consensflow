@@ -57,6 +57,8 @@ fn begun_at(dir: &std::path::Path, at: Rc<Cell<i64>>) -> (Ledger, i64, i64, i64)
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .expect("a project");
     let chief = project

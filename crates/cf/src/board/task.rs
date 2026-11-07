@@ -1071,22 +1071,26 @@ and 2 idle sessions (`cf task list --all`)";
         );
     }
 
-    /// A lane on a harness says in its head the model and effort it runs on, after its role
-    /// (harness-models); a lane that says none is as it was.
+    /// A lane says in its head the model and effort it runs on, after its role, where its name
+    /// does not say them (harness-models, HMD-12: the board leaves `runsOn` out of a lane
+    /// whose name holds them); a lane that says none is as it was.
     #[test]
-    fn a_lane_s_head_says_the_model_and_effort_it_runs_on() {
-        let mut opus = lane(
-            "opus-high",
+    fn a_lane_s_head_says_the_model_and_effort_it_runs_on_where_its_name_does_not() {
+        let mut chief = lane("chief", "chief", &[card(2, "working", Some("chief"))]);
+        chief["runsOn"] = json!("claude-opus-5-5 · xhigh");
+        let named = lane(
+            "claude-opus-5-5-high",
             "worker",
-            &[card(2, "working", Some("opus-high"))],
+            &[card(3, "working", Some("claude-opus-5-5-high"))],
         );
-        opus["runsOn"] = json!("Opus · high");
-        let plain = lane("zeus", "worker", &[card(3, "working", Some("zeus"))]);
-        let text = listed(&[], &json!([opus, plain]));
+        let text = listed(&[], &json!([chief, named]));
         let heads: Vec<&str> = text.lines().filter(|line| line.starts_with('@')).collect();
         assert_eq!(
             heads,
-            ["@opus-high (worker, Opus · high)", "@zeus (worker)"]
+            [
+                "@chief (chief, claude-opus-5-5 · xhigh)",
+                "@claude-opus-5-5-high (worker)"
+            ]
         );
     }
 

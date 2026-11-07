@@ -1,0 +1,52 @@
+# The dock's cards beside the folded board, from the owner's report of
+# 2026-11-06 for 3.0.7-alpha.3 ("when you minimize the board the chief if it
+# is alone doesnt fill in 100% of screen, just 75%"): with the board folded
+# the chief's card is the whole row alone, and three-quarters of it once
+# another window joins, each other card the last quarter less the gap, so
+# the first sits whole beside it (`app/ui/page.css`). The join and the last
+# one's leaving resize the chief's card once, as folding the board itself
+# does; beside the board the sizes are unchanged (the chief's the whole
+# dock, each other two-thirds of it).
+#
+# The tests are in `app/tests/core-page.spec.mjs`, the lifecycle one on a
+# real xterm, which sends a pane_resize for each size a card's terminal
+# takes. One plant takes one rule out; a test of it fails. Every name holds
+# `dock:`, so `npm run plants:daemon -- "dock:"` runs them all.
+
+[run]
+# The folded row's card widths, and the resizes they send, on a real xterm.
+dock-folded = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "board folded fills|sizes the dock"]
+
+[[plant]]
+name = "dock: with the board folded, a lone chief's card keeps three-quarters of the row"
+meant = "with the board folded fills the row with the chief's card alone, three-quarters of it beside another window, and the row again when it leaves"
+runs = ["dock-folded"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''
+  .main[data-board="hidden"] .stage > .terminal-card[data-role="chief"]:only-child {
+    flex-basis: 100%;
+  }
+'''
+replace = ""
+
+[[plant]]
+name = "dock: with the board folded, the chief's card beside another keeps two-thirds of the row"
+meant = "sizes the dock's cards: beside the board the chief's the whole dock and each other two-thirds of it, with the board folded three-quarters and the last quarter"
+runs = ["dock-folded"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "calc((100% - 8px) * 3 / 4)"
+replace = "calc((100% - 8px) * 2 / 3)"
+
+[[plant]]
+name = "dock: with the board folded, each card beside the chief's keeps a third of the row"
+meant = "sizes the dock's cards: beside the board the chief's the whole dock and each other two-thirds of it, with the board folded three-quarters and the last quarter"
+runs = ["dock-folded"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "calc((100% - 8px) / 4)"
+replace = "calc((100% - 8px) / 3)"

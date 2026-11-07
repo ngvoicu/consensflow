@@ -544,33 +544,84 @@ test.describe('the history viewer', () => {
     for (const name of ['Pi', 'zeus', 'amber-pine']) expect(theirs).not.toContain(name)
   })
 
-  test('says beside its title the name a member had before members were named by their model', async ({
+  test("says beside its title every name a member had before it was named by its model's id", async ({
     page,
   }) => {
-    // The migration named @zeus by its model: its row and its window's keep the old name.
+    // The migrations named @zeus by its model's name (@opus-high), then by its id: its row
+    // keeps the nickname, and the names it left, oldest first; its window's rows keep them too.
     const data = model()
     const [, , member, session] = data.board.lanes
-    Object.assign(member.participant, { handle: 'opus-high' })
-    Object.assign(session.participant, {
-      handle: 'opus-high-amber-pine',
-      member: 'opus-high',
+    Object.assign(member.participant, {
+      handle: 'claude-opus-5-5-high',
+      formerHandles: ['opus-high'],
     })
-    data.histories['opus-high-amber-pine'] = data.histories['zeus-amber-pine']
+    Object.assign(session.participant, {
+      handle: 'claude-opus-5-5-high-amber-pine',
+      member: 'claude-opus-5-5-high',
+      formerHandles: ['opus-high-amber-pine'],
+    })
+    data.histories['claude-opus-5-5-high-amber-pine'] = data.histories['zeus-amber-pine']
     await open(page, data)
     await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
-    await page.getByRole('button', { name: "Show @opus-high · amber-pine's terminal" }).click()
     await page
-      .locator('#stage .terminal-card[data-handle="opus-high-amber-pine"]')
+      .getByRole('button', { name: "Show @claude-opus-5-5-high · amber-pine's terminal" })
+      .click()
+    await page
+      .locator('#stage .terminal-card[data-handle="claude-opus-5-5-high-amber-pine"]')
       .getByRole('button', {
-        name: "Read everything kept of @opus-high · amber-pine's conversations",
+        name: "Read everything kept of @claude-opus-5-5-high · amber-pine's conversations",
       })
       .click()
     const viewer = page.getByRole('dialog', { name: 'History', exact: true })
     await expect(viewer.locator('.history-formerly')).toHaveText(
-      'once @zeus, before members were named by their model',
+      "once @zeus, then @opus-high, before members were named by their model's id",
     )
-    // The chief's agent was only what it ran on: the line says no name.
     await viewer.getByRole('button', { name: 'Close' }).click()
+    // The chief's agent was only what it ran on: the line says no name.
+    const chief = await openChief(page)
+    await expect(chief.locator('.history-formerly')).toBeHidden()
+  })
+
+  test('says the one name a member that joined in alpha.2 had, and nothing of a member never renamed', async ({
+    page,
+  }) => {
+    const data = model()
+    const [, , member, session] = data.board.lanes
+    Object.assign(member.participant, {
+      handle: 'claude-opus-5-5-high',
+      agent: null,
+      formerHandles: ['opus-high'],
+    })
+    Object.assign(session.participant, {
+      handle: 'claude-opus-5-5-high-amber-pine',
+      member: 'claude-opus-5-5-high',
+      agent: null,
+      formerHandles: ['opus-high-amber-pine'],
+    })
+    data.histories['claude-opus-5-5-high-amber-pine'] = data.histories['zeus-amber-pine']
+    await open(page, data)
+    await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+    await page
+      .getByRole('button', { name: "Show @claude-opus-5-5-high · amber-pine's terminal" })
+      .click()
+    const card = page.locator(
+      '#stage .terminal-card[data-handle="claude-opus-5-5-high-amber-pine"]',
+    )
+    await card
+      .getByRole('button', {
+        name: "Read everything kept of @claude-opus-5-5-high · amber-pine's conversations",
+      })
+      .click()
+    const viewer = page.getByRole('dialog', { name: 'History', exact: true })
+    await expect(viewer.locator('.history-formerly')).toHaveText(
+      "once @opus-high, before members were named by their model's id",
+    )
+    // Never renamed: no name before, and the line is not there.
+    await viewer.getByRole('button', { name: 'Close' }).click()
+    session.participant.formerHandles = []
+    await page.evaluate(() => {
+      for (const lane of window.__model.board.lanes) lane.participant.formerHandles = []
+    })
     const chief = await openChief(page)
     await expect(chief.locator('.history-formerly')).toBeHidden()
   })

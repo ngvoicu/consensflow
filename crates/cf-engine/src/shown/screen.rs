@@ -8,6 +8,10 @@
 //!   they were drawn, and joined with nothing between them: `{"api_` / `key": "red` / `green
 //!   blue"}` is `api_key` at the join, and `sk-` / `abcd…` is a token's beginning. A token's
 //!   prefix ([`begins_a_token`]) withholds the screen whatever follows it.
+//! - **A URL's user and password the wrap cut in two.** `https://alder:copper` / `willow@host`:
+//!   the masker takes them out of a row that has all of them and a row that has half of them is
+//!   none, so a row end in or beside the user and password of a URL withholds the screen
+//!   ([`splits_url_credentials`]); a URL whole on a row is masked where it stands.
 //! - **A frame.** A program that draws a box around its output puts `│`, `┃`, `|` and the box's
 //!   edges at the ends of every row, and a row of a key between them is no row of base64. The
 //!   frame and the blanks beside it are taken off before a row is looked at ([`undecorated`]).
@@ -41,7 +45,7 @@
 //! A false alarm (a hash, a long identifier, a sentence of four-letter words) costs the quote of
 //! one screen; a miss costs a key.
 
-use super::mask::{begins_a_token, has_url_credentials};
+use super::mask::{begins_a_token, has_url_credentials, url_credential_spans};
 use super::secret::names_a_secret;
 
 /// A row this long, of base64's characters alone, is a token or a key's body by itself.
@@ -90,7 +94,11 @@ pub(super) fn withheld(tail: &[String]) -> Option<Withheld> {
     // that ends in a letter, and a scheme and its credential (`Basic` / `YTpi`).
     let joined = rows.concat();
     let spaced = rows.join(" ");
-    if names_a_secret(&joined) || begins_a_token(&joined) || begins_a_token(&spaced) {
+    if names_a_secret(&joined)
+        || begins_a_token(&joined)
+        || begins_a_token(&spaced)
+        || splits_url_credentials(&rows, &joined)
+    {
         return Some(Withheld::Secret);
     }
     // Text in percent signs says nothing to the tests above: what it spells is looked at too.
@@ -106,6 +114,22 @@ pub(super) fn withheld(tail: &[String]) -> Option<Withheld> {
         return Some(Withheld::Key);
     }
     None
+}
+
+/// Whether the end of a row falls in a URL's user and password, or at either side of them
+/// (`https://alder:copper` / `willow@host`): the masker takes the user and password of a URL out
+/// of a row that has all of them, and neither row of this has, so nothing is left to take. A URL
+/// whole on a row is no concern of this: it is masked where it stands.
+fn splits_url_credentials(rows: &[&str], joined: &str) -> bool {
+    let mut ends = Vec::with_capacity(rows.len());
+    let mut at = 0;
+    for row in rows {
+        at += row.len();
+        ends.push(at);
+    }
+    url_credential_spans(joined)
+        .into_iter()
+        .any(|(from, to)| ends.iter().any(|end| (from..=to).contains(end)))
 }
 
 /// `text` with its `%XX` escapes spelled out, or none where it has none.

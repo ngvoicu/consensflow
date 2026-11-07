@@ -17,6 +17,8 @@ fn chief(model: Option<&str>, launched: Option<&str>) -> ParticipantView {
         model: model.map(str::to_owned),
         effort: None,
         model_name: None,
+        former_handles: Vec::new(),
+        name_apart: false,
         needs_edit: false,
         launched_model: launched.map(str::to_owned),
         gone_model: None,

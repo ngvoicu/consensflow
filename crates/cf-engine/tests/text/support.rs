@@ -203,6 +203,8 @@ pub fn seat(harness: Option<&str>, model: Option<&str>) -> ParticipantView {
         model: model.map(str::to_owned),
         effort: None,
         model_name: None,
+        former_handles: Vec::new(),
+        name_apart: false,
         needs_edit: false,
         launched_model: None,
         gone_model: None,
@@ -232,6 +234,8 @@ pub fn participant_of(row: &Value) -> ParticipantView {
         model: text(row, "model"),
         effort: text(row, "effort"),
         model_name: text(row, "modelName"),
+        former_handles: Vec::new(),
+        name_apart: false,
         needs_edit: false,
         launched_model: text(row, "launchedModel"),
         gone_model: None,
@@ -264,7 +268,7 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         description: None,
         meeting: None,
         staff_rules: None,
-        claude_compaction: None,
+        compaction: None,
     }
 }
 

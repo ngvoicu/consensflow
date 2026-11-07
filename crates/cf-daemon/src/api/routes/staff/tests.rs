@@ -29,7 +29,7 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_i
     assert_eq!(status, 200);
     assert_eq!(
         said.to_string(),
-        r#"{"members":[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","harnessName":"Claude Code","model":"claude-sonnet-5","modelName":"zeus","effort":null}]}"#
+        r#"{"members":[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","harnessName":"Claude Code","model":"claude-sonnet-5","nameApart":false,"modelName":"zeus","effort":null}]}"#
     );
     assert_eq!(scene.kicks.get(), 0);
 }
@@ -57,6 +57,8 @@ async fn a_member_on_its_harness_s_default_says_so_and_a_tester_its_roles() {
     let (_, said) = staff(&scene, &scene.context).await;
     let tess = &said["members"][1];
     assert_eq!(tess["handle"], "codex-default");
+    // Its name holds no model: `cf staff` says what it runs on.
+    assert_eq!(tess["nameApart"], true);
     assert_eq!(
         (&tess["model"], &tess["modelName"], &tess["effort"]),
         (&json!(null), &json!("Codex default"), &json!(null))

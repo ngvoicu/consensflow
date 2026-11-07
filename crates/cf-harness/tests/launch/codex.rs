@@ -22,6 +22,7 @@
 //! the cases left.
 
 mod channel;
+mod compaction;
 mod dialogs;
 mod resumed;
 mod roles;
@@ -112,6 +113,8 @@ struct Request {
     specs: Option<Variant>,
     /// The folder its project keeps its specs in, relative to the project.
     folder: &'static str,
+    /// The size its project's members compact at, where the project chose one.
+    compaction: Option<u32>,
 }
 
 impl Default for Request {
@@ -126,6 +129,7 @@ impl Default for Request {
             starts_given_up: 0,
             specs: None,
             folder: ".specs",
+            compaction: None,
         }
     }
 }
@@ -174,7 +178,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
                 folder: request.folder,
                 skill,
             }),
-        compaction: None,
+        compaction: request.compaction,
         first_message_ms: request.first_message_ms,
         starts_given_up: request.starts_given_up,
     };

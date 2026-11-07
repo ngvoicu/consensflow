@@ -1605,10 +1605,12 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/one_shot.rs"
 find = '''
-    let child = processes.spawn(program, Streams::Lines)?;
+        Streams::Lines,
+        what,
 '''
 replace = '''
-    let child = processes.spawn(program, Streams::Quiet)?;
+        Streams::Quiet,
+        what,
 '''
 
 # MUS-23's engine: an unavailable member is held with no reset and told once, until the human or an allowance says.

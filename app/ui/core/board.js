@@ -225,7 +225,7 @@ function boardRows(board) {
     for (const role of roles) {
       rows.push({
         ...lane,
-        participant: { ...participant, role, roles: [role] },
+        participant: { ...participant, role, roles: [role], also: role !== roles[0] },
         tasks: lane.tasks.filter((task) => roleOf(task, roles) === role),
         sessions: sessions.filter((session) => session.participant.role === role),
       })
@@ -350,8 +350,9 @@ const chiefModel = (participant) =>
   participant.needsEdit ? 'no model: needs an edit' : (participant.ranOn ?? participant.model)
 
 /**
- * What a member's model is called (harness-models): the name its harness's list gave it,
- * else its id, else its harness's default (the image designer from before, on Codex's).
+ * What a member's model is called (harness-models, HMD-12): its id as its harness's list
+ * names it (`claude-opus-5-5`; Pi's `provider/id`; Devin's listed id), else its id as the
+ * harness takes it, else its harness's default (the image designer from before, on Codex's).
  */
 export const modelShown = (participant) =>
   (participant.needsEdit && 'no model: needs an edit') ||
@@ -359,32 +360,69 @@ export const modelShown = (participant) =>
   participant.model ||
   `${HARNESS_NAMES[participant.harness] ?? participant.harness} default`
 
+/** A harness as the human knows it: `claude-code` is Claude Code. */
+export const harnessLabel = (participant) =>
+  HARNESS_NAMES[participant.harness] ?? participant.harness
+
 /**
- * A session's row says whose window it is; the member's row says what it
- * is. Each says what it runs on: its harness, its model's name, and its effort when it
- * has one, as Project settings does. The chief's card in the dock says its
- * harness and the model it runs on.
+ * Whether a member's name, or a session's, says nothing of the model and effort it runs on
+ * (the daemon says so, `nameApart`): a designer on its harness's default, a member the update
+ * could not tell the model of. Where it does, its card says them no more than the name does.
  */
-export const identity = (participant) =>
-  (participant.member
+export const nameApart = (participant) => participant.nameApart === true || participant.needsEdit
+
+/**
+ * What a row, or the chief's card in the dock, says its participant is, in order, each part
+ * with what it is (`kind`): a session's row says whose window it is; the member's row says
+ * what it is, its roles, its tier and its harness, and what it runs on only where its name
+ * does not say it (HMD-12: `@claude-opus-5-5-high` is the model and the effort). The chief's
+ * card in the dock says its harness and the model it runs on.
+ */
+const identityParts = (participant) => {
+  const part = (kind, text) => (text ? { kind, text } : null)
+  const runs = nameApart(participant)
+    ? [part('model', modelShown(participant)), part('effort', participant.effort)]
+    : []
+  const parts = participant.member
     ? [
-        `${participant.role} session of @${participant.member}`,
-        participant.harness,
-        modelShown(participant),
-        participant.effort,
+        part('role', `${participant.role} session of @${participant.member}`),
+        part('harness', harnessLabel(participant)),
+        ...runs,
       ]
     : participant.role === 'chief'
-      ? [HARNESS_NAMES[participant.harness] ?? participant.harness, chiefModel(participant)]
-      : [
-          participant.roles.join('+'),
-          participant.tier,
-          participant.harness,
-          modelShown(participant),
-          participant.effort,
+      ? [
+          part('harness', HARNESS_NAMES[participant.harness] ?? participant.harness),
+          part('model', chiefModel(participant)),
         ]
-  )
-    .filter(Boolean)
+      : [
+          part('role', participant.roles.join('+')),
+          part('tier', participant.tier),
+          part('harness', harnessLabel(participant)),
+          ...runs,
+        ]
+  return parts.filter(Boolean)
+}
+
+/** The same, as one line of words. */
+export const identity = (participant) =>
+  identityParts(participant)
+    .map((part) => part.text)
     .join(' · ')
+
+/**
+ * The same, drawn for a row: each part a span of its own, so the role reads first and the tier
+ * has its mark, and the words between them the line's (`textContent` is [`identity`]).
+ */
+function identityLine(participant, className) {
+  const line = element('span', className)
+  identityParts(participant).forEach((part, at) => {
+    if (at > 0) line.append(' · ')
+    const span = element('span', `meta-${part.kind}`, part.text)
+    if (part.kind === 'tier') span.dataset.tier = part.text
+    line.append(span)
+  })
+  return line
+}
 
 /**
  * What a row, or the chief's card in the dock, says its participant is
@@ -872,6 +910,8 @@ export class BoardView {
     row.dataset.role = participant.role
     if (participant.member) row.dataset.session = participant.member
     if (folded !== null) row.dataset.folded = String(folded)
+    // A member's second role has its row too: the name is the same member's.
+    if (participant.also) row.dataset.also = 'true'
     row.append(this.#rowHead(lane, board, now, folded))
     const mine = rowCards(lane, board, folded === true)
     for (const [state, label] of COLUMNS) {
@@ -901,7 +941,7 @@ export class BoardView {
     // The chief's row only holds its tasks: what it is doing, what it runs on
     // and Switch chief are on its card in the dock.
     if (participant.role === 'chief') return head
-    head.append(element('span', 'row-meta', identity(participant)))
+    head.append(identityLine(participant, 'row-meta'))
     const said = laneStatus(lane, board, now)
     if (said !== null) {
       const [state, text] = said

@@ -279,7 +279,7 @@ replace = '    if fetch || true {'
 
 [[plant]]
 name = 'listing: pi: the list is read online'
-meant = "the_list_is_read_offline_with_nothing_of_pi_s_own"
+meant = "the_list_is_read_offline_with_the_packages_and_extensions_a_window_starts_with"
 runs = ["ch-harness"]
 
 [[plant.edit]]
@@ -354,8 +354,8 @@ runs = ["ch-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '        if !refresh && self.read.borrow().contains(&harness) {'
-replace = '        if false {'
+find = '        if refresh || !self.read.borrow().contains(&harness) {'
+replace = '        if true {'
 
 [[plant]]
 name = 'listing: daemon: a harness not installed here is asked'
@@ -368,14 +368,14 @@ find = '        if harness_path(harness, &self.env).is_none() {'
 replace = '        if false {'
 
 [[plant]]
-name = 'listing: daemon: two harnesses are read at once'
-meant = "two_harnesses_are_read_one_after_the_other"
+name = 'listing: daemon: two reads of one harness are made at once'
+meant = "two_reads_of_one_harness_are_one_after_the_other"
 runs = ["ch-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '        let _turn = self.reading.lock().await;'
-replace = '        let _turn = ();'
+find = '        let _turn = turn.lock().await;'
+replace = '        let _turn = turn.try_lock().ok();'
 
 [[plant]]
 name = 'listing: daemon: a failed read drops the listing kept before'
@@ -384,8 +384,8 @@ runs = ["ch-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '        let listing = ModelListing::after(kept, adapter.models(refresh).await);'
-replace = '        let listing = ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await);'
+find = '        let listing = without_credentials(ModelListing::after(kept, adapter.models(refresh).await));'
+replace = '        let listing = without_credentials(ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await));'
 
 # A chief is a harness and a model (Phase 1, CHF-04 to CHF-10, T-729): the ledger's chief
 # model and its switch (crates/cf-ledger), each harness's last_used reader and its words for a
@@ -741,18 +741,8 @@ replace = '''
     let Some(listing) = kept else {'''
 
 [[plant]]
-name = "chief: the page marks no contributor model in the chief's list"
-meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
-runs = ["chm-page-pick"]
-
-[[plant.edit]]
-file = "app/ui/core/dialogs.js"
-find = '        model.contributor ? `${model.label} · Contributor` : model.label,'
-replace = '        model.label,'
-
-[[plant]]
 name = "chief: the page says no contributor warning for the chief's model"
-meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+meant = "the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief"
 runs = ["chm-page-pick"]
 
 [[plant.edit]]
@@ -1026,7 +1016,7 @@ replace = '            listing'
 
 [[plant]]
 name = "chief: the page offers no Muse chief"
-meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+meant = "the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief"
 runs = ["chm-page-muse"]
 
 [[plant.edit]]
