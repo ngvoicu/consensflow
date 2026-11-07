@@ -3,10 +3,10 @@ use serde_json::json;
 use super::*;
 
 fn window(value: serde_json::Value) -> Result<Option<u32>, String> {
-    parse_claude_compaction(Some(&value)).map_err(|refused| refused.to_string())
+    parse_compaction(Some(&value)).map_err(|refused| refused.to_string())
 }
 
-const WORDS: &str = "the compaction window for Claude members is a whole number of tokens from 100000 to 1000000, or none for Claude's own point";
+const WORDS: &str = "the compaction size is a whole number of tokens from 100000 to 1000000, or none for each harness's own point";
 
 #[test]
 fn a_size_from_a_hundred_thousand_to_a_million_tokens_is_kept_as_it_is() {
@@ -17,8 +17,8 @@ fn a_size_from_a_hundred_thousand_to_a_million_tokens_is_kept_as_it_is() {
 
 #[test]
 fn no_size_is_claudes_own_point_a_missing_field_null_or_nothing_else() {
-    assert_eq!(parse_claude_compaction(None).unwrap(), None);
-    assert_eq!(parse_claude_compaction(Some(&json!(null))).unwrap(), None);
+    assert_eq!(parse_compaction(None).unwrap(), None);
+    assert_eq!(parse_compaction(Some(&json!(null))).unwrap(), None);
 }
 
 #[test]
@@ -52,6 +52,6 @@ fn only_a_whole_number_is_a_size() {
 
 #[test]
 fn the_range_is_claudes_own_hundred_thousand_to_a_million() {
-    assert_eq!(CLAUDE_COMPACTION_MIN, 100_000);
-    assert_eq!(CLAUDE_COMPACTION_MAX, 1_000_000);
+    assert_eq!(COMPACTION_MIN, 100_000);
+    assert_eq!(COMPACTION_MAX, 1_000_000);
 }

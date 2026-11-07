@@ -1320,8 +1320,8 @@ impl Adapter for Asked {
             })),
             "instructions": launch.instructions,
         });
-        // Said only where the project chose a size for its Claude members' windows to
-        // compact at, which no trace of Node's has.
+        // Said only where the project chose a size for its members' windows to compact
+        // at, which no trace of Node's has.
         if let Some(size) = launch.compaction {
             asked["compaction"] = json!(size);
         }

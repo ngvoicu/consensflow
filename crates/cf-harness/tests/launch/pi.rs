@@ -119,6 +119,8 @@ struct Request {
     folder: &'static str,
     /// The folder the window opens in.
     directory: String,
+    /// The size its project's members compact at, where the project chose one.
+    compaction: Option<u32>,
 }
 
 impl Default for Request {
@@ -131,6 +133,7 @@ impl Default for Request {
             specs: None,
             folder: ".specs",
             directory: "/work/app".to_owned(),
+            compaction: None,
         }
     }
 }
@@ -164,7 +167,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
                 folder: request.folder,
                 skill,
             }),
-        compaction: None,
+        compaction: request.compaction,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };
@@ -692,6 +695,7 @@ fn reads_each_turn_s_end_from_the_extension_s_settled_marker() {
     );
 }
 
+mod compaction;
 mod failed;
 mod install;
 mod resumed;

@@ -332,17 +332,16 @@
         <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
         <div class="dialog-actions"><button class="primary-button" type="button" name="staff-rules-save">Save rules</button></div>
       </fieldset>
-      <!-- Compaction for Claude members (core/claude-compaction.js): the size at which the
-           project's Claude member windows compact, or Claude's own point; the chief never; chosen here only. -->
-      <fieldset class="project-section claude-compaction">
-        <legend>Compaction for Claude members</legend>
-        <p class="dialog-help">From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.</p>
-        <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
-        <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="own" checked> Claude's own point</label>
-        <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="size"> A size</label>
-        <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="claude-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
-        <p class="staff-hint claude-compaction-hint" role="alert" hidden></p>
-        <div class="dialog-actions"><button class="primary-button" type="button" name="claude-compaction-save">Save compaction</button></div>
+      <!-- Compaction (core/compaction.js): the size at which every member window of the project
+           compacts, whatever its harness, or each harness's own point; the chief never; chosen here only. -->
+      <fieldset class="project-section members-compaction">
+        <legend>Compaction</legend>
+        <p class="dialog-help">From its next start, each member's harness compacts its conversation at about this size, by its own rule; a size above a model's own window leaves the harness's own point. The chief is not affected.</p>
+        <label class="members-compaction-choice"><input type="radio" name="members-compaction-choice" value="own" checked> The harness's own point</label>
+        <label class="members-compaction-choice"><input type="radio" name="members-compaction-choice" value="size"> A size</label>
+        <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="members-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
+        <p class="staff-hint members-compaction-hint" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="primary-button" type="button" name="members-compaction-save">Save compaction</button></div>
       </fieldset>
       <div data-project-sections></div>
       <!-- Computer use (core/computer-use.js): a part for each harness of the project's with a

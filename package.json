@@ -57,6 +57,7 @@
     "live:door": "cargo xtask live door",
     "live:hook-status": "cargo xtask live door claude --hold 90",
     "live:codex-interrupt": "cargo xtask live codex-interrupt",
+    "live:compaction-routes": "cargo xtask live compaction-routes",
     "live:asks": "cargo xtask live asks",
     "live:codex-resume": "cargo xtask live codex-resume",
     "live:compacting": "cargo xtask live compacting",

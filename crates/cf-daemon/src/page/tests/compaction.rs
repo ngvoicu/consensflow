@@ -1,18 +1,18 @@
-//! The size the human chooses for the project's Claude member windows to compact
-//! at, on the page: checked before the project is looked for, kept, shown on every
+//! The size the human chooses for the project's member windows to compact at,
+//! whatever their harness, on the page: checked before the project is looked for, kept, shown on every
 //! view of the project the page reads, the dispatcher woken. It is the human's to
 //! choose alone: no route of the agents' API writes it, so no `cf` command does,
 //! whosever token it holds. And the page's own range is the ledger's.
 //! Not held to a Node recording: this operation is this build's own.
 
-use cf_ledger::{CLAUDE_COMPACTION_MAX, CLAUDE_COMPACTION_MIN};
+use cf_ledger::{COMPACTION_MAX, COMPACTION_MIN};
 use hyper::Method;
 
 use super::reading::home_with;
 use super::*;
 use crate::testing::{request, said, scene};
 
-const WORDS: &str = "the compaction window for Claude members is a whole number of tokens from 100000 to 1000000, or none for Claude's own point";
+const WORDS: &str = "the compaction size is a whole number of tokens from 100000 to 1000000, or none for each harness's own point";
 
 /// The page over a project with a worker, on a bridge.
 struct Asked {
@@ -48,7 +48,7 @@ impl Asked {
             "projects.list" => answer["projects"][0].clone(),
             _ => answer["board"]["project"].clone(),
         };
-        project.get("claudeCompaction").cloned()
+        project.get("compaction").cloned()
     }
 
     async fn set(&self, body: Value) -> Value {
@@ -74,7 +74,7 @@ async fn the_human_chooses_the_size_and_every_view_of_the_project_carries_it_unt
                 .set(json!({ "project": project, "compaction": 400_000 }))
                 .await;
             assert_eq!(answer["ok"], true, "{answer}");
-            assert_eq!(answer["project"]["claudeCompaction"], 400_000);
+            assert_eq!(answer["project"]["compaction"], 400_000);
             assert_eq!(held.rig.kicks.get(), 1, "the dispatcher is woken once");
             for operation in ["board.get", "projects.list"] {
                 assert_eq!(
@@ -91,10 +91,7 @@ async fn the_human_chooses_the_size_and_every_view_of_the_project_carries_it_unt
                     .await;
                 let answer = held.set(body.clone()).await;
                 assert_eq!(answer["ok"], true, "{body}: {answer}");
-                assert!(
-                    answer["project"].get("claudeCompaction").is_none(),
-                    "{body}"
-                );
+                assert!(answer["project"].get("compaction").is_none(), "{body}");
                 for operation in ["board.get", "projects.list"] {
                     assert_eq!(held.read(operation).await, None, "{body}: {operation}");
                 }
@@ -142,11 +139,11 @@ async fn a_size_outside_the_range_or_no_number_is_refused_and_changes_nothing() 
             );
             assert_eq!(held.read("board.get").await, Some(json!(400_000)));
             // The ends of the range are sizes.
-            for size in [CLAUDE_COMPACTION_MIN, CLAUDE_COMPACTION_MAX] {
+            for size in [COMPACTION_MIN, COMPACTION_MAX] {
                 let kept = held
                     .set(json!({ "project": project, "compaction": size }))
                     .await;
-                assert_eq!(kept["project"]["claudeCompaction"], size);
+                assert_eq!(kept["project"]["compaction"], size);
             }
             assert_eq!(held.rig.kicks.get(), kicks + 2, "a refusal wakes nothing");
         })
@@ -186,21 +183,15 @@ async fn a_windows_token_reaches_no_route_that_writes_the_size_so_only_the_human
         .project(scene.project.id)
         .unwrap()
         .unwrap();
-    assert_eq!(
-        after.claude_compaction, None,
-        "nothing a window asked wrote it"
-    );
+    assert_eq!(after.compaction, None, "nothing a window asked wrote it");
 }
 
 /// The page checks the size the human types against the range and says it in its
 /// words: its copy of the range is held to the ledger's.
 #[test]
 fn the_pages_range_for_the_size_is_the_ledgers() {
-    let source = include_str!("../../../../../app/ui/core/claude-compaction.js");
-    for (constant, value) in [
-        ("LEAST", CLAUDE_COMPACTION_MIN),
-        ("MOST", CLAUDE_COMPACTION_MAX),
-    ] {
+    let source = include_str!("../../../../../app/ui/core/compaction.js");
+    for (constant, value) in [("LEAST", COMPACTION_MIN), ("MOST", COMPACTION_MAX)] {
         let line = format!("const {constant} = {}\n", group(value));
         assert!(
             source.contains(&line),

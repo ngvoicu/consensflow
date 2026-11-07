@@ -97,6 +97,21 @@ const OFFERS: [&str; 6] = [
     "features.skill_mcp_dependency_install=false",
 ];
 
+/// The size the project chose for its members to compact at, as Codex is given it for the
+/// launch alone (at launch and on resume): its `model_auto_compact_token_limit`, which
+/// Codex caps at 90% of the model's window itself (`ModelInfo::auto_compact_token_limit`,
+/// codex-rs 0.166.0), so a size above that leaves Codex's own point. None where the project
+/// chose none, and for the chief, whose launch is never given one.
+fn compaction_limit(size: Option<u32>) -> Vec<String> {
+    size.map(|size| {
+        vec![
+            "-c".to_owned(),
+            format!("model_auto_compact_token_limit={size}"),
+        ]
+    })
+    .unwrap_or_default()
+}
+
 /// Why a message waits while the broker names no thread or cannot take one: a
 /// refusal there would spend the message's attempts in seconds (an answer to a
 /// Codex worker was lost that way), so it is held.
@@ -243,6 +258,7 @@ impl Adapter for CodexAdapter {
             }
             args.extend(WINDOW.map(str::to_owned));
             args.extend(OFFERS.map(str::to_owned));
+            args.extend(compaction_limit(launch.compaction));
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
