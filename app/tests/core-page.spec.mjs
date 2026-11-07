@@ -4550,7 +4550,7 @@ test('Enter in any field of New project starts no project, and is a new line in 
   data.lastStaff = [lastMember('zeus', 'claude-code', ['worker'])]
   await open(page, data)
   const made = await newProject(page)
-  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   // A size chosen, so the field that takes one can be pressed in too.
   await made.compaction.size.check()
   const fields = fieldsIn(made.dialog)
@@ -4595,7 +4595,7 @@ test('Enter in a field of a section of Project settings adds nobody to the staff
   await pickMember(dialog, {
     role: 'worker',
     harness: 'Codex',
-    model: 'GPT-6 Astra',
+    model: 'gpt-6-astra',
     tier: 'standard',
   })
   await dialog
@@ -4777,7 +4777,7 @@ test('New project: the rules for the staff and the compaction are written as the
 }) => {
   await open(page)
   const made = await newProject(page)
-  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   // Counted against the bounds as the human types, as in Project settings.
   await made.rules.text.fill(STAFF_RULES)
   await expect(made.rules.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
@@ -4814,7 +4814,7 @@ test('New project: rules over a bound, or a size that is no whole number in the 
 }) => {
   await open(page)
   const made = await newProject(page)
-  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   // 8,001 bytes of rules.
   await made.rules.text.fill('x'.repeat(8_001))
   await expect(made.rules.count).toHaveClass(/over/)
@@ -4858,7 +4858,7 @@ test('New project: a project made with rules, a compaction size and computer use
   data.computerUse = { on: true, permissions: { accessibility: true, screenRecording: false } }
   await open(page, data)
   const made = await newProject(page)
-  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await made.rules.text.fill(STAFF_RULES)
   await made.compaction.size.check()
   await made.compaction.tokens.fill('300000')
@@ -4897,9 +4897,9 @@ test("New project: computer use is read for the folder picked, shown while the c
   // No harness picked: no computer use to say.
   await expect(made.computerUse).toBeHidden()
   // A chief on Pi has none; on Claude Code it has, for the folder.
-  await pickChief(made.dialog, 'Pi', 'Muse Spark')
+  await pickChief(made.dialog, 'Pi', 'meta/muse-spark')
   await expect(made.computerUse).toBeHidden()
-  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await expect(made.computerUse).toBeVisible()
   expect(await computerUse(made.dialog)).toEqual([
     {
@@ -4923,7 +4923,7 @@ test("New project: computer use is read for the folder picked, shown while the c
   await pickMember(made.dialog, {
     role: 'worker',
     harness: 'Codex',
-    model: 'GPT-6 Astra',
+    model: 'gpt-6-astra',
     tier: 'standard',
   })
   await made.dialog.getByRole('button', { name: 'Add', exact: true }).click()
@@ -4962,7 +4962,7 @@ test('New project: back from System Settings, computer use is read again for the
   data.computerUse = { on: true, permissions: { accessibility: false, screenRecording: false } }
   await open(page, data)
   const made = await newProject(page)
-  await pickChief(made.dialog, 'Claude Code', 'Sonnet 5')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   const accessibility = made.computerUse.locator(
     'tr[data-grant="accessibility"] .computer-use-status',
   )
