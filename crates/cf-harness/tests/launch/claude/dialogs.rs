@@ -113,6 +113,8 @@ fn its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_
             after_ms: None,
             then_tell: None,
             what: "offer".to_owned(),
+            listed: true,
+            members_only: false,
         })
     );
     // Its hint to install a plugin a command named: every answer but a cancel writes the
@@ -425,4 +427,157 @@ fn a_claude_windows_command_that_prints_the_warning_is_not_blanked_whatever_its_
         assert_eq!(decline.after_ms, Some(600_000));
         assert_eq!(window.safe_decline(&second).as_ref(), Some(&decline));
     }
+}
+
+// ----- Its Computer Use permission prompt (T-1300) -----
+
+/// The prompt as T-1291's window drew it, the pane host's tail (see the constant).
+fn computer_use_prompt() -> Vec<String> {
+    cf_harness::testing::screens::CLAUDE_COMPUTER_USE_PROMPT
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect()
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_read_as_a_dialog_that_waits_whatever_its_footer_says() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let dialog = plan
+        .window
+        .dialog(&computer_use_prompt())
+        .expect("the prompt");
+    // The wrapped last row of its sentence, as the field's notice quoted it.
+    assert_eq!(dialog.question, "Recording.");
+    assert_eq!(
+        dialog.options,
+        [
+            "Open System Settings \u{2192} Screen Recording",
+            "Try again"
+        ]
+    );
+    assert!(dialog.asks && !dialog.prompt_below);
+    // Its status says nothing while it is open (2.1.319's table of dialogs has no `waitingFor`
+    // for it), so the screen is the only sign: it waits whatever the footer under it says.
+    let mut bare = computer_use_prompt();
+    bare.pop();
+    let bare = plan
+        .window
+        .dialog(&bare)
+        .expect("the prompt without a footer");
+    assert!(bare.asks, "{bare:?}");
+    // Any other list of choices that asks nothing is not read as one that asks.
+    let mut other = computer_use_prompt();
+    other[3] = "  Something else".to_owned();
+    other.pop();
+    let other = plan.window.dialog(&other).expect("a list");
+    assert!(!other.asks, "{other:?}");
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_declined_by_escape_alone_in_a_members_window() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let dialog = plan
+        .window
+        .dialog(&computer_use_prompt())
+        .expect("the prompt");
+    assert_eq!(
+        plan.window.safe_decline(&dialog),
+        Some(Decline {
+            choice: "Esc".to_owned(),
+            key: vec![27],
+            after_ms: None,
+            then_tell: Some("Computer use isn't available in ConsensFlow's windows until ConsensFlow has the Screen Recording permission and has been restarted. Do the task without it.".to_owned()),
+            what: "Computer Use permission prompt".to_owned(),
+            listed: false,
+            members_only: true,
+        })
+    );
+    // Accessibility missing too: its choice leads the list, and the member is told of both.
+    let mut both = computer_use_prompt();
+    both[4] = "  Accessibility: \u{2718} not granted".to_owned();
+    both.insert(
+        8,
+        "  \u{276f} Open System Settings \u{2192} Accessibility".to_owned(),
+    );
+    both[9] = "    Open System Settings \u{2192} Screen Recording".to_owned();
+    both.insert(10, "    Try again".to_owned());
+    both.remove(11);
+    let both = plan.window.dialog(&both).expect("the prompt");
+    assert_eq!(both.options.len(), 3, "{both:?}");
+    let decline = plan.window.safe_decline(&both).expect("on the list");
+    assert_eq!(decline.key, vec![27]);
+    assert!(decline
+        .then_tell
+        .as_deref()
+        .is_some_and(|words| words.contains("the Accessibility and Screen Recording permissions")));
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_not_declined_where_only_its_words_are_quoted() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    // The harness's own prompt drawn under the choices: they are a conversation's words.
+    let mut shown = computer_use_prompt();
+    shown.extend([
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}".to_owned(),
+        "\u{276f} ".to_owned(),
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}".to_owned(),
+        "  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)".to_owned(),
+    ]);
+    match plan.window.dialog(&shown) {
+        None => {}
+        Some(dialog) => assert_eq!(plan.window.safe_decline(&dialog), None, "{dialog:?}"),
+    }
+    // No cursor on the choices: no dialog at all.
+    let mut plain = computer_use_prompt();
+    plain[8] = "  Open System Settings \u{2192} Screen Recording".to_owned();
+    assert_eq!(plan.window.dialog(&plain), None);
+    // The title in a longer row of a command, a title that is not its own: another dialog.
+    let mut quoted = computer_use_prompt();
+    quoted[3] = "  $ echo \"Computer Use needs macOS permissions\"".to_owned();
+    let quoted = plan.window.dialog(&quoted).expect("a list of choices");
+    assert_eq!(plan.window.safe_decline(&quoted), None);
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_one_dialog_whatever_slides_above_its_title() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let read = |first: &str, second: &str| {
+        let mut screen = computer_use_prompt();
+        screen[0] = first.to_owned();
+        screen[1] = second.to_owned();
+        plan.window.dialog(&screen).expect("the prompt")
+    };
+    let before = read("\u{23fa} Reading the log", "  3 lines so far");
+    let after = read(
+        "\u{23fa} Reading the log",
+        "  40 lines so far, and a long word more",
+    );
+    assert_ne!(before.detail, after.detail, "the tail slid");
+    assert_eq!(
+        plan.window.dialog_identity(&before),
+        plan.window.dialog_identity(&after)
+    );
+    // Its own words are still told apart: the same prompt with Accessibility missing is another.
+    let mut other = computer_use_prompt();
+    other[4] = "  Accessibility: \u{2718} not granted".to_owned();
+    let other = plan.window.dialog(&other).expect("the prompt");
+    assert_ne!(
+        plan.window.dialog_identity(&before),
+        plan.window.dialog_identity(&other)
+    );
+    // A dialog that has other choices keeps all its words: nothing above its title is cut.
+    let mut deny = computer_use_prompt();
+    deny[8] = "  \u{276f} Deny, and tell Claude what to do differently (esc)".to_owned();
+    deny[9] = "    Allow for this session (1 app)".to_owned();
+    let first = plan.window.dialog(&deny).expect("a list");
+    deny[0] = "\u{23fa} Another row".to_owned();
+    let second = plan.window.dialog(&deny).expect("a list");
+    assert_ne!(
+        plan.window.dialog_identity(&first),
+        plan.window.dialog_identity(&second)
+    );
 }

@@ -3,7 +3,7 @@
 //! holds two reads to one dialog by plain equality of what this returns, and presses a decline
 //! only into a read whose identity equals the one that was told of.
 //!
-//! Two things are taken out of the words, and nothing else:
+//! Three things are taken out of the words, and nothing else:
 //!
 //! - **The time in its warning line.** A permission prompt, a hook's ask, a classifier's ask draws
 //!   under the request's words a line that says when Claude Code will block the request by
@@ -29,6 +29,12 @@
 //!   identity runs from its title down. A read in which the tail cut the title off is another
 //!   read: it is told as another dialog, and since the offer is on the list of safe declines it is
 //!   declined at the next look that shows it so (over-telling, which is the side to err on).
+//!
+//! - **What is drawn above the Computer Use permission prompt** (T-1300). Its top is its title,
+//!   "Computer Use needs macOS permissions", and only where its choices are the prompt's own
+//!   (`computer_use_prompt`): the conversation above slid in the field (the notice of the dialog
+//!   quoted the model's last words above the tool line), and a decline is pressed only into the
+//!   dialog that was told of.
 //!
 //! Claude Code's other dialogs have no known top, and their words are compared as they were read.
 //! The note that tells a dialog still quotes the read as it was, the time in it.
@@ -104,6 +110,11 @@ pub(crate) fn identity(dialog: &Dialog) -> Dialog {
         if let Some(top) = detail.iter().rposition(|line| line == LSP_TITLE) {
             detail.drain(..top);
         }
+    }
+    // The Computer Use permission prompt begins at its title, and only where its choices are its
+    // own (T-1300): what the tail shows above it is the conversation's, and it slides.
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
     }
     Dialog {
         detail,

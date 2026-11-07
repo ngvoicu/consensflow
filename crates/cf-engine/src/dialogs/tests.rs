@@ -52,6 +52,8 @@ fn a_note_of_a_dialog_on_its_harnesss_list_says_it_is_declined_and_how() {
         after_ms: None,
         then_tell: None,
         what: "offer".to_owned(),
+        listed: true,
+        members_only: false,
     };
     let body = told("zeus", Some(&offer(Some(30))), Some(&decline));
     assert!(
@@ -59,6 +61,35 @@ fn a_note_of_a_dialog_on_its_harnesss_list_says_it_is_declined_and_how() {
         "{body}"
     );
     assert!(!body.contains("presses nothing"), "{body}");
+}
+
+#[test]
+fn a_note_of_a_decline_made_by_a_key_with_no_choice_listed_says_it_is_pressed_not_chosen() {
+    let decline = Decline {
+        choice: "Esc".to_owned(),
+        key: vec![27],
+        after_ms: None,
+        then_tell: Some("Go on without it.".to_owned()),
+        what: "Computer Use permission prompt".to_owned(),
+        listed: false,
+        members_only: true,
+    };
+    let body = told("zeus", Some(&offer(None)), Some(&decline));
+    assert!(
+        body.ends_with("ConsensFlow declines it for the window now, by pressing \u{201c}Esc\u{201d}, which closes it and writes nothing, and tells it to go on without it; nothing else is typed into the window meanwhile."),
+        "{body}"
+    );
+    assert!(!body.contains("choosing"), "{body}");
+    // Where the harness has nothing to tell, the note says nothing of telling.
+    let silent = Decline {
+        then_tell: None,
+        ..decline
+    };
+    let body = told("zeus", Some(&offer(None)), Some(&silent));
+    assert!(
+        body.ends_with("by pressing \u{201c}Esc\u{201d}, which closes it and writes nothing; nothing else is typed into the window meanwhile."),
+        "{body}"
+    );
 }
 
 #[test]

@@ -37,6 +37,16 @@
 //! finds it gone, or drawn otherwise, presses nothing, and a key the window did not take is not
 //! pressed again. A dialog that goes and comes again is told again.
 //!
+//! **A decline can be a key with no choice of its own** (T-1300): Claude Code's Computer Use
+//! permission prompt, which a member's `request_access` raises where ConsensFlow.app lacks
+//! Accessibility or Screen Recording, lists two choices that cannot be pressed (one opens System
+//! Settings in ConsensFlow's name, the other asks again, and a Screen Recording grant takes effect
+//! only when the app restarts), so its decline is Escape, which closes it and grants nothing
+//! ([`cf_harness::contract::Decline::listed`] false). It is made in a member's window only
+//! ([`cf_harness::contract::Decline::members_only`]): the chief's window is the human's, and the
+//! prompt is told there as any other and never closed. The member is told what ConsensFlow lacks
+//! once its window rests, as a message of the board's, kept for its task when the task is paused.
+//!
 //! **Which dialog is which** (T-1277, after T-1261 and T-1273). Two reads of a screen are one
 //! dialog or two, and the two mistakes are not alike: telling a dialog twice is a nuisance, and
 //! taking two different dialogs for one is a failure (the second is never told, and a decline
@@ -243,9 +253,12 @@ impl Dispatcher {
             }
             return Ok(observed);
         }
+        // The chief's window is the human's: a decline that is for a member's window alone is
+        // not made there, and the dialog is told as any other (T-1300).
         let decline = dialog
             .as_ref()
-            .and_then(|dialog| window.safe_decline(dialog));
+            .and_then(|dialog| window.safe_decline(dialog))
+            .filter(|decline| !(decline.members_only && participant.role == "chief"));
         let body = told(&participant.handle, dialog.as_ref(), decline.as_ref());
         {
             let mut watch = record.dialog.borrow_mut();
@@ -288,7 +301,7 @@ impl Dispatcher {
                     told.question == identity.question
                         && told.detail == identity.detail
                         && told.options == identity.options
-                }) && shown.options.contains(&decline.choice)
+                }) && (!decline.listed || shown.options.contains(&decline.choice))
             });
             if !due {
                 return Ok(());
@@ -306,9 +319,13 @@ impl Dispatcher {
         };
         // The press ended the window's turn: the words that send it on go in once it rests,
         // as any message of the board's, and whoever gave its task and the human hear of it.
-        let number = self
-            .dialog_task(participant)?
-            .map(|thread| thread.task.number);
+        let number = match self.dialog_task(participant)? {
+            Some(thread) => Some(thread.task.number),
+            // The chief's `cf tell` pauses a member's task, and the task is still the window's: a
+            // note about no task, or about a paused one, is no row a member's queue lets go in,
+            // so it is kept for the task and goes in once the chief resumes it (T-1300).
+            None => self.paused_task(participant)?,
+        };
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -318,14 +335,40 @@ impl Dispatcher {
                 body: words,
             },
         )?;
-        let span = spoken(decline.after_ms.unwrap_or(0));
-        let body = format!(
-            "Nobody answered @{}'s {} in {span}, so ConsensFlow answered {} and told it to go on without that call.",
-            participant.handle,
-            decline.what,
-            quoted(&decline.choice)
-        );
+        let body = match decline.after_ms {
+            Some(after) => format!(
+                "Nobody answered @{}'s {} in {}, so ConsensFlow answered {} and told it to go on without that call.",
+                participant.handle,
+                decline.what,
+                spoken(after),
+                quoted(&decline.choice)
+            ),
+            None => format!(
+                "ConsensFlow declined @{}'s {} by pressing {}, which writes nothing, and told it to go on without it.",
+                participant.handle,
+                decline.what,
+                quoted(&decline.choice)
+            ),
+        };
         self.tell_dialog(project, participant, &body)
+    }
+
+    /// The number of the task `participant`'s window holds paused, where it holds one: a member's
+    /// last task, if it is paused and still its own. None for the chief.
+    fn paused_task(&self, participant: &ParticipantView) -> Result<Option<i64>, EngineError> {
+        if participant.role == "chief" {
+            return Ok(None);
+        }
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .last_task(participant.id)?
+            .filter(|thread| {
+                thread.task.state == "paused"
+                    && thread.task.assignee.as_deref() == Some(participant.handle.as_str())
+            })
+            .map(|thread| thread.task.number))
     }
 
     /// The task of `participant`'s window whose giver hears of its dialogs: none for the chief's.
@@ -404,6 +447,18 @@ pub(crate) fn told(handle: &str, dialog: Option<&Dialog>, decline: Option<&Decli
         };
         return format!(
             "{shows} The window waits on it, and nothing is typed into it meanwhile. It is yours to answer in that window; if nobody does within {span}, ConsensFlow answers {} for it, which writes nothing{then}. It never answers yes.",
+            quoted(&decline.choice)
+        );
+    }
+    if let Some(decline) = decline.filter(|decline| !decline.listed) {
+        // A key that closes it, no choice of its own listed: pressed, not chosen.
+        let then = if decline.then_tell.is_some() {
+            ", and tells it to go on without it"
+        } else {
+            ""
+        };
+        return format!(
+            "{shows} ConsensFlow declines it for the window now, by pressing {}, which closes it and writes nothing{then}; nothing else is typed into the window meanwhile.",
             quoted(&decline.choice)
         );
     }
