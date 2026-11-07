@@ -15,9 +15,9 @@
 //! The stand-in agent reads none of that: [`Ask::StandIn`] says the same shapes in
 //! its words (`DISPATCH` lines it runs as `cf task add`, a `JOB` that runs while its
 //! turn works, a `BACKGROUND --wake` that wakes it when the job ends), for the dry run.
-//! [`Ask::StandInFast`] says them with their seconds cut to a twentieth or so: the project of
-//! a run that finishes its work long before its schedule of disruptions is played, as the
-//! 2-hour run on Windows did (2026-11-05: its project ended at 53 minutes, with the chief
+//! [`Ask::StandInFast`] says them with their seconds cut to about half, and its jobs to a
+//! minute: the project of a run that finishes its work long before its schedule of
+//! disruptions is played, as the 2-hour run on Windows did (2026-11-05: its project ended at 53 minutes, with the chief
 //! switch, the Devin cut and the suspension still to play).
 //!
 //! **The extra work** ([`Ask::extra_work`]) is a short fixed list of pieces the owner gives, one
@@ -187,11 +187,11 @@ pub const MOST_SILENT_TURN: Duration = Duration::from_secs(80);
 /// whose job wakes its worker when it ends, Devin's long turn and the command it
 /// moves to the background, and a slow test run.
 const STAND_IN_SHAPES: [&str; 5] = [
-    "DISPATCH --tier complex JOB 1200 SLEEP 900 Reply with exactly: BUILT",
+    "DISPATCH --tier complex JOB 1200 SLEEP 80 Reply with exactly: BUILT",
     "DISPATCH --tier complex BACKGROUND --wake 90 Reply with exactly: DEV-SERVER-UP",
-    "DISPATCH --tier light SLEEP 900 Reply with exactly: DEVIN-BUILD-DONE",
+    "DISPATCH --tier light SLEEP 80 Reply with exactly: DEVIN-BUILD-DONE",
     "DISPATCH --tier light BACKGROUND 300 Reply with exactly: DEVIN-MOVED-IT",
-    "DISPATCH --tier complex JOB 1200 SLEEP 900 Reply with exactly: TESTS-PASS",
+    "DISPATCH --tier complex JOB 1200 SLEEP 80 Reply with exactly: TESTS-PASS",
 ];
 
 /// The same five shapes with their seconds cut: each job and turn lasts under a minute, so the
@@ -216,13 +216,14 @@ struct Pace {
     last: u32,
 }
 
-/// The pace of the dry run.
+/// The pace of the dry run: the jobs outlast their turns by many minutes, and each turn is as
+/// long as a stand-in's may be ([`MOST_SILENT_TURN`]).
 const SLOW: Pace = Pace {
     shapes: STAND_IN_SHAPES,
     job: 1200,
-    sleep: 900,
-    export: 400,
-    last: 300,
+    sleep: 80,
+    export: 80,
+    last: 60,
 };
 
 /// The pace of a project that is done long before its schedule is.
@@ -291,17 +292,17 @@ fn stand_in(quiet: Duration, pace: Pace) -> Scenario {
 /// How long a piece of the stand-in's extra work takes, with the chief's accepting after it.
 pub const STAND_IN_PIECE_TAKES: Duration = Duration::from_secs(4 * 60);
 
-/// The stand-in's extra work: the shapes of one complex and one light task, 80 seconds of work
-/// each, a job running beside the complex one's turn (a tool call at work, the shape the
-/// switch and the Devin cut are for). A stand-in Claude writes nothing of a silent turn until
-/// it ends, and the product pauses a task whose window has begun no turn in two minutes
-/// (the first dry run of this work, T-26 at `SLEEP 120`): the turn stays under it.
+/// The stand-in's extra work: the shapes of one complex and one light task, a turn of
+/// [`MOST_SILENT_TURN`] each, a job running beside the complex one's turn (a tool call at work,
+/// the shape the switch and the Devin cut are for). A stand-in's silent turn is paused by the
+/// product past two minutes (the first dry run of this work, T-26 at `SLEEP 120`).
 fn stand_in_extra_work() -> Vec<Piece> {
     (1..=2)
         .map(|at| Piece {
             say: format!(
-                "DISPATCH --tier complex JOB 100 SLEEP 80 Reply with exactly: RERUN-{at}\n\
-                 DISPATCH --tier light SLEEP 80 Reply with exactly: DEVIN-RERUN-{at}"
+                "DISPATCH --tier complex JOB 100 SLEEP {silent} Reply with exactly: RERUN-{at}\n\
+                 DISPATCH --tier light SLEEP {silent} Reply with exactly: DEVIN-RERUN-{at}",
+                silent = MOST_SILENT_TURN.as_secs()
             ),
             takes: STAND_IN_PIECE_TAKES,
         })
@@ -388,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn the_fast_stand_in_says_the_same_shapes_in_a_twentieth_of_the_seconds() {
+    fn the_fast_stand_in_says_the_same_shapes_in_fewer_seconds() {
         let slow = Ask::StandIn.scenario(Duration::from_secs(90));
         let fast = Ask::StandInFast.scenario(Duration::from_secs(90));
         let shape = |line: &str| {
@@ -408,7 +409,8 @@ mod tests {
         for (slow_line, fast_line) in slow_lines.iter().zip(&fast_lines) {
             assert_eq!(shape(slow_line), shape(fast_line));
         }
-        // And every number of seconds is smaller: under a minute for a job or a turn.
+        // And the seconds are fewer: under a minute for a job or a turn, where the standard
+        // run's jobs last twenty.
         for line in &fast_lines {
             for seconds in line
                 .split_whitespace()
@@ -417,8 +419,9 @@ mod tests {
                 assert!(seconds <= 60, "{line}");
             }
         }
-        // The slow one is untouched: the standard dry run's seconds.
+        // The standard run's own: its jobs last twenty minutes, far past its turns.
         assert_eq!(slow_lines[..5], STAND_IN_SHAPES);
+        assert!(slow_lines.iter().any(|line| line.contains("JOB 1200 ")));
         assert_eq!(slow.follow_ups.len(), fast.follow_ups.len());
         assert_eq!((slow.fixture, fast.fixture), ("long-run", "long-run"));
     }
@@ -517,7 +520,10 @@ mod tests {
     #[test]
     fn no_stand_in_turn_is_silent_for_longer_than_the_engine_waits_for_a_turn_to_begin() {
         // The standard dry run's 900-second turns were paused by the never-began rule two
-        // minutes after their briefs went in, and nobody resumed them (T-1256).
+        // minutes after their briefs went in, and nobody resumed them (T-1256). The limit is
+        // held under the engine's two arrival windows (a minute each), so that it cannot be
+        // raised to fit a turn.
+        assert!(MOST_SILENT_TURN <= Duration::from_secs(100));
         for ask in [Ask::StandIn, Ask::StandInFast] {
             let turns = silent_turns(ask);
             assert!(!turns.is_empty(), "{}", ask.name());

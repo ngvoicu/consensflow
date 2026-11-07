@@ -4470,7 +4470,7 @@ replace = "pub const REAL_PIECE_TAKES: Duration = Duration::from_secs(60);"
 
 [[plant]]
 name = "long run: the fast stand-in project takes as long as the standard one"
-meant = "the_fast_stand_in_says_the_same_shapes_in_a_twentieth_of_the_seconds"
+meant = "the_fast_stand_in_says_the_same_shapes_in_fewer_seconds"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
@@ -4557,3 +4557,43 @@ runs = ["evals-lib-run-owner"]
 file = "crates/cf-evals/src/run/owner.rs"
 find = "        self.worked_since |= seen.staff_at_work;\n"
 replace = "        self.worked_since |= seen.busy;\n"
+
+[[plant]]
+name = "long run: the standard dry run's stand-ins work silent turns of 15 minutes, which the engine pauses"
+meant = "no_stand_in_turn_is_silent_for_longer_than_the_engine_waits_for_a_turn_to_begin"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "    sleep: 80,\n    export: 80,\n    last: 60,\n"
+replace = "    sleep: 900,\n    export: 400,\n    last: 300,\n"
+
+[[plant]]
+name = "long run: the stand-in chief's first shapes are silent for 15 minutes"
+meant = "no_stand_in_turn_is_silent_for_longer_than_the_engine_waits_for_a_turn_to_begin"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "\"DISPATCH --tier complex JOB 1200 SLEEP 80 Reply with exactly: BUILT\","
+replace = "\"DISPATCH --tier complex JOB 1200 SLEEP 900 Reply with exactly: BUILT\","
+
+[[plant]]
+name = "long run: the stand-in's extra work is silent for four times the engine's wait"
+meant = "no_stand_in_turn_is_silent_for_longer_than_the_engine_waits_for_a_turn_to_begin"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "                silent = MOST_SILENT_TURN.as_secs()\n"
+replace = "                silent = MOST_SILENT_TURN.as_secs() * 4\n"
+
+[[plant]]
+name = "long run: the limit of a stand-in's silent turn is raised to a quarter of an hour"
+meant = "no_stand_in_turn_is_silent_for_longer_than_the_engine_waits_for_a_turn_to_begin"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = "pub const MOST_SILENT_TURN: Duration = Duration::from_secs(80);"
+replace = "pub const MOST_SILENT_TURN: Duration = Duration::from_secs(900);"

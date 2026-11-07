@@ -503,8 +503,12 @@ run on the stand-ins, which spends nothing: `cargo test -p cf-evals --test
 long_dry_run -- --ignored --nocapture` (about fifteen minutes, on a budget of half
 an hour; it plays every
 disruption, the stand-in compacting at `/compact` as Claude Code does, and keeps its
-report). Two more cases of that file play `--ask stand-in-fast`, the same shapes in a
-twentieth of the seconds, a project done in about five minutes: one with the half-hour
+report. Its stand-ins' turns last 80 seconds at most (`ask::MOST_SILENT_TURN`): the engine's
+never-began rule pauses a task whose window began no turn on its brief two arrival windows
+after it went in, and a stand-in's `SLEEP` writes and draws nothing, so a longer turn is paused
+and nobody resumes it (the 900-second turns this run had until 2026-11-08 failed it so). Two
+more cases of that file play `--ask stand-in-fast`, the same shapes in about half the seconds
+and a minute's jobs, a project done in about five minutes: one with the half-hour
 budget, where the extra work lets every disruption be played, and one with a six-minute
 budget, where none fits and the run fails and names the disruptions it did not play
 (`cargo test -p cf-evals --test long_dry_run -- --ignored --nocapture ends_before`, and
