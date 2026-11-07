@@ -22,18 +22,21 @@ pub fn team_table(members: &[StaffRow]) -> Result<String, RoleError> {
         // member. A member is named by its model, which the name says; where it does not
         // (a member on its harness's default, one that needs an edit) the model stands
         // beside it.
-        let tier = member.work_tier.ok_or_else(|| RoleError::NoWorkTier {
-            member: member.name.clone(),
-        })?;
+        // An image designer has no tier (`--design`, no tier), and the table says none.
+        let tier = match member.work_tier {
+            Some(tier) => work_tier_info(tier).label,
+            None if member.roles == ["designer"] => "none",
+            None => {
+                return Err(RoleError::NoWorkTier {
+                    member: member.name.clone(),
+                })
+            }
+        };
         let named = match &member.model {
             Some(model) => format!("{} ({model})", member.name),
             None => member.name.clone(),
         };
-        let cells = [
-            named.as_str(),
-            &member.roles.join(", "),
-            work_tier_info(tier).label,
-        ];
+        let cells = [named.as_str(), &member.roles.join(", "), tier];
         table.push(format!("| {} |", cells.map(cell).join(" | ")));
     }
     Ok(table.join("\n"))

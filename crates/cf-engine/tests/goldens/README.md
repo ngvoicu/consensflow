@@ -217,3 +217,6 @@ play it, not by hand.
   default, one that needs an edit) has the model beside its name, `zeus (Opus · high)`.
   The `role_change` sizes of the chief's text moved with it, and are measured in the
   engine's tests and docs.
+- **The image designer's tier** is none (a design task has none): in the 2 `staffOf` rows
+  that hold one, `osiris` reads without the tier its participant holds, and a chief's table
+  says `none` for it, from a staff row that has no tier and the one role of a designer.

@@ -51,7 +51,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
         .expect("a project")
 }
 
-fn participant<'a>(project: &'a ProjectView, designer: bool) -> &'a ParticipantView {
+fn participant(project: &ProjectView, designer: bool) -> &ParticipantView {
     project
         .participants
         .iter()

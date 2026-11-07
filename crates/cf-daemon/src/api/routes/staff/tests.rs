@@ -100,3 +100,38 @@ async fn the_staff_is_the_members_and_not_the_chief_nor_the_windows_the_daemon_o
         .collect();
     assert_eq!(handles, ["zeus"]);
 }
+
+#[tokio::test]
+async fn an_image_designer_is_said_with_no_tier_because_a_design_task_has_none() {
+    let scene = scene();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            scene.project.id,
+            &cf_ledger::NewMember {
+                model: None,
+                effort: None,
+                model_name: None,
+                harness: "codex".to_owned(),
+                designer: true,
+                roles: vec!["designer".to_owned()],
+                tier: "light".to_owned(),
+            },
+        )
+        .unwrap();
+    let (_, said) = staff(&scene, &scene.context).await;
+    let designer = said["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|member| member["role"] == "designer")
+        .expect("the designer");
+    assert_eq!(designer["tier"], json!(null), "{designer}");
+    assert_eq!(designer["modelName"], "Codex default");
+    assert_eq!(
+        said["members"][0]["tier"], "standard",
+        "a worker's tier is said"
+    );
+}

@@ -259,6 +259,7 @@ fn webp<F: Read + Seek>(file: &mut F) -> Option<Facts> {
 /// A path that starts at a root: `/`, or a drive (`C:\`, `D:/`), after the start of a line or a
 /// character that sets it off, and runs to the first image extension. Lazy, so that a line with
 /// two paths gives two, and so that a path may hold a space.
+#[allow(clippy::expect_used)]
 static PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?i)(?:^|[\s"'`(\[<:=,])((?:[a-z]:[\\/]|/)[^\n\r"'`<>|*?]*?\.(?:png|jpe?g|webp))(?:$|[^a-z0-9_])"#,
@@ -276,7 +277,7 @@ pub fn files_named(words: &str) -> Vec<String> {
         // path may start with, so each is looked for from where the last one ended.
         let mut rest = line;
         while let Some(found) = PATH.captures(rest) {
-            let path = found.get(1).expect("the pattern's one group");
+            let Some(path) = found.get(1) else { break };
             if !named.iter().any(|seen| seen == path.as_str()) {
                 named.push(path.as_str().to_owned());
                 if named.len() == MOST_FILES {

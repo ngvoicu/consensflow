@@ -447,6 +447,63 @@ async fn a_member_on_a_listed_model_with_a_long_id_is_added_and_starts_a_project
         .await;
 }
 
+/// New project starts with an image designer as the page picks one: Codex and the role, no
+/// model, effort, tier or designer flag. The project opens with a designer on Codex's own
+/// model, named by it, in the tier a designer is kept in, and a model, an effort or a tier
+/// asked for it refuses the start in the words Add member uses (designer P2, T-1280).
+#[tokio::test]
+async fn a_project_starts_with_an_image_designer_as_the_page_picks_one() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let opening = |designer: Value| {
+                json!({
+                    "directory": "/work/drawn",
+                    "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high",
+                    "staff": [
+                        { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "standard", "roles": ["worker"] },
+                        designer,
+                    ],
+                })
+            };
+            let opened = ask(
+                &staffing.app,
+                "project.open",
+                opening(json!({ "harness": "codex", "roles": ["designer"] })),
+            )
+            .await;
+            assert_eq!(opened["ok"], true, "{opened}");
+            let project = staffing
+                .rig
+                .kit
+                .ledger
+                .borrow()
+                .project(opened["project"]["id"].as_i64().unwrap())
+                .unwrap()
+                .unwrap();
+            let designer = project
+                .participants
+                .iter()
+                .find(|participant| participant.designer)
+                .expect("the designer");
+            assert_eq!(designer.handle, "codex-default");
+            assert_eq!(designer.roles, ["designer"]);
+            assert_eq!(designer.model, None);
+            assert_eq!(designer.tier.as_deref(), Some("light"));
+            let refused = ask(
+                &staffing.app,
+                "project.open",
+                opening(json!({ "harness": "codex", "model": "gpt-6.1-sol", "tier": "light", "roles": ["designer"] })),
+            )
+            .await;
+            assert_eq!(
+                refused,
+                json!({ "ok": false, "error": "an image designer draws on Codex's own model: it takes no model, effort or tier" })
+            );
+        })
+        .await;
+}
+
 /// Devin writes the effort into the id, before a suffix (`claude-opus-5-5-medium-fast`): the
 /// member holds the exact `model_uid` Devin lists for that effort, never one joined
 /// (`claude-opus-5-5-fast-medium`), and the effort beside it for the page to say.

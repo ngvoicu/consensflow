@@ -22134,7 +22134,7 @@
           "roles": [
             "designer"
           ],
-          "workTier": "critical",
+          "workTier": null,
           "model": "Codex default"
         }
       ]
@@ -22487,7 +22487,7 @@
           "roles": [
             "designer"
           ],
-          "workTier": "critical",
+          "workTier": null,
           "model": "Codex default"
         },
         {

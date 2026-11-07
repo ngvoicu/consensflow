@@ -131,3 +131,64 @@ fn a_member_named_by_its_model_is_read_off_the_project_with_no_model_beside_its_
         ]
     );
 }
+
+/// A design task has no tier (`--design`, no tier), so the chief's table says none of an image
+/// designer, which the project reads without one; any other member with none is refused
+/// as it was.
+#[test]
+fn says_none_for_an_image_designer_s_tier_and_refuses_any_other_member_with_none() {
+    use cf_engine::roles::RoleError;
+
+    let designer = StaffRow {
+        work_tier: None,
+        ..staff_row("codex-default", &["designer"], WorkTier::Light)
+    };
+    let table =
+        team_table(&[staff_row("zeus", &["worker"], WorkTier::Standard), designer]).unwrap();
+    assert!(
+        table.ends_with("| codex-default (Opus · high) | designer | none |"),
+        "{table}"
+    );
+    let advisor = StaffRow {
+        work_tier: None,
+        ..staff_row("diana", &["advisor"], WorkTier::Light)
+    };
+    assert!(matches!(
+        team_table(&[advisor]),
+        Err(RoleError::NoWorkTier { .. })
+    ));
+}
+
+/// The project is read as the chief's text needs it: an image designer's tier is none.
+#[test]
+fn an_image_designer_is_read_off_the_project_with_no_tier() {
+    use cf_engine::roles::staff_of;
+    use serde_json::json;
+
+    use super::support::{participant_of, project_of};
+
+    let row = |id: i64, handle: &str, role: &str, designer: bool| {
+        json!({
+            "id": id, "projectId": 1, "handle": handle, "role": role, "roles": [role],
+            "harness": "codex", "model": null, "effort": null, "modelName": null,
+            "designer": designer, "createdAt": "2026-11-08T10:00:00.000Z", "tier": "light",
+        })
+    };
+    let project = project_of(
+        [
+            row(3, "codex-default", "designer", true),
+            row(4, "zeus", "worker", false),
+        ]
+        .iter()
+        .map(participant_of)
+        .collect(),
+    );
+    let staff = staff_of(&project);
+    assert_eq!(
+        staff
+            .iter()
+            .map(|member| member.work_tier)
+            .collect::<Vec<_>>(),
+        [None, Some(WorkTier::Light)]
+    );
+}

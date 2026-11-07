@@ -52,7 +52,8 @@ pub struct StaffRow {
     /// edit, has a name that holds no model, and this says what it runs on.
     pub model: Option<String>,
     pub roles: Vec<String>,
-    /// None for a tier no work tier is called: the ledger holds four, or none.
+    /// None for a tier no work tier is called: the ledger holds four, or none. An image
+    /// designer has none to be called, and its table says so.
     pub work_tier: Option<WorkTier>,
 }
 
@@ -90,7 +91,12 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
                 .name_apart
                 .then(|| cf_ledger::handles::runs_on(member)),
             roles: member.roles.clone(),
-            work_tier: member.tier.as_deref().and_then(work_tier),
+            // An image designer has no tier: a design task has none (`--design`, no tier).
+            work_tier: member
+                .tier
+                .as_deref()
+                .and_then(work_tier)
+                .filter(|_| !member.designer),
         })
         .collect()
 }
