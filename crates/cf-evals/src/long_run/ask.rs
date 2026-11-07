@@ -172,6 +172,16 @@ fn real(quiet: Duration) -> Scenario {
     }
 }
 
+/// The longest a stand-in turn may work with nothing in its record and nothing drawn on its
+/// screen (a `SLEEP`): the engine pauses a task whose window has begun no turn on its brief
+/// two arrival windows after it went in, the screen being quiet (`cf-engine`'s `never_began`,
+/// T-1130, on main since 2026-11-04), and a stand-in's `SLEEP` writes and draws nothing until
+/// it ends, as no real harness's turn does. A task paused so is resumed by no one in a dry
+/// run, and the project never reaches its end (9): the standard dry run failed so on the
+/// release pin of 3.0.7-alpha.2 (T-1256), with turns of 900 s. A stand-in turn stays under
+/// this, with a margin of the arrival window's quarter.
+pub const MOST_SILENT_TURN: Duration = Duration::from_secs(80);
+
 /// The shapes the stand-in chief puts on the board first at the owner's answer: a
 /// build whose job runs while its turn works (a tool call at work), a dev server
 /// whose job wakes its worker when it ends, Devin's long turn and the command it
@@ -472,5 +482,53 @@ mod tests {
         );
         assert_eq!(scenario.quiet, Duration::from_secs(600));
         assert!(scenario.expectations.is_empty());
+    }
+
+    /// Every number of seconds that follows a `SLEEP` in the words an ask has the stand-in say:
+    /// the answer's tasks, the follow-ups and the extra work.
+    fn silent_turns(ask: Ask) -> Vec<(String, u64)> {
+        let scenario = ask.scenario(Duration::from_secs(90));
+        let mut words: Vec<String> = scenario.answers.iter().map(|a| a.text.clone()).collect();
+        words.push(scenario.fallback.clone());
+        words.extend(
+            scenario
+                .follow_ups
+                .iter()
+                .filter_map(|follow_up| match follow_up {
+                    FollowUp::Say(said) => Some(said.clone()),
+                    FollowUp::Switch => None,
+                }),
+        );
+        words.extend(ask.extra_work().into_iter().map(|piece| piece.say));
+        let sleep = regex::Regex::new(r"SLEEP (\d+) ").unwrap();
+        words
+            .iter()
+            .flat_map(|text| text.lines())
+            .flat_map(|line| {
+                sleep
+                    .captures_iter(line)
+                    .filter_map(|found| found[1].parse::<u64>().ok())
+                    .map(|seconds| (line.to_owned(), seconds))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_stand_in_turn_is_silent_for_longer_than_the_engine_waits_for_a_turn_to_begin() {
+        // The standard dry run's 900-second turns were paused by the never-began rule two
+        // minutes after their briefs went in, and nobody resumed them (T-1256).
+        for ask in [Ask::StandIn, Ask::StandInFast] {
+            let turns = silent_turns(ask);
+            assert!(!turns.is_empty(), "{}", ask.name());
+            for (line, seconds) in turns {
+                assert!(
+                    seconds <= MOST_SILENT_TURN.as_secs(),
+                    "{}: a turn silent for {seconds} s, past {} s: {line}",
+                    ask.name(),
+                    MOST_SILENT_TURN.as_secs()
+                );
+            }
+        }
     }
 }
