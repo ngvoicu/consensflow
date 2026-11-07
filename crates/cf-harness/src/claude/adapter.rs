@@ -113,7 +113,7 @@ const OFFERS_CLOSING: [&str; 2] = [LSP_OFFER, "Would you like to install it?"];
 
 /// The question of Claude Code's offer to install an LSP plugin, and its choice that declines
 /// it and writes nothing (2.1.317).
-const LSP_OFFER: &str = "Would you like to install this LSP plugin?";
+pub(super) const LSP_OFFER: &str = "Would you like to install this LSP plugin?";
 const LSP_DECLINE: &str = "No, not now";
 
 /// What Claude Code 2.1.317 asks where a PreToolUse hook answers "ask" for a call, its words of
@@ -663,6 +663,13 @@ impl Window for ClaudeWindow {
             closes_after_s,
             ..shown.dialog
         })
+    }
+
+    /// What tells one of Claude Code's dialogs from another read of its screen: the time in its
+    /// own warning line blanked, and its offer to install an LSP plugin from its own title down
+    /// (`dialog_identity`, T-1277). Never a time in a command, a hook's reason or a question.
+    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
+        super::dialog_identity::identity(dialog)
     }
 
     /// Claude Code's list of safe declines: its offer to install an LSP plugin, answered "No, not

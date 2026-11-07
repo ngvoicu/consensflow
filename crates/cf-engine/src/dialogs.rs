@@ -37,6 +37,21 @@
 //! finds it gone, or drawn otherwise, presses nothing, and a key the window did not take is not
 //! pressed again. A dialog that goes and comes again is told again.
 //!
+//! **Which dialog is which** (T-1277, after T-1261 and T-1273). Two reads of a screen are one
+//! dialog or two, and the two mistakes are not alike: telling a dialog twice is a nuisance, and
+//! taking two different dialogs for one is a failure (the second is never told, and a decline
+//! meant for the first is pressed into it). Where they conflict the dialog is told twice. The
+//! engine holds two reads to one dialog by **plain equality** of what the dialog's own window says
+//! tells it from another read ([`cf_harness::contract::Window::dialog_identity`]): the words as
+//! they were read for every harness but Claude Code, whose window blanks the time in its own
+//! warning line ("⚠ Claude Code will automatically block this request in 1:57, …", redrawn each
+//! second) and begins its offer to install an LSP plugin at the offer's own title (the tail slides
+//! when the turn under the offer ends, and a line of the conversation takes the place above it).
+//! A read whose identity differs is another dialog: it is told, and it has a deadline of its own.
+//! A decline is pressed only into a read whose identity equals that of the dialog told of. The
+//! identity first told is the dialog's for as long as it stays: nothing grows, nothing is held.
+//! A note still quotes the read as it was.
+//!
 //! The screen is read through [`crate::host::EngineHost::screen`], which no Node trace holds: the
 //! pane host's tail, the last twelve lines with a letter or a digit in them, so no empty line and
 //! no rule that says no word. A harness's own prompt is no dialog, and the reader has to tell it
@@ -53,7 +68,7 @@
 
 use std::rc::Rc;
 
-use cf_harness::contract::{Decline, Dialog, DialogSign, Observed, Pane, Waiting};
+use cf_harness::contract::{Decline, Dialog, DialogSign, Observed, Pane, Waiting, Window};
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 use serde_json::json;
 
@@ -91,8 +106,9 @@ pub(crate) struct DialogWatch {
     open_since: Option<i64>,
     /// The words of the dialog the human was told of, until a look finds it gone.
     told: Option<String>,
-    /// When the note of it went, and the dialog as it was read then: a decline is pressed only
-    /// into that dialog, its words, what it says above them and its choices the same.
+    /// When the note of it went, and the dialog's identity then (`Window::dialog_identity` of the
+    /// read): a decline is pressed only into a read whose identity equals it, its words, what it
+    /// says above them and its choices the same.
     told_at: Option<i64>,
     told_as: Option<Dialog>,
     /// The decline of the dialog told of, where it is on its harness's list of safe declines,
@@ -201,10 +217,13 @@ impl Dispatcher {
                     ),
             }),
         });
-        // A dialog is told of by its words and what it says above them: another call's ask in
-        // the same words is another dialog.
-        let key = dialog.as_ref().map_or_else(String::new, |dialog| {
-            [dialog.detail.join(" "), dialog.question.clone()].join("\n")
+        // A dialog is told of by its identity, its window's words of what tells it from another
+        // read of its screen: the words and what it says above them as they were read, but for
+        // what its harness draws and redraws of its own. Another call's ask in the same words is
+        // another dialog.
+        let identity = dialog.as_ref().map(|dialog| window.dialog_identity(dialog));
+        let key = identity.as_ref().map_or_else(String::new, |identity| {
+            [identity.detail.join(" "), identity.question.clone()].join("\n")
         });
         // Once a dialog: one its harness says is open stays the one told of until it closes,
         // whatever words a later look reads of it.
@@ -212,8 +231,15 @@ impl Dispatcher {
         if before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some())
         {
             if due {
-                self.decline(project, participant, record, &pane, dialog.as_ref())
-                    .await?;
+                self.decline(
+                    project,
+                    participant,
+                    record,
+                    &pane,
+                    &*window,
+                    dialog.as_ref(),
+                )
+                .await?;
             }
             return Ok(observed);
         }
@@ -227,7 +253,7 @@ impl Dispatcher {
             watch.decline = decline;
             watch.declined = false;
             watch.told_at = Some(now);
-            watch.told_as.clone_from(&dialog);
+            watch.told_as = identity;
         }
         self.tell_dialog(project, participant, &body)?;
         Ok(observed)
@@ -235,14 +261,15 @@ impl Dispatcher {
 
     /// The decline of the dialog told of in `record`'s window, pressed once, where it is on its
     /// harness's list, the note of it has gone, and `shown`, what this step's look read of the
-    /// screen, is that dialog still with that choice: a look that finds it gone, or drawn
-    /// otherwise, presses nothing.
+    /// screen, is that dialog still (its identity equals the identity told of, its choices the
+    /// same) with that choice: a look that finds it gone, or drawn otherwise, presses nothing.
     async fn decline(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Record,
         pane: &Pane,
+        window: &dyn Window,
         shown: Option<&Dialog>,
     ) -> Result<(), EngineError> {
         let now = self.now();
@@ -256,10 +283,11 @@ impl Dispatcher {
                 .after_ms
                 .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after));
             let still = shown.is_some_and(|shown| {
+                let identity = window.dialog_identity(shown);
                 watch.told_as.as_ref().is_some_and(|told| {
-                    told.question == shown.question
-                        && told.detail == shown.detail
-                        && told.options == shown.options
+                    told.question == identity.question
+                        && told.detail == identity.detail
+                        && told.options == identity.options
                 }) && shown.options.contains(&decline.choice)
             });
             if !due {

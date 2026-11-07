@@ -5,6 +5,7 @@
 
 mod adapter;
 pub mod computer_use;
+pub(crate) mod dialog_identity;
 pub(crate) mod input_box;
 pub(crate) mod install;
 mod last_used;

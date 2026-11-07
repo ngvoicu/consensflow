@@ -890,7 +890,10 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         offers::survey().map_err(failed)?;
     }
     if let Some(open) = offers::offer_in(text) {
-        offers::offer(open).map_err(failed)?;
+        offers::offer(records, pid, open, offers::turn_ends_in(text)).map_err(failed)?;
+    }
+    if let Some(open) = offers::permission_ask_in(text) {
+        offers::permission_ask(records, pid, open).map_err(failed)?;
     }
     if let Some(open) = offers::hook_ask_in(text) {
         if offers::hook_ask(records, pid, open).map_err(failed)? {

@@ -314,6 +314,24 @@ mod tests {
             })
     }
 
+    /// What T-1277 added to `claude/adapter.rs`, and no code the corpus borrows reads: Claude
+    /// Code's `dialog_identity` (a `Window` method of its own, which the release head's window did
+    /// not have) and the `pub(super)` of `LSP_OFFER` that its module reads. They are taken out
+    /// again before the file is hashed, so the file is the release head's, byte for byte,
+    /// otherwise: any other change to it fails the test, `shows_prompt` among them. The method is
+    /// taken out only where it was added, right above the doc comment of `safe_decline`: a method
+    /// that changed, or moved elsewhere in the file, is left in and fails the hash (T-1282).
+    fn without_what_t1277_added(file: &str, text: &str) -> String {
+        const IDENTITY: &str = "    /// What tells one of Claude Code's dialogs from another read of its screen: the time in its\n    /// own warning line blanked, and its offer to install an LSP plugin from its own title down\n    /// (`dialog_identity`, T-1277). Never a time in a command, a hook's reason or a question.\n    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {\n        super::dialog_identity::identity(dialog)\n    }\n\n";
+        const NEXT: &str = "    /// Claude Code's list of safe declines: its offer to install an LSP plugin, answered \"No, not\n";
+        if file == "claude/adapter.rs" {
+            text.replace(&format!("{IDENTITY}{NEXT}"), NEXT)
+                .replace("pub(super) const LSP_OFFER", "const LSP_OFFER")
+        } else {
+            text.to_owned()
+        }
+    }
+
     /// The code [`super::base_window_dialog`] borrows is the release head's.
     #[test]
     fn the_prompt_readers_the_release_heads_windows_are_borrowed_for_are_the_release_heads() {
@@ -346,7 +364,7 @@ mod tests {
         ];
         for (file, text, hash) in pinned {
             assert_eq!(
-                fnv(text),
+                fnv(&without_what_t1277_added(file, text)),
                 hash,
                 "{file} is not what 5b7acff7f has: the corpus borrows its prompt reader as the release head's; \
                  freeze a copy of the old code in testing/base_dialog.rs before judging the new code by it"

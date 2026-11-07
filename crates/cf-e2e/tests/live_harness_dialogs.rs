@@ -141,6 +141,9 @@ struct Seen {
     /// When the offer was first and last seen, from the task's being given.
     offer_from: Option<Duration>,
     offer_until: Option<Duration>,
+    /// What the engine's tail, the last twelve lines of the screen, showed while the offer was on
+    /// it, each change and when (T-1261: the tail slides when the spinner under the offer goes).
+    shapes: Vec<(Duration, String)>,
     /// What Claude Code's statuses said while the offer was on the screen, each change.
     said: Vec<String>,
     /// When the human was first told of a dialog.
@@ -172,6 +175,10 @@ fn observe(members: &Members, agent: &str, log: &Log) -> Result<Account> {
                     seen.offer_from.get_or_insert(now);
                     seen.offer_until = Some(now);
                     seen.offer_screen.get_or_insert_with(|| lines.join("\n"));
+                    let tail = lines[lines.len().saturating_sub(12)..].join("\n");
+                    if seen.shapes.last().map(|(_, shape)| shape) != Some(&tail) {
+                        seen.shapes.push((now, tail));
+                    }
                 }
             }
         }
@@ -196,6 +203,15 @@ fn observe(members: &Members, agent: &str, log: &Log) -> Result<Account> {
     }
     if let Some(screen) = &seen.offer_screen {
         log.block("the offer, as the pane host drew it", screen);
+    }
+    for (at, tail) in &seen.shapes {
+        log.block(
+            &format!(
+                "the engine's tail, its last twelve lines, as it read at +{:.1} s",
+                at.as_secs_f64()
+            ),
+            tail,
+        );
     }
     let human = dialog_notes(&members.inbox(Some("human"))?);
     let chief = dialog_notes(&members.inbox(Some(members.chief()))?);
