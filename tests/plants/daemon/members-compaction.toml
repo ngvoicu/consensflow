@@ -1,0 +1,720 @@
+# The size a project chooses for its members' windows to compact at, whatever their harness
+# (spec smaller-contexts, SCX-24 to SCX-26, T-1017, widened to every harness by SCX-28 to SCX-30,
+# T-1265): kept in the ledger (`crates/cf-ledger/src/projects/compaction.rs`, migration 0026's
+# second column, renamed by 0034), chosen on the page alone (`project.compaction`, Project
+# settings' "Compaction"), given by the engine to every member's launch at launch and on resume
+# and never to the chief's (`crates/cf-engine/src/windows.rs`), and given each harness by its
+# own route, never in the owner's config: Claude's launch settings file (`autoCompactWindow`),
+# Codex's `-c model_auto_compact_token_limit`, Devin's `DEVIN_COMPACTION_THRESHOLDS`, Pi's
+# ConsensFlow extension (`CF_COMPACTION_TOKENS`, a compaction asked at a rest), and Muse's
+# `-c context_compaction.provider_context_limit_tokens` up to its real window. Each plant breaks
+# one of these and the test written for it fails.
+#
+# Every name holds `members compaction`, so `npm run plants:daemon -- "members compaction"` runs them all.
+
+[run]
+mc-ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "projects::compaction::"]
+mc-ledger-described = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described", "compaction::"]
+mc-ledger-testing-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::staff_rules::"]
+mc-engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "compaction_window::"]
+mc-harness-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::compaction_window"]
+mc-harness-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::"]
+mc-daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::compaction"]
+mc-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+mc-ledger-rename = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::members_compaction::"]
+mc-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::compaction::"]
+mc-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::compaction::"]
+mc-pi-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::compaction::"]
+mc-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::adapter::tests::"]
+mc-pi-extension = ["node", "--test", "tests/pi-extension.test.mjs"]
+mc-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "members_compaction::"], builds = true }
+mc-page-suite = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the members' compaction|saves the choice of a size|holds the size to the range|sections, in that order"]
+
+[[plant]]
+name = "members compaction: the ledger takes a size below the range"
+meant = "a_size_below_or_above_what_claude_takes_is_refused_in_the_words_that_say_the_range"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''    (COMPACTION_MIN..=COMPACTION_MAX)'''
+replace = '''    (0..=COMPACTION_MAX)'''
+
+[[plant]]
+name = "members compaction: the ledger takes a size above the range"
+meant = "a_size_below_or_above_what_claude_takes_is_refused_in_the_words_that_say_the_range"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''    (COMPACTION_MIN..=COMPACTION_MAX)'''
+replace = '''    (COMPACTION_MIN..=COMPACTION_MAX + 1)'''
+
+[[plant]]
+name = "members compaction: text is taken for none"
+meant = "only_a_whole_number_is_a_size"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''        Some(_) => Err(refused()),'''
+replace = '''        Some(_) => Ok(None),'''
+
+[[plant]]
+name = "members compaction: a fraction is taken for a whole number"
+meant = "only_a_whole_number_is_a_size"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''let tokens = number.as_u64().ok_or_else(refused)?;'''
+replace = '''let tokens = number.as_f64().map(|float| float as u64).ok_or_else(refused)?;'''
+
+[[plant]]
+name = "members compaction: null is refused instead of being the harness's own point"
+meant = "no_size_is_claudes_own_point_a_missing_field_null_or_nothing_else"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''        None | Some(Value::Null) => Ok(None),'''
+replace = '''        None => Ok(None),
+        Some(Value::Null) => Err(refused()),'''
+
+[[plant]]
+name = "members compaction: the ledger does not check the size it writes"
+meant = "a_size_outside_the_range_is_refused_and_changes_nothing"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''    let to = window.map(size_of).transpose()?;'''
+replace = '''    let to = window;'''
+
+[[plant]]
+name = "members compaction: the same size again is written and logged"
+meant = "the_same_size_again_or_none_where_there_is_none_log_nothing_and_touch_nothing"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''        if from != to {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "members compaction: a change is not logged"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''            store.log(id, "project.compaction", json!({ "from": from, "to": to }))?;'''
+replace = '''            let _ = (json!({ "from": from, "to": to }), &store);'''
+
+[[plant]]
+name = "members compaction: the log does not say what the size was"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''json!({ "from": from, "to": to })'''
+replace = '''json!({ "to": to })'''
+
+[[plant]]
+name = "members compaction: the project's view has no size"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        compaction: row.compaction,
+    }))'''
+replace = '''        compaction: None,
+    }))'''
+
+[[plant]]
+name = "members compaction: a project on the harness's own point has the key of it in its view"
+meant = "the_size_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/ledger.rs"
+find = '''    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compaction: Option<u32>,'''
+replace = '''    pub compaction: Option<u32>,'''
+
+[[plant]]
+name = "members compaction: the migration gives every existing project a size"
+meant = "a_ledger_at_the_version_before_gains_no_size_in_every_project_and_keeps_every_row"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0026.sql"
+find = '''  ALTER TABLE project ADD COLUMN claude_compaction INTEGER;'''
+replace = '''  ALTER TABLE project ADD COLUMN claude_compaction INTEGER DEFAULT 400000;'''
+
+[[plant]]
+name = "members compaction: the undo for older ledgers leaves the size column"
+meant = "undoing_migration_0026_leaves_the_schema_0025_left_and_the_ledger_migrates_again"
+runs = ["mc-ledger-testing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing/staff_rules.rs"
+find = '''        "ALTER TABLE project DROP COLUMN claude_compaction;
+         ALTER TABLE project DROP COLUMN staff_rules",'''
+replace = '''        "ALTER TABLE project DROP COLUMN staff_rules",'''
+
+[[plant]]
+name = "members compaction: the page's operation is the rules' operation"
+meant = "the_human_chooses_the_size_and_every_view_of_the_project_carries_it_until_it_is_taken_away"
+runs = ["mc-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/operations.rs"
+find = '''        PageOperation::ProjectCompaction => projects::compaction(page, body).await,'''
+replace = '''        PageOperation::ProjectCompaction => projects::rules(page, body).await,'''
+
+[[plant]]
+name = "members compaction: the page's operation reads the size from another field"
+meant = "the_human_chooses_the_size_and_every_view_of_the_project_carries_it_until_it_is_taken_away"
+runs = ["mc-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''parse_compaction(body.get("compaction"))?'''
+replace = '''parse_compaction(body.get("size"))?'''
+
+[[plant]]
+name = "members compaction: the app does not forward the page's operation"
+meant = "the_operations_are_the_ones_the_app_forwards"
+runs = ["mc-proto-page"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "project.compaction",
+    "models.get",'''
+replace = '''    "models.get",'''
+
+[[plant]]
+name = "members compaction: the page's lowest size is not the ledger's"
+meant = "the_pages_range_for_the_size_is_the_ledgers"
+runs = ["mc-daemon-page"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''const LEAST = 100_000
+'''
+replace = '''const LEAST = 10_000
+'''
+
+[[plant]]
+name = "members compaction: the page's highest size is not the ledger's"
+meant = "the_pages_range_for_the_size_is_the_ledgers"
+runs = ["mc-daemon-page"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''const MOST = 1_000_000
+'''
+replace = '''const MOST = 2_000_000
+'''
+
+[[plant]]
+name = "members compaction: the chief's launch is given the size"
+meant = "every_members_launch_of_a_claude_project_is_given_its_size_and_the_chiefs_never_is"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
+replace = '''compaction: project.compaction,'''
+
+[[plant]]
+name = "members compaction: only the chief's launch is given the size"
+meant = "every_members_launch_of_a_claude_project_is_given_its_size_and_the_chiefs_never_is"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
+replace = '''compaction: project.compaction.filter(|_| participant.role == "chief"),'''
+
+[[plant]]
+name = "members compaction: only a Claude member is given the size, as before Phase 7"
+meant = "every_member_is_given_the_size_whatever_its_harness_and_no_chief_is"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
+replace = '''compaction: project.compaction.filter(|_| {
+                participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
+            }),'''
+
+[[plant]]
+name = "members compaction: no launch is given the project's size"
+meant = "every_members_launch_of_a_claude_project_is_given_its_size_and_the_chiefs_never_is"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
+replace = '''compaction: None::<u32>.filter(|_| participant.role != "chief"),'''
+
+[[plant]]
+name = "members compaction: a conversation opened again is given no size"
+meant = "a_member_opened_again_on_its_conversation_is_given_the_size_as_the_project_has_it_by_then"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
+replace = '''compaction: project.compaction.filter(|_| participant.role != "chief" && resume.is_none()),'''
+
+[[plant]]
+name = "members compaction: the settings file leaves the size out"
+meant = "every_members_launch_is_given_the_size_as_the_window_in_its_settings_file_and_nothing_else_moves"
+runs = ["mc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''        file["autoCompactWindow"] = json!(window);'''
+replace = '''        let _ = window;'''
+
+[[plant]]
+name = "members compaction: the settings file names the window by another key"
+meant = "every_members_launch_is_given_the_size_as_the_window_in_its_settings_file_and_nothing_else_moves"
+runs = ["mc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''file["autoCompactWindow"]'''
+replace = '''file["autoCompactWindows"]'''
+
+[[plant]]
+name = "members compaction: the settings file says none where there is no size"
+meant = "a_launch_with_no_size_writes_the_settings_file_it_always_wrote_byte_for_byte"
+runs = ["mc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''    if let Some(window) = compaction {
+        file["autoCompactWindow"] = json!(window);
+    }'''
+replace = '''    {
+        let window = compaction;
+        file["autoCompactWindow"] = json!(window);
+    }'''
+
+[[plant]]
+name = "members compaction: the adapter is given no size"
+meant = "every_members_launch_is_given_the_size_as_the_window_in_its_settings_file_and_nothing_else_moves"
+runs = ["mc-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''                launch.compaction,
+'''
+replace = '''                None,
+'''
+
+[[plant]]
+name = "members compaction: the tooling question ignores the size"
+meant = "a_claude_member_of_a_project_that_chose_a_size_gets_it_in_the_settings_file_of_its_launch"
+runs = ["mc-harness-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling.rs"
+find = '''        .get("compaction")'''
+replace = '''        .get("size")'''
+
+[[plant]]
+name = "members compaction: the harness's own point is saved as the size left in the field"
+meant = "saves the choice of a size by its own Save, shows what the daemon kept, and saves the harness's own point again as none"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''const compaction = this.#size.checked ? sizeOf(this.#amount.value) : null'''
+replace = '''const compaction = sizeOf(this.#amount.value)'''
+
+[[plant]]
+name = "members compaction: Save does not wait for a size in the range"
+meant = "holds the size to the range the ledger takes, and Save back while it is not a whole number in it"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''    this.#save.disabled = bad'''
+replace = '''    this.#save.disabled = false'''
+
+[[plant]]
+name = "members compaction: the page takes a size above the range"
+meant = "holds the size to the range the ledger takes, and Save back while it is not a whole number in it"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''return size >= LEAST && size <= MOST ? size : null'''
+replace = '''return size >= LEAST ? size : null'''
+
+[[plant]]
+name = "members compaction: the page takes a fraction"
+meant = "holds the size to the range the ledger takes, and Save back while it is not a whole number in it"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''if (!/^\d+$/.test(trimmed)) return null'''
+replace = '''if (!/^\d+\.?\d*$/.test(trimmed)) return null'''
+
+[[plant]]
+name = "members compaction: the dialog does not show the size the board has"
+meant = "Project settings shows the size the board has for the members' compaction"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#compaction.show(board.project)
+'''
+replace = ''''''
+
+[[plant]]
+name = "members compaction: the section does not say the chief is left alone"
+meant = "Project settings offers each harness's own point for the members' compaction until the human chooses a size, and says in one line what it does"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = ''' The chief is not affected.</p>'''
+replace = '''</p>'''
+
+[[plant]]
+name = "members compaction: the migration drops every project's size and adds an empty column"
+meant = "a_ledger_at_the_version_before_the_rename_keeps_each_projects_size_as_its_members_size"
+runs = ["mc-ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0034.sql"
+find = '''  ALTER TABLE project RENAME COLUMN claude_compaction TO compaction;'''
+replace = '''  ALTER TABLE project DROP COLUMN claude_compaction;
+  ALTER TABLE project ADD COLUMN compaction INTEGER;'''
+
+[[plant]]
+name = "members compaction: the undo for older ledgers keeps the new name"
+meant = "undoing_migration_0034_leaves_the_schema_0033_left_and_the_ledger_migrates_again"
+runs = ["mc-ledger-rename"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing/members_compaction.rs"
+find = '''    db.execute_batch("ALTER TABLE project RENAME COLUMN compaction TO claude_compaction")'''
+replace = '''    db.execute_batch("SELECT 1")'''
+
+[[plant]]
+name = "members compaction: the players do not hold the renamed column apart"
+meant = "the_players_hold_the_renamed_column_apart_from_what_node_s_schema_had"
+runs = ["mc-ledger-rename"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''    .chain([members_compaction::COLUMN])'''
+replace = '''    .chain([members_compaction::COLUMN].into_iter().filter(|_| false))'''
+
+[[plant]]
+name = "members compaction: Codex is given no limit"
+meant = "every_members_launch_is_given_the_size_as_codex_s_compaction_limit_and_nothing_else_moves"
+runs = ["mc-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            args.extend(compaction_limit(launch.compaction));'''
+replace = '''            args.extend(compaction_limit(None));'''
+
+[[plant]]
+name = "members compaction: Codex's limit goes by another key"
+meant = "every_members_launch_is_given_the_size_as_codex_s_compaction_limit_and_nothing_else_moves"
+runs = ["mc-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''format!("model_auto_compact_token_limit={size}")'''
+replace = '''format!("model_context_window={size}")'''
+
+[[plant]]
+name = "members compaction: a resumed Codex thread is given no limit"
+meant = "the_size_is_given_to_a_thread_resumed_as_to_one_launched"
+runs = ["mc-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            args.extend(compaction_limit(launch.compaction));'''
+replace = '''            args.extend(compaction_limit(launch.compaction.filter(|_| launch.resume.is_none())));'''
+
+[[plant]]
+name = "members compaction: Devin is given no thresholds"
+meant = "every_members_launch_is_given_the_size_as_devin_s_thresholds_and_nothing_else_moves"
+runs = ["mc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            vars.extend(compaction_thresholds(launch.compaction));'''
+replace = '''            vars.extend(compaction_thresholds(None));'''
+
+[[plant]]
+name = "members compaction: Devin's thresholds say the size once"
+meant = "every_members_launch_is_given_the_size_as_devin_s_thresholds_and_nothing_else_moves"
+runs = ["mc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''format!("{size},{size}")'''
+replace = '''format!("{size}")'''
+
+[[plant]]
+name = "members compaction: a resumed Devin session is given no thresholds"
+meant = "a_devin_session_resumed_is_given_the_size_as_one_launched_is"
+runs = ["mc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            vars.extend(compaction_thresholds(launch.compaction));'''
+replace = '''            vars.extend(compaction_thresholds(launch.compaction.filter(|_| launch.resume.is_none())));'''
+
+[[plant]]
+name = "members compaction: Pi's extension is given no size"
+meant = "every_members_launch_gives_the_extension_the_size_and_nothing_else_moves"
+runs = ["mc-pi-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''                    .chain(compaction_size(launch.compaction))'''
+replace = '''                    .chain(compaction_size(None))'''
+
+[[plant]]
+name = "members compaction: a resumed Pi session's extension is given no size"
+meant = "a_pi_session_resumed_gives_its_extension_the_size_as_one_launched_does"
+runs = ["mc-pi-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''                    .chain(compaction_size(launch.compaction))'''
+replace = '''                    .chain(compaction_size(launch.compaction.filter(|_| launch.resume.is_none())))'''
+
+[[plant]]
+name = "members compaction: the extension compacts where the size is at or above the model's window"
+meant = "asks for no compaction for a size at or above the model window"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    if (!(compaction < usage.contextWindow)) return
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "members compaction: the extension compacts after a turn the human aborted"
+meant = "asks for no compaction for a turn the human aborted"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    if (event?.aborted === true) return
+'''
+replace = '''
+'''
+
+# T-1272's blocker: real Pi is not idle for a whole compaction. Each plant below is caught by
+# the extension's tests on that semantics (the fake stays not idle while it compacts, and ends
+# it in Pi's order), the first through the real Rust channel (`pi-send`).
+
+[[plant]]
+name = "members compaction: a compacting window's handover waits behind the idle check, as before T-1272"
+meant = "hands over nothing but Busy while Pi's own compaction runs, and one message after it ends (complete), through the real channel"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''          if (compactingNow()) {'''
+replace = '''          if (context?.isIdle?.() !== true) break
+          if (compactingNow()) {'''
+
+[[plant]]
+name = "members compaction: the extension sends a delivery while its own compaction runs"
+meant = "refuses every delivery as busy while ours compaction runs, and delivers exactly one after it ends (complete)"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''          if (compactingNow()) {'''
+replace = '''          if (false) {'''
+
+[[plant]]
+name = "members compaction: the extension does not follow a compaction Pi began itself"
+meant = "refuses every delivery as busy while Pi's own compaction runs, and delivers exactly one after it ends (fail)"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    piCompacting = true'''
+replace = '''    void piCompacting'''
+
+[[plant]]
+name = "members compaction: an idle Pi is still taken for one that compacts"
+meant = "refuses every delivery as busy while Pi's own compaction runs, and delivers exactly one after it ends (endUntold)"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    if (piCompacting && context?.isIdle?.() === true) piCompacting = false
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "members compaction: a compaction's end leaves a turn that goes on busy"
+meant = "leaves a delivery waiting, unanswered, in a turn that goes on after Pi compacted in its middle"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    piCompacting = false
+    await consume()'''
+replace = '''    await consume()'''
+
+[[plant]]
+name = "members compaction: a handover for another session is refused busy while Pi compacts"
+meant = "keeps the expiry and session checks while Pi compacts"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''sessionIdOf(context) === record.session ? 'chief busy' : 'native session changed''''
+replace = ''''chief busy''''
+
+[[plant]]
+name = "members compaction: the extension asks for a second compaction while one runs"
+meant = "asks Pi for no second compaction in the moment before the first has begun, when Pi still reads idle"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    if (!Number.isInteger(compaction) || compaction <= 0 || compacting) return'''
+replace = '''    if (!Number.isInteger(compaction) || compaction <= 0) return'''
+
+[[plant]]
+name = "members compaction: a failed compaction leaves the window busy"
+meant = "asks again at a later rest after a compaction that failed"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''          logError(`compaction at ${compaction} tokens failed: ${cause?.message ?? String(cause)}`)
+          over()'''
+replace = '''          logError(`compaction at ${compaction} tokens failed: ${cause?.message ?? String(cause)}`)'''
+
+[[plant]]
+name = "members compaction: the extension reads its size from another variable"
+meant = "reads the size its launch gave it from CF_COMPACTION_TOKENS, and nothing else as one"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''  const text = env?.CF_COMPACTION_TOKENS'''
+replace = '''  const text = env?.CF_COMPACTION'''
+
+[[plant]]
+name = "members compaction: Muse is given a size above its real window"
+meant = "a_members_window_is_given_a_size_up_to_muse_s_real_window_as_its_limit_and_none_past_it"
+runs = ["mc-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''    size.filter(|size| *size <= REAL_WINDOW)'''
+replace = '''    size.filter(|size| *size <= 1_000_000)'''
+
+[[plant]]
+name = "members compaction: Muse's real window is its catalog's"
+meant = "muse_s_real_window_is_the_smallest_one_measured"
+runs = ["mc-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''pub(super) const REAL_WINDOW: u32 = 512_000;'''
+replace = '''pub(super) const REAL_WINDOW: u32 = 1_007_997;'''
+
+[[plant]]
+name = "members compaction: Muse is given no limit"
+meant = "a_members_window_is_given_a_size_up_to_muse_s_real_window_as_its_limit_and_none_past_it"
+runs = ["mc-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            argv.extend(compaction_limit(launch.compaction));'''
+replace = '''            argv.extend(compaction_limit(None));'''
+
+[[plant]]
+name = "members compaction: Muse's limit is its soft threshold"
+meant = "a_members_window_is_given_a_size_up_to_muse_s_real_window_as_its_limit_and_none_past_it"
+runs = ["mc-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''format!("context_compaction.provider_context_limit_tokens={size}")'''
+replace = '''format!("context_compaction.soft_threshold={size}")'''
+
+[[plant]]
+name = "members compaction: a resumed Muse window is given no limit"
+meant = "the_size_is_given_to_a_window_resumed_as_to_one_launched"
+runs = ["mc-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            argv.extend(compaction_limit(launch.compaction));'''
+replace = '''            argv.extend(compaction_limit(launch.compaction.filter(|_| launch.resume.is_none())));'''
+
+[[plant]]
+name = "members compaction: the section does not say what a size above a model's own window does"
+meant = "Project settings offers each harness's own point for the members' compaction until the human chooses a size, and says in one line what it does"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''; a size above a model's own window leaves the harness's own point. The chief'''
+replace = '''. The chief'''
+
+[[plant]]
+name = "members compaction: only a Claude member's window is given the size, end to end"
+meant = "every_members_window_is_given_the_projects_size_by_its_harnesss_route_and_the_chiefs_none"
+runs = ["mc-rig"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
+replace = '''compaction: project.compaction.filter(|_| {
+                participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
+            }),'''
+
+[[plant]]
+name = "members compaction: a Muse window is given no limit, end to end"
+meant = "a_muse_members_window_takes_the_projects_size_as_its_context_limit"
+runs = ["mc-rig"]
+harnesses = ["muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''            argv.extend(compaction_limit(launch.compaction));'''
+replace = '''            argv.extend(compaction_limit(None));'''
+
+[[plant]]
+name = "members compaction: a handover goes in before the extension's own compaction has begun"
+meant = "asks Pi for no second compaction in the moment before the first has begun, when Pi still reads idle"
+runs = ["mc-pi-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = '''    if (compacting) return true
+'''
+replace = '''
+'''

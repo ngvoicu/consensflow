@@ -54,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 18] = [
+const BY_HAND: [(&str, &str, &str); 20] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -87,6 +87,18 @@ const BY_HAND: [(&str, &str, &str); 18] = [
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "APPDATA",
         "the same read of the machine's Devin config, as Windows names its folder",
+    ),
+    (
+        "crates/cf-e2e/tests/live_compaction_routes.rs",
+        "XDG_CONFIG_HOME",
+        "its Muse turns run alone, in no window of the kit's, on a throwaway copy of `auth.json` and \
+         the model catalog (`guard::copy_muse_into`, as `live muse-reads` does): the login is the \
+         keychain's, and the owner's `~/.config/muse` is digested before and after",
+    ),
+    (
+        "crates/cf-e2e/tests/live_compaction_routes.rs",
+        "XDG_DATA_HOME",
+        "the same turns' data folder, the throwaway's own, where the case reads their sessions",
     ),
     (
         "crates/cf-e2e/tests/live_muse/tui.rs",

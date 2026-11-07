@@ -485,3 +485,102 @@ fn a_role_that_needs_more_hooks_than_muse_was_measured_to_take_is_refused_in_wor
     assert_eq!(crate::muse::parts(&allowed).len(), 7);
     assert!(prepared_with(&env, None, &allowed).is_ok());
 }
+
+/// The words a launch gives Muse its compaction limit by, where it gives one.
+fn limits_of(argv: &[String]) -> Vec<String> {
+    argv.windows(2)
+        .filter(|pair| {
+            pair[0] == "-c"
+                && pair[1].starts_with("context_compaction.provider_context_limit_tokens=")
+        })
+        .map(|pair| pair[1].clone())
+        .collect()
+}
+
+/// The size a project chose for its members to compact at (smaller-contexts, SCX-28 to
+/// SCX-30, T-1265): Muse treats it as the model's context limit for the run, so it begins a
+/// background compaction at 75% of it and a blocking one at 90% (its own fractions, left as
+/// they are): it compacts by the size, never past it. Muse takes any limit, and a limit above
+/// the model's real window would put both points past it, so a size above
+/// [`super::REAL_WINDOW`] gives nothing, which leaves Muse's own point.
+#[test]
+fn a_members_window_is_given_a_size_up_to_muse_s_real_window_as_its_limit_and_none_past_it() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.14-R7309.1"));
+    let id = LaunchId::new(LAUNCH).unwrap();
+    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+        let argv = |compaction: Option<u32>| {
+            let launch = Launch {
+                role,
+                compaction,
+                ..launch(&id, None)
+            };
+            finished(adapter(&env).prepare(&launch)).unwrap().argv
+        };
+        let plain = argv(None);
+        assert_eq!(
+            limits_of(&plain),
+            Vec::<String>::new(),
+            "{role}: none chosen"
+        );
+        for size in [100_000, 400_000, super::REAL_WINDOW] {
+            let given = argv(Some(size));
+            assert_eq!(
+                limits_of(&given),
+                [format!(
+                    "context_compaction.provider_context_limit_tokens={size}"
+                )],
+                "{role} at {size}"
+            );
+            // Nothing else of the command line moves, and the hooks are still the first `-c`.
+            let without: Vec<String> = given
+                .iter()
+                .filter(|word| !word.starts_with("context_compaction."))
+                .cloned()
+                .collect();
+            let mut plain_without = plain.clone();
+            let mut given_without = without.clone();
+            // The `-c` of the limit, which leaves an empty pair where it was taken out.
+            let dashes = |words: &[String]| words.iter().filter(|word| *word == "-c").count();
+            assert_eq!(dashes(&given), dashes(&plain) + 1, "{role} at {size}");
+            plain_without.retain(|word| word != "-c");
+            given_without.retain(|word| word != "-c");
+            assert_eq!(given_without, plain_without, "{role} at {size}");
+            assert_eq!(hooks_of(&given), hooks_of(&plain), "{role} at {size}");
+        }
+        for size in [super::REAL_WINDOW + 1, 600_000, 1_000_000] {
+            assert_eq!(
+                argv(Some(size)),
+                plain,
+                "{role} at {size}: Muse's own point"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_size_is_given_to_a_window_resumed_as_to_one_launched() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.14-R7309.1"));
+    let id = LaunchId::new(LAUNCH).unwrap();
+    let launch = Launch {
+        compaction: Some(250_000),
+        ..launch(&id, Some("01a17923-56fa-7f60-9d86-84709f9d4b25"))
+    };
+    let argv = finished(adapter(&env).prepare(&launch)).unwrap().argv;
+    assert!(argv.iter().any(|word| word == "resume"), "{argv:?}");
+    assert_eq!(
+        limits_of(&argv),
+        ["context_compaction.provider_context_limit_tokens=250000"]
+    );
+}
+
+/// The smallest real window of the models Muse lists here, as Muse 1.4.14 measured it: 512,000
+/// tokens for muse-spark-1.3-contributor (its soft and hard points at 0.03 and 0.9 were 15,360
+/// and 460,800, live on 2026-11-06, and 384,000 and 460,800 in the recorded
+/// `live/contributor-full-run.jsonl`), though its catalog says 1,007,997. Unproven for
+/// muse-wonder-1.0, muse-spark-1.3 and muse-spark-1.2, whose sessions recorded no threshold.
+#[test]
+fn muse_s_real_window_is_the_smallest_one_measured() {
+    assert_eq!(super::REAL_WINDOW, 512_000);
+}

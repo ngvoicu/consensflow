@@ -56,6 +56,7 @@ mod windows;
 pub use chief_switch::SwitchTo;
 pub use deliveries::HeldBack;
 pub use dispatcher::{require_chief_model, require_open, Dispatcher, SwitchWhen};
+pub use shown::{quotable, WORDS_WITHHELD};
 pub use stops::Unstopped;
 pub use turn_end::{Finished, Hold};
 pub use windows::{Activity, ActivityState};

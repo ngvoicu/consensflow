@@ -17,7 +17,7 @@ harness-codex-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", 
 # The daemon's answer to the page.
 daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use"]
 # The row, in the browser Playwright keeps.
-page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app|omputer use|both parts"]
+page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app|omputer use|both blocks|permissions can't be read"]
 
 # --- what the harness reads ---
 
@@ -82,18 +82,18 @@ runs = ["page-computer-use"]
 
 [[plant.edit]]
 file = "app/ui/core/computer-use.js"
-find = "        ...(said.setUp\n"
-replace = "        ...(false\n"
+find = "      if (said.setUp) {\n"
+replace = "      if (false) {\n"
 
 [[plant]]
-name = "codex computer use: Codex's part has no buttons for its own app's permissions"
+name = "codex computer use: Codex's own app has no column in the permissions"
 meant = "Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions"
 runs = ["page-computer-use"]
 
 [[plant.edit]]
 file = "app/ui/core/computer-use.js"
-find = "        if (part.own && said.system === 'macos') {"
-replace = "        if (false) {"
+find = "              .filter(([, part]) => part.own !== undefined)\n"
+replace = "              .filter(() => false)\n"
 
 [[plant]]
 name = "codex computer use: ConsensFlow's permissions are shown for Codex alone"
@@ -102,8 +102,8 @@ runs = ["page-computer-use"]
 
 [[plant.edit]]
 file = "app/ui/core/computer-use.js"
-find = "this.#permissions.hidden = !parts.some(([, part]) => part.ours) || permissions === null"
-replace = "this.#permissions.hidden = parts.length === 0 || permissions === null"
+find = "            ...(parts.some(([, part]) => part.ours)\n"
+replace = "            ...(parts.length > 0\n"
 
 [[plant]]
 name = "codex computer use: Windows is told how to set it up"
@@ -112,5 +112,5 @@ runs = ["page-computer-use"]
 
 [[plant.edit]]
 file = "app/ui/core/computer-use.js"
-find = "      if (system === 'windows') return ['Codex has no computer use on Windows.']\n"
-replace = ""
+find = "    own: 'Codex Computer Use',\n    show(said, system) {\n      if (system === 'windows') return { status: 'Not available on Windows', state: 'none' }\n"
+replace = "    own: 'Codex Computer Use',\n    show(said, system) {\n"

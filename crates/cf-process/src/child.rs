@@ -10,6 +10,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::process::Stdio;
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use cf_base::env::Env;
@@ -32,7 +33,20 @@ pub enum Streams {
     /// go, and it has closed only once that stream has
     /// (`['ignore', 'ignore', 'pipe']`, drained).
     Quiet,
+    /// A conversation with a program that loads code of the human's (Pi, with the
+    /// packages and extensions it has): its input and output are this side's, a line at a
+    /// time, as with [`Streams::Lines`]; but its error stream is read and its last
+    /// [`SAID_KEPT`] bytes kept, for whoever must say why it ended ([`Child::said`]), the
+    /// code it exited with is kept ([`Child::code`]), and what it started ends with it,
+    /// however it ends: on Unix it leads a process group of its own, which every end of it
+    /// reaches and which is forced once the program has gone (as `capture` leads one), on
+    /// Windows its job is ended. A child of this kind is a read, never a window: nothing it
+    /// started is meant to outlive it.
+    Conversation,
 }
+
+/// How much of a [`Streams::Conversation`] child's error stream is kept: the last of it.
+pub const SAID_KEPT: usize = 4096;
 
 /// A program running beside this one.
 pub struct Child {
@@ -47,6 +61,31 @@ pub struct Child {
     live: Rc<Live>,
     /// Whether it was asked or forced to end.
     asked: Cell<bool>,
+    /// What an end of it reaches: itself, or the group it leads.
+    reach: Reach,
+    /// The last of its error stream, where it is kept ([`Streams::Conversation`]).
+    said: Arc<Mutex<Kept>>,
+}
+
+/// What is kept of the error stream of a [`Streams::Conversation`] child: its last
+/// [`SAID_KEPT`] bytes, and whether the bytes before them were let go.
+#[derive(Default)]
+struct Kept {
+    bytes: Vec<u8>,
+    cut: bool,
+}
+
+impl Kept {
+    /// Adds `chunk` to what is kept, and lets go of the front where that is more than
+    /// [`SAID_KEPT`].
+    fn push(&mut self, chunk: &[u8]) {
+        self.bytes.extend_from_slice(chunk);
+        if self.bytes.len() > SAID_KEPT {
+            let over = self.bytes.len() - SAID_KEPT;
+            self.bytes.drain(..over);
+            self.cut = true;
+        }
+    }
 }
 
 /// Starts `run` in `cwd` with the environment `env`, all of it and nothing
@@ -66,9 +105,17 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped()),
+        Streams::Conversation => command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
     };
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
+    }
+    let conversation = streams == Streams::Conversation;
+    if conversation {
+        crate::group::lead(&mut command);
     }
     crate::job::start_in_job(&mut command);
     let mut process = crate::spawning::one_at_a_time(|| command.spawn()).map_err(|failed| {
@@ -89,33 +136,61 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
     };
     // Read and let go while the child lives, whoever waits on it: one that
     // fills its error stream would otherwise stop, as Node's never does.
+    let said = Arc::new(Mutex::new(Kept::default()));
+    let kept = conversation.then(|| Arc::clone(&said));
     let drained = process
         .stderr
         .take()
-        .map(|errors| tokio::spawn(drain(errors)));
+        .map(|errors| tokio::spawn(drain(errors, kept)));
     let live = Rc::new(Live::new(job));
+    let pid = process.id();
+    let reach = if conversation {
+        Reach::Group
+    } else {
+        Reach::Process
+    };
     Ok(Child {
-        pid: process.id(),
+        pid,
         input: RefCell::new(process.stdin.take()),
         output: RefCell::new(process.stdout.take().map(BufReader::new)),
-        closing: RefCell::new(Some(Box::pin(closing(drained, process, Rc::clone(&live))))),
+        closing: RefCell::new(Some(Box::pin(closing(
+            drained,
+            process,
+            Rc::clone(&live),
+            conversation.then_some(pid).flatten(),
+        )))),
         live,
         asked: Cell::new(false),
+        reach,
+        said,
     })
 }
 
-/// Reads `errors` to its end, letting each byte go.
-async fn drain(mut errors: ChildStderr) {
+/// Reads `errors` to its end, letting each byte go but the last [`SAID_KEPT`], which are
+/// kept in `kept` where it is given one.
+async fn drain(mut errors: ChildStderr, kept: Option<Arc<Mutex<Kept>>>) {
     let mut sink = [0; 4096];
-    while matches!(errors.read(&mut sink).await, Ok(count) if count > 0) {}
+    while let Ok(count) = errors.read(&mut sink).await {
+        if count == 0 {
+            break;
+        }
+        if let Some(kept) = &kept {
+            kept.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(&sink[..count]);
+        }
+    }
 }
 
-/// Until `process` has exited (then `live` says so, and lets go of what it left running)
-/// and its error stream, drained apart, has closed.
+/// Until `process` has exited (then `live` says so, with the code it exited with, and lets
+/// go of what it left running) and its error stream, drained apart, has closed. Where it
+/// leads a group (`led`, its pid), what of the group is left once it has gone is forced to
+/// end first.
 async fn closing(
     drained: Option<tokio::task::JoinHandle<()>>,
     mut process: tokio::process::Child,
     live: Rc<Live>,
+    led: Option<u32>,
 ) {
     let drain = async {
         if let Some(drained) = drained {
@@ -123,10 +198,33 @@ async fn closing(
         }
     };
     let wait = async {
-        let _ = process.wait().await;
+        let status = process.wait().await;
+        live.set_code(status.ok().and_then(|status| status.code()));
+        if let Some(leader) = led {
+            end_what_it_started(leader, &live);
+        }
         live.set_exited();
     };
     tokio::join!(drain, wait);
+}
+
+/// Forces to end what a program that led a group started and left running once it was
+/// waited for: on Unix, if a process of its group that is no zombie is there, the group (a
+/// group whose id is in use is its leader's still, however long ago it was reaped, so the
+/// number names no other); on Windows its job.
+fn end_what_it_started(leader: u32, live: &Live) {
+    #[cfg(unix)]
+    {
+        let _ = live;
+        if let Some(group) = i32::try_from(leader).ok().filter(|&leader| leader > 1) {
+            crate::terminate::force_stragglers(-group);
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = leader;
+        let _ = live.job().terminate();
+    }
 }
 
 impl Child {
@@ -171,6 +269,33 @@ impl Child {
         self.live.exited()
     }
 
+    /// The code it exited with, once it has: none while it runs, and none where a signal
+    /// ended it (and on Windows where this side did).
+    pub fn code(&self) -> Option<i32> {
+        self.exited().then(|| self.live.code()).flatten()
+    }
+
+    /// The last [`SAID_KEPT`] bytes of its error stream, as text, where the child was
+    /// started to keep them ([`Streams::Conversation`]); nothing otherwise. What it said
+    /// before the moment of asking: more may follow while it runs.
+    pub fn said(&self) -> String {
+        let kept = self
+            .said
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        String::from_utf8_lossy(&kept.bytes).into_owned()
+    }
+
+    /// Whether the front of its error stream was let go: more than [`SAID_KEPT`] bytes were
+    /// written, and [`Child::said`] is the end of them. What stands at its start may be the
+    /// rest of a line, or of a value, whose beginning is gone.
+    pub fn said_cut(&self) -> bool {
+        self.said
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .cut
+    }
+
     /// Waits until it has exited and its streams have closed.
     pub async fn closed(&self) {
         poll_fn(|context| self.poll_closing(context)).await;
@@ -197,14 +322,14 @@ impl Child {
     pub fn terminate(&self, how: Ending) {
         self.asked.set(true);
         if let (Some(pid), false) = (self.pid, self.exited()) {
-            end(pid, how, Reach::Process, true, self.live.job());
+            end(pid, how, self.reach, true, self.live.job());
         }
     }
 
     /// What ends it later, should this process be ending: the forcing of it
     /// while it runs.
     pub fn ender(&self) -> Ender {
-        Ender::new(self.pid, Reach::Process, &self.live)
+        Ender::new(self.pid, self.reach, &self.live)
     }
 
     fn poll_closing(&self, context: &mut Context<'_>) -> Poll<()> {
@@ -652,5 +777,157 @@ mod tests {
             marked.exists(),
             "what it left running was let go of, and wrote"
         );
+    }
+
+    /// What it said last and the code it exited with are kept for a conversation, and for no
+    /// other kind of child.
+    #[test]
+    fn a_conversation_keeps_the_last_of_its_error_stream_and_the_code_it_exited_with() {
+        let script = if cfg!(windows) {
+            "echo first 1>&2 & echo last 1>&2 & exit /b 3"
+        } else {
+            "echo first >&2; echo last >&2; exit 3"
+        };
+        block_on(async {
+            let kept = spawn(&shell(script), None, &system_env(), Streams::Conversation).unwrap();
+            assert_eq!(kept.code(), None, "it has not been waited for");
+            tokio::time::timeout(Duration::from_secs(60), kept.closed())
+                .await
+                .expect("it closed");
+            let said = kept.said();
+            assert!(said.contains("first") && said.contains("last"), "{said:?}");
+            assert!(!kept.said_cut(), "all of it is kept: nothing was let go");
+            assert_eq!(kept.code(), Some(3));
+            // Nothing is kept of the others.
+            for streams in [Streams::Lines, Streams::Quiet] {
+                let other = spawn(&shell(script), None, &system_env(), streams).unwrap();
+                tokio::time::timeout(Duration::from_secs(60), other.closed())
+                    .await
+                    .expect("it closed");
+                assert_eq!(other.said(), "", "{streams:?}");
+            }
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_conversation_keeps_no_more_than_the_last_bytes_it_said() {
+        block_on(async {
+            let kept = spawn(
+                &shell("/usr/bin/head -c 10000 /dev/zero | /usr/bin/tr '\\0' x >&2; echo END >&2"),
+                None,
+                &system_env(),
+                Streams::Conversation,
+            )
+            .unwrap();
+            tokio::time::timeout(Duration::from_secs(60), kept.closed())
+                .await
+                .expect("it closed");
+            let said = kept.said();
+            assert_eq!(said.len(), SAID_KEPT, "the last of it, no more");
+            assert!(
+                said.ends_with("xxxxEND\n"),
+                "its end is kept: {:?}",
+                &said[said.len() - 12..]
+            );
+            assert!(
+                kept.said_cut(),
+                "the front of it was let go, and that is said"
+            );
+        });
+    }
+
+    /// A conversation that wrote more than is kept says its front was let go, and one that wrote
+    /// less does not, on Windows as well (the loop is `cmd`'s).
+    #[test]
+    fn a_conversation_that_wrote_more_than_is_kept_says_its_front_was_let_go() {
+        for (lines, cut) in [(10, false), (400, true)] {
+            let script = if cfg!(windows) {
+                format!("(for /L %i in (1,1,{lines}) do @echo xxxxxxxxxxxxxxxxxxxxxxxxx 1>&2) & exit /b 3")
+            } else {
+                format!("i=0; while [ $i -lt {lines} ]; do echo xxxxxxxxxxxxxxxxxxxxxxxxx >&2; i=$((i+1)); done; exit 3")
+            };
+            block_on(async {
+                let kept =
+                    spawn(&shell(&script), None, &system_env(), Streams::Conversation).unwrap();
+                tokio::time::timeout(Duration::from_secs(60), kept.closed())
+                    .await
+                    .expect("it closed");
+                assert_eq!(kept.said_cut(), cut, "{lines} lines");
+                assert!(kept.said().len() <= SAID_KEPT);
+                assert_eq!(kept.code(), Some(3));
+            });
+        }
+    }
+
+    /// What is kept says whether the front was let go: only where more than [`SAID_KEPT`] bytes
+    /// were written, however they came in chunks (the label of a value can be in the front, and
+    /// its continuation in what is left). Not a test of a child, so that Windows runs it too.
+    #[test]
+    fn what_is_kept_of_the_error_stream_says_whether_its_front_was_let_go() {
+        let mut kept = Kept::default();
+        assert!(!kept.cut && kept.bytes.is_empty());
+        kept.push(&[b'a'; 1000]);
+        kept.push(&[b'b'; SAID_KEPT - 1000]);
+        assert_eq!(kept.bytes.len(), SAID_KEPT);
+        assert!(!kept.cut, "exactly SAID_KEPT bytes lost none");
+        kept.push(b"c");
+        assert!(kept.cut, "one byte over lost the first");
+        assert_eq!(kept.bytes.len(), SAID_KEPT);
+        assert_eq!(kept.bytes.first(), Some(&b'a'));
+        assert_eq!(kept.bytes.last(), Some(&b'c'));
+        kept.push(b"d");
+        assert!(kept.cut, "once cut, cut");
+        let mut one_chunk = Kept::default();
+        one_chunk.push(&vec![b'x'; SAID_KEPT * 3]);
+        assert!(one_chunk.cut);
+        assert_eq!(one_chunk.bytes.len(), SAID_KEPT);
+    }
+
+    /// A conversation that goes of itself leaves nothing it started running; any other child
+    /// does (the test above this one's twin).
+    #[test]
+    fn a_conversation_that_exits_leaves_nothing_it_started_running() {
+        use crate::testing::{leaves_a_writer, Survivors};
+        let dir = tempfile::tempdir().unwrap();
+        let (file, marked) = (dir.path().join("pids"), dir.path().join("late"));
+        block_on(async {
+            let child = spawn(
+                &leaves_a_writer(&file, &marked, 2),
+                None,
+                &Env::from_process(),
+                Streams::Conversation,
+            )
+            .unwrap();
+            child.ended().await;
+        });
+        let pids = crate::testing::pids_in(&file, 2).expect("written before it ended");
+        let _left = Survivors(pids);
+        std::thread::sleep(Duration::from_secs(5));
+        assert!(
+            !marked.exists(),
+            "what the conversation started was ended with it, and did not write"
+        );
+    }
+
+    /// Asked to end, a conversation ends what it started with it, not the program alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_conversation_asked_to_end_ends_the_group_it_leads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("pids");
+        let script = format!("/bin/sleep 30 & echo $! > '{}'; wait", file.display());
+        block_on(async {
+            let child = spawn(&shell(&script), None, &system_env(), Streams::Conversation).unwrap();
+            let sleeper = crate::testing::pids_written_to_soon(&file, 1).await[0];
+            child.terminate(Ending::Asked);
+            tokio::time::timeout(Duration::from_secs(10), child.ended())
+                .await
+                .expect("it ended");
+            assert!(
+                crate::testing::gone_within(sleeper, Duration::from_secs(10)),
+                "the sleep it started is gone"
+            );
+        });
     }
 }

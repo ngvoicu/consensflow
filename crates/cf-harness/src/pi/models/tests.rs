@@ -4,10 +4,54 @@ use cf_process::Failed;
 use serde_json::json;
 
 use super::*;
-use crate::testing::{finished, ChildScript, Ends, ManualTime, ScriptedProcesses};
+use crate::pi::setup::Setup;
+use crate::testing::{finished, ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
+use cf_proto::models::WORDS_WITHHELD;
+
+mod failures;
+mod homes;
+mod off_thread;
+mod refresh;
+mod standin;
 
 /// When a test's list is read.
 const AT: i64 = 1_793_000_000_000;
+
+/// The first work `driver` settles, run until it does for up to ten seconds of real time (see
+/// [`eventually`]).
+pub(super) fn settled<T>(driver: &mut Driver<T>) -> T {
+    let began = std::time::Instant::now();
+    loop {
+        if let Some((_, done)) = driver.run().into_iter().next() {
+            return done;
+        }
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(10),
+            "work that waited on nothing it was given"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// `work`, polled until it is done, for up to ten seconds of real time: a read that finds no model
+/// has Pi's folder read on a thread of its own (`setup::inspect`), which answers a moment later and
+/// has no waker to wake a test that waits on nothing else.
+pub(super) fn eventually<T>(mut work: crate::contract::Work<'_, T>) -> T {
+    let began = std::time::Instant::now();
+    loop {
+        let polled = work
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()));
+        if let std::task::Poll::Ready(done) = polled {
+            return done;
+        }
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(10),
+            "work that waited on nothing it was given"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
 
 /// What Pi 1.4.0 answered `get_available_models` with on 2026-10-28, offline, a few rows of
 /// each provider kept (`tools/probes/chief-harness/models.py pi`), and with no login.
@@ -77,28 +121,59 @@ fn pi_with_no_login_lists_no_model_and_says_why() {
     let signed_out = parse(&serde_json::from_str(SIGNED_OUT).unwrap(), AT);
     assert_eq!(
         signed_out,
-        Err("Pi lists no model: it holds no login for any provider".to_owned())
+        Err(Unlisted::NoModel),
+        "an empty list is told from the folder of Pi, which is read only then"
     );
+    assert!(Setup::default()
+        .unlisted()
+        .starts_with("Pi lists no model: no provider is set up ("));
     let refused = parse(&json!({ "success": false, "error": "bad" }), AT);
+    // What Pi gives as its reason is Pi's words, after the mark, whole.
     assert_eq!(
         refused,
-        Err("pi refused get_available_models: bad".to_owned())
+        Err(Unlisted::Said(
+            "pi refused get_available_models; it said:\nbad".to_owned()
+        ))
     );
+    let multiline = parse(
+        &json!({ "success": false, "error": "line one\nline two\n" }),
+        AT,
+    );
+    assert_eq!(
+        multiline,
+        Err(Unlisted::Said(
+            "pi refused get_available_models; it said:\nline one\nline two".to_owned()
+        )),
+        "not cut to a line"
+    );
+    for none in [
+        json!({ "success": false }),
+        json!({ "success": false, "error": "  " }),
+    ] {
+        assert_eq!(
+            parse(&none, AT),
+            Err(Unlisted::Said(
+                "pi refused get_available_models: no reason given".to_owned()
+            )),
+            "no words of Pi's, no mark"
+        );
+    }
 }
 
 #[test]
-fn the_list_is_read_offline_with_nothing_of_pi_s_own() {
+fn the_list_is_read_offline_with_the_packages_and_extensions_a_window_starts_with() {
     let program = program(PathBuf::from("pi"), &Env::default());
     assert_eq!(
         program.args,
-        [
-            "--mode",
-            "rpc",
-            "--no-session",
-            "--no-extensions",
-            "--no-mcp",
-            "--offline"
-        ]
+        ["--mode", "rpc", "--no-session", "--no-mcp", "--offline"]
+    );
+    assert!(
+        !program
+            .args
+            .iter()
+            .any(|arg| arg == "--no-extensions" || arg == "-ne"),
+        "Pi's --no-extensions leaves out settings.json's packages: a provider such as \
+         pi-cliproxyapi-provider lists nothing (HMD-13)"
     );
     assert_eq!(program.env.text("PI_OFFLINE"), Some("1"));
 }
@@ -115,17 +190,27 @@ fn listed_with(
     if let Some(update) = update {
         processes.run_answer("pi update --models", update);
     }
-    let answer = json!({ "type": "response", "id": "models", "success": true,
-        "data": { "models": [{ "provider": "meta", "id": "spark", "name": "Spark" }] } });
+    let answer = |id: &str| {
+        json!({ "type": "response", "id": id, "success": true,
+            "data": { "models": [{ "provider": "meta", "id": "spark", "name": "Spark" }] } })
+        .to_string()
+    };
+    let lines = vec![answer("models")];
     processes.child(
         "pi",
         ChildScript {
-            lines: vec![answer.to_string()],
+            lines,
             ends: Ends::Asked,
         },
     );
-    let time = ManualTime::new(0);
-    let listed = finished(Box::pin(listed(&env, &*processes, &time, fetch)));
+    let time = Rc::new(ManualTime::new(0));
+    let mut driver = Driver::default();
+    let (asked_env, asked_processes, asked_time) =
+        (env.clone(), Rc::clone(&processes), Rc::clone(&time));
+    driver.begin(0, async move {
+        listed(&asked_env, &*asked_processes, &*asked_time, fetch).await
+    });
+    let listed = driver.run().remove(0).1;
     let ran = processes
         .take_ran()
         .iter()
@@ -155,10 +240,70 @@ fn only_the_human_s_refresh_fetches_pi_s_catalogs_and_a_failed_fetch_leaves_a_st
     assert_eq!(
         listed.freshness,
         cf_proto::models::Freshness::Stale {
-            why: "Pi's own catalog: pi update --models failed: offline".to_owned()
+            why: "Pi's own catalog: pi update --models failed (exit 1); it said:\noffline"
+                .to_owned()
         }
     );
     assert_eq!(listed.models.len(), 1, "the list Pi keeps");
+}
+
+fn update_failed(message: &str, code: Option<i32>) -> String {
+    update_failure(&Failed {
+        message: message.to_owned(),
+        code,
+        killed: false,
+        stdout: String::new(),
+    })
+}
+
+/// Why `pi update --models` failed: its exit code, and after the mark everything its error
+/// stream held, whole (the third reading, F2: the last line alone left a label behind it).
+#[test]
+fn why_a_pi_update_failed_is_its_code_and_all_it_said_after_the_mark() {
+    assert_eq!(
+        update_failed(
+            "Command failed: pi update --models\nfirst\nsecond\nthird\n",
+            Some(2)
+        ),
+        "failed (exit 2); it said:\nfirst\nsecond\nthird"
+    );
+    // A program that never started has the system's words only, which are not Pi's.
+    assert_eq!(
+        update_failed("spawn pi ENOENT", None),
+        "failed: spawn pi ENOENT"
+    );
+    // One that said nothing has no mark.
+    assert_eq!(
+        update_failed("Command failed: pi update --models\n", Some(1)),
+        "failed (exit 1)"
+    );
+    // One that said as much as is kept said it whole; one that said more had its front let go
+    // (T-1276: the label of a value can be in it), and none of what it said is handed on.
+    let whole = "é".repeat(UPDATE_SAID_BYTES / 2);
+    assert_eq!(
+        update_failed(
+            &format!("Command failed: pi update --models\n{whole}"),
+            None
+        ),
+        format!("failed{IT_SAID}{whole}")
+    );
+    let many = "é".repeat(UPDATE_SAID_BYTES);
+    let cut = update_failed(&format!("Command failed: pi update --models\n{many}"), None);
+    assert_eq!(cut, format!("failed{IT_SAID}{WORDS_WITHHELD}"));
+}
+
+/// T-1276, `long-password-continuation` for `pi update --models`: the label stands before the
+/// last `UPDATE_SAID_BYTES` of what it said, the words of its value after it.
+#[test]
+fn a_pi_update_whose_front_was_let_go_hands_on_none_of_its_words() {
+    let label = "password: to\nred\nbird\ncedar\nflower\norchard\n";
+    let rest = "to\nred\nbird\ncedar\nflower\norchard\n".repeat(UPDATE_SAID_BYTES / 20);
+    let tail = "remainingviolet\nremainingwillow";
+    let failed = update_failed(
+        &format!("Command failed: pi update --models\n{label}{rest}{tail}"),
+        Some(1),
+    );
+    assert_eq!(failed, format!("failed (exit 1){IT_SAID}{WORDS_WITHHELD}"));
 }
 
 /// Pi's default model, from a folder of its own whose `settings.json` says `settings`, a

@@ -1,0 +1,13 @@
+-- Members are named by their model's id and effort (spec `harness-models`, HMD-12), where
+-- alpha.2 named them by the name their harness's list gave the model (`@opus-high`): the
+-- id is what `--model` takes, and what the pickers show. Every member with a model takes
+-- the name its id and effort make (`@claude-opus-5-5-high`), and each of its windows the
+-- same two words after it; the member's `model_name` now holds the model as its harness's
+-- list names it, its id (Pi's `provider/id`, Devin's listed id, not the launch id its row's
+-- `model` holds), which the page, the board and `cf` show. That is done after this SQL
+-- ([`crate::schema`]'s `after`), which SQL cannot do. A name a participant leaves is kept,
+-- oldest first, in `former_handles` (a JSON list of words), so history can say every name
+-- it went by; `agent`, the ready-made agent's name of a participant from before the models
+-- were the harnesses' own, stays what it was. Added in place, a column a line, as 0026
+-- added its own: nothing of the table moves.
+  ALTER TABLE participant ADD COLUMN former_handles TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(former_handles) AND json_type(former_handles) = 'array');

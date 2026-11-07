@@ -40,15 +40,23 @@ fn system() -> &'static str {
 }
 
 /// `computer_use.get`: `{system, permissions, grantsOf, harnesses}` for the project the
-/// body names; `permissions` is null where the system keeps no grants, and `grantsOf`
-/// names the app they are of where it is not ConsensFlow (null where it is).
+/// body names, or, where it names a folder (`directory`) and no project (New project, before
+/// there is one), for that folder: Claude Code keeps its switch by folder, and what the page
+/// is told is what a project of that folder would be told. `permissions` is null where the
+/// system keeps no grants, and `grantsOf` names the app they are of where it is not
+/// ConsensFlow (null where it is).
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
-    let id = body.whole("project")?;
-    let project = page
-        .ledger
-        .borrow()
-        .project(id)?
-        .ok_or_else(|| Said(format!("no project {id}")))?;
+    let directory = match (body.get("project"), body.get("directory")) {
+        (None, Some(Value::String(folder))) if !folder.trim().is_empty() => folder.clone(),
+        _ => {
+            let id = body.whole("project")?;
+            page.ledger
+                .borrow()
+                .project(id)?
+                .ok_or_else(|| Said(format!("no project {id}")))?
+                .directory
+        }
+    };
     let machine = &page.computer_use.machine;
     let permissions = machine.permissions().map_or(Value::Null, |granted| {
         json!({
@@ -56,7 +64,7 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             "screenRecording": granted.screen_recording,
         })
     });
-    let claude = machine.claude(&project.directory);
+    let claude = machine.claude(&directory);
     let codex = machine.codex();
     merged(json!({
         "system": system(),

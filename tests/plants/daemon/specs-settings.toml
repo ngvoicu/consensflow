@@ -390,7 +390,7 @@ replace = ""
 
 [[plant]]
 name = "specs settings: Settings has no Specs entry"
-meant = "Settings has Specs as a third entry, under Agents and Harnesses, and it opens a dialog of the page, Settings closed behind it"
+meant = "Settings has Specs as a second entry, under Harnesses, and it opens a dialog of the page, Settings closed behind it"
 runs = ["settings-page-dialog"]
 
 [[plant.edit]]
@@ -589,12 +589,12 @@ file = "app/ui/core/dialogs.js"
 find = '''
       this.#wakeUp.read(project),
       this.#page.readSpecs(),
-      this.#computerUse.read(project),
+      this.#computerUse.read({ project }),
 '''
 replace = '''
       this.#wakeUp.read(project),
       null,
-      this.#computerUse.read(project),
+      this.#computerUse.read({ project }),
 '''
 
 [[plant]]

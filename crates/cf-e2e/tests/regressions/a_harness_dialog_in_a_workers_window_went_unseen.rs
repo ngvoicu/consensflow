@@ -114,6 +114,86 @@ fn an_offer_to_install_an_lsp_plugin_mid_turn_is_told_once_to_the_chief_and_the_
     Ok(())
 }
 
+/// Seen on the release check of 3.0.7-alpha.2 on 2026-11-06 (T-1178, T-1261): the offer was told
+/// at the window's second look, its turn still at work; the turn ended under it before the look
+/// that was to decline it, and the pane host's tail slid, so that the line that closes a turn was
+/// the first of what the offer "said". Read as another dialog, it was told a second time and its
+/// decline, held to the dialog as it was told, was never pressed: the offer closed by itself
+/// after its 30 s and counted against the owner's own offers (`TURN-ENDS`, its `offers`: the case
+/// ends the turn under the open offer once the chief was told).
+#[test]
+fn an_offer_whose_turn_ends_under_it_is_still_declined_and_told_once() -> Outcome {
+    let rig = Rig::start(config())?;
+    write_roster(&rig)?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    dispatched(
+        &rig,
+        &project,
+        "LSP-OFFER 30 TURN-ENDS Reply with exactly: DIALOG_OK",
+    )?;
+    rig.wait_for("the chief to be told of the offer", secs(90), || {
+        Ok(!dialog_notes(&project, "chief")?.is_empty())
+    })?;
+    // The turn ends under the open offer once it was told, before the look that declines it.
+    let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default().to_owned();
+    files::write(&Path::new(&config).join("turn-ends"), "")?;
+    rig.wait_for("T-1 to be done", secs(90), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let told = dialog_notes(&project, "chief")?;
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].ends_with("ConsensFlow declines it for the window now, choosing \u{201c}No, not now\u{201d}, which writes nothing; nothing else is typed into the window meanwhile."),
+        "{}",
+        told[0]
+    );
+    assert_eq!(dialog_notes(&project, "human")?, told);
+    // The offer was answered by its digit, "No, not now", and did not close by itself.
+    let answers = files::read_string(&Path::new(&config).join("offer-answers")).unwrap_or_default();
+    assert_eq!(answers, "2\n", "how the offer was answered");
+    rig.close()?;
+    Ok(())
+}
+
+/// Seen on the owner's board on 2026-11-06 (T-1268): a permission prompt told twice, 1 min 58 s
+/// apart, the second note word for word the first but for the clock of the line under the command
+/// (`in 1:57`, then `in 0:03`). The status said a dialog was open until Claude Code blocked the
+/// request by itself, and the screen still showed the prompt when it stopped saying so. The
+/// stand-in draws the prompt as it was drawn (`PERMISSION-ASK <seconds>`, its `offers`).
+#[test]
+fn a_permission_prompt_whose_clock_counts_down_is_told_once_to_the_chief_and_the_human() -> Outcome
+{
+    let rig = Rig::start(config())?;
+    write_roster(&rig)?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    dispatched(
+        &rig,
+        &project,
+        "PERMISSION-ASK 14 Reply with exactly: DIALOG_OK",
+    )?;
+    rig.wait_for("the chief to be told of the prompt", secs(90), || {
+        Ok(!dialog_notes(&project, "chief")?.is_empty())
+    })?;
+    rig.wait_for("T-1 to be done", secs(90), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let told = dialog_notes(&project, "chief")?;
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains("\u{201c}Do you want to proceed?\u{201d}"),
+        "{}",
+        told[0]
+    );
+    assert!(told[0].contains("block this request in 0:"), "{}", told[0]);
+    assert_eq!(dialog_notes(&project, "human")?, told);
+    // Nothing was pressed in it: it is on no list of safe declines.
+    let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default().to_owned();
+    let answers = files::read_string(&Path::new(&config).join("offer-answers")).unwrap_or_default();
+    assert_eq!(answers, "permission:blocked\n", "how the prompt ended");
+    rig.close()?;
+    Ok(())
+}
+
 #[test]
 fn a_survey_the_launch_turns_off_never_appears() -> Outcome {
     let rig = Rig::start(config())?;

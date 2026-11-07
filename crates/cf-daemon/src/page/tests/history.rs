@@ -30,6 +30,8 @@ fn project(rig: &Rig, name: &str) -> i64 {
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .unwrap()
         .id;

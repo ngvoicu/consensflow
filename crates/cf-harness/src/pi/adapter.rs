@@ -177,7 +177,11 @@ impl Adapter for PiAdapter {
             argv.extend(invocation.args);
             Ok(Prepared {
                 argv,
-                env: configuration.env,
+                env: configuration
+                    .env
+                    .into_iter()
+                    .chain(compaction_size(launch.compaction))
+                    .collect(),
                 drop_env: invocation
                     .drop_env
                     .iter()
@@ -354,4 +358,13 @@ impl Window for PiWindow {
             })
         })
     }
+}
+
+/// The size the project chose for its members to compact at, as ConsensFlow's own extension
+/// in the window is given it (at launch and on resume): Pi has no flag or variable for it, and
+/// its settings are the owner's. The extension asks Pi to compact at the window's next rest once
+/// its context is past the size, and never where the size is at or above the model's window.
+/// None where the project chose none, and for the chief, whose launch is never given one.
+fn compaction_size(size: Option<u32>) -> Option<(String, String)> {
+    size.map(|size| ("CF_COMPACTION_TOKENS".to_owned(), size.to_string()))
 }

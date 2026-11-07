@@ -107,6 +107,8 @@ impl World {
                 gate,
                 wake_up: None,
                 specs: None,
+                staff_rules: None,
+                compaction: None,
             })
             .expect("a project");
         Self {

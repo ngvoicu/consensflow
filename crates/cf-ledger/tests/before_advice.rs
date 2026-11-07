@@ -39,6 +39,8 @@ fn ledger_in(dir: &tempfile::TempDir) -> Ledger {
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .expect("a project");
     ledger

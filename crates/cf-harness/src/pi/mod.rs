@@ -9,6 +9,7 @@ mod last_used;
 pub(crate) mod models;
 pub(crate) mod paths;
 pub mod record;
+pub(crate) mod setup;
 
 pub use adapter::PiAdapter;
 // What the channel's cases against the system's own clock call

@@ -1267,3 +1267,159 @@ async fn an_accept_of_a_result_that_left_nothing_running_says_nothing_of_it() {
     assert_eq!(said.0, 200, "{:?}", said.1);
     assert!(said.1.get("running").is_none(), "{:?}", said.1);
 }
+
+/// Edit member renames a member and its windows (HMD-12), a window at work too, and the window
+/// goes on: its token names its participant by id, so `cf` keeps answering to it under the new
+/// name. It reads its task, finishes it, and what the chief answered it before the rename still
+/// reaches it; the task is its own under the new name, and the old name is nobody's.
+#[tokio::test]
+async fn a_window_at_work_keeps_running_cf_with_its_token_after_its_member_is_renamed() {
+    let scene = scene();
+    let project = scene.project.id;
+    let zeus = scene.id("zeus");
+    // The chief's task for the standard workers goes to a window of zeus, which takes it up.
+    let created = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            project,
+            &cf_ledger::NewTask {
+                from: "chief".to_owned(),
+                pool: Some("worker".to_owned()),
+                tier: Some("standard".to_owned()),
+                body: "Parser".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap();
+    let number = created.task.number;
+    let moved = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .assign_task(project, number, zeus)
+        .unwrap();
+    let window = moved.task.assignee.clone().expect("a window has the task");
+    assert!(window.starts_with("zeus-"), "{window}");
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let brief = moved.message.as_ref().expect("its brief").id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+    }
+    let window_id = scene
+        .context
+        .ledger
+        .borrow()
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .participants
+        .iter()
+        .find(|participant| participant.handle == window)
+        .unwrap()
+        .id;
+    // Its token, as the engine issues it when the window opens; a question it asked on the
+    // task, and the chief's answer, which waits for it.
+    let token = scene.context.credentials.issue(project, window_id);
+    let asked = cf_ledger::NewQuestion {
+        from: Some(window.clone()),
+        to: "chief".to_owned(),
+        body: Some("Which?".to_owned()),
+        task: Some(number),
+        ..cf_ledger::NewQuestion::default()
+    };
+    let question = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .ask(project, &asked)
+        .unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .answer(
+            question.id,
+            scene.id("chief"),
+            Some(&json!("Use the first.")),
+            None,
+        )
+        .unwrap();
+    // The human edits zeus to another model while the window works.
+    let edited = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .edit_member(
+            project,
+            "zeus",
+            &cf_ledger::MemberEdit {
+                harness: "claude-code".to_owned(),
+                model: Some("claude-opus-5-5".to_owned()),
+                effort: Some("high".to_owned()),
+                model_name: Some("claude-opus-5-5".to_owned()),
+                tier: "standard".to_owned(),
+            },
+        )
+        .unwrap();
+    assert_eq!(edited.handle, "claude-opus-5-5-high");
+    let renamed = format!(
+        "claude-opus-5-5-high-{}",
+        window.strip_prefix("zeus-").unwrap()
+    );
+    // The same token: who the window is now, and the task, its own under the new name.
+    let (status, said) = api_whoami(&scene, &token).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["participant"]["handle"], renamed.as_str());
+    assert_eq!(said["task"]["number"], number);
+    assert_eq!(said["task"]["assignee"], renamed.as_str());
+    let (status, said) = get(&scene, &token, &number.to_string()).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["assignee"], renamed.as_str());
+    // What the chief answered before reaches it, by its id.
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .next_delivery(window_id)
+            .unwrap()
+            .map(|message| message.body),
+        Some("Use the first.".to_owned())
+    );
+    // It finishes its task with the token it had.
+    let (status, said) = post(
+        &scene,
+        &token,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "done");
+    assert_eq!(said["task"]["assignee"], renamed.as_str());
+    // The old name is no one's: the board holds no participant by it.
+    let names: Vec<String> = scene
+        .context
+        .ledger
+        .borrow()
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .map(|participant| participant.handle)
+        .collect();
+    assert!(
+        !names.iter().any(|name| name == "zeus" || *name == window),
+        "{names:?}"
+    );
+}
+
+async fn api_whoami(scene: &crate::testing::Scene, token: &str) -> (u16, serde_json::Value) {
+    crate::api::routes::tests::support::api(scene, Method::GET, "/api/whoami", token, "").await
+}
