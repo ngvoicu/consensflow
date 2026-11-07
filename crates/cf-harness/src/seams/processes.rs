@@ -67,6 +67,11 @@ pub trait Child {
     fn said(&self) -> String {
         String::new()
     }
+    /// Whether the front of what it said was let go: [`Child::said`] is the end of more than
+    /// it holds, and what stands at its start may be the rest of a value whose label is lost.
+    fn said_cut(&self) -> bool {
+        false
+    }
     /// The code it exited with, once it has; none while it runs or where a signal ended it.
     fn code(&self) -> Option<i32> {
         None
@@ -185,6 +190,10 @@ impl Child for cf_process::Child {
 
     fn said(&self) -> String {
         cf_process::Child::said(self)
+    }
+
+    fn said_cut(&self) -> bool {
+        cf_process::Child::said_cut(self)
     }
 
     fn code(&self) -> Option<i32> {
@@ -541,6 +550,67 @@ mod tests {
         assert!(holding, "the program it left holds the stream ({pid:?})");
         assert!(ended.is_ok(), "it has exited, so it has ended");
         assert!(closed.is_err(), "its error stream is held open");
+    }
+
+    /// A program of the system's own that writes `lines` lines of 27 bytes to its error stream
+    /// and exits with 3.
+    fn writes(lines: usize) -> Program {
+        let script = if cfg!(windows) {
+            format!(
+                "(for /L %i in (1,1,{lines}) do @echo xxxxxxxxxxxxxxxxxxxxxxxxx 1>&2) & exit /b 3"
+            )
+        } else {
+            format!("i=0; while [ $i -lt {lines} ]; do echo xxxxxxxxxxxxxxxxxxxxxxxxx >&2; i=$((i+1)); done; exit 3")
+        };
+        let (executable, flags) = if cfg!(windows) {
+            (r"C:\Windows\System32\cmd.exe", vec!["/d", "/c"])
+        } else {
+            ("/bin/sh", vec!["-c"])
+        };
+        Program {
+            executable: executable.into(),
+            args: flags
+                .into_iter()
+                .chain([script.as_str()])
+                .map(str::to_owned)
+                .collect(),
+            cwd: None,
+            env: Env::from_vars(if cfg!(windows) {
+                vec![("SystemRoot", r"C:\Windows")]
+            } else {
+                vec![("PATH", "/usr/bin:/bin")]
+            }),
+        }
+    }
+
+    /// T-1276: what a read of Pi says of its error stream depends on whether the front of it was
+    /// let go (cf-process keeps the last bytes), and the trait object the adapters hold says so.
+    #[test]
+    fn a_child_started_to_keep_what_it_said_says_whether_the_front_of_it_was_let_go() {
+        let processes = SystemProcesses::new(Env::default());
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                for (lines, cut) in [(10, false), (400, true)] {
+                    let child = processes
+                        .spawn(writes(lines), Streams::Conversation)
+                        .unwrap();
+                    tokio::time::timeout(Duration::from_secs(60), child.closed())
+                        .await
+                        .expect("it closed");
+                    assert_eq!(child.said_cut(), cut, "{lines} lines");
+                    assert!(child.said().contains("xxxxxxxxxxxxxxxxxxxxxxxxx"));
+                    assert_eq!(child.code(), Some(3));
+                }
+                // Any other kind keeps nothing, and lost nothing.
+                let child = processes.spawn(writes(400), Streams::Quiet).unwrap();
+                tokio::time::timeout(Duration::from_secs(60), child.closed())
+                    .await
+                    .expect("it closed");
+                assert!(!child.said_cut() && child.said().is_empty());
+            });
     }
 
     #[test]

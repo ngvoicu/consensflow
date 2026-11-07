@@ -82,6 +82,12 @@ impl StandIn {
         self.processes.child_said("pi", said, code);
     }
 
+    /// As [`StandIn::says`], and the front of what Pi wrote was let go: past the last
+    /// `SAID_KEPT` bytes of its error stream, which are all that is kept.
+    pub fn says_the_end(&self, said: &str, code: Option<i32>) {
+        self.processes.child_said_cut("pi", said, code);
+    }
+
     /// The read, for a Pi that needs no clock.
     pub fn read(&self, fetch: bool) -> Result<ModelListing, String> {
         eventually(Box::pin(listed(

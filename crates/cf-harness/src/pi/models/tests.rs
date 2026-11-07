@@ -6,6 +6,7 @@ use serde_json::json;
 use super::*;
 use crate::pi::setup::Setup;
 use crate::testing::{finished, ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
+use cf_proto::models::WORDS_WITHHELD;
 
 mod failures;
 mod homes;
@@ -276,15 +277,33 @@ fn why_a_pi_update_failed_is_its_code_and_all_it_said_after_the_mark() {
         update_failed("Command failed: pi update --models\n", Some(1)),
         "failed (exit 1)"
     );
-    // One that said a great deal is kept from the end, at a character.
-    let many = "é".repeat(UPDATE_SAID_BYTES);
-    let kept = update_failed(&format!("Command failed: pi update --models\n{many}"), None);
-    let said = kept.strip_prefix(&format!("failed{IT_SAID}")).unwrap();
-    assert!(
-        said.len() <= UPDATE_SAID_BYTES && said.chars().all(|c| c == 'é'),
-        "{}",
-        said.len()
+    // One that said as much as is kept said it whole; one that said more had its front let go
+    // (T-1276: the label of a value can be in it), and none of what it said is handed on.
+    let whole = "é".repeat(UPDATE_SAID_BYTES / 2);
+    assert_eq!(
+        update_failed(
+            &format!("Command failed: pi update --models\n{whole}"),
+            None
+        ),
+        format!("failed{IT_SAID}{whole}")
     );
+    let many = "é".repeat(UPDATE_SAID_BYTES);
+    let cut = update_failed(&format!("Command failed: pi update --models\n{many}"), None);
+    assert_eq!(cut, format!("failed{IT_SAID}{WORDS_WITHHELD}"));
+}
+
+/// T-1276, `long-password-continuation` for `pi update --models`: the label stands before the
+/// last `UPDATE_SAID_BYTES` of what it said, the words of its value after it.
+#[test]
+fn a_pi_update_whose_front_was_let_go_hands_on_none_of_its_words() {
+    let label = "password: to\nred\nbird\ncedar\nflower\norchard\n";
+    let rest = "to\nred\nbird\ncedar\nflower\norchard\n".repeat(UPDATE_SAID_BYTES / 20);
+    let tail = "remainingviolet\nremainingwillow";
+    let failed = update_failed(
+        &format!("Command failed: pi update --models\n{label}{rest}{tail}"),
+        Some(1),
+    );
+    assert_eq!(failed, format!("failed (exit 1){IT_SAID}{WORDS_WITHHELD}"));
 }
 
 /// Pi's default model, from a folder of its own whose `settings.json` says `settings`, a

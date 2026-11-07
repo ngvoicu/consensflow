@@ -7,6 +7,7 @@ use cf_process::Failed;
 use super::standin::{answer, StandIn};
 use super::*;
 use crate::seams::processes::Streams;
+use cf_proto::models::WORDS_WITHHELD;
 
 /// Synthetic credentials, one of each kind a failure could carry. None is a real one.
 const GIT_TOKEN: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
@@ -75,6 +76,39 @@ fn a_read_given_up_on_says_what_pi_had_said_so_far_and_names_what_it_was_loading
         "pi --mode rpc did not answer within 30 s. Pi loads the packages and extensions it has \
          before it lists, and one of them may be waiting for something (packages \
          npm:@scope/slow-provider@1.2.3); it said:\nwarming the provider's cache"
+    );
+}
+
+/// T-1276, `label-before-4KiB`, `long-password-continuation`: Pi's error stream is kept to its
+/// last 4 KiB, and where the front of it was let go the label of a value may be in the part that
+/// was, and its words in the part that is kept. None of what Pi said is handed on, for a read
+/// that ended or one given up on; the description, the code and what Pi was loading stay.
+#[test]
+fn a_read_whose_stderr_lost_its_front_hands_on_none_of_pi_s_words() {
+    let pi = StandIn::new(&[], &[]);
+    pi.child(&[], Ends::Itself);
+    pi.says_the_end("remainingviolet\nremainingwillow\n", Some(1));
+    let why = pi.read(false).unwrap_err();
+    assert_eq!(
+        why,
+        format!("pi --mode rpc ended before it answered (exit 1){IT_SAID}{WORDS_WITHHELD}")
+    );
+
+    let settings = r#"{"packages":["npm:@scope/slow-provider@1.2.3"]}"#;
+    let pi = StandIn::new(&[("settings.json", settings)], &[]);
+    pi.child(&[], Ends::Asked);
+    pi.says_the_end("flower\norchard\nviolet\nwillow\n", None);
+    let mut driver = pi.begin(false);
+    assert!(driver.run().is_empty(), "it waits for Pi");
+    assert!(pi.time.fire_next(i64::MAX), "the bound is armed");
+    let why = settled(&mut driver).unwrap_err();
+    assert_eq!(
+        why,
+        format!(
+            "pi --mode rpc did not answer within 30 s. Pi loads the packages and extensions it \
+             has before it lists, and one of them may be waiting for something (packages \
+             npm:@scope/slow-provider@1.2.3){IT_SAID}{WORDS_WITHHELD}"
+        )
     );
 }
 

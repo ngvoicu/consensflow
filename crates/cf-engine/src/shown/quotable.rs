@@ -17,13 +17,15 @@
 //! **The words after the mark are screened whole, and cut after** (F2 of the third reading).
 //! Line by line, a value that ran over lines had its first line withheld and its continuations
 //! kept, and a cut to the last lines made before the look took the line that named a
-//! credential and left the lines of its value. So the block is taken as one text: the lines
-//! that are blank or a stack frame ([`FRAME`]: `at fn (file:1:2)`, `at file:1:2`,
-//! `at fn (<anonymous>)`; never quoted, so nothing in one can leak, and prose that begins with
-//! `at` is none) are set aside, and if anything in the rest may hold a credential, **none of it is quoted** and [`WORDS_WITHHELD`] stands in its
-//! place; the description before the mark, the exit code in it and the names of what Pi was
-//! loading are kept. Only a block that passed is cut, to its last [`QUOTE_LINES`] lines within
-//! [`QUOTE_CHARS`] characters, and masked.
+//! credential and left the lines of its value. So the block is taken as one text, **every
+//! line of it, a stack frame among them** (T-1276, `frame-label-continuation`: `at password:
+//! correct (native)` is a frame by its shape and the label of the lines below it by its words),
+//! and if anything in it may hold a credential, **none of it is quoted** and [`WORDS_WITHHELD`]
+//! stands in its place. A frame ([`FRAME`]: `at fn (file:1:2)`, `at file:1:2`,
+//! `at fn (<anonymous>)`; prose that begins with `at` is none) is set aside from what is
+//! quoted, not from what is looked at. The description before the mark, the exit code in it and
+//! the names of what Pi was loading are kept. Only a block that passed is cut, to its last
+//! [`QUOTE_LINES`] lines that are no frame within [`QUOTE_CHARS`] characters, and masked.
 //!
 //! What may hold a credential is the screens' own rule on the lines as one text
 //! ([`screen::withheld`]: a secret-like word on any line, a token's beginning, a key's body, a
@@ -43,7 +45,7 @@ use super::mask::mask;
 use super::screen;
 
 /// What stands in place of the words of a program that may hold a credential.
-pub const WORDS_WITHHELD: &str = "(Pi's words withheld: they may hold a credential)";
+pub use cf_proto::models::WORDS_WITHHELD;
 
 /// The most lines of the words of a program that are quoted: the last ones.
 const QUOTE_LINES: usize = 4;
@@ -100,15 +102,22 @@ fn said(program: &str) -> Option<String> {
     let lines: Vec<&str> = program
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty() && !FRAME.is_match(line))
+        .filter(|line| !line.is_empty())
         .collect();
-    if lines.is_empty() {
+    // A frame is never quoted, but it is looked at: `at password: correct (native)` is the
+    // label of the lines below it as much as any line (T-1276, `frame-label-continuation`).
+    let quoted: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| !FRAME.is_match(line))
+        .collect();
+    if quoted.is_empty() {
         return None;
     }
     if may_hold_a_credential(&lines) {
         return Some(WORDS_WITHHELD.to_owned());
     }
-    let kept = &lines[lines.len().saturating_sub(QUOTE_LINES)..];
+    let kept = &quoted[quoted.len().saturating_sub(QUOTE_LINES)..];
     let joined = mask(&kept.join("\n")).text;
     Some(match joined.char_indices().nth(QUOTE_CHARS) {
         Some((cut, _)) => format!("{}…", &joined[..cut]),

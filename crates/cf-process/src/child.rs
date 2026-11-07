@@ -64,7 +64,28 @@ pub struct Child {
     /// What an end of it reaches: itself, or the group it leads.
     reach: Reach,
     /// The last of its error stream, where it is kept ([`Streams::Conversation`]).
-    said: Arc<Mutex<Vec<u8>>>,
+    said: Arc<Mutex<Kept>>,
+}
+
+/// What is kept of the error stream of a [`Streams::Conversation`] child: its last
+/// [`SAID_KEPT`] bytes, and whether the bytes before them were let go.
+#[derive(Default)]
+struct Kept {
+    bytes: Vec<u8>,
+    cut: bool,
+}
+
+impl Kept {
+    /// Adds `chunk` to what is kept, and lets go of the front where that is more than
+    /// [`SAID_KEPT`].
+    fn push(&mut self, chunk: &[u8]) {
+        self.bytes.extend_from_slice(chunk);
+        if self.bytes.len() > SAID_KEPT {
+            let over = self.bytes.len() - SAID_KEPT;
+            self.bytes.drain(..over);
+            self.cut = true;
+        }
+    }
 }
 
 /// Starts `run` in `cwd` with the environment `env`, all of it and nothing
@@ -115,7 +136,7 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
     };
     // Read and let go while the child lives, whoever waits on it: one that
     // fills its error stream would otherwise stop, as Node's never does.
-    let said = Arc::new(Mutex::new(Vec::new()));
+    let said = Arc::new(Mutex::new(Kept::default()));
     let kept = conversation.then(|| Arc::clone(&said));
     let drained = process
         .stderr
@@ -147,21 +168,16 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
 
 /// Reads `errors` to its end, letting each byte go but the last [`SAID_KEPT`], which are
 /// kept in `kept` where it is given one.
-async fn drain(mut errors: ChildStderr, kept: Option<Arc<Mutex<Vec<u8>>>>) {
+async fn drain(mut errors: ChildStderr, kept: Option<Arc<Mutex<Kept>>>) {
     let mut sink = [0; 4096];
     while let Ok(count) = errors.read(&mut sink).await {
         if count == 0 {
             break;
         }
         if let Some(kept) = &kept {
-            let mut kept = kept
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            kept.extend_from_slice(&sink[..count]);
-            if kept.len() > SAID_KEPT {
-                let over = kept.len() - SAID_KEPT;
-                kept.drain(..over);
-            }
+            kept.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(&sink[..count]);
         }
     }
 }
@@ -267,7 +283,17 @@ impl Child {
             .said
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        String::from_utf8_lossy(&kept).into_owned()
+        String::from_utf8_lossy(&kept.bytes).into_owned()
+    }
+
+    /// Whether the front of its error stream was let go: more than [`SAID_KEPT`] bytes were
+    /// written, and [`Child::said`] is the end of them. What stands at its start may be the
+    /// rest of a line, or of a value, whose beginning is gone.
+    pub fn said_cut(&self) -> bool {
+        self.said
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .cut
     }
 
     /// Waits until it has exited and its streams have closed.
@@ -770,6 +796,7 @@ mod tests {
                 .expect("it closed");
             let said = kept.said();
             assert!(said.contains("first") && said.contains("last"), "{said:?}");
+            assert!(!kept.said_cut(), "all of it is kept: nothing was let go");
             assert_eq!(kept.code(), Some(3));
             // Nothing is kept of the others.
             for streams in [Streams::Lines, Streams::Quiet] {
@@ -803,7 +830,58 @@ mod tests {
                 "its end is kept: {:?}",
                 &said[said.len() - 12..]
             );
+            assert!(
+                kept.said_cut(),
+                "the front of it was let go, and that is said"
+            );
         });
+    }
+
+    /// A conversation that wrote more than is kept says its front was let go, and one that wrote
+    /// less does not, on Windows as well (the loop is `cmd`'s).
+    #[test]
+    fn a_conversation_that_wrote_more_than_is_kept_says_its_front_was_let_go() {
+        for (lines, cut) in [(10, false), (400, true)] {
+            let script = if cfg!(windows) {
+                format!("(for /L %i in (1,1,{lines}) do @echo xxxxxxxxxxxxxxxxxxxxxxxxx 1>&2) & exit /b 3")
+            } else {
+                format!("i=0; while [ $i -lt {lines} ]; do echo xxxxxxxxxxxxxxxxxxxxxxxxx >&2; i=$((i+1)); done; exit 3")
+            };
+            block_on(async {
+                let kept =
+                    spawn(&shell(&script), None, &system_env(), Streams::Conversation).unwrap();
+                tokio::time::timeout(Duration::from_secs(60), kept.closed())
+                    .await
+                    .expect("it closed");
+                assert_eq!(kept.said_cut(), cut, "{lines} lines");
+                assert!(kept.said().len() <= SAID_KEPT);
+                assert_eq!(kept.code(), Some(3));
+            });
+        }
+    }
+
+    /// What is kept says whether the front was let go: only where more than [`SAID_KEPT`] bytes
+    /// were written, however they came in chunks (the label of a value can be in the front, and
+    /// its continuation in what is left). Not a test of a child, so that Windows runs it too.
+    #[test]
+    fn what_is_kept_of_the_error_stream_says_whether_its_front_was_let_go() {
+        let mut kept = Kept::default();
+        assert!(!kept.cut && kept.bytes.is_empty());
+        kept.push(&[b'a'; 1000]);
+        kept.push(&[b'b'; SAID_KEPT - 1000]);
+        assert_eq!(kept.bytes.len(), SAID_KEPT);
+        assert!(!kept.cut, "exactly SAID_KEPT bytes lost none");
+        kept.push(b"c");
+        assert!(kept.cut, "one byte over lost the first");
+        assert_eq!(kept.bytes.len(), SAID_KEPT);
+        assert_eq!(kept.bytes.first(), Some(&b'a'));
+        assert_eq!(kept.bytes.last(), Some(&b'c'));
+        kept.push(b"d");
+        assert!(kept.cut, "once cut, cut");
+        let mut one_chunk = Kept::default();
+        one_chunk.push(&vec![b'x'; SAID_KEPT * 3]);
+        assert!(one_chunk.cut);
+        assert_eq!(one_chunk.bytes.len(), SAID_KEPT);
     }
 
     /// A conversation that goes of itself leaves nothing it started running; any other child

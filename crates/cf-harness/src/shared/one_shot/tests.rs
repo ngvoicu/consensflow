@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::*;
 use crate::testing::{ChildScript, Driver, Ends, ManualTime, ScriptedProcesses};
-use cf_proto::models::IT_SAID;
+use cf_proto::models::{IT_SAID, WORDS_WITHHELD};
 
 fn program() -> Program {
     Program {
@@ -242,4 +242,62 @@ fn a_program_that_said_nothing_has_no_mark() {
             "{said:?}"
         );
     }
+}
+
+/// T-1276, `label-before-4KiB`, `long-password-continuation`: cf-process keeps the last 4 KiB of
+/// a program's error stream, and where the front was let go, a label cut off it leaves the words
+/// of its value in what is kept. None of what the program said is handed on then, and the
+/// sentence stands after the mark in its place: ConsensFlow's description and the exit code stay.
+#[test]
+fn where_the_front_of_what_a_program_said_was_let_go_none_of_it_is_handed_on() {
+    for (ends, said, code, failure) in [
+        (
+            Ends::Itself,
+            "horse\nbattery\nstaple\n",
+            Some(1),
+            "the harness ended before it answered (exit 1)",
+        ),
+        (
+            Ends::Itself,
+            "to\nred\nbird\ncedar\nflower\norchard\n",
+            Some(2),
+            "the harness ended before it answered (exit 2)",
+        ),
+        (
+            Ends::Asked,
+            "violet\nwillow\n",
+            None,
+            "the harness did not answer within 30 s",
+        ),
+    ] {
+        let (processes, time) = (
+            Rc::new(ScriptedProcesses::default()),
+            Rc::new(ManualTime::new(0)),
+        );
+        processes.child_said_cut("harness", said, code);
+        let mut driver = asked_as(Streams::Conversation, ends, &processes, &time);
+        if ends == Ends::Asked {
+            assert!(driver.run().is_empty());
+            assert!(time.fire_next(i64::MAX));
+        }
+        assert_eq!(
+            driver.run(),
+            [(0, Err(format!("{failure}{IT_SAID}{WORDS_WITHHELD}")))],
+            "{said:?}"
+        );
+    }
+    // What was cut and held nothing but blanks has no words to withhold.
+    let (processes, time) = (
+        Rc::new(ScriptedProcesses::default()),
+        Rc::new(ManualTime::new(0)),
+    );
+    processes.child_said_cut("harness", "  \n", Some(3));
+    let mut driver = asked_as(Streams::Conversation, Ends::Itself, &processes, &time);
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Err("the harness ended before it answered (exit 3)".to_owned())
+        )]
+    );
 }

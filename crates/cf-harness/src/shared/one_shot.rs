@@ -6,7 +6,7 @@
 //! An answer is the first line, read as JSON, that the asker's test takes for it: the
 //! notifications and the answers to other requests that come between are passed over.
 
-use cf_proto::models::IT_SAID;
+use cf_proto::models::{IT_SAID, WORDS_WITHHELD};
 use serde_json::Value;
 
 use crate::seams::processes::{Child, Processes, Program, Streams};
@@ -96,6 +96,11 @@ pub(crate) async fn conversation_as<T>(
 /// (the third reading of T-1270, F2); whoever keeps or tells the failure looks at the whole
 /// block first and cuts it after (`cf_engine::quotable`), and what the program wrote never
 /// stands before the mark, where ConsensFlow's own words are.
+///
+/// Where the front of what it said was let go (cf-process keeps the last bytes only), the
+/// beginning of a value can be in what is kept and its label in what is not, and no look at what
+/// is kept can tell (T-1276, `label-before-4KiB`): none of it is handed on, and
+/// [`WORDS_WITHHELD`] stands after the mark in its place.
 fn with_its_words(failure: String, child: &dyn Child) -> String {
     let code = child
         .code()
@@ -104,6 +109,8 @@ fn with_its_words(failure: String, child: &dyn Child) -> String {
     let said = said.trim();
     if said.is_empty() {
         format!("{failure}{code}")
+    } else if child.said_cut() {
+        format!("{failure}{code}{IT_SAID}{WORDS_WITHHELD}")
     } else {
         format!("{failure}{code}{IT_SAID}{said}")
     }

@@ -496,6 +496,38 @@ fn a_key_that_runs_over_lines_is_withheld_with_every_line_after_it() {
     }
 }
 
+/// T-1276, `frame-label-continuation`: a label in a line of the shape of a stack frame, and the
+/// words of its value on the lines below it. Returned and kept, none of it.
+#[test]
+fn a_label_in_a_line_shaped_like_a_frame_withholds_the_lines_of_its_value() {
+    let failure = format!("{ENDED}at password: correct (native)\nhorse\nbattery\nstaple");
+    let (told, kept) = failed_with(&failure);
+    for why in [told, kept] {
+        assert_withheld(&why, &["correct", "horse", "battery", "staple"]);
+    }
+}
+
+/// T-1276, `wrapped-url-userinfo`: a line end in the middle of a URL's user and password. Returned
+/// and kept, neither half.
+#[test]
+fn a_url_whose_user_and_password_a_line_end_splits_is_withheld_whole() {
+    let failure = format!("{ENDED}FetchError: https://alder:copper\nwillow@host.invalid/catalog");
+    let (told, kept) = failed_with(&failure);
+    for why in [told, kept] {
+        assert_withheld(&why, &["alder", "copper", "willow"]);
+    }
+}
+
+/// T-1276, `label-before-4KiB`, `long-password-continuation`: a read of Pi that kept only the end
+/// of what Pi said puts the sentence after the mark, and the daemon returns and keeps it as it is.
+#[test]
+fn the_sentence_a_cut_read_put_in_place_of_pis_words_is_returned_and_kept_as_it_is() {
+    let failure = format!("{ENDED}{WITHHELD}");
+    let (told, kept) = failed_with(&failure);
+    assert_eq!(told, failure);
+    assert_eq!(kept, failure);
+}
+
 #[test]
 fn a_credential_word_on_any_line_withholds_the_words_before_it_and_after_it() {
     for words in [

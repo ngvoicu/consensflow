@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
-use cf_proto::models::{ModelChoice, ModelListing, IT_SAID};
+use cf_proto::models::{ModelChoice, ModelListing, IT_SAID, WORDS_WITHHELD};
 use serde_json::{json, Value};
 
 use super::setup::inspect;
@@ -195,13 +195,17 @@ async fn waiting_on(failed: String, time: &dyn Time, env: &Env) -> String {
     }
 }
 
-/// The most of what a failed `pi update --models` said that is kept: the end of it.
+/// The most of what a failed `pi update --models` said that is handed on, as a read of Pi
+/// hands on no more than cf-process keeps of its error stream: more than this is withheld.
 const UPDATE_SAID_BYTES: usize = 4 << 10;
 
 /// Why `pi update --models` failed, in words: its exit code and, after [`IT_SAID`], everything
 /// its error stream held (the message is `Command failed: <cmd>\n<what it wrote>`), whole, for
 /// whoever tells it to screen it before they cut it. A program that never started has only
-/// the system's words, which are ConsensFlow's to say.
+/// the system's words, which are ConsensFlow's to say. What it wrote past [`UPDATE_SAID_BYTES`]
+/// is not handed on at all, and [`WORDS_WITHHELD`] stands in its place: a cut to its end can take
+/// the label of a value and leave the value (T-1276, `long-password-continuation`), as the end
+/// of a read's error stream does.
 fn update_failure(failed: &cf_process::Failed) -> String {
     let code = failed
         .code
@@ -210,13 +214,10 @@ fn update_failure(failed: &cf_process::Failed) -> String {
         return format!("failed{code}: {}", failed.message.trim());
     };
     let said = said.trim();
-    let from = said.len().saturating_sub(UPDATE_SAID_BYTES);
-    let from = (from..=said.len())
-        .find(|at| said.is_char_boundary(*at))
-        .unwrap_or(said.len());
-    let said = &said[from..];
     if said.is_empty() {
         format!("failed{code}")
+    } else if said.len() > UPDATE_SAID_BYTES {
+        format!("failed{code}{IT_SAID}{WORDS_WITHHELD}")
     } else {
         format!("failed{code}{IT_SAID}{said}")
     }

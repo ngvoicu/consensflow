@@ -7,7 +7,10 @@
 # set up, by names alone and only then, read on a thread of its own, one read at a time, waited for
 # a bounded time (crates/cf-harness/src/pi/setup.rs); a Refresh runs the update and asks Pi once;
 # and the words of Pi that a failure carries (after the mark `cf_proto::models::IT_SAID`) are screened
-# whole, before any cut, and withheld whole if anything in them may hold a credential; every other
+# whole, every line of them a stack frame among them, before any cut, and withheld whole if anything in
+# them may hold a credential or a row end falls in a URL's user and password (T-1276); where the front
+# of what Pi said was let go (cf-process keeps the last 4 KiB; `pi update --models` is held to the
+# same), none of it is handed on; every other
 # reason is only masked (crates/cf-engine/src/shown/quotable.rs, used in crates/cf-daemon/src/models.rs and
 # crates/cf-engine/src/chief_model.rs); the daemon reads each harness on a turn of its own and
 # answers a list the home kept with no turn (crates/cf-daemon/src/models.rs).
@@ -21,6 +24,8 @@ ps-process = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "child:
 ps-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "models::"]
 ps-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::"]
 ps-quotable = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::quotable::"]
+ps-screen = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::screen::"]
+ps-seams = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "seams::processes::"]
 
 [[plant]]
 name = "pi-setups: the list is read with Pi's extensions left out"
@@ -418,8 +423,8 @@ runs = ["ps-process"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/child.rs"
-find = '            if kept.len() > SAID_KEPT {'
-replace = '            if false {'
+find = '        if self.bytes.len() > SAID_KEPT {'
+replace = '        if false {'
 
 [[plant]]
 name = "pi-setups: a child's error stream is kept from its first bytes"
@@ -428,8 +433,8 @@ runs = ["ps-process"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/child.rs"
-find = '                kept.drain(..over);'
-replace = '                kept.truncate(SAID_KEPT);'
+find = '            self.bytes.drain(..over);'
+replace = '            self.bytes.truncate(SAID_KEPT);'
 
 [[plant]]
 name = "pi-setups: a conversation leads no group"
@@ -763,8 +768,8 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '.filter(|line| !line.is_empty() && !FRAME.is_match(line))'
-replace = '.filter(|line| !line.is_empty())'
+find = '.filter(|line| !FRAME.is_match(line))'
+replace = '.filter(|_| true)'
 
 [[plant]]
 name = "pi-setups: the first lines of the words are quoted, not the last"
@@ -773,7 +778,7 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = 'lines.len().saturating_sub(QUOTE_LINES)'
+find = 'quoted.len().saturating_sub(QUOTE_LINES)'
 replace = '0'
 
 [[plant]]
@@ -923,5 +928,107 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '.filter(|line| !line.is_empty() && !FRAME.is_match(line))'
-replace = '.filter(|line| !line.is_empty() && !line.starts_with("at "))'
+find = '.filter(|line| !FRAME.is_match(line))'
+replace = '.filter(|line| !line.starts_with("at "))'
+
+# T-1276: three ways the words of Pi could still leak a credential.
+
+[[plant]]
+name = "pi-setups: a frame is not looked at, only left out of the quote"
+meant = "a_label_in_a_line_of_the_shape_of_a_frame_withholds_the_lines_of_its_value"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '    if may_hold_a_credential(&lines) {'
+replace = '    if may_hold_a_credential(&quoted) {'
+
+[[plant]]
+name = "pi-setups: a URL's user and password a row end splits is not looked for"
+meant = "a_url_whose_user_and_password_the_wrap_split_withholds_the_screen"
+runs = ["ps-screen"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '        || splits_url_credentials(&rows, &joined)'
+replace = '        || false'
+
+[[plant]]
+name = "pi-setups: a row end beside a URL's user and password is no split"
+meant = "a_url_whose_user_and_password_the_wrap_split_withholds_the_screen"
+runs = ["ps-screen"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '.any(|end| (from..=to).contains(end))'
+replace = '.any(|end| (from + 1..to).contains(end))'
+
+[[plant]]
+name = "pi-setups: every URL with a user and a password is withheld, whole on a row or not"
+meant = "the_lines_that_are_quoted_are_masked_as_a_note_masks_them"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '        || splits_url_credentials(&rows, &joined)'
+replace = '        || has_url_credentials(&joined)'
+
+[[plant]]
+name = "pi-setups: the front of the error stream is let go and not said"
+meant = "what_is_kept_of_the_error_stream_says_whether_its_front_was_let_go"
+runs = ["ps-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '            self.cut = true;'
+replace = '            let _ = self.cut;'
+
+[[plant]]
+name = "pi-setups: a child's lost front is not said by the trait object"
+meant = "a_child_started_to_keep_what_it_said_says_whether_the_front_of_it_was_let_go"
+runs = ["ps-seams"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '        cf_process::Child::said_cut(self)'
+replace = '        false'
+
+[[plant]]
+name = "pi-setups: the end of what Pi said is handed on though its front was let go"
+meant = "where_the_front_of_what_a_program_said_was_let_go_none_of_it_is_handed_on"
+runs = ["ps-one-shot"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/one_shot.rs"
+find = '    } else if child.said_cut() {'
+replace = '    } else if false {'
+
+[[plant]]
+name = "pi-setups: a read of Pi that lost its front is withheld without the sentence"
+meant = "where_the_front_of_what_a_program_said_was_let_go_none_of_it_is_handed_on"
+runs = ["ps-one-shot"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/one_shot.rs"
+find = '        format!("{failure}{code}{IT_SAID}{WORDS_WITHHELD}")'
+replace = '        format!("{failure}{code}")'
+
+[[plant]]
+name = "pi-setups: the end of what a failed update said is handed on past what is kept"
+meant = "why_a_pi_update_failed_is_its_code_and_all_it_said_after_the_mark"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '    } else if said.len() > UPDATE_SAID_BYTES {'
+replace = '    } else if said.len() > UPDATE_SAID_BYTES * 100 {'
+
+[[plant]]
+name = "pi-setups: what a failed update said, exactly as much as is kept, is withheld"
+meant = "why_a_pi_update_failed_is_its_code_and_all_it_said_after_the_mark"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '    } else if said.len() > UPDATE_SAID_BYTES {'
+replace = '    } else if said.len() >= UPDATE_SAID_BYTES {'

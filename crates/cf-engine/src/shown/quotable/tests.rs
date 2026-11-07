@@ -141,11 +141,15 @@ fn only_the_last_lines_that_passed_are_quoted_and_a_stack_is_never_quoted() {
     assert!(words.ends_with('…'));
 }
 
-/// A frame is never quoted, so a frame whose path names a token library withholds nothing: it
-/// is set aside before the look. The message above it is what the user needs, and it is told.
+/// A frame is never quoted, but it is looked at with the rest (T-1276,
+/// `frame-label-continuation`): a frame whose path names a credential word withholds the block, as
+/// a line of prose that names one does. That is the cost of the rule, and of a frame that is also
+/// the label of the lines below it; a frame that names none is set aside from what is quoted.
 #[test]
-fn a_stack_frame_that_names_a_credential_word_withholds_nothing_because_it_is_never_quoted() {
+fn a_stack_frame_that_names_a_credential_word_withholds_the_block_though_it_is_never_quoted() {
     let said = "Error: Failed to load extension \"/x/e.ts\": boom\n    at load (/x/node_modules/token-lib/auth/index.js:1:1)";
+    assert_eq!(quotable(&pi_said(said)), withheld());
+    let said = "Error: Failed to load extension \"/x/e.ts\": boom\n    at load (/x/node_modules/lib/index.js:1:1)";
     assert_eq!(
         quotable(&pi_said(said)),
         pi_said("Error: Failed to load extension \"/x/e.ts\": boom")
@@ -163,6 +167,9 @@ fn a_line_that_begins_with_at_and_is_no_frame_is_screened_with_the_rest() {
     ] {
         assert_eq!(quotable(&pi_said(words)), withheld(), "{words}");
     }
+    // Prose that begins with `at` and names no credential is no frame: it is quoted.
+    let prose = "Error: boom\nat startup the extension failed to load";
+    assert_eq!(quotable(&pi_said(prose)), pi_said(prose));
     for frame in [
         "at load (/x/e.ts:1:1)",
         "at /x/e.ts:12:34",
@@ -264,4 +271,67 @@ fn a_reason_with_no_mark_is_only_masked_so_the_login_and_billing_messages_read_a
 fn a_reason_with_nothing_is_nothing() {
     assert_eq!(quotable(""), "");
     assert_eq!(quotable(&pi_said("")), ENDED);
+}
+
+/// T-1276, `frame-label-continuation`: a line of the shape of a frame was set aside before the
+/// look, and a label in it went with it; the three words of its value on the lines below it
+/// were quoted. Every line is looked at, a frame among them; a frame is only never quoted.
+#[test]
+fn a_label_in_a_line_of_the_shape_of_a_frame_withholds_the_lines_of_its_value() {
+    for words in [
+        "at password: correct (native)\nhorse\nbattery\nstaple",
+        "    at password: correct (native)\n    horse\n    battery\n    staple\n",
+        "Error: boom\nat password: correct (native)\nhorse\nbattery\nstaple",
+        "at token: abcd (a.js:1:2)\nefgh ijkl mnop",
+        "at load (<anonymous>)\nat api_key: red (index 0)\ngreen blue",
+    ] {
+        let said = quotable(&pi_said(words));
+        assert_eq!(said, withheld(), "{words:?}");
+        for value in [
+            "correct",
+            "horse",
+            "battery",
+            "staple",
+            "abcd",
+            "green blue",
+        ] {
+            assert!(!said.contains(value), "{value} in {said}");
+        }
+    }
+}
+
+/// T-1276, `wrapped-url-userinfo`: a line end in the middle of a URL's user and password left
+/// neither line with both of them, and the half before the end was quoted.
+#[test]
+fn a_url_whose_user_and_password_a_line_end_splits_withholds_the_block() {
+    for words in [
+        "FetchError: https://alder:copper\nwillow@host.invalid/catalog",
+        "FetchError: https://alder:\ncopperwillow@host.invalid/catalog",
+        "FetchError: https://al\nder:copperwillow@host.invalid/catalog",
+        "FetchError: https://alder:cop\nperwil\nlow@host.invalid/catalog",
+        "FetchError: https://alder:copper\r\nwillow@host.invalid/catalog",
+        "FetchError: https://alder:copper\n   willow@host.invalid/catalog",
+        "FetchError: https://\nalder:copperwillow@host.invalid/catalog",
+        "FetchError: https://alder:copperwillow\n@host.invalid/catalog",
+    ] {
+        let said = quotable(&pi_said(words));
+        assert_eq!(said, withheld(), "{words:?}");
+        for value in ["alder", "copper", "willow"] {
+            assert!(!said.contains(value), "{value} in {said}");
+        }
+    }
+    // A URL with no password in it, a line end after it, and a host on the next line, are none.
+    for words in [
+        "FetchError: request to https://catalog.invalid/models failed\nCheck your network.",
+        "see https://host.invalid/a\nthen write to the owner",
+    ] {
+        assert_eq!(quotable(&pi_said(words)), pi_said(words), "{words:?}");
+    }
+}
+
+/// What a read of Pi puts after the mark when it kept only the end of what Pi said (the label
+/// of a value can be in the front it lost): the sentence, and it is told as it stands.
+#[test]
+fn the_sentence_a_cut_read_put_in_place_of_pis_words_is_told_as_it_stands() {
+    assert_eq!(quotable(&withheld()), withheld());
 }

@@ -248,6 +248,18 @@ fn the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said() {
             "{\n  \"error\": {\n    \"apiKey\": \"sk-abcd efghijkl\"\n  }\n}",
             vec!["sk-abcd", "efghijkl"],
         ),
+        // T-1276: a label in a line of the shape of a stack frame, and a URL's user and
+        // password that a line end splits.
+        (
+            "at password: correct (native)\nhorse\nbattery\nstaple",
+            vec!["correct", "horse", "battery", "staple"],
+        ),
+        (
+            "FetchError: https://alder:copper\nwillow@host.invalid/catalog",
+            vec!["alder", "copper", "willow"],
+        ),
+        // T-1276: what a read of Pi that kept only the end of what Pi said puts in place of it.
+        (cf_proto::models::WORDS_WITHHELD, vec![]),
     ] {
         let context = harness_without_the_model(Err(format!(
             "pi --mode rpc ended before it answered (exit 1); it said:\n{said}"
