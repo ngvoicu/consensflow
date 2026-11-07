@@ -32,6 +32,7 @@ hd-corpus = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing
 hd-guard = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing::corpus::guard::"]
 hd-claude-identity = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::dialog_identity::"]
 hd-base-dialog = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing::base_dialog::"]
+hd-engine-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "dialogs::"]
 hd-claude-cu = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use_prompt::"]
 hd-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_chiefs_idle_prompt_was_read_as_a_dialog::"]
 
@@ -1277,3 +1278,32 @@ runs = ["hd-claude-cu"]
 file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
 find = '        (false, true) => "the Screen Recording permission and has been restarted",'
 replace = '        (false, true) => "the Accessibility permission",'
+
+[[plant]]
+name = "harness dialogs: computer use: the note of a key pressed with no choice listed says a choice was made"
+meant = "a_note_of_a_decline_made_by_a_key_with_no_choice_listed_says_it_is_pressed_not_chosen"
+runs = ["hd-engine-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '    if let Some(decline) = decline.filter(|decline| !decline.listed) {'
+replace = '    if let Some(decline) = decline.filter(|decline| !decline.listed && decline.key.is_empty()) {'
+
+[[plant]]
+name = "harness dialogs: computer use: nobody is told that ConsensFlow pressed Escape in the member's window"
+meant = "a_computer_use_permission_prompt_the_screen_shows_is_told_then_closed_by_escape_once_and_the_held_tell_goes_in_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '''
+                quoted(&decline.choice)
+            ),
+        };
+        self.tell_dialog(project, participant, &body)'''
+replace = '''
+                quoted(&decline.choice)
+            ),
+        };
+        let _ = &body;
+        Ok(())'''
