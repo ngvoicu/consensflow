@@ -9,7 +9,7 @@
 # designer's line tells the truth (designer P2): no model, effort or tier is asked of it, it is read as
 # running on Codex's own model, and it has no tier to say (crates/cf-ledger/src/views.rs,
 # crates/cf-daemon/src/page/staff.rs, api/routes/staff.rs, crates/cf/src/board/mod.rs and the page's
-# app/ui/core/dialogs.js and board.js). `cargo xtask plants daemon "chief-words:"` runs them.
+# app/ui/core/dialogs.js and board.js; and the rig's stand-in designer, crates/cf-e2e/src/rig/project.rs). `cargo xtask plants daemon "chief-words:"` runs them.
 
 [run]
 cw-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
@@ -20,6 +20,7 @@ cw-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "designe
 cw-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members"]
 cw-staff-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::staff"]
 cw-cf = ["cargo", "test", "--offline", "-p", "cf", "--lib", "the_staff_says"]
+cw-rig-body = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::project::"]
 cw-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "image designer"]
 cw-page-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a member's card says its role"]
 cw-page-help = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "say the same of the chief"]
@@ -498,3 +499,15 @@ runs = ["cw-page-help"]
 file = "app/ui/index.html"
 find = '''it keeps its conversation, ConsensFlow follows it, and a reopen keeps it.</p>'''
 replace = '''it keeps its conversation, and ConsensFlow follows it.</p>'''
+
+[[plant]]
+name = "chief-words: the rig asks for a designer by its model and tier"
+meant = "an_image_designer_is_asked_for_on_codex_and_its_role_alone"
+runs = ["cw-rig-body"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/project.rs"
+find = '''    if designer {
+        return json!({ "harness": row["kind"], "roles": ["designer"] });'''
+replace = '''    if false {
+        return json!({ "harness": row["kind"], "roles": ["designer"] });'''
