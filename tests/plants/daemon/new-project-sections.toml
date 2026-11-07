@@ -1,0 +1,626 @@
+# New project holds every section Project settings holds (T-1268, Gabriel, 2026-11-06: New project does
+# not offer the settings Project settings has, so a project starts without its rules). The page's
+# `project-sections` template holds the rules for the staff, the compaction, Human approval, Wake-up
+# calls, Specs and Computer use, and both dialogs build them from it; New project starts with what the
+# human set in them in the one write that makes the project (`project.open` takes `rules` and
+# `compaction`), holds the start back where a section holds what no project can start with, and reads
+# computer use for the folder picked (`computer_use.get` takes a `directory`). One plant takes one rule
+# out; a test of it fails. Every name holds `new project sections`.
+
+[run]
+nps-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project|Enter in a field of a section of Project settings|no id is held|described by its own counter"]
+nps-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "opened_with"]
+nps-daemon-opening = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening"]
+nps-daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::computer_use"]
+
+[[plant]]
+name = "new project sections: a section is put back into Project settings' own form"
+meant = "New project holds every section Project settings holds, in its order, but those named with a reason"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''
+      </fieldset>
+      <div data-project-sections></div>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Close</button>'''
+replace = '''
+      </fieldset>
+      <fieldset class="project-section"><legend>Only here</legend></fieldset>
+      <div data-project-sections></div>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Close</button>'''
+
+[[plant]]
+name = "new project sections: the start leaves the rules out of the request"
+meant = "New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    if (rules !== null) body.rules = rules
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: the start leaves the compaction out of the request"
+meant = "New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    if (compaction !== null) body.compaction = compaction
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: the start is held back by nothing"
+meant = "New project: rules over a bound, or a size that is no whole number in the range, hold the start back as they hold the save in Project settings, and say why"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '    if (blocked !== null) {'
+replace = '    if (false) {'
+
+[[plant]]
+name = "new project sections: the sections hold back the start for the rules alone"
+meant = "New project: rules over a bound, or a size that is no whole number in the range, hold the start back as they hold the save in Project settings, and say why"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '    return this.#rules.blocked() ?? this.#compaction.blocked()'
+replace = '    return this.#rules.blocked()'
+
+[[plant]]
+name = "new project sections: rules over a bound do not hold the start back"
+meant = "New project: rules over a bound, or a size that is no whole number in the range, hold the start back as they hold the save in Project settings, and say why"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+    return bytes > MOST_BYTES || lines > MOST_LINES
+      ? `The rules'''
+replace = '''
+    return false
+      ? `The rules'''
+
+[[plant]]
+name = "new project sections: a size that is no size does not hold the start back"
+meant = "New project: rules over a bound, or a size that is no whole number in the range, hold the start back as they hold the save in Project settings, and say why"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''
+    return this.#size.checked && sizeOf(this.#amount.value) === null
+      ? `A size is a whole number'''
+replace = '''
+    return false
+      ? `A size is a whole number'''
+
+[[plant]]
+name = "new project sections: what New project starts with leaves the rules out"
+meant = "New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+      rules: this.#rules.values(),
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: what New project starts with leaves the compaction out"
+meant = "New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+      compaction: this.#compaction.values(),
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: the rules section starts nothing"
+meant = "New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''    return this.#text.value.trim() === '' ? null : this.#text.value'''
+replace = '    return null'
+
+[[plant]]
+name = "new project sections: the compaction section starts nothing"
+meant = "New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''
+    return this.#size.checked ? sizeOf(this.#amount.value) : null
+  }
+
+  /** Why a project cannot start'''
+replace = '''
+    return null
+  }
+
+  /** Why a project cannot start'''
+
+[[plant]]
+name = "new project sections: the data-live parts are shown in New project"
+meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = 'live.hidden = page === null'
+replace = 'live.hidden = false'
+
+[[plant]]
+name = "new project sections: the sections are not reset as New project opens: the rules"
+meant = "New project opens on the defaults every time: what was set in it before is not kept"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+    this.#rules.reset()
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: the sections are not reset as New project opens: the compaction"
+meant = "New project opens on the defaults every time: what was set in it before is not kept"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+    this.#compaction.reset()
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: the rules section does not forget what was written"
+meant = "New project opens on the defaults every time: what was set in it before is not kept"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+  reset() {
+    this.show(null)
+  }'''
+replace = '  reset() {}'
+
+[[plant]]
+name = "new project sections: the compaction section does not forget what was chosen"
+meant = "New project opens on the defaults every time: what was set in it before is not kept"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/claude-compaction.js"
+find = '''
+  reset() {
+    this.show(null)
+  }'''
+replace = '  reset() {}'
+
+[[plant]]
+name = "new project sections: computer use is not drawn again when the chief's harness is picked"
+meant = "New project: computer use is read for the folder picked, shown while the chief or a member runs on a harness that has one, and opens the panes as Project settings' does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: computer use is not drawn again when a member is added or removed"
+meant = "New project: computer use is read for the folder picked, shown while the chief or a member runs on a harness that has one, and opens the panes as Project settings' does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    this.#staff.replaceChildren(...rows)
+    this.#drawComputerUse()
+'''
+replace = '''
+    this.#staff.replaceChildren(...rows)
+'''
+
+[[plant]]
+name = "new project sections: computer use is read for the project in New project"
+meant = "New project: computer use is read for the folder picked, shown while the chief or a member runs on a harness that has one, and opens the panes as Project settings' does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '      this.#sections.computerUse.read({ directory }),'
+replace = '      this.#sections.computerUse.read({ project: 1 }),'
+
+[[plant]]
+name = "new project sections: New project's computer use is not read again where the human comes back"
+meant = "New project: back from System Settings, computer use is read again for the folder picked, and only while the dialog is open"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '        scope: () => (dialog.open ? { directory: this.#form.elements.directory.value } : null),'
+replace = '        scope: () => null,'
+
+[[plant]]
+name = "new project sections: New project's computer use is read again whether the dialog is open or not"
+meant = "New project: back from System Settings, computer use is read again for the folder picked, and only while the dialog is open"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '        scope: () => (dialog.open ? { directory: this.#form.elements.directory.value } : null),'
+replace = '        scope: () => ({ directory: this.#form.elements.directory.value }),'
+
+[[plant]]
+name = "new project sections: the ledger does not keep the rules a project opens with"
+meant = "a_project_opened_with_rules_and_a_compaction_has_them_when_it_is_first_seen_and_logs_them_as_if_said_right_after"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: the ledger does not keep the compaction a project opens with"
+meant = "a_project_opened_with_rules_and_a_compaction_has_them_when_it_is_first_seen_and_logs_them_as_if_said_right_after"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: a request in JSON loses its rules"
+meant = "a_project_opened_with_rules_and_a_compaction_has_them_when_it_is_first_seen_and_logs_them_as_if_said_right_after"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '            staff_rules: parse_staff_rules(value.get("rules"))?,'
+replace = '            staff_rules: None,'
+
+[[plant]]
+name = "new project sections: a request in JSON loses its compaction"
+meant = "a_project_opened_with_rules_and_a_compaction_has_them_when_it_is_first_seen_and_logs_them_as_if_said_right_after"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '            compaction: parse_claude_compaction(value.get("compaction"))?,'
+replace = '            compaction: None,'
+
+[[plant]]
+name = "new project sections: rules the ledger refuses are let through to the opening"
+meant = "a_request_in_json_with_rules_or_a_size_the_ledger_refuses_is_refused_in_the_words_the_settings_are_refused_in"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '            staff_rules: parse_staff_rules(value.get("rules"))?,'
+replace = '            staff_rules: parse_staff_rules(value.get("rules")).unwrap_or(None),'
+
+[[plant]]
+name = "new project sections: a size the ledger refuses is let through to the opening"
+meant = "a_request_in_json_with_rules_or_a_size_the_ledger_refuses_is_refused_in_the_words_the_settings_are_refused_in"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '            compaction: parse_claude_compaction(value.get("compaction"))?,'
+replace = '            compaction: parse_claude_compaction(value.get("compaction")).unwrap_or(None),'
+
+[[plant]]
+name = "new project sections: the page leaves the rules out of the request it makes to the ledger"
+meant = "a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_given_the_rules_at_its_first_launch"
+runs = ["nps-daemon-opening"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
+replace = '    for key in ["gate", "wakeUp", "specs", "compaction"] {'
+
+[[plant]]
+name = "new project sections: the page leaves the compaction out of the request it makes to the ledger"
+meant = "a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_given_the_rules_at_its_first_launch"
+runs = ["nps-daemon-opening"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
+replace = '    for key in ["gate", "wakeUp", "specs", "rules"] {'
+
+[[plant]]
+name = "new project sections: rules the page sends the daemon cannot read are let through"
+meant = "rules_and_a_size_the_daemon_refuses_refuse_the_whole_start_in_the_dialogs_words_and_make_no_project"
+runs = ["nps-daemon-opening"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '        staff_rules: parse_staff_rules(request.get("rules")).ok()?,'
+replace = '        staff_rules: parse_staff_rules(request.get("rules")).unwrap_or(None),'
+
+[[plant]]
+name = "new project sections: a size the page sends the daemon cannot read is let through"
+meant = "rules_and_a_size_the_daemon_refuses_refuse_the_whole_start_in_the_dialogs_words_and_make_no_project"
+runs = ["nps-daemon-opening"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '        compaction: parse_claude_compaction(request.get("compaction")).ok()?,'
+replace = '        compaction: parse_claude_compaction(request.get("compaction")).unwrap_or(None),'
+
+[[plant]]
+name = "new project sections: computer use is not read for a folder"
+meant = "a_folder_asked_for_before_there_is_a_project_is_read_as_a_project_of_it_would_be"
+runs = ["nps-daemon-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/computer_use.rs"
+find = '        (None, Some(Value::String(folder))) if !folder.trim().is_empty() => folder.clone(),'
+replace = '        (None, Some(Value::String(_folder))) if false => String::new(),'
+
+[[plant]]
+name = "new project sections: computer use is read for a blank folder"
+meant = "a_read_that_names_neither_a_project_nor_a_folder_is_refused"
+runs = ["nps-daemon-computer-use"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/computer_use.rs"
+find = '        (None, Some(Value::String(folder))) if !folder.trim().is_empty() => folder.clone(),'
+replace = '        (None, Some(Value::String(folder))) => folder.clone(),'
+
+[[plant]]
+name = "new project sections: Enter is not held in the form of New project"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    holdEnter(this.#form)
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: Enter is not held in the fields of the shared sections"
+meant = "Enter in a field of a section of Project settings adds nobody to the staff, saves no other section and leaves the dialog open"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+    for (const section of sections.querySelectorAll('fieldset.project-section')) holdEnter(section)
+'''
+replace = ''
+
+[[plant]]
+name = "new project sections: Enter is held in text and number fields alone"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input[type=text], input[type=number]')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in the checkboxes and the radios no more"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input[type=text], input[type=number], select')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in a select no more"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset])')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in a text area, so it is no new line"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select, textarea')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held on a button, so it presses nothing"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '''    if (event.target.matches('input:not([type=submit], [type=reset]), select, button')) {'''
+
+[[plant]]
+name = "new project sections: Enter is held in no field at all"
+meant = "Enter in any field of New project starts no project, and is a new line in a text area; Start alone does"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {'''
+replace = '    if (false) {'
+
+[[plant]]
+name = "new project sections: a field of a section of Project settings submits its form on Enter"
+meant = "Enter in a field of a section of Project settings adds nobody to the staff, saves no other section and leaves the dialog open"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''
+    for (const section of sections.querySelectorAll('fieldset.project-section')) holdEnter(section)
+'''
+replace = '''
+    for (const section of sections.querySelectorAll('fieldset.project-section')) {
+      if (page === null) holdEnter(section)
+    }
+'''
+
+[[plant]]
+name = "new project sections: the rules' counter keeps one id for every dialog"
+meant = "no id is held by two elements of the page, and what a field is described or labelled by is in its own dialog"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+    this.#count.id = `staff-rules-count-${made}`
+'''
+replace = '''
+    this.#count.id = 'staff-rules-count'
+'''
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+    this.#text.setAttribute('aria-describedby', this.#count.id)
+'''
+replace = '''
+    this.#text.setAttribute('aria-describedby', 'staff-rules-count')
+'''
+
+[[plant]]
+name = "new project sections: a rules field is described by the first counter made"
+meant = "each dialog's rules for the staff are described by its own counter, whatever the other says"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/staff-rules.js"
+find = '''
+    this.#text.setAttribute('aria-describedby', this.#count.id)
+'''
+replace = '''
+    this.#text.setAttribute('aria-describedby', 'staff-rules-count-1')
+'''
+
+[[plant]]
+name = "new project sections: the rules are written outside the write that makes the project"
+meant = "rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project_and_none_of_what_was_written_before_them"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, made.id, Some(rules))?;
+        }
+        known_project(store, made.id)
+    })
+}'''
+
+[[plant]]
+name = "new project sections: the compaction is written outside the write that makes the project"
+meant = "rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project_and_none_of_what_was_written_before_them"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''
+        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, made.id, Some(size))?;
+        }
+        known_project(store, made.id)
+    })
+}'''
+
+[[plant]]
+name = "new project sections: both are written outside the write that makes the project"
+meant = "rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project_and_none_of_what_was_written_before_them"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''
+        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, made.id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_claude_compaction(store, made.id, Some(size))?;
+        }
+        known_project(store, made.id)
+    })
+}'''

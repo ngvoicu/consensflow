@@ -99,6 +99,23 @@ export class Compaction {
     this.#say(bad ? `A size is a whole number from ${said(LEAST)} to ${said(MOST)}.` : '')
   }
 
+  /** The section as it is for a project with no choice: a new project's start. */
+  reset() {
+    this.show(null)
+  }
+
+  /** What a new project starts with: the size chosen, or none for each harness's own point. */
+  values() {
+    return this.#size.checked ? sizeOf(this.#amount.value) : null
+  }
+
+  /** Why a project cannot start with this choice, or none: a size is chosen and is no size. */
+  blocked() {
+    return this.#size.checked && sizeOf(this.#amount.value) === null
+      ? `A size is a whole number from ${said(LEAST)} to ${said(MOST)}.`
+      : null
+  }
+
   /**
    * Saves what the section shows, for the project the dialog is for, by its id. What the
    * daemon answers is shown only while the dialog is still for that project, and a refusal

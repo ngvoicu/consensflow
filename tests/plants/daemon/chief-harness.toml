@@ -742,7 +742,7 @@ replace = '''
 
 [[plant]]
 name = "chief: the page says no contributor warning for the chief's model"
-meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+meant = "the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief"
 runs = ["chm-page-pick"]
 
 [[plant.edit]]
@@ -1016,7 +1016,7 @@ replace = '            listing'
 
 [[plant]]
 name = "chief: the page offers no Muse chief"
-meant = "the chief is picked as a harness, then a model it lists, nothing picked and no effort asked, in New project and Switch chief"
+meant = "the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief"
 runs = ["chm-page-muse"]
 
 [[plant.edit]]

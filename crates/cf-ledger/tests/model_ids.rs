@@ -148,6 +148,8 @@ fn edit_member_names_a_member_and_its_windows_by_the_model_it_runs_now() {
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .unwrap();
     let member_id = project
@@ -260,6 +262,8 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
                 gate: false,
                 wake_up: None,
                 specs: None,
+                staff_rules: None,
+                compaction: None,
             })
             .unwrap();
         let added = ledger
@@ -295,6 +299,8 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
                 gate: false,
                 wake_up: None,
                 specs: None,
+                staff_rules: None,
+                compaction: None,
             })
             .unwrap_or_else(|failed| panic!("create_project at {len}: {failed}"));
         let staffed = project
@@ -322,6 +328,8 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .unwrap();
     let (id, too_long) = (long_id(256), long_id(257));
@@ -342,6 +350,8 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .expect_err("a name of 257 at a start");
     assert_eq!(refused.code(), Some("invalid-model-name"));

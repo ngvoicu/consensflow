@@ -78,6 +78,8 @@ fn world_with(gate: bool) -> World {
             gate,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .expect("a project");
     World {

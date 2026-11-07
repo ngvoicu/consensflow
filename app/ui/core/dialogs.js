@@ -1,9 +1,7 @@
 import { button, element, redraw } from '../dom.js'
 import { HARNESS_NAMES, harnessLabel, isMember, modelShown, nameApart } from './board.js'
-import { Compaction } from './compaction.js'
-import { ComputerUseSection } from './computer-use.js'
-import { ProjectSections } from './project-sections.js'
-import { StaffRules } from './staff-rules.js'
+import { harnessesOf } from './computer-use.js'
+import { holdEnter, ProjectSections } from './project-sections.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -676,16 +674,27 @@ export class NewProjectDialog {
   constructor(dialog, page) {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
+    // Start is the button's: Enter in no field of the dialog starts the project.
+    holdEnter(this.#form)
     this.#staff = dialog.querySelector('#new-project-staff')
     this.#refusal = dialog.querySelector('.dialog-refusal')
     this.#sections = new ProjectSections(
       dialog.querySelector('[data-project-sections]'),
       null,
       page.specs,
+      {
+        daemon: page.daemon,
+        act: page.act,
+        report: page.report,
+        // Before there is a project, the folder picked is what computer use is read for.
+        scope: () => (dialog.open ? { directory: this.#form.elements.directory.value } : null),
+      },
     )
     this.#page = page
     this.#chief = new ChiefPicker(this.#form, page.daemon)
     this.#member = new MemberPicker(this.#form, new ModelLists(page.daemon), () => {})
+    // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
+    this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
     this.#form.elements.memberAdd.addEventListener('click', () => {
       const picked = this.#member.values()
       if (picked === null) return
@@ -713,19 +722,31 @@ export class NewProjectDialog {
 
   /** Opens on `directory`; with no harness installed here it refuses, and says where to get one. */
   async open(directory) {
-    const [{ missing = [] }, { staff }] = await Promise.all([
+    const [{ missing = [] }, { staff }, , screen] = await Promise.all([
       this.#page.daemon('harnesses.missing'),
       this.#page.daemon('staff.last'),
       this.#page.readSpecs(),
+      this.#sections.computerUse.read({ directory }),
     ])
     this.#missing = missing
+    this.#sections.computerUse.show(screen)
     this.#chief.fill(missing)
     this.#member.reset(missing)
     this.#pickLast(staff)
     this.#sections.reset()
     this.#say('')
     this.#form.elements.directory.value = directory
+    this.#drawComputerUse()
     this.#dialog.showModal()
+  }
+
+  /** Computer use, drawn for the harnesses of the chief picked and of the members picked. */
+  #drawComputerUse() {
+    const kinds = [
+      this.#form.elements.chiefHarness.value,
+      ...this.#picked.map((pick) => pick.harness),
+    ]
+    this.#sections.computerUse.draw(new Set(kinds.filter(Boolean)))
   }
 
   /** What is said above the buttons: the daemon's refusal of the start, until the next try or the next opening. */
@@ -744,9 +765,15 @@ export class NewProjectDialog {
    */
   async #start() {
     if (this.#starting || !this.#chief.picked()) return
+    // A section holding what no project can start with says so, as its Save does in Project settings.
+    const blocked = this.#sections.blocked()
+    if (blocked !== null) {
+      this.#say(blocked)
+      return
+    }
     this.#starting = true
     const form = this.#form
-    const { gate, wakeUp, specs } = this.#sections.values()
+    const { gate, wakeUp, specs, rules, compaction } = this.#sections.values()
     const body = {
       directory: form.elements.directory.value,
       ...this.#chief.values(),
@@ -755,6 +782,8 @@ export class NewProjectDialog {
     }
     if (wakeUp !== null) body.wakeUp = wakeUp
     if (specs !== null) body.specs = specs
+    if (rules !== null) body.rules = rules
+    if (compaction !== null) body.compaction = compaction
     this.#say('')
     let refused = null
     try {
@@ -831,6 +860,7 @@ export class NewProjectDialog {
       rows.push(nobodyRow('Nobody yet: pick a role, a harness, a model and a tier, then Add.'))
     }
     this.#staff.replaceChildren(...rows)
+    this.#drawComputerUse()
   }
 
   /** The picked rows as the daemon takes a staff: each member once, with its roles. */
@@ -980,31 +1010,19 @@ export class ProjectSettingsDialog {
         chiefRunning: () => this.#chiefRunning(),
       },
       page.specs,
+      {
+        daemon: page.daemon,
+        act: page.act,
+        report: page.report,
+        scope: () => (dialog.open ? { project: this.#project } : null),
+      },
     )
     this.#gate = sections.gate
     this.#wakeUp = sections.wakeUp
     this.#specs = sections.specs
-    this.#rules = new StaffRules(dialog.querySelector('.staff-rules'), {
-      project: () => (dialog.open ? this.#project : null),
-      daemon: page.daemon,
-      act: page.act,
-      note: page.note,
-      report: page.report,
-      chiefRunning: () => this.#chiefRunning(),
-    })
-    this.#compaction = new Compaction(dialog.querySelector('.members-compaction'), {
-      project: () => (dialog.open ? this.#project : null),
-      daemon: page.daemon,
-      act: page.act,
-      note: page.note,
-      report: page.report,
-    })
-    this.#computerUse = new ComputerUseSection(dialog.querySelector('.computer-use'), {
-      daemon: page.daemon,
-      act: page.act,
-      report: page.report,
-      project: () => (dialog.open ? this.#project : null),
-    })
+    this.#rules = sections.rules
+    this.#compaction = sections.compaction
+    this.#computerUse = sections.computerUse
     // What the dialog changes is its project's, whichever board the page shows now.
     this.#gate.addEventListener('change', () => {
       const project = this.#project
@@ -1096,7 +1114,7 @@ export class ProjectSettingsDialog {
     const [calls, , computerUse] = await Promise.all([
       this.#wakeUp.read(project),
       this.#page.readSpecs(),
-      this.#computerUse.read(project),
+      this.#computerUse.read({ project }),
     ])
     const board = this.#page.board()
     if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {
@@ -1193,7 +1211,7 @@ export class ProjectSettingsDialog {
     redraw(this.#members, rows)
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
-    this.#computerUse.draw(board)
+    this.#computerUse.draw(harnessesOf(board))
   }
 
   /** A member as the project's board has it now, which a Remove kept across redraws acts on. */
