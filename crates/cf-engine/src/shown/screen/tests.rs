@@ -192,6 +192,45 @@ fn rows_of_base64_and_nothing_else_withhold_the_screen() {
             vec!["abcdefghijklmnop", "qrstuvwxyzabcdef", "ghijklmnopqrstuv"],
         ),
         ("a hash", vec![hash]),
+        // A row of digits is a number, and fortyness alone makes it a key: neither a word of
+        // letters nor a row that looks encoded.
+        (
+            "a run of forty-eight digits",
+            vec!["012345678901234567890123456789012345678901234567"],
+        ),
+        // Two rows or more of twelve, the last what is left, of digits: no row is a body by
+        // itself, and the last is shorter than the others.
+        (
+            "digits in rows of sixteen and a short ending",
+            vec![
+                "0123456789012345",
+                "6789012345678901",
+                "2345678901234567",
+                "890",
+            ],
+        ),
+        // Two rows only: the first thirty-six long, the second what is left.
+        (
+            "digits in two rows, the second what is left",
+            vec!["012345678901234567890123456789012345", "6789"],
+        ),
+        // Rows of letters from eight to eleven, widths that differ, the last what is left:
+        // three rows or more of eight, forty together.
+        (
+            "letters in rows of ten, eleven, nine and eleven and a short ending",
+            vec![
+                "abcdefghij",
+                "klmnopqrstu",
+                "vwxyzabcd",
+                "efghijklmno",
+                "qrs",
+            ],
+        ),
+        // A capital after a small letter is what two short rows in a row look encoded by.
+        (
+            "two short rows with capitals after small letters",
+            vec!["abCDef", "ghIJkl"],
+        ),
         // Rows narrower than twelve, with what is left of the body on the last.
         (
             "a body of small letters in rows of eleven",
@@ -853,6 +892,16 @@ fn a_value_in_groups_withholds_the_screen() {
         ),
         ("groups wrapped over rows", vec!["abcd efgh", "ijkl mnop"]),
         ("a group to a row", vec!["abcd", "efgh", "ijkl", "mnop"]),
+        // Hex, not letters: digits alone (hex, not a word, not one length).
+        (
+            "digit groups of differing lengths",
+            vec!["1234 56789 012345 6789012"],
+        ),
+        // A capital after a small letter in groups that are no words of letters alone.
+        (
+            "groups of differing lengths with a slash and a capital after a small letter",
+            vec!["aB/cDe fGh/IjKl mNo/PqRs tUv/WxYzA"],
+        ),
         (
             "groups parted by a dash and by a blank",
             vec!["abcd-efgh ijkl-mnop"],
