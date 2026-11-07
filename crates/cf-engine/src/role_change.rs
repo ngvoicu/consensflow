@@ -113,9 +113,9 @@
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
 //! the most rules and a staff of up to 15 rows (38 without specs) is read whole,
-//! a staff of 15 with 19 bytes and 58 lines to spare (19 and 39 with the model column, 29
+//! a staff of 15 with 20 bytes and 58 lines to spare (19 and 39 with the model column, 29
 //! and 58 before it; a staff of 25 with the most rules is told in part and not read whole,
-//! 581 bytes over: a row of the table is 59 bytes, and the text without a row is 28,100).
+//! 580 bytes over: a row of the table is 59 bytes, and the text without a row is 28,100).
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).
