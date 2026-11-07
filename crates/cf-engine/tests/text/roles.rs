@@ -79,10 +79,10 @@ fn teaches_only_the_boards_commands(role: &str) {
         ));
         assert!(
             found(
-                r"\| Member \| Model \| Roles \| Work tier \|\n\|---\|---\|---\|---\|\n\| zeus \| Opus · high \| worker, reviewer \| Standard work \|",
+                r"\| Member \| Roles \| Work tier \|\n\|---\|---\|---\|\n\| zeus \(Opus · high\) \| worker, reviewer \| Standard work \|",
                 &text
             ),
-            "the staff table: name, model, roles, tier"
+            "the staff table: name (and its model where the name says none), roles, tier"
         );
         assert!(!found(r"tags|PM(?-u:\b)", &text), "no tags, no PM");
         assert!(
@@ -118,6 +118,24 @@ fn teaches_only_the_boards_commands(role: &str) {
             &text
         ));
         assert!(text.contains("do not run the command to see the refusal: ask"));
+        // The image designer draws the chief's precise orders (Gabriel, 2026-10-21), and a
+        // revision goes back to its window.
+        assert!(found(
+            r"Give it a precise\s+drawing order: the subject and composition, the style, the exact colours and\s+size, transparency when needed, each reference file by path and what it is for,\s+and the output path\. It draws exactly that and does not research or choose\.",
+            &text
+        ));
+        assert!(found(
+            r"A\s+revision goes back to its window with `--after`; its result names the file\.",
+            &text
+        ));
+        assert!(!found(r"say what to draw", &text));
+        // The chief's model is the human's to change (CHF-22): in the chief's window with
+        // its harness's own switch, which a reopen keeps; Switch the chief is for another
+        // harness or a fresh conversation.
+        assert!(found(
+            r"The human changes your model with their harness's own switch in this window, and\s+a reopen keeps it\. Switch the chief, in the app, is for another harness or a\s+fresh conversation, on a model from that harness's list\.",
+            &text
+        ));
         assert!(!found(r"VERDICT|review policy|cf task review", &text));
     } else {
         assert!(text.contains("cf ask"), "{role} can ask");
@@ -156,6 +174,29 @@ fn teaches_only_the_boards_commands(role: &str) {
         }
         if role == "designer" {
             assert!(text.contains("image generation tool"));
+            // It draws the order and nothing else (Gabriel, 2026-10-21).
+            assert!(found(
+                r"a drawing order, which says what\s+to draw, the references to use and where to save the result\. Draw exactly what\s+it says, at the size and path it names, using only the references it names\.",
+                &text
+            ));
+            assert!(found(
+                r"Do\s+not research the project or redesign what was asked\.",
+                &text
+            ));
+            assert!(found(
+                r#"If something needed to draw it is\s+missing or contradicts itself, or you cannot go on without an answer, ask with\s+`cf ask "…"` rather than guess, and end your turn"#,
+                &text
+            ));
+            // Its result is as it was: the paths, then one line on what each shows.
+            assert!(found(
+                r"the absolute path\s+of every file you saved, one per line, then one line on what it shows",
+                &text
+            ));
+        } else {
+            assert!(
+                !text.contains("drawing order"),
+                "{role} is not told what the designer draws"
+            );
         }
         // Poker-lab, 2026-10-03: a worker's rm -rf "$W/$d" stopped Claude Code
         // for a human, with a countdown, in a window where every permission is
@@ -546,6 +587,40 @@ fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_
         r"Hand your harness's subagents or task tool, if it has them, any work\s+beyond searching and reading: the board, the human and the staff never see\s+that work",
         &instructions("chief", &[])
     ));
+}
+
+/// harness-models removed the saved agent: a member is a harness, a model it lists, an
+/// effort and a tier, named by the model. No role text may send a window to pick an agent,
+/// a preset or a nickname, or to a command that no longer exists (`cf agent`, `cf catalog`).
+#[test]
+fn names_no_agent_to_pick_no_preset_no_nickname_and_no_cf_agent_or_catalog_in_any_text() {
+    let removed = Regex::new(
+        r"(?i)\bpresets?\b|\bnicknames?\b|\b(?:cf|\{\{cf\}\}) +(?:agent|agents|catalog)\b|\bsaved agents?\b|\b(?:pick|choose|name) (?:an|the) agent\b|\bagent (?:to pick|name)\b",
+    )
+    .unwrap();
+    let staff = [zeus()];
+    for role in [
+        "chief", "worker", "advisor", "reviewer", "tester", "designer",
+    ] {
+        let text = instructions(role, &staff);
+        let said = removed.find(&text);
+        assert!(
+            said.is_none(),
+            "the {role}'s text names a removed thing: {:?}",
+            said.map(|word| &text[word.start().saturating_sub(60)..word.end() + 60])
+        );
+    }
+    // The files themselves, with their slots unfilled, not only the text a window gets.
+    for file in ["chief.md", "staff.md"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../skill/core")
+            .join(file);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            removed.find(&text).is_none(),
+            "{file} names a removed thing"
+        );
+    }
 }
 
 #[test]

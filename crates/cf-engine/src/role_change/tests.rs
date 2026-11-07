@@ -170,8 +170,10 @@ fn a_windows() -> CfWord {
 fn a_chiefs_role_for(cf: &CfWord, rows: usize, specs_on: bool, rules: Option<&str>) -> String {
     let staff: Vec<StaffRow> = (0..rows)
         .map(|at| StaffRow {
-            name: format!("member-{at}"),
-            model: "GPT-6.1-Sol · xhigh".to_owned(),
+            // A member is named by its model and effort (T-1263), a handle of about twenty
+            // characters, and the table says the model once, in the name.
+            name: format!("gpt-6-1-sol-xhigh-{at}"),
+            model: None,
             roles: vec!["worker".to_owned(), "reviewer".to_owned()],
             work_tier: Some(WorkTier::Standard),
         })
@@ -209,10 +211,11 @@ fn printed_by_cf(note: &MessageView) -> String {
 /// it is read.
 #[test]
 fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
-    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 19, the
-    // most a model column for each member leaves room for (harness-models).
+    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 15, the
+    // most the chief's words leave room for (T-1234: 19 with a model column in the table,
+    // 29 before it; the words of the designer and of the chief's own model took the rest).
     let most = the_most_rules();
-    for (rows, rules) in [(25, None), (19, Some(most.as_str()))] {
+    for (rows, rules) in [(25, None), (15, Some(most.as_str()))] {
         told_whole_or_told_and_read(&a_chiefs_role_with(rows, true, rules));
     }
 }
@@ -269,13 +272,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        133,
-        "docs: read to 133 rows with specs on"
+        151,
+        "docs: read to 151 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),
-        152,
-        "docs: read to 152 rows without"
+        174,
+        "docs: read to 174 rows without"
     );
     // With the most rules for the staff the ledger takes.
     let most = the_most_rules();
@@ -293,13 +296,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     };
     assert_eq!(
         rows_with_the_most(true),
-        19,
-        "docs: read to 19 rows with specs on and the most rules"
+        15,
+        "docs: read to 15 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_with_the_most(false),
-        39,
-        "docs: read to 39 rows without specs and the most rules"
+        38,
+        "docs: read to 38 rows without specs and the most rules"
     );
 }
 

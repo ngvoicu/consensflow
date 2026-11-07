@@ -46,8 +46,11 @@ const CARD: &str = "CONSENSFLOW_EVAL_CHIEF_CARD";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaffRow {
     pub name: String,
-    /// The model it runs on as its harness names it, with its effort (`Opus · high`).
-    pub model: String,
+    /// The model it runs on as its harness names it, with its effort (`Opus · high`),
+    /// where its name does not say so already: a member is named by its model (T-1263),
+    /// so the table says it once. A member on its harness's default, or one that needs an
+    /// edit, has a name that holds no model, and this says what it runs on.
+    pub model: Option<String>,
     pub roles: Vec<String>,
     /// None for a tier no work tier is called: the ledger holds four, or none.
     pub work_tier: Option<WorkTier>,
@@ -83,7 +86,9 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
         })
         .map(|member| StaffRow {
             name: member.handle.clone(),
-            model: cf_ledger::handles::runs_on(member),
+            model: member
+                .name_apart
+                .then(|| cf_ledger::handles::runs_on(member)),
             roles: member.roles.clone(),
             work_tier: member.tier.as_deref().and_then(work_tier),
         })

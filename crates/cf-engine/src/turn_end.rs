@@ -86,6 +86,7 @@ use serde_json::Value;
 
 use crate::delivery_text::{header_id, is_paste_of};
 use crate::dispatcher::Dispatcher;
+use crate::image_facts::for_task;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
 use crate::seams::{CommandsSeen, EngineError};
@@ -437,7 +438,7 @@ impl Dispatcher {
             &replacements,
             &words_of(&answers.final_run),
         )?;
-        let words = with_earlier(words, &earlier);
+        let words = for_task(&thread.task, with_earlier(words, &earlier));
         let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));
         self.seams
             .ledger
