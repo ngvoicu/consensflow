@@ -581,3 +581,65 @@ fn its_computer_use_permission_prompt_is_one_dialog_whatever_slides_above_its_ti
         plan.window.dialog_identity(&second)
     );
 }
+
+/// The prompt as 2.1.319 draws it on the terminal: its dialog's rule across the top, a blank row
+/// between its title and its body and between the body's blocks (`gap:1`), the choices without
+/// their numbers, the footer under them.
+fn computer_use_prompt_drawn() -> Vec<String> {
+    [
+        "\u{23fa} I'll type that URL into the chief's input, Cmd+click it, and then check the log, with plain and",
+        "  Ctrl-click as negative tests.",
+        "",
+        "\u{23fa} Computer Use[request_access]",
+        "",
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        " Computer Use needs macOS permissions",
+        "",
+        "  Accessibility: \u{2714} granted",
+        "  Screen Recording: \u{2718} not granted",
+        "",
+        "  Grant the missing permissions in System Settings, then select \"Try again\". macOS may require you to restart Claude Code after granting Screen",
+        "  Recording.",
+        "",
+        "  \u{276f} Open System Settings \u{2192} Screen Recording",
+        "    Try again",
+        "",
+        " Enter to confirm \u{b7} Esc to cancel",
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_declined_when_the_pane_host_sends_its_tail_of_the_screen_as_drawn(
+) {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    // What the engine reads is the pane host's tail: the last twelve rows with a letter or a
+    // digit, no blank row and no rule.
+    let tail = cf_proto::panes::word_tail(computer_use_prompt_drawn(), 12);
+    assert_eq!(tail.len(), 11, "{tail:?}");
+    assert!(tail.iter().all(|row| !row.trim().is_empty()));
+    assert!(tail
+        .iter()
+        .any(|row| row.trim() == "Computer Use needs macOS permissions"));
+    let dialog = plan.window.dialog(&tail).expect("the prompt");
+    assert_eq!(dialog.options.len(), 2, "{dialog:?}");
+    assert!(dialog.asks && !dialog.prompt_below, "{dialog:?}");
+    let decline = plan.window.safe_decline(&dialog).expect("on the list");
+    assert_eq!(decline.key, vec![27]);
+    // A narrow window wraps its sentence in more rows, and the tail still holds the title.
+    let mut narrow = computer_use_prompt_drawn();
+    narrow.splice(
+        11..13,
+        [
+            "  Grant the missing permissions in System".to_owned(),
+            "  Settings, then select \"Try again\". macOS".to_owned(),
+            "  may require you to restart Claude Code".to_owned(),
+            "  after granting Screen Recording.".to_owned(),
+        ],
+    );
+    let tail = cf_proto::panes::word_tail(narrow, 12);
+    let dialog = plan.window.dialog(&tail).expect("the prompt");
+    assert!(plan.window.safe_decline(&dialog).is_some(), "{dialog:?}");
+}
