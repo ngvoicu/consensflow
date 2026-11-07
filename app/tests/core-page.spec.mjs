@@ -10212,7 +10212,7 @@ test('keeps the order the cards came into the dock in across a switch to another
   await expect.poll(() => docked(page)).toEqual(shown)
 })
 
-test("sizes the dock's cards: beside the board the chief's the whole dock and each other two-thirds of it, with the board folded two-thirds and the last third", async ({
+test("sizes the dock's cards: beside the board the chief's the whole dock and each other two-thirds of it, with the board folded three-quarters and the last quarter", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -10247,21 +10247,77 @@ test("sizes the dock's cards: beside the board the chief's the whole dock and ea
   now = await measure()
   expect(now.room.width).toBeLessThan(320)
   for (const card of now.cards) expect(card.width).toBeCloseTo(now.room.width, 0)
-  // The board folded: the chief's two-thirds of the row, the other the last
-  // third, whole beside it.
+  // The board folded: the chief's three-quarters of the row, the other the
+  // last quarter, whole beside it.
   await squeeze('ArrowLeft', 40)
   await page.getByRole('button', { name: 'Hide board' }).click()
   await expect.poll(async () => (await measure()).dock).toBeGreaterThan(1200)
   now = await measure()
   const [chief, other] = now.cards
-  expect(chief.width).toBeCloseTo(((now.room.width - now.room.gap) * 2) / 3, 0)
-  expect(other.width).toBeCloseTo((now.room.width - now.room.gap) / 3, 0)
+  expect(chief.width).toBeCloseTo(((now.room.width - now.room.gap) * 3) / 4, 0)
+  expect(other.width).toBeCloseTo((now.room.width - now.room.gap) / 4, 0)
   expect(other.inView).toBe(true)
   // Back beside the board, the cards are as they were.
   await page.getByRole('button', { name: 'Show board' }).click()
   await expect
     .poll(async () => (await cardsOf(page))[0].width)
     .toBeCloseTo((await roomOf(page)).width, 0)
+})
+
+test("with the board folded fills the row with the chief's card alone, three-quarters of it beside another window, and the row again when it leaves", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  // harbour keeps a session's terminal shown; foundry's dock is its chief's alone.
+  await open(page, { ...twoOpen(atWork()), realTerminals: true })
+  await unfold(page)
+  const resizes = () =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_resize' && args.id === 'p1-chief')
+        .map(([, args]) => args.cols),
+    )
+  await expect.poll(async () => (await resizes()).length).toBe(1)
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  const room = await roomOf(page)
+  const [threeQuarters, quarter] = [((room.width - room.gap) * 3) / 4, (room.width - room.gap) / 4]
+  // Two cards beside the folded board: the chief's three-quarters of the row,
+  // the other's the last quarter, whole beside it.
+  let now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(threeQuarters, 0)
+  expect(now[1].width).toBeCloseTo(quarter, 0)
+  expect(now[1].inView).toBe(true)
+  // Folding grew the chief's card: its terminal took the new size once, wider.
+  await expect.poll(async () => (await resizes()).length).toBe(2)
+  // Alone — the other project's dock is its chief's alone: the whole row.
+  await chooseProject(page, 'foundry')
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(room.width, 0)
+  // Back to harbour's two: three-quarters and the last quarter again, as wide
+  // as the card left them, so no new size for its terminal.
+  await chooseProject(page, 'harbour')
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(threeQuarters, 0)
+  expect(now[1].width).toBeCloseTo(quarter, 0)
+  await page.waitForTimeout(300)
+  expect((await resizes()).length).toBe(2)
+  // The session's card hidden from its own Hide: the chief's is the whole row
+  // again, and its terminal takes that size once, wider still.
+  await page
+    .locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+    .getByRole('button', { name: "Hide @zeus · amber-pine's terminal" })
+    .click()
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(room.width, 0)
+  await expect.poll(async () => (await resizes()).length).toBe(3)
+  const [beside, folded, alone] = await resizes()
+  expect(folded).toBeGreaterThan(beside)
+  expect(alone).toBeGreaterThan(folded)
 })
 
 test('snaps the row of terminals to its padding: scrolled to its start, no sliver of the next card shows', async ({
@@ -11453,10 +11509,11 @@ test.describe('file drop on a Mac', () => {
     const zeus = await middleOf(page, 'zeus')
     await dragged.enter(page, ['/a/b.png'], told(zeus))
     expect(await marked(page)).toEqual(['zeus'])
-    // Its window ends: its card goes, and the dock has nothing there.
+    // Its window ends: its card goes, the chief's taking the row the place is
+    // in — the drop was meant for the window that went, not the card there now.
     await zeusWindow(null)
     await expect.poll(() => docked(page)).toEqual(['chief'])
-    expect(await cardAt(page, zeus)).toBeNull()
+    expect(await cardAt(page, zeus)).toBe('chief')
     await dragged.over(page, told(zeus))
     expect(await marked(page)).toEqual([])
     // Dropped where it was: nothing is typed, and the status line says the window went.
@@ -11464,9 +11521,12 @@ test.describe('file drop on a Mac', () => {
     const went = "Nothing was typed: @zeus's window has closed."
     await expect.poll(() => heard(page)).toEqual([went])
     await expect(page.locator('#status')).toHaveAttribute('data-tone', 'error')
-    // The next drag, dropped there with no window ending under it, says nothing.
+    // The next drag, dropped there with no window ending under it, is the
+    // chief's card's like anywhere on it: it takes the drop and says nothing.
     await dragged.enter(page, ['/a/b.png'], told(zeus))
+    expect(await marked(page)).toEqual(['chief'])
     await dragged.drop(page, ['/a/b.png'], told(zeus))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['/a/b.png'])
     // Nor does a drop elsewhere, though a window ended under the file before it moved on.
     await zeusWindow(8)
     await expect.poll(() => docked(page)).toEqual(['chief', 'zeus'])
@@ -11479,7 +11539,7 @@ test.describe('file drop on a Mac', () => {
     await dragged.drop(page, ['/a/b.png'], head)
     expect(await heard(page)).toEqual([went])
     expect(await typedInto(page, 'p1-zeus')).toEqual([])
-    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    expect(await typedInto(page, 'p1-chief')).toEqual(['/a/b.png'])
   })
 
   test('types nothing on a closed project’s dock, though an open one’s windows live on off screen', async ({
