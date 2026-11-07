@@ -141,12 +141,37 @@ fn paused_note(
     screen: &[&str],
     call: Option<std::sync::Arc<cf_harness::records::LastCall>>,
 ) -> String {
+    paused_note_on(code, screen, call, None)
+}
+
+/// [`paused_note`] for a window whose conversation runs in the harness's session `session`, as
+/// Claude Code's does (the id its quit line prints), where one is given.
+fn paused_note_on(
+    code: u32,
+    screen: &[&str],
+    call: Option<std::sync::Arc<cf_harness::records::LastCall>>,
+    session: Option<&str>,
+) -> String {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
     context.pass().unwrap();
     context.adapter.with("zeus", |agent| agent.last_call = call);
+    if let Some(session) = session {
+        let id = context.id(project.id, "zeus");
+        let conversation = context
+            .ledger
+            .borrow()
+            .current_conversation(id)
+            .unwrap()
+            .expect("its conversation");
+        context
+            .ledger
+            .borrow_mut()
+            .bind_conversation(conversation.id, session)
+            .unwrap();
+    }
     context.host.exits_showing(Some(code), None, Some(screen));
     context.exit("zeus");
     let task = context.task(project.id, 1);
@@ -430,6 +455,260 @@ fn a_pause_note_the_ledger_holds_says_none_of_a_secret_split_grouped_framed_or_p
         );
         assert!(!note.contains(value), "{screen:?}");
     }
+}
+
+/// The note the ledger holds for a screen that is quoted, `quote` between its marks, with
+/// `masked` strings hidden in it.
+fn quoted_note(quote: &str, masked: usize) -> String {
+    let hid = match masked {
+        0 => String::new(),
+        1 => " (1 key- or token-like string masked)".to_owned(),
+        count => format!(" ({count} key- or token-like strings masked)"),
+    };
+    format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its screen ended with: \
+         \"{quote}\"{hid}. {RESUME}"
+    )
+}
+
+/// The cases of `cases` whose pause note, as the ledger holds it, is not the whole-screen
+/// withholding `named` says (a secret named, else what may be a key), or has a piece of its
+/// value in it: one line for each, so that a red run lists every shape and not the first.
+fn not_withheld(cases: &[(&[&str], &str)], named: bool) -> Vec<String> {
+    let mut failed = Vec::new();
+    for (screen, value) in cases {
+        // The screen alone, and between rows that name nothing.
+        for rows in [
+            screen.to_vec(),
+            [&["pad one"][..], screen, &["pad two"][..]].concat(),
+        ] {
+            let note = paused_note(1, &rows, None);
+            let wanted = if named { named_note() } else { key_note() };
+            if note != wanted || note.contains(value) {
+                failed.push(format!("{rows:?}: {note}"));
+            }
+        }
+    }
+    failed
+}
+
+/// T-1227 found these shapes of a value in groups still quoted, and main quoted them too: groups
+/// parted by `_`, `:` or `.`, hex parted by a tab or two blanks.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_value_in_groups_parted_by_any_one_character_or_any_blanks(
+) {
+    let failed = not_withheld(
+        &[
+            (&["abcd_efgh_ijkl_mnop"], "efgh_ijkl"),
+            (&["abcd:efgh:ijkl:mnop"], "efgh:ijkl"),
+            (&["abcd.efgh.ijkl.mnop"], "efgh.ijkl"),
+            (&["deadbeef\tcafebabe\tfeedface\tabcdefab"], "cafebabe"),
+            (&["deadbeef  cafebabe  feedface  abcdefab"], "cafebabe"),
+            (
+                &["deadbeef", "cafebabe", "feedface", "abcdefab"],
+                "cafebabe",
+            ),
+        ],
+        false,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: four words of unequal length in a row of their own are a passphrase as much as four
+/// of one length.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_four_words_in_a_row_of_their_own() {
+    let failed = not_withheld(
+        &[
+            (&["abcd efghi jklmno pqrstuv"], "efghi"),
+            (&["correct horse battery staple"], "horse battery"),
+        ],
+        false,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: a short body with a `/` in it, alone or above another, is a key's body as much as
+/// one with a digit in it.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_short_body_with_a_slash_in_it() {
+    let failed = not_withheld(
+        &[
+            (&["abcd/efghijkl"], "efghijkl"),
+            (&["abcd/efghijkl", "mnopqrst/uvw"], "mnopqrst"),
+        ],
+        false,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: the beginning of a token of a known kind, followed by fewer than four letters or
+/// digits, or by punctuation, and the rest of it in groups.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_token_prefix_cut_short_or_followed_by_punctuation()
+{
+    let failed = not_withheld(
+        &[
+            (&["sk-abc defg hijk lmno"], "defg hijk"),
+            (&["sk-_abc defg hijk lmno"], "defg hijk"),
+            (&["ghp_ab cdef ghij klmn"], "cdef ghij"),
+            (&["glpat-.ab cdef ghij klmn"], "cdef ghij"),
+        ],
+        true,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: a URL's user with no password is a token as often as a name (`https://TOKEN@host`):
+/// it is masked where it stands, and the screen is withheld where the window's wrap cut the
+/// URL in two or its characters are written in percent signs.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_the_user_of_a_url_that_has_no_password() {
+    let mut failed = Vec::new();
+    for (row, quoted) in [
+        (
+            "cloned from https://swordfish@vault",
+            "cloned from https://[masked]@vault",
+        ),
+        (
+            "https://swordfish@vault.example.test/x.git",
+            "https://[masked]@vault.example.test/x.git",
+        ),
+    ] {
+        let note = paused_note(1, &[row], None);
+        if note != quoted_note(quoted, 1) {
+            failed.push(format!("{row}: {note}"));
+        }
+    }
+    // A name on ssh is a name: the account of `git clone`.
+    let note = paused_note(1, &["cloned from ssh://git@vault/repo"], None);
+    if note != quoted_note("cloned from ssh://git@vault/repo", 0) {
+        failed.push(format!("ssh: {note}"));
+    }
+    // The wrap cut the URL: the masker sees no URL in either row.
+    failed.extend(not_withheld(
+        &[
+            (&["https://swordfi", "sh@vault"], "swordfi"),
+            (&["https://alice:swo", "rdfish@vault"], "rdfish"),
+            (&["https%3A%2F%2Fswordfish%40vault"], "swordfish"),
+        ],
+        true,
+    ));
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: percent signs nested (`%25` for the sign), and a value that is nothing but them.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_percent_signs_nested_or_alone() {
+    let mut failed = not_withheld(
+        &[
+            (&["api%255Fkey%253Dredgreenblue"], "redgreenblue"),
+            (&["sk%252Dabcdefgh%2520ijklmnop"], "ijklmnop"),
+            (&["%2570assword%25253Dhunter22"], "hunter22"),
+        ],
+        true,
+    );
+    failed.extend(not_withheld(
+        &[(&["cobalt%2Dviolet%2Dindigo"], "violet")],
+        false,
+    ));
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: `Authentication failed` names a secret as `token` does.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_what_follows_an_authentication_word() {
+    let failed = not_withheld(
+        &[
+            (&["Authentication failed", "redgreenblue"], "redgreenblue"),
+            (
+                &["authenticate with the registry", "redgreenblue"],
+                "redgreenblue",
+            ),
+            (&["Unauthenticated: redgreenblue"], "redgreenblue"),
+        ],
+        true,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A Claude Code window that quit printed `claude --resume <its session>`: that id is not a
+/// secret, and the screen is quoted around it. Any other id in the screen still withholds it
+/// whole, and so does the same id on a window whose session ConsensFlow does not know.
+#[test]
+fn a_pause_note_the_ledger_holds_quotes_the_screen_of_a_claude_window_that_quit_with_its_own_resume_line(
+) {
+    const OWN: &str = "123e4567-e89b-12d3-a456-426614174000";
+    const OTHER: &str = "9f2c1d3e-7a4b-4c5d-8e6f-0a1b2c3d4e5f";
+    let resume = format!("Resume this conversation with: claude --resume {OWN}");
+    let mut failed = Vec::new();
+    // Its own: quoted, and the id is masked as any long id is.
+    let note = paused_note_on(1, &["Goodbye!", &resume], None, Some(OWN));
+    if note
+        != quoted_note(
+            "Goodbye! / Resume this conversation with: claude --resume [masked]",
+            1,
+        )
+    {
+        failed.push(format!("its own: {note}"));
+    }
+    // As a harness may print it in capitals.
+    let loud = resume.to_uppercase();
+    let note = paused_note_on(1, &["Goodbye!", &loud], None, Some(OWN));
+    if !note.contains("its screen ended with") {
+        failed.push(format!("its own, in capitals: {note}"));
+    }
+    // Another id withholds the screen, beside the window's own or alone; and so does the
+    // window's own where ConsensFlow does not know it, or where it is another window's.
+    let other = format!("claude --resume {OTHER}");
+    for (rows, session) in [
+        (vec!["Goodbye!", other.as_str()], Some(OWN)),
+        (vec![resume.as_str(), other.as_str()], Some(OWN)),
+        (vec!["Goodbye!", other.as_str()], None),
+        (vec!["Goodbye!", resume.as_str()], None),
+        (vec!["Goodbye!", resume.as_str()], Some(OTHER)),
+    ] {
+        let note = paused_note_on(1, &rows, None, session);
+        if note != key_note() || note.contains("a456") || note.contains("8e6f") {
+            failed.push(format!("{rows:?} {session:?}: {note}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// What the new rules leave alone, through the same path: the screens of an ordinary day are
+/// quoted in the note the ledger holds, as before (cargo's test names, a Rust error, git's log,
+/// a connection error, a URL an account clones from, a URL written in percent signs, a quit
+/// line with the window's own id on it).
+#[test]
+fn a_pause_note_the_ledger_holds_still_quotes_the_screens_of_an_ordinary_day() {
+    let mut failed = Vec::new();
+    for rows in [
+        vec![
+            "test windows::a_host_shut_down_with_windows_open_tells_the_exit ... ok",
+            "test result: ok. 238 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+        ],
+        vec![
+            "error[E0308]: mismatched types",
+            " --> crates/cf-engine/src/shown.rs:258:20",
+            "expected `Vec<&str>`, found `Vec<String>`",
+        ],
+        vec![
+            "3e25960a1 A short body with a point. and the rest",
+            "error: failed to connect to 127.0.0.1:8080: Connection refused (os error 61)",
+        ],
+        vec![
+            "cloned from ssh://git@vault/repo",
+            "file:///My%20Folder/a%2Fb.txt",
+        ],
+        vec!["Compiling cf-engine v3.0.7-alpha.3 (/Users/me/consensflow/crates/cf-engine)"],
+    ] {
+        let note = paused_note(1, &rows, None);
+        if !note.contains("its screen ended with") || note.contains("[masked]") {
+            failed.push(format!("{rows:?}: {note}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// The files a tool worked on are never said in a pause note (T-1224, finding 2): a token split
@@ -770,7 +1049,7 @@ fn a_worker_window_that_ends_mid_task_with_work_running_says_both() {
     let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
     assert_match(
         &note.body,
-        r#"^T-1 is paused: @zeus's window closed \(exit code 1\) with background work running, which its close ended: npm test -- --watch; its screen ended with: "Killed"\. Resume it with"#,
+        r#"^T-1 is paused: @zeus's window closed \(exit code 1\) with background work running, which its close ended: npm …; its screen ended with: "Killed"\. Resume it with"#,
     );
 }
 

@@ -254,3 +254,85 @@ fn keeps_what_was_queued_for_a_first_chief_whose_window_does_not_open() {
         "keeps what was queued for a first chief whose window does not open",
     );
 }
+
+/// What a program's start failed with, as a host or an adapter says it: the file it tried and,
+/// on Windows, a folder of the person's (`startup-refusal-notes-can-quote-a-program-path`,
+/// alpha.3's known issue, T-1178: the guard script's absolute path was in the note).
+const PATH_CAUSES: [(&str, &str); 3] = [
+    (
+        r"C:\Users\me\guard\claude.cmd is not an npm shim, and only cmd.exe could run it in a window",
+        "[path] is not an npm shim, and only cmd.exe could run it in a window",
+    ),
+    (
+        "spawn /Users/me/secret-project/bin/claude ENOENT",
+        "spawn [path] ENOENT",
+    ),
+    (
+        r"%LOCALAPPDATA%\pi-node\current holds no node, and C:\Program Files\Pi\pi.cmd needs one",
+        "[path] holds no node, and [path] needs one",
+    ),
+];
+
+/// A startup refusal says what failed, and the advice in it, and not the path of the program:
+/// the chief's window that did not come up, a member's that failed its task, and a window the
+/// human opened that the host refused.
+#[test]
+fn a_launch_that_failed_says_its_cause_and_never_the_path_of_the_program() {
+    let mut failed = Vec::new();
+    for (cause, said) in PATH_CAUSES {
+        // The adapter cannot prepare the chief's window.
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.pass().unwrap();
+        context.close_project(project.id).unwrap();
+        let cause_now = cause.to_owned();
+        *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |_| Err(cause_now.clone())));
+        context.resume_project(project.id).unwrap();
+        let told = to_human(&context, project.id);
+        let wanted = format!(
+            "The chief could not start: the launch failed: {said}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
+        );
+        if told != [wanted] {
+            failed.push(format!("chief, prepared: {told:?}"));
+        }
+        context.close();
+
+        // The host refuses to open it.
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.pass().unwrap();
+        context.close_project(project.id).unwrap();
+        *context.host.refused_with.borrow_mut() = Some(cause.to_owned());
+        context.host.refuse.set(true);
+        context.resume_project(project.id).unwrap();
+        let told = to_human(&context, project.id);
+        let wanted = format!(
+            "The chief could not start: the window did not open: {said}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
+        );
+        if told != [wanted] {
+            failed.push(format!("chief, refused: {told:?}"));
+        }
+        context.close();
+
+        // A member's task fails with it, and its requester is told.
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.pass().unwrap();
+        let cause_now = cause.to_owned();
+        *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |_| Err(cause_now.clone())));
+        context.give(project.id, "zeus", "Parser");
+        context.pass().unwrap();
+        let task = context.task(project.id, 1);
+        let note = task
+            .messages
+            .iter()
+            .find(|m| m.kind == "note")
+            .map(|m| m.body.clone())
+            .unwrap_or_default();
+        if !note.starts_with(&format!("T-1 failed: the launch failed: {said}.")) {
+            failed.push(format!("member: {note}"));
+        }
+        context.close();
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}

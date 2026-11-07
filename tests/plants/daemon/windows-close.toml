@@ -81,6 +81,11 @@
 
 [run]
 engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+quote-less-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "background::"]
+quote-less-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
+quote-less-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_cut_note"]
+quote-less-chief-not-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_not_up::"]
+quote-less-background-notes = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "background::"]
 engine-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
 engine-assigning = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "assigning::"]
 engine-closing = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closing::"]
@@ -756,8 +761,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        .any(|row| row.len() >= BODY_ROW && looks_encoded(row))'''
-replace = '''        .any(|row| row.len() >= BODY_ROW && looks_encoded(row) && false)'''
+find = '''        && (looks_encoded(row) || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+replace = '''        && (false || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
 
 [[plant]]
 name = "windows close: two rows that look encoded are no key"
@@ -1069,8 +1074,11 @@ runs = ["engine-shown", "engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if holds_a_key(&rows) || grouped(&spaced) {'''
-replace = '''    if grouped(&spaced) {'''
+find = '''    if holds_a_key(&rows)
+        || grouped(&spaced)
+'''
+replace = '''    if grouped(&spaced)
+'''
 
 [[plant]]
 name = "windows close: a padding row survives as a row"
@@ -1143,14 +1151,14 @@ find = '''const GROUP: usize = 4;'''
 replace = '''const GROUP: usize = 3;'''
 
 [[plant]]
-name = "windows close: two blanks part a run no more than one"
-meant = "a_value_in_groups_withholds_the_screen"
+name = "windows close: a tab or blanks of any number part nothing"
+meant = "hex_groups_parted_by_a_tab_or_by_blanks_of_any_number_are_a_run"
 runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if false {'''
+find = '''                    (count, _) if count >= 1 && blank => Some(Gap::Blanks),'''
+replace = '''                    (count, _) if count >= 1 && blank => None,'''
 
 [[plant]]
 name = "windows close: a short token does not part a run"
@@ -1174,8 +1182,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''            if last.iter().all(|group| group.len() == last[0].len())'''
-replace = '''            if false && last.iter().all(|group| group.len() == last[0].len())'''
+find = '''                || (one_each && last.iter().all(|(group, _)| group.len() == last[0].0.len()))'''
+replace = '''                || (false && one_each && last.iter().all(|(group, _)| group.len() == last[0].0.len()))'''
 
 [[plant]]
 name = "windows close: groups that look encoded are no run"
@@ -1184,8 +1192,10 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''                || last.iter().all(|group| is_grouped_value(group))'''
-replace = '''                || false'''
+find = '''            if last.iter().all(|(group, _)| is_grouped_value(group))
+'''
+replace = '''            if false
+'''
 
 [[plant]]
 name = "windows close: a hex group is no value"
@@ -1260,8 +1270,12 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if holds_a_key(&rows) || grouped(&spaced) {'''
-replace = '''    if holds_a_key(&rows) || rows.iter().any(|row| grouped(row)) {'''
+find = '''    if holds_a_key(&rows)
+        || grouped(&spaced)
+'''
+replace = '''    if holds_a_key(&rows)
+        || rows.iter().any(|row| grouped(row))
+'''
 
 [[plant]]
 name = "windows close: no token's beginning withholds a screen"
@@ -1322,8 +1336,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''|xox[abprs]-)(?:[A-Za-z0-9]{4}'''
-replace = '''|xox[abprs]-X)(?:[A-Za-z0-9]{4}'''
+find = '''|xox[abprs]-)(?:[A-Za-z0-9_-]{4}'''
+replace = '''|xox[abprs]-X)(?:[A-Za-z0-9_-]{4}'''
 
 [[plant]]
 name = "windows close: the AKIA kind is not found"
@@ -1418,8 +1432,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''(?:[A-Za-z0-9]{4}|\s|$)'''
-replace = '''(?:[A-Za-z0-9]{8}|\s|$)'''
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{8}|\S{0,3}(?:\s|$))'''
 
 [[plant]]
 name = "windows close: a prefix at the end of the text is no token's beginning"
@@ -1428,8 +1442,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''(?:[A-Za-z0-9]{4}|\s|$)'''
-replace = '''(?:[A-Za-z0-9]{4}|\s)'''
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s))'''
 
 [[plant]]
 name = "windows close: a prefix before a blank is no token's beginning"
@@ -1438,8 +1452,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''(?:[A-Za-z0-9]{4}|\s|$)'''
-replace = '''(?:[A-Za-z0-9]{4}|$)'''
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:$))'''
 
 [[plant]]
 name = "windows close: a name that begins like the npm kind is a token"
@@ -1665,9 +1679,9 @@ runs = ["engine-shown"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''        count += 1;
-        between = Some(c);'''
+        last = c;'''
 replace = '''        count = 1;
-        between = Some(c);'''
+        last = c;'''
 
 [[plant]]
 name = "windows close: a blank does not part groups"
@@ -1676,8 +1690,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if !matches!(parted_by, Some('-')) {'''
+find = '''                    (1, ' ' | '-') => Some(Gap::One),'''
+replace = '''                    (1, '-') => Some(Gap::One),'''
 
 [[plant]]
 name = "windows close: a dash does not part groups"
@@ -1686,8 +1700,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if !matches!(parted_by, Some(' ')) {'''
+find = '''                    (1, ' ' | '-') => Some(Gap::One),'''
+replace = '''                    (1, ' ') => Some(Gap::One),'''
 
 [[plant]]
 name = "windows close: any one character parts groups"
@@ -1696,8 +1710,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if parted_by.is_none() {'''
+find = '''                    (1, ' ' | '-') => Some(Gap::One),'''
+replace = '''                    (1, _) => Some(Gap::One),'''
 
 [[plant]]
 name = "windows close: a slash alone makes a row look encoded"
@@ -1708,3 +1722,487 @@ runs = ["engine-shown"]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''    if row.contains(['+', '=']) {'''
 replace = '''    if row.contains(['+', '/', '=']) {'''
+
+[[plant]]
+name = "windows close: quote less: the window's own id is looked at as any value in groups"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if word_edge(row[..start].chars().next_back()) && word_edge(row[end..].chars().next()) {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "windows close: quote less: the id inside a longer word is the window's own too"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if word_edge(row[..start].chars().next_back()) && word_edge(row[end..].chars().next()) {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "windows close: quote less: the window's own id is looked for in the case it was printed in only"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let (lower_row, lower_id) = (row.to_ascii_lowercase(), id.to_ascii_lowercase());'''
+replace = '''    let (lower_row, lower_id) = (row.to_owned(), id.to_owned());'''
+
+[[plant]]
+name = "windows close: quote less: any session is taken out of the screen, a UUID or not"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let Some(id) = own_session.filter(|id| is_uuid(id)) else {'''
+replace = '''    let Some(id) = own_session else {'''
+
+[[plant]]
+name = "windows close: quote less: the screen is looked at with the session of none"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''match screen::withheld(tail, self.own_session.as_deref()) {'''
+replace = '''match screen::withheld(tail, None) {'''
+
+[[plant]]
+name = "windows close: quote less: the exit of a window is told no session of its own"
+meant = "a_pause_note_the_ledger_holds_quotes_the_screen_of_a_claude_window_that_quit_with_its_own_resume_line"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let shown = shown.with_own_session(self.native_session_of(record.id));'''
+replace = '''        let shown = shown.with_own_session(None);'''
+
+[[plant]]
+name = "windows close: quote less: escapes are spelled out once only"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''const PERCENT_LEVELS: usize = 3;'''
+replace = '''const PERCENT_LEVELS: usize = 1;'''
+
+[[plant]]
+name = "windows close: quote less: an escaped sign with two hex digits after it is an ordinary one"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        nested
+            || (escapes.len() >= 2'''
+replace = '''        false
+            || (escapes.len() >= 2'''
+
+[[plant]]
+name = "windows close: quote less: an escape for a letter or a digit is an ordinary one"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                    .any(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(byte)))'''
+replace = '''                    .any(|byte| b"-._~".contains(byte)))'''
+
+[[plant]]
+name = "windows close: quote less: one escape alone is a word written in percent signs"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            || (escapes.len() >= 2
+'''
+replace = '''            || (escapes.len() >= 1
+'''
+
+[[plant]]
+name = "windows close: quote less: a word of three parts is a value in groups"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    parts.len() >= GROUPS
+        && parts'''
+replace = '''    parts.len() >= 3
+        && parts'''
+
+[[plant]]
+name = "windows close: quote less: a part of three characters is a group"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            .all(|part| part.len() >= GROUP && part.chars().all(is_base64_char))'''
+replace = '''            .all(|part| part.len() >= 3 && part.chars().all(is_base64_char))'''
+
+[[plant]]
+name = "windows close: quote less: parts of one length are no value in groups"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        && (parts.iter().all(|part| part.len() == parts[0].len())
+'''
+replace = '''        && (false
+'''
+
+[[plant]]
+name = "windows close: quote less: hex or encoded parts are no value in groups"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            || parts.iter().all(|part| is_grouped_value(part)))'''
+replace = '''            || false)'''
+
+[[plant]]
+name = "windows close: quote less: the quotes and brackets round a word of groups are part of it"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let word = word.trim_matches(|c: char| !(is_base64_char(c) || "_:.-".contains(c)));
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: a word of groups is looked for in no word"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    text.split_whitespace().any(parted_word)'''
+replace = '''    false'''
+
+[[plant]]
+name = "windows close: quote less: hex groups parted by blanks of any number are no run"
+meant = "hex_groups_parted_by_a_tab_or_by_blanks_of_any_number_are_a_run"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                    (count, _) if count >= 1 && blank => Some(Gap::Blanks),'''
+replace = '''                    (count, _) if count >= 1 && blank && false => Some(Gap::Blanks),'''
+
+[[plant]]
+name = "windows close: quote less: a word to a row is a row of words"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if row_words.len() >= 2
+'''
+replace = '''        if row_words.len() >= 1
+'''
+
+[[plant]]
+name = "windows close: quote less: a word of three letters is a long one"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''.all(|word| word.chars().count() >= GROUP && word.chars().all(char::is_alphabetic))'''
+replace = '''.all(|word| word.chars().count() >= 3 && word.chars().all(char::is_alphabetic))'''
+
+[[plant]]
+name = "windows close: quote less: a digit or a point in a word is a letter"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''.all(|word| word.chars().count() >= GROUP && word.chars().all(char::is_alphabetic))'''
+replace = '''.all(|word| word.chars().count() >= GROUP)'''
+
+[[plant]]
+name = "windows close: quote less: three words are a run of words"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            if words >= GROUPS {
+                return true;'''
+replace = '''            if words >= 3 {
+                return true;'''
+
+[[plant]]
+name = "windows close: quote less: a row that is no row of words does not end the run"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        } else {
+            words = 0;
+        }'''
+replace = '''        } else {
+        }'''
+
+[[plant]]
+name = "windows close: quote less: a slash in a row of twelve is a path's"
+meant = "a_row_of_twelve_with_a_slash_in_it_or_one_word_of_letters_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        && (looks_encoded(row) || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+replace = '''        && (looks_encoded(row) || false || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+
+[[plant]]
+name = "windows close: quote less: one word of letters is a word"
+meant = "a_row_of_twelve_with_a_slash_in_it_or_one_word_of_letters_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        && (looks_encoded(row) || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+replace = '''        && (looks_encoded(row) || row.contains('/') || false)'''
+
+[[plant]]
+name = "windows close: quote less: a body is a row of any length"
+meant = "a_row_of_twelve_with_a_slash_in_it_or_one_word_of_letters_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    row.len() >= BODY_ROW
+        && (looks_encoded(row)'''
+replace = '''    row.len() >= 1
+        && (looks_encoded(row)'''
+
+[[plant]]
+name = "windows close: quote less: a prefix with three characters and a blank after it is no token's beginning"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{4}|(?:\s|$))'''
+
+[[plant]]
+name = "windows close: quote less: a dash or an underscore among the four characters after a prefix is no body"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9]{4}|\S{0,3}(?:\s|$))'''
+
+[[plant]]
+name = "windows close: quote less: the user of a URL with no password is hidden by no rule"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    let mut users: Vec<(usize, usize)> = url_user_spans(text);
+    spans.extend(users.iter().copied());'''
+replace = '''    let mut users: Vec<(usize, usize)> = Vec::new();'''
+
+[[plant]]
+name = "windows close: quote less: the user of a URL with no password is no credential to the screen's look"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    URL_CREDENTIALS.is_match(text) || !url_user_spans(text).is_empty()'''
+replace = '''    URL_CREDENTIALS.is_match(text)'''
+
+[[plant]]
+name = "windows close: quote less: the user of a URL with no password has no span for the wrap to cut"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        .chain(url_user_spans(text))
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: ssh names no account"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    "ssh", "sftp", "scp"'''
+replace = '''    "ssx", "sftp", "scp"'''
+
+[[plant]]
+name = "windows close: quote less: a backslash makes no path"
+meant = "the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''Regex::new(r"(?:\S*[/\\]\S*|%[A-Za-z_]'''
+replace = '''Regex::new(r"(?:\S*[/]\S*|%[A-Za-z_]'''
+
+[[plant]]
+name = "windows close: quote less: an environment variable in percent signs makes no path"
+meant = "the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''|%[A-Za-z_][A-Za-z0-9_]*%\S*)")'''
+replace = '''|%[A-Za-z_]X[A-Za-z0-9_]*%\S*)")'''
+
+[[plant]]
+name = "windows close: quote less: paths side by side are not one"
+meant = "the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    while collapsed.contains(&doubled) {'''
+replace = '''    while false && collapsed.contains(&doubled) {'''
+
+[[plant]]
+name = "windows close: quote less: the cause of an adapter that could not prepare a window is told with its path"
+meant = "a_launch_that_failed_says_its_cause_and_never_the_path_of_the_program"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''without_paths(&cause.to_string())'''
+replace = '''cause.to_string()'''
+
+[[plant]]
+name = "windows close: quote less: the cause of a window the host refused is told with its path"
+meant = "a_launch_that_failed_says_its_cause_and_never_the_path_of_the_program"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''without_paths(error)'''
+replace = '''error.to_owned()'''
+
+[[plant]]
+name = "windows close: quote less: authenticating names no secret"
+meant = "authenticating_is_named_whatever_its_ending_and_an_author_is_not"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '''            .any(|word| STEMS.iter().any(|stem| word.starts_with(stem)))'''
+replace = '''            .any(|word| STEMS.iter().any(|stem| word == stem))'''
+
+[[plant]]
+name = "windows close: quote less: unauthenticated names no secret"
+meant = "authenticating_is_named_whatever_its_ending_and_an_author_is_not"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '''const STEMS: [&str; 2] = ["authenticat", "unauthenticat"];'''
+replace = '''const STEMS: [&str; 2] = ["authenticat", "unauthenticax"];'''
+
+[[plant]]
+name = "windows close: quote less: a command is told with what follows its program"
+meant = "a_note_of_the_work_a_window_left_running_names_a_program_and_never_an_argument"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        Some((program, true)) => format!("{program} …"),'''
+replace = '''        Some((program, true)) => process.command.clone(),'''
+
+[[plant]]
+name = "windows close: quote less: a command the list does not name is told whole"
+meant = "a_note_of_the_work_a_window_left_running_names_a_program_and_never_an_argument"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        None => format!("process {}", process.pid),'''
+replace = '''        None => process.command.clone(),'''
+
+[[plant]]
+name = "windows close: quote less: a pause's note names the commands the turn left in words of their own"
+meant = "a_pause_names_the_programs_of_what_its_turn_left_running_and_never_an_argument"
+runs = ["quote-less-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''    let mut commands: Vec<String> = listed.iter().take(QUOTED).map(line).collect();'''
+replace = '''    let mut commands: Vec<String> = listed.iter().take(QUOTED).map(|process| process.command.clone()).collect();'''
+
+[[plant]]
+name = "windows close: quote less: a command with no number is told as process 0"
+meant = "a_command_is_its_program_and_never_an_argument_nor_a_path"
+runs = ["quote-less-background-notes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        None if process.pid == 0 => "a command".to_owned(),'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: sleep is no program of the list"
+meant = "a_note_of_the_work_a_window_left_running_names_a_program_and_never_an_argument"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''"killall", "sleep", "ping",'''
+replace = '''"killall", "ping",'''
+
+[[plant]]
+name = "windows close: quote less: an opening that may hold a secret is quoted"
+meant = "a_cut_note_quotes_no_opening_that_may_hold_a_secret_and_masks_the_rest"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''    if screen::withheld(&[words.to_owned()], None).is_some() {
+        return None;
+    }'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: an opening is quoted unmasked"
+meant = "a_cut_note_quotes_no_opening_that_may_hold_a_secret_and_masks_the_rest"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''    Some(mask(words).text)
+}'''
+replace = '''    Some(words.to_owned())
+}'''
+
+[[plant]]
+name = "windows close: quote less: the words of Pi that were withheld point nowhere"
+meant = "a_hint_that_only_names_a_credential_is_withheld_with_a_pointer_to_where_to_read_it"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '''    "(Pi's words withheld: they may hold a credential; run Pi in a terminal to read what it says)";'''
+replace = '''    "(Pi's words withheld: they may hold a credential)";'''

@@ -15,6 +15,9 @@
 //! when the window closed is the cause, and `cargo …` points at it; the rest of the line is the
 //! record's, which the human can read.
 //!
+//! The notes of what a window left running say its commands the same way ([`program`], used by
+//! `background`): the program the list names and `…`, or the process's number.
+//!
 //! **Never a file's name either** (the re-check T-1224): a path carries a secret in more shapes
 //! than a rule can list, and each was found: a token split by blanks, a key's body of twelve
 //! characters, a URL with its credentials written in percent signs
@@ -33,11 +36,11 @@ const TOOL_CHARS: usize = 40;
 /// version-control and file tools. The program only: what it was given is never said, so a
 /// program that takes a credential on its line (`git`, `npm`, `cargo login`) is named safely,
 /// and the list is of programs worth naming, not of programs that are safe to run.
-const PROGRAMS: [&str; 42] = [
+const PROGRAMS: &[&str] = &[
     "cargo", "rustc", "rustfmt", "npm", "npx", "yarn", "pnpm", "bun", "tsc", "vitest", "jest",
     "biome", "eslint", "prettier", "make", "cmake", "ninja", "git", "ls", "cat", "head", "tail",
     "wc", "diff", "mkdir", "rm", "cp", "mv", "tar", "python", "python3", "pytest", "node", "go",
-    "mvn", "gradle", "dotnet", "java", "ruby", "kill", "pkill", "killall",
+    "mvn", "gradle", "dotnet", "java", "ruby", "kill", "pkill", "killall", "sleep", "ping",
 ];
 
 /// What a note says of `call`, after "; ", or nothing where the call names nothing.
@@ -72,7 +75,7 @@ pub(super) fn words(call: &LastCall) -> String {
 /// The program a shell command begins with, where the list names it, and whether the command
 /// goes on after it. The first word as it is written: a path to it is its last part, and
 /// nothing else is looked at.
-fn program(command: &str) -> Option<(&'static str, bool)> {
+pub(crate) fn program(command: &str) -> Option<(&'static str, bool)> {
     let mut words = command.split_whitespace();
     let first = words.next()?;
     let name = first.rsplit('/').next().unwrap_or(first);

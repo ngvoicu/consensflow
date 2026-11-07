@@ -62,14 +62,16 @@ use cf_harness::contract::{Opening, TurnLeft};
 // words and in those of the builds before it, which said no more: the ledger's, as
 // a meeting with the chief holds no such note and knows one by them.
 use cf_ledger::{
-    continuation, continuation_in, continuation_tasks, cut_turn, ConversationView, MessageView,
-    NewNote, ParticipantView, ProjectView, Stop, CHIEF_CUT, RESUME_WORDS,
+    continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
+    ConversationView, MessageView, NewNote, ParticipantView, ProjectView, Stop, CHIEF_CUT,
+    RESUME_WORDS,
 };
 
 use crate::dispatcher::Dispatcher;
 use crate::handoff::is_handoff;
 use crate::runtime::returning;
 use crate::seams::EngineError;
+use crate::shown::quotable_opening;
 
 /// The Closes under way, by project (the human's, and the one the chief's window
 /// ending makes), as the closes of their windows, and the human's as a whole, to its
@@ -158,7 +160,12 @@ impl Coming {
     /// the task). Each came back by the human's Resume, not by a quit alone (a Close
     /// cuts a turn too), so the words say only that ConsensFlow stopped.
     pub(crate) fn words(&self, opening: Option<&Opening>) -> String {
-        let turn = opening.map(|opening| cut_turn(opening.at.as_deref(), &opening.words));
+        // The opening is the first words of a message the person typed or the board sent: those
+        // that may hold a secret are not quoted, and the rest is masked (T-830, item 1).
+        let turn = opening.map(|opening| match quotable_opening(&opening.words) {
+            Some(words) => cut_turn(opening.at.as_deref(), &words),
+            None => cut_turn_unquoted(opening.at.as_deref()),
+        });
         match (self, turn) {
             (Coming::Chief, None) => format!("{CHIEF_CUT}. {RESUME_WORDS}"),
             (Coming::Chief, Some(turn)) => format!("{CHIEF_CUT}: {turn}. {RESUME_WORDS}"),

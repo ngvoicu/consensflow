@@ -364,7 +364,7 @@ fn a_harness_not_read_yet_is_read_while_another_harness_is_being_read() {
 /// None reaches the ledger, which the page reads, or the caller.
 const BEARER: &str = "SYNTHETICSTDERRTOKEN0123456789";
 const URL_TOKEN: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
-const WITHHELD: &str = "(Pi's words withheld: they may hold a credential)";
+const WITHHELD: &str = cf_proto::models::WORDS_WITHHELD;
 /// What a read of Pi that ended says before the words of Pi.
 const ENDED: &str = "pi --mode rpc ended before it answered (exit 1); it said:\n";
 

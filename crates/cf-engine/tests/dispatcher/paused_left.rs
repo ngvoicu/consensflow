@@ -51,7 +51,7 @@ fn a_pause_whose_window_stops_names_what_its_turn_left_running_once_and_ends_non
     let project = paused_at_rest(&context);
     assert_eq!(
         told_left(&context, project),
-        ["T-1's window stays open while T-1 is paused, with background work its turn left running, which the pause does not end: bash retry-zeewin.sh; pid 4242 (sleep) may be this window's and was not ended"]
+        ["T-1's window stays open while T-1 is paused, with background work its turn left running, which the pause does not end: process 4711; pid 4242 (sleep) may be this window's and was not ended"]
     );
     // Never signalled: the window stays, and nothing is asked to end.
     assert!(context.host.killed().is_empty());
@@ -63,6 +63,38 @@ fn a_pause_whose_window_stops_names_what_its_turn_left_running_once_and_ends_non
     context.pass().unwrap();
     assert_eq!(context.background.left_asked().len(), 1);
     assert_eq!(told_left(&context, project).len(), 1);
+    context.close();
+}
+
+/// What a pause's note says of the work its turn left running is the program the list names and
+/// nothing after it (T-1178, alpha.3's known issue): no argument, no path, no token.
+#[test]
+fn a_pause_names_the_programs_of_what_its_turn_left_running_and_never_an_argument() {
+    let context = Context::new();
+    context.background.leaves(Some(Background {
+        total: 3,
+        processes: vec![
+            BackgroundProcess {
+                pid: 4711,
+                command: "python3 lock.py record --run 7 --token redgreenblue".to_owned(),
+            },
+            BackgroundProcess {
+                pid: 4712,
+                command: "curl -u alice:swordfish https://example.test/upload".to_owned(),
+            },
+            BackgroundProcess {
+                pid: 4713,
+                command: "/Users/me/secret-project/bin/node server.mjs --password hunter22"
+                    .to_owned(),
+            },
+        ],
+        possibly_left: Vec::new(),
+    }));
+    let project = paused_at_rest(&context);
+    assert_eq!(
+        told_left(&context, project),
+        ["T-1's window stays open while T-1 is paused, with background work its turn left running, which the pause does not end: python3 …; process 4712; node …"]
+    );
     context.close();
 }
 
@@ -167,7 +199,7 @@ fn a_pause_of_a_task_held_for_its_job_names_the_job_and_the_loop_it_left() {
     assert!(context.host.killed().is_empty());
     assert_eq!(
         told_left(&context, project.id),
-        ["T-1's window stays open while T-1 is paused, with background work its turn left running, which the pause does not end: bash retry-zeewin.sh; pid 4242 (bash) may be this window's and was not ended"]
+        ["T-1's window stays open while T-1 is paused, with background work its turn left running, which the pause does not end: process 4711; pid 4242 (bash) may be this window's and was not ended"]
     );
     context.close();
 }
@@ -254,11 +286,11 @@ fn a_window_that_ignores_every_round_while_its_work_runs_stays_open_and_its_work
     // The chief is told, once, what runs and how it ends; the human too, on the board.
     assert_eq!(
         did_not_stop(&context, project, "chief"),
-        [kept_for("wsl.exe -d Ubuntu -- bash cf-t3-check.sh")]
+        [kept_for("process 4711")]
     );
     assert_eq!(
         did_not_stop(&context, project, "human"),
-        ["@zeus did not stop for T-1: its turn went on through the interrupt 3 times, and its window runs work that closing it would end: wsl.exe -d Ubuntu -- bash cf-t3-check.sh. ConsensFlow keeps the window open for that work and T-1 paused, and ends none of it; once the work has ended, it interrupts the turn again. To end the work now, delete @zeus's session."]
+        ["@zeus did not stop for T-1: its turn went on through the interrupt 3 times, and its window runs work that closing it would end: process 4711. ConsensFlow keeps the window open for that work and T-1 paused, and ends none of it; once the work has ended, it interrupts the turn again. To end the work now, delete @zeus's session."]
     );
     // Still so ten minutes on, with no key: nothing closes it, and nothing is said again.
     for _ in 0..20 {
@@ -397,9 +429,7 @@ fn a_window_whose_harness_keeps_commands_running_that_no_tree_shows_is_kept_open
     );
     assert_eq!(
         did_not_stop(&context, project.id, "chief"),
-        [kept_for(
-            "the commands its harness keeps running: node ./ignore-signals-cf-stops-live.cjs"
-        )]
+        [kept_for("the commands its harness keeps running: node …")]
     );
     context.close();
 }

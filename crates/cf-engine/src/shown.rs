@@ -41,6 +41,14 @@
 //! nothing else, a lone padding row `=`) and a value in groups (`YWJj-ZGVm-…`). All in
 //! [`screen`].
 //!
+//! Three more notes quote less by the same rule. **The notes of what a window left running**
+//! (`background`) name the program of each command where the list of the last tool call names
+//! it, and `…` where it goes on, or the process's number: never an argument, a path or a header
+//! (T-1178's known issue). **The note of a turn a Resume tells a window was cut** quotes the
+//! first words of the message that began it only where they may hold no secret (the screen's
+//! rule on the words as one row), masked ([`quotable_opening`], T-830). **A window's own session
+//! id** on its screen is not a value in groups ([`Shown::with_own_session`]).
+//!
 //! **How the program ended** is said as the host said it: its signal where it sent one, and a
 //! status above 128 as consistent with the signal it names (143 SIGTERM, 137 SIGKILL,
 //! [`signalled`]), no more; whether ConsensFlow sent it is said only from what the engine
@@ -72,6 +80,7 @@ use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+pub(crate) use call::program as command_program;
 use mask::mask;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -79,6 +88,18 @@ pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
 pub use quotable::{quotable, WORDS_WITHHELD};
+
+/// The first words of a message, as a note may quote them (the opening of a turn a Resume tells
+/// a window was cut): none where they may hold a secret, by the rule of a screen applied to
+/// the words as one row (a name, a token's beginning, a key's shape: [`screen::withheld`]), else
+/// the words masked as every quote of a note is. A key or a password typed in the first words of
+/// a message is the person's, and the note is the board's (T-830, item 1).
+pub(crate) fn quotable_opening(words: &str) -> Option<String> {
+    if screen::withheld(&[words.to_owned()], None).is_some() {
+        return None;
+    }
+    Some(mask(words).text)
+}
 
 /// The most lines of a screen a note quotes: the last ones.
 const QUOTE_LINES: usize = 6;
@@ -114,6 +135,9 @@ pub struct Shown {
     part: Part,
     /// The last tool call the window's record shows ([`Shown::with_last_call`]).
     last_call: Option<Arc<LastCall>>,
+    /// The session of the conversation the window ran in, as ConsensFlow has it
+    /// ([`Shown::with_own_session`]).
+    own_session: Option<String>,
 }
 
 impl Shown {
@@ -129,6 +153,7 @@ impl Shown {
             pasted: false,
             part: Part::Unknown,
             last_call: None,
+            own_session: None,
         }
     }
 
@@ -284,7 +309,7 @@ impl Shown {
         // `4aeb48564`: where the extent of a secret cannot be proven the whole screen goes, and
         // no row beside a secret is ever quoted. Every line the host sent is looked at, not only
         // those the quote would keep, and the rows together as well as one by one (`screen`).
-        match screen::withheld(tail) {
+        match screen::withheld(tail, self.own_session.as_deref()) {
             Some(screen::Withheld::Secret) => {
                 said.push_str("; its last screen lines named a secret, so they are left out");
                 return said;
@@ -309,6 +334,15 @@ impl Shown {
     /// signal's source is told only by that, never by an exit code.
     pub(crate) fn with_part(mut self, part: Part) -> Self {
         self.part = part;
+        self
+    }
+
+    /// This exit with the session of the conversation its window ran in, as ConsensFlow has it
+    /// (the ledger's `native_session`): the id a harness prints when it quits
+    /// (`claude --resume <id>`) is no secret, and the screen that shows it is quoted. Any other
+    /// id on the screen still withholds it ([`screen`]).
+    pub(crate) fn with_own_session(mut self, session: Option<String>) -> Self {
+        self.own_session = session;
         self
     }
 

@@ -344,6 +344,18 @@ fn the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_it
         // A Basic credential of base64's, as short as four characters.
         "Basic YTpi",
         "basic dXNlcjpwYXNz",
+        // T-1227: fewer than four letters or digits after the prefix and then a blank (the
+        // rest of the token in groups), punctuation among them, and Anthropic's own shape,
+        // whose `ant` is three.
+        "sk-abc defg hijk lmno",
+        "sk-_abc defg hijk lmno",
+        "sk-a b",
+        "sk-ab",
+        "sk-ant-api03-AbCdEf",
+        concat!("gh", "p_ab cdef ghij klmn"),
+        "glpat-.ab cdef ghij klmn",
+        "xoxb-_-abc defg",
+        "pk_live_ab cd",
     ] {
         assert!(begins_a_token(text), "{text}");
     }
@@ -376,7 +388,89 @@ fn the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_it
         "basic",
         "ghx_abcd",
         "xoxz-abcd",
+        // Four characters or more after a prefix that is none, and a prefix of a longer word.
+        "desk-abc defg",
+        "task-abc defg hijk",
     ] {
         assert!(!begins_a_token(text), "{text}");
+    }
+}
+
+/// T-1227: the user of a URL that has no password is a token as often as a name
+/// (`https://TOKEN@host`, GitHub's way to clone with one). It is hidden where the URL's scheme
+/// is not one that names an account to log in as, and found for the screen's own look.
+#[test]
+fn the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account() {
+    for (text, hidden_text) in [
+        (
+            "cloned https://swordfish@vault",
+            "cloned https://[masked]@vault",
+        ),
+        (
+            "https://swordfish@vault.example.test/x.git",
+            "https://[masked]@vault.example.test/x.git",
+        ),
+        ("HTTP://TOKEN@host/", "HTTP://[masked]@host/"),
+        ("wss://abc123@relay", "wss://[masked]@relay"),
+        ("ftp://anonymous@files.test", "ftp://[masked]@files.test"),
+        ("postgres://app@db/main", "postgres://[masked]@db/main"),
+    ] {
+        let masked = mask(text);
+        assert_eq!(masked.text, hidden_text, "{text}");
+        assert_eq!(masked.count, 1, "{text}");
+        assert!(has_url_credentials(text), "{text}");
+    }
+    // An account on ssh and its kin is a name: every pull shows one.
+    for text in [
+        "ssh://git@vault/repo",
+        "SSH://git@vault/repo",
+        "sftp://deploy@files/x",
+        "git://git@host/x",
+        "git+ssh://git@host/x",
+        "rsync://backup@host/x",
+        "svn+ssh://dev@host/x",
+    ] {
+        assert_eq!(hidden(text), text, "{text}");
+        assert!(!has_url_credentials(text), "{text}");
+        assert!(url_credential_spans(text).is_empty(), "{text}");
+    }
+    // No user at all, and an `@` after the first `/`.
+    for text in [
+        "https://vault/x",
+        "https://vault/x@y",
+        "see https://x.test and me@home",
+    ] {
+        assert!(!has_url_credentials(text), "{text}");
+    }
+    // The span is the user's: where the wrap may cut it.
+    let text = "go https://swordfish@vault";
+    let spans = url_credential_spans(text);
+    assert_eq!(spans.len(), 1);
+    assert_eq!(&text[spans[0].0..spans[0].1], "swordfish");
+}
+
+/// T-1227 (startup refusal notes): the paths in the cause of a failed start are replaced, the
+/// words around them kept, and paths side by side are one.
+#[test]
+fn the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept() {
+    for (cause, said) in [
+        (
+            r"C:\Users\me\guard\claude.cmd is not an npm shim",
+            "[path] is not an npm shim",
+        ),
+        ("spawn /usr/local/bin/claude ENOENT", "spawn [path] ENOENT"),
+        (
+            r"%LOCALAPPDATA%\pi-node\current holds no node, and C:\Program Files\Pi\pi.cmd needs one",
+            "[path] holds no node, and [path] needs one",
+        ),
+        (
+            "could not fetch https://example.test/models.json: refused",
+            "could not fetch [path] refused",
+        ),
+        ("%HOME% is unset", "[path] is unset"),
+        ("no harness", "no harness"),
+        ("refused by the test", "refused by the test"),
+    ] {
+        assert_eq!(without_paths(cause), said, "{cause}");
     }
 }

@@ -80,7 +80,7 @@ static FRAME: LazyLock<Regex> = LazyLock::new(|| {
 /// Whether `lines`, taken as one text, may hold a credential.
 fn may_hold_a_credential(lines: &[&str]) -> bool {
     let rows: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))
+    screen::withheld(&rows, None).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))
 }
 
 /// `reason` as it may be kept and told: masked, and where it carries the words of a program

@@ -755,6 +755,9 @@ impl Dispatcher {
             }
             return Ok(());
         }
+        // The conversation the window ran in: the id its harness may have printed as it quit is
+        // no secret in the window's own note (`Shown::with_own_session`).
+        let shown = shown.with_own_session(self.native_session_of(record.id));
         // Whether its program is gone, kept on the conversation it wrote to for the next
         // launch on it, after a restart too (`ownership`, `Launch::previous_gone`).
         if let (Some(gone), Some(conversation)) = (shown.gone(), conversation) {

@@ -486,7 +486,7 @@ fn a_screen_with_a_great_deal_on_it_is_cut_to_its_last_lines_and_a_few_hundred_c
 fn a_key_looking_string_on_the_screen_is_masked_in_the_note_and_in_the_log() {
     let context = Context::new();
     let project = launched(&context);
-    let key = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+    let key = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
     let screen = format!("request with {key} was refused");
     context
         .host

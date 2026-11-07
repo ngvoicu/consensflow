@@ -27,6 +27,7 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         pasted: false,
         part: Part::Unknown,
         last_call: None,
+        own_session: None,
     }
 }
 

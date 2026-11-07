@@ -32,6 +32,9 @@ pub struct FakeHost {
     requests: RefCell<Vec<(String, Value)>>,
     /// The next open is refused.
     pub refuse: Cell<bool>,
+    /// The words the next refused open is refused with, instead of "refused by the test": what
+    /// a host says of a program it could not start (its path, for one).
+    pub refused_with: RefCell<Option<String>>,
     /// The next open is not answered by its deadline: its window opens all the same,
     /// as a loaded host's does after the daemon stopped waiting.
     pub unanswered: Cell<bool>,
@@ -323,7 +326,11 @@ impl FakeHost {
     ) -> Result<Opened, HostError> {
         if self.refuse.replace(false) {
             next_turn().await;
-            let error = "refused by the test".to_owned();
+            let error = self
+                .refused_with
+                .borrow_mut()
+                .take()
+                .unwrap_or_else(|| "refused by the test".to_owned());
             self.recorder
                 .answered(at, json!({ "ok": false, "error": error }));
             return Ok(Opened::Refused { error });

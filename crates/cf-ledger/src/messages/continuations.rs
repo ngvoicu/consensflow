@@ -68,6 +68,18 @@ pub fn cut_turn(at: Option<&str>, words: &str) -> String {
     }
 }
 
+/// [`cut_turn`] for a turn whose first words may hold a secret and are not quoted (T-830, item
+/// 1): it names the turn by when it began, and says why it quotes none.
+pub fn cut_turn_unquoted(at: Option<&str>) -> String {
+    match at {
+        Some(at) => format!(
+            "the turn that began at {at} with words that may hold a secret, so they are not quoted"
+        ),
+        None => "the turn that began with words that may hold a secret, so they are not quoted"
+            .to_owned(),
+    }
+}
+
 /// The tasks a continuation names, in its words or in those of 3.0.5 and the
 /// builds before it, which named every task a window held; none for any other
 /// text. Only the words those builds and [`continuation`] write are read, so no

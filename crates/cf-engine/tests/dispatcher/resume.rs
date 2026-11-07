@@ -1376,6 +1376,80 @@ fn a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words() {
     assert_eq!(continuation_tasks(&note.body), Some(vec![1]));
 }
 
+/// T-830, item 1: the note that tells a window its turn was cut quotes the first 100
+/// characters of the message that began the turn. A key or a password typed there went into a
+/// board note as it was typed, while every other quote goes through the masker. An opening that
+/// may hold a secret is not quoted at all (the rule of a screen, applied to its words as one
+/// row), and the rest of it goes through the masker; the note still names the turn by when it
+/// began, and its tasks still read back from it.
+#[test]
+fn a_cut_note_quotes_no_opening_that_may_hold_a_secret_and_masks_the_rest() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.busy("chief");
+    context.adapter.turn_began_with(
+        "chief",
+        Some("2026-10-15 20:41 UTC"),
+        "the password is hunter22 for the staging box",
+    );
+    context.adapter.turn_began_with(
+        "zeus",
+        None,
+        "[ConsensFlow m-3 · T-1 · task from @chief] deploy with sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv",
+    );
+    let after = quit_and_start(&context);
+
+    after.resume_project(project).unwrap();
+
+    let chief = launch_of(&context, "chief")["message"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_match(
+        &chief,
+        &format!(
+            "^\\[ConsensFlow m-\\d+ · note from ConsensFlow\\]\n{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC with words that may hold a secret, so they are not quoted\\. Go on where you stopped\\.$"
+        ),
+    );
+    let zeus = launch_of(&context, "zeus-amber-pine")["message"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        zeus.split_once('\n').unwrap().1,
+        "ConsensFlow stopped while you were working on T-1, in the turn that began with words that may hold a secret, so they are not quoted. Go on where you stopped."
+    );
+    // The ledger still knows it for zeus's continuation of T-1.
+    let note = cut_notes(&context, tiers.id("zeus-amber-pine")).remove(0);
+    assert_eq!(continuation_tasks(&note.body), Some(vec![1]));
+    for said in [&chief, &zeus, &note.body] {
+        assert!(
+            !said.contains("hunter22") && !said.contains("AbCdEf"),
+            "{said}"
+        );
+    }
+    context.close();
+
+    // What passes is masked as the rest of a note is.
+    let context = Context::new();
+    let tiers = at_work(&context);
+    context.adapter.busy("chief");
+    context.adapter.turn_began_with(
+        "chief",
+        Some("2026-10-15 20:41 UTC"),
+        "mail the report to ci-bot@example.com now",
+    );
+    let after = quit_and_start(&context);
+    after.resume_project(tiers.project.id).unwrap();
+    assert_match(
+        launch_of(&context, "chief")["message"].as_str().unwrap(),
+        &format!(
+            "^\\[ConsensFlow m-\\d+ · note from ConsensFlow\\]\n{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC with \"mail the report to \\[masked\\] now\"\\. Go on where you stopped\\.$"
+        ),
+    );
+}
+
 #[test]
 fn a_cut_note_that_names_its_turn_and_still_holds_is_told_once_across_resumes() {
     let context = Context::new();

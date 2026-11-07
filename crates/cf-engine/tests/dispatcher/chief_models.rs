@@ -275,7 +275,7 @@ fn the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said() {
             assert!(!told[0].contains(leaked), "{leaked} in {}", told[0]);
         }
         assert!(
-            told[0].contains("(Pi's words withheld: they may hold a credential)"),
+            told[0].contains(cf_proto::models::WORDS_WITHHELD),
             "Pi's words were withheld: {}",
             told[0]
         );

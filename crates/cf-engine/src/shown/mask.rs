@@ -6,7 +6,8 @@
 //! short on top of this, and says that it hid something.
 //!
 //! What is hidden, each by `[masked]` in its place:
-//! - the user and password of a URL (`https://user:password@host`);
+//! - the user and password of a URL (`https://user:password@host`), and the user of one with no
+//!   password (`https://TOKEN@host`) unless its scheme names an account (`ssh://git@host`);
 //! - an email address (`ci-bot@example.com`), whose account it names;
 //! - the user and password of a command's `-u user:password` (curl's `-u`, `--user`,
 //!   `--proxy-user`);
@@ -32,7 +33,11 @@
 //! `sk-abcd efgh …` is a key whose body the rules above never see whole, because the window
 //! wrapped it, put blanks in it or decorated it. So a screen that shows the beginning of a token
 //! of a known kind, with a few characters of its body or none, is withheld whole, and no guess is
-//! made of where the token ends.
+//! made of where the token ends. Four characters of the body, `_` and `-` among them, or up to
+//! three and then a blank or the end, count (`sk-abc defg …`, `sk-_ab cd`, `sk-ant-…`).
+//!
+//! **The paths in the cause of a failed start** are replaced ([`without_paths`]): the words of
+//! a program that could not be run say what to do about it, and not the file that was tried.
 //!
 //! **The spans of every rule are found in the text as it was**, joined where they overlap
 //! or touch, and replaced once (T-823): no part of a value is left to a rule that comes
@@ -176,13 +181,14 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
 /// Where a token of a kind with a known prefix begins, with a few characters of its body: the
 /// same kinds as the rule above, with the body cut to what is enough to tell the kind from a
 /// word. `npm_config_cache` and `hf_hub_download` are names, not tokens: their kinds need twelve
-/// characters in a row, and the others four, or a blank, or the end of the text, so that a
-/// prefix a window's wrap cut off the rest of is one too. Of Stripe's keys only the live and
+/// characters in a row, and the others four, or three or fewer and then a blank or the end of
+/// the text (`sk-abc defg …`, `sk-_ab cd`), so that a prefix a window's wrap or a blank cut the
+/// rest of is one too. Of Stripe's keys only the live and
 /// test shapes (`pk_live_…`, `rk_test_…`) count: `pk_users_id` is the name of a constraint.
 #[allow(clippy::expect_used)]
 static PREFIXES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
-        r"\b(?:sk[-_]|(?:pk|rk)_(?:live|test)_|gh[pousr]_|github_pat_|glpat-|xox[abprs]-)(?:[A-Za-z0-9]{4}|\s|$)",
+        r"\b(?:sk[-_]|(?:pk|rk)_(?:live|test)_|gh[pousr]_|github_pat_|glpat-|xox[abprs]-)(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))",
         r"|\b(?:AKIA|ASIA)[A-Z0-9]{4}",
         r"|\bAIza[A-Za-z0-9_-]{4}",
         r"|\beyJ[A-Za-z0-9_-]{4}",
@@ -205,18 +211,52 @@ static BASIC_SCHEME: LazyLock<Regex> = LazyLock::new(|| {
 static URL_CREDENTIALS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(URL_USER_PASSWORD).expect("a pattern of the masker"));
 
-/// Whether `text` holds a URL with a user and a password in it.
+/// The user of a URL that has no password: `scheme://user@host`.
+const URL_USER_ONLY: &str = r"(?i)\b([a-z][a-z0-9+.-]*)://([^\s/@:]+)@";
+
+#[allow(clippy::expect_used)]
+static URL_USER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(URL_USER_ONLY).expect("a pattern of the masker"));
+
+/// The schemes whose URL names the account to log in as, and not a token: `ssh://git@host` is
+/// `git clone`'s way to say which account, and its user is seen in every screen of a pull. The
+/// user of a URL of any other scheme is a token as often as a name (`https://TOKEN@host`,
+/// GitHub's and GitLab's way to clone with one).
+const ACCOUNT_SCHEMES: [&str; 8] = [
+    "ssh", "sftp", "scp", "git", "git+ssh", "ssh+git", "svn+ssh", "rsync",
+];
+
+/// Where the user of each `scheme://user@` in `text` begins and ends, as byte offsets, for a
+/// URL with no password in it and a scheme that is not an [`ACCOUNT_SCHEMES`] one.
+fn url_user_spans(text: &str) -> Vec<(usize, usize)> {
+    URL_USER
+        .captures_iter(text)
+        .filter(|found| {
+            found.get(1).is_some_and(|scheme| {
+                !ACCOUNT_SCHEMES
+                    .iter()
+                    .any(|account| scheme.as_str().eq_ignore_ascii_case(account))
+            })
+        })
+        .filter_map(|found| found.get(2))
+        .map(|user| (user.start(), user.end()))
+        .collect()
+}
+
+/// Whether `text` holds a URL with a user and a password in it, or a user only (see
+/// [`url_user_spans`]).
 pub(crate) fn has_url_credentials(text: &str) -> bool {
-    URL_CREDENTIALS.is_match(text)
+    URL_CREDENTIALS.is_match(text) || !url_user_spans(text).is_empty()
 }
 
 /// Where the user and password of each `scheme://user:password@` in `text` begin and end, as
-/// byte offsets.
+/// byte offsets, and the user of each one that has none (see [`url_user_spans`]).
 pub(crate) fn url_credential_spans(text: &str) -> Vec<(usize, usize)> {
     URL_CREDENTIALS
         .captures_iter(text)
         .filter_map(|found| found.get(1))
         .map(|userinfo| (userinfo.start(), userinfo.end()))
+        .chain(url_user_spans(text))
         .collect()
 }
 
@@ -248,6 +288,34 @@ fn is_base64_marked(found: &str) -> bool {
     found.contains('+') || found.ends_with('=')
 }
 
+/// What a path is replaced with in the cause of a failed start ([`without_paths`]).
+pub const PATH: &str = "[path]";
+
+/// A word with a `/` or a `\` in it, or one that begins with an environment variable in percent
+/// signs (`%LOCALAPPDATA%`): a path, a URL, or part of either.
+#[allow(clippy::expect_used)]
+static PATHISH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:\S*[/\\]\S*|%[A-Za-z_][A-Za-z0-9_]*%\S*)").expect("a pattern of the masker")
+});
+
+/// `text` with each path in it replaced by [`PATH`]: the words of a failed start (a program the
+/// host or an adapter could not run) say what failed and what to do about it, and not the file
+/// that was tried, which is a folder of the person's and may carry a name (the issue
+/// `startup-refusal-notes-can-quote-a-program-path`, T-1178). A word with a `/` or a `\` in it is
+/// one, and so is each word of a path with blanks in it that has one (`C:\Program Files\Pi\pi.cmd`
+/// is two); paths side by side are one. A last part of a path with a blank in it
+/// (`/opt/bin/Claude Code`) is not found: nothing in it says where a path ends, and the words
+/// of a start's failure do not carry a path as their last word.
+pub(crate) fn without_paths(text: &str) -> String {
+    let replaced = PATHISH.replace_all(text, PATH).into_owned();
+    let doubled = format!("{PATH} {PATH}");
+    let mut collapsed = replaced;
+    while collapsed.contains(&doubled) {
+        collapsed = collapsed.replace(&doubled, PATH);
+    }
+    collapsed
+}
+
 /// A text, and how many secrets were hidden in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Masked {
@@ -262,7 +330,8 @@ pub struct Masked {
 /// found by two rules is one.
 pub fn mask(text: &str) -> Masked {
     let mut spans: Vec<(usize, usize)> = Vec::new();
-    let mut users: Vec<(usize, usize)> = Vec::new();
+    let mut users: Vec<(usize, usize)> = url_user_spans(text);
+    spans.extend(users.iter().copied());
     for (at, rule) in RULES.iter().enumerate() {
         for found in rule.pattern.captures_iter(text) {
             let Some(secret) = found.get(rule.secret) else {

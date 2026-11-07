@@ -350,3 +350,28 @@ fn a_name_or_token_cut_in_two_with_a_frame_between_its_halves_is_found_at_the_jo
         assert_eq!(said, withheld(), "{words:?}");
     }
 }
+
+/// T-1276, item d: Pi's harmless hints that only name a credential's word are withheld with the
+/// rest (the cost of the rule: `OPENAI_API_KEY is not set`, `OAuth login expired`, an `npm
+/// install oauth-helper`, `Unexpected token: }`, `monkey: expected integer`), and no list of
+/// them is kept, for each list reopens the case of `token: expired`. What stands in their place
+/// says where to read them.
+#[test]
+fn a_hint_that_only_names_a_credential_is_withheld_with_a_pointer_to_where_to_read_it() {
+    for hint in [
+        "OPENAI_API_KEY is not set\nrun pi /login",
+        "OAuth login expired. Run /login",
+        "Run npm install oauth-helper",
+        "Unexpected token: }",
+        "monkey: expected integer",
+        "Invalid key: expected string",
+    ] {
+        let said = quotable(&pi_said(hint));
+        assert_eq!(said, withheld(), "{hint}");
+        assert!(
+            said.ends_with("run Pi in a terminal to read what it says)"),
+            "{said}"
+        );
+        assert!(!said.contains(hint.lines().next().unwrap()), "{said}");
+    }
+}
