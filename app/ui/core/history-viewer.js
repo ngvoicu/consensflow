@@ -101,10 +101,11 @@ export class HistoryViewer {
     }
     this.#find.value = ''
     const once = this.#shown.formerly
-    this.#formerly.textContent = once
-      ? `once @${once}, before members were named by their model`
-      : ''
-    this.#formerly.hidden = !once
+    this.#formerly.textContent =
+      once.length > 0
+        ? `once ${once.map((name) => `@${name}`).join(', then ')}, before members were named by their model's id`
+        : ''
+    this.#formerly.hidden = once.length === 0
     this.#body.replaceChildren(element('p', 'history-note', 'Reading the history…'))
     if (!this.#dialog.open) this.#dialog.showModal()
     await this.#read()
@@ -458,11 +459,19 @@ function clock(iso) {
 }
 
 /**
- * The name a member, or a window of one, went by before the members were named by their
- * model (harness-models): the ready-made agent its row still names, where its handle is no
- * longer that name. None for the chief, whose agent was only what it ran on.
+ * The names a member, or a window of one, went by before it was named by its model's id
+ * (harness-models), the oldest first: the ready-made agent its row still names, where its
+ * handle is no longer that name (none for the chief, whose agent was only what it ran on),
+ * then each name it left (`formerHandles`). A window's own are its member's names with its
+ * two words after, which it leaves out.
  */
 function formerly(participant) {
-  if (participant.role === 'chief' || !participant.agent) return null
-  return (participant.member ?? participant.handle) === participant.agent ? null : participant.agent
+  if (participant.role === 'chief') return []
+  const session = participant.session ? `-${participant.session}` : null
+  const left = (participant.formerHandles ?? []).map((handle) =>
+    session !== null && handle.endsWith(session) ? handle.slice(0, -session.length) : handle,
+  )
+  const names = participant.agent ? [participant.agent, ...left] : left
+  const now = participant.member ?? participant.handle
+  return names.filter((name, at) => name !== now && names.indexOf(name) === at)
 }

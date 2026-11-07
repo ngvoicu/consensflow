@@ -227,6 +227,8 @@ async fn a_message_that_is_no_question_or_is_of_another_project_is_not_answered(
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .unwrap();
     let chief = other

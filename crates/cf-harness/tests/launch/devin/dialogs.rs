@@ -69,3 +69,29 @@ fn the_devin_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_no
     }
     println!("{}", say(&audit, Harness::Devin));
 }
+
+/// Devin draws no timer on its dialogs, and its window takes nothing out of one (T-1273, T-1277):
+/// the command is the question it parses, and `printf 'retry in 5s'` and `printf 'retry in 10s'`
+/// are two requests.
+#[test]
+fn a_devin_call_with_a_time_in_its_command_is_another_dialog_than_the_same_call_with_another_time()
+{
+    let home = Home::new();
+    let window = window(&home.adapter(), &Request::default());
+    let make = |duration: &str| -> Vec<String> {
+        DEVIN_CALL
+            .iter()
+            .map(|line| {
+                line.replace(
+                    "echo ran > shell.txt",
+                    &format!("printf 'retry in {duration}'"),
+                )
+            })
+            .collect()
+    };
+    let five = window.dialog(&make("5s")).expect("a call");
+    let ten = window.dialog(&make("10s")).expect("a call");
+    assert_eq!(window.dialog_identity(&five), five);
+    assert_eq!(window.dialog_identity(&ten), ten);
+    assert_ne!(window.dialog_identity(&five), window.dialog_identity(&ten));
+}

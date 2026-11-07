@@ -253,6 +253,8 @@ async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
                     gate: false,
                     wake_up: None,
                     specs: None,
+                    staff_rules: None,
+                    compaction: None,
                 })
                 .unwrap()
                 .id;

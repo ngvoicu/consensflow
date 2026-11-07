@@ -129,6 +129,8 @@ async fn a_message_of_another_project_is_none_of_this_one_s_even_for_a_handle_th
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .unwrap();
     let chief = other

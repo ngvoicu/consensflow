@@ -220,6 +220,102 @@ fn a_gone_model_the_harness_has_no_default_for_keeps_the_chief_closed_until_a_sw
     assert_eq!(launched["agent"], agent("gpt-5.6-luna", None));
 }
 
+/// The words of a harness that found no default (a Pi read that failed quotes what Pi said,
+/// and what Pi said can carry a credential) reach the human's note without it (T-1270). **The
+/// words of Pi are screened whole, before any cut** (the third reading, F2): if anything in
+/// what was kept of them may hold a credential, none of them is quoted, whatever line it is on
+/// and however a value runs over lines. The description of the failure and its exit code stay,
+/// in the note's one paragraph.
+#[test]
+fn the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said() {
+    for (said, hidden) in [
+        (
+            "Error: Failed to load extension\nextension failed: API_KEY: sk-abcd efghijkl mnopqrst\n\
+             password: correct horse battery staple\nAuthorization: Bearer SYNTHETICSTDERRTOKEN0123456789",
+            vec!["sk-abcd", "efghijkl", "mnopqrst", "horse", "battery", "staple", "SYNTHETICSTDERRTOKEN"],
+        ),
+        // The third reading's probes: a value that runs over lines, and a label that five lines
+        // in a row would have lost to a cut.
+        (
+            "Error: extension failed\nAPI_KEY: sk-abcd\nefghijkl\nmnopqrst",
+            vec!["sk-abcd", "efghijkl", "mnopqrst"],
+        ),
+        (
+            "password: correct\nhorse\nbattery\nstaple\nprovider unavailable",
+            vec!["correct", "horse", "battery", "staple"],
+        ),
+        (
+            "{\n  \"error\": {\n    \"apiKey\": \"sk-abcd efghijkl\"\n  }\n}",
+            vec!["sk-abcd", "efghijkl"],
+        ),
+        // T-1276: a label in a line of the shape of a stack frame, and a URL's user and
+        // password that a line end splits.
+        (
+            "at password: correct (native)\nhorse\nbattery\nstaple",
+            vec!["correct", "horse", "battery", "staple"],
+        ),
+        (
+            "FetchError: https://alder:copper\nwillow@host.invalid/catalog",
+            vec!["alder", "copper", "willow"],
+        ),
+        // T-1276: what a read of Pi that kept only the end of what Pi said puts in place of it.
+        (cf_proto::models::WORDS_WITHHELD, vec![]),
+    ] {
+        let context = harness_without_the_model(Err(format!(
+            "pi --mode rpc ended before it answered (exit 1); it said:\n{said}"
+        )));
+        let project = opened_on_a_gone_model(&context);
+        context.pass().unwrap();
+        let told: Vec<String> = to_human(&context, project)
+            .into_iter()
+            .filter(|body| body.contains("no longer available"))
+            .collect();
+        assert_eq!(told.len(), 1, "{told:?}");
+        for leaked in hidden {
+            assert!(!told[0].contains(leaked), "{leaked} in {}", told[0]);
+        }
+        assert!(
+            told[0].contains("(Pi's words withheld: they may hold a credential)"),
+            "Pi's words were withheld: {}",
+            told[0]
+        );
+        assert!(
+            told[0].contains("ended before it answered (exit 1)"),
+            "the description and the exit code are said: {}",
+            told[0]
+        );
+        assert!(!told[0].contains('\n'), "a note is one paragraph: {}", told[0]);
+    }
+}
+
+/// The words of Pi that hold no credential are in the note, as they were.
+#[test]
+fn the_note_of_a_gone_model_quotes_the_words_of_pi_that_hold_no_credential() {
+    let context = harness_without_the_model(Err(
+        "pi --mode rpc ended before it answered (exit 1); it said:\nError: Failed to load \
+         extension \"/x/e.ts\": boom\nHint: Start without extensions using \"pi -ne\"."
+            .to_owned(),
+    ));
+    let project = opened_on_a_gone_model(&context);
+    context.pass().unwrap();
+    let told: Vec<String> = to_human(&context, project)
+        .into_iter()
+        .filter(|body| body.contains("no longer available"))
+        .collect();
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains("Error: Failed to load extension \"/x/e.ts\": boom")
+            && told[0].contains("Hint: Start without extensions using \"pi -ne\"."),
+        "{}",
+        told[0]
+    );
+    assert!(
+        !told[0].contains("withheld") && !told[0].contains('\n'),
+        "{}",
+        told[0]
+    );
+}
+
 #[test]
 fn a_turn_that_fails_on_a_gone_model_closes_the_window_and_starts_the_chief_on_the_default() {
     let context = harness_without_the_model(Ok(Some("claude-haiku-5-5".to_owned())));

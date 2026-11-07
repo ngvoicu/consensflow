@@ -4,10 +4,10 @@
 //! closed. One opens with the wake-up calls and the specs the human says for it,
 //! in the write that makes it. The human may rename one and write a line under
 //! its name ([`describing`]), write the rules its staff is given
-//! ([`staff_rules`]) and choose the size its Claude members' windows compact at
-//! ([`claude_compaction`]).
+//! ([`staff_rules`]) and choose the size its members' windows compact at, whatever
+//! their harness ([`compaction`]).
 
-mod claude_compaction;
+mod compaction;
 mod describing;
 mod staff_rules;
 
@@ -17,10 +17,8 @@ use cf_proto::specs::SpecsView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::{json, Value};
 
-pub(crate) use claude_compaction::set_claude_compaction;
-pub use claude_compaction::{
-    parse_claude_compaction, CLAUDE_COMPACTION_MAX, CLAUDE_COMPACTION_MIN,
-};
+pub(crate) use compaction::set_compaction;
+pub use compaction::{parse_compaction, COMPACTION_MAX, COMPACTION_MIN};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
 pub(crate) use staff_rules::set_staff_rules;
@@ -68,9 +66,9 @@ pub(crate) struct ProjectRow {
     pub(crate) meeting_at: Option<String>,
     /// The rules the human wrote for the staff; null where there are none.
     pub(crate) staff_rules: Option<String>,
-    /// The size in tokens the human chose for the Claude members' windows to
-    /// compact at; null for Claude's own point.
-    pub(crate) claude_compaction: Option<u32>,
+    /// The size in tokens the human chose for the members' windows to compact at,
+    /// whatever their harness; null for each harness's own point.
+    pub(crate) compaction: Option<u32>,
 }
 
 impl ProjectRow {
@@ -89,7 +87,7 @@ impl ProjectRow {
             description: row.get("description")?,
             meeting_at: row.get("meeting_at")?,
             staff_rules: row.get("staff_rules")?,
-            claude_compaction: row.get("claude_compaction")?,
+            compaction: row.get("compaction")?,
         })
     }
 
@@ -148,11 +146,17 @@ pub struct NewProject {
     pub wake_up: Option<NewWakeUp>,
     /// What it says of specs; none says nothing, and it follows the app's setting.
     pub specs: Option<SpecsChange>,
+    /// The rules the human wrote for its staff; none starts it with none.
+    pub staff_rules: Option<String>,
+    /// The size, in tokens, the human chose for its members' windows to compact
+    /// at; none starts it on each harness's own point.
+    pub compaction: Option<u32>,
 }
 
 impl NewProject {
     /// The request as JSON gives it, read in the order the Node ledger checked it;
-    /// what this build added, the calls (`wakeUp`) and the specs, after it.
+    /// what this build added, the calls (`wakeUp`), the specs, the rules for the staff
+    /// (`rules`) and the compaction (`compaction`), after it.
     pub fn from_json(value: &Value) -> Result<Self, LedgerError> {
         let directory = model::parse_text(value.get("directory"), "directory", 4096)?;
         let name = parse_name(value.get("name"))?;
@@ -192,6 +196,8 @@ impl NewProject {
             gate,
             wake_up: NewWakeUp::from_opening(value.get("wakeUp"))?,
             specs: SpecsChange::from_opening(value.get("specs"))?,
+            staff_rules: parse_staff_rules(value.get("rules"))?,
+            compaction: parse_compaction(value.get("compaction"))?,
         })
     }
 }
@@ -264,7 +270,7 @@ impl NewMember {
     /// unique in the project ([`crate::handles::member_handle`]).
     pub(crate) fn handle(&self, store: &Store, project: i64) -> Result<String, LedgerError> {
         let mut failed = None;
-        let handle = crate::handles::member_handle(
+        let handle = crate::handles::model_handle(
             &self.shown(),
             self.effort.as_deref(),
             &self.harness,
@@ -290,9 +296,10 @@ fn designer_refused() -> LedgerError {
 }
 
 /// A project with its chief, on the harness and model it runs on, and its staff, and
-/// the calls and specs the human said for it, kept in the same write: the
-/// chief's first launch reads the specs, and the project is never seen without
-/// them. Everything the ledger refuses is refused before the write begins.
+/// the calls, specs, rules for the staff and compaction the human said for it, kept in
+/// the same write: the chief's first launch reads the specs and the rules, and the
+/// project is never seen without them. Everything the ledger refuses is refused
+/// before the write begins.
 pub(crate) fn create_project(
     store: &mut Store,
     request: &NewProject,
@@ -354,6 +361,14 @@ pub(crate) fn create_project(
         if let Some(specs) = &request.specs {
             keep_specs(store, id, specs)?;
         }
+        // The setting's own writes, which join this one, so each is checked as it is when
+        // the human says it right after, and logged the same.
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_compaction(store, id, Some(size))?;
+        }
         known_project(store, id)
     })
 }
@@ -390,7 +405,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         description: row.description,
         meeting: row.meeting_at,
         staff_rules: row.staff_rules,
-        claude_compaction: row.claude_compaction,
+        compaction: row.compaction,
     }))
 }
 

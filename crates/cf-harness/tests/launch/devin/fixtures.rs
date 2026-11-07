@@ -224,6 +224,8 @@ pub(super) struct Request {
     pub(super) specs: Option<Variant>,
     /// The folder its project keeps its specs in, relative to the project.
     pub(super) folder: &'static str,
+    /// The size its project's members compact at, where the project chose one.
+    pub(super) compaction: Option<u32>,
 }
 
 impl Default for Request {
@@ -241,6 +243,7 @@ impl Default for Request {
             first_message_ms: FIRST_MESSAGE_MS,
             specs: None,
             folder: ".specs",
+            compaction: None,
         }
     }
 }
@@ -295,7 +298,7 @@ pub(super) fn prepare_as(
                 folder: request.folder,
                 skill,
             }),
-        compaction: None,
+        compaction: request.compaction,
         first_message_ms: request.first_message_ms,
         starts_given_up: 0,
     };

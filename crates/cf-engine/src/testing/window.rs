@@ -162,6 +162,14 @@ impl Window for FakeWindow {
         holds(screen, COMPACTING)
     }
 
+    /// Its harness tells a dialog from another read of its screen as Claude Code's window does,
+    /// which is the real window's own rule (the countdown in Claude Code's warning line, the LSP
+    /// offer from its title down; a time in a command, a hook's reason or a question is the
+    /// request's own, T-1273): the engine's tests hold the real identity, not a copy of it.
+    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
+        cf_harness::testing::claude_dialog_identity(dialog)
+    }
+
     /// Its list of safe declines holds [`DECLINED_OFFER`], declined by the digit of
     /// [`DECLINE_CHOICE`] in its choices.
     fn safe_decline(&self, dialog: &Dialog) -> Option<Decline> {

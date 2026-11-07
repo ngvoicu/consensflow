@@ -1,0 +1,578 @@
+{
+ "pi": "1.5.0",
+ "recorded": "2026-11-06",
+ "scenarios": {
+  "oauth-login": {
+   "with": {
+    "models": [
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     }
+    ],
+    "providers": {
+     "openai-codex": 8
+    }
+   },
+   "without": {
+    "models": [
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     }
+    ],
+    "providers": {
+     "openai-codex": 8
+    }
+   }
+  },
+  "api-key-login": {
+   "with": {
+    "models": [
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-fable-latest",
+      "name": "Anthropic: Claude Fable Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-haiku-latest",
+      "name": "Anthropic: Claude Haiku Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": "none",
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-opus-latest",
+      "name": "Anthropic: Claude Opus Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     }
+    ],
+    "providers": {
+     "openrouter": 388
+    }
+   },
+   "without": {
+    "models": [
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-fable-latest",
+      "name": "Anthropic: Claude Fable Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-haiku-latest",
+      "name": "Anthropic: Claude Haiku Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": "none",
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-opus-latest",
+      "name": "Anthropic: Claude Opus Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     }
+    ],
+    "providers": {
+     "openrouter": 388
+    }
+   }
+  },
+  "env-key": {
+   "with": {
+    "models": [
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-fable-latest",
+      "name": "Anthropic: Claude Fable Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-haiku-latest",
+      "name": "Anthropic: Claude Haiku Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": "none",
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-opus-latest",
+      "name": "Anthropic: Claude Opus Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     }
+    ],
+    "providers": {
+     "openrouter": 388
+    }
+   },
+   "without": {
+    "models": [
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-fable-latest",
+      "name": "Anthropic: Claude Fable Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-haiku-latest",
+      "name": "Anthropic: Claude Haiku Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": "none",
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     },
+     {
+      "provider": "openrouter",
+      "id": "~anthropic/claude-opus-latest",
+      "name": "Anthropic: Claude Opus Latest",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "off": null,
+       "minimal": null,
+       "low": "low",
+       "medium": "medium",
+       "high": "high",
+       "xhigh": "xhigh",
+       "max": "max"
+      }
+     }
+    ],
+    "providers": {
+     "openrouter": 388
+    }
+   }
+  },
+  "custom-provider": {
+   "with": {
+    "models": [
+     {
+      "provider": "mylocal",
+      "id": "my-model-1",
+      "name": "my-model-1",
+      "reasoning": false
+     },
+     {
+      "provider": "mylocal",
+      "id": "my-model-2",
+      "name": "my-model-2",
+      "reasoning": false
+     }
+    ],
+    "providers": {
+     "mylocal": 2
+    }
+   },
+   "without": {
+    "models": [
+     {
+      "provider": "mylocal",
+      "id": "my-model-1",
+      "name": "my-model-1",
+      "reasoning": false
+     },
+     {
+      "provider": "mylocal",
+      "id": "my-model-2",
+      "name": "my-model-2",
+      "reasoning": false
+     }
+    ],
+    "providers": {
+     "mylocal": 2
+    }
+   }
+  },
+  "package-provider": {
+   "with": {
+    "models": [
+     {
+      "provider": "pkgprov",
+      "id": "pkg-model-1",
+      "name": "Pkg 1",
+      "reasoning": false
+     },
+     {
+      "provider": "pkgprov",
+      "id": "pkg-model-2",
+      "name": "Pkg 2",
+      "reasoning": false
+     }
+    ],
+    "providers": {
+     "pkgprov": 2
+    }
+   },
+   "without": {
+    "models": [],
+    "providers": {}
+   }
+  },
+  "extension-provider": {
+   "with": {
+    "models": [
+     {
+      "provider": "extprov",
+      "id": "ext-model-1",
+      "name": "Ext 1",
+      "reasoning": false
+     }
+    ],
+    "providers": {
+     "extprov": 1
+    }
+   },
+   "without": {
+    "models": [],
+    "providers": {}
+   }
+  },
+  "several": {
+   "with": {
+    "models": [
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "mylocal",
+      "id": "my-model-1",
+      "name": "my-model-1",
+      "reasoning": false
+     },
+     {
+      "provider": "mylocal",
+      "id": "my-model-2",
+      "name": "my-model-2",
+      "reasoning": false
+     },
+     {
+      "provider": "extprov",
+      "id": "ext-model-1",
+      "name": "Ext 1",
+      "reasoning": false
+     },
+     {
+      "provider": "pkgprov",
+      "id": "pkg-model-1",
+      "name": "Pkg 1",
+      "reasoning": false
+     },
+     {
+      "provider": "pkgprov",
+      "id": "pkg-model-2",
+      "name": "Pkg 2",
+      "reasoning": false
+     }
+    ],
+    "providers": {
+     "openai-codex": 8,
+     "mylocal": 2,
+     "extprov": 1,
+     "pkgprov": 2
+    }
+   },
+   "without": {
+    "models": [
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "mylocal",
+      "id": "my-model-1",
+      "name": "my-model-1",
+      "reasoning": false
+     },
+     {
+      "provider": "mylocal",
+      "id": "my-model-2",
+      "name": "my-model-2",
+      "reasoning": false
+     }
+    ],
+    "providers": {
+     "openai-codex": 8,
+     "mylocal": 2
+    }
+   }
+  },
+  "nothing": {
+   "with": {
+    "models": [],
+    "providers": {}
+   },
+   "without": {
+    "models": [],
+    "providers": {}
+   }
+  },
+  "package-without-models": {
+   "with": {
+    "models": [],
+    "providers": {}
+   },
+   "without": {
+    "models": [],
+    "providers": {}
+   }
+  },
+  "extension-fails": {
+   "with": {
+    "exit": 1,
+    "stderr": "Error: Failed to load extension \"<agent>/extensions/broken.ts\": Failed to load extension: this extension fails to load\nHint: Start without extensions using \"pi -ne\".\n"
+   },
+   "without": {
+    "models": [
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     },
+     {
+      "provider": "openai-codex",
+      "id": "gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "reasoning": true,
+      "thinkingLevelMap": {
+       "xhigh": "xhigh",
+       "max": "max",
+       "minimal": "low"
+      }
+     }
+    ],
+    "providers": {
+     "openai-codex": 8
+    }
+   }
+  }
+ }
+}

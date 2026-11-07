@@ -38,7 +38,8 @@ pub fn node_staff(request: &Value) -> Value {
 
 /// What neither side of an answer is compared by: what a participant runs on (Node's named
 /// its ready-made agent, this one's its model, its effort, its model's name, its harness's
-/// name, the two as a lane says them, and the mark of one that needs an edit, each held apart, a chief's model aside, which the
+/// name, the two as a lane says them, the mark of one that needs an edit, whether its name
+/// holds its model and the names it left (HMD-12), each held apart, a chief's model aside, which the
 /// recordings were moved to), and of a staff a new
 /// project starts from, all but its harness and roles.
 pub fn hold_apart_what_members_run_on(value: &mut Value) {
@@ -53,6 +54,8 @@ pub fn hold_apart_what_members_run_on(value: &mut Value) {
                     "harnessName",
                     "runsOn",
                     "needsEdit",
+                    "nameApart",
+                    "formerHandles",
                 ] {
                     fields.shift_remove(key);
                 }

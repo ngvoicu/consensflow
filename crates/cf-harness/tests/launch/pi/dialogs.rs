@@ -46,3 +46,37 @@ fn the_pi_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none(
     }
     println!("{}", say(&audit, Harness::Pi));
 }
+
+/// A Pi window's identity of a dialog is its words as they were read (T-1277), as on 3.0.7-alpha.2:
+/// the seconds a title carries in brackets are part of it. Pi 1.5.0's selector built without a
+/// timeout draws `Run the health check? (30s)` and `Run the health check? (45s)` for two requests
+/// that do not expire (T-1273's second review), so the window takes no time out of a title.
+#[test]
+fn a_pi_windows_dialogs_are_their_words_as_read_so_titles_that_say_seconds_are_two_requests() {
+    let home = Home::new();
+    let (adapter, _fakes) = adapter(&home);
+    let plan = prepare(&adapter, &Request::default()).unwrap();
+    let window = &plan.window;
+    let selector = |title: &str| {
+        let screen: Vec<String> = [
+            format!(" {title}"),
+            " \u{2192} Yes".to_owned(),
+            "   No".to_owned(),
+            " \u{2191}\u{2193} navigate  enter select  escape/ctrl+c cancel".to_owned(),
+        ]
+        .to_vec();
+        let dialog = window.dialog(&screen).expect("the selector");
+        assert_eq!(window.dialog_identity(&dialog), dialog);
+        window.dialog_identity(&dialog)
+    };
+    assert_ne!(
+        selector("Run the health check? (30s)"),
+        selector("Run the health check? (45s)")
+    );
+    // A selector with a timeout ticks its title each second: another dialog at each, as on
+    // alpha.2 (Pi's own extension never asks one).
+    assert_ne!(
+        selector("Allow the call to remove the build folder? (29s)"),
+        selector("Allow the call to remove the build folder? (3s)")
+    );
+}

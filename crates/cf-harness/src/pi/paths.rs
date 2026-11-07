@@ -98,7 +98,7 @@ pub(crate) fn global_specmint(env: &Env, variant: Variant) -> Option<String> {
 
 /// A configured path with its `~` expanded (`piPath`): `~` is the home, and
 /// `~/` and, on Windows, `~\` begin a path under it.
-fn expand(configured: &str, env: &Env) -> Result<String, String> {
+pub(crate) fn expand(configured: &str, env: &Env) -> Result<String, String> {
     if configured == "~" {
         return home(env);
     }

@@ -3,7 +3,10 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
+import {
+  compactionOf,
+  createDeliveryExtension,
+} from '../hosts/pi-extension/consensflow-delivery.mjs'
 import { cargoMissing, rustPi } from './rust-channels.mjs'
 
 function fakePi() {
@@ -70,6 +73,11 @@ async function setup(
     pendingMessages = false,
     watchInbox,
     pollMs,
+    compaction,
+    usage,
+    // Pi's `compact()` awaits `abort()` before it sets its compaction state: Pi reads idle
+    // until the test says the compaction has begun (`started()`).
+    compactionStartsLater = false,
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
@@ -91,14 +99,82 @@ async function setup(
     logger: { error: (...args) => logs.push(args.join(' ')) },
     ...(watchInbox ? { watchInbox } : {}),
     ...(pollMs ? { pollMs } : {}),
+    ...(compaction !== undefined ? { compaction } : {}),
   })
   let currentIdle = idle
-  const ctx = context(() => currentIdle)
+  // Pi's own compaction state, as Pi 1.4.0 and 1.5.0 keep it: `isIdle()` is false from the
+  // moment a compaction begins until its state is cleared (`!this._isAgentRunActive &&
+  // !this.isCompacting`, dist/core/agent-session.js), whoever began it.
+  let piCompacting = false
+  const ctx = context(() => currentIdle && !piCompacting)
   ctx.hasUI = hasUI
   ctx.mode = mode
   ctx.hasPendingMessages = () => pendingMessages
   ctx.sessionManager.getLeafEntry = () => leaf
   ctx.ui = { getEditorText: () => editor }
+  // Pi's own context reading and compaction (ExtensionContext, Pi 1.4.0 and 1.5.0): the
+  // reading the test gives, and each compaction, which the test ends itself in Pi's order.
+  let currentUsage = usage
+  const compactions = []
+  ctx.getContextUsage = () => currentUsage
+  const tell = (name, event) => pi.handlers.get(name)?.(event, ctx)
+  // A compaction, begun by `ctx.compact()` (reason `manual`, its `options`) or by Pi itself at
+  // its own point (`threshold`, `overflow`): Pi is not idle from its start; the extension is
+  // told `session_before_compact`. It ends complete (`session_compact`, told while Pi is still
+  // compacting, then its state cleared), failed or cancelled (its state cleared, then
+  // `session_compact_failed`), and only then the caller's callback, as `compact()` returns.
+  const begin = (reason, options, later = false) => {
+    const started = () => {
+      piCompacting = true
+      void tell('session_before_compact', {
+        type: 'session_before_compact',
+        reason,
+        willRetry: false,
+      })
+    }
+    if (!later) started()
+    const handle = {
+      options,
+      reason,
+      started,
+      complete: async (result = { tokensBefore: 150_005, summary: 'the summary' }) => {
+        await tell('session_compact', { type: 'session_compact', reason, willRetry: false })
+        piCompacting = false
+        options?.onComplete?.(result)
+      },
+      fail: async (message = 'the summary model failed') => {
+        piCompacting = false
+        await tell('session_compact_failed', {
+          type: 'session_compact_failed',
+          reason,
+          errorMessage: `Compaction failed: ${message}`,
+          aborted: false,
+          willRetry: false,
+        })
+        options?.onError?.(new Error(message))
+      },
+      // Pi clears its state and tells no extension (it tells `session_compact` only where it
+      // finds the entry it saved).
+      endUntold: async () => {
+        piCompacting = false
+      },
+      cancel: async () => {
+        piCompacting = false
+        await tell('session_compact_failed', {
+          type: 'session_compact_failed',
+          reason,
+          aborted: true,
+          willRetry: false,
+        })
+        options?.onError?.(new Error('Compaction cancelled'))
+      },
+    }
+    compactions.push(handle)
+    return handle
+  }
+  ctx.compact = (options) => {
+    begin('manual', options, compactionStartsLater)
+  }
   const payload =
     typeof record?.id === 'string' &&
     /^m-[a-f0-9]+$/.test(record.id) &&
@@ -127,6 +203,12 @@ async function setup(
     setEditor(value) {
       editor = value
     },
+    setUsage(value) {
+      currentUsage = value
+    },
+    compactions,
+    /** Pi compacts by itself, at its own point. */
+    piCompacts: (reason = 'threshold') => begin(reason),
     ctx,
   }
 }
@@ -536,3 +618,301 @@ it('a Pi session switch at admission reports a retryable zero-byte refusal', {
     await s.close()
   }
 })
+
+// The size a project chose for its members to compact at (smaller-contexts, SCX-28 to
+// SCX-30, T-1265): Pi has no flag or variable for it, so ConsensFlow's extension asks Pi
+// to compact at the window's next rest once its context is past the size. `ctx.compact()`
+// aborts a turn at work, so it is asked only at a rest: idle, nothing pending, the turn not
+// aborted by the human. A size at or above the model's window leaves Pi's own point.
+describe('compaction at a rest', () => {
+  const window = 1_000_000
+  const past = { tokens: 150_005, contextWindow: window, percent: 15 }
+
+  const settle = (s, event = {}) => s.pi.handlers.get('agent_settled')(event, s.ctx)
+
+  it('asks Pi once to compact at a rest once the context is past the size', async () => {
+    const s = await setup(null, { compaction: 100_000, usage: past })
+    try {
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      // A second rest while the first compaction is at work asks for none.
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('asks Pi for no second compaction in the moment before the first has begun, when Pi still reads idle', async () => {
+    const s = await setup(null, { compaction: 100_000, usage: past, compactionStartsLater: true })
+    try {
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      assert.equal(s.ctx.isIdle(), true, 'Pi has not set its compaction state yet')
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      // And a handover in that moment is refused busy: a message sent then would start a turn
+      // that the compaction's own abort() ends.
+      await arrive(s, 1)
+      await s.extension.consume()
+      assert.equal((await ackOf(s, 1)).reason, 'chief busy')
+      s.compactions[0].started()
+      await s.compactions[0].complete()
+      await arrive(s, 2)
+      await s.extension.consume()
+      await sentWithin(s, 1)
+      assert.deepEqual(s.pi.sent, [envelope])
+    } finally {
+      await s.close()
+    }
+  })
+
+  for (const [name, options, event] of [
+    ['a project that chose no size', { usage: past }, {}],
+    ['a context at the size or under it', { compaction: 150_005, usage: past }, {}],
+    [
+      'a size at or above the model window',
+      // Pi's estimate can run past the window before Pi's own overflow handling: the size is
+      // passed, but a size at the window is no point of ours.
+      { compaction: 262_144, usage: { tokens: 270_000, contextWindow: 262_144, percent: 103 } },
+      {},
+    ],
+    [
+      'a context Pi cannot say yet (just after a compaction)',
+      { compaction: 100_000, usage: { tokens: null, contextWindow: window, percent: null } },
+      {},
+    ],
+    ['no reading at all', { compaction: 100_000, usage: undefined }, {}],
+    ['a turn the human aborted', { compaction: 100_000, usage: past }, { aborted: true }],
+    ['a window not idle', { compaction: 100_000, usage: past, idle: false }, {}],
+    ['messages pending', { compaction: 100_000, usage: past, pendingMessages: true }, {}],
+  ]) {
+    it(`asks for no compaction for ${name}`, async () => {
+      const s = await setup(null, options)
+      try {
+        await settle(s, event)
+        assert.equal(s.compactions.length, 0)
+      } finally {
+        await s.close()
+      }
+    })
+  }
+
+  const idOf = (n) => `m-${String(n).padStart(32, '0')}`
+  const arrive = (s, n, more = {}) =>
+    writeFile(
+      join(s.inbox, `${idOf(n)}.json`),
+      `${JSON.stringify({ ...envelopeRecord, id: idOf(n), expiresAt: Date.now() + 30_000, ...more })}\n`,
+    )
+  // A runner's disk can be slow to remove a refused message (an antivirus scans the folder), and a
+  // read that comes meanwhile waits behind it: the answer is waited for longer than the other
+  // tests' 300 ms.
+  const ackOf = (s, n, ms = 5_000) => waitFor(join(s.ack, `${idOf(n)}.json`), ms)
+  const sentWithin = async (s, count, ms = 2_000) => {
+    const deadline = Date.now() + ms
+    while (s.pi.sent.length < count && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
+  // Who began the compaction: ConsensFlow's extension at a rest past the size, or Pi itself at
+  // its own point (no size chosen).
+  const sources = {
+    ours: async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      await settle(s)
+      assert.equal(s.compactions.length, 1)
+      return [s, s.compactions[0]]
+    },
+    "Pi's own": async () => {
+      const s = await setup(null)
+      return [s, s.piCompacts('threshold')]
+    },
+  }
+
+  for (const [source, start] of Object.entries(sources)) {
+    // ConsensFlow's own compaction always ends in its callback; only Pi may end one untold.
+    const ends =
+      source === 'ours'
+        ? ['complete', 'fail', 'cancel']
+        : ['complete', 'fail', 'cancel', 'endUntold']
+    for (const end of ends) {
+      it(`refuses every delivery as busy while ${source} compaction runs, and delivers exactly one after it ends (${end})`, async () => {
+        const [s, compaction] = await start()
+        try {
+          // Pi is not idle for the whole compaction, as real Pi keeps it.
+          assert.equal(s.ctx.isIdle(), false)
+          for (const n of [1, 2, 3]) {
+            await arrive(s, n)
+            await s.extension.consume()
+            // Pi's own word for a window at work: no attempt of the message is spent on it.
+            assert.equal((await ackOf(s, n)).reason, 'chief busy', `attempt ${n}`)
+          }
+          assert.deepEqual(s.pi.sent, [], 'nothing goes in while Pi compacts')
+          await compaction[end]()
+          await arrive(s, 4)
+          await s.extension.consume()
+          await sentWithin(s, 1)
+          assert.deepEqual(s.pi.sent, [envelope])
+          // None of the refused ones comes back later.
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          await s.extension.consume()
+          assert.deepEqual(s.pi.sent, [envelope])
+        } finally {
+          await s.close()
+        }
+      })
+    }
+  }
+
+  it('keeps the expiry and session checks while Pi compacts', async () => {
+    const s = await setup(null)
+    try {
+      s.piCompacts('threshold')
+      await arrive(s, 1, { session: 'previous-session' })
+      await arrive(s, 2, { expiresAt: Date.now() - 1 })
+      await s.extension.consume()
+      assert.equal((await ackOf(s, 1)).reason, 'native session changed')
+      assert.equal(
+        (await waitFor(join(s.expired, '..', 'ack', `${idOf(2)}.json`), 5_000)).reason,
+        'expired-before-send',
+      )
+      assert.deepEqual(s.pi.sent, [])
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('leaves a delivery waiting, unanswered, in a turn that goes on after Pi compacted in its middle', async () => {
+    const s = await setup(null, { idle: false })
+    try {
+      const compaction = s.piCompacts('threshold')
+      await arrive(s, 1)
+      await s.extension.consume()
+      assert.equal((await ackOf(s, 1)).reason, 'chief busy')
+      await compaction.complete()
+      await arrive(s, 2)
+      await s.extension.consume()
+      await assert.rejects(ackOf(s, 2, 300), /timed out/)
+      assert.deepEqual(s.pi.sent, [])
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('leaves a delivery waiting, unanswered, while Pi works a turn and compacts nothing', async () => {
+    const s = await setup(null, { idle: false })
+    try {
+      await arrive(s, 1)
+      await s.extension.consume()
+      await assert.rejects(ackOf(s, 1, 300), /timed out/)
+      assert.deepEqual(s.pi.sent, [])
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('asks again at a later rest after a compaction that failed', async () => {
+    const s = await setup(null, { compaction: 100_000, usage: past })
+    try {
+      await settle(s)
+      await s.compactions[0].fail('Nothing to compact (session too small)')
+      await settle(s)
+      assert.equal(s.compactions.length, 2)
+      assert.ok(s.logs.some((line) => line.includes('Nothing to compact')))
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('reads the size its launch gave it from CF_COMPACTION_TOKENS, and nothing else as one', () => {
+    assert.equal(compactionOf({ CF_COMPACTION_TOKENS: '400000' }), 400_000)
+    for (const text of [undefined, '', '0', '-400000', '400k', '4e5', '400000.5', ' 400000']) {
+      assert.equal(compactionOf({ CF_COMPACTION_TOKENS: text }), undefined, String(text))
+    }
+    assert.equal(compactionOf({ CF_COMPACTION: '400000' }), undefined, 'another name')
+    assert.equal(compactionOf(undefined), undefined)
+  })
+})
+
+// The same, through the real Rust channel (`pi-send`, the daemon's own handover): a Pi window
+// that compacts, whoever began it, answers Busy to every handover however many lifetimes the
+// compaction outlasts, which the adapter reads as Busy and the engine gives back the attempt
+// for (`Admission::Busy`); once it ends, completed, failed or cancelled, the next handover goes
+// in, once. Before, real Pi's `isIdle()` was false all along, the extension left each message
+// unanswered, and each ended `expired-before-send`, a failed attempt (T-1272).
+for (const source of ['ours', "Pi's own"]) {
+  for (const end of ['complete', 'fail', 'cancel']) {
+    it(`hands over nothing but Busy while ${source} compaction runs, and one message after it ends (${end}), through the real channel`, {
+      skip: cargoMissing,
+    }, async () => {
+      const usage = { tokens: 150_005, contextWindow: 1_000_000, percent: 15 }
+      const s =
+        source === 'ours'
+          ? await setup(null, { compaction: 100_000, usage, pollMs: 10 })
+          : await setup(null, { pollMs: 10 })
+      // Real Pi says it took a message as its turn begins (`message_start`).
+      s.pi.sendUserMessage = (text) => {
+        s.pi.sent.push(text)
+        setTimeout(
+          () =>
+            s.pi.handlers.get('message_start')(
+              { message: { role: 'user', content: [{ type: 'text', text }] } },
+              s.ctx,
+            ),
+          5,
+        )
+      }
+      try {
+        let compaction
+        if (source === 'ours') {
+          await s.pi.handlers.get('agent_settled')({}, s.ctx)
+          compaction = s.compactions[0]
+        } else {
+          compaction = s.piCompacts('threshold')
+        }
+        const channel = rustPi()
+        const handover = (ackTimeoutMs) =>
+          channel.send(
+            {
+              session: 'native-pi-session',
+              pane: 'member-pane',
+              generation: 1,
+              claim: async () => ({ ok: true }),
+              launch: {
+                channel: {
+                  kind: 'pi-extension',
+                  inbox: s.inbox,
+                  ack: s.ack,
+                  launchId: 'launch-pi-test',
+                  ackTimeoutMs,
+                },
+              },
+            },
+            envelopeRecord.text,
+          )
+        // Three handovers with a short life, each after the one before has expired: the
+        // compaction outlasts them all. The life is long enough for a slow runner's disk to
+        // answer within it (150 ms was enough on the Mac and zeewin2).
+        for (const attempt of [1, 2, 3]) {
+          const result = await handover(600)
+          assert.equal(
+            result.ack?.reason,
+            'chief busy',
+            `attempt ${attempt}: ${JSON.stringify(result)}`,
+          )
+          assert.equal(result.admitted, false, `attempt ${attempt}`)
+          assert.equal(result.bytesWritten, 0, `attempt ${attempt}`)
+          await new Promise((resolve) => setTimeout(resolve, 700))
+        }
+        assert.deepEqual(s.pi.sent, [], 'nothing went in while Pi compacted')
+        await compaction[end]()
+        const delivered = await handover(10_000)
+        assert.equal(delivered.admitted, true, JSON.stringify(delivered))
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        assert.deepEqual(s.pi.sent, [envelopeRecord.text], 'exactly one delivery after it')
+      } finally {
+        await s.close()
+      }
+    })
+  }
+}

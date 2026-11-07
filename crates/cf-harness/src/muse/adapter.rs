@@ -47,6 +47,33 @@ use crate::shared::{specmint, window_args};
 /// Withholds Muse's question tools for the run: a member asks with `cf ask`.
 const NO_QUESTION_TOOL: &str = "--disable-request-user-input";
 
+/// The smallest real context window of the models Muse lists here, in tokens: the most a
+/// project's compaction size may be for Muse to be given it. Muse takes any limit it is given
+/// (`context_compaction.provider_context_limit_tokens` replaces the model's for the run), so a
+/// limit above the model's real window would put Muse's compaction points past it. Muse 1.4.14
+/// measured 512,000 for muse-spark-1.3-contributor (soft and hard points 15,360 and 460,800 at
+/// fractions 0.03 and 0.9, live on 2026-11-06; 384,000 and 460,800 in a recorded session),
+/// though its catalog says 1,007,997 for every model it lists. Unproven for muse-wonder-1.0,
+/// muse-spark-1.3 and muse-spark-1.2: no session of theirs recorded a threshold. It follows
+/// Muse's real windows when Muse says them (brain: issues/muse-catalog-window-is-not-its-real-one.md).
+pub(super) const REAL_WINDOW: u32 = 512_000;
+
+/// The size the project chose for its members to compact at, as Muse is given it for the run
+/// (at launch and on resume): the model's context limit, so that Muse begins a background
+/// compaction at 75% of it and a blocking one at 90%, its own fractions, and compacts by the
+/// size, never past it. Nothing for a size above [`REAL_WINDOW`], which leaves Muse's own point,
+/// where the project chose none, and for the chief, whose launch is never given one.
+fn compaction_limit(size: Option<u32>) -> Vec<String> {
+    size.filter(|size| *size <= REAL_WINDOW)
+        .map(|size| {
+            vec![
+                "-c".to_owned(),
+                format!("context_compaction.provider_context_limit_tokens={size}"),
+            ]
+        })
+        .unwrap_or_default()
+}
+
 /// Muse Code, as the engine launches its windows.
 pub struct MuseAdapter {
     services: Services,
@@ -165,6 +192,7 @@ impl Adapter for MuseAdapter {
                 .ok_or_else(|| "a Muse window opens on a session id".to_owned())?;
             let mut argv = vec![integration.program];
             argv.extend(integration.args);
+            argv.extend(compaction_limit(launch.compaction));
             argv.extend(invocation.args);
             if launch.role != "chief" {
                 argv.push(NO_QUESTION_TOOL.to_owned());

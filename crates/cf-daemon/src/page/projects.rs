@@ -1,11 +1,11 @@
 //! The projects: listed, opened, resumed, closed, deleted, gated, renamed and
-//! described, given the rules for their staff, and told the size their Claude
-//! members' windows compact at.
+//! described, given the rules for their staff, and told the size their members'
+//! windows compact at.
 
 use cf_base::js;
 use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
-    parse_claude_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
+    parse_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
     NewProject, NewWakeUp, SpecsChange,
 };
 use serde_json::{json, Map, Value};
@@ -25,11 +25,12 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
 /// staff given, each member a harness, a model its harness lists, an effort and a tier, as
 /// Add member takes one, else the last staff, but its members on a harness not installed
 /// here. The gate, the wake-up calls
-/// (`wakeUp`, as `wakeup.set` takes them) and the specs (`specs`, as
-/// `project.specs` takes them) are the human's word for the project, kept in
-/// the write that makes it, so the chief's first launch has them; one the
-/// ledger refuses refuses the whole start, in the words the Project settings
-/// dialog shows for it, and no project is made.
+/// (`wakeUp`, as `wakeup.set` takes them), the specs (`specs`, as
+/// `project.specs` takes them), the rules for the staff (`rules`, as `project.rules`
+/// takes them) and the compaction (`compaction`, as `project.compaction` takes it) are
+/// the human's word for the project, kept in the write that makes it, so the chief's
+/// first launch has them; one the ledger refuses refuses the whole start, in the words
+/// the Project settings dialog shows for it, and no project is made.
 pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let directory = body.get("directory");
     let name = match body.get("name") {
@@ -60,7 +61,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         "chief".to_owned(),
         json!({ "harness": chief.harness, "model": chief.model, "effort": chief.effort }),
     );
-    for key in ["gate", "wakeUp", "specs"] {
+    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {
         if let Some(said) = body.get(key) {
             request.insert(key.to_owned(), said.clone());
         }
@@ -197,18 +198,18 @@ pub(super) async fn rules(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
 }
 
 /// `project.compaction`: the size, in tokens, at which the human has the project's
-/// Claude member windows compact, from 100,000 to 1,000,000, checked before the
-/// project is looked for. `compaction` that is left out or `null` takes the
-/// choice away: Claude's own point. Only the page chooses it: no route of the
+/// member windows compact, whatever their harness, from 100,000 to 1,000,000, checked
+/// before the project is looked for. `compaction` that is left out or `null` takes the
+/// choice away: each harness's own point. Only the page chooses it: no route of the
 /// agents' API does, so no `cf` command, the chief's or a member's, changes it.
 /// Each member window of the project is given it when it next starts (the
 /// harness's launch); the chief's never is.
 pub(super) async fn compaction(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
-    let size = parse_claude_compaction(body.get("compaction"))?;
+    let size = parse_compaction(body.get("compaction"))?;
     let project = page
         .ledger
         .borrow_mut()
-        .set_claude_compaction(body.whole("project")?, size)?;
+        .set_compaction(body.whole("project")?, size)?;
     one("project", project)
 }
 
@@ -249,6 +250,8 @@ fn typed(request: &Map<String, Value>) -> Option<NewProject> {
         },
         wake_up: NewWakeUp::from_opening(request.get("wakeUp")).ok()?,
         specs: SpecsChange::from_opening(request.get("specs")).ok()?,
+        staff_rules: parse_staff_rules(request.get("rules")).ok()?,
+        compaction: parse_compaction(request.get("compaction")).ok()?,
     })
 }
 
