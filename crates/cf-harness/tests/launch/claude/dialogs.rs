@@ -282,7 +282,7 @@ fn a_claude_window_blanks_the_time_of_its_own_warning_and_no_time_of_a_request()
     // The warning wrapped before its time: the row under it is the same line.
     let wrapped = |left: &str| {
         let mut screen = rm_prompt(command, "-");
-        screen[3] = format!(" \u{26a0} Claude Code will automatically block this request in");
+        screen[3] = " \u{26a0} Claude Code will automatically block this request in".to_owned();
         screen.insert(
             4,
             format!(" {left}, to avoid holding up an unattended session"),
