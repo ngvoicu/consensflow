@@ -53,7 +53,6 @@ mod a_codex_window_compacting_before_its_first_message_was_closed;
 #[cfg(unix)]
 mod a_codex_windows_role_was_on_its_command_line;
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
-#[cfg(unix)]
 mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 #[path = "regressions/a_command_that_never_exits_held_a_workers_result.rs"]
 mod a_command_that_never_exits_held_a_workers_result;
