@@ -245,3 +245,28 @@ fn the_codex_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_no
     }
     println!("{}", say(&audit, Harness::Codex));
 }
+
+/// A Codex window reads no dialog by shape, and what it says tells dialogs apart is the words as
+/// read (T-1277): whatever dialog it is handed, its identity is that dialog.
+#[test]
+fn a_codex_windows_dialog_identity_is_the_dialog_as_it_was_read() {
+    use cf_harness::contract::Dialog;
+    let home = Home::new();
+    let (adapter, _fakes) = adapter(&home);
+    let plan = prepare(&adapter, &Request::default()).unwrap();
+    let dialog = |left: &str| Dialog {
+        question: format!("Switch models? ({left})"),
+        detail: vec![format!(
+            "Claude Code will automatically block this request in {left}, to avoid it"
+        )],
+        options: vec!["Yes".to_owned(), "No".to_owned()],
+        asks: true,
+        prompt_below: false,
+        closes_after_s: None,
+    };
+    assert_eq!(plan.window.dialog_identity(&dialog("1:57")), dialog("1:57"));
+    assert_ne!(
+        plan.window.dialog_identity(&dialog("1:57")),
+        plan.window.dialog_identity(&dialog("0:03"))
+    );
+}
