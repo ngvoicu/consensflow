@@ -643,3 +643,43 @@ fn its_computer_use_permission_prompt_is_declined_when_the_pane_host_sends_its_t
     let dialog = plan.window.dialog(&tail).expect("the prompt");
     assert!(plan.window.safe_decline(&dialog).is_some(), "{dialog:?}");
 }
+
+// ----- A countdown prompt whose rows above its request slid (T-1300) -----
+
+#[test]
+fn its_permission_prompt_of_the_field_is_one_dialog_at_1_57_and_at_0_05() {
+    // T-1306's window, 2026-11-07: the prompt of a dangerous `rm` of a mounted drive's path, told
+    // twice (m-7776, m-7780) because the second read began at the request, two rows lower.
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let screen = |clock: &str, slid: usize| -> Vec<String> {
+        [
+            "  \u{23bf} \u{a0}Waiting\u{2026}".to_owned(),
+            " Bash command".to_owned(),
+            " Delete the sparse bundle by its literal path".to_owned(),
+            " rm -rf /Volumes/Data/consensflow-builds.sparsebundle; echo \"rm finished rc=$?\"".to_owned(),
+            " \u{2502} Dangerous rm operation on mounted drive path: /Volumes/Data/consensflow-builds.sparsebundle".to_owned(),
+            format!(" \u{26a0} Claude Code will automatically block this request in {clock}, to avoid holding up an unattended session"),
+            " Do you want to proceed?".to_owned(),
+            " \u{276f} 1. Yes".to_owned(),
+            "   2. No".to_owned(),
+            " Esc to cancel \u{b7} Tab to amend".to_owned(),
+        ]
+        .into_iter()
+        .skip(slid)
+        .collect()
+    };
+    let first = plan.window.dialog(&screen("1:57", 0)).expect("the prompt");
+    let second = plan.window.dialog(&screen("0:05", 2)).expect("the prompt");
+    assert_ne!(first.detail, second.detail, "as they were read");
+    assert_eq!(
+        plan.window.dialog_identity(&first),
+        plan.window.dialog_identity(&second)
+    );
+    // The command row slid out too: another read, told as another dialog (T-1282).
+    let third = plan.window.dialog(&screen("0:05", 3)).expect("the prompt");
+    assert_ne!(
+        plan.window.dialog_identity(&first),
+        plan.window.dialog_identity(&third)
+    );
+}

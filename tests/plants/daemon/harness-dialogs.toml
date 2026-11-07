@@ -153,8 +153,15 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = "        if before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some())"
-replace = "        if false && (before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some()))"
+find = '''
+        if before.as_deref() == Some(key.as_str())
+            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())
+        {'''
+replace = '''
+        if false
+            && (before.as_deref() == Some(key.as_str())
+                || (sign == DialogSign::Open && dialog.is_none() && before.is_some()))
+        {'''
 
 [[plant]]
 name = "harness dialogs: the window's own question tool is taken for a dialog of its harness"
@@ -293,7 +300,7 @@ replace = "            let Some(decline) = watch.decline.as_ref() else {"
 
 [[plant]]
 name = "harness dialogs: a decline whose look finds the dialog gone presses its key all the same"
-meant = "a_decline_whose_look_finds_another_dialog_where_its_harness_still_says_one_is_open_presses_nothing"
+meant = "a_hooks_ask_whose_choices_changed_under_the_same_words_is_never_pressed_with_the_digit_it_was_told_with"
 runs = ["hd-engine"]
 
 [[plant.edit]]
@@ -374,16 +381,6 @@ runs = ["hd-engine"]
 file = "crates/cf-engine/src/dialogs.rs"
 find = "                .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after));"
 replace = "                .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after) || after > 0);"
-
-[[plant]]
-name = "harness dialogs: a decline is pressed into another dialog that asks the same question"
-meant = "a_hooks_ask_whose_window_shows_another_dialog_at_its_ten_minutes_is_never_pressed"
-runs = ["hd-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dialogs.rs"
-find = "                        && told.detail == identity.detail"
-replace = "                        && !told.detail.is_empty()"
 
 [[plant]]
 name = "harness dialogs: the window a hook's ask was answered No in is never sent on, and its task sits working"
@@ -912,13 +909,13 @@ find = '            [identity.detail.join(" "), identity.question.clone()].join(
 replace = '            identity.question.clone()'
 
 [[plant]]
-name = "harness dialogs: once: a decline is pressed into any read with the dialog's question and choices, whatever it says above them"
-meant = "a_hooks_ask_another_request_replaces_while_its_status_says_one_is_open_is_never_pressed_into"
+name = "harness dialogs: once: a decline is pressed into a read whose choices are not the ones the dialog was told with"
+meant = "a_hooks_ask_whose_choices_changed_under_the_same_words_is_never_pressed_with_the_digit_it_was_told_with"
 runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = '                        && told.detail == identity.detail'
+find = '                        && told.options == identity.options'
 replace = '                        && true'
 
 [[plant]]
@@ -1145,22 +1142,8 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '''
-    if let Some(top) = super::computer_use_prompt::top(dialog) {
-        detail.drain(..top.min(detail.len()));
-    }
-'''
-replace = ''
-
-[[plant]]
-name = "harness dialogs: computer use: a decline is pressed into another dialog than the prompt told of"
-meant = "another_dialog_where_the_prompt_was_is_never_pressed_escape_would_refuse_it"
-runs = ["hd-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dialogs.rs"
-find = '            if !still {'
-replace = '            if false && !still {'
+find = '    if let Some(top) = super::computer_use_prompt::top(dialog) {'
+replace = '    if let Some(top) = super::computer_use_prompt::top(dialog).filter(|_| false) {'
 
 [[plant]]
 name = "harness dialogs: computer use: a dialog with its choices and another title is declined"
@@ -1307,3 +1290,67 @@ replace = '''
         };
         let _ = &body;
         Ok(())'''
+
+[[plant]]
+name = "harness dialogs: once: the title of a permission dialog and the rows above it are part of its identity, and a countdown prompt is told again when they slide"
+meant = "a_countdown_prompt_only_its_screen_shows_is_told_once_though_its_title_and_the_row_above_it_slid"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '        .position(|row| is_title(row))'
+replace = '        .position(|_| false)'
+
+[[plant]]
+name = "harness dialogs: once: a title Claude Code draws from a tool's own name is part of the identity under the row of the tool that waits"
+meant = "a_prompt_whose_title_is_not_one_claude_code_is_known_to_draw_is_told_once_while_its_tool_waits"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '                .position(|row| is_waiting(row))'
+replace = '                .position(|_| false)'
+
+[[plant]]
+name = "harness dialogs: once: the identity of a permission dialog is cut under its title too, and the description is not part of the request"
+meant = "a_permission_dialogs_title_and_the_row_of_the_tool_that_waits_are_not_its_request"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+        .map(|at| at + 1)
+        .or_else'''
+replace = '''
+        .map(|at| at + 2)
+        .or_else'''
+
+[[plant]]
+name = "harness dialogs: once: a title's words in the request, any row down, cut the rows above them"
+meant = "the_titles_claude_code_draws_are_cut_and_only_in_the_first_rows"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '        .take(TITLE_WITHIN)'
+replace = '        .take(usize::MAX)'
+
+[[plant]]
+name = "harness dialogs: once: a second request under the status of the first is taken for the first, and never told"
+meant = "a_second_hook_ask_under_the_same_open_status_is_told_and_has_its_own_ten_minutes"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())'
+replace = '            || (sign == DialogSign::Open && before.is_some())'
+
+[[plant]]
+name = "harness dialogs: once: a look that reads no words under an open status is another dialog, and a note says so at every redraw"
+meant = "a_look_that_reads_no_words_under_an_open_status_is_the_dialog_told_of"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())'
+replace = '            || false'

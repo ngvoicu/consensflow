@@ -61,6 +61,13 @@
 //! A decline is pressed only into a read whose identity equals that of the dialog told of. The
 //! identity first told is the dialog's for as long as it stays: nothing grows, nothing is held.
 //! A note still quotes the read as it was.
+//! The rule holds whatever the harness's status says (T-1300): where it says a dialog is open all along,
+//! a second request that takes the place of the first is another dialog, told, with a deadline of its
+//! own, and a decline is never pressed into it by the first's. Before, the status said "the dialog told
+//! of" for any read, and a second hook's ask in the same words was never told. Only a look that reads no
+//! words under such a status is the dialog told of. What a harness's window draws above the request (a
+//! permission dialog's title and the row of the tool that waits above it) is not the request's, and its
+//! identity leaves it out, or a tail that slid would tell the same prompt twice (`claude::dialog_identity`).
 //!
 //! The screen is read through [`crate::host::EngineHost::screen`], which no Node trace holds: the
 //! pane host's tail, the last twelve lines with a letter or a digit in them, so no empty line and
@@ -235,10 +242,14 @@ impl Dispatcher {
         let key = identity.as_ref().map_or_else(String::new, |identity| {
             [identity.detail.join(" "), identity.question.clone()].join("\n")
         });
-        // Once a dialog: one its harness says is open stays the one told of until it closes,
-        // whatever words a later look reads of it.
+        // Once a dialog: the same words and the same place are the dialog told of, and a read
+        // whose identity differs is another dialog, whatever the status says: a second request
+        // that opens under the status of the first is told, and has a deadline of its own
+        // (T-1300). A look that read no words under a status that says a dialog is open is the
+        // dialog told of: there is nothing to tell it from.
         let before = record.dialog.borrow().told.clone();
-        if before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some())
+        if before.as_deref() == Some(key.as_str())
+            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())
         {
             if due {
                 self.decline(

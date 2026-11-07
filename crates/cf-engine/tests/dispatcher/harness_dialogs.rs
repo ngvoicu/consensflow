@@ -1006,11 +1006,13 @@ fn hook_reasons_that_say_about_two_and_about_three_minutes_are_two_requests() {
 }
 
 #[test]
-fn a_hooks_ask_another_request_replaces_while_its_status_says_one_is_open_is_never_pressed_into() {
-    // Where its harness says a dialog is open all along (Claude Code's status), the engine does not
-    // tell a second dialog while the first stays told of: the decline of the first, at its ten
-    // minutes, is pressed only into a read that is the first (its command the same), never into
-    // the request that took its place in the same words and choices.
+fn a_hooks_ask_another_request_replaces_while_its_status_says_one_is_open_is_told_and_never_pressed_by_the_firsts_deadline(
+) {
+    // Where its harness says a dialog is open all along (Claude Code's status), a request that takes
+    // the place of the first in the same words and choices is another dialog (T-1300; before, it was
+    // taken for the first and never told). The decline of the first, at its ten minutes, is pressed
+    // only into a read that is the first (its command the same), never into the request that took
+    // its place; the second has its ten minutes from its own note.
     let first = hook_command("sleep 30");
     let second = hook_command("sleep 45");
     let context = Context::new();
@@ -1023,13 +1025,23 @@ fn a_hooks_ask_another_request_replaces_while_its_status_says_one_is_open_is_nev
     until_told(&context, &tiers);
     passes(&context, 9, 60_000);
     context.host.set_snapshot(json!({ "tail": second }));
+    passes(&context, 1, 6_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2), "the second is told");
+    // Past the first's ten minutes: nothing is pressed into the second.
     passes(&context, 4, 60_000);
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
     assert_eq!(answered(&tiers), Vec::<String>::new());
-    // And the first one itself, shown again at its ten minutes, is declined, once.
-    context.host.set_snapshot(json!({ "tail": first }));
-    passes(&context, 2, 5_000);
+    // The second's own ten minutes: "No", once.
+    passes(&context, 7, 60_000);
     assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
+    // The first, shown again, is another dialog than the second: told again, its ten minutes its own.
+    context.host.set_snapshot(json!({ "tail": first }));
+    passes(&context, 1, 6_000);
+    assert_eq!(told_counts(&context, &tiers), (3, 3));
+    passes(&context, 9, 60_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
+    passes(&context, 3, 60_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2"), json!(b"2")]);
 }
 
 #[test]
@@ -1570,4 +1582,216 @@ fn a_prompt_with_a_choice_it_does_not_offer_gets_no_key() {
     passes(&context, 40, 1_000);
     assert_eq!(of_dialogs(&tiers.notes("chief")).len(), 1, "still told");
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}
+
+// ----- A countdown prompt is told once though the rows above it slide (T-1300) -----
+//
+// T-1306's window, 2026-11-07 about 23:4x, Claude Code 2.1.319 on 3.0.7-alpha.3: Claude Code's
+// prompt of a dangerous `rm` of a mounted drive's path was told to the chief twice, m-7776 at 1:57
+// and m-7780 at 0:05. The first read began at `⎿  Waiting…`, the row of the tool that waits, then
+// the dialog's title and its description; the second began at the description. The tail is twelve
+// rows, and the rows above the dialog's request slid out of it as rows below changed. The words of
+// the two notices are the field's; the rows between them, the dialog's own layout, are those of the
+// live recorded prompt of a dangerous `rm` (`CLAUDE_RM_PROMPT_LIVE`).
+
+/// The prompt as the first notice read it, over the tool that waits (its row is drawn with a
+/// no-break space after the glyph), its title and its request, `clock` left to block it.
+fn mounted_drive_prompt(clock: &str) -> Vec<String> {
+    [
+        "  \u{23bf} \u{a0}Waiting\u{2026}",
+        " Bash command",
+        " Delete the sparse bundle by its literal path",
+        " rm -rf /Volumes/Data/consensflow-builds.sparsebundle; echo \"rm finished rc=$?\"",
+        " \u{2502} Dangerous rm operation on mounted drive path: /Volumes/Data/consensflow-builds.sparsebundle",
+    ]
+    .map(str::to_owned)
+    .into_iter()
+    .chain(mounted_drive_prompt_below(clock))
+    .collect()
+}
+
+/// What is under the request, the same in both reads.
+fn mounted_drive_prompt_below(clock: &str) -> Vec<String> {
+    vec![
+        format!(" \u{26a0} Claude Code will automatically block this request in {clock}, to avoid holding up an unattended session"),
+        " Do you want to proceed?".to_owned(),
+        " \u{276f} 1. Yes".to_owned(),
+        "   2. No".to_owned(),
+        " Esc to cancel \u{b7} Tab to amend".to_owned(),
+    ]
+}
+
+/// The prompt as the second notice read it: the tool's row and the title slid out of the tail, so
+/// that it begins at the description.
+fn mounted_drive_prompt_slid(clock: &str) -> Vec<String> {
+    mounted_drive_prompt(clock).split_off(2)
+}
+
+#[test]
+fn a_countdown_prompt_whose_rows_above_its_request_slid_between_two_looks_is_told_once() {
+    // The field's shape: its status says a dialog is open at the first look, and says nothing at the
+    // second (the last seconds, as the prompt is blocked by Claude Code itself).
+    let context = Context::new();
+    let tiers = at_work(&context, &mounted_drive_prompt("1:57"));
+    dialog_is_open(&context);
+    until_told(&context, &tiers);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert!(told[0].contains("\u{23bf}"), "{}", told[0]);
+    context.adapter.with("zeus", |agent| agent.waiting = None);
+    context
+        .host
+        .set_snapshot(json!({ "tail": mounted_drive_prompt_slid("0:05") }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+}
+
+#[test]
+fn a_countdown_prompt_only_its_screen_shows_is_told_once_though_its_title_and_the_row_above_it_slid(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context, &mounted_drive_prompt("1:57"));
+    until_told(&context, &tiers);
+    for (left, screen) in [
+        (60, mounted_drive_prompt("1:00")),
+        // One row slid: the title is the first row.
+        (30, mounted_drive_prompt("0:30").split_off(1)),
+        (5, mounted_drive_prompt_slid("0:05")),
+    ] {
+        let _ = left;
+        context.host.set_snapshot(json!({ "tail": screen }));
+        passes(&context, 6, 1_000);
+    }
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+}
+
+#[test]
+fn a_prompt_whose_title_is_not_one_claude_code_is_known_to_draw_is_told_once_while_its_tool_waits()
+{
+    // The row of the tool that waits sits directly above the dialog's title, whatever the title says.
+    let with_title = |screen: Vec<String>| -> Vec<String> {
+        screen
+            .into_iter()
+            .map(|row| row.replace(" Bash command", " Frobnicate the sparse bundle"))
+            .collect()
+    };
+    let context = Context::new();
+    let tiers = at_work(&context, &with_title(mounted_drive_prompt("1:57")));
+    until_told(&context, &tiers);
+    context
+        .host
+        .set_snapshot(json!({ "tail": mounted_drive_prompt_slid("0:05") }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+}
+
+#[test]
+fn two_requests_that_differ_after_the_title_are_two_prompts_though_the_title_is_not_in_either() {
+    let context = Context::new();
+    let tiers = at_work(&context, &mounted_drive_prompt_slid("1:57"));
+    until_told(&context, &tiers);
+    let other: Vec<String> = mounted_drive_prompt_slid("1:57")
+        .into_iter()
+        .map(|row| row.replace("consensflow-builds", "consensflow-other"))
+        .collect();
+    context.host.set_snapshot(json!({ "tail": other }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+}
+
+// ----- A second dialog under one open status is told (T-1300) -----
+
+/// A hook's ask for `command`, as Claude Code 2.1.317 drew one (`HOOK_ASK`), its reason `reason`.
+fn hook_ask_for(command: &str, reason: &str) -> Vec<String> {
+    vec![
+        format!("\u{2502} {command}"),
+        "\u{2502} Hook tool.check requires confirmation for this command:".to_owned(),
+        format!("\u{2502} {reason}"),
+        "\u{2502} [plugin:cc-plugin-privacy]".to_owned(),
+        "Do you want to proceed?".to_owned(),
+        "\u{276f} 1. Yes".to_owned(),
+        "  2. No".to_owned(),
+        "Esc to cancel \u{b7} Tab to amend".to_owned(),
+    ]
+}
+
+#[test]
+fn a_second_hook_ask_under_the_same_open_status_is_told_and_has_its_own_ten_minutes() {
+    let context = Context::new();
+    let tiers = at_work(
+        &context,
+        &hook_ask_for("git status -s", "Holds your account email address."),
+    );
+    dialog_is_open(&context);
+    until_told(&context, &tiers);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    // Five minutes on the human answers it, and a second ask opens in its place: the status says a
+    // dialog is open all along.
+    passes(&context, 5, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    context.host.set_snapshot(json!({
+        "tail": hook_ask_for("git log --oneline", "Holds a secret token.")
+    }));
+    passes(&context, 7, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (2, 2), "the second is told");
+    let told = of_dialogs(&tiers.notes("chief"));
+    assert!(told[1].contains("git log --oneline"), "{}", told[1]);
+    // The first one's ten minutes are over, and nothing is pressed into the second.
+    passes(&context, 6, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(answered(&tiers), Vec::<String>::new());
+    // The second's own ten minutes: "No", once, and the first was never answered.
+    passes(&context, 5, 60_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")], "\"No\", once");
+    assert_eq!(answered(&tiers).len(), 1, "{:?}", answered(&tiers));
+    passes(&context, 12, 60_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")], "never twice");
+}
+
+#[test]
+fn a_look_that_reads_no_words_under_an_open_status_is_the_dialog_told_of() {
+    let context = Context::new();
+    let tiers = at_work(
+        &context,
+        &hook_ask_for("git status -s", "Holds your email."),
+    );
+    dialog_is_open(&context);
+    until_told(&context, &tiers);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    // A redraw caught halfway: nothing to read, the status still says it is open.
+    context.host.set_snapshot(json!({ "tail": [" (drawing)"] }));
+    passes(&context, 12, 1_000);
+    context.host.set_snapshot(json!({
+        "tail": hook_ask_for("git status -s", "Holds your email.")
+    }));
+    passes(&context, 12, 1_000);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+}
+
+#[test]
+fn a_hooks_ask_whose_choices_changed_under_the_same_words_is_never_pressed_with_the_digit_it_was_told_with(
+) {
+    // The key of a dialog is its words and its question; its choices are held apart. A hook's ask
+    // told with "2. No" whose words stay and whose choices become "2. Yes, and don't ask again" and
+    // "3. No" would take the "2" of its decline for a yes that is kept for good.
+    let context = Context::new();
+    let tiers = at_work(
+        &context,
+        &hook_ask_for("git status -s", "Holds your account email address."),
+    );
+    dialog_is_open(&context);
+    until_told(&context, &tiers);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    let mut changed = hook_ask_for("git status -s", "Holds your account email address.");
+    let at = changed
+        .iter()
+        .position(|row| row.trim_start().starts_with("2. No"))
+        .expect("its No");
+    changed[at] = "  2. Yes, and don't ask again".to_owned();
+    changed.insert(at + 1, "  3. No".to_owned());
+    context.host.set_snapshot(json!({ "tail": changed }));
+    passes(&context, 14, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(answered(&tiers), Vec::<String>::new());
 }
