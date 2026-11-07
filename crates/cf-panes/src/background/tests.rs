@@ -1090,6 +1090,55 @@ fn a_process_whose_parent_is_not_among_the_detached_work_is_never_proved_by_a_bi
     assert!(proved_by_birth(&detached, |_| true).is_empty());
 }
 
+/// What the host names of a Windows window's tree where its agent's command runs in `shell`
+/// (the program of the shell, with its command line), by the number of each process.
+fn named_where_the_command_runs_in(shell: (&str, &str), rest: (&str, &str)) -> Vec<u32> {
+    let window = member(10, "devin.exe", "devin.exe", None);
+    let baseline = marked(std::slice::from_ref(&window), None, Some("devin"));
+    let tree = vec![
+        window,
+        member(41, shell.1, shell.0, of(10)),
+        member(42, rest.1, rest.0, of(41)),
+    ];
+    baseline
+        .left_running(&tree)
+        .processes
+        .iter()
+        .map(|process| process.pid)
+        .collect()
+}
+
+#[test]
+fn a_windows_command_is_named_where_a_shell_runs_it_and_none_where_cmd_exe_does() {
+    // T-1218. The harnesses' commands on Windows run in a shell of their own for each: Git
+    // Bash for Claude Code, Pi and Devin (a Devin member's commands answered `/usr/bin/bash:
+    // line 1: …` on zeewin), a PowerShell for Codex and Muse (the brain's platform-facts says
+    // where each was seen). The host names the shell and what it started, so a
+    // close says what it ended. T-1207's stand-in Devin ran its command under `cmd.exe`, which
+    // is no shell here (npm puts every server behind a `cmd /c`): neither the turn's work nor
+    // detached work, so the close ended the ping and the chief was told nothing of it.
+    for (shell, command) in [
+        ("bash.exe", "bash.exe -c sleep 600; true"),
+        (
+            "powershell.exe",
+            "powershell.exe -NoProfile -Command ping -n 601 127.0.0.1",
+        ),
+    ] {
+        assert_eq!(
+            named_where_the_command_runs_in((shell, command), ("sleep.exe", "sleep.exe 600")),
+            [41, 42],
+            "{shell}"
+        );
+    }
+    assert_eq!(
+        named_where_the_command_runs_in(
+            ("cmd.exe", "cmd /d /c ping -n 601 127.0.0.1 > nul"),
+            ("ping.exe", "ping -n 601 127.0.0.1")
+        ),
+        Vec::<u32>::new()
+    );
+}
+
 #[test]
 fn a_shell_is_told_by_the_host_with_or_without_its_extension() {
     for shell in [

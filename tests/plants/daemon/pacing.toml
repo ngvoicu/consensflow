@@ -512,11 +512,11 @@ runs = ["pacing-rig-lists"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/regressions.rs"
 find = '''
-#[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
+#[path = "regressions/a_codex_window_compacting_before_its_first_message_was_closed.rs"]
 #[cfg(unix)]'''
 replace = '''
 #[cfg(unix)]
-#[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]'''
+#[path = "regressions/a_codex_window_compacting_before_its_first_message_was_closed.rs"]'''
 
 [[plant]]
 name = "pacing merge: lists: the smoke stand-in's attribute sits above its path, as main wrote it"
