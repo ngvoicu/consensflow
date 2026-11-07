@@ -98,9 +98,10 @@ fn a_warning_wrapped_before_its_time_is_the_same_line_at_every_clock() {
     for left in ["0:03", "9:59", "about 3 seconds", "about 2 minutes"] {
         assert_eq!(id(COMMAND, &wrapped(left)), first, "{left}");
     }
+    // The two rows are one row of the identity, the sentence whole with its time blanked.
     assert_eq!(
         first.detail[first.detail.len() - 1],
-        "#, to avoid holding up an unattended session"
+        "\u{26a0} Claude Code will automatically block this request in #, to avoid holding up an unattended session"
     );
     assert_ne!(
         first,
@@ -332,32 +333,167 @@ fn the_live_permission_prompt_with_its_wrapped_warning_is_one_dialog_at_every_ti
     // The kit's live run of 2026-11-07: 120 looks, a second apart, 1:59 down to 0:00, each the same
     // rows but for the clock. The screen wrapped the warning after its time.
     use crate::testing::screens::CLAUDE_RM_PROMPT_LIVE;
-    let at = |clock: &str| {
-        let lines: Vec<String> = CLAUDE_RM_PROMPT_LIVE
+    let lines_at = |clock: &str| -> Vec<String> {
+        CLAUDE_RM_PROMPT_LIVE
             .iter()
             .map(|line| line.replace("in 1:59,", &format!("in {clock},")))
-            .collect();
-        identity(&read(&lines))
+            .collect()
     };
+    let at = |clock: &str| identity(&read(&lines_at(clock)));
     let first = at("1:59");
     for clock in ["1:58", "1:00", "0:59", "0:10", "0:01", "0:00"] {
         assert_eq!(at(clock), first, "{clock}");
     }
-    let rows = &first.detail;
-    assert!(
-        rows.iter().any(|row| row
-            == "\u{26a0} Claude Code will automatically block this request in #, to avoid holding"),
-        "{rows:?}"
-    );
-    // The row that wraps under it holds words only, and is left as it was.
+    // The two rows the screen wrapped it in are one row of the identity, whole, its time blanked.
     assert_eq!(
-        rows.last().map(String::as_str),
-        Some("up an unattended session")
+        first.detail.last().map(String::as_str),
+        Some("\u{26a0} Claude Code will automatically block this request in #, to avoid holding up an unattended session")
     );
+    assert_eq!(first.detail.len(), read(&lines_at("1:59")).detail.len() - 1);
     // The request is its own: another command is another dialog.
     let other: Vec<String> = CLAUDE_RM_PROMPT_LIVE
         .iter()
         .map(|line| line.replace("rm \"$CFA/$CFB\"", "rm \"$CFA/$CFC\""))
         .collect();
     assert_ne!(identity(&read(&other)), first);
+}
+
+/// A command that prints Claude Code's warning, as a box of the prompt draws its rows (the reader
+/// drops the frame), its quoted time `clock`, the quoted line wrapped before its time when
+/// `wrapped`; a hook's header and reason follow the command.
+fn quoting_command(clock: &str, wrapped: bool) -> Vec<String> {
+    let mut lines = owned(&["\u{2502} cat <<'NOTICE'"]);
+    if wrapped {
+        lines.push(format!(
+            "\u{2502} {GLYPH} Claude Code will automatically block this request in"
+        ));
+        lines.push(format!(
+            "\u{2502} {clock}, to avoid holding up an unattended session"
+        ));
+    } else {
+        lines.push(format!("\u{2502} {}", blocks(clock).trim()));
+    }
+    lines.extend(owned(&[
+        "\u{2502} NOTICE",
+        "\u{2502} Hook tool.check requires confirmation for this command:",
+        "\u{2502} Review the generated warning text.",
+        "\u{2502} [plugin:review-warning]",
+        "Do you want to proceed?",
+        "\u{276f} 1. Yes",
+        "  2. No",
+    ]));
+    lines
+}
+
+#[test]
+fn a_warning_a_command_prints_is_the_commands_whatever_time_it_says() {
+    // T-1282's blocker: the words of the warning in a command's rows, above a hook's header, are
+    // command data; two commands that differ in the time they print are two requests.
+    for wrapped in [false, true] {
+        let at = |clock: &str| identity(&read(&quoting_command(clock, wrapped)));
+        assert_ne!(at("1:57"), at("0:03"), "wrapped: {wrapped}");
+        assert_eq!(at("1:57"), at("1:57"));
+    }
+}
+
+#[test]
+fn the_warning_is_the_block_that_ends_the_rows_above_the_question_and_nothing_else() {
+    // Its place: the nearest rows above the question, all of them its sentence. A row after it, a
+    // sentence that is not whole, or the words inside a longer row are not Claude Code's.
+    let raw = |extra_after: &[&str], row: &str| {
+        let mut lines = rm_prompt(COMMAND, &[row.to_owned()]);
+        let at = lines
+            .iter()
+            .position(|l| l.contains("Do you want"))
+            .unwrap();
+        for (n, line) in extra_after.iter().enumerate() {
+            lines.insert(at + n, (*line).to_owned());
+        }
+        identity(&read(&lines))
+    };
+    let sentence = |left: &str| blocks(left).trim().to_owned();
+    // The native shape: ticks collapse.
+    assert_eq!(raw(&[], &sentence("1:57")), raw(&[], &sentence("0:03")));
+    // A row between it and the question: raw.
+    assert_ne!(
+        raw(&[" one more row"], &sentence("1:57")),
+        raw(&[" one more row"], &sentence("0:03"))
+    );
+    // The sentence is not whole: raw.
+    let whole = "to avoid holding up an unattended session";
+    for after in [
+        format!("{whole}."),
+        format!("{whole} (quoted)"),
+        "to avoid holding up an unattended".to_owned(),
+    ] {
+        let row = |left: &str| {
+            format!("{GLYPH} Claude Code will automatically block this request in {left}, {after}")
+        };
+        assert_ne!(raw(&[], &row("1:57")), raw(&[], &row("0:03")), "{after:?}");
+    }
+}
+
+#[test]
+fn a_quoted_warning_above_the_native_one_keeps_its_time_and_the_native_one_is_blanked() {
+    let screen = |quoted: &str, native: &str| -> Vec<String> {
+        owned(&[
+            " Bash command",
+            &format!("\u{2502} printf '{GLYPH} Claude Code will automatically block this request in {quoted}, to avoid holding up an unattended session'"),
+            &format!(" {}", blocks(native).trim()),
+            " Do you want to proceed?",
+            " \u{276f} 1. Yes",
+            "   2. No",
+        ])
+    };
+    let at = |quoted: &str, native: &str| identity(&read(&screen(quoted, native)));
+    assert_eq!(at("1:57", "1:57"), at("1:57", "0:03"));
+    assert_ne!(at("1:57", "1:57"), at("0:03", "1:57"));
+}
+
+#[test]
+fn the_native_warning_is_one_line_whichever_way_the_screen_wrapped_it() {
+    // Wrapped before its time, after it, inside "about 2 minutes", or not at all: the identity is
+    // the sentence with its time blanked.
+    let one = id(COMMAND, &[blocks("1:57")]);
+    let wrapped = |rows: &[&str]| {
+        id(
+            COMMAND,
+            &rows.iter().map(|r| format!(" {r}")).collect::<Vec<_>>(),
+        )
+    };
+    let head = format!("{GLYPH} Claude Code will automatically block this request in");
+    assert_eq!(
+        wrapped(&[&head, "0:03, to avoid holding up an unattended session"]),
+        one
+    );
+    assert_eq!(
+        wrapped(&[
+            &format!("{head} 9:59, to avoid holding"),
+            "up an unattended session"
+        ]),
+        one
+    );
+    assert_eq!(
+        wrapped(&[
+            &format!("{head} about"),
+            "2 minutes, to avoid holding up an unattended session"
+        ]),
+        one
+    );
+    assert_eq!(
+        wrapped(&[
+            &format!("{head} about 2"),
+            "minutes, to avoid holding up an",
+            "unattended session"
+        ]),
+        one
+    );
+    // A clock that is wider wraps it elsewhere: the same line.
+    assert_eq!(
+        wrapped(&[
+            &format!("{head} 10:00, to avoid holding up"),
+            "an unattended session"
+        ]),
+        one
+    );
 }

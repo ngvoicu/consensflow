@@ -830,36 +830,6 @@ replace = "pub const QUESTION: &str = \"Which format should I use for my reply: 
 # (`launch claude::`) and the rig's.
 
 [[plant]]
-name = "harness dialogs: once: the time in Claude Code's warning line is never blanked, and a ticking clock is another dialog"
-meant = "the_time_in_the_warning_is_the_same_dialog_at_every_clock"
-runs = ["hd-claude-identity"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '                Some((time, length)) => format!("{WARNING} #{}", &time[length..]),'
-replace = '                Some(_) => row.clone(),'
-
-[[plant]]
-name = "harness dialogs: once: the row under a warning wrapped before its time is never blanked"
-meant = "a_warning_wrapped_before_its_time_is_the_same_line_at_every_clock"
-runs = ["hd-claude-identity"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '            if after_warning {'
-replace = '            if after_warning && false {'
-
-[[plant]]
-name = "harness dialogs: once: a row that begins with a time is blanked as the end of the warning whatever is above it"
-meant = "a_hooks_reason_that_begins_with_a_time_is_the_hooks_own_words"
-runs = ["hd-claude-identity"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '            let after_warning = std::mem::take(&mut wrapped);'
-replace = '            let after_warning = !std::mem::take(&mut wrapped) || true;'
-
-[[plant]]
 name = "harness dialogs: once: the words of Claude Code's warning are known without the warning sign that begins them"
 meant = "a_time_in_the_request_is_part_of_it_whatever_words_come_before_it"
 runs = ["hd-claude-identity"]
@@ -1004,3 +974,111 @@ runs = ["hd-base-dialog"]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = '        super::dialog_identity::identity(dialog)'
 replace = '        super::dialog_identity::identity(&dialog.clone())'
+
+# T-1282: Claude Code's warning is known by its place, the last block above the question, and its
+# whole sentence; a warning a command or a hook's reason quotes is the request's own words.
+
+[[plant]]
+name = "harness dialogs: once: place: the time in Claude Code's warning line is never blanked, and a ticking clock is another dialog"
+meant = "the_time_in_the_warning_is_the_same_dialog_at_every_clock"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '    rows.push(format!("{WARNING} #{AFTER_TIME}"));'
+replace = '    rows.push(detail[start..].join(" "));'
+
+[[plant]]
+name = "harness dialogs: once: place: the rows a wrap broke the warning into are joined with no space, and the sentence is never whole"
+meant = "a_warning_wrapped_before_its_time_is_the_same_line_at_every_clock"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '    let line = detail[start..].join(" ");'
+replace = '    let line = detail[start..].join("");'
+
+[[plant]]
+name = "harness dialogs: once: place: rows after the warning's sentence are ignored, and a quoted warning above a hook's header is blanked"
+meant = "a_warning_a_command_prints_is_the_commands_whatever_time_it_says"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '        .is_some_and(|after| after == AFTER_TIME);'
+replace = '        .is_some_and(|after| after.starts_with(AFTER_TIME));'
+
+[[plant]]
+name = "harness dialogs: once: place: a sentence that is not whole is taken for the warning"
+meant = "the_warning_is_the_block_that_ends_the_rows_above_the_question_and_nothing_else"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '        .is_some_and(|after| after == AFTER_TIME);'
+replace = '        .is_some();'
+
+[[plant]]
+name = "harness dialogs: once: place: the first row that begins with the warning's words is taken for it, not the nearest to the question"
+meant = "a_quoted_warning_above_the_native_one_keeps_its_time_and_the_native_one_is_blanked"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '    let Some(start) = detail.iter().rposition(|row| row.starts_with(WARNING)) else {'
+replace = '    let Some(start) = detail.iter().position(|row| row.starts_with(WARNING)) else {'
+
+[[plant]]
+name = "harness dialogs: once: place: a command that prints the warning is read by its first row alone, and the first command's decline is pressed into the second"
+meant = "a_command_that_quotes_the_warning_never_has_the_first_commands_decline_pressed_into_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '    let line = detail[start..].join(" ");'
+replace = '    let line = detail[start].clone();'
+
+[[plant]]
+name = "harness dialogs: once: place: two commands that print the warning with another time are one request, and the second is never told"
+meant = "two_commands_that_quote_the_warning_with_another_time_are_two_requests"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '        .is_some_and(|after| after == AFTER_TIME);'
+replace = '        .is_some_and(|after| after.starts_with(AFTER_TIME));'
+
+[[plant]]
+name = "harness dialogs: once: place: a native countdown under a quoted one blanks the quoted time too"
+meant = "a_native_countdown_under_a_quoted_one_ticks_alone"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '    let Some(start) = detail.iter().rposition(|row| row.starts_with(WARNING)) else {'
+replace = '    let Some(start) = detail.iter().position(|row| row.starts_with(WARNING)) else {'
+
+[[plant]]
+name = "harness dialogs: once: place: the pin of Claude's adapter lets the added method move"
+meant = "the_prompt_readers_the_release_heads_windows_are_borrowed_for_are_the_release_heads"
+runs = ["hd-base-dialog"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
+        super::dialog_identity::identity(dialog)
+    }
+
+'''
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Claude, snapshot)'''
+replace = '''    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
+        super::dialog_identity::identity(dialog)
+    }
+
+    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
+        input_box::read_empty(Harness::Claude, snapshot)'''

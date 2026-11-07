@@ -1065,3 +1065,127 @@ fn claude_codes_live_permission_prompt_counting_down_is_told_once_whichever_way_
         assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
     }
 }
+
+// ----- A warning quoted in a command is the command's own (T-1282) -----
+//
+// Claude Code draws its own warning as the last block above its question. A command that holds the
+// same words (a here-document that prints them) is command data: two commands that differ only in
+// the time they quote are two requests, and the decline of the first is never pressed into the
+// second. The reader drops the frame (`│`) of a box's rows, so the words alone do not tell the
+// block from a quoted line: its place does.
+
+/// A hook's ask for a command that prints Claude Code's warning, as the screen shows it, `clock` the
+/// time in the quoted line, which is wrapped before its time when `wrapped`. The quoted rows are
+/// the command's, above the hook's header and reason.
+fn warning_as_command_data(clock: &str, wrapped: bool) -> Vec<String> {
+    let mut screen = vec!["\u{2502} cat <<'NOTICE'".to_owned()];
+    if wrapped {
+        screen.push(
+            "\u{2502} \u{26a0} Claude Code will automatically block this request in".to_owned(),
+        );
+        screen.push(format!(
+            "\u{2502} {clock}, to avoid holding up an unattended session"
+        ));
+    } else {
+        screen.push(format!(
+            "\u{2502} \u{26a0} Claude Code will automatically block this request in {clock}, to avoid holding up an unattended session"
+        ));
+    }
+    screen.extend(
+        [
+            "\u{2502} NOTICE",
+            "\u{2502} Hook tool.check requires confirmation for this command:",
+            "\u{2502} Review the generated warning text.",
+            "\u{2502} [plugin:review-warning]",
+            "Do you want to proceed?",
+            "\u{276f} 1. Yes",
+            "  2. No",
+        ]
+        .map(str::to_owned),
+    );
+    screen
+}
+
+#[test]
+fn two_commands_that_quote_the_warning_with_another_time_are_two_requests() {
+    for wrapped in [false, true] {
+        let context = Context::new();
+        let tiers = at_work(&context, &warning_as_command_data("1:57", wrapped));
+        until_told(&context, &tiers);
+        context
+            .host
+            .set_snapshot(json!({ "tail": warning_as_command_data("0:03", wrapped) }));
+        passes(&context, 12, 1_000);
+        assert_eq!(told_counts(&context, &tiers), (2, 2), "wrapped: {wrapped}");
+        assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    }
+}
+
+#[test]
+fn a_command_that_quotes_the_warning_never_has_the_first_commands_decline_pressed_into_it() {
+    for wrapped in [false, true] {
+        let context = Context::new();
+        let tiers = at_work(&context, &warning_as_command_data("1:57", wrapped));
+        until_told(&context, &tiers);
+        passes(&context, 1, 595_000);
+        assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+        // The second command replaces the first, five seconds before the first one's ten minutes.
+        context
+            .host
+            .set_snapshot(json!({ "tail": warning_as_command_data("0:03", wrapped) }));
+        passes(&context, 1, 5_000);
+        assert_eq!(
+            keys_to(&context, &tiers),
+            Vec::<serde_json::Value>::new(),
+            "wrapped: {wrapped}"
+        );
+        assert_eq!(told_counts(&context, &tiers), (2, 2), "wrapped: {wrapped}");
+        // And it has the ten minutes of its own, from its own note.
+        passes(&context, 9, 60_000);
+        assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+        passes(&context, 2, 60_000);
+        assert_eq!(
+            keys_to(&context, &tiers),
+            [json!(b"2")],
+            "wrapped: {wrapped}"
+        );
+    }
+}
+
+#[test]
+fn a_native_countdown_under_a_quoted_one_ticks_alone() {
+    // The command quotes the warning with a time, and Claude Code's own warning, the last block
+    // above the question, counts down under it: only the native time is a clock.
+    let screen = |quoted: &str, native: &str| -> Vec<String> {
+        vec![
+            " Bash command".to_owned(),
+            "\u{2502} cat <<'NOTICE'".to_owned(),
+            format!("\u{2502} \u{26a0} Claude Code will automatically block this request in {quoted}, to avoid holding up an unattended session"),
+            "\u{2502} NOTICE".to_owned(),
+            "\u{2502} Dangerous rm operation on possibly-empty variable path: \"$A/$B\" in `rm \"$A/$B\"`".to_owned(),
+            format!(" \u{26a0} Claude Code will automatically block this request in {native}, to avoid holding up an unattended session"),
+            " Do you want to proceed?".to_owned(),
+            " \u{276f} 1. Yes".to_owned(),
+            "   2. No".to_owned(),
+        ]
+    };
+    let context = Context::new();
+    let tiers = at_work(&context, &screen("1:57", "1:57"));
+    counting_down(
+        &context,
+        117,
+        3,
+        |left| screen("1:57", &clock(left)),
+        |_| {},
+    );
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    // The quoted time is the command's own: another time there is another command.
+    counting_down(
+        &context,
+        117,
+        100,
+        |left| screen("0:03", &clock(left)),
+        |_| {},
+    );
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
+}

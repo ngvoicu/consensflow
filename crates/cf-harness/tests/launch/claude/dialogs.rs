@@ -369,3 +369,60 @@ fn a_claude_windows_offer_is_one_dialog_from_its_title_down_and_a_cut_one_is_sti
     );
     assert!(window.safe_decline(&cut).is_some());
 }
+
+/// T-1282's blocker through the real window: a command that prints Claude Code's warning (a
+/// here-document), asked about by a hook, above the hook's header and reason. The quoted time is
+/// the command's own: two such commands are two requests, though the window's list of safe
+/// declines answers both the same way after ten minutes.
+#[test]
+fn a_claude_windows_command_that_prints_the_warning_is_not_blanked_whatever_its_time() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let window = &plan.window;
+    let screen = |clock: &str, wrapped: bool| -> Vec<String> {
+        let mut rows = vec!["\u{2502} cat <<'NOTICE'".to_owned()];
+        if wrapped {
+            rows.push(
+                "\u{2502} \u{26a0} Claude Code will automatically block this request in".to_owned(),
+            );
+            rows.push(format!(
+                "\u{2502} {clock}, to avoid holding up an unattended session"
+            ));
+        } else {
+            rows.push(format!("\u{2502} \u{26a0} Claude Code will automatically block this request in {clock}, to avoid holding up an unattended session"));
+        }
+        rows.extend(
+            [
+                "\u{2502} NOTICE",
+                "\u{2502} Hook tool.check requires confirmation for this command:",
+                "\u{2502} Review the generated warning text.",
+                "\u{2502} [plugin:review-warning]",
+                "Do you want to proceed?",
+                "\u{276f} 1. Yes",
+                "  2. No",
+            ]
+            .map(str::to_owned),
+        );
+        rows
+    };
+    for wrapped in [false, true] {
+        let first = window
+            .dialog(&screen("1:57", wrapped))
+            .expect("the hook's ask");
+        let second = window
+            .dialog(&screen("0:03", wrapped))
+            .expect("the hook's ask");
+        assert_ne!(first, second, "two reads of two commands");
+        assert_ne!(
+            window.dialog_identity(&first),
+            window.dialog_identity(&second),
+            "wrapped: {wrapped}"
+        );
+        // Both are the list's hook ask, answered "No" (2) after ten minutes: held to the identity,
+        // the first one's decline is never pressed into the second.
+        let decline = window.safe_decline(&first).expect("a hook's ask");
+        assert_eq!(decline.key, b"2");
+        assert_eq!(decline.after_ms, Some(600_000));
+        assert_eq!(window.safe_decline(&second).as_ref(), Some(&decline));
+    }
+}

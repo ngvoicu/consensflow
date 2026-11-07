@@ -10,14 +10,18 @@
 //!   itself, and redraws it every second: `⚠ Claude Code will automatically block this request
 //!   in 1:57, to avoid holding up an unattended session` (2.1.319's own string, the time as
 //!   `m:ss`, or `about 2 minutes` / `about 57 seconds` in its other mode, which changes its unit
-//!   as it runs down). Only the time in that line is blanked, and the line is known by the words
-//!   it begins with, glyph and all. Where the screen wraps it before its time (a row that ends
-//!   `… this request in`), the time is the first thing of the row under it, and that row is read
-//!   as the same line, because the row above it is that warning. A row that merely looks like it
-//!   (a hook's reason that begins `about 2 minutes, to avoid …`, T-1273's finding 7) is no such
-//!   row when the warning is not the row above it. A command, a hook's reason, a question that
-//!   says a time (`printf 'retry in 5s'`, `Retry in 5s?`) is the request, and another time there
-//!   is another request.
+//!   as it runs down). Claude Code draws it as the **last block above its question**, a block of
+//!   its own with a margin under it (`wPe`, rendered after the request's words and the reason, and
+//!   before the question), so it is known by its **place**: the rows of what the dialog says above
+//!   its question, from the nearest that begins with the warning's words to the last, are that
+//!   sentence and nothing else, whole, whichever way the screen wrapped it (joined by the spaces a
+//!   wrap broke them at). Then they are one row of the identity, the time blanked. Any other
+//!   shape keeps the words as they were read (T-1282's blocker): a command that prints the
+//!   warning (a here-document), a hook's reason that quotes it, a sentence that is not whole or
+//!   has a row after it are the request's own words, and another time there is another request.
+//!   The reader drops what would tell them apart by their frame (the `│` of a box's rows), their
+//!   indent and the blank lines of the screen; the order of the rows above the question is what
+//!   this uses. When in doubt the words are kept: telling a dialog twice is the side to err on.
 //! - **What is drawn above the LSP offer.** The offer's top is its own title, "LSP plugin
 //!   recommendation" (2.1.317 to 2.1.319, as the live runs drew it). What the pane host's tail
 //!   shows above that line is the conversation's, and it slides: the line that closes a turn
@@ -41,12 +45,13 @@ const LSP_TITLE: &str = "LSP plugin recommendation";
 /// space.
 const WARNING: &str = "\u{26a0} Claude Code will automatically block this request in";
 
-/// The length of the time left at the start of `text`, where one begins it and ends it, or goes
-/// on with the comma that follows it in Claude Code's sentence: `m:ss`, or `about N minute(s)` /
+/// What the sentence says after the time.
+const AFTER_TIME: &str = ", to avoid holding up an unattended session";
+
+/// The length of the time left at the start of `text`: `m:ss`, or `about N minute(s)` /
 /// `about N second(s)`.
 fn time_at(text: &str) -> Option<usize> {
-    let length = clock_at(text).or_else(|| spelled_at(text))?;
-    matches!(text[length..].chars().next(), None | Some(',')).then_some(length)
+    clock_at(text).or_else(|| spelled_at(text))
 }
 
 /// The length of a clock, `m:ss`, at the start of `text`.
@@ -68,36 +73,26 @@ fn spelled_at(text: &str) -> Option<usize> {
     (digits > 0).then_some("about ".len() + digits + 1 + word.len())
 }
 
-/// `detail`, the lines a Claude Code dialog says above its question, with the time of its warning
-/// line blanked wherever that line is.
+/// `detail`, the rows a Claude Code dialog says above its question, with its own warning, where
+/// it is, as one row and its time blanked. The warning is the last block above the question: the
+/// rows from the nearest that begins with its words to the end, joined by the spaces a wrap broke
+/// them at, are its whole sentence and nothing else. Any other rows are returned as they were.
 fn blanked(detail: &[String]) -> Vec<String> {
-    // Whether the row above is the warning, wrapped before its time.
-    let mut wrapped = false;
-    detail
-        .iter()
-        .map(|row| {
-            let after_warning = std::mem::take(&mut wrapped);
-            if after_warning {
-                if let Some(length) = time_at(row) {
-                    return format!("#{}", &row[length..]);
-                }
-            }
-            let Some(rest) = row.strip_prefix(WARNING) else {
-                return row.clone();
-            };
-            if rest.is_empty() {
-                wrapped = true;
-                return row.clone();
-            }
-            match rest
-                .strip_prefix(' ')
-                .and_then(|time| time_at(time).map(|length| (time, length)))
-            {
-                Some((time, length)) => format!("{WARNING} #{}", &time[length..]),
-                None => row.clone(),
-            }
-        })
-        .collect()
+    let Some(start) = detail.iter().rposition(|row| row.starts_with(WARNING)) else {
+        return detail.to_vec();
+    };
+    let line = detail[start..].join(" ");
+    let whole = line
+        .strip_prefix(WARNING)
+        .and_then(|rest| rest.strip_prefix(' '))
+        .and_then(|rest| time_at(rest).map(|length| &rest[length..]))
+        .is_some_and(|after| after == AFTER_TIME);
+    if !whole {
+        return detail.to_vec();
+    }
+    let mut rows = detail[..start].to_vec();
+    rows.push(format!("{WARNING} #{AFTER_TIME}"));
+    rows
 }
 
 /// `dialog` as Claude Code's own window tells it from another read of its screen: the time in its
