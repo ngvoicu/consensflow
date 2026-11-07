@@ -464,6 +464,26 @@ pub const CLAUDE_LSP_TURN_ENDED: &[&str] = &[
     "     4. Disable all LSP recommendations",
 ];
 
+/// Claude Code 2.1.319's permission prompt of a dangerous `rm` (of two empty variables, a command
+/// that runs nothing: `rm "$CFA/$CFB"`), as the pane host's tail (the engine's) showed it in the
+/// kit's live run of 2026-11-07 (T-1277), at the first look: 1:59 left before Claude Code blocks the
+/// request by itself. The 120 looks of the run, one a second, differed in that clock alone. The
+/// screen wrapped the warning after its time, so the line is two rows.
+pub const CLAUDE_RM_PROMPT_LIVE: &[&str] = &[
+    " \u{23bf}  Waiting\u{2026}",
+    " Bash command",
+    " Remove the specified file",
+    " rm \"$CFA/$CFB\"",
+    " \u{2502} Dangerous rm operation on possibly-empty variable path: \"$CFA/$CFB\" in `rm",
+    " \u{2502} \"$CFA/$CFB\"` (rewrite it as \"${CFA:?}/${CFB:?}\" or use a literal path)",
+    " \u{26a0} Claude Code will automatically block this request in 1:59, to avoid holding",
+    " up an unattended session",
+    " Do you want to proceed?",
+    " \u{276f} 1. Yes",
+    "   2. No",
+    " Esc to cancel \u{b7} Tab to amend",
+];
+
 /// Claude Code 2.1.317's ask of a plugin's PreToolUse hook on a Bash call (the owner's kluris
 /// board, 2026-11-03, T-1198).
 pub const CLAUDE_HOOK_ASK: &[&str] = &[

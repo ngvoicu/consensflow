@@ -326,3 +326,38 @@ fn a_hooks_ask_without_a_warning_is_what_it_was() {
     let dialog = read(&owned(CLAUDE_HOOK_ASK));
     assert_eq!(identity(&dialog), dialog);
 }
+
+#[test]
+fn the_live_permission_prompt_with_its_wrapped_warning_is_one_dialog_at_every_tick() {
+    // The kit's live run of 2026-11-07: 120 looks, a second apart, 1:59 down to 0:00, each the same
+    // rows but for the clock. The screen wrapped the warning after its time.
+    use crate::testing::screens::CLAUDE_RM_PROMPT_LIVE;
+    let at = |clock: &str| {
+        let lines: Vec<String> = CLAUDE_RM_PROMPT_LIVE
+            .iter()
+            .map(|line| line.replace("in 1:59,", &format!("in {clock},")))
+            .collect();
+        identity(&read(&lines))
+    };
+    let first = at("1:59");
+    for clock in ["1:58", "1:00", "0:59", "0:10", "0:01", "0:00"] {
+        assert_eq!(at(clock), first, "{clock}");
+    }
+    let rows = &first.detail;
+    assert!(
+        rows.iter().any(|row| row
+            == "\u{26a0} Claude Code will automatically block this request in #, to avoid holding"),
+        "{rows:?}"
+    );
+    // The row that wraps under it holds words only, and is left as it was.
+    assert_eq!(
+        rows.last().map(String::as_str),
+        Some("up an unattended session")
+    );
+    // The request is its own: another command is another dialog.
+    let other: Vec<String> = CLAUDE_RM_PROMPT_LIVE
+        .iter()
+        .map(|line| line.replace("rm \"$CFA/$CFB\"", "rm \"$CFA/$CFC\""))
+        .collect();
+    assert_ne!(identity(&read(&other)), first);
+}

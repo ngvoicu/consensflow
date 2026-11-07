@@ -1030,3 +1030,38 @@ fn a_hooks_ask_another_request_replaces_while_its_status_says_one_is_open_is_nev
     passes(&context, 2, 5_000);
     assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
 }
+
+#[test]
+fn claude_codes_live_permission_prompt_counting_down_is_told_once_whichever_way_its_status_goes() {
+    // The kit's live run of 2026-11-07 (T-1277): 120 looks, the clock 1:59 down to 0:00, the warning
+    // wrapped after its time; its status said a permission prompt waited all along. And the field's
+    // shape of 2026-11-06, where the status stopped saying so for the last seconds.
+    use cf_harness::testing::screens::CLAUDE_RM_PROMPT_LIVE;
+    let at = |left: u32| -> Vec<String> {
+        CLAUDE_RM_PROMPT_LIVE
+            .iter()
+            .map(|line| line.replace("in 1:59,", &format!("in {},", clock(left))))
+            .collect()
+    };
+    for status_leaves in [false, true] {
+        let context = Context::new();
+        let tiers = at_work(&context, &at(119));
+        context.adapter.with("zeus", |agent| {
+            agent.waiting = Some(Waiting {
+                reason: Some(DIALOG_OPEN.to_owned()),
+            });
+        });
+        until_told(&context, &tiers);
+        counting_down(&context, 119, 0, at, |left| {
+            if status_leaves && left == 6 {
+                context.adapter.with("zeus", |agent| agent.waiting = None);
+            }
+        });
+        assert_eq!(
+            told_counts(&context, &tiers),
+            (1, 1),
+            "status leaves: {status_leaves}"
+        );
+        assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    }
+}
