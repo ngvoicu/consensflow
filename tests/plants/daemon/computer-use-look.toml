@@ -216,5 +216,5 @@ runs = ["cul-page"]
 
 [[plant.edit]]
 file = "app/ui/index.html"
-find = '<label class="check"><input type="radio" name="claude-compaction-choice" value="own" checked>'
-replace = '<label><input type="radio" name="claude-compaction-choice" value="own" checked>'
+find = '<label class="check"><input type="radio" name="members-compaction-choice" value="own" checked>'
+replace = '<label><input type="radio" name="members-compaction-choice" value="own" checked>'

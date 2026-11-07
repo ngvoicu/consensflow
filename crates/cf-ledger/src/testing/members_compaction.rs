@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn undoing_migration_0034_leaves_the_schema_0033_left_and_the_ledger_migrates_again() {
-        assert_eq!(at(), 32, "migration 0034");
+        assert_eq!(at(), 33, "migration 0034");
         let before = rusqlite::Connection::open_in_memory().unwrap();
         migrate(&before, &MIGRATIONS[..at()]).unwrap();
         let db = rusqlite::Connection::open_in_memory().unwrap();

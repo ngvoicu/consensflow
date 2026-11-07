@@ -90,7 +90,7 @@ find = '''        if let Some(specs) = &request.specs {
             set_staff_rules(store, id, Some(rules))?;
         }
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
@@ -101,7 +101,7 @@ replace = '''        // The setting's own writes, which join this one, so each i
             set_staff_rules(store, id, Some(rules))?;
         }
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
@@ -142,7 +142,7 @@ find = '''        if let Some(wake_up) = wake_up {
             set_staff_rules(store, id, Some(rules))?;
         }
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
@@ -156,7 +156,7 @@ replace = '''        if let Some(specs) = &request.specs {
             set_staff_rules(store, id, Some(rules))?;
         }
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })

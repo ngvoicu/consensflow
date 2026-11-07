@@ -96,7 +96,7 @@ meant = "New project: rules over a bound, or a size that is no whole number in t
 runs = ["nps-page"]
 
 [[plant.edit]]
-file = "app/ui/core/claude-compaction.js"
+file = "app/ui/core/compaction.js"
 find = '''
     return this.#size.checked && sizeOf(this.#amount.value) === null
       ? `A size is a whole number'''
@@ -144,7 +144,7 @@ meant = "New project: the rules for the staff and the compaction are written as 
 runs = ["nps-page"]
 
 [[plant.edit]]
-file = "app/ui/core/claude-compaction.js"
+file = "app/ui/core/compaction.js"
 find = '''
     return this.#size.checked ? sizeOf(this.#amount.value) : null
   }
@@ -209,7 +209,7 @@ meant = "New project opens on the defaults every time: what was set in it before
 runs = ["nps-page"]
 
 [[plant.edit]]
-file = "app/ui/core/claude-compaction.js"
+file = "app/ui/core/compaction.js"
 find = '''
   reset() {
     this.show(null)
@@ -296,7 +296,7 @@ runs = ["nps-ledger"]
 file = "crates/cf-ledger/src/projects.rs"
 find = '''
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
 '''
 replace = ''
@@ -318,7 +318,7 @@ runs = ["nps-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/projects.rs"
-find = '            compaction: parse_claude_compaction(value.get("compaction"))?,'
+find = '            compaction: parse_compaction(value.get("compaction"))?,'
 replace = '            compaction: None,'
 
 [[plant]]
@@ -338,8 +338,8 @@ runs = ["nps-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/projects.rs"
-find = '            compaction: parse_claude_compaction(value.get("compaction"))?,'
-replace = '            compaction: parse_claude_compaction(value.get("compaction")).unwrap_or(None),'
+find = '            compaction: parse_compaction(value.get("compaction"))?,'
+replace = '            compaction: parse_compaction(value.get("compaction")).unwrap_or(None),'
 
 [[plant]]
 name = "new project sections: the page leaves the rules out of the request it makes to the ledger"
@@ -378,8 +378,8 @@ runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '        compaction: parse_claude_compaction(request.get("compaction")).ok()?,'
-replace = '        compaction: parse_claude_compaction(request.get("compaction")).unwrap_or(None),'
+find = '        compaction: parse_compaction(request.get("compaction")).ok()?,'
+replace = '        compaction: parse_compaction(request.get("compaction")).unwrap_or(None),'
 
 [[plant]]
 name = "new project sections: computer use is not read for a folder"
@@ -550,14 +550,14 @@ find = '''
             set_staff_rules(store, id, Some(rules))?;
         }
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
 }'''
 replace = '''
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
@@ -578,7 +578,7 @@ runs = ["nps-ledger"]
 file = "crates/cf-ledger/src/projects.rs"
 find = '''
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
@@ -588,7 +588,7 @@ replace = '''
     })
     .and_then(|made| {
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, made.id, Some(size))?;
+            set_compaction(store, made.id, Some(size))?;
         }
         known_project(store, made.id)
     })
@@ -606,7 +606,7 @@ find = '''
             set_staff_rules(store, id, Some(rules))?;
         }
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, id, Some(size))?;
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
@@ -619,7 +619,7 @@ replace = '''
             set_staff_rules(store, made.id, Some(rules))?;
         }
         if let Some(size) = request.compaction {
-            set_claude_compaction(store, made.id, Some(size))?;
+            set_compaction(store, made.id, Some(size))?;
         }
         known_project(store, made.id)
     })
