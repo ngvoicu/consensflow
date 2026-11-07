@@ -770,3 +770,39 @@ fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
     );
     assert_eq!(first_on_path("cf", "", ".EXE"), None);
 }
+
+/// Git Bash is where the file named says, else beside the `git.exe` on the PATH (`…\Git\cmd`),
+/// and a file that is not there is none: the stand-ins start the commands of their agents in it.
+#[cfg(windows)]
+#[test]
+fn git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path() {
+    let root = tempfile::tempdir().unwrap();
+    let touch = |relative: &str| {
+        let file = root.path().join(relative);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"").unwrap();
+        file
+    };
+    let named = touch(r"named\bash.exe");
+    let beside = touch(r"Git\bin\bash.exe");
+    touch(r"Git\cmd\git.exe");
+    let path = root.path().join(r"Git\cmd").to_string_lossy().into_owned();
+    let named_word = named.to_string_lossy().into_owned();
+    assert_eq!(git_bash_in(Some(&named_word), &path), Some(named));
+    // A name that is no file is not taken, and the path's Git is.
+    let absent = root.path().join(r"absent\bash.exe");
+    assert_eq!(
+        git_bash_in(Some(&absent.to_string_lossy()), &path),
+        Some(beside.clone())
+    );
+    assert_eq!(git_bash_in(None, &path), Some(beside));
+    // A folder of the path with no `git.exe` names no Git, though a `bin\bash.exe` is beside it.
+    let other = touch(r"Other\bin\bash.exe");
+    std::fs::create_dir_all(root.path().join(r"Other\cmd")).unwrap();
+    let path = root
+        .path()
+        .join(r"Other\cmd")
+        .to_string_lossy()
+        .into_owned();
+    assert_ne!(git_bash_in(None, &path), Some(other));
+}

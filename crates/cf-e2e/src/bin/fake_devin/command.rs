@@ -1,7 +1,7 @@
 //! A command the agent leaves running when its turn ends, as a harness's shell tool runs
 //! one in the background (a line `BACKGROUND <seconds> <words>`): a shell, a child of the
-//! window's program, that runs `sleep` for the seconds and waits for it (on Windows, `cmd`
-//! and a `ping` of loopback as long). The agent runs it
+//! window's program, that runs `sleep` for the seconds and waits for it (on Windows, Git Bash,
+//! as Devin's commands run there). The agent runs it
 //! once it has thought, which is well after the daemon marked the turn, so that what it
 //! starts is the turn's work. Its process is written where the rig looks for the jobs a
 //! window left (`jobs/job-<window>-1.pid`, beside the daemon's home).
@@ -48,18 +48,20 @@ pub fn start(
     let command = format!("sleep {seconds}");
     wire.called(&command, client).map_err(said)?;
     // The `true` after it keeps the shell from becoming the command it runs: it stays a
-    // shell that waits for it, as a harness's shell tool does. Windows has no `/bin/sh` and no
-    // `sleep`: its shell is `cmd`, which waits as long on a `ping` of loopback, a line a
-    // second, as the field's Devin worker left one running on Windows (3.0.1, 2026-10-12;
-    // T-1207).
+    // shell that waits for it, as a harness's shell tool does. Windows has no `/bin/sh`: Devin's
+    // shell there is Git Bash, which runs a command as `bash -c "<command>"` (its commands
+    // answer `/usr/bin/bash: line 1: …` on zeewin), and `sleep` is Git Bash's own. The host
+    // proves a turn's work by a shell that started it, which `cmd.exe` is none (`cf-panes`'
+    // `background::work`: npm puts every server behind a `cmd /c`), so a command left under
+    // `cmd` was never named at the window's close (T-1218; T-1207's stand-in ran it so).
     #[cfg(not(windows))]
     let shell = Run::new("/bin/sh").args(["-c", &format!("{command}; true")]);
     #[cfg(windows)]
-    let shell = Run::new("cmd").args([
-        "/d".to_owned(),
-        "/c".to_owned(),
-        format!("ping -n {} 127.0.0.1 > nul", seconds + 1),
-    ]);
+    let shell = Run::new(cf_e2e::process::git_bash().ok_or_else(|| {
+        "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
+            .to_owned()
+    })?)
+    .args(["-c", &format!("{command}; true")]);
     let shell = shell
         .inheriting_env()
         .closed_input()

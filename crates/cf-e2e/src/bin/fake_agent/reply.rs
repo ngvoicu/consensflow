@@ -309,32 +309,13 @@ fn shell(command: &str) -> Run {
 /// quotes written as they are.
 #[cfg(windows)]
 fn shell(command: &str) -> Run {
-    if let Some(bash) = git_bash() {
+    if let Some(bash) = cf_e2e::process::git_bash() {
         return Run::new(bash).args(["-c", command]);
     }
     let interpreter = own_var("ComSpec").unwrap_or_else(|| "cmd.exe".to_owned());
     Run::new(interpreter)
         .args(["/d", "/s", "/c"])
         .raw_arg(format!("\"{command}\""))
-}
-
-/// Git Bash, where Claude Code looks for it: the file `CLAUDE_CODE_GIT_BASH_PATH` names,
-/// then the `bin\bash.exe` of the Git whose `git.exe` is on the PATH (`…\Git\cmd` or
-/// `…\Git\bin`), then Git's own install folder.
-#[cfg(windows)]
-fn git_bash() -> Option<std::path::PathBuf> {
-    use std::path::PathBuf;
-    if let Some(named) = own_var("CLAUDE_CODE_GIT_BASH_PATH").map(PathBuf::from) {
-        if named.is_file() {
-            return Some(named);
-        }
-    }
-    let path = own_var("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
-        .filter(|folder| folder.join("git.exe").is_file())
-        .filter_map(|folder| folder.parent().map(|git| git.join("bin").join("bash.exe")))
-        .chain([PathBuf::from(r"C:\Program Files\Git\bin\bash.exe")])
-        .find(|bash| bash.is_file())
 }
 
 /// Prints lines of text to the window's screen until they make `bytes`.
