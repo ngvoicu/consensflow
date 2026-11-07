@@ -1,4 +1,4 @@
-import { FitAddon, Terminal } from './vendor/xterm.js'
+import { FitAddon, Terminal, WebLinksAddon } from './vendor/xterm.js'
 
 /**
  * How long a terminal's new size must hold before the terminal and the
@@ -10,6 +10,16 @@ const SETTLE_MS = 200
 
 /** A Mac, where Cmd+C copies and Ctrl+C is always the program's. */
 const MAC = /Macintosh|Mac OS X/.test(globalThis.navigator?.userAgent ?? '')
+
+/** The key a click must hold to open a link, as VS Code's terminal asks: Cmd on a Mac, Ctrl elsewhere. */
+const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
+
+/**
+ * Whether `event`, a click on a link, is the one that opens it: the primary button with the
+ * system's key held, so a click into a pane to type or select never opens one, and nor does
+ * the other system's key (Ctrl+click is a Mac's secondary click).
+ */
+const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
 
 /**
  * The letter a key types for a shortcut: its own on a Latin layout, else the
@@ -31,8 +41,23 @@ const shortcutLetter = (event) =>
  */
 
 export class XtermEmulator {
-  constructor(host, { onReply = () => {}, onResize = () => {} } = {}) {
+  constructor(host, { onReply = () => {}, onResize = () => {}, onLink = () => {} } = {}) {
     this.host = host
+    // A link is what a program prints as a web address (the addon below) or hides behind words
+    // (OSC 8, which xterm reads itself and hands to `linkHandler`). The pointer on one underlines
+    // it and says in the terminal's title what opens it and where it goes, the address too, for
+    // words can hide any. Only a web page is a link: xterm drops an OSC 8 address of another
+    // scheme (`file:`, `javascript:`, an app's own) before this is asked, as it does by default;
+    // `allowNonHttpProtocols` says so here, and the app refuses what is not http or https again.
+    const link = {
+      activate: (event, uri) => {
+        if (opensLink(event)) onLink(uri)
+      },
+      hover: (_event, uri) => {
+        if (this.terminal.element) this.terminal.element.title = `${LINK_KEY}+click to open ${uri}`
+      },
+      leave: () => this.terminal.element?.removeAttribute('title'),
+    }
     this.terminal = new Terminal({
       allowProposedApi: false,
       convertEol: false,
@@ -41,10 +66,13 @@ export class XtermEmulator {
       fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace',
       fontSize: 12,
       lineHeight: 1.16,
+      linkHandler: { ...link, allowNonHttpProtocols: false },
       scrollback: 10_000,
     })
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)
+    // The addon opens a click with `activate`, and takes the `hover` and `leave` of its options.
+    this.terminal.loadAddon(new WebLinksAddon(link.activate, link))
     this.terminal.open(host)
     this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
     this.humanDataPending = 0
@@ -174,12 +202,14 @@ export class EmulatorRegistry {
     onData,
     onReply,
     onResize,
+    onLink = () => {},
     createEmulator = (host, callbacks) => new XtermEmulator(host, callbacks),
   }) {
     this.emulators = new Map()
     this.onData = onData
     this.onReply = onReply
     this.onResize = onResize
+    this.onLink = onLink
     this.createEmulator = createEmulator
   }
 
@@ -191,6 +221,7 @@ export class EmulatorRegistry {
     const emulator = this.createEmulator(host, {
       onReply: (data) => this.onReply(pane, data),
       onResize: (cols, rows) => this.onResize(pane, cols, rows),
+      onLink: (uri) => this.onLink(uri),
     })
     const input = emulator.onData((data) => this.onData(pane, data))
     this.emulators.set(key, { emulator, input })

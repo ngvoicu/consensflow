@@ -1,0 +1,219 @@
+# A link in a pane opens in the human's browser (T-1291, Gabriel, 2026-11-07: "yes turn on the links"):
+# the addresses a program prints in a window (a plain `http://` or `https://` one, or an OSC 8
+# hyperlink, words with the address behind them) are links in every pane, and the rules stand, each
+# held by a test:
+#
+# - the pointer on a link underlines it and says in the terminal's title what opens it and where it
+#   goes, the address too (words can hide any); the title goes when the pointer does;
+# - a click opens it only with the system's key held (Cmd on a Mac, Ctrl on Windows, as VS Code's
+#   terminal does) and with the primary button: a click into a pane to type, the other system's key,
+#   another button, or a pane whose program has taken the mouse, opens nothing without them;
+# - what the page asks of the app is the address as the program printed it (`open_link`), and an OSC 8
+#   address that is no web page (`file:`, `javascript:`, `data:`, an app's own scheme) is no link;
+# - the app opens only a web page (`http` or `https`), of no more than 2,048 characters, with no
+#   control character in what was printed (the parser would drop a tab or a line break from the middle
+#   of it), and hands the system's opener the address as the parser writes it, as one argument and
+#   no shell between (`app/src-tauri/src/link.rs`, the update's download page opened the same way);
+#   a refusal is said in the status line.
+#
+# One plant takes one rule out; a test of it fails. The page's run the browser's, the app's the tests
+# of the link module on this system; the xterm they stand on is the tracked `app/ui/vendor`, so no
+# plant bundles it. Every name holds `pane links`, so `npm run plants:daemon -- "pane links"` runs them all.
+
+[run]
+pl-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pane links"]
+pl-app = ["cargo", "xtask", "app", "test", "link::"]
+
+# --- the page: when a click opens a link ---
+
+[[plant]]
+name = "pane links: a click without the system's key opens a link"
+meant = "pane links on a Mac › a click without Cmd opens nothing, nor does the other system's key, nor another button"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)"
+replace = "const opensLink = (event) => event.button === 0"
+
+[[plant]]
+name = "pane links: the other system's key opens a link too"
+meant = "pane links on a Mac › a click without Cmd opens nothing, nor does the other system's key, nor another button"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)"
+replace = "event.button === 0 && (event.metaKey || event.ctrlKey)"
+
+[[plant]]
+name = "pane links: a click of any button opens a link"
+meant = "pane links on a Mac › a click without Cmd opens nothing, nor does the other system's key, nor another button"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)"
+replace = "(MAC ? event.metaKey : event.ctrlKey)"
+
+# --- the page: what is a link, and what it says ---
+
+[[plant]]
+name = "pane links: a plain URL is no link"
+meant = "pane links on a Mac › a plain URL is underlined and titled as the pointer comes on it, and Cmd+click opens exactly that address"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.loadAddon(new WebLinksAddon(link.activate, link))\n"
+replace = ""
+
+[[plant]]
+name = "pane links: an OSC 8 hyperlink is left to xterm's own handler"
+meant = "pane links on a Mac › an OSC 8 hyperlink shows its address in the title where its words hide it, and Cmd+click opens exactly that address"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "      linkHandler: { ...link, allowNonHttpProtocols: false },\n"
+replace = ""
+
+[[plant]]
+name = "pane links: an OSC 8 address that is no web page is a link too"
+meant = "pane links on a Mac › an OSC 8 hyperlink to a file, a script, data or an app scheme is no link and reaches nothing"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "linkHandler: { ...link, allowNonHttpProtocols: false },"
+replace = "linkHandler: { ...link, allowNonHttpProtocols: true },"
+
+[[plant]]
+name = "pane links: the title does not say where a link goes"
+meant = "pane links on a Mac › an OSC 8 hyperlink shows its address in the title where its words hide it, and Cmd+click opens exactly that address"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "title = `${LINK_KEY}+click to open ${uri}`"
+replace = "title = `${LINK_KEY}+click to open`"
+
+[[plant]]
+name = "pane links: the title stays after the pointer has left a link"
+meant = "pane links on a Mac › a plain URL is underlined and titled as the pointer comes on it, and Cmd+click opens exactly that address"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "      leave: () => this.terminal.element?.removeAttribute('title'),\n"
+replace = "      leave: () => {},\n"
+
+[[plant]]
+name = "pane links: a refusal of the app is not said"
+meant = "pane links on a Mac › a refusal of the app shows in the status line, and the link goes on working"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      if (opened?.ok !== true) {"
+replace = "      if (opened?.ok === undefined) {"
+
+# --- the app: what may open, and how ---
+
+[[plant]]
+name = "pane links: an address of another scheme opens"
+meant = "an_address_that_is_no_web_page_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = '''
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(format!(
+            "Only http and https addresses open, not {}:",
+            url.scheme()
+        ));
+    }
+'''
+replace = ''
+
+[[plant]]
+name = "pane links: an address of any length opens"
+meant = "an_address_of_more_than_2048_characters_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = '''
+    if address.chars().count() > MAX_CHARS {
+        return Err(format!("The address is longer than {MAX_CHARS} characters"));
+    }
+'''
+replace = ''
+
+[[plant]]
+name = "pane links: the length of an address is counted in bytes"
+meant = "an_address_of_more_than_2048_characters_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = "if address.chars().count() > MAX_CHARS {"
+replace = "if address.len() > MAX_CHARS {"
+
+[[plant]]
+name = "pane links: an address with a control character opens"
+meant = "an_address_with_a_control_character_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = '''
+    if address.chars().any(char::is_control) {
+        return Err("The address has a control character".into());
+    }
+'''
+replace = ''
+
+[[plant]]
+name = "pane links: the control characters are looked for in what the parser makes of the address"
+meant = "an_address_with_a_control_character_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = "if address.chars().any(char::is_control) {"
+replace = "if Url::parse(address).is_ok_and(|url| url.as_str().chars().any(char::is_control)) {"
+
+[[plant]]
+name = "pane links: the opener is given the address as the program printed it"
+meant = "an_address_is_opened_as_the_parser_writes_it"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = "    open(checked(address)?.as_str())"
+replace = "    checked(address)?;\n    open(address)"
+
+[[plant]]
+name = "pane links: the command is not one of the page's"
+meant = "the_page_is_told_why_an_address_did_not_open_and_one_that_may_is_opened"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "        link::open_link,\n"
+replace = ""
+
+[[plant]]
+name = "pane links: the opener is started through a shell"
+meant = "the_address_reaches_the_systems_opener_as_one_argument_with_no_shell_between"
+runs = ["pl-app"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = "    let mut command = Command::new(opener);\n"
+replace = '''    let mut command = Command::new("/bin/sh");
+    command.arg("-c").arg(format!("{} {}", opener.display(), page));
+'''

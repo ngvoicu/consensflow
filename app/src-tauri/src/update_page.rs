@@ -102,7 +102,7 @@ pub fn open(page: &str) -> Result<(), String> {
 
 /// Opens `page` with `opener`. Explorer answers 1 even when the page
 /// opened: only a start that failed is a failure.
-fn open_with(opener: &Path, page: &str) -> Result<(), String> {
+pub(crate) fn open_with(opener: &Path, page: &str) -> Result<(), String> {
     let mut command = Command::new(opener);
     // Started while the app's other threads open sockets and pipes.
     cf_process::hold_only_the_streams(&mut command);
