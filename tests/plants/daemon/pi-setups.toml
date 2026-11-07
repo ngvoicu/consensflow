@@ -118,7 +118,7 @@ replace = '''        .loading()
 
 [[plant]]
 name = "pi-setups: a conversation keeps nothing of what a program said"
-meant = "a_conversation_that_ended_says_the_code_and_the_last_words_of_the_one_start"
+meant = "a_conversation_that_ended_says_the_code_and_what_the_one_start_said_whole"
 runs = ["ps-one-shot"]
 
 [[plant.edit]]
@@ -128,7 +128,7 @@ replace = '    let keeps_words = false;'
 
 [[plant]]
 name = "pi-setups: the code a program exited with is not said"
-meant = "a_conversation_that_ended_says_the_code_and_the_last_words_of_the_one_start"
+meant = "a_conversation_that_ended_says_the_code_and_what_the_one_start_said_whole"
 runs = ["ps-one-shot"]
 
 [[plant.edit]]

@@ -98,6 +98,10 @@ fn the_screens_rule_holds_for_words_a_credential_is_in_with_no_word_to_say_so() 
         "deadbeef cafebabe feedface 0badf00d",
         "see https%3A%2F%2Falice%3Aswordfish%40example.test",
         "MIIEvQIBADANBgkq\nhkiG9w0BAQEFAASC",
+        // A name the wrap cut in two is whole only at the join of the lines: neither row names a
+        // secret alone.
+        "cannot read pass\nword from disk",
+        "the access tok\nen was refused",
     ] {
         assert_eq!(quotable(&pi_said(words)), withheld(), "{words}");
     }
