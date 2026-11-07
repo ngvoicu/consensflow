@@ -87,8 +87,8 @@ runs = ["cw-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''The human changes your model with their harness's own switch in this window, and
-a reopen keeps it. '''
+find = '''The human changes your model with your harness's own switch in this window, and a
+reopen keeps it. '''
 replace = ''''''
 
 [[plant]]
@@ -98,8 +98,8 @@ runs = ["cw-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''is for another harness or a
-fresh conversation, on a model from that harness's list.'''
+find = '''is for another harness or a fresh
+conversation, on a model from that harness's list.'''
 replace = '''is for another model.'''
 
 [[plant]]

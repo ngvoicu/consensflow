@@ -3858,8 +3858,13 @@ test('an image designer is added with no model, effort or tier: Codex is picked 
   await expect(add.locator('.member-help')).toHaveText(
     "An image designer draws on Codex's own model: it takes no model, effort or tier.",
   )
-  // No model of Codex's is read for it.
+  // No model of Codex's is read for it, nor when the harness is picked again.
+  await add.locator('[name="memberHarness"]').selectOption('codex')
   expect(await calls(page, 'models.get')).toEqual(read)
+  await expect(add.locator('[name="memberModel"]')).toBeHidden()
+  await expect(add.locator('.member-help')).toHaveText(
+    "An image designer draws on Codex's own model: it takes no model, effort or tier.",
+  )
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))

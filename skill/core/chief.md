@@ -182,9 +182,9 @@ session files or type into another window.
 
 Keep this chief role after a new or resumed native session.
 
-The human changes your model with their harness's own switch in this window, and
-a reopen keeps it. Switch the chief, in the app, is for another harness or a
-fresh conversation, on a model from that harness's list.
+The human changes your model with your harness's own switch in this window, and a
+reopen keeps it. Switch the chief, in the app, is for another harness or a fresh
+conversation, on a model from that harness's list.
 
 ## Choose the tier, not the member
 

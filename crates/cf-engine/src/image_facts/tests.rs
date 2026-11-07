@@ -103,8 +103,11 @@ fn a_transparency_chunk_is_found_past_a_chunk_of_a_hundred_thousand_bytes() {
 
 #[test]
 fn a_transparency_chunk_after_the_pixels_is_none_of_the_picture_s() {
+    // Between the pixels and the end chunk (12 bytes), where a file that is not a picture's
+    // own could carry one.
     let mut bytes = png(5, 5, 2, &[]);
-    bytes.extend(chunk(b"tRNS", &[0]));
+    let end = bytes.len() - 12;
+    bytes.splice(end..end, chunk(b"tRNS", &[0]));
     assert_eq!(facts(bytes), the(5, 5, Kind::Png, false));
 }
 

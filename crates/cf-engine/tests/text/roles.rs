@@ -133,7 +133,7 @@ fn teaches_only_the_boards_commands(role: &str) {
         // its harness's own switch, which a reopen keeps; Switch the chief is for another
         // harness or a fresh conversation.
         assert!(found(
-            r"The human changes your model with their harness's own switch in this window, and\s+a reopen keeps it\. Switch the chief, in the app, is for another harness or a\s+fresh conversation, on a model from that harness's list\.",
+            r"The human changes your model with your harness's own switch in this window, and a\s+reopen keeps it\. Switch the chief, in the app, is for another harness or a fresh\s+conversation, on a model from that harness's list\.",
             &text
         ));
         assert!(!found(r"VERDICT|review policy|cf task review", &text));
