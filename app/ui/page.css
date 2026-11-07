@@ -351,7 +351,7 @@ button:disabled { opacity: .45; cursor: default; }
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
-  min-width: calc(176px + 6 * 96px);
+  min-width: calc(216px + 6 * 96px);
   table-layout: fixed;
 }
 .kanban thead th {
@@ -369,7 +369,7 @@ button:disabled { opacity: .45; cursor: default; }
 }
 /* Room for a session's buttons beside its indent. A fixed table takes a
    column's width as given, and a width mixing % and px as none at all. */
-.kanban .kanban-staff { width: 176px; }
+.kanban .kanban-staff { width: 216px; }
 .kanban th[data-state="finished"] { color: var(--muted); }
 /* Delete finished sits beside the heading it acts on, as an icon whose tip
    opens leftward into the board; its margins keep the headings level. */
@@ -390,11 +390,36 @@ button:disabled { opacity: .45; cursor: default; }
 .kanban tbody th { border-left: 0; }
 .kanban td[data-state="finished"] { background: rgba(0, 0, 0, .12); }
 .row-head { text-align: left; font-weight: normal; }
-.row-title { display: flex; align-items: center; gap: 8px; }
-.row-name { font: 700 11px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+.row-title { display: flex; align-items: flex-start; gap: 8px; }
+.row-title .lamp { margin-top: 2px; }
+.row-title .fold-sessions { margin-top: -3px; }
+/* A member is named by its model's id and effort (`claude-opus-5-5-high`), which reads as it
+   is, in lower case; the chief and the human are labels, and stay capitals. */
+.row-name { min-width: 0; font: 600 12px/1.35 var(--mono); letter-spacing: 0; overflow-wrap: anywhere; }
+tr:is([data-role="chief"], [data-role="human"]) .row-name { font: 700 11px/1.35 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+/* A member's second role has a row of its own: the same member, its name a little quieter. */
+tr[data-also="true"] .row-name { color: var(--muted); }
 tr[data-session] .row-head { padding-left: 22px; border-left: 3px solid var(--line); }
-tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-transform: none; }
-.row-meta { display: block; margin-top: 6px; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+tr[data-session] .row-name { font-weight: 500; }
+/* Under the name: the role first, then the tier with a mark of its weight, then the harness and,
+   where the name holds no model, what it runs on. */
+.row-meta { display: block; margin-top: 5px; font: 11px/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.row-meta .meta-role { color: var(--foam); font-weight: 600; }
+.row-meta .meta-harness { white-space: nowrap; }
+.row-meta .meta-tier::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--tier, var(--slate));
+}
+.row-meta .meta-tier[data-tier="critical"] { --tier: var(--buoy); }
+.row-meta .meta-tier[data-tier="complex"] { --tier: var(--amber); }
+.row-meta .meta-tier[data-tier="standard"] { --tier: var(--seafoam); }
+.row-meta .meta-tier[data-tier="light"] { --tier: var(--sky); }
 .row-status { display: block; margin-top: 6px; font: 600 11px var(--mono); color: var(--muted); }
 .try-again { margin-top: 6px; padding: 2px 9px; font-size: 12px; }
 .terminal-about .try-again { margin: 0 0 0 8px; }
@@ -638,8 +663,8 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .staff { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
 .staff th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
 .staff td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
-.staff .member-name { font-family: var(--mono); }
-.staff .member-meta { color: var(--muted); font: 11px var(--mono); }
+.staff .member-name { font: 600 13px var(--mono); }
+.staff .member-meta { color: var(--muted); font: 11px/1.6 var(--mono); }
 /* A section of a project's settings, in Project settings and in New project alike: Staff, Human
    approval, Wake-up calls and Specs, each a group of its own, one under another. */
 .project-section { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
@@ -1176,7 +1201,7 @@ dialog.history-viewer {
 dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
 .history-head { grid-row: 1; display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px 26px; }
 .history-title { margin: 0; font: 600 24px/1.2 var(--ui); }
-/* The name a member had before members were named by their model (harness-models). */
+/* The names a member had before it was named by its model's id (harness-models). */
 .history-formerly { font: 13px var(--ui); color: var(--history-quiet); }
 .history-search input {
   width: 270px;

@@ -64,7 +64,10 @@ pub(super) async fn list(
             "tasks": tasks,
         });
         let participant = &lane.participant;
-        if participant.harness.is_some() {
+        // A name that holds the model and effort says them already (HMD-12); the chief's
+        // name is its role, and never does.
+        if participant.harness.is_some() && (participant.role == "chief" || participant.name_apart)
+        {
             entry["runsOn"] = json!(cf_ledger::handles::runs_on(participant));
         }
         lanes.push(entry);

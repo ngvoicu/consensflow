@@ -1,5 +1,5 @@
 import { button, element, redraw } from '../dom.js'
-import { HARNESS_NAMES, isMember, modelShown } from './board.js'
+import { HARNESS_NAMES, harnessLabel, isMember, modelShown, nameApart } from './board.js'
 import { ClaudeCompaction } from './claude-compaction.js'
 import { ComputerUseSection } from './computer-use.js'
 import { ProjectSections } from './project-sections.js'
@@ -40,11 +40,19 @@ const byRoleAndTier = (a, b) =>
   rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
   a.name.localeCompare(b.name)
 /**
- * "Opus · claude · high · standard": what a member runs on and the tier a task finds
- * it by, the effort where it has one.
+ * What a staff table says under a member's name: its tier and its harness, and what it runs on
+ * (its model's id and its effort) only where its name does not say it (HMD-12); a pick of New
+ * project has no name made yet, and says its harness, its effort and its tier.
  */
-const runsLabel = (member) =>
-  [modelShown(member), member.harness && harnessOf(member.harness), member.effort, member.tier]
+const runsLabel = (member, named = true) =>
+  (named
+    ? [
+        ...(nameApart(member) ? [modelShown(member), member.effort] : []),
+        member.tier,
+        member.harness && harnessLabel(member),
+      ]
+    : [member.harness && harnessLabel(member), member.effort, member.tier]
+  )
     .filter(Boolean)
     .join(' · ')
 
@@ -78,7 +86,7 @@ function whoCell(name, runs) {
 function goneCell(name, model, runs, harness) {
   const cell = element('td')
   const meta = element('span', 'member-meta')
-  meta.append(element('mark', 'model-gone', model), runs.slice(model.length))
+  meta.append(element('mark', 'model-gone', model), ` · ${runs}`)
   cell.append(
     element('span', 'member-name', name),
     element('br'),
@@ -310,10 +318,9 @@ class ModelPicker {
     ask.disabled = true
     const options = answer.listing.models.map((model) => {
       const id = modelOf(model)
-      const option = new Option(
-        model.contributor ? `${model.label} · Contributor` : model.label,
-        id,
-      )
+      // The id, exactly as the harness takes it: a contributor model's says so itself
+      // (`-contributor`), and the warning stands under the select once it is picked.
+      const option = new Option(id, id)
       // A model its harness lists and will not run is no pick, nor one taken off.
       option.disabled = model.disabled || this.#takenOff(kind, id)
       return option
@@ -426,7 +433,7 @@ class ChiefPicker {
     const model = this.#picker.model()
     if (this.#picker.kind !== '' && model !== undefined) {
       if (model.efforts.length === 0 || this.#effort.value !== '') return true
-      this.#say(`Pick the effort ${HARNESS_NAMES[this.#picker.kind]} runs ${model.label} at.`)
+      this.#say(`Pick the effort ${HARNESS_NAMES[this.#picker.kind]} runs ${modelOf(model)} at.`)
       return false
     }
     // A harness whose models could not be read says why already.
@@ -574,7 +581,7 @@ class MemberPicker {
     if (kind === '') return say('Pick a harness for the member.')
     if (model === undefined) return this.#picker.open ? say("Pick the member's model.") : null
     if (model.efforts.length > 0 && this.#effort.value === '') {
-      return say(`Pick the effort ${HARNESS_NAMES[kind]} runs ${model.label} at.`)
+      return say(`Pick the effort ${HARNESS_NAMES[kind]} runs ${modelOf(model)} at.`)
     }
     if (this.#tier.value === '') {
       return say("Pick the member's tier: the work the chief gives it, from critical to light.")
@@ -585,7 +592,7 @@ class MemberPicker {
       model: modelOf(model),
       effort: this.#effort.value === '' ? null : this.#effort.value,
       tier: this.#tier.value,
-      modelName: model.label,
+      modelName: modelOf(model),
     }
   }
 
@@ -782,7 +789,9 @@ export class NewProjectDialog {
       .flatMap((member) =>
         member.roles.map((role) => ({
           harness: member.harness,
-          model: member.model,
+          // The model as its harness's list names it (`modelName`): what the daemon takes for
+          // a pick. Devin's `model` is the launch id for the effort, which no list holds.
+          model: member.modelName || member.model,
           effort: member.effort,
           tier: member.tier,
           modelName: member.modelName,
@@ -814,7 +823,7 @@ export class NewProjectDialog {
           },
           `Remove ${ROLE_LABEL[pick.role]} ${pick.name}`,
         )
-        const row = staffRow(whoCell(pick.name, runsLabel(pick)), pick.role, remove)
+        const row = staffRow(whoCell(pick.name, runsLabel(pick, false)), pick.role, remove)
         row.dataset.model = pick.model ?? ''
         return row
       })
@@ -1027,8 +1036,17 @@ export class ProjectSettingsDialog {
       void page.act(async () => {
         try {
           if (editing !== null) {
-            await page.daemon('member.edit', { project, member: editing, ...picked })
-            page.note(`@${editing} runs ${modelName} from its next window.`)
+            const { member } = await page.daemon('member.edit', {
+              project,
+              member: editing,
+              ...picked,
+            })
+            // The name holds the model (HMD-12): a member edited to another one is renamed.
+            page.note(
+              member.handle === editing
+                ? `@${editing} runs ${modelName} from its next window.`
+                : `@${editing} is @${member.handle} now, and runs ${modelName} from its next window.`,
+            )
             this.#member.reset(this.#missing)
             return
           }

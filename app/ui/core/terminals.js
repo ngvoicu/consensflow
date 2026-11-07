@@ -241,10 +241,12 @@ export class TerminalsView {
       }
       const board = boards.find((board) => board.project.id === entry.project)
       if (board === undefined) continue
-      const lane = board.lanes.find((lane) => lane.participant.handle === entry.handle)
-      if (lane === undefined || lane.pane === null || paneKey(lane.pane) !== entry.key) {
-        this.#retire(entry.key)
-      }
+      // Its lane is the one whose window it is, whatever the lane is called now: a member edited
+      // to another model is renamed, its windows with it, and a window at work goes on (HMD-12).
+      const lane = board.lanes.find(
+        (lane) => lane.pane !== null && paneKey(lane.pane) === entry.key,
+      )
+      if (lane === undefined) this.#retire(entry.key)
     }
   }
 
@@ -418,6 +420,15 @@ export class TerminalsView {
     if (placed !== null) {
       const { lane, board } = placed
       this.#head(entry, lane, board)
+      // A window renamed with its member (HMD-12) is still the one the human showed.
+      const was = entry.handle
+      if (
+        was !== null &&
+        was !== lane.participant.handle &&
+        this.#showing.delete(showingKey(board.project.id, was))
+      ) {
+        this.#showing.add(showingKey(board.project.id, lane.participant.handle))
+      }
       entry.handle = lane.participant.handle
       entry.harness = lane.participant.harness
       entry.project = board.project.id
