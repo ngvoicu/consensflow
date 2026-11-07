@@ -1131,3 +1131,51 @@ fn text_in_percent_signs_is_looked_at_as_what_it_spells() {
         assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
     }
 }
+
+/// T-1276, `wrapped-url-userinfo`: a window that wraps a URL between its user and its password
+/// leaves neither row with both, and no row names a secret. At the join they are
+/// `scheme://user:password@host`, which the masker takes out of a row that has it whole.
+#[test]
+fn a_url_whose_user_and_password_the_wrap_split_withholds_the_screen() {
+    assert_withheld(
+        &[
+            &[
+                "FetchError: https://alder:copper",
+                "willow@host.invalid/catalog",
+            ],
+            &[
+                "FetchError: https://alder:",
+                "copperwillow@host.invalid/catalog",
+            ],
+            &[
+                "FetchError: https://al",
+                "der:copperwillow@host.invalid/catalog",
+            ],
+            &["https://alder:cop", "perwil", "low@host.invalid/catalog"],
+            // The row ends beside the user and password: before the user, and before the `@`.
+            &[
+                "FetchError: https://",
+                "alder:copperwillow@host.invalid/catalog",
+            ],
+            &[
+                "FetchError: https://alder:copperwillow",
+                "@host.invalid/catalog",
+            ],
+        ],
+        NAMED,
+        "copperwillow",
+    );
+    // A URL whole on a row is masked where it stands, as it always was, with rows around it.
+    let said = note(&[
+        "pad",
+        "cloned from https://alder:copperwillow@host.invalid/repo",
+        "pad",
+    ]);
+    assert!(
+        said.contains("1 key- or token-like string masked"),
+        "{said}"
+    );
+    // A URL with no password in it is none.
+    let said = note(&["see https://host.invalid/a", "then write to the owner"]);
+    assert!(said.contains("its screen ended with"), "{said}");
+}

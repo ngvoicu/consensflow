@@ -5,7 +5,7 @@
 //! kept, the same on every platform, as a stand-in sees itself.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::poll_fn;
 use std::path::Path;
 use std::rc::Rc;
@@ -76,12 +76,33 @@ pub struct ScriptedProcesses {
     always: RefCell<HashMap<String, Result<String, Failed>>>,
     every: RefCell<HashMap<String, Result<String, Failed>>>,
     children: RefCell<HashMap<String, VecDeque<ChildScript>>>,
+    /// What the next child of a name keeps of its error stream and the code it exits with,
+    /// for a child started to keep them ([`Streams::Conversation`]).
+    said: RefCell<HashMap<String, (String, Option<i32>)>>,
+    /// The names of the programs whose children lost the front of what they said.
+    said_cut: RefCell<HashSet<String>>,
     ran: RefCell<Vec<(Program, Limits)>>,
     spawned: RefCell<Vec<(Program, Streams)>>,
     written: Rc<RefCell<Vec<String>>>,
 }
 
 impl ScriptedProcesses {
+    /// Scripts what the children of the program `name` say on their error stream and the code
+    /// they exit with: kept by a child started with [`Streams::Conversation`], and by no other,
+    /// as a real one is.
+    pub fn child_said(&self, name: &str, said: &str, code: Option<i32>) {
+        self.said
+            .borrow_mut()
+            .insert(name.to_owned(), (said.to_owned(), code));
+    }
+
+    /// As [`ScriptedProcesses::child_said`], and the front of what they said was let go: `said`
+    /// is the end of more than it holds, as a real child's is past [`cf_process::SAID_KEPT`].
+    pub fn child_said_cut(&self, name: &str, said: &str, code: Option<i32>) {
+        self.child_said(name, said, code);
+        self.said_cut.borrow_mut().insert(name.to_owned());
+    }
+
     /// Scripts what `named` (`codex --version`) answers when run.
     pub fn run_answer(&self, named: &str, answer: Result<String, Failed>) {
         self.runs
@@ -188,11 +209,20 @@ impl Processes for ScriptedProcesses {
         if script.ends == Ends::Itself && script.lines.is_empty() {
             ended.open();
         }
+        let (said, code) = if streams == Streams::Conversation {
+            self.said.borrow().get(&name).cloned().unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        let said_cut = streams == Streams::Conversation && self.said_cut.borrow().contains(&name);
         Ok(Box::new(ScriptedChild {
             lines: RefCell::new(script.lines.into()),
             ends: script.ends,
             written: Rc::clone(&self.written),
             ended,
+            said,
+            said_cut,
+            code,
         }))
     }
 }
@@ -203,6 +233,9 @@ struct ScriptedChild {
     ends: Ends,
     written: Rc<RefCell<Vec<String>>>,
     ended: Latch,
+    said: String,
+    said_cut: bool,
+    code: Option<i32>,
 }
 
 impl Child for ScriptedChild {
@@ -234,6 +267,18 @@ impl Child for ScriptedChild {
 
     fn exited(&self) -> bool {
         self.ended.is_open()
+    }
+
+    fn said(&self) -> String {
+        self.said.clone()
+    }
+
+    fn said_cut(&self) -> bool {
+        self.said_cut
+    }
+
+    fn code(&self) -> Option<i32> {
+        self.code.filter(|_| self.ended.is_open())
     }
 
     fn closed(&self) -> Work<'_, ()> {

@@ -56,6 +56,7 @@
 mod call;
 pub(crate) mod mask;
 mod ours;
+mod quotable;
 mod screen;
 mod secret;
 #[cfg(test)]
@@ -72,10 +73,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use mask::mask;
+
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
+pub use quotable::{quotable, WORDS_WITHHELD};
 
 /// The most lines of a screen a note quotes: the last ones.
 const QUOTE_LINES: usize = 6;

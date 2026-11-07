@@ -1,0 +1,62 @@
+[
+ {
+  "harness": "claude",
+  "message": "Invalid API key",
+  "seen_in": "crates/cf-harness/src/claude/record/tests/refusals.rs"
+ },
+ {
+  "harness": "claude",
+  "message": "Invalid API key · Please run /login",
+  "seen_in": "crates/cf-engine/src/shown/screen/tests.rs"
+ },
+ {
+  "harness": "claude",
+  "message": "its login was refused: Invalid API key",
+  "seen_in": "crates/cf-harness/src/claude/record/tests/refusals.rs"
+ },
+ {
+  "harness": "devin",
+  "message": "Error: Not logged in. Run `devin auth login` to authenticate.",
+  "seen_in": "crates/cf-harness/tests/fixtures/models/devin-models-list-signed-out.json"
+ },
+ {
+  "harness": "devin",
+  "message": "devin models list --format json: Not logged in. Run `devin auth login` to authenticate.",
+  "seen_in": "crates/cf-harness/src/devin/models/tests.rs"
+ },
+ {
+  "harness": "muse",
+  "message": "API error 401 [request_id=x]: invalid api key (authentication_error)",
+  "seen_in": "crates/cf-harness/src/muse/record/tests/provisional.rs"
+ },
+ {
+  "harness": "muse",
+  "message": "API error 402 [request_id=00000000-0000-4000-8000-000000000081]: Billing verification failed. Billing Issue. To use this API key, your team needs to resolve a billing issue first. To resolve this issue, go here: <URL> (billing_error)",
+  "seen_in": "crates/cf-harness/tests/fixtures/muse/billing-wonder.jsonl"
+ },
+ {
+  "harness": "muse",
+  "message": "API error 402 [request_id=00000000-0000-4000-8000-000000000093]: Billing verification failed. Billing Issue. To use this API key, your team needs to resolve a billing issue first. To resolve this issue, go here: <URL> (billing_error)",
+  "seen_in": "crates/cf-harness/tests/fixtures/muse/billing-spark.jsonl"
+ },
+ {
+  "harness": "muse",
+  "message": "No Meta credentials were found. Run `muse login`.",
+  "seen_in": "crates/cf-harness/src/muse/record/tests/provisional.rs"
+ },
+ {
+  "harness": "muse",
+  "message": "credential error: authentication failed for the account",
+  "seen_in": "crates/cf-engine/src/shown/screen/tests.rs"
+ },
+ {
+  "harness": "muse",
+  "message": "deferred_token_held",
+  "seen_in": "crates/cf-harness/tests/fixtures/muse/live/stopped-by-the-model.jsonl"
+ },
+ {
+  "harness": "muse",
+  "message": "model failed: API error 402 [request_id=00000000-0000-4000-8000-000000000087]: Billing verification failed. Billing Issue. To use this API key, your team needs to resolve a billing issue first. To resolve this issue, go here: <URL> (billing_error)",
+  "seen_in": "crates/cf-harness/tests/fixtures/muse/billing-wonder.jsonl"
+ }
+]
