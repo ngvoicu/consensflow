@@ -470,7 +470,7 @@ pub const CLAUDE_LSP_TURN_ENDED: &[&str] = &[
 /// request by itself. The 120 looks of the run, one a second, differed in that clock alone. The
 /// screen wrapped the warning after its time, so the line is two rows.
 pub const CLAUDE_RM_PROMPT_LIVE: &[&str] = &[
-    " \u{23bf}  Waiting\u{2026}",
+    " \u{23bf} \u{a0}Waiting\u{2026}",
     " Bash command",
     " Remove the specified file",
     " rm \"$CFA/$CFB\"",
