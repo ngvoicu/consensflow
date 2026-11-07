@@ -685,8 +685,8 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    if may_hold_a_credential(&lines) {'
-replace = '    if may_hold_a_credential(&lines[lines.len().saturating_sub(QUOTE_LINES)..]) {'
+find = '    let holds = may_hold_a_credential(&lines)'
+replace = '    let holds = may_hold_a_credential(&lines[lines.len().saturating_sub(QUOTE_LINES)..])'
 
 [[plant]]
 name = "pi-setups: the words of Pi are screened a line at a time"
@@ -758,8 +758,8 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    if may_hold_a_credential(&lines) {'
-replace = '    if false && may_hold_a_credential(&lines) {'
+find = '    if holds {'
+replace = '    if false && holds {'
 
 [[plant]]
 name = "pi-setups: a stack frame is screened and quoted"
@@ -940,8 +940,18 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    if may_hold_a_credential(&lines) {'
-replace = '    if may_hold_a_credential(&quoted) {'
+find = '    let holds = may_hold_a_credential(&lines)'
+replace = '    let holds = may_hold_a_credential(&quoted)'
+
+[[plant]]
+name = "pi-setups: the lines that are no frame are not looked at on their own"
+meant = "a_name_or_token_cut_in_two_with_a_frame_between_its_halves_is_found_at_the_join"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '        || (quoted.len() < lines.len() && may_hold_a_credential(&quoted))'
+replace = '        || false'
 
 [[plant]]
 name = "pi-setups: a URL's user and password a row end splits is not looked for"

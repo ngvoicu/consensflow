@@ -335,3 +335,18 @@ fn a_url_whose_user_and_password_a_line_end_splits_withholds_the_block() {
 fn the_sentence_a_cut_read_put_in_place_of_pis_words_is_told_as_it_stands() {
     assert_eq!(quotable(&withheld()), withheld());
 }
+
+/// T-1276, `frame-wrapped-token`: a frame between the two halves of a name or a token the wrap
+/// cut in two. Every line is looked at, and so are the lines that are no frame, joined as they
+/// are with the frames out of the way: `s` / `at load (native)` / `k-fake…` is `sk-fake…`.
+#[test]
+fn a_name_or_token_cut_in_two_with_a_frame_between_its_halves_is_found_at_the_join() {
+    for words in [
+        "s\nat load (native)\nk-fakeCloverOak12345",
+        "passw\n    at load (/x/e.ts:1:1)\nord: invented-otter-river",
+        "Error: boom:\ngh\nat async Promise.all (index 0)\np_FAKEAspenMaple1234567890123456",
+    ] {
+        let said = quotable(&pi_said(words));
+        assert_eq!(said, withheld(), "{words:?}");
+    }
+}

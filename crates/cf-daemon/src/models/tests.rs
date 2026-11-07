@@ -507,6 +507,17 @@ fn a_label_in_a_line_shaped_like_a_frame_withholds_the_lines_of_its_value() {
     }
 }
 
+/// T-1276, `frame-wrapped-token`: a frame between the two halves of a token the wrap cut in two.
+/// Returned and kept, no part of it.
+#[test]
+fn a_token_cut_in_two_with_a_frame_between_its_halves_is_withheld_whole() {
+    let failure = format!("{ENDED}s\nat load (native)\nk-fakeCloverOak12345");
+    let (told, kept) = failed_with(&failure);
+    for why in [told, kept] {
+        assert_withheld(&why, &["k-fakeCloverOak12345"]);
+    }
+}
+
 /// T-1276, `wrapped-url-userinfo`: a line end in the middle of a URL's user and password. Returned
 /// and kept, neither half.
 #[test]

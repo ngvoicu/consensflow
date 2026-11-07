@@ -23,7 +23,9 @@
 //! and if anything in it may hold a credential, **none of it is quoted** and [`WORDS_WITHHELD`]
 //! stands in its place. A frame ([`FRAME`]: `at fn (file:1:2)`, `at file:1:2`,
 //! `at fn (<anonymous>)`; prose that begins with `at` is none) is set aside from what is
-//! quoted, not from what is looked at. The description before the mark, the exit code in it and
+//! quoted, not from what is looked at; and the lines that are no frame are looked at on their
+//! own as well, for a name or a token the wrap cut in two around a frame is whole only without
+//! it (`s` / `at load (native)` / `k-fake…`). The description before the mark, the exit code in it and
 //! the names of what Pi was loading are kept. Only a block that passed is cut, to its last
 //! [`QUOTE_LINES`] lines that are no frame within [`QUOTE_CHARS`] characters, and masked.
 //!
@@ -114,7 +116,12 @@ fn said(program: &str) -> Option<String> {
     if quoted.is_empty() {
         return None;
     }
-    if may_hold_a_credential(&lines) {
+    // Looked at twice where there are frames: with them, for one may be the label of the lines
+    // below it, and without them, so that a name or a token the wrap cut in two around a frame
+    // is whole at the join (T-1276, `frame-wrapped-token`: `s` / `at load (native)` / `k-fake…`).
+    let holds = may_hold_a_credential(&lines)
+        || (quoted.len() < lines.len() && may_hold_a_credential(&quoted));
+    if holds {
         return Some(WORDS_WITHHELD.to_owned());
     }
     let kept = &quoted[quoted.len().saturating_sub(QUOTE_LINES)..];
