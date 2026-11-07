@@ -353,6 +353,21 @@ impl Dispatcher {
         self.tell_dialog(project, participant, &body)
     }
 
+    /// The task of `participant`'s window whose giver hears of its dialogs: none for the chief's.
+    fn dialog_task(
+        &self,
+        participant: &ParticipantView,
+    ) -> Result<Option<cf_ledger::TaskThread>, EngineError> {
+        if participant.role == "chief" {
+            return Ok(None);
+        }
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, false)?)
+    }
+
     /// The number of the task `participant`'s window holds paused, where it holds one: a member's
     /// last task, if it is paused and still its own. None for the chief.
     fn paused_task(&self, participant: &ParticipantView) -> Result<Option<i64>, EngineError> {
@@ -369,21 +384,6 @@ impl Dispatcher {
                     && thread.task.assignee.as_deref() == Some(participant.handle.as_str())
             })
             .map(|thread| thread.task.number))
-    }
-
-    /// The task of `participant`'s window whose giver hears of its dialogs: none for the chief's.
-    fn dialog_task(
-        &self,
-        participant: &ParticipantView,
-    ) -> Result<Option<cf_ledger::TaskThread>, EngineError> {
-        if participant.role == "chief" {
-            return Ok(None);
-        }
-        Ok(self
-            .seams
-            .ledger
-            .borrow()
-            .active_task(participant.id, false)?)
     }
 
     /// The note of a dialog in `participant`'s window, `body`, to the human and to whoever gave
