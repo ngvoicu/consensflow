@@ -16,8 +16,10 @@
 //! last reply of a request, Codex's `final_answer`), and the progress it writes on the way
 //! is no complete answer. What the harness wrote itself is no answer and cuts none: the
 //! summary of a compaction, a notification it keeps in its record alone, Claude Code's
-//! close of a cut turn. A turn that wrote nothing after its last tool call says so
-//! ([`WITHOUT_ANSWER`]).
+//! close of a cut turn. A turn that wrote nothing after its last tool call gives the last
+//! words it wrote before it in that turn (the chief's decision on T-262: a result is never
+//! empty), and one that wrote no words at all says so ([`WITHOUT_ANSWER`]). A tell's turn is
+//! told on the words after its last tool call alone ([`paused`], T-878).
 //!
 //! **Pending work keeps the task working** (A2; dip-agentos #1, poker-lab's T-442):
 //! Claude Code lets a command run in the background, or a Monitor watch one, and its
@@ -93,7 +95,8 @@ use crate::seams::{CommandsSeen, EngineError};
 use self::asks::asks_the_chief;
 use self::earlier_turns::with_earlier;
 
-/// What a result says of a turn that wrote nothing after its last tool call.
+/// What a result says of a turn that wrote no words at all, and what a tell's turn says
+/// after its last tool call where it wrote none there.
 pub(crate) const WITHOUT_ANSWER: &str = "(the agent ended its turn without a written answer)";
 
 /// What a worker's turn came to, for its task.

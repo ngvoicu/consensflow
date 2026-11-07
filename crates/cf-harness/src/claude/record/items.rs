@@ -5,6 +5,13 @@
 //! result is one item by the call it answers. Each item keeps the place
 //! (`seq`) of the latest record that said anything of it, which orders the
 //! items in an answer; neither that nor the fragments are in what it says.
+//! A message that holds a tool's result itself (the advisor's: of the blocks a
+//! message holds, only a `tool_result` or an `advisor_tool_result` is one, so no
+//! other server tool's) goes on after it in an item of its own, as a message after
+//! a tool does: what it said before stopped for the tool (T-593's result, m-4165).
+//! A record that holds a result and words of its own both does not split, and its
+//! words stay with what the message said before: Claude Code writes a block a
+//! record, and no transcript read has held one (T-670's P3).
 //!
 //! Beside them are the items only the history shows ([`Record::beside`]): a
 //! record's thinking, which stands before the message it is of, and a call with
@@ -12,7 +19,7 @@
 //!
 //! [`Record::beside`]: crate::shared::record::reading::Record::beside
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::js;
@@ -26,8 +33,11 @@ use crate::shared::record::sort::sort;
 #[derive(Default)]
 pub(super) struct Items {
     list: Vec<Entry>,
-    /// Each assistant's message, by its native id.
+    /// Each assistant's message, by its native id: its latest item.
     assistants: HashMap<Arc<str>, usize>,
+    /// The messages that hold a tool's result and have written nothing since:
+    /// the next record of one begins its next item.
+    after_a_tool: HashSet<Arc<str>>,
     /// Each tool's result, by the call's native id.
     tools: HashMap<Arc<str>, usize>,
     /// The items only the history shows, in the order they were pushed.
@@ -168,14 +178,37 @@ impl Items {
     /// `addAssistant`: the message `id` names, made when it is the first
     /// record of it; its time and place are the latest record's. Its place in
     /// the list is where it was first pushed.
-    pub(super) fn assistant(&mut self, id: Arc<str>, at: &Value, seq: usize) -> usize {
+    ///
+    /// A message that held a tool's result goes on in an item of its own, by
+    /// the uuid of the record that goes on with it (`record`). A record that is
+    /// no place of the message's words (`placed` false: it holds a tool's result
+    /// alone) leaves the message's item where it was.
+    pub(super) fn assistant(
+        &mut self,
+        id: Arc<str>,
+        record: &Arc<str>,
+        at: &Value,
+        seq: usize,
+        placed: bool,
+    ) -> usize {
+        if !placed {
+            if let Some(&place) = self.assistants.get(&id) {
+                return place;
+            }
+        }
+        let after_a_tool = self.after_a_tool.remove(&id);
         let place = match self.assistants.get(&id) {
-            Some(&place) => place,
-            None => {
+            Some(&place) if !after_a_tool => place,
+            _ => {
                 let place = self.list.len();
-                self.assistants.insert(Arc::clone(&id), place);
+                let item = if after_a_tool {
+                    Arc::clone(record)
+                } else {
+                    Arc::clone(&id)
+                };
+                self.assistants.insert(id, place);
                 self.list
-                    .push(Entry::new(id, Role::Assistant, "", false, at, seq));
+                    .push(Entry::new(item, Role::Assistant, "", false, at, seq));
                 place
             }
         };
@@ -255,6 +288,11 @@ impl Items {
         let item = &mut self.list[place].item;
         item.commentary = true;
         item.synthetic = true;
+    }
+
+    /// The message `id` holds a tool's result: what it writes next is after it.
+    pub(super) fn after_a_tool(&mut self, id: &Arc<str>) {
+        self.after_a_tool.insert(Arc::clone(id));
     }
 
     /// The assistant's message `id` names is complete, when there is one.

@@ -1,0 +1,128 @@
+# A result is the text the member wrote after its turn's last tool call, and where it wrote
+# none, the last words it wrote before it in that turn (the chief's decisions on T-262), with
+# what decides on the words after the last tool call alone reading those (T-878).
+#
+# - Claude's reader: a message that holds a tool's result itself (the advisor's) goes on after
+#   it in an item of its own, so the words before the call are a step that stopped for it
+#   (T-593's result, m-4165, began with them; `crates/cf-harness/src/claude/record/items.rs`,
+#   `replay.rs`).
+# - The engine: a final answer with no words is the last item of the turn that has some, never
+#   one of the turn before the latest message to the member, nor the harness's own words, and
+#   Finish takes the same (`crates/cf-engine/src/role_change.rs`).
+# - Strict: a tell's note reads the words after the last tool call alone
+#   (`Answers::after_the_last_tool`, `turn_end/paused.rs`; Calliope's P2 on T-262, T-878).
+#
+# The rig's cases build the native `cf` from the sources as planted, so their plants say `builds`.
+# Every name holds `result-text`, so `cargo xtask plants daemon result-text` runs them all.
+
+[run]
+rt-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::final_answer"]
+rt-role-change-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change"]
+rt-engine-final = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "final_answer::"]
+rt-engine-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
+rt-rig-progress = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_that_began_with_the_workers_progress::"], builds = true }
+
+[[plant]]
+name = "result-text reader: a message that held the advisor's answer goes on in the same item"
+meant = "what_a_message_wrote_after_an_advisors_answer_in_it_is_an_item_of_its_own_after_the_tool"
+runs = ["rt-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        if holds_a_result {
+            self.items.after_a_tool(&message_id);
+        }'''
+replace = ''
+
+[[plant]]
+name = "result-text rig: the words before the advisor's answer are in the chief's result"
+meant = "a_report_written_after_the_advisor_answered_in_its_own_message_is_the_result_alone"
+runs = ["rt-rig-progress"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '        let after_a_tool = self.after_a_tool.remove(&id);'
+replace = '        let after_a_tool = self.after_a_tool.remove(&id) && false;'
+
+[[plant]]
+name = "result-text reader: the record that holds the advisor's answer is a place of its message's words"
+meant = "what_a_message_wrote_after_an_advisors_answer_in_it_is_an_item_of_its_own_after_the_tool"
+runs = ["rt-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '        let placed = !holds_a_result || !record.text.is_empty();'
+replace = '        let placed = true;'
+
+[[plant]]
+name = "result-text: a final answer of steps that said nothing is no answer"
+meant = "a_turn_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words_it_wrote_before_it"
+runs = ["rt-engine-final"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '        Some(said) if !run.iter().any(|item| has_words(item)) => vec![said],'
+replace = '        Some(said) if run.is_empty() => vec![said],'
+
+[[plant]]
+name = "result-text rig: a worker that wrote nothing after its last tool call gives no words"
+meant = "a_worker_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words_it_wrote"
+runs = ["rt-rig-progress"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '        final_run: with_words(&final_run, said),'
+replace = '        final_run: with_words(&final_run, None),'
+
+[[plant]]
+name = "result-text: the words before a message to the member are its answer's"
+meant = "the_words_before_a_woken_turns_last_tool_call_are_its_own_and_none_of_the_turn_before"
+runs = ["rt-engine-final"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '                said = said.filter(|_| of_the_role);'
+replace = ''
+
+[[plant]]
+name = "result-text: a harness's progress note is words of the member's"
+meant = "a_turn_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words_it_wrote_before_it"
+runs = ["rt-engine-final"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '    !item.commentary && !item.synthetic && !js::trim(&item.text).is_empty()'
+replace = '    !item.synthetic && !js::trim(&item.text).is_empty()'
+
+[[plant]]
+name = "result-text: the harness's own words in the member's place are words of the member's"
+meant = "a_turn_with_no_words_after_its_last_tool_call_answers_with_the_last_words_it_wrote_before_it"
+runs = ["rt-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '    !item.commentary && !item.synthetic && !js::trim(&item.text).is_empty()'
+replace = '    !item.commentary && !js::trim(&item.text).is_empty()'
+
+[[plant]]
+name = "result-text: Finish takes no words where the held turn wrote none after its last tool call"
+meant = "finish_takes_the_last_words_before_the_last_tool_call_of_a_held_turn_that_wrote_none_after_it"
+runs = ["rt-engine-final"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '                    complete_run = Some(with_words(&final_run, said));'
+replace = '                    complete_run = Some(final_run.clone());'
+
+[[plant]]
+name = "result-text: a tell answered with words then cf answer and no words after it is told the words"
+meant = "a_tell_answered_with_words_then_cf_answer_and_no_words_after_it_says_nothing_more"
+runs = ["rt-engine-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/paused.rs"
+find = '        let words = words_of(&answers.after_the_last_tool);'
+replace = '        let words = words_of(&answers.final_run);'

@@ -522,6 +522,40 @@ fn a_tell_answered_with_cf_answer_alone_says_nothing_more() {
 }
 
 #[test]
+fn a_tell_answered_with_words_then_cf_answer_and_no_words_after_it_says_nothing_more() {
+    // Calliope's P2 on T-262 (T-670), T-878: a tell's turn of [the tell, words that stopped for
+    // a tool, `cf answer`, a last step with no words]. A result that has no words after its
+    // last tool call takes the words before it (T-262), but this turn said all it had to say
+    // with `cf answer`, which reached the chief as a message of its own: the note of the tell's
+    // turn is decided on the words after the last tool call, and there are none.
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .answer(told.id, told.recipient_id, Some(&json!(ANSWER)), None)
+        .unwrap();
+    let item = |role, text: &str, complete| {
+        let mut item = context.adapter.item(role, text);
+        item.complete = complete;
+        item
+    };
+    let (words, done) = (
+        item(Role::Assistant, "Answering the chief with cf answer", false),
+        item(Role::Tool, "m-3 answered @chief.", true),
+    );
+    context.adapter.with("zeus", |agent| {
+        agent.items.extend([words, done]);
+    });
+    context.adapter.answer("zeus", "");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(kept_notes(&context, project), Vec::<String>::new());
+    assert_eq!(context.task(project, 1).task.state, "paused");
+}
+
+#[test]
 fn a_turn_that_ends_with_work_its_harness_wakes_it_for_is_not_over_and_says_nothing_yet() {
     let context = Context::new();
     let (project, told) = told_at_work(&context);

@@ -170,12 +170,22 @@ impl Transcript {
         }
         let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));
-        let item = self.items.assistant(Arc::clone(&message_id), at, seq);
+        // The record's uuid is asked for even of a record that says nothing.
+        let uuid = id_of(record.uuid.as_ref(), "claude record", seq)?;
+        // A record that holds a tool's result and says nothing is no place of its
+        // message's words: those before it stopped for the tool, and what the message
+        // writes next is after it (`Items::after_a_tool`).
+        let holds_a_result = record
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Result(_)));
+        let placed = !holds_a_result || !record.text.is_empty();
+        let item = self
+            .items
+            .assistant(Arc::clone(&message_id), &uuid, at, seq, placed);
         if record.closes_a_cut_turn {
             self.items.synthetic(item);
         }
-        // The record's uuid is asked for even of a record that says nothing.
-        let uuid = id_of(record.uuid.as_ref(), "claude record", seq)?;
         self.items.fragment(item, Arc::clone(&uuid), &record.text);
         for thinking in &record.thinking {
             self.items.thinking(&uuid, thinking, at, seq);
@@ -216,6 +226,9 @@ impl Transcript {
                 }
                 Block::Result(result) => self.tool_result(result, None, at, seq)?,
             }
+        }
+        if holds_a_result {
+            self.items.after_a_tool(&message_id);
         }
 
         if record.refused {

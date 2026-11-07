@@ -1,7 +1,9 @@
 //! A worker's result is its final answer: what it wrote after its last tool call or
 //! message in its last turn, and not every line of progress before it (the owner's
 //! decision of 2026-10-15, after the results of T-14 and T-15 began with ten to twenty
-//! lines of it). What it wrote before stays in the transcript. Each harness's reader
+//! lines of it). Where it wrote nothing after its last tool call, the last words it wrote
+//! before it in that turn (the chief's decision on T-262). What it wrote before stays in
+//! the transcript. Each harness's reader
 //! gives the turn's items in the shape its own record has (`cf-harness`'s tests of each
 //! reader hold those shapes), and the engine takes the final answer out of every one of
 //! them; Codex's notes are marked as its commentary and never complete, the others'
@@ -145,16 +147,58 @@ fn what_the_member_wrote_after_its_last_tool_call_is_all_of_the_result_in_the_it
 }
 
 #[test]
-fn a_turn_that_wrote_nothing_after_its_last_tool_call_says_so_and_its_progress_is_not_the_result() {
-    // The member's last step is empty (it ended its turn on a tool's output): the words it
-    // said on the way are progress, and the result says there is none.
+fn a_turn_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words_it_wrote_before_it() {
+    // The member's last step is empty (it ended its turn on a tool's output): the result is
+    // the last words it wrote on the way, so that a result is never empty (the chief's
+    // decision on T-262). The same for every harness's shape of it.
+    assert_eq!(result_of(&REVIEWING, ""), "Now the tests");
+    assert_eq!(result_of(&REVIEWING, "  \n "), "Now the tests");
+    // The words of a step that said nothing do not count: the last that said something does.
+    let silent_step = [
+        Wrote::Progress("Still reviewing the diff"),
+        Wrote::Tool,
+        Wrote::Progress(" "),
+        Wrote::Tool,
+    ];
+    assert_eq!(result_of(&silent_step, ""), "Still reviewing the diff");
+    // Codex's notes are its own progress, never its answer.
+    let noted = [
+        Wrote::Progress("Read the diff"),
+        Wrote::Tool,
+        Wrote::Commentary("Checking the counts now."),
+        Wrote::Tool,
+    ];
+    assert_eq!(result_of(&noted, ""), "Read the diff");
+    // A turn that wrote no words at all says so.
     assert_eq!(
-        result_of(&REVIEWING, ""),
+        result_of(&[Wrote::Tool, Wrote::Its, Wrote::Tool], ""),
         "(the agent ended its turn without a written answer)"
     );
+}
+
+#[test]
+fn the_words_before_a_woken_turns_last_tool_call_are_its_own_and_none_of_the_turn_before() {
+    // A job's end woke a turn that called a tool and wrote nothing after it: the words of
+    // the turn before the notification are no part of this turn's answer, which has none.
+    let context = Context::new();
+    let tiers = working(&context);
+    let first = context
+        .adapter
+        .item(Role::Assistant, "Still going; I'll report when it ends");
+    let woken = context.adapter.item(
+        Role::User,
+        "<task-notification>b1 completed</task-notification>",
+    );
+    let output = context.adapter.item(Role::Tool, "output of a tool");
+    context.adapter.with("zeus", |agent| {
+        agent.items.extend([first, woken, output]);
+    });
+    context.adapter.answer("zeus", "");
+    context.pass().unwrap();
+
     assert_eq!(
-        result_of(&REVIEWING, "  \n "),
-        "(the agent ended its turn without a written answer)"
+        results(&context, &tiers),
+        ["(the agent ended its turn without a written answer)"]
     );
 }
 
@@ -210,4 +254,46 @@ fn a_turn_that_was_woken_has_the_final_answer_of_its_last_turn_and_none_of_the_t
 
         assert_eq!(results(&context, &tiers), [REPORT]);
     }
+}
+
+#[test]
+fn finish_takes_the_last_words_before_the_last_tool_call_of_a_held_turn_that_wrote_none_after_it() {
+    // A turn that left a job running is held, and Finish is the way out of the wait: it
+    // takes the same answer a result does, the last words before the last tool call where
+    // there are none after it (T-262), and not that there is none.
+    let context = Context::new();
+    let tiers = working(&context);
+    let written = items(&context, &REVIEWING);
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.extend(written));
+    context.adapter.answer_leaving_a_job("zeus", "");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+    context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(tiers.task(1).task.state, "done");
+    let result = results(&context, &tiers).remove(0);
+    assert!(result.starts_with("Now the tests"), "{result}");
+}
+
+#[test]
+fn a_question_written_before_the_last_tool_call_with_no_words_after_it_is_a_question_to_the_chief()
+{
+    // A turn that wrote no words after its last tool call ends on the last words it wrote
+    // before it (T-262), and those words are what says whether it ended asking the chief
+    // (T-1119): a question there is put to the chief, and the task waits for the answer.
+    let context = Context::new();
+    let tiers = working(&context);
+    let asked = "Should I continue with the live runs, or stop here?";
+    let written = items(&context, &[Wrote::Progress(asked), Wrote::Tool]);
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.extend(written));
+    context.adapter.answer("zeus", "");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    assert_eq!(results(&context, &tiers), Vec::<String>::new());
 }

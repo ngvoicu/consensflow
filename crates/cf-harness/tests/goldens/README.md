@@ -130,6 +130,32 @@ once, with the reason here and in the commit.
   one look read `inFlight: true` and `settlement: in-flight`, and reads `false`
   and `settled` now; its items, `failed` and `quota` are Node's.
 
+- **A Claude message goes on after the advisor's answer in an item of its own**
+  (2026-10-26 and 2026-11-08, T-262 and T-878: T-593's result, m-4165 on 3.0.6-alpha.2,
+  began with the line its worker wrote before it asked the advisor). Claude Code writes
+  the advisor's call and its result (`server_tool_use` and `advisor_tool_result`) as
+  blocks of the message that asks it, a record a block, so a message can say something,
+  call the advisor, hold its answer and go on. Node's reader made that message one item
+  whose text joined every record's, placed after the advisor's tool item by its last
+  record, so a worker's final answer began with the words it wrote before the call. The
+  Rust reader ends the message's item where it holds a result and goes on in an item of
+  its own, whose id is the uuid of the record that goes on; the record that holds the
+  result alone is no place of the words before it (`claude/record/items.rs`,
+  `replay.rs`). Only a `tool_result` or an `advisor_tool_result` block is a result
+  (`project.rs`), so no other server tool's call splits a message, as none made a tool
+  item before. `records/` moved for it in 36 of its 372 scenarios, all Claude's, in 49
+  readings: 15 readings of 2 scenarios of `sequences`, 22 of 22 of `suite` and 12 of 12
+  of `sweep`. In 47 of them the one item of such a message is two, the words before the
+  result (incomplete, at the time of the last record that said something of them) and
+  those after it (with Node's `complete` and `at`), with the advisor's tool item between
+  them; the first item's text is Node's up to the result, and the two texts, joined with
+  a line between, are Node's (in two of them, looks of `read in pieces` taken before the
+  message went on, the second item has no words yet, and the first alone is Node's
+  text). In the other 2 the message has said nothing after the result yet, and its
+  item's `at` is its last record before the result, not the result's. Nothing else of
+  any reading moved, and no look was added or taken, so the counts in
+  `../records/main.rs` stand.
+
 - **No first message on a command line** (2026-10-24, T-432). A worker sent SIGINT
   to every process whose `ps` line matched "xtask plants", and two other workers'
   Claude windows closed: Node's adapters gave Claude Code, Pi and Codex their
