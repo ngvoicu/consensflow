@@ -437,14 +437,16 @@ fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task(
         answers(&[user(&replacement), assistant("Understood.")]),
         Vec::<String>::new()
     );
-    // What it said of the task before the role came is the task's, and is kept.
+    // What it said of the task before the role came is the task's, and is kept, whole: two
+    // items, since a final run with no words would take back the last of them (T-262).
     assert_eq!(
         answers(&[
             assistant("Parser done"),
+            assistant("All tests pass"),
             user(&replacement),
             assistant("Understood.")
         ]),
-        ["Parser done"]
+        ["Parser done", "All tests pass"]
     );
     // And what it says to the next message is the task's again, whoever the message is from.
     assert_eq!(
