@@ -1003,3 +1003,30 @@ fn hook_reasons_that_say_about_two_and_about_three_minutes_are_two_requests() {
     assert_eq!(told_counts(&context, &tiers), (2, 2));
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
 }
+
+#[test]
+fn a_hooks_ask_another_request_replaces_while_its_status_says_one_is_open_is_never_pressed_into() {
+    // Where its harness says a dialog is open all along (Claude Code's status), the engine does not
+    // tell a second dialog while the first stays told of: the decline of the first, at its ten
+    // minutes, is pressed only into a read that is the first (its command the same), never into
+    // the request that took its place in the same words and choices.
+    let first = hook_command("sleep 30");
+    let second = hook_command("sleep 45");
+    let context = Context::new();
+    let tiers = at_work(&context, &first);
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some(DIALOG_OPEN.to_owned()),
+        });
+    });
+    until_told(&context, &tiers);
+    passes(&context, 9, 60_000);
+    context.host.set_snapshot(json!({ "tail": second }));
+    passes(&context, 4, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(answered(&tiers), Vec::<String>::new());
+    // And the first one itself, shown again at its ten minutes, is declined, once.
+    context.host.set_snapshot(json!({ "tail": first }));
+    passes(&context, 2, 5_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
+}

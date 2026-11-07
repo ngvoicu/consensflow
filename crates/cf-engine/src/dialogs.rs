@@ -173,12 +173,7 @@ impl Dispatcher {
             watch.looked = Some(now);
             watch.shown = read.map(|dialog| {
                 let looks = match &watch.shown {
-                    Some((before, looks))
-                        if window.dialog_identity(before).question
-                            == window.dialog_identity(&dialog).question =>
-                    {
-                        looks + 1
-                    }
+                    Some((before, looks)) if before.question == dialog.question => looks + 1,
                     _ => 1,
                 };
                 (dialog, looks)
@@ -202,7 +197,6 @@ impl Dispatcher {
             if sign == DialogSign::Screen && dialog.is_none() {
                 let mut watch = record.dialog.borrow_mut();
                 watch.told = None;
-                watch.told_as = None;
                 watch.decline = None;
                 watch.declined = false;
             }
