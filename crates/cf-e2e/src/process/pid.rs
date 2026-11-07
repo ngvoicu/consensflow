@@ -123,6 +123,19 @@ pub fn described(pid: u32) -> Option<String> {
     })
 }
 
+/// The command line of the process `pid`, as `ps` says it: none where there is no such
+/// process or `ps` says nothing of it.
+#[cfg(unix)]
+pub fn command(pid: u32) -> Option<String> {
+    let ran = Run::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .inheriting_env()
+        .run()
+        .ok()?;
+    let said = ran.stdout.trim();
+    (ran.code == Some(0) && !said.is_empty()).then(|| said.to_owned())
+}
+
 /// How long the process `pid` has run, in whole seconds: the `etime` of `ps`. None where
 /// it is not there or the system will not say. A process that has run for less than
 /// another is one that began after it.
@@ -250,18 +263,13 @@ pub fn end_all(pids: &[u32]) {
     let _ = taskkill.run();
 }
 
-/// How long the PowerShell that says when a process began is given: well past what
-/// it takes on a loaded runner.
-#[cfg(windows)]
-const STARTED_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
-
 /// When the process `pid` began, in the words the system says it in (the 100 ns
 /// since 1601 that PowerShell's `StartTime` is): the same for the same process, and
 /// others for one that took its number after it. None where it is not there or the
 /// system will not say. A PowerShell takes its time to start: 11 to 17 s on GitHub's
 /// Windows runner (2026-10-15), and more under a suite's load, past the limit a
 /// program is given by default, which ended it, and a process that ran was said
-/// to be none ([`STARTED_LIMIT`]).
+/// to be none ([`super::POWERSHELL_LIMIT`]).
 #[cfg(windows)]
 pub fn started(pid: u32) -> Option<String> {
     // On GitHub's runner a PowerShell asked of a process that ran said nothing once,
@@ -282,16 +290,21 @@ pub fn started(pid: u32) -> Option<String> {
 #[cfg(windows)]
 const STARTED_TRIES: usize = 3;
 
+/// The PowerShell that says when the process `pid` began, given what one takes to
+/// start on a loaded machine ([`super::POWERSHELL_LIMIT`]).
+#[cfg(any(windows, test))]
+pub(super) fn when_started(pid: u32) -> Run {
+    let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
+    Run::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .finding_programs()
+        .limit(super::POWERSHELL_LIMIT)
+}
+
 /// What one PowerShell says of when the process `pid` began, or none.
 #[cfg(windows)]
 fn asked_when_started(pid: u32) -> Option<String> {
-    let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
-    let ran = Run::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .finding_programs()
-        .limit(STARTED_LIMIT)
-        .run()
-        .ok()?;
+    let ran = when_started(pid).run().ok()?;
     let said = ran.stdout.trim();
     (ran.code == Some(0) && !said.is_empty()).then(|| said.to_owned())
 }

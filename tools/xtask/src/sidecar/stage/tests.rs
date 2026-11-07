@@ -40,7 +40,7 @@ fn stages_the_cf_as_the_bundles_cli_bin_cf_and_nothing_else_off_windows() {
 }
 
 #[test]
-fn stages_the_console_host_beside_it_on_windows_and_says_each_file() {
+fn stages_the_shim_and_the_console_host_beside_it_on_windows_and_says_each_file() {
     let (_dir, context) = checkout();
     let bytes = console_host_package();
     let hash = sha256_of(&bytes);
@@ -54,16 +54,19 @@ fn stages_the_console_host_beside_it_on_windows_and_says_each_file() {
     stage(&context, &package, &mut system, &mut out).unwrap();
 
     let resources = context.path("app/src-tauri/resources");
-    // Exactly what the bundle is made of: the cf, and the two files of the console host.
+    // Exactly what the bundle is made of: the cf, the program the terminal's command is beside
+    // it, and the two files of the console host.
     assert_eq!(
         files_under(&resources),
         [
+            "cli/bin/cf-shim.exe",
             "cli/bin/cf.exe",
             "conpty/OpenConsole.exe",
             "conpty/conpty.dll"
         ]
     );
     assert_eq!(read(&resources.join("cli/bin/cf.exe")), "the new cf");
+    assert_eq!(read(&resources.join("cli/bin/cf-shim.exe")), "the new shim");
     assert_eq!(
         read(&resources.join("conpty/conpty.dll")),
         "the console host's dll"

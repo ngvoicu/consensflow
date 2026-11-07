@@ -48,11 +48,12 @@ const state = {
   selected: null,
   board: null,
   inbox: NO_NOTES,
-  // Whether a project's specs folder holds a file (`{ project, present }`), read after its board
-  // and never waited for: whether Specs shows. The daemon stops at the first file, and remembers
-  // it for a moment.
+  // Whether Specs shows for a project (`{ project, on, present }`): specs on for it, or its
+  // specs folder holding a file, read after its board and never waited for. The daemon stops at
+  // the first file, and remembers it for a moment.
   specsPresent: null,
-  agents: [],
+  /** The harnesses not installed here, as `harnesses.missing` said them last. */
+  missing: [],
   /** What the app says of specs for every project and the Specmint it bundles, as last read. */
   specs: null,
   focus: 'chief',
@@ -92,9 +93,10 @@ async function daemon(operation, body = {}) {
   return result
 }
 
-/** The saved agents, read again: what the board says members run, and what the pickers offer. */
-async function readAgents() {
-  state.agents = (await daemon('agents.list')).agents
+/** The harnesses not installed here, read again: Add member and the chief's pickers offer none of them. */
+async function readMissing() {
+  const { missing = [] } = await daemon('harnesses.missing')
+  state.missing = missing
 }
 
 /**
@@ -140,7 +142,7 @@ function daemonStatus({ available, cause, retrying }) {
   daemonDown.hidden = available
   if (available) {
     placeDaemonDown()
-    if (wasDown) void act(readAgents)
+    if (wasDown) void act(readMissing)
     return
   }
   daemonDown.replaceChildren(
@@ -504,21 +506,22 @@ let presenceReads = 0
 let presenceAgain = null
 
 /**
- * Whether the specs folder of project `project` holds a file, which shows the Specs button: read
- * apart from the board, which never waits for it (a folder on a drive that does not answer would
- * hold the board, its inbox and its windows until the daemon gave up on it), and shown when it
- * comes, for the project the board still shows. A folder that cannot be read shows no button. An
- * answer the daemon gave from memory says when it reads the folder again: it is asked once more
- * then, so the button never keeps what the folder said before a spec was written.
+ * Whether the Specs button shows for project `project`: specs on for it, or its specs folder
+ * holding a file — read apart from the board, which never waits for it (a folder on a drive
+ * that does not answer would hold the board, its inbox and its windows until the daemon gave
+ * up on it), and shown when it comes, for the project the board still shows. A folder that
+ * cannot be read holds no file, and a daemon that cannot answer says neither. An answer the
+ * daemon gave from memory says when it reads the folder again: it is asked once more then, so
+ * the button never keeps what the folder said before a spec was written.
  */
 async function readPresence(project) {
   const read = ++presenceReads
   clearTimeout(presenceAgain)
   presenceAgain = null
-  const said = await daemon('specs.present', { project }).catch(() => ({ present: false }))
+  const said = await daemon('specs.present', { project }).catch(() => ({}))
   if (read !== presenceReads || state.board?.project.id !== project) return
-  state.specsPresent = { project, present: said.present === true }
-  specsButton.hidden = !state.specsPresent.present
+  state.specsPresent = { project, on: said.on === true, present: said.present === true }
+  specsButton.hidden = !(state.specsPresent.on || state.specsPresent.present)
   if (typeof said.readAgainIn === 'number') {
     presenceAgain = setTimeout(() => void readPresence(project), said.readAgainIn + 50)
   }
@@ -540,12 +543,13 @@ function render() {
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
   projectSettingsButton.disabled = project === null
-  // Specs shows while the project's specs folder holds a file: from the board's first read after
-  // the chief writes its first spec, open or closed, specs on or off (`readPresence`).
+  // Specs shows while specs are on for the project or its specs folder holds a file: from the
+  // setting being saved, before anything is written, and from the board's first read after the
+  // chief writes its first spec, open or closed (`readPresence`).
   specsButton.hidden = !(
     project !== null &&
     state.specsPresent?.project === project.id &&
-    state.specsPresent.present
+    (state.specsPresent.on || state.specsPresent.present)
   )
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
@@ -561,11 +565,10 @@ function render() {
     board.render({
       board: state.board,
       inbox: state.inbox,
-      agents: state.agents,
       shows: (participant) => terminals.shows(participant.projectId, participant.handle),
     })
   }
-  terminals.render(state.board, { focused: state.focus, agents: state.agents })
+  terminals.render(state.board, { focused: state.focus })
 }
 
 // Deleting a project is confirmed in a dialog that names it.
@@ -780,13 +783,12 @@ inboxButton.addEventListener('click', () => {
 })
 
 // Project settings (the staff, human approval, wake-up calls and specs), for the project
-// asked for: drawn from its board while the board shown is its, and from the agents as the
-// page has them now; opening it reads the agents again. The button asks for the project
-// the board shows.
+// asked for: drawn from its board while the board shown is its; opening it reads again which
+// harnesses are installed. The button asks for the project the board shows.
 const projectSettings = new ProjectSettingsDialog($('#project-settings-dialog'), {
   board: () => state.board,
   selected: () => state.selected,
-  agents: () => state.agents,
+  missing: () => state.missing,
   specs: () => state.specs,
   readSpecs,
   daemon,
@@ -805,24 +807,18 @@ projectSettingsButton.addEventListener('click', () =>
  */
 async function openSettings(id) {
   if (!(await showProject(id))) return
-  await readAgents()
+  await readMissing()
   await projectSettings.open(id)
 }
 
-// New project: the native folder picker first, then the saved agent the chief
-// runs on and the project's settings: the staff (the last project's ticked
-// already), human approval, wake-up calls and specs, which the project starts
-// with. The agents it reads are the page's too, and the project it starts is
-// shown.
+// New project: the native folder picker first, then the chief's harness, model and effort
+// and the project's settings: the staff (the last project's there already), human approval,
+// wake-up calls and specs, which the project starts with. The project it starts is shown.
 const newProject = new NewProjectDialog($('#new-project-dialog'), {
-  agents: () => state.agents,
   specs: () => state.specs,
   readSpecs,
   daemon,
   act,
-  onAgents: (agents) => {
-    state.agents = agents
-  },
   onStart: (project) => {
     state.selected = project.id
     state.focus = 'chief'
@@ -858,14 +854,13 @@ const switchChief = new SwitchChiefDialog($('#switch-chief-dialog'), {
   },
 })
 
-// The agents screens are the daemon's own pages, each framed in a dialog of
-// its own at the address and token the app hands the page. A key pressed in a
-// frame never reaches the dialog around it, so a screen hands Escape up.
-// Closing one gives the focus back to the Settings button (its dialog closed
-// as the screen opened) and reads the agents again: a model or a tier may
-// have changed on it. Asked as the app starts, a screen's address waits for the
-// daemon's start: the status line says so, and one screen is asked for at a
-// time, so clicks meanwhile queue nothing (T-978).
+// The harnesses screen is the daemon's own page, framed in a dialog of its own at
+// the address and token the app hands the page. A key pressed in a frame never
+// reaches the dialog around it, so the screen hands Escape up. Closing it gives the
+// focus back to the Settings button (its dialog closed as the screen opened) and
+// reads again which harnesses are installed: one may have been on it. Asked as the
+// app starts, a screen's address waits for the daemon's start: the status line says
+// so, and one screen is asked for at a time, so clicks meanwhile queue nothing (T-978).
 const settingsButton = $('#settings-button')
 const settingsDialog = $('#settings-dialog')
 settingsButton.addEventListener('click', () => settingsDialog.showModal())
@@ -886,15 +881,10 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
       try {
         const screen = await invoke('agents_screen', { page })
         if (screen?.ok !== true) {
-          throw new Error(screen?.error ?? 'The agents screens are not available.')
+          throw new Error(screen?.error ?? 'The harnesses screen is not available.')
         }
-        // A screen opened before keeps what the human left on it, its filters
-        // and drafts, and is told the agents may have changed since.
-        if (frame.src === screen.url) {
-          frame.contentWindow.postMessage('consensflow:refresh-agents', new URL(screen.url).origin)
-        } else {
-          frame.src = screen.url
-        }
+        // A screen opened before keeps what the human left on it.
+        if (frame.src !== screen.url) frame.src = screen.url
         dialog.showModal()
       } finally {
         clearTimeout(saying)
@@ -911,7 +901,7 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
   })
   dialog.addEventListener('close', () => {
     settingsButton.focus()
-    void act(readAgents)
+    void act(readMissing)
   })
 }
 
@@ -926,6 +916,10 @@ const specsSettings = new SpecsSettings($('#specs-dialog'), {
   readSpecs,
   setSpecs: (specs) => {
     state.specs = specs
+    // What the app says of specs may turn them on for the project shown, or name it another
+    // folder: whether Specs shows is read again at once.
+    const project = state.board?.project.id
+    if (project !== undefined) void readPresence(project)
   },
 })
 $('#specs-settings-button').addEventListener('click', () =>
@@ -1001,7 +995,7 @@ async function start() {
     await invoke('subscribe_output', { onOutput: channel })
   }
   try {
-    await readAgents()
+    await readMissing()
   } catch (cause) {
     report(cause)
   }

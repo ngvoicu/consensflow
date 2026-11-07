@@ -482,9 +482,11 @@ fn a_held_tasks_window_whose_own_turn_fails_or_is_refused_again_does_not_go_on()
 }
 
 #[test]
-fn a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_windows_own() {
-    // A tell goes in on its own, not carried by the words that resume the task:
-    // the window's answer to it is no turn of its own (T-95).
+fn a_tell_to_a_task_held_at_its_reset_takes_it_over_goes_in_on_its_own_and_no_resume_follows() {
+    // A tell goes in on its own, not carried by any words that resume the task: the window's
+    // answer to it is no turn of its own (T-95). And a tell to a held task takes the hold
+    // over (T-1220's P1-1, T-1199): the task is the teller's, and the daemon resumes nothing
+    // at the reset; it goes on by the chief's resume.
     let context = Context::new();
     let (tiers, session) = held_for_two_hours(&context);
     context.advance(2 * 3_600_000 + 60_000);
@@ -525,9 +527,10 @@ fn a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_w
     }
     assert_eq!(
         pasted_saying(&context, &session, "Resumed:"),
-        1,
-        "the words that resume it go in after the tell"
+        0,
+        "the hold is the teller's now: no resume of the daemon's"
     );
+    assert_eq!(tiers.task(1).task.state, "paused");
     let task = tiers.task(1);
     assert!(
         task.messages.iter().all(|m| m.kind != "result"),
@@ -938,4 +941,89 @@ fn a_held_tasks_window_whose_summary_quotes_its_briefs_header_goes_on_by_itself(
     }
     assert_eq!(results(&tiers), ["The parser is done."]);
     assert_eq!(pasted_saying(&context, &session, "Resumed:"), 0);
+}
+
+/// A note of ConsensFlow's on its way into the window as the busy model holds its task
+/// (T-1223's P3-6): deliveries begun after the hold wait with it, but one begun before it may
+/// finish. The note's adapter handoff is held; the busy model holds the task (the ledger's
+/// hold, as `hold_busy` makes it); then the note goes in, once, while the task is still held.
+/// The window's reply to it is no turn of its own: the note is a paste of ConsensFlow's after
+/// the task's words (`went_on_by_itself`), and the task stays held.
+#[test]
+fn a_note_already_on_its_way_as_a_busy_model_holds_the_task_goes_in_and_the_reply_is_no_turn_of_the_windows_own(
+) {
+    let context = Context::new();
+    let tiers = crate::background::working(&context);
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.ask(project, &session, "chief", 1, "Which grammar?");
+    context
+        .adapter
+        .answer("zeus", "Asked the chief which grammar.");
+    context.pass().unwrap();
+    let handing = context.adapter.deliver_holds.hold(|_| true);
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &cf_ledger::NewNote {
+                from: None,
+                to: session.clone(),
+                task: Some(1),
+                body: "The tests live in tests/parser".to_owned(),
+            },
+        )
+        .unwrap()
+        .id;
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.settle();
+        if context.message(note).state == "delivering" {
+            break;
+        }
+        context.advance(3_100);
+    }
+    assert_eq!(
+        context.message(note).state,
+        "delivering",
+        "its handoff held"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .hold_task(
+            project,
+            1,
+            &after(&context, 60_000),
+            "its model is busy, a refusal of its provider for a moment",
+        )
+        .unwrap();
+    assert!(
+        tiers.task(1).task.held_until.is_some(),
+        "held for the busy model"
+    );
+    handing.open();
+    context.settle();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.settle();
+    }
+    assert_eq!(context.message(note).state, "delivered");
+    assert_eq!(
+        pasted_saying(&context, &session, "The tests live in tests/parser"),
+        1,
+        "in once"
+    );
+    assert!(
+        tiers.task(1).task.held_until.is_some(),
+        "in while the task is still held"
+    );
+    context.adapter.answer("zeus", "Noted: tests/parser.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let task = tiers.task(1);
+    assert_eq!(task.task.state, "paused", "no turn of the window's own");
+    assert!(task.messages.iter().all(|message| message.kind != "result"));
 }

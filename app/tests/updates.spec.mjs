@@ -128,7 +128,7 @@ async function installTauriShim(
             return copy({ ok: true, board: initialState.boards[body.project] })
           }
           if (operation === 'inbox.get') return { ok: true, messages: [], total: 0, shown: 0 }
-          if (operation === 'agents.list') return { ok: true, agents: [] }
+          if (operation === 'harnesses.missing') return { ok: true, missing: [] }
           return { ok: true }
         }
         if (command === 'update_status' || command === 'update_check') {

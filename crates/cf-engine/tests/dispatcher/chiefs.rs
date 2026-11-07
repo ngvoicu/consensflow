@@ -4,7 +4,7 @@
 //! handoffs it was written, and a project replaced while something of it waits.
 
 use cf_engine::seams::EngineError;
-use cf_engine::testing::{Answer, Context, Made};
+use cf_engine::testing::{Answer, Context, Made, MODELS};
 use cf_engine::SwitchTo;
 use cf_ledger::{DeletedProject, MessageView, ParticipantView, ProjectView};
 use serde_json::json;
@@ -20,11 +20,17 @@ pub fn with_codex() -> Context {
     })
 }
 
-/// The chief a switch is to.
+/// The chief a switch is to: `harness`, on the model the kit's fake `agent` is saved with,
+/// as Node's suite switched to a saved agent (its name where the kit saves none).
 pub fn to(harness: &str, agent: &str) -> SwitchTo {
+    let model = MODELS
+        .iter()
+        .find(|(saved, _)| *saved == agent)
+        .map_or(agent, |(_, model)| model);
     SwitchTo {
         harness: harness.to_owned(),
-        agent: agent.to_owned(),
+        model: model.to_owned(),
+        effort: None,
     }
 }
 
@@ -108,7 +114,7 @@ pub fn replace_project_with(context: &Context, old: &ProjectView, workers: &[&st
     let opening = context.begin_open_project(json!({
         "directory": "/work/api",
         "name": "api",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         "staff": staff,
     }));
     let fresh = context

@@ -49,10 +49,28 @@ fn a_close_whose_exit_never_comes_is_settled_once_its_wait_is_over_and_the_next_
     assert_eq!(context.host.opened().len(), opened);
     assert_eq!(context.task(project.id, 2).task.state, "queued");
 
-    // Its wait over, the exit is settled, and T-2 opens a window of its own.
+    // Its wait over, the exit is settled; the host never proved the program gone, so T-2, a
+    // follow-up no window had, is held for the chief's word and given no window unasked.
     context.advance(1);
     context.pass().unwrap();
     assert_eq!(context.dispatcher.pane(zeus), None, "released");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.host.opened().len(), opened);
+    assert_eq!(context.task(project.id, 2).task.state, "paused");
+
+    // The chief's word sends it on, and T-2 opens a window of its own.
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            project.id,
+            2,
+            Some("chief"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
+    context.pass().unwrap();
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.host.opened().len(), opened + 1);

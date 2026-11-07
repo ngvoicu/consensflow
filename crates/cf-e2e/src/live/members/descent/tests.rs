@@ -123,6 +123,100 @@ fn what_descends_from_a_process_is_what_it_started_and_began_after_it_and_not_it
 }
 
 #[test]
+fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone(
+) {
+    // A job the agent detached from a shell that then ended (`nohup sleep 4711 &`, in a shell
+    // that leads a session of its own) is held by no window, and says nothing of whose it is:
+    // it is the run's own by where it runs (the folder made for the run), that it began after the
+    // run's window did and that nothing started it any more (its parent is init's). A
+    // process whose command line says the same and is none of these is not.
+    let folder = std::path::Path::new("/runs/leaving-pi");
+    let elsewhere = std::path::PathBuf::from("/runs/leaving-devin");
+    let here = || Some(folder.to_path_buf());
+    let folder_of = |pid: u32| match pid {
+        200 | 202 | 203 | 205 | 207 | 208 => here(),
+        204 => Some(elsewhere.clone()),
+        // 206's folder cannot be read; 201 is in this one but began before the window did.
+        201 => here(),
+        _ => None,
+    };
+    let all = [
+        // The job: an orphan, in the run's folder, begun after the window (at 100).
+        running(200, 101, 1, "sleep 4711"),
+        // Begun before the window did: another run's, whose folder this one is later.
+        running(201, 99, 1, "sleep 4711"),
+        // Has a parent: a process of a shell that still runs, which the window's tree finds.
+        running(202, 102, 50, "sleep 4711"),
+        // Says other words.
+        running(203, 103, 1, "sleep 12"),
+        // Another folder.
+        running(204, 104, 1, "sleep 4711"),
+        // Its folder cannot be read.
+        running(206, 106, 1, "sleep 4711"),
+        // An orphan shell that runs the job, and the job it started: both are the run's.
+        running(207, 107, 1, "/bin/sh -c sleep 4711"),
+        running(208, 108, 207, "sleep 4711"),
+    ];
+    let pids = |found: Vec<Running>| -> Vec<u32> {
+        let mut pids: Vec<u32> = found.iter().map(|one| one.identity.pid).collect();
+        pids.sort_unstable();
+        pids
+    };
+    assert_eq!(
+        pids(orphans_in_folder(
+            &all,
+            "sleep 4711",
+            folder,
+            100,
+            folder_of
+        )),
+        [200, 207, 208]
+    );
+    // A window that began after every one of them leaves them all out: a child (208) is taken
+    // only with the orphan it descends from, never alone.
+    assert!(
+        orphans_in_folder(&all, "sleep 4711", folder, 108, folder_of).is_empty(),
+        "nothing orphaned began at or after 108"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
+    // The system says the real path of the folder a process runs in; the run may spell its own
+    // through a link (a Mac's temporary folder is behind `/var`).
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let real = real.canonicalize().unwrap();
+    let all = [running(200, 101, 1, "sleep 4711")];
+    let found = orphans_in_folder(&all, "sleep 4711", &link, 100, |_| Some(real.clone()));
+    assert_eq!(found.len(), 1);
+    // Its parent folder holds the other's folder, and is no folder of the process's.
+    assert!(
+        orphans_in_folder(&all, "sleep 4711", dir.path(), 100, |_| Some(real.clone())).is_empty()
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = crate::process::Run::new("/bin/sleep")
+        .arg("20")
+        .cwd(dir.path())
+        .spawn()
+        .unwrap();
+    let said = working_folder(child.id());
+    child.kill();
+    // The system says the real path: the temporary folder is behind `/var`, a link.
+    assert_eq!(said, Some(dir.path().canonicalize().unwrap()));
+    assert_eq!(working_folder(u32::MAX - 7), None);
+}
+
+#[test]
 fn a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said() {
     use super::testing::{Listed, Now};
 
@@ -666,5 +760,170 @@ fn an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spell
         let before = list.iter().find(|one| one.identity.pid == pid).unwrap();
         let after = repaired.iter().find(|one| one.identity.pid == pid).unwrap();
         assert_eq!(before, after, "{pid}");
+    }
+}
+
+/// The PowerShell that lists Windows' processes is given what one takes to start on a loaded
+/// machine, not the 30 s of a verb of `cf`: ended there under the load of a whole test program,
+/// it left a check unable to say what its window ran (CI, 2026-11-03, T-1161). Built here as on
+/// Windows, where it runs.
+#[test]
+fn the_powershell_that_lists_windows_processes_is_given_what_one_takes_on_a_loaded_machine() {
+    assert_eq!(
+        table_run().limit_given(),
+        Some(crate::process::POWERSHELL_LIMIT)
+    );
+}
+
+/// The programs a Unix has and Windows has not (outside Git Bash): `ps` and its kin, the
+/// shells, `python3` (what Windows' `PATH` holds under that name opens the Store), and the
+/// small tools a script is made of.
+const UNIX_ONLY: &str = "ps|pgrep|pkill|kill|killall|sh|bash|zsh|dash|python3?|perl|sleep|cat|tail|head|grep|sed|awk|lsof|security|tar|osascript|pbcopy|pbpaste|true|false|echo|mkfifo|nohup|setsid|launchctl";
+
+/// The files of the live kit that start a Unix-only program or give a harness a POSIX-only
+/// command, with why each is no Windows case's start of one: a platform's own branch, a
+/// test of the Unix side, a case that runs on a Mac alone, a harness whose shell on Windows
+/// is Git Bash (Claude Code's: `sh` and `sleep` are there), or text the case only reads.
+/// A file that is not here and starts one is a case that cannot run on Windows (T-1079:
+/// `ps` in `codex-role`, `sh` in `stops`, `python3` in `outside-claude`).
+const WINDOWS_AWARE: &[(&str, &str)] = &[
+    ("src/live/ask/readiness.rs", "a test with a Windows branch of its own"),
+    ("src/live/claude.rs", "`ps` after the Windows branch returns the process table's"),
+    ("src/live/codex.rs", "a disabled server's command is never started (enabled=false); /bin/sh only in cfg(unix) tests"),
+    ("src/live/isolation/tests.rs", "a test of the Unix side"),
+    ("src/live/login.rs", "macOS's keychain"),
+    ("src/live/login/tests.rs", "a test of the Unix side"),
+    ("src/live/machine/tests.rs", "tests of the Unix side"),
+    ("src/live/machine/wrapper.rs", "the shell wrappers of the Unix side (Windows has the .cmd ones)"),
+    ("src/live/mcp_server.rs", "python3 where there are process groups, Node on Windows"),
+    ("src/live/members/closing.rs", "`ps` on macOS and Linux, the process table on Windows"),
+    ("src/live/members/command.rs", "tests of the Unix side beside the Windows ones"),
+    ("src/live/members/descent.rs", "`ps` of the Unix side only (cfg(unix))"),
+    ("src/live/members/descent/native/tests.rs", "a test with a Windows branch of its own"),
+    ("src/live/members/descent/tests.rs", "this guard and its examples"),
+    ("tests/live_absorbed.rs", "Claude Code's commands run in Git Bash on Windows"),
+    ("tests/live_approval/flow.rs", "not a Windows case: an advisor's window on a Mac"),
+    ("tests/live_approval/minute.rs", "not a Windows case: an advisor's window on a Mac"),
+    ("tests/live_asks.rs", "Claude Code's commands run in Git Bash on Windows"),
+    ("tests/live_devin_wire.rs", "`sleep 30` is PowerShell's Start-Sleep and Git Bash's own (not run in cmd.exe; Devin's shell on Windows is unchecked)"),
+    ("tests/live_finish/leaving.rs", "`ps` on the Unix side, PowerShell's table on Windows"),
+    ("tests/live_finish/leaving/tests.rs", "tests of the Unix side"),
+    ("tests/live_folder_trust.rs", "a server of a .mcp.json the dialog asks of, never started"),
+    ("tests/live_monitor_wait.rs", "Claude Code's commands run in Git Bash on Windows"),
+    ("tests/live_muse/tui.rs", "the live Muse TUI cases run Muse on the Mac's keychain login, with the Mac's PATH, `ps` and `lsof`: not a Windows case"),
+    ("tests/live_muse_background.rs", "a Mac case: the keychain, lsof"),
+    ("tests/live_muse_window.rs", "`sleep 25` is PowerShell's Start-Sleep and Git Bash's own (Muse's shell on Windows is unchecked)"),
+    ("tests/live_parity/claude.rs", "macOS's keychain"),
+    ("tests/live_parity/codex_devin.rs", "/bin/sh only in its cfg(unix) tests of Muse's hook"),
+    ("tests/live_parity/terminal_env.rs", "a Mac case: refuses elsewhere"),
+    ("tests/live_stops/midturn/tool.rs", "text of process lists the case reads"),
+    ("tests/live_stops/slow.rs", "a Claude hook, which Claude Code runs in Git Bash on Windows"),
+    ("tests/live_tell.rs", "`sleep 15` is PowerShell's Start-Sleep and Git Bash's own; Claude's Monitor runs in Git Bash"),
+];
+
+/// The first Unix-only program a line of Rust starts (`Run::new`, `Command::new` or a `run`
+/// of the case's own, by name or by a Unix path), or gives a harness to run (a `python3`
+/// one-liner, `sh ./script`, `/bin/sleep`, a shell loop). A comment says, and starts nothing.
+fn unix_only_use(line: &str) -> Option<String> {
+    static STARTED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static PATHED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static POSIX: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let code = line.trim_start();
+    if code.starts_with("//") {
+        return None;
+    }
+    let started = crate::pattern::once(
+        &STARTED,
+        &format!(
+            r#"(?:Run|Command)::new\(\s*(?:Path::new\(\s*)?"(?:[^"]*/)?(?:{UNIX_ONLY})"|\brun\(\s*"(?:{UNIX_ONLY})""#
+        ),
+    );
+    let pathed = crate::pattern::once(
+        &PATHED,
+        &format!(r#""/(?:usr/)?(?:s?bin)/(?:{UNIX_ONLY})""#),
+    );
+    let posix = crate::pattern::once(&POSIX, r"python3? -c|\bsh \./|/bin/sleep|; do |; done");
+    [started, pathed, posix]
+        .iter()
+        .find_map(|found| found.find(code))
+        .map(|found| found.as_str().to_owned())
+}
+
+#[test]
+fn no_live_check_starts_a_unix_only_program_or_gives_a_harness_one_unless_it_is_named_as_aware_of_windows(
+) {
+    // `cargo xtask live codex-role` started `ps`, `stops --case stuck` told Codex to run
+    // `sh ./script`, and `outside-claude` told Claude to run `python3`: none of them could
+    // run on Windows (the alpha.1 release check, T-1069; fixed in T-1079). A live check
+    // starts such a program only in a file named in `WINDOWS_AWARE`, with its reason.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = rust_files(&root.join("src").join("live"));
+    for entry in std::fs::read_dir(root.join("tests")).unwrap() {
+        let path = entry.unwrap().path();
+        let live = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("live_"));
+        if live {
+            files.extend(rust_files(&path));
+        }
+    }
+    for (aware, why) in WINDOWS_AWARE {
+        assert!(
+            files.contains(&root.join(aware)),
+            "{aware} ({why}) is a file of the live kit"
+        );
+    }
+    let unaware: Vec<String> = files
+        .iter()
+        .filter_map(|file| {
+            let shown = file
+                .strip_prefix(root)
+                .unwrap_or(file)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if WINDOWS_AWARE.iter().any(|(aware, _)| *aware == shown) {
+                return None;
+            }
+            std::fs::read_to_string(file)
+                .unwrap()
+                .lines()
+                .enumerate()
+                .find_map(|(at, line)| {
+                    unix_only_use(line).map(|used| format!("{shown}:{}: {used}", at + 1))
+                })
+        })
+        .collect();
+    assert!(
+        unaware.is_empty(),
+        "a live check starts a program Windows lacks, or tells a harness to run one: {unaware:#?}\n\
+         Use the kit's own: `quiet_command`, `ticking_command`, `LongCommand` (Node), the machine's \
+         process table (`ThisMachine`); or, if the file never runs on Windows, name it in \
+         `WINDOWS_AWARE` with the reason."
+    );
+    // What the guard takes for one, and what it does not: the lines the three cases had.
+    for used in [
+        r#"let (_, command) = run("ps", &["-ww", "-o", "command=", "-p", &pid.to_string()])?;"#,
+        r#"let (code, found) = run("pgrep", &["-f", word])?;"#,
+        r#"let ran = Run::new("ps").args(["-A"]).run()?;"#,
+        r#"format!("Run exactly this one shell command, then stop: sh ./{SCRIPT}")"#,
+        r#"Run this exact command with your shell tool: python3 -c 'import time; time.sleep(60)'"#,
+        r#"let git = Command::new("/bin/sh").arg("-c");"#,
+        r#"Path::new("/usr/sbin/lsof")"#,
+        r#"for i in 1 2 3; do echo tick $i; /bin/sleep 5; done"#,
+    ] {
+        assert!(unix_only_use(used).is_some(), "{used}");
+    }
+    for fine in [
+        r#"let ran = Run::new("git").args(["init"]).run()?;"#,
+        r#"let ran = Run::new("node").args(["-e", "1"]).run()?;"#,
+        r#"let ran = Run::new("powershell").args(["-NoProfile"]).run()?;"#,
+        r#"let made = Run::new("shasum").args(["-a", "256"]);"#,
+        r#"let ran = Run::new("cmd").args(["/c", "ping -n 30 127.0.0.1"]);"#,
+        r#"    // `ps` is how the Mac lists them: Run::new("ps")"#,
+        r#"let program = Path::new("/usr/bin/git");"#,
+        r#"format!("Run exactly this one shell command, then stop: node ./{SCRIPT}")"#,
+    ] {
+        assert!(unix_only_use(fine).is_none(), "{fine}");
     }
 }

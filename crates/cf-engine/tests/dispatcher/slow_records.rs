@@ -240,14 +240,14 @@ fn presses_no_enter_again_after_the_arrival_window_for_a_message_its_window_goes
     // The chief is in a turn and printing when the paste has been waited for the
     // arrival window: the one Enter the paste is given is not pressed into it.
     context.adapter.busy("chief");
-    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 500 }));
     context.advance(ARRIVAL_MS);
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "not into a window that just printed");
 
     // Quiet at last, minutes on, and the record is still waited for: that window
     // is past, and no Enter is pressed into a turn for the paste it holds.
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     for _ in 0..6 {
         context.advance(ARRIVAL_MS);
         context.pass().unwrap();
@@ -865,6 +865,40 @@ fn confirms_a_paste_taken_in_a_conversation_the_human_left_when_its_record_shows
         Role::User,
         &delivery_text(&context.message(note.id), &[], &CfWord::bare()),
     );
+    context.adapter.with("chief", |agent| {
+        agent.records.entry(left.clone()).or_default().push(item);
+    });
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
+    assert_eq!(pasted.get(), 1, "never pasted again");
+}
+
+/// T-810's third path of the image-paste fix with no case: the paste the human's `/new` left
+/// behind is read from the record of the conversation it went into, and that record shows it
+/// as Claude Code writes a paste whose pictures it attached: behind their placeholders. It
+/// arrived all the same, and is never pasted again.
+#[test]
+fn confirms_a_paste_taken_in_a_conversation_the_human_left_when_its_record_shows_it_behind_the_placeholders_of_its_pictures(
+) {
+    let context = Context::new();
+    let (_, note, pasted, left) = taken_then_switched(&context);
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+    });
+    for _ in 0..4 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "a record at work is waited for");
+    assert_eq!(context.message(note.id).state, "delivering");
+    let words = delivery_text(&context.message(note.id), &[], &CfWord::bare());
+    let item = context
+        .adapter
+        .item(Role::User, &format!("[Image #1] [Image #2]{words}"));
     context.adapter.with("chief", |agent| {
         agent.records.entry(left.clone()).or_default().push(item);
     });

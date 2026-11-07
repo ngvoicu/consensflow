@@ -46,13 +46,18 @@ fn rig_over(env: Env, engine: Option<Rc<dyn Engine>>) -> Rig {
 
 /// A rig as [`rig_over`] makes one, its specs viewer given `specs`.
 fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
+    rig_of(env, engine, specs, Context::new())
+}
+
+/// A rig as [`rig_with`] makes one, over the engine kit `kit`.
+fn rig_of(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs, kit: Context) -> Rig {
     let Worked { home, spawn } = worked();
-    let kit = Context::new();
     let kicks = Rc::new(Cell::new(0));
     let counted = Rc::clone(&kicks);
     let opened = Rc::new(RefCell::new(Vec::new()));
     let noted = Rc::clone(&opened);
     let grants_of = crate::computer_use::grants_of(&env);
+    let env_of_models = env.clone();
     let page = Rc::new(Page {
         ledger: Rc::clone(&kit.ledger),
         engine: engine.unwrap_or_else(|| Rc::new(Rc::clone(&kit.dispatcher))),
@@ -67,6 +72,10 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
             }),
             grants_of,
         },
+        models: Rc::new(crate::models::ModelLists::new(
+            Rc::new(crate::models::tests_support::NoAdapters),
+            env_of_models,
+        )),
     });
     Rig {
         home,
@@ -120,6 +129,12 @@ async fn every_operation_is_registered_and_asked_for_nothing_it_says_what_it_lac
                 let answer = ask(&app, name, json!({})).await;
                 if name == "projects.list" {
                     assert_eq!(answer, json!({ "ok": true, "projects": [] }));
+                    continue;
+                }
+                // What is installed is the environment's to say, and the last staff the
+                // ledger's: neither needs a home.
+                if name == "harnesses.missing" || name == "staff.last" {
+                    assert_eq!(answer["ok"], true, "{answer}");
                     continue;
                 }
                 // The rig has no home, so even the operations that need no body
@@ -390,7 +405,7 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
 }
 
 mod app_specs;
-mod claude_compaction;
+mod compaction;
 mod computer_use;
 mod deleting;
 mod describing;
@@ -398,6 +413,8 @@ mod gate;
 mod held;
 mod history;
 mod meeting;
+mod members;
+mod models;
 mod opening;
 mod reading;
 mod scripted;

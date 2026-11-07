@@ -22,6 +22,8 @@
 //! the cases left.
 
 mod channel;
+mod compaction;
+mod dialogs;
 mod resumed;
 mod roles;
 mod specs;
@@ -111,6 +113,8 @@ struct Request {
     specs: Option<Variant>,
     /// The folder its project keeps its specs in, relative to the project.
     folder: &'static str,
+    /// The size its project's members compact at, where the project chose one.
+    compaction: Option<u32>,
 }
 
 impl Default for Request {
@@ -125,6 +129,7 @@ impl Default for Request {
             starts_given_up: 0,
             specs: None,
             folder: ".specs",
+            compaction: None,
         }
     }
 }
@@ -173,7 +178,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
                 folder: request.folder,
                 skill,
             }),
-        compaction: None,
+        compaction: request.compaction,
         first_message_ms: request.first_message_ms,
         starts_given_up: request.starts_given_up,
     };
@@ -321,6 +326,12 @@ fn runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_comman
         "check_for_update_on_startup=false",
         "-c",
         "allow_login_shell=false",
+        "-c",
+        "notice.hide_rate_limit_model_nudge=true",
+        "-c",
+        "features.tool_suggest=false",
+        "-c",
+        "features.skill_mcp_dependency_install=false",
         "--model",
         "gpt-5.6-luna",
         "-c",
@@ -395,6 +406,12 @@ fn resumes_its_thread() {
             "check_for_update_on_startup=false",
             "-c",
             "allow_login_shell=false",
+            "-c",
+            "notice.hide_rate_limit_model_nudge=true",
+            "-c",
+            "features.tool_suggest=false",
+            "-c",
+            "features.skill_mcp_dependency_install=false",
             "resume",
             THREAD,
             "--model",
@@ -486,6 +503,12 @@ fn opens_an_image_agent_s_window_on_codex_s_own_model_whose_image_tool_draws_no_
             "check_for_update_on_startup=false",
             "-c",
             "allow_login_shell=false",
+            "-c",
+            "notice.hide_rate_limit_model_nudge=true",
+            "-c",
+            "features.tool_suggest=false",
+            "-c",
+            "features.skill_mcp_dependency_install=false",
             "--dangerously-bypass-approvals-and-sandbox",
         ]
     );
@@ -525,7 +548,12 @@ fn starts_a_member_with_codex_s_mcp_servers_as_it_starts_the_chief_neither_comma
             .filter(|setting| setting.to_ascii_lowercase().contains("mcp"))
             .collect()
     };
-    assert_eq!(switches(&chief), Vec::<String>::new());
+    // The one setting that names MCP turns off Codex's offer to install the servers a skill
+    // names, which is no server of the owner's (T-1183).
+    assert_eq!(
+        switches(&chief),
+        ["features.skill_mcp_dependency_install=false"]
+    );
     assert_eq!(switches(&member), switches(&chief));
 }
 

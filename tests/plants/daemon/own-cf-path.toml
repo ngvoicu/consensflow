@@ -370,8 +370,8 @@ runs = ["harness-lib-muse-launch"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '"command": cf_hook(pane_cf, "muse-session", &[role_file, said]),'
-replace = '"command": cf_hook("cf", "muse-session", &[role_file, said]),'
+find = '"command": cf_hook(pane_cf, "muse-session", &[role_file, said, &number]),'
+replace = '"command": cf_hook("cf", "muse-session", &[role_file, said, &number]),'
 
 # The live suite.
 

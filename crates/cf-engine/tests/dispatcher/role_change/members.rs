@@ -42,7 +42,7 @@ fn working_session(context: &Context) -> ProjectView {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
         }))
         .unwrap()
@@ -67,6 +67,7 @@ fn session_of(context: &Context, project: &ProjectView) -> String {
 
 /// The chief gives the session that did T-1 a follow-up.
 pub(super) fn follow_up(context: &Context, project: &ProjectView, body: &str) {
+    context.accept_if_done(project.id, 1);
     context.create_task(
         project.id,
         NewTask {
@@ -647,7 +648,7 @@ fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_refused_has_the_
     assert_eq!(
         to_chief,
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     let to_human: Vec<String> = context
@@ -793,7 +794,7 @@ fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_never_answered_i
     assert_eq!(
         to_chief,
         [format!(
-            "T-1 failed: what @chief told its window, {words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "T-1 failed: what @chief told its window, {words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     held.open();

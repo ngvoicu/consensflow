@@ -398,8 +398,8 @@ runs = ["cf-lib-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '        "reopen" | "resume" | "edit" => BRIEFED,'
-replace = '        "reopen" | "resume" => BRIEFED,'
+find = '        "edit" => EDIT,'
+replace = '        "edit" => Shape::TEXT,'
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
@@ -550,8 +550,8 @@ runs = ["engine-dispatcher-resume", "ledger-receipt-carrying", "engine-dispatche
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '    if message.kind != "task" || task.state != "queued" {'
-replace = '    if message.kind != "task" || task.state != "queued" || task.state == "queued" {'
+find = '    if message.kind != "task" || !matches!(task.state.as_str(), "queued" | "working") {'
+replace = '    if message.kind != "task" || !matches!(task.state.as_str(), "queued" | "working") || task.state == "queued" {'
 
 [[plant]]
 name = "review 306: the note of a pause says the why twice"
@@ -720,9 +720,9 @@ runs = ["ledger-receipt-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '''    pause(store, task, detail, false)?;
+find = '''    pause(store, task, detail, false, Stops::NotAsked)?;
     Ok(true)'''
-replace = '''    pause(store, task, detail, true)?;
+replace = '''    pause(store, task, detail, true, Stops::NotAsked)?;
     Ok(true)'''
 
 [[plant]]

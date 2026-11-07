@@ -19,9 +19,10 @@ use crate::fixtures::{given, Tiers};
 const NOTICE: &str =
     "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>";
 
-/// What the chief is told when T-1 goes on in the background: the opening of the note.
-fn goes_on(handle: &str, running: &str) -> String {
-    format!("T-1 goes on in the background: @{handle} ended its turn with {running} running")
+/// What the chief is told when T-1 goes on in the background: the opening of the note, which
+/// says what runs (T-1181).
+fn goes_on(running: &str) -> String {
+    format!("T-1 is still working in the background ({running}); its result comes when")
 }
 
 /// T-1 given to zeus, whose window has taken it in.
@@ -124,7 +125,6 @@ fn a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and_the_r
 ) {
     let context = Context::new();
     let tiers = working(&context);
-    let session = tiers.assignee(1);
 
     // zeus starts three research agents and ends its turn: its words are progress.
     context
@@ -135,11 +135,11 @@ fn a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and_the_r
     assert_eq!(results(&context, &tiers), Vec::<String>::new());
     let told = tiers.notes("chief");
     assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0].starts_with(&goes_on("1 agent")), "{told:?}");
     assert!(
-        told[0].starts_with(&goes_on(&session, "1 background agent or workflow")),
+        told[0].contains("`cf task finish T-1` takes what it said last now."),
         "{told:?}"
     );
-    assert!(told[0].contains("cf task finish T-1"), "{told:?}");
     assert!(
         told[0].ends_with("Started three research agents"),
         "{told:?}"
@@ -167,6 +167,37 @@ fn a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and_the_r
         results(&context, &tiers),
         ["All three are in: the parser is sound"]
     );
+}
+
+#[test]
+fn the_note_that_a_worker_goes_on_is_the_chiefs_before_the_result_and_nothing_is_said_after_it() {
+    // A3 of the field reports of 2026-10-15 (`field-reports-2026-10-15`): a worker's turn
+    // ended with its job running, and the notice of it (m-132) came after the result, when
+    // the chief had already decided on it. The notice comes with the turn that is held, the
+    // result with the turn that reports, and the result is the last the task says.
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .adapter
+        .answer_leaving_agents("zeus", "Started three research agents");
+    context.pass().unwrap();
+    context.adapter.wake("zeus", NOTICE);
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer("zeus", "All three are in: the parser is sound");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+
+    let mut said: Vec<(i64, String)> = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .filter(|message| message.kind == "note" || message.kind == "result")
+        .map(|message| (message.id, message.kind))
+        .collect();
+    said.sort();
+    let kinds: Vec<&str> = said.iter().map(|(_, kind)| kind.as_str()).collect();
+    assert_eq!(kinds, ["note", "result"], "{said:?}");
 }
 
 #[test]
@@ -203,7 +234,6 @@ fn a_reviewer_or_an_advisor_whose_turn_ends_with_agents_pending_is_held_as_a_wor
 fn a_turn_that_left_a_job_and_agents_is_held_for_both_and_ends_neither() {
     let context = Context::new();
     let tiers = working(&context);
-    let session = tiers.assignee(1);
     context.adapter.answer_leaving(
         "zeus",
         "Started the run and the research",
@@ -219,13 +249,10 @@ fn a_turn_that_left_a_job_and_agents_is_held_for_both_and_ends_neither() {
     assert_eq!(tiers.task(1).task.state, "working");
     let told = tiers.notes("chief");
     assert!(
-        told[0].starts_with(&goes_on(
-            &session,
-            "1 background job and 1 background agent or workflow"
-        )),
+        told[0].starts_with(&goes_on("1 command, 1 agent")),
         "{told:?}"
     );
-    assert!(told[0].contains("which does not end them"), "{told:?}");
+    assert!(told[0].contains(" they end. "), "{told:?}");
 }
 
 #[test]

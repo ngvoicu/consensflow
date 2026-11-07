@@ -32,25 +32,30 @@
 //! (`quota_accounts`), and a window whose turn is over, which no stop interrupts
 //! or closes (`nothing_to_stop`), and a read of a window that fails or comes too late, which is
 //! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`), and
-//! the window's own `cf` every text typed into it starts its commands with (`window_cf`).
+//! the window's own `cf` every text typed into it starts its commands with (`window_cf`), and a
+//! setting the chief's role is built from that the human changes under its open window, which it is
+//! told at its rest (`role_news`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod adapters_failing_at_once;
-mod agent_gone;
 mod approval;
 mod assigning;
 mod background;
+mod brief_never_began;
+mod busy_models;
 mod cancelled_task;
 mod canonical_folder;
 mod carriers;
+mod chief_models;
 mod chief_not_up;
 mod chiefs;
 mod close_when_drawn;
 mod close_while_delivering;
 mod closed_given_nothing;
 mod closing;
+mod codex_role_replay;
 mod compacting;
 mod compaction_window;
 mod computer_use;
@@ -60,12 +65,15 @@ mod deliveries;
 mod exit_overdue;
 mod exit_proof;
 mod exit_unsettled;
+mod failure_first;
 mod failure_reasons;
 mod final_answer;
 mod first_delivered;
 mod fixtures;
 mod follow_ups;
+mod harness_dialogs;
 mod held_at_work;
+mod hold_notes;
 mod interrupts;
 mod lanes;
 mod launch_stops;
@@ -76,11 +84,13 @@ mod lost_lines;
 mod meeting;
 mod meeting_main;
 mod moved_models;
+mod named_by_model;
 mod no_adapter;
 mod not_ready;
 mod nothing_to_stop;
 mod open_deadline;
 mod out_of_quota;
+mod outage_notes;
 mod own_steps;
 mod pacing;
 mod participant_leaves;
@@ -89,6 +99,8 @@ mod pause_notes;
 mod paused_answers;
 mod paused_left;
 mod pending_agents;
+mod privacy_prompts;
+mod questions_not_results;
 mod queued_tells;
 mod quota;
 mod quota_accounts;
@@ -96,12 +108,17 @@ mod quota_waits;
 mod quoted_headers;
 mod read_in_the_inbox;
 mod receipts;
+mod relaunch;
 mod restart;
+mod result_after_held_turn;
+mod result_while_asking;
 mod resumable;
 mod resume;
-mod retired_agents;
+mod resumed_at_work;
+mod resumed_at_work_claims;
 mod review;
 mod role_change;
+mod role_news;
 mod schedules;
 mod separate_callbacks;
 mod servers;
@@ -125,9 +142,11 @@ mod tasks;
 mod testers;
 mod the_dispatcher;
 mod throws_early;
+mod tier_fallback;
 mod told_once;
 mod trace_untold;
 mod traces;
+mod transcript_whole;
 mod turn_end;
 mod turns_at_seams;
 mod unavailable_accounts;
@@ -135,7 +154,6 @@ mod undeliverable;
 mod unfit;
 mod unknown_looks;
 mod unproven;
-mod unreadable_agents;
 mod unsent;
 mod unstarted;
 mod waiting_notes;

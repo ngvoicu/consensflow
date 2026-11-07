@@ -3,6 +3,7 @@
 //! them, on the machine's own login. No model turn is run, and no allowance spent.
 
 use cf_proto::agents::Harness;
+use cf_proto::models::warning;
 use serde_json::{json, Value};
 
 use super::env;
@@ -57,10 +58,10 @@ pub(super) fn models(question: &Value) -> Result<Value, String> {
     let warnings: serde_json::Map<String, Value> = listed
         .models
         .iter()
-        .filter_map(|model| Some((model.id.clone(), json!(models::warning(model)?))))
+        .filter_map(|model| Some((model.id.clone(), json!(warning(model)?))))
         .collect();
     Ok(json!({
-        "stale": listed.stale,
+        "stale": listed.is_stale(),
         "models": rows,
         "default": listed.default_model().map(|model| model.id.clone()),
         "warnings": warnings,

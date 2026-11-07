@@ -53,7 +53,7 @@ const LONGEST_DEAF_SLEEP: f64 = 60.0;
 
 /// The strings that run on and are let: the file, a piece of the string, and why. Each is
 /// looked for, and one that is no longer there is to be taken out.
-const LET: [(&str, &str, &str); 7] = [
+const LET: [(&str, &str, &str); 5] = [
     (
         "crates/cf-e2e/tests/live_monitor_wait.rs",
         "cf-mark-noisy",
@@ -78,16 +78,6 @@ const LET: [(&str, &str, &str); 7] = [
         "crates/cf-e2e/tests/live_stops/slow.rs",
         "sleep 100;",
         "the text of that hook, as the case that pins it says it",
-    ),
-    (
-        "crates/cf-e2e/tests/live_stops/stuck.rs",
-        "sleep {STUCK_S}",
-        "the command of a live run, which ignores the signals for 200 s; a Windows one too, as the hook",
-    ),
-    (
-        "crates/cf-e2e/tests/live_stops/stuck.rs",
-        "sleep 200",
-        "the text of that command, as the case that pins it says it",
     ),
 ];
 

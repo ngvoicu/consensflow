@@ -198,8 +198,8 @@ runs = ["ledger-told-edges"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        window: assignee.filter(|window| began && window.left_at.is_none()),"
-replace = "        window: assignee.filter(|_| began),"
+find = "        window: assignee.filter(|window| began && !decided && window.left_at.is_none()),"
+replace = "        window: assignee.filter(|_| began && !decided),"
 
 [[plant]]
 name = "removal tellers: the teller of words that never reach the window hears only if it asked for the task"
@@ -219,11 +219,15 @@ runs = ["engine-queued-tells"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-            .give_up_task(project.id, task.number, because)?;
+            cause,
+        )?;
+        self.settled_at_departure(participant, owed);
         Ok(())'''
 replace = '''
-            .give_up_task(project.id, task.number, because)?;
-        self.tell_failed(project, task, &task.requester, because, &[], None)'''
+            cause,
+        )?;
+        self.settled_at_departure(participant, owed);
+        self.tell_failed(project, task, &task.requester, because, &[], None, "")'''
 
 [[plant]]
 name = "removal tellers: the daemon gives up on a task and its requester hears nothing of it"
@@ -233,11 +237,11 @@ runs = ["ledger-told-edges", "engine-queued-tells"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        // Last, where the engine's note was.
-        if given_up {'''
+        if given_up {
+            outage::tell_failure('''
 replace = '''
-        // Last, where the engine's note was.
-        if false && given_up {'''
+        if given_up && false {
+            outage::tell_failure('''
 
 [[plant]]
 name = "removal tellers: the daemon gives up on a task and the words told to its window go with what was queued"

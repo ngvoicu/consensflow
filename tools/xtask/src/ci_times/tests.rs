@@ -226,12 +226,26 @@ fn a_job_and_a_step_are_found_by_the_name_github_shows_them_under() {
     );
 }
 
+/// The live matrix's step, by the name it is given (T-1184).
+const LIVE_MATRIX: &str = "The live matrix on the stand-ins";
+
+/// The workspace's tests, the gate's job and the live matrix's step are held to their limits:
+/// the matrix's, at 20 minutes, is about 3.5 times what a half of its 56 cases took 4 at a time
+/// on the Mac (308 and 338 s, T-1195), a margin for GitHub's runners, which have fewer
+/// processors, until CI's own runs read it; a share of 80 % fails a run at 16.
 #[test]
 fn the_workspace_tests_and_their_job_have_limits_in_the_ci_this_checkout_runs() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(".github/workflows/ci.yml");
     let limits = limits(&std::fs::read_to_string(file).unwrap());
+    assert!(
+        limits.contains(&Limit {
+            held: Held::Step(LIVE_MATRIX.into()),
+            minutes: 20
+        }),
+        "ci.yml gives {LIVE_MATRIX} 20 minutes: {limits:?}"
+    );
     for held in [Held::Job("gate".into()), Held::Step(WORKSPACE_TESTS.into())] {
         assert!(
             limits.iter().any(|limit| limit.held == held),

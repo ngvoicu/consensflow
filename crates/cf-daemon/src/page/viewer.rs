@@ -1,10 +1,11 @@
 //! The specs viewer's door: what a project's specs folder holds, whether it
-//! holds a file at all (the board's Specs button), one file of it for the page
-//! to show the human, and an HTML file of it opened in the browser; read and
-//! never written. The folder is the one a chief's launch is given (the
-//! project's, else the app's, else `.specs`: [`folder_of`]), and it is shown
-//! whether the project has specs on or off, and whoever made it (Specmint run
-//! outside ConsensFlow makes one too).
+//! holds a file at all and whether specs are on for the project (the board's
+//! Specs button, which either shows), one file of it for the page to show the
+//! human, and an HTML file of it opened in the browser; read and never
+//! written. The folder is the one a chief's launch is given (the project's,
+//! else the app's, else `.specs`: [`folder_of`]), and it is shown whether the
+//! project has specs on or off, and whoever made it (Specmint run outside
+//! ConsensFlow makes one too).
 //!
 //! Like every page operation, these are the human's alone: the app forwards
 //! them from its own page, and no route of the agents' API reaches them. What
@@ -70,7 +71,6 @@ use futures_util::future::{LocalBoxFuture, Shared};
 use futures_util::FutureExt as _;
 use serde_json::{json, Value};
 
-use super::agents::saved;
 use super::body::{one, Body, Fields, Said};
 use super::Page;
 
@@ -231,7 +231,7 @@ fn folder_of(project: &ProjectView, app: &AppSpecs) -> String {
 /// each folder by name, with what was cut in words where a limit was passed. A
 /// folder that is not there is no refusal: it is found empty.
 pub(super) async fn tree(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
-    let (directory, name) = folder_named(page, body)?;
+    let (directory, name, _) = folder_named(page, body)?;
     let specs = page
         .specs
         .look(move || {
@@ -251,17 +251,20 @@ pub(super) async fn tree(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     one("specs", specs)
 }
 
-/// `specs.present`: whether the folder holds a file, which shows the board's
-/// Specs button. It stops at the first file, and is remembered for a moment; a
-/// folder that is not there, or cannot be read, holds none. An answer from
+/// `specs.present`: whether specs are on for the project and whether its specs
+/// folder holds a file — either shows the board's Specs button. The look at
+/// the folder stops at the first file, and is remembered for a moment; a
+/// folder that is not there, or cannot be read, holds none. Whether specs are
+/// on is resolved at every ask, the remembered folder's answer as a fresh
+/// one's, so a setting saved a moment ago is answered now. An answer from
 /// memory says in how many milliseconds the folder is read again
 /// (`readAgainIn`), for the page to ask once more then; one read now says
 /// nothing of it.
 pub(super) async fn present(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
-    let (directory, name) = folder_named(page, body)?;
+    let (directory, name, on) = folder_named(page, body)?;
     let key = directory.join(&name);
     if let Some((present, again)) = page.specs.recall(&key) {
-        let mut fields = one("present", present)?;
+        let mut fields = answered(present, on)?;
         fields.insert(
             "readAgainIn".to_owned(),
             json!(u64::try_from(again.as_millis()).unwrap_or(u64::MAX)),
@@ -285,22 +288,31 @@ pub(super) async fn present(page: &Page, body: Body<'_>) -> Result<Fields, Said>
                 .shared()
         })
         .clone();
-    let answered = looking.clone().await;
+    let found = looking.clone().await;
     {
         let mut running = page.specs.looking.borrow_mut();
         if running.get(&key).is_some_and(|now| now.ptr_eq(&looking)) {
             running.remove(&key);
         }
     }
-    let present = answered.map_err(Said)?;
+    let present = found.map_err(Said)?;
     page.specs.remember(key, present);
-    one("present", present)
+    answered(present, on)
+}
+
+/// The answer `specs.present` gives: `present` is whether the folder holds a
+/// file and `on` whether specs are on for the project — either shows the
+/// board's Specs button.
+fn answered(present: bool, on: bool) -> Result<Fields, Said> {
+    let mut fields = one("present", present)?;
+    fields.insert("on".to_owned(), json!(on));
+    Ok(fields)
 }
 
 /// `specs.file`: the file at `path` in the folder (relative, in slashes), its
 /// text, its bytes for an image, or its size and why it is not shown.
 pub(super) async fn file(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
-    let (directory, name) = folder_named(page, body)?;
+    let (directory, name, _) = folder_named(page, body)?;
     let path = path_of(body)?;
     let shown = page
         .specs
@@ -316,7 +328,7 @@ pub(super) async fn file(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
 /// long that the page may have stopped waiting. The answer is its path.
 pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let asked = Instant::now();
-    let (directory, name) = folder_named(page, body)?;
+    let (directory, name, _) = folder_named(page, body)?;
     let path = path_of(body)?;
     let home = config_root(&page.env)
         .ok_or_else(|| Said("ConsensFlow has no home folder to copy the file into".to_owned()))?;
@@ -356,23 +368,27 @@ impl Specs {
     }
 }
 
-/// The folder of the project the body names: the project's own folder, and
-/// the specs folder's name in it. What the app says of specs is read from the
-/// agents file as a chief's launch reads it: where it cannot be read, the app
-/// names no folder.
-fn folder_named(page: &Page, body: Body<'_>) -> Result<(PathBuf, String), Said> {
+/// The folder of the project the body names: the project's own folder, the
+/// specs folder's name in it, and whether specs are on for the project —
+/// resolved as its chief's launch is given them
+/// ([`ProjectView::specs_setting`], the project's own word, else the app's,
+/// else the documented default). What the app says of specs is read from its
+/// settings file as a chief's launch reads it: where it cannot be read, the app
+/// says nothing of them.
+fn folder_named(page: &Page, body: Body<'_>) -> Result<(PathBuf, String, bool), Said> {
     let id = body.whole("project")?;
     let project = page
         .ledger
         .borrow()
         .project(id)?
         .ok_or_else(|| Said(format!("no project {id}")))?;
-    let app = saved(&page.env)
+    let app = super::app_specs::settings(page)
         .ok()
-        .and_then(|agents| agents.roster().app_specs().ok())
+        .and_then(|settings| settings.app_specs().ok())
         .unwrap_or_default();
     let name = folder_of(&project, &app);
-    Ok((PathBuf::from(project.directory), name))
+    let on = project.specs_setting(&app).is_some();
+    Ok((PathBuf::from(project.directory), name, on))
 }
 
 /// The path the body names, a file of the folder.

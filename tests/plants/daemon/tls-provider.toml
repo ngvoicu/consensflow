@@ -1,0 +1,84 @@
+# The Windows update check's panic with no TLS provider (T-1247, 3.0.7-alpha.2). The workspace's
+# reqwest is `rustls-no-provider`, which brings none: a client panics at its build where the process
+# has none installed. The app's update check on Windows panicked so at every start: it reads the feed
+# with `update_page::read_feed`, and only the updater's plugin, which the Mac's check goes through,
+# installs ring before it builds its client. Now the app installs ring for its process (`tls.rs`:
+# at the start of `run`, and in the feed's client) and the daemon hands its client a rustls config
+# built on ring. These plants are the fix's own: the install taken out of each place that makes it.
+# Every name here begins `tls provider:`, so `npm run plants:daemon -- "tls provider"` runs them.
+#
+# A rule over the sources, that every client names its provider, was tried (the sources read as
+# Rust) and left out of the release; the lock's test, `tools/xtask/tests/tls_lock.rs`, has no plant:
+# cargo rewrites a `Cargo.lock` that holds a package nothing needs before any test reads it.
+
+[run]
+tls-app-client = ["cargo", "xtask", "app", "test", "update_page::tests::the_feeds_client_is_built"]
+tls-app-install = ["cargo", "xtask", "app", "test", "tls::tests::"]
+
+# The feed's client is built on whatever the process has: with none, reqwest panics.
+[[plant]]
+name = "tls provider: the feed's client installs no provider before it is built"
+meant = "the_feeds_client_is_built_in_a_process_that_has_installed_no_tls_provider"
+runs = ["tls-app-client"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''
+    crate::tls::install_ring_as_default();
+    reqwest::Client::builder()
+'''
+replace = '''
+    reqwest::Client::builder()
+'''
+
+# The install does nothing.
+[[plant]]
+name = "tls provider: the app's install installs nothing"
+meant = "the_app_installs_ring_once_for_its_whole_process"
+runs = ["tls-app-install"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/tls.rs"
+find = "    let _ = ring::default_provider().install_default();"
+replace = "    let _ = ring::default_provider();"
+
+# The app starts without it, and with it after the app is built.
+[[plant]]
+name = "tls provider: the app starts without installing its provider"
+meant = "the_app_installs_its_provider_before_it_builds_anything"
+runs = ["tls-app-install"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''
+    tls::install_ring_as_default();
+    let context = tauri::generate_context!();
+'''
+replace = '''
+    let context = tauri::generate_context!();
+'''
+
+[[plant]]
+name = "tls provider: the app installs its provider after it has built the app"
+meant = "the_app_installs_its_provider_before_it_builds_anything"
+runs = ["tls-app-install"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''
+    tls::install_ring_as_default();
+    let context = tauri::generate_context!();
+'''
+replace = '''
+    let context = tauri::generate_context!();
+'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''
+    .expect("error while building the ConsensFlow app");
+'''
+replace = '''
+    .expect("error while building the ConsensFlow app");
+    tls::install_ring_as_default();
+'''

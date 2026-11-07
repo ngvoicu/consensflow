@@ -8,7 +8,8 @@ use cf_base::file::{read_file_sync, write_file, FileError};
 use cf_base::home::config_root;
 use cf_base::path;
 
-use crate::places::{make_missing, names, writable, Places};
+use crate::places::{make_missing, names, program_of, script_of, sought, writable, Places};
+use crate::program;
 use crate::text::{is_ours, launcher, spelled};
 
 /// The launcher found installed here: the file, the folder it is in, and
@@ -25,9 +26,16 @@ pub struct Installed {
 /// it went.
 ///
 /// A user-owned folder is created rather than reported missing; a system one
-/// never is. Someone else's command by either name is left alone, and ours
-/// is replaced: a name is ours when the file holds the mark. The launcher
-/// pins ConsensFlow's home when the environment names one of its own.
+/// never is. Someone else's command by either name is left alone, and ours is
+/// replaced: a name is ours when the file holds the mark. The launcher pins
+/// ConsensFlow's home when the environment names one of its own.
+///
+/// On Windows a launcher is a pair, the launch file and the shim that reads it
+/// (`cf.exe` beside `cf.launch`), and the shim is the copy of the one beside
+/// `cf` in its bundle: no shim there, and nothing is written. A `.cmd` of ours
+/// from a build before the shim is taken away, for cmd.exe would end an
+/// argument at its first line break; one of someone else's is a command by that
+/// name, and the name is left alone.
 ///
 /// This is what `cf setup` asks for, the user's own act, and it names the
 /// `cf` it is given wherever that is. The care [`repair`](crate::repair) takes
@@ -46,21 +54,59 @@ pub fn install(env: &Env, cf: &Path, places: &Places) -> Result<Option<Installed
         ));
     };
     let windows = env.on_windows();
-    let script = launcher(windows, &spelled(cf, windows), pinned_home(env).as_deref());
+    let named = spelled(cf, windows);
+    // Before anything is written: a launcher without its program is no command.
+    let shim = if windows {
+        Some(program::read_bundled(Path::new(&named))?)
+    } else {
+        None
+    };
+    let script = launcher(windows, &named, pinned_home(env).as_deref());
     for name in names(windows) {
         let file = PathBuf::from(path::join(&[&dir.to_string_lossy(), name]));
         // Someone else's `cf` is left alone; ours is replaced.
-        if file.exists() && !is_ours(&read_text(&file)?) {
+        let free = if windows {
+            is_free(&file)?
+        } else {
+            !file.exists() || is_ours(&read_text(&file)?)
+        };
+        if !free {
             continue;
         }
         write_launcher(&file, &script, windows).map_err(|failed| failed.to_string())?;
+        if let Some(shim) = &shim {
+            program::place(&program_of(&file), shim).map_err(|failed| failed.to_string())?;
+            // The `.cmd` of ours the shim replaces: cmd.exe would run it for the name `cf.cmd`.
+            let _ = std::fs::remove_file(script_of(&file));
+        }
     }
     status(env, places)
 }
 
+/// Whether a launcher on Windows may be written at the launch file `file`:
+/// nothing of someone else's is under its names. The file, the `.cmd` of a build
+/// before the shim, and the program each is ours or is not there, and a program
+/// is ours when the file beside it is, which is how it was put there.
+fn is_free(file: &Path) -> Result<bool, String> {
+    let ours = |found: &Path| -> Result<Option<bool>, String> {
+        if found.exists() {
+            Ok(Some(is_ours(&read_text(found)?)))
+        } else {
+            Ok(None)
+        }
+    };
+    let launch = ours(file)?;
+    if launch == Some(false) || ours(&script_of(file))? == Some(false) {
+        return Ok(false);
+    }
+    Ok(launch == Some(true) || !program_of(file).exists())
+}
+
 /// Whether our launcher is installed here, where, and whether that place is
-/// on `PATH`: by its first name, in each of `places` in turn. Only ours: a
-/// `consensflow` someone else put there is not ours to report as installed.
+/// on `PATH`: by its first name, in each of `places` in turn (on Windows, the
+/// launch file, or the `.cmd` of a build before the shim that the app has not
+/// yet repaired). Only ours: a `consensflow` someone else put there is not ours
+/// to report as installed.
 /// A file that cannot be read is the failure, as Node's read threw it, and so
 /// is an environment that names no home to look in.
 pub fn status(env: &Env, places: &Places) -> Result<Option<Installed>, String> {
@@ -69,32 +115,33 @@ pub fn status(env: &Env, places: &Places) -> Result<Option<Installed>, String> {
 
 /// The launcher [`status`] finds, with what it says.
 pub(crate) fn found(env: &Env, places: &Places) -> Result<Option<(Installed, String)>, String> {
-    let name = names(env.on_windows())[0];
     for dir in places.folders(env)? {
         let dir_text = dir.to_string_lossy().into_owned();
-        let file = PathBuf::from(path::join(&[&dir_text, name]));
-        if !file.exists() {
-            continue;
+        for name in sought(env.on_windows()) {
+            let file = PathBuf::from(path::join(&[&dir_text, name]));
+            if !file.exists() {
+                continue;
+            }
+            let text = read_text(&file)?;
+            if !is_ours(&text) {
+                continue;
+            }
+            let delimiter = if cfg!(windows) { ';' } else { ':' };
+            let on_path = env.os("PATH").is_some_and(|value| {
+                value
+                    .to_string_lossy()
+                    .split(delimiter)
+                    .any(|at| at == dir_text)
+            });
+            return Ok(Some((
+                Installed {
+                    path: file,
+                    dir,
+                    on_path,
+                },
+                text,
+            )));
         }
-        let text = read_text(&file)?;
-        if !is_ours(&text) {
-            continue;
-        }
-        let delimiter = if cfg!(windows) { ';' } else { ':' };
-        let on_path = env.os("PATH").is_some_and(|value| {
-            value
-                .to_string_lossy()
-                .split(delimiter)
-                .any(|at| at == dir_text)
-        });
-        return Ok(Some((
-            Installed {
-                path: file,
-                dir,
-                on_path,
-            },
-            text,
-        )));
     }
     Ok(None)
 }

@@ -837,17 +837,6 @@ file = "crates/cf-e2e/tests/smoke.rs"
 find = 'consensflow\.db open$'
 replace = 'consensflow\.sqlite open$'
 
-[[plant]]
-name = "packaged smoke, on the app: the agents are proved on a home that is not the daemons"
-meant = "the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean"
-runs = ["smoke-on-the-app"]
-requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/smoke.rs"
-find = "home: &machine.state,"
-replace = "home: &machine.probe,"
-
 # The stand-in harness on the rig (tests/rig/smoke_stand_in.rs, T-863): what the daemon
 # asks of a Claude window before it hands it its first message, asked of the stand-in on
 # every gate, which needs no app.

@@ -6,6 +6,8 @@
 
 pub(crate) mod boundary;
 pub(crate) mod cache;
+pub(crate) mod calls;
+pub(crate) mod drawn;
 pub(crate) mod find;
 pub(crate) mod followed;
 pub(crate) mod jsonl;

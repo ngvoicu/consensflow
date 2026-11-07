@@ -31,12 +31,17 @@ process-closed-stream-stress = ["cargo", "test", "--offline", "-p", "cf-process"
 rig-lib-spawned = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::spawned"]
 rig-lib-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
 rig-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left"]
+rig-lib-closing-listing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing::tests::the_machines_processes_are_listed"]
 rig-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
 rig-stand-ins = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_ins::the_stand_in_agents_job_writes"]
 regressions-idle = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "idle_compaction_read_as_a_cut_turn"]
 regressions-finder = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "--", "a_window_of_a_daemon_on_the_finders_path"]
 panes-headless-eof = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "stdin_eof_reaps_every_spawned_process"]
 process-execute = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_out_of_time_that_writes"]
+# What a PowerShell is given on Windows (T-1161): the rig's ask of when a process began, the
+# live checks' process table, and the stand-in's wait for the shell of its command.
+rig-lib-powershell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "powershell"]
+stand-in-job-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "background::tests::a_job_is_waited"]
 
 [[plant]]
 name = "load flakes: a free port of loopback is not let go"
@@ -122,6 +127,8 @@ replace = '''
 name = "load flakes: a program that began after the last window was noted is taken for a window"
 meant = "a_program_that_began_after_the_last_note_is_none_of_the_windows"
 runs = ["rig-lib-left"]
+# Unix's `began_after` (`ps`'s age); Windows' has its own plant below.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/left.rs"
@@ -236,3 +243,130 @@ find = """
     }"""
 replace = """
     fn drop(&mut self) {}"""
+
+# A PowerShell starts in 11 to 17 s on GitHub's Windows runner, and past 30 s under the load of a
+# whole test program: CI's run of the live suites' offline cases (T-1161) saw a check that could not
+# list its processes and a stand-in that took its own command for failed and left its window. Each
+# PowerShell the rig, its checks or its stand-ins start is given `cf_e2e::process::POWERSHELL_LIMIT`.
+
+[[plant]]
+name = "load flakes: the stand-in waits only 30 s for its command's shell to start"
+meant = "a_job_is_waited_for_as_long_as_its_shell_may_take_to_start_on_a_loaded_machine"
+runs = ["stand-in-job-wait"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
+find = "const UP: Duration = cf_e2e::process::POWERSHELL_LIMIT;"
+replace = "const UP: Duration = Duration::from_secs(30);"
+
+[[plant]]
+name = "load flakes: the live checks' process table is given a verb of cf's 30 s"
+meant = "the_powershell_that_lists_windows_processes_is_given_what_one_takes_on_a_loaded_machine"
+runs = ["rig-lib-powershell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = """
+        .inheriting_env()
+        .limit(crate::process::POWERSHELL_LIMIT)
+}"""
+replace = """
+        .inheriting_env()
+}"""
+
+[[plant]]
+name = "load flakes: when a process began is asked of a PowerShell given a verb of cf's 30 s"
+meant = "the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded_machine"
+runs = ["rig-lib-powershell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/pid.rs"
+find = """
+        .finding_programs()
+        .limit(super::POWERSHELL_LIMIT)
+}"""
+replace = """
+        .finding_programs()
+}"""
+
+# The rig's leftover check on Windows (T-1226; CI runs 41787972093 and 41792519144): a number
+# Windows gave to another program after the last note is none of the windows', as its process
+# table says when the program began, and the closing listing reads that table, not Git Bash's
+# `ps -x`.
+
+[[plant]]
+name = "load flakes: on Windows a program that took a window's number is a window left behind"
+meant = "a_program_that_began_after_the_last_note_is_none_of_the_windows"
+runs = ["rig-lib-left"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''        (Some(began), Some(written)) => began_later(began, written),'''
+replace = '''        (Some(_), Some(_)) => false,'''
+
+[[plant]]
+name = "load flakes: a program that began within the slack of the last note is taken for a later one"
+meant = "windows_time_reads_from_1601_and_a_later_start_is_after_the_slack_only"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''        .is_ok_and(|after| after > Duration::from_secs(2))'''
+replace = '''        .is_ok_and(|after| after > Duration::ZERO)'''
+
+[[plant]]
+name = "load flakes: the closing listing on Windows lists none of the machine's processes"
+meant = "the_machines_processes_are_listed_with_this_test_among_them"
+runs = ["rig-lib-closing-listing"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''            .map(|all| on_windows(&all))'''
+replace = '''            .map(|_| Vec::new())'''
+
+# The leftover check on every system (CI run 41973700452, main `addd83cfe`, Windows): a window's
+# number held by another program than the stand-in is none of the windows', whenever that
+# program began. Its start alone missed `sort.exe`, which took the first chief's number before a
+# chief opened again noted its own (T-1236).
+
+[[plant]]
+name = "load flakes: a number another program holds is a window left behind when that program began before the last note"
+meant = "a_number_held_by_another_program_than_the_stand_in_is_none_of_the_windows_whenever_it_began"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''    command(pid).is_some_and(|command| !names(&command, program))'''
+replace = '''    command(pid).is_some_and(|_| false)'''
+
+[[plant]]
+name = "load flakes: a command line names its program only by the exact file name, its .exe and case too"
+meant = "a_command_line_names_its_program_by_its_file_alone"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''        .any(|name| name.eq_ignore_ascii_case(program))'''
+replace = '''        .any(|name| name == program)'''
+
+[[plant]]
+name = "load flakes: a command line's program is named by its whole path"
+meant = "a_command_line_names_its_program_by_its_file_alone"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''        .map(|word| word.rsplit(['/', '\\']).next().unwrap_or(word))'''
+replace = '''        .map(|word| word)'''
+
+[[plant]]
+name = "load flakes: the rig takes a noted number for another program than the binary that notes it"
+meant = "the_program_a_window_runs_is_the_stand_in_binary_that_notes_its_number"
+runs = ["rig-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''pub(super) const NOTER: &str = "fake-agent";'''
+replace = '''pub(super) const NOTER: &str = "fake_agent";'''

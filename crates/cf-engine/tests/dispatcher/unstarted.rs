@@ -77,7 +77,9 @@ fn told(context: &Context, project: i64) -> Told {
 
 /// The failure note of T-1 the chief is sent, for a failure saying `because`.
 fn failure_of_t1(because: &str) -> String {
-    format!(r#"T-1 failed: {because}. Reopen it with: cf task reopen T-1 "…""#)
+    format!(
+        r#"T-1 failed: {because}. Reopen it with: cf task reopen T-1 "…", or accept it with what you checked: cf task accept T-1 "…""#
+    )
 }
 
 #[test]

@@ -10,10 +10,11 @@ use crate::conversations::current_conversation;
 use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::projects::known_project;
 use crate::store::Store;
-use crate::views::{ParticipantRow, TaskRow};
+use crate::views::ParticipantRow;
 
 /// A member's new session: its own participant, named after the member,
-/// with the member's agent, harness, designer flag and tier and the role
+/// with the member's harness, model, effort and model's name, designer flag and tier
+/// (and the ready-made agent's name an old member keeps), and the role
 /// its task needs. It starts from nothing and ends with its work.
 pub(crate) fn start_session(
     store: &mut Store,
@@ -50,8 +51,8 @@ pub(crate) fn start_session(
     }
     let at = store.at();
     store.db.execute(
-        "INSERT INTO participant (project_id, handle, role, roles, agent, harness, designer, tier, member_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO participant (project_id, handle, role, roles, agent, harness, model, effort, model_name, designer, tier, member_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             project_id,
             handle,
@@ -59,6 +60,9 @@ pub(crate) fn start_session(
             member.roles,
             member.agent,
             member.harness,
+            member.model,
+            member.effort,
+            member.model_name,
             member.designer,
             member.tier,
             member.id,
@@ -121,28 +125,32 @@ pub(crate) fn bring_back(
     store.participant_row(session.id)
 }
 
-/// The session that did T-`after`, and whether a follow-up for it goes behind
-/// that task.
+/// The session that did T-`after`, and the tasks a follow-up for it waits for.
 pub(crate) struct FollowUp {
     pub session: ParticipantRow,
-    /// The window is still on T-`after` (or will be: it waits for its needs, or
-    /// is paused): the follow-up waits for it to be accepted, as it would for
-    /// any task it needs, and goes into the window then.
-    pub behind: bool,
+    /// The tasks the follow-up waits to be accepted, as it would for any task it
+    /// needs, and goes into the window then: T-`after` while it is not accepted and
+    /// may still be the window's (it is at work, will be, is paused, or its result is
+    /// in and waits for the chief), and every task of the session whose result is in
+    /// and is not decided, whichever task the follow-up names. In the order of their
+    /// numbers; none when the window may take it now.
+    pub behind: Vec<i64>,
 }
 
 /// The session that did T-`after`, on the board (brought back if the human had
-/// deleted it) for a follow-up. A follow-up of a task whose result is not in
-/// goes behind it (`FollowUp::behind`) and asks nothing of the session. One of
-/// a task whose result is in goes to the session now, and is refused while the
-/// session has another task in hand (`require_free`); unless follow-ups already
-/// wait for that task's acceptance, which the new one lines up behind (by
-/// number), but for those it is put `before`.
+/// deleted it) for a follow-up. A window takes nothing new while a task of it waits
+/// for the chief's decision, so that the chief can send that task back to it: a
+/// follow-up waits behind T-`after` when that is at work or its result is in, and
+/// behind every task of the session whose result is in and not decided, whichever
+/// task it names (`FollowUp::behind`; T-1118: a follow-up of a done task went into the
+/// window before the chief had decided the task, and so did one of an older task).
+/// It asks nothing of the session then; the window takes it when they are accepted.
+/// A follow-up that waits for none goes to the session now, and is refused while the
+/// session has another task in hand (`require_free`).
 pub(crate) fn follow_up_session(
     store: &mut Store,
     project_id: i64,
     after: i64,
-    before: &[i64],
 ) -> Result<FollowUp, LedgerError> {
     let previous = store.task_row(project_id, after)?;
     if previous.assignee_id.is_none() {
@@ -189,14 +197,24 @@ pub(crate) fn follow_up_session(
     };
     // A session the human ended is not on a task's work: a task of its that is
     // paused waits for its resumption, not for a follow-up.
-    let at_work = HELD_TASK_STATES.contains(&previous.state.as_str())
-        || matches!(previous.state.as_str(), "open" | "paused");
-    // A task whose result is in but not accepted still has follow-ups waiting for
-    // it, and one added now lines up behind them (by number), not ahead.
-    let others_wait =
-        previous.state == "done" && others_wait_for(store, &previous, session.id, before)?;
-    let behind = session.left_at.is_none() && (at_work || others_wait);
-    if !behind {
+    let at_work = session.left_at.is_none()
+        && (HELD_TASK_STATES.contains(&previous.state.as_str())
+            || matches!(previous.state.as_str(), "open" | "paused"));
+    // The follow-up waits for T-`after` while it is at work, as for any task it needs.
+    let mut behind = Vec::new();
+    if at_work {
+        behind.push(after);
+    }
+    // And for every task of the window whose result is in and not accepted, T-`after`
+    // among them: the chief may send it back to the window, which takes nothing new
+    // meanwhile. The follow-ups of a window go in the order they were given.
+    for number in undecided_results(store, session.id)? {
+        if !behind.contains(&number) {
+            behind.push(number);
+        }
+    }
+    behind.sort_unstable();
+    if behind.is_empty() {
         require_free(store, &session, Giving::Task)?;
     }
     Ok(FollowUp {
@@ -205,24 +223,17 @@ pub(crate) fn follow_up_session(
     })
 }
 
-/// Whether open tasks bound to `session` wait for `task` to be accepted, other
-/// than those the new follow-up is put `before` (the chief says it goes ahead of
-/// them: the rule of 2026-10-15).
-fn others_wait_for(
-    store: &Store,
-    task: &TaskRow,
-    session: i64,
-    before: &[i64],
-) -> Result<bool, LedgerError> {
-    let waiting: Vec<i64> = store
+/// The numbers of the tasks of a session whose result is in and not decided,
+/// oldest first.
+pub(crate) fn undecided_results(store: &Store, session_id: i64) -> Result<Vec<i64>, LedgerError> {
+    Ok(store
         .db
         .prepare(
-            "SELECT t.number FROM task_need n JOIN task t ON t.id = n.task_id
-       WHERE n.needs_id = ? AND t.state = 'open' AND t.assignee_id = ?",
+            "SELECT number FROM task WHERE assignee_id = ? AND state = 'done' AND deleted_at IS NULL
+         ORDER BY number",
         )?
-        .query_map(params![task.id, session], |row| row.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(waiting.iter().any(|number| !before.contains(number)))
+        .query_map([session_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// How a task comes to a session, which is what a refusal can tell it to do
@@ -256,58 +267,79 @@ pub(crate) enum Giving {
 /// `session-busy` while it has a task in hand ([`has_task_in_hand`]), and so is
 /// a paused task resumed into its window while the window is at work on another,
 /// so that it is never at work on one task while the board speaks of another.
-/// The refusal says what the door can do instead (`giving`). A task that waits
+/// The refusal names the task that holds the window and its state, says how to
+/// free the window (wait for the result of one at work; resume a paused one and
+/// wait for its result; or cancel it), and what the door can do instead
+/// (`giving`). A task that waits
 /// on the board for what it needs does not make its session busy: the release
 /// (`release_ready`) gives the session's window those one at a time, each once
 /// the window is free, so a door that gives the session another task meanwhile
 /// leaves the board and the window speaking of one (the owner's report of
 /// 2026-10-14, a follow-up refused while another waited for the same idle
 /// window). The chief, the human and a member's own lane are no sessions, and
-/// are held to nothing.
+/// are held to nothing. A paused task held the window under the words "is still
+/// on its work: wait for its result", though it waits for the chief's resume (the
+/// report of 2026-11-02, T-1122).
 pub(crate) fn require_free(
     store: &Store,
     taker: &ParticipantRow,
     giving: Giving,
 ) -> Result<(), LedgerError> {
-    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {
-        let instead = match giving {
-            Giving::Task => ", or open the task for its tier".to_owned(),
-            Giving::SentBack(number) => {
-                format!(" before sending T-{number} back, or open a new task for its tier")
-            }
-            Giving::Resumed(number) => format!(" before resuming T-{number}"),
-        };
-        return Err(LedgerError::refused_with(
-            "session-busy",
-            format!(
-                "@{} is still on its work: wait for its result{instead}",
-                taker.handle
-            ),
-            409,
-        ));
+    if taker.member_id.is_none() {
+        return Ok(());
     }
-    Ok(())
+    let Some((held, state)) = holder(store, taker.id, giving)? else {
+        return Ok(());
+    };
+    let free_it = if state == "paused" {
+        format!("resume T-{held} and wait for its result, or cancel T-{held}")
+    } else {
+        format!("wait for its result, or cancel T-{held}")
+    };
+    let door = match giving {
+        Giving::Task => "giving it another task; or open the task for its tier".to_owned(),
+        Giving::SentBack(number) => {
+            format!("sending T-{number} back; or open a new task for its tier")
+        }
+        Giving::Resumed(number) => format!("resuming T-{number}"),
+    };
+    Err(LedgerError::refused_with(
+        "session-busy",
+        format!(
+            "@{}'s window holds T-{held}, {state}: {free_it}, before {door}",
+            taker.handle
+        ),
+        409,
+    ))
 }
 
-/// Whether a participant has a task in hand that is not the one `giving` gives
-/// it: any, but for a task resumed, which is its own already, and which only a
-/// task at work keeps out of its window.
-fn on_other_work(store: &Store, participant_id: i64, giving: Giving) -> Result<bool, LedgerError> {
-    let Giving::Resumed(number) = giving else {
-        return has_task_in_hand(store, participant_id);
+/// The task that keeps `giving` out of a participant's window, and its state:
+/// any it has in hand that is not the one given, but for a task resumed, which
+/// is its own already, and which only a task at work keeps out of its window.
+/// Of several (a ledger written before one task per session left some), the one
+/// at work first, which has to end before a paused one can be resumed, and the
+/// oldest of those.
+fn holder(
+    store: &Store,
+    participant_id: i64,
+    giving: Giving,
+) -> Result<Option<(i64, String)>, LedgerError> {
+    let (own, states) = match giving {
+        Giving::Resumed(number) => (number, HELD_TASK_STATES.to_vec()),
+        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &["paused"]].concat()),
     };
     Ok(store
         .db
         .query_row(
             &format!(
-                "SELECT 1 FROM task WHERE assignee_id = ? AND number != ? AND state IN ({})",
-                sql_list(&HELD_TASK_STATES)
+                "SELECT number, state FROM task WHERE assignee_id = ? AND number != ?
+                   AND state IN ({}) ORDER BY state = 'paused', id LIMIT 1",
+                sql_list(&states)
             ),
-            params![participant_id, number],
-            |_| Ok(()),
+            params![participant_id, own],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .optional()?
-        .is_some())
+        .optional()?)
 }
 
 /// Whether a participant's window has a task in hand: queued, working or

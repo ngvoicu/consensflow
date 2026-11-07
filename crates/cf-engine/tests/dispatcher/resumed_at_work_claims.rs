@@ -1,0 +1,647 @@
+//! What a task shown working for the words that resumed it breaks, and what holds the claim
+//! (T-1153's review of T-1139, 2026-11-03: F1 to F5, the churn, and the guards no plant held).
+//!
+//! The claim (`resumed_at_work`) is the ledger's `working` with the resume's words still
+//! queued. Every place that read "a task message pending for the window" as "the task is
+//! queued" has to read it so, and the claim has to go wherever its window goes: a window
+//! that exits, a start that finds none, a stop that closes it.
+
+use cf_engine::testing::Context;
+use cf_harness::contract::{Over, Waiting};
+use cf_proto::ledger::{Claim, MessageView};
+use cf_proto::panes::{Background, BackgroundProcess};
+use serde_json::json;
+
+use crate::fixtures::{after, exhausted, given, notes};
+use crate::paused_answers::FINAL;
+use crate::resume::{cut_notes, quit_and_start};
+use crate::resumed_at_work::{
+    paced, resume_words, resumed_while_the_turn_goes_on, state, works_on,
+};
+
+/// The task shown working for the words that resumed it: tell, the window's answer, the
+/// resume, and the window going on with its turn. The project, and the resume's words.
+fn shown_working(context: &Context) -> (i64, MessageView) {
+    let (project, _told, words) = resumed_while_the_turn_goes_on(context);
+    context.pass().unwrap();
+    works_on(context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(context, project), "working");
+    (project, words)
+}
+
+/// The words the chief was sent that say T-1 is paused.
+fn paused_notes(context: &Context, project: i64) -> Vec<String> {
+    notes(context, context.id(project, "chief"))
+        .into_iter()
+        .filter(|note| note.starts_with("T-1 is paused"))
+        .collect()
+}
+
+/// Passes enough for a window that went to open again and be given what waits for it.
+fn settle(context: &Context) {
+    for _ in 0..8 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+}
+
+// ---- F1: the window goes while the task reads working ----------------------------------
+
+#[test]
+fn a_window_that_exits_while_its_task_reads_working_for_the_resume_words_does_not_undo_the_resume()
+{
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context.exit("zeus");
+    context.pass().unwrap();
+    assert_eq!(
+        state(&context, project),
+        "queued",
+        "the claim goes with the window: its words wait for the one that opens"
+    );
+    // The words are not withdrawn: the pass that found the window gone opens the next.
+    assert!(
+        ["queued", "delivering"].contains(&context.message(words.id).state.as_str()),
+        "{}",
+        context.message(words.id).state
+    );
+    assert_eq!(paused_notes(&context, project), Vec::<String>::new());
+
+    // The words reopen the window, as they do for a window that exited before it worked.
+    settle(&context);
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
+    assert_eq!(paused_notes(&context, project), Vec::<String>::new());
+}
+
+#[test]
+fn the_claim_a_window_leaves_when_it_exits_says_so_in_the_log() {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context.exit("zeus");
+    context.pass().unwrap();
+    let said = context
+        .recorder
+        .events()
+        .into_iter()
+        .filter(|event| event["seam"] == "event" && event["event"]["kind"] == "task.state")
+        .map(|event| event["event"]["data"].clone())
+        .next_back()
+        .expect("a move of the task");
+    assert_eq!(
+        (said["from"].as_str(), said["to"].as_str()),
+        (Some("working"), Some("queued"))
+    );
+    assert_eq!(
+        said["because"],
+        json!(format!(
+            "its window closed, and m-{}, the words that resumed it, have not gone in",
+            words.id
+        )),
+        "{said}"
+    );
+    assert_eq!(state(&context, project), "queued");
+}
+
+#[test]
+fn a_waiting_task_whose_window_exits_is_not_paused_for_the_resume_words_either() {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context.ask(project, "zeus", "chief", 1, "Which grammar?");
+    assert_eq!(state(&context, project), "waiting");
+    context.exit("zeus");
+    context.pass().unwrap();
+    assert_ne!(state(&context, project), "paused");
+    assert!(
+        ["queued", "delivering"].contains(&context.message(words.id).state.as_str()),
+        "{}",
+        context.message(words.id).state
+    );
+    assert_eq!(paused_notes(&context, project), Vec::<String>::new());
+}
+
+#[test]
+fn a_close_of_the_project_while_the_task_reads_working_leaves_the_resume_for_the_resume_of_the_project(
+) {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context.close_project(project).unwrap();
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        state(&context, project),
+        "queued",
+        "not paused by the Close"
+    );
+    assert_eq!(
+        context.message(words.id).state,
+        "queued",
+        "a closed project is given nothing"
+    );
+
+    context.resume_project(project).unwrap();
+    settle(&context);
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
+    // F2: the window's one paste is the resume's words, with no stray note of a cut turn.
+    let pasted = given(&context, "zeus");
+    assert!(
+        !pasted
+            .iter()
+            .any(|text| text.contains("ConsensFlow stopped while you were working on")),
+        "{pasted:?}"
+    );
+}
+
+#[test]
+fn a_kept_window_whose_work_ends_after_its_resume_stays_its_task_at_work_and_its_words_wait_for_the_turn(
+) {
+    // T-1117's kept window: the pause was ignored while work ran, the chief resumed the task,
+    // the window went on and the task read working; the work ended, the fresh rounds were
+    // ignored too. A pause never closes a window (T-1199): it stays, kept, and the words
+    // that resumed the task go in once its turn ends.
+    let context = Context::new();
+    context.background.leaves(Some(Background {
+        total: 1,
+        processes: vec![BackgroundProcess {
+            pid: 4711,
+            command: "wsl.exe -d Ubuntu -- bash cf-t3-check.sh".to_owned(),
+        }],
+        possibly_left: Vec::new(),
+    }));
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.pause_task(project.id, 1);
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    context.pass().unwrap();
+    assert_eq!(state(&context, project.id), "paused");
+    context.resume_task(project.id, 1, "Carry on");
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project.id), "working");
+
+    // Its work ends, and the fresh rounds are ignored: the window is kept.
+    context.background.leaves(Some(Background::default()));
+    context.advance(10_000);
+    context.pass().unwrap();
+    for _ in 0..2 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    context.advance(3_100);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(context.host.killed().is_empty(), "a pause closes nothing");
+    assert_eq!(state(&context, project.id), "working");
+    let said: Vec<String> = notes(&context, context.id(project.id, "chief"))
+        .into_iter()
+        .filter(|note| note.contains("did not stop") || note.contains("closed it"))
+        .collect();
+    assert_eq!(
+        said.len(),
+        1,
+        "said once, as it was kept for its work: {said:?}"
+    );
+    assert_eq!(paused_notes(&context, project.id), Vec::<String>::new());
+
+    // Its turn ends: the words go in.
+    context.adapter.answer("zeus", "Where I was");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let words = context.adapter.agent("zeus").items.pop().unwrap();
+    assert!(words.text.ends_with("Resumed: Carry on"), "{}", words.text);
+}
+
+// ---- F2: a quit and the Resume ----------------------------------------------------------
+
+#[test]
+fn a_quit_while_the_task_reads_working_for_the_resume_words_gives_its_window_no_cut_note() {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    let zeus = context.id(project, "zeus");
+    let after_the_quit = quit_and_start(&context);
+    after_the_quit.resume_project(project).unwrap();
+    for _ in 0..8 {
+        after_the_quit.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(cut_notes(&context, zeus), Vec::<MessageView>::new());
+    let pasted = given(&context, "zeus");
+    assert!(
+        !pasted
+            .iter()
+            .any(|text| text.contains("ConsensFlow stopped while you were working on")),
+        "{pasted:?}"
+    );
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
+}
+
+// ---- F3: a turn the quota cut --------------------------------------------------------------
+
+#[test]
+fn a_quota_refusal_whose_reset_has_passed_does_not_hold_and_resume_a_task_shown_working() {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context.adapter.refuse(
+        "zeus",
+        exhausted(
+            Some(&after(&context, -7_200_000)),
+            Some(&after(&context, -60_000)),
+        ),
+    );
+    let seen: Vec<String> = (0..6)
+        .map(|_| {
+            context.pass().unwrap();
+            state(&context, project)
+        })
+        .collect();
+    assert!(
+        !seen.iter().any(|state| state == "paused"),
+        "the board churned: {seen:?}"
+    );
+    let pasted = given(&context, "zeus");
+    assert!(
+        !pasted
+            .iter()
+            .any(|text| text.contains("Resumed: Go on where you stopped.")),
+        "the window is not also told to go on: {pasted:?}"
+    );
+    assert_ne!(context.message(words.id).state, "cancelled");
+}
+
+// ---- F4: every door is shut while the window is on the turn before the words -------------
+
+#[test]
+fn a_question_asked_after_the_first_has_its_door_shut_too() {
+    let context = Context::new();
+    let (project, _words) = shown_working(&context);
+    let zeus = context.id(project, "zeus");
+    context.ask(project, "zeus", "chief", 1, "Which grammar?");
+    let second = context.ask(project, "zeus", "chief", 1, "And which parser?");
+    let claim = context
+        .ledger
+        .borrow_mut()
+        .claim_answer(second.id, zeus)
+        .unwrap();
+    assert!(matches!(claim, Claim::Closed), "{claim:?}");
+}
+
+// ---- F5: a second tell ------------------------------------------------------------------
+
+#[test]
+fn a_second_tell_keeps_the_resume_words_queued_and_rides_in_their_paste() {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    let told = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 1, "chief", "Also check the lexer")
+        .expect("the words are kept for the window");
+    assert_eq!(context.message(words.id).state, "queued");
+    assert_eq!(context.message(told.id).state, "queued");
+    assert_eq!(state(&context, project), "working");
+
+    // The turn on the first tell ends: both go in one paste, and their answer is the result.
+    context.adapter.answer("zeus", FINAL);
+    settle(&context);
+    assert_eq!(context.message(words.id).state, "delivered");
+    let pasted = given(&context, "zeus");
+    assert!(
+        pasted
+            .iter()
+            .any(|text| text.contains("Go on, or say you finished")
+                && text.contains("Also check the lexer")),
+        "{pasted:?}"
+    );
+    context.adapter.answer("zeus", "ALL-DONE");
+    settle(&context);
+    assert_eq!(state(&context, project), "done");
+}
+
+#[test]
+fn the_ledger_sends_back_only_a_task_shown_working_for_words_that_have_not_gone_in() {
+    let context = Context::new();
+    let (project, _told, words) = resumed_while_the_turn_goes_on(&context);
+    let send_back = |context: &Context| {
+        context
+            .ledger
+            .borrow_mut()
+            .rest_while_resumed(project, 1, "its window closed")
+    };
+    // Queued, not shown working: nothing to send back.
+    assert!(send_back(&context).is_err());
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+    // The words are being pasted: their arrival moves the task, not this.
+    context
+        .ledger
+        .borrow_mut()
+        .begin_delivery(words.id)
+        .unwrap();
+    assert!(send_back(&context).is_err());
+    assert_eq!(state(&context, project), "working");
+    // The words are in: the window has them.
+    context
+        .ledger
+        .borrow_mut()
+        .confirm_delivery(words.id, Some(&json!({ "item": "test" })))
+        .unwrap();
+    assert!(send_back(&context).is_err());
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn words_cannot_be_kept_for_a_window_that_has_the_words_that_resumed_its_task() {
+    // Only a task still waiting for its resume's words keeps a tell behind them: one at work
+    // on them is told by a pause and a question, as ever.
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .begin_delivery(words.id)
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .confirm_delivery(words.id, Some(&json!({ "item": "test" })))
+        .unwrap();
+    let kept = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 1, "chief", "Also check the lexer");
+    assert!(kept.is_err(), "{kept:?}");
+}
+
+// ---- the guards that held no plant ------------------------------------------------------
+
+/// The window goes on working after the resume, with `flag` set on what a look reads of it:
+/// the claim is not made while it is, and is made once it is not.
+fn not_claimed_while(flag: impl Fn(&Context, bool)) {
+    let context = Context::new();
+    let (project, _told, _words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    flag(&context, true);
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.pass().unwrap();
+    assert_eq!(
+        state(&context, project),
+        "queued",
+        "no claim while it is set"
+    );
+    flag(&context, false);
+    works_on(&context, "(Bash completed: cargo build)");
+    context.pass().unwrap();
+    assert_eq!(
+        state(&context, project),
+        "working",
+        "the claim once it is not"
+    );
+}
+
+#[test]
+fn a_failed_turn_is_no_work_shown() {
+    not_claimed_while(|context, on| {
+        context.adapter.with("zeus", |agent| {
+            agent.failed = on;
+            agent.failure = on.then(|| "the model failed".to_owned());
+        });
+    });
+}
+
+#[test]
+fn a_conversation_another_program_writes_into_is_no_work_shown() {
+    not_claimed_while(|context, on| {
+        context.adapter.with("zeus", |agent| agent.shared = on);
+    });
+}
+
+#[test]
+fn a_window_that_has_not_named_its_conversation_is_no_work_shown() {
+    not_claimed_while(|context, on| {
+        context.adapter.with("zeus", |agent| {
+            agent.unnamed = on.then(|| "the window is reconnecting".to_owned());
+        });
+    });
+}
+
+#[test]
+fn a_window_waiting_on_a_dialog_of_its_own_is_no_work_shown() {
+    not_claimed_while(|context, on| {
+        context.adapter.with("zeus", |agent| {
+            agent.waiting = on.then_some(Waiting { reason: None });
+        });
+    });
+}
+
+#[test]
+fn a_window_in_a_closed_project_is_shown_no_work() {
+    // Its Close could not close it (the pane host refuses the kill): the project is
+    // suspended, the window is still looked at, and nothing is moved in a closed project.
+    let context = Context::new();
+    let (project, _told, _words) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    context.host.refuse_kills.set(true);
+    assert!(context.close_project(project).is_err(), "its windows stay");
+    context.host.refuse_kills.set(false);
+    works_on(&context, "(Bash completed: cargo metadata)");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(state(&context, project), "queued");
+}
+
+#[test]
+fn a_claim_in_a_closed_project_is_not_withdrawn_for_a_window_at_rest() {
+    let context = paced();
+    let (project, _words) = shown_working(&context);
+    context.host.refuse_kills.set(true);
+    assert!(context.close_project(project).is_err(), "its windows stay");
+    context.host.refuse_kills.set(false);
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    for _ in 0..3 {
+        context.advance(6_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn the_work_a_window_did_before_a_second_resume_is_not_shown_as_work_after_it() {
+    // The first resume's words were seen waiting; before the next look the task was paused
+    // and resumed again, and the window wrote a step between the two. That step is not the
+    // window acting on the second resume.
+    let context = Context::new();
+    let (project, _told, first) = resumed_while_the_turn_goes_on(&context);
+    context.pass().unwrap();
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.pause_task(project, 1, Some("chief"), None).unwrap();
+    }
+    works_on(&context, "(Bash completed: cargo metadata)");
+    context.resume_task(project, 1, "Go on, the second time");
+    let second = resume_words(&context, project);
+    assert_ne!(first.id, second.id);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    works_on(&context, "(Bash completed: cargo build)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn a_window_that_took_its_turn_back_is_no_work_shown() {
+    not_claimed_while(|context, on| {
+        context.adapter.with("zeus", |agent| agent.took_back = on);
+    });
+}
+
+#[test]
+fn a_turn_the_window_began_since_its_rest_keeps_the_claim() {
+    // The words were held (the human typed in the window and has not sent it), the window
+    // rested, and then it began a turn: the human sent what they typed. It is at work again,
+    // not at rest, and the task is not sent back for a rest the last look read.
+    let context = paced();
+    let (project, _words) = shown_working(&context);
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+}
+
+// ---- the churn --------------------------------------------------------------------------
+
+#[test]
+fn a_task_sent_back_to_queued_does_not_read_working_again_for_thirty_seconds_unless_its_words_went_in(
+) {
+    let context = paced();
+    let (project, words) = shown_working(&context);
+    // The words are held (the human typed in the window and has not sent it): the window
+    // rests, and the task goes back to queued.
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    let moves = |context: &Context| {
+        context
+            .recorder
+            .events()
+            .into_iter()
+            .filter(|event| event["seam"] == "event" && event["event"]["kind"] == "task.state")
+            .count()
+    };
+    let before = moves(&context);
+
+    // The window acts again, twice, inside the thirty seconds: no move.
+    for _ in 0..2 {
+        context.adapter.busy("zeus");
+        context.pass().unwrap();
+        works_on(&context, "(Bash completed: cargo metadata)");
+        context.pass().unwrap();
+        assert_eq!(state(&context, project), "queued");
+        context.adapter.with("zeus", |agent| {
+            agent.settled = true;
+            agent.over = Over::No;
+        });
+        context.advance(5_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(moves(&context), before, "the board did not churn");
+
+    // Past them, it acts once more and the claim is made again.
+    context.advance(30_000);
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo build)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+    assert_eq!(moves(&context), before + 1);
+    assert_eq!(context.message(words.id).state, "queued");
+}
+
+#[test]
+fn a_task_sent_back_to_queued_reads_working_the_moment_its_words_go_in() {
+    let context = paced();
+    let (project, words) = shown_working(&context);
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+
+    // The hold ends well inside the thirty seconds: the paste moves the task, whatever the
+    // look would say.
+    context.host.set_snapshot(json!({}));
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn the_words_of_a_second_resume_are_not_held_back_for_the_first_s_sending_back() {
+    // Sent back for the first resume's words; before any look saw the task paused, it was
+    // paused and resumed again. The second words are not the first's: the window acting on
+    // them is shown as ever.
+    let context = paced();
+    let (project, first) = shown_working(&context);
+    context.host.set_snapshot(json!({ "typedQuietMs": 100 }));
+    context.adapter.answer("zeus", FINAL);
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "queued");
+    context
+        .ledger
+        .borrow_mut()
+        .pause_task(project, 1, Some("chief"), None)
+        .unwrap();
+    context.resume_task(project, 1, "Go on, the second time");
+    let second = resume_words(&context, project);
+    assert_ne!(first.id, second.id);
+    context.host.set_snapshot(json!({}));
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    works_on(&context, "(Bash completed: cargo build)");
+    context.pass().unwrap();
+    assert_eq!(state(&context, project), "working");
+}
+
+#[test]
+fn a_waiting_tasks_window_cannot_finish_it_before_it_has_read_the_words_that_resumed_it() {
+    let context = Context::new();
+    let (project, words) = shown_working(&context);
+    context.ask(project, "zeus", "chief", 1, "Which grammar?");
+    assert_eq!(state(&context, project), "waiting");
+    let refused = context
+        .ledger
+        .borrow_mut()
+        .record_result(project, 1, "All done")
+        .expect_err("refused");
+    assert!(
+        refused.to_string().contains("words on their way"),
+        "{refused}"
+    );
+    assert_eq!(context.message(words.id).state, "queued");
+}

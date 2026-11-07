@@ -49,7 +49,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
  "cf-bridge",
@@ -64,6 +64,7 @@ dependencies = [
  "objc2",
  "portable-pty",
  "reqwest",
+ "rustls",
  "semver",
  "serde",
  "serde_json",
@@ -341,11 +342,10 @@ checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cf"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
  "cf-board",
- "cf-catalog",
  "cf-codex-session",
  "cf-daemon",
  "cf-harness",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "cf-base"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "cf-board"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
  "cf-proto",
@@ -392,7 +392,7 @@ dependencies = [
 
 [[package]]
 name = "cf-bridge"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-proto",
  "serde_json",
@@ -400,20 +400,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "cf-catalog"
-version = "3.0.7-alpha.2"
-dependencies = [
- "cf-base",
- "cf-proto",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "cf-codex-session"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "bytes",
  "cf-base",
@@ -439,13 +427,12 @@ dependencies = [
 
 [[package]]
 name = "cf-daemon"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
  "cf-base",
  "cf-bridge",
- "cf-catalog",
  "cf-engine",
  "cf-harness",
  "cf-ledger",
@@ -478,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "cf-e2e"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
  "cf-e2e",
@@ -504,10 +491,9 @@ dependencies = [
 
 [[package]]
 name = "cf-engine"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
- "cf-catalog",
  "cf-engine",
  "cf-harness",
  "cf-ledger",
@@ -518,6 +504,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -525,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "cf-evals"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-e2e",
  "jiff",
@@ -539,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "cf-harness"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -571,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "cf-launcher"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
  "cf-process",
@@ -582,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "cf-ledger"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -600,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "cf-panes"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "anyhow",
  "cf-base",
@@ -620,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "cf-portable"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "flate2",
  "tar",
@@ -630,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "cf-process"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
  "cf-process",
@@ -643,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "cf-proto"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-base",
  "serde",
@@ -653,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "cf-publish"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "cf-publish",
  "minisign-verify",
@@ -663,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "cf-release"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
@@ -5590,7 +5577,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "3.0.7-alpha.2"
+version = "3.0.7-alpha.3"
 dependencies = [
  "base64 0.22.1",
  "cf-base",

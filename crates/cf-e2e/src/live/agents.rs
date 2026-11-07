@@ -29,9 +29,9 @@ use serde_json::{json, Value};
 use super::machine::Harness;
 use super::{requested, Log, CLAUDE_MODEL, MODELS};
 use crate::rig::Rig;
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
-/// The image designer, the catalog's own: a Codex agent whose image tool draws.
+/// The image designer: a Codex member whose image tool draws.
 pub const DESIGNER: &str = "pygmalion";
 
 /// The model of the agent the stand-in plays for a chief, and for a member: the
@@ -40,14 +40,19 @@ pub const DESIGNER: &str = "pygmalion";
 pub const STAND_IN_CHIEF_MODEL: &str = "fake-chief";
 pub const STAND_IN_WORKER_MODEL: &str = "fake";
 
+/// The member a fresh rig seats on the stand-in (`rig::install`'s stand-ins): a member is
+/// asked for by its model, and one on a stand-in model by its own name, which is its
+/// handle (`rig::member_body`), so a shim hands a window asked for on this model to the
+/// stand-in as well (spec harness-models).
+pub const STAND_IN_MEMBER_MODEL: &str = "worker";
+
 /// The harness an agent (a roster row, or what a window is asked for) runs on,
 /// when it is a real one: the stand-in agent's (a Claude Code agent whose model is
 /// a fake one) are none.
 pub fn harness_of(agent: &Value) -> Option<Harness> {
     let kind = agent["kind"].as_str()?;
-    if kind == "claude-code"
-        && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?)
-    {
+    // A fake model is the rig's stand-in, of whichever kind it is shaped as (T-1207).
+    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {
         return None;
     }
     Harness::ALL
@@ -90,14 +95,19 @@ fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
         Harness::Pi => ("openrouter/meta/muse-spark-1.3", None),
         Harness::Devin => ("swe-2", Some("medium")),
         Harness::Codex => ("gpt-5.6-luna", None),
-        // The owner's testing model of 2026-10-26: not a contributor model, at its least
-        // effort (the contributor model measured no saving, T-718).
-        Harness::Muse => ("muse-spark-1.3", Some("minimal")),
+        // The contributor model, at its least effort: test code only, never the product, which
+        // never defaults a person to a contributor model (`cf_harness::muse::models`). Meta may
+        // train on what it is sent, and a live run sends ConsensFlow's own test content alone
+        // (the owner's decision of 2026-11-02). Launched as the product launches Muse,
+        // contributor mode off, it drew about half the allowance of `muse-spark-1.3` (T-954:
+        // three 3.5k-character turns with a tool call each, on the same server model: window
+        // +2, +0, +2 against +3, +2, +3; week +1, +0, +0 against +1, +1, +1).
+        Harness::Muse => ("muse-spark-1.3-contributor", Some("minimal")),
     }
 }
 
 /// The effort levels `harness` takes, as the product's catalog has them
-/// (`efforts` of `crates/cf-catalog/src/catalog.rs`, which quotes each CLI's own
+/// (as each CLI's own
 /// help; a test holds the two to one list).
 fn efforts(harness: Harness) -> &'static [&'static str] {
     match harness {
@@ -333,12 +343,13 @@ pub fn row_on(model: &Model, tier: &str) -> Value {
     row
 }
 
-/// Writes the roster of the rig's home: the agents `rows`, over the one the rig
-/// started with. The daemon opens a member's window on its row, so each row of a
-/// real harness is what the `log`'s report says it was launched on.
+/// Writes the rig's stand-ins: the agents `rows`, over the ones the rig started with. A
+/// member added from a row runs on the row's harness, model and effort
+/// (`rig::member_body`), so each row of a real harness is what the `log`'s report says
+/// it was launched on.
 pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
-    let roster = json!({ "schemaVersion": 1, "agents": rows });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    let roster = json!({ "agents": rows });
+    rig.stand_ins(&roster)?;
     for row in rows {
         log.launched(row);
     }
@@ -346,14 +357,14 @@ pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
 }
 
 /// What each harness calls its tool for asking the person it works for a
-/// question, as a brief names it; Pi has none.
+/// question, as a brief names it: Pi has none, and a Muse member is launched
+/// without its own (`--disable-request-user-input`, T-790). Both ask with `cf ask`.
 pub fn question_tool(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("AskUserQuestion tool"),
         Harness::Codex => Some("request_user_input tool"),
         Harness::Devin => Some("ask_user_question tool"),
-        Harness::Muse => Some("request_user_input tool"),
-        Harness::Pi => None,
+        Harness::Muse | Harness::Pi => None,
     }
 }
 
@@ -404,7 +415,7 @@ mod tests {
                 "openrouter/meta/muse-spark-1.3",
                 "swe-2",
                 "gpt-5.6-luna",
-                "muse-spark-1.3"
+                "muse-spark-1.3-contributor"
             ]
         );
         assert!(rows.iter().all(|row| row["workTier"] == "standard"));
@@ -484,7 +495,7 @@ mod tests {
                 on("openai/gpt-6-luna", None),
                 on("swe-2", Some("max")),
                 on("gpt-6.1-sol", Some("high")),
-                on("muse-spark-1.3", Some("minimal")),
+                on("muse-spark-1.3-contributor", Some("minimal")),
             ]
         );
         // Spaces around a piece, a harness, a model or an effort are let be, and so is
@@ -620,7 +631,7 @@ mod tests {
             models.line(),
             "the models --models and the cheap ones give: claude claude-sonnet-5-5; \
              pi openai/gpt-6-luna; devin swe-2, effort medium; codex gpt-6.1-sol, effort high; \
-             muse muse-spark-1.3, effort minimal"
+             muse muse-spark-1.3-contributor, effort minimal"
         );
         // What a window launched on an agent runs on is the agent's: Pi's effort is its
         // thinking, and the stand-in agent's windows run on nothing of a harness.
@@ -668,72 +679,14 @@ mod tests {
         );
     }
 
-    /// A run can name any agent of the product's catalog by its model and effort.
+    /// T-790: a Muse member is launched without its question tools
+    /// (`--disable-request-user-input`), so no brief tells it to use one.
     #[test]
-    fn every_agent_of_the_catalog_can_be_named_by_its_model_and_effort() {
-        let presets: Value = serde_json::from_str(
-            &std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/data/presets.json"))
-                .unwrap(),
-        )
-        .unwrap();
-        let presets = presets["presets"].as_array().unwrap();
-        assert!(presets.len() > 100, "{}", presets.len());
-        for preset in presets {
-            let kind = preset["kind"].as_str().unwrap();
-            let harness = Harness::ALL
-                .into_iter()
-                .find(|harness| harness.kind() == kind)
-                .unwrap_or_else(|| panic!("no harness runs {kind}"));
-            let model = preset["model"].as_str().unwrap();
-            let effort = preset["effort"].as_str().or(preset["thinking"].as_str());
-            let piece = match effort {
-                Some(effort) => format!("{}={model}:{effort}", harness.name()),
-                None => format!("{}={model}", harness.name()),
-            };
-            let named = parse(Some(&piece), None).unwrap_or_else(|refused| panic!("{refused}"));
-            assert_eq!(
-                (
-                    named.of(harness).name.as_str(),
-                    named.of(harness).effort.as_deref()
-                ),
-                (model, effort),
-                "{piece}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_efforts_a_harness_takes_are_the_ones_the_products_catalog_has() {
-        // The catalog's `efforts()` says each harness's levels with whether its model's id
-        // holds the level (`Harness::Claude => (&[…], false),`, T-1078), in a layout rustfmt
-        // chooses by length: read with the whitespace left out.
-        let squeezed = |text: &str| text.split_whitespace().collect::<String>();
-        let catalog = squeezed(
-            &std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/src/catalog.rs"))
-                .unwrap(),
-        );
-        for harness in Harness::ALL {
-            // The catalog's own name of the harness.
-            let name = harness.name();
-            let variant = format!("{}{}", name[..1].to_uppercase(), &name[1..]);
-            let quoted: Vec<String> = efforts(harness)
-                .iter()
-                .map(|effort| format!("\"{effort}\""))
-                .collect();
-            let line = format!("Harness::{variant}=>(&[{}],", quoted.join(","));
-            assert!(
-                catalog.contains(&line),
-                "the catalog's efforts() has no {line} (whitespace left out)"
-            );
-        }
-    }
-
-    #[test]
-    fn only_pi_has_no_tool_to_ask_a_question_with() {
+    fn only_pi_and_muse_members_have_no_tool_to_ask_a_question_with() {
         for harness in Harness::ALL {
             assert_eq!(
                 question_tool(harness).is_none(),
-                harness == Harness::Pi,
+                matches!(harness, Harness::Pi | Harness::Muse),
                 "{harness:?}"
             );
         }

@@ -47,7 +47,8 @@ fn times(text: &str, words: &str) -> usize {
     text.matches(words).count()
 }
 
-/// A task done by a session, and a follow-up of it that waits for a task of `diana`'s.
+/// A task done by a session and accepted (a follow-up of one the chief has not decided waits
+/// for that), and a follow-up of it that waits for a task of `diana`'s.
 fn waiting_follow_up(w: &mut World) -> (String, i64, i64, i64) {
     let a = w.open("Parser").task.number;
     let moved = w.assign(a, "zeus");
@@ -56,6 +57,9 @@ fn waiting_follow_up(w: &mut World) -> (String, i64, i64, i64) {
     w.ledger
         .record_result(w.project, a, "Parser, done")
         .expect("a result");
+    w.ledger
+        .accept_task(w.project, a, "chief")
+        .expect("accepted");
     let need = w.open("Lexer").task.number;
     let follow_up = w.follow_up(a, "Tests", &[need]).expect("a follow-up");
     assert_eq!(follow_up.task.state, "open");

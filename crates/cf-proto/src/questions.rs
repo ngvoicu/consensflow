@@ -5,6 +5,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// What `cf ask` tells its window after the question's id and the one asked ("m-5 asked
+/// @chief. …"): the answer is a message, so the turn ends here. The engine reads a turn
+/// whose last tool output has it as one that ended on its question (`cf-engine`'s
+/// `turn_end::while_asking`, T-1204), so it is written here, where `cf` and the engine
+/// both have it.
+pub const ASKED_THEN_END_THE_TURN: &str = "The answer arrives as a message; end your turn now.";
+
 /// One question in the board's shape. Its texts are what the harness gave,
 /// passed through as they came; one it did not give is left out.
 #[derive(Debug, Clone, PartialEq, Serialize)]

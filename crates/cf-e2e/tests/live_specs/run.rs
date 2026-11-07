@@ -18,7 +18,7 @@ use cf_e2e::{Error, Result};
 
 use crate::ctx::Ctx;
 use crate::plan::{self, Planned, Step, VARIANTS};
-use crate::project::{self, Settings};
+use crate::project::{self, Apply, Settings};
 use crate::steps;
 
 /// How long the daemon and the pane host have to end once the project is: a real
@@ -42,6 +42,8 @@ pub struct Options {
     pub variant: Option<String>,
     /// The specs folder the projects are given, relative to the project's folder.
     pub folder: String,
+    /// How the specs reach a chief: while its window is open, or at its next launch.
+    pub apply: Apply,
 }
 
 impl Machine {
@@ -86,6 +88,7 @@ fn settings(rig: &Rig, planned: &Planned, options: &Options) -> Result<Settings>
         .find(|(name, skill)| *name == variant.name && skill.installed)
         .map(|(_, skill)| skill.skill.clone());
     Ok(Settings {
+        apply: options.apply,
         folder: options.folder.clone(),
         variant,
         installed_at,

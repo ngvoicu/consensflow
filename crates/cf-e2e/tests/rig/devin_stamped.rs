@@ -21,7 +21,6 @@
 use std::thread::sleep;
 use std::time::Instant;
 
-use cf_e2e::files;
 use cf_e2e::live::trace::at_ms;
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::{json, Value};
@@ -45,7 +44,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "devin-worker", "kind": "devin", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// A project of a stamped rig, with its Devin worker, given `task`; waited for until the

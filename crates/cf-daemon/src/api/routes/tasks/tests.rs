@@ -76,6 +76,16 @@ async fn the_board_is_the_open_tasks_and_every_lane_as_summaries() {
         said.as_object().unwrap().keys().collect::<Vec<_>>(),
         ["open", "lanes"]
     );
+    // A lane says the model and effort it runs on where its name does not (harness-models,
+    // HMD-12): the chief's, whose name is its role; the human's runs on none, and zeus's
+    // name holds its model.
+    let runs_on: Vec<&Value> = said["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|lane| &lane["runsOn"])
+        .collect();
+    assert_eq!(runs_on, [&Value::Null, &json!("mybuilder"), &Value::Null]);
     assert_eq!(scene.kicks.get(), 0, "a read wakes nothing");
 }
 
@@ -272,7 +282,9 @@ async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dis
         .add_member(
             scene.project.id,
             &cf_ledger::NewMember {
-                agent: "tess".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("tess".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["tester".to_owned()],
@@ -322,9 +334,10 @@ async fn a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_betwee
     assert_eq!(said["task"]["tier"], "standard");
     assert_eq!(
         said.as_object().unwrap().keys().collect::<Vec<_>>(),
-        ["task", "message", "asked", "gated"]
+        ["task", "message", "asked", "heldBy", "gated"]
     );
     assert_eq!(said["asked"], "critical");
+    assert_eq!(said["heldBy"], json!(["zeus"]), "whose tier it went to");
 }
 
 #[tokio::test]
@@ -477,6 +490,13 @@ async fn a_follow_up_goes_back_to_the_session_that_did_the_task_whatever_the_spe
     for after in ["1", r#""1""#, "1.0", r#""0x1""#, "[1]", "true"] {
         let scene = scene();
         assert_eq!(finished_session_task(&scene), 1);
+        // The chief has decided it: a follow-up of a task still undecided waits (T-1118).
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .accept_task(scene.project.id, 1, "chief")
+            .unwrap();
         let body = format!(r#"{{"after":{after},"body":"Now the lexer"}}"#);
         let (status, said) = post(&scene, &scene.chief, &body).await;
         assert_eq!(status, 201, "{after}: {said}");
@@ -521,6 +541,49 @@ async fn a_follow_up_of_a_task_still_at_work_waits_for_it_and_is_not_queued_for_
         (status, said["task"]["blockedBy"].clone()),
         (201, json!([next]))
     );
+}
+
+/// T-1118: a follow-up of a task whose result is in and not accepted waits for it, as one
+/// of a task at work does; it was queued for the window at once, before the chief decided.
+#[tokio::test]
+async fn a_follow_up_of_a_task_with_its_result_in_waits_for_it_and_is_not_queued_for_the_window() {
+    let scene = scene();
+    let finished = finished_session_task(&scene);
+    let body = format!(r#"{{"after":{finished},"body":"Now the lexer"}}"#);
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["task"]["state"], "open");
+    assert_eq!(said["task"]["blockedBy"], json!([finished]));
+    assert!(
+        said["task"]["assignee"]
+            .as_str()
+            .unwrap()
+            .starts_with("zeus-"),
+        "{said}"
+    );
+    assert!(
+        said["message"].is_null(),
+        "nothing is queued for the window"
+    );
+
+    // Accepted, it goes to the window.
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .accept_task(scene.project.id, finished, "chief")
+        .unwrap();
+    let next = said["task"]["number"].as_i64().unwrap();
+    let (status, said) = api(
+        &scene,
+        Method::GET,
+        &format!("/api/tasks/{next}"),
+        &scene.chief,
+        "",
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "queued");
 }
 
 /// The title of task `number` as `token`'s window lists the board: on its lane, or

@@ -22,6 +22,7 @@ use super::chain::{Chain, Entry};
 use super::comparable::comparable;
 use super::wires::{Cause, Outcome, Wires};
 use crate::devin::adapter::BYPASS;
+use crate::shared::quota::{busy_refusal, Quota};
 use crate::shared::record::key::Key;
 use crate::shared::record::reading::{Record, Role, Settlement};
 
@@ -36,7 +37,9 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     }
     let mut record = Record::new();
     record.asking = chain.asking;
+    record.last_call.clone_from(&chain.last_call);
     record.lines.lost = wires.lost();
+    record.beside = chain.beside.clone();
     record.items = chain
         .entries
         .iter()
@@ -80,6 +83,20 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     record.failure = outcome
         .filter(|_| failed)
         .and_then(|outcome| outcome.error.clone());
+    // A turn Devin ended for its provider's moment (an overloaded model, a server error) is
+    // held and tried again, no failure (T-1112). Dated by the last message of the chain, so
+    // the same refusal reads the same look after look, and the next try's is another.
+    if let Some(said) = record
+        .failure
+        .as_deref()
+        .filter(|said| busy_refusal(said, None))
+    {
+        let at = last.and_then(|at| time_of(record.items[at].at.as_ref()));
+        record.quota = Some(Arc::new(Quota::Busy {
+            at,
+            because: said.trim().chars().take(300).collect(),
+        }));
+    }
     record.in_flight = working || (last_open && !cancelled && !failed);
     record.settlement = if working {
         Settlement::InFlight
@@ -89,6 +106,15 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         Settlement::Unknown
     };
     record
+}
+
+/// A message's time as an ISO text: its own, or its milliseconds since the epoch.
+fn time_of(at: Option<&serde_json::Value>) -> Option<String> {
+    match at? {
+        serde_json::Value::String(at) => Some(at.clone()),
+        serde_json::Value::Number(ms) => ms.as_i64().map(cf_base::time::iso),
+        _ => None,
+    }
 }
 
 /// What tells which turn a message of the chain is of: the request it answers, or,

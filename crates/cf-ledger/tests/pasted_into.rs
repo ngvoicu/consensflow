@@ -42,10 +42,13 @@ fn begun_at(dir: &std::path::Path, at: Rc<Cell<i64>>) -> (Ledger, i64, i64, i64)
             name: "app".into(),
             chief: NewChief {
                 harness: "devin".into(),
-                agent: Some("apollo".into()),
+                model: Some("apollo".into()),
+                effort: None,
             },
             staff: vec![NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "devin".into(),
                 designer: false,
                 roles: vec!["worker".into()],
@@ -54,6 +57,8 @@ fn begun_at(dir: &std::path::Path, at: Rc<Cell<i64>>) -> (Ledger, i64, i64, i64)
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .expect("a project");
     let chief = project

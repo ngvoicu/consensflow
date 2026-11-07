@@ -1,0 +1,75 @@
+{
+  "models": [
+    {
+      "id": "muse-wonder-1.0",
+      "label": "muse-wonder-1.0",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high"
+    },
+    {
+      "id": "muse-spark-1.3",
+      "label": "muse-spark-1.3",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "max"
+    },
+    {
+      "id": "muse-spark-1.3-contributor",
+      "label": "muse-spark-1.3-contributor",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "max",
+      "markedDefault": true,
+      "contributor": true
+    },
+    {
+      "id": "muse-spark-1.2",
+      "label": "muse-spark-1.2",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "high"
+    },
+    {
+      "id": "muse-spark-1.2-contributor",
+      "label": "muse-spark-1.2-contributor",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "high",
+      "contributor": true
+    }
+  ],
+  "readAt": 1793000000000,
+  "freshness": {
+    "state": "fresh"
+  },
+  "how": "muse serve --provider meta --no-session-log: model/list"
+}

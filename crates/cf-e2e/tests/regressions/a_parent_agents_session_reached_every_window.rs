@@ -160,7 +160,7 @@ fn no_program_the_daemon_starts_of_its_own_is_given_the_session_cf_ui_was_starte
         "schemaVersion": 1,
         "agents": [{ "id": "codex-chief", "kind": "codex", "model": "fake" }],
     });
-    cf_e2e::files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let project = Project::open(&rig, "codex-chief", json!({}))?;
     let chief = format!("p{}-chief", project.id());
     rig.wait_for("the chief's window to be opened", secs(60), || {

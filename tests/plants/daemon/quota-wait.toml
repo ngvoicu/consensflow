@@ -196,6 +196,7 @@ find = '''
                 match unwell {
                     Some(Unwell::Account(_)) => "its account is unavailable",
                     Some(Unwell::Moved(_)) => "its model moved on its own",
+                    Some(Unwell::Busy(_)) => "its model was busy",
                     None => "the harness ran out of quota",
                 },
             )?;
@@ -383,9 +384,12 @@ find = """        if participant.role == "chief" || observed.failed || refused {
 replace = """        if participant.role == "chief" {
             let _ = refused;"""
 
+# A tell to a held task takes the hold over now (T-1199, T-1220's P1-1), and new deliveries to a
+# held window wait with the hold; but one already begun as the hold came may finish, and reach
+# the held window on its own (T-1223's P3-6): its reply is no turn of the window's own.
 [[plant]]
-name = "quota wait: a tell answered while the words that resume the task wait is taken for a turn of the window's own"
-meant = "a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_windows_own"
+name = "quota wait: a reply to a paste of ConsensFlow's that went in while the task was held is taken for a turn of the window's own"
+meant = "a_note_already_on_its_way_as_a_busy_model_holds_the_task_goes_in_and_the_reply_is_no_turn_of_the_windows_own"
 runs = ["quota-wait-engine"]
 
 [[plant.edit]]

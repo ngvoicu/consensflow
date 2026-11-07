@@ -11,6 +11,8 @@
 decided-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "decided"]
 # The engine's tests of the same on the chief's fake window.
 decided-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "decided_results"]
+# The rig's case of a done task the chief and the human cancel (T-1122).
+rig-regression-done-cancel = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_done_task_could_not_be_cancelled_so_the_chief_could_only_accept_it::"]
 
 [[plant]]
 name = "decided result: an accept leaves the result its requester was not given"
@@ -20,9 +22,9 @@ runs = ["decided-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
-        withdraw_result(store, &task, "was accepted")?;'''
-replace = '        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
+    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
+    withdraw_result(store, task, "was accepted")?;'''
+replace = '    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
 
 [[plant]]
 name = "decided result: an accept leaves it, and the dispatcher pastes it into the chief"
@@ -32,9 +34,9 @@ runs = ["decided-engine"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
-        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
-        withdraw_result(store, &task, "was accepted")?;'''
-replace = '        withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
+    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
+    withdraw_result(store, task, "was accepted")?;'''
+replace = '    withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;'
 
 [[plant]]
 name = "decided result: a sending back leaves the result its requester was not given"
@@ -171,3 +173,47 @@ runs = ["evals-measure"]
 file = "crates/cf-evals/src/measure/plumbing.rs"
 find = '''WHERE kind = 'result' AND recipient_id = ?1 AND state != 'cancelled'",'''
 replace = '''WHERE kind = 'result' AND recipient_id = ?1",'''
+
+# --- a task that is done is called off (T-1122, the field report of 2026-11-02) ---
+
+[[plant]]
+name = "decided result: a task that is done is not called off"
+meant = "the_chief_cancels_a_done_task_whose_result_it_was_given_and_the_result_stays_as_it_was"
+runs = ["decided-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        &["paused", "done", "failed"],'''
+replace = '''        &["paused", "failed"],'''
+
+[[plant]]
+name = "decided result: a cancel of a done task leaves its result queued for the chief"
+meant = "a_cancel_withdraws_the_result_of_a_done_task_the_chief_was_not_given_yet_as_a_decision_does"
+runs = ["decided-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        withdraw_result(store, &task, "was cancelled")?;
+'''
+replace = ""
+
+[[plant]]
+name = "decided result: a cancel of a done task says its window was stopped"
+meant = "whoever_asked_for_a_done_task_is_told_it_was_cancelled_and_that_no_window_was_stopped"
+runs = ["decided-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        window: assignee.filter(|window| began && !decided && window.left_at.is_none()),"
+replace = "        window: assignee.filter(|window| began && window.left_at.is_none()),"
+
+[[plant]]
+name = "decided result: the rig's chief cannot cancel a task that is done"
+meant = "a_done_task_is_cancelled_by_the_chiefs_cf_and_no_other_is_touched"
+runs = ["rig-regression-done-cancel"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        &["paused", "done", "failed"],'''
+replace = '''        &["paused", "failed"],'''

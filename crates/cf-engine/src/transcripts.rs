@@ -5,9 +5,9 @@
 //! copied.
 
 use cf_harness::contract::Observed;
-use cf_harness::records::Item;
+use cf_harness::records::{Detail, Item, Role};
 use cf_ledger::ParticipantView;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -26,7 +26,9 @@ impl Dispatcher {
     /// ConsensFlow's own copy of the window's conversation, readable on the
     /// card once the window is gone: each look copies what is new and the
     /// item still being written; a record that shrank (a resumed window
-    /// rewrote it) is copied over from the start. A look that wrote anything
+    /// rewrote it) is copied over from the start. What is copied is the record's
+    /// timeline: its items and those only the history shows, each where it stands
+    /// ([`Observed::timeline`]). A look that wrote anything
     /// says so ([`Dispatcher::wrote`]): a view of what the window did reads
     /// it again.
     pub(crate) fn copy(
@@ -43,19 +45,22 @@ impl Dispatcher {
         let Some(conversation) = conversation else {
             return Ok(());
         };
-        let items = observed.items();
+        let timeline = observed.timeline();
         let copied = record
             .copied
             .borrow()
             .filter(|copied| copied.conversation == conversation.id)
             .map_or(0, |copied| copied.count);
-        let from = if items.len() < copied {
+        let from = if timeline.len() < copied {
             0
         } else {
             copied.saturating_sub(1)
         };
-        if items.len() > from {
-            let new: Vec<Value> = items[from..].iter().map(to_copy).collect();
+        if timeline.len() > from {
+            let new: Vec<Value> = timeline
+                .from(from)
+                .map(|(item, drawn_only)| to_copy(item, drawn_only))
+                .collect();
             let changed = self.seams.ledger.borrow_mut().copy_transcript(
                 conversation.id,
                 &new,
@@ -67,7 +72,7 @@ impl Dispatcher {
         }
         *record.copied.borrow_mut() = Some(Copied {
             conversation: conversation.id,
-            count: items.len(),
+            count: timeline.len(),
         });
         Ok(())
     }
@@ -108,16 +113,53 @@ impl Dispatcher {
     }
 }
 
-/// An item as the ledger copies it: as its reading writes it, and marked when
-/// it is a compaction's summary, which a reading never says.
-fn to_copy(item: &Item) -> Value {
+/// An item as the ledger copies it: as its reading writes it, and what a
+/// reading never says: marked when it is a compaction's summary, with what the
+/// history draws of it besides its words where its reader says more than its role
+/// does (`detail`), marked when only the history shows it (`drawnOnly`), and the
+/// harness's own when it is a user's item with no human's words in it (Claude Code's
+/// `<task-notification>`, which a reading keeps a user's, as Node read it, and
+/// `synthetic`). Copied as the user's, it was taken for the human typing to the chief:
+/// the wake-up calls read it as news, and a project's third nudge came with nothing
+/// moved on its board (the field board of 2026-11-02, T-1113).
+fn to_copy(item: &Item, drawn_only: bool) -> Value {
     let mut value = serde_json::to_value(item).unwrap_or(Value::Null);
-    if item.compaction {
-        if let Value::Object(fields) = &mut value {
+    if let Value::Object(fields) = &mut value {
+        if item.compaction {
             fields.insert("compaction".to_owned(), Value::Bool(true));
+        }
+        if item.synthetic && item.role == Role::User {
+            fields.insert("role".to_owned(), Value::from("custom"));
+        }
+        if let Some(detail) = &item.detail {
+            fields.insert("detail".to_owned(), detail_of(detail));
+        }
+        if drawn_only {
+            fields.insert("drawnOnly".to_owned(), Value::Bool(true));
         }
     }
     value
+}
+
+/// What the history draws of an item, as the ledger takes it: each field its reader says.
+fn detail_of(detail: &Detail) -> Value {
+    let mut fields = Map::new();
+    fields.insert("kind".to_owned(), Value::from(detail.kind.word()));
+    let mut say = |name: &str, value: Option<Value>| {
+        if let Some(value) = value {
+            fields.insert(name.to_owned(), value);
+        }
+    };
+    say("name", detail.name.as_deref().map(Value::from));
+    say("header", detail.header.as_deref().map(Value::from));
+    say(
+        "status",
+        detail.status.map(|status| Value::from(status.word())),
+    );
+    say("tookMs", detail.took_ms.map(Value::from));
+    say("tokens", detail.tokens.map(Value::from));
+    say("diff", detail.diff.as_deref().map(Value::from));
+    Value::Object(fields)
 }
 
 #[cfg(test)]

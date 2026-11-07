@@ -1,0 +1,412 @@
+# Plants for the Fixed pages whose test held the bug but had no plant to prove it (the audits of
+# 2026-10-29, T-961 and T-962, read again by T-976; Gabriel: "we don't want issues that happen once
+# and are fixed to happen again"; rule 6 of `decisions/2026-10-21-every-bug-and-feature-gets-tests.md`
+# in consensflow-sme: every Fixed issue page names the test and the plant that hold it). Each plant
+# puts a fix's bug back, and the test the page names fails:
+#
+# - the role cards say the result is the final message of the turn (answers-reach-the-board-shortened);
+# - the Pi channel looks a second past a record's expiry for the extension's verdict, and looks
+#   until that deadline (ci-pi-ack-timeout-race);
+# - a paste its window did not send is pressed Enter again (devin-chief-launch-message-left-unsubmitted);
+# - a window whose own question dialog is open is a window waiting (no-waiting-for-input-marker);
+# - the Pi extension sends a message id it settled no more (pi-extension-double-send);
+# - a queue removal names the message whose envelope has other attributes (results-held-at-the-gate);
+# - the PowerShell that says when a process began is given time (stand-in-detached-job-dies-on-the-
+#   windows-runner), a Windows plant;
+# - a page of a list is cut at half a frame (state-list-grows-toward-frame-cap);
+# - a terminal takes a size once it has held, and its card is its own width (terminal-resize-cascade);
+# - what the router keeps of a window is bounded (the-rigs-capture-is-unbounded);
+# - a turn ended for its quota is read as one (devin-quota-turn-end-not-read);
+# - a stand-in's `cf` form that no longer parses turns a rig case red (packaged-smoke-silently-broken);
+# - a platform that installs nothing itself reads the feed for a page (windows-update-check-platform-
+#   not-found), the Mac's and Windows' plants;
+# - B7 of field-reports-2026-10-15: a search sends its words, a page is from one, a page counts its
+#   items from the first; A3: the note that a worker goes on comes before its result.
+#
+# A1 of that page has its plant already, in `background.toml` ("background regression: a build's
+# daemon, its build ended, is taken for the turn's work and told as left"), and the rest of B7 in
+# `decisions-306.toml` ("transcript pages: …"). The T-139 plants of `the-rigs-capture-is-unbounded`
+# are in `long-run.toml` ("long run: the rig keeps every byte a window printed, …").
+#
+# Every name here begins `held-rest:`, so `npm run plants:daemon -- "held-rest:"` runs them all.
+
+[run]
+# The role texts, and the golden of Node's chief text that holds them whole.
+rest-engine-text-goldens-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
+# The text's goldens hold no tester (Node had none): the tester's card is read by its own test.
+rest-engine-text-roles-tester = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::teach_the_tester_only_the_board_s_commands"]
+# The Pi channel's looks for the extension's verdict, on a clock the test moves.
+rest-pi-send-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::channel::send::tests::record::"]
+# A paste the window still holds is pressed Enter again.
+rest-engine-still-there = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "still_there::"]
+# What a record says a window waits for.
+rest-record-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record_state::tests::"]
+# The Pi extension's followups, sent by Rust.
+rest-pi-message = ["node", "--test", "--test-reporter=tap", "tests/pi-message.test.mjs"]
+# Claude's record read across the queue's operations.
+rest-claude-queues = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::queues::"]
+# The rig case of a job the agent detached from its shell, on the machine's own processes.
+rest-rig-detached-job = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_job_the_agent_detached_from_its_shell"]
+# What a page of a list holds of a frame, in the ledger and over the bridge.
+rest-ledger-page-reads = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "page_reads::tests::"]
+rest-daemon-history = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history::"]
+# The terminals of the page, with a real xterm: the resizes a drag makes of one.
+rest-page-resize = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "resizes a terminal once"]
+# What the rig's router keeps of a window's output.
+rest-e2e-route = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::"]
+# Devin's wire log, and what it says of its quota.
+rest-devin-wire-log = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::wire_log::tests::"]
+# The rig case of a test put on the board by the stand-in chief, to a tester's window.
+rest-rig-tiered-test = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "core_tiered::a_test_is_a_task"]
+# The app's updates module, and the page's dialog of them.
+rest-app-updates = ["cargo", "xtask", "app", "test", "updates::tests"]
+rest-page-updates = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/updates.spec.mjs", "-g", "download page"]
+# `cf task get T-n --transcript --page N` and `--find`, as a window runs them.
+rest-cf-transcript-pages = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
+# A worker's turn that ends with agents pending, on the engine's fake windows.
+rest-engine-pending-agents = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pending_agents::"]
+
+# --- the role cards (answers-reach-the-board-shortened) ---
+
+[[plant]]
+name = "held-rest: the worker's card says its result is a one-line summary of its turn"
+meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
+runs = ["rest-engine-text-goldens-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''Your result is the final message of your turn: ConsensFlow collects it when
+you finish and delivers it to whoever asked.'''
+replace = '''Your result is a one-line summary of your turn: ConsensFlow collects it when
+you finish and delivers it to whoever asked.'''
+
+[[plant]]
+name = "held-rest: the advisor's card says its answer is a one-line summary of its turn"
+meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
+runs = ["rest-engine-text-goldens-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = "Your answer is the final message of your turn: ConsensFlow collects it when you"
+replace = "Your answer is a one-line summary of your turn: ConsensFlow collects it when you"
+
+[[plant]]
+name = "held-rest: the reviewer's card says its findings are a one-line summary of its turn"
+meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
+runs = ["rest-engine-text-goldens-roles"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = "Your findings are the final message of your turn: ConsensFlow collects them and"
+replace = "Your findings are a one-line summary of your turn: ConsensFlow collects them and"
+
+[[plant]]
+name = "held-rest: the tester's card says its result is a one-line summary of its turn"
+meant = "teach_the_tester_only_the_board_s_commands"
+runs = ["rest-engine-text-roles-tester"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''Your result is the final message of your turn: ConsensFlow collects
+it and'''
+replace = '''Your result is a one-line summary of your turn: ConsensFlow collects
+it and'''
+
+# --- the Pi channel's grace (ci-pi-ack-timeout-race) ---
+
+[[plant]]
+name = "held-rest: the Pi channel looks 30 ms past a record's expiry for the extension's verdict, not a second"
+meant = "a_verdict_is_looked_for_every_ten_milliseconds_through_the_grace_and_the_last_one_is_slept_out"
+runs = ["rest-pi-send-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "const ACK_GRACE_MS: i64 = 1000;"
+replace = "const ACK_GRACE_MS: i64 = 30;"
+
+[[plant]]
+name = "held-rest: the Pi channel looks for the extension's verdict only until the record's expiry"
+meant = "a_verdict_written_before_the_last_look_is_taken_and_one_written_after_it_is_missed"
+runs = ["rest-pi-send-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "    let deadline = expires_at.saturating_add(ACK_GRACE_MS);"
+replace = "    let deadline = expires_at;"
+
+# --- a paste a window did not send (devin-chief-launch-message-left-unsubmitted) ---
+
+[[plant]]
+name = "held-rest: the Enter pressed again for a paste its window holds is sent with no key"
+meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
+runs = ["rest-engine-still-there"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '        let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });'
+replace = '        let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [] });'
+
+# --- a window waiting on its own dialog (no-waiting-for-input-marker) ---
+
+[[plant]]
+name = "held-rest: a window whose own question dialog is open is not waiting"
+meant = "a_dialog_of_its_own_still_open_is_a_window_waiting_and_nothing_else_is"
+runs = ["rest-record-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = "        Some(Reading::Known(record)) if record.asking => Some(Waiting {"
+replace = "        Some(Reading::Known(record)) if record.asking && false => Some(Waiting {"
+
+[[plant]]
+name = "held-rest: a window waiting on its dialog gives no reason for it"
+meant = "a_dialog_of_its_own_still_open_is_a_window_waiting_and_nothing_else_is"
+runs = ["rest-record-state"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record_state.rs"
+find = '            reason: Some("its own question dialog is open".to_owned()),'
+replace = "            reason: None,"
+
+# --- the Pi extension's settled ids (pi-extension-double-send) ---
+
+[[plant]]
+name = "held-rest: the Pi extension forgets the ids it settled"
+meant = "never sends a message id again once it was acknowledged"
+runs = ["rest-pi-message"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    settledIds.add(id)"
+replace = "    // settledIds.add(id)"
+
+[[plant]]
+name = "held-rest: the Pi extension sends a message id it settled again"
+meant = "never sends a message id again once it was acknowledged"
+runs = ["rest-pi-message"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "          if (settledIds.has(id)) {"
+replace = "          if (false && settledIds.has(id)) {"
+
+# --- the hop chain of a queued message (results-held-at-the-gate) ---
+
+[[plant]]
+name = "held-rest: a queue removal names a message by its exact words, and one whose envelope has other attributes stays queued"
+meant = "a_removal_without_the_hop_chain_names_the_message_queued_with_it"
+runs = ["rest-claude-queues"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/text.rs"
+find = "    queued == removed || envelope(queued) == envelope(removed)"
+replace = "    queued == removed"
+
+# --- the start time of a process on Windows (stand-in-detached-job-dies-on-the-windows-runner) ---
+#
+# The PowerShell that says when a process began took 11 to 17 s on GitHub's Windows runner and was
+# ended at the 30 s a program is given under a suite's load: a job that ran was said to be none. A
+# plant cannot put the old 30 s back, which is a bound met only on a loaded machine; it gives the
+# PowerShell no time at all, which says of every process that it began never. A Windows machine's
+# plant (`cargo xtask windows --machine zeewin2 -- cargo xtask plants daemon "held-rest: the
+# PowerShell"`), skipped elsewhere.
+
+[[plant]]
+name = "held-rest: the PowerShell that says when a process began is given no time to start"
+meant = "a_job_the_agent_detached_from_its_shell_is_left_running_and_nothing_is_said_of_it"
+platforms = ["windows"]
+runs = ["rest-rig-detached-job"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/pid.rs"
+find = "        .limit(STARTED_LIMIT)"
+replace = "        .limit(std::time::Duration::from_millis(1))"
+
+# --- the page's bound (state-list-grows-toward-frame-cap) ---
+#
+# The replies of `history.rs` are held to `PAGE_BYTES` itself, so a bound raised past the frame
+# passes them as it passes itself: the plant of the constant is caught by the test of its ratio.
+
+[[plant]]
+name = "held-rest: a page of a list may be as large as the frame the bridge carries and more"
+meant = "a_page_of_a_list_is_at_most_half_the_frame_the_bridge_carries"
+runs = ["rest-daemon-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "pub const PAGE_BYTES: usize = 512 * 1024;"
+replace = "pub const PAGE_BYTES: usize = 64 * 1024 * 1024;"
+
+[[plant]]
+name = "held-rest: a list takes every item that comes, whatever its size"
+meant = "a_list_fits_to_its_last_byte_and_no_further"
+runs = ["rest-ledger-page-reads"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "        if used + size > PAGE_BYTES {"
+replace = "        if used + size > usize::MAX {"
+
+[[plant]]
+name = "held-rest: an item too long for a list of its own is not cut"
+meant = "an_item_too_long_for_a_list_of_its_own_is_cut_and_goes_on"
+runs = ["rest-ledger-page-reads"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "        if 1 + size > PAGE_BYTES {"
+replace = "        if false {"
+
+# --- a terminal's resizes (terminal-resize-cascade) ---
+
+[[plant]]
+name = "held-rest: a terminal takes each size the moment it is asked"
+meant = "resizes a terminal once, when a drag that narrows it holds still"
+runs = ["rest-page-resize"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "const SETTLE_MS = 200"
+replace = "const SETTLE_MS = 0"
+
+[[plant]]
+name = "held-rest: a terminal fits at once instead of waiting for its size to hold"
+meant = "resizes a terminal once, when a drag that narrows it holds still"
+runs = ["rest-page-resize"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.settling = setTimeout(() => this.#fitNow(), SETTLE_MS)"
+replace = "    this.#fitNow()"
+
+[[plant]]
+name = "held-rest: a terminal's card is as wide as its content"
+meant = "resizes a terminal once, when a drag that narrows it holds still"
+runs = ["rest-page-resize"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''     each fit took one column off, a resize of the program every time. */
+  grid-template-columns: minmax(0, 1fr);'''
+replace = '''     each fit took one column off, a resize of the program every time. */
+  grid-template-columns: auto;'''
+
+# --- the rig's capture (the-rigs-capture-is-unbounded) ---
+
+[[plant]]
+name = "held-rest: the router keeps all a window printed, for the rig's life"
+meant = "what_a_window_printed_through_the_router_is_kept_to_its_bound_and_what_went_counted"
+runs = ["rest-e2e-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "                    printed.push(&bytes, KEPT, SLACK);"
+replace = "                    printed.push(&bytes, usize::MAX / 4, 0);"
+
+# --- Devin's quota (devin-quota-turn-end-not-read) ---
+
+[[plant]]
+name = "held-rest: a turn Devin ends for its quota is not read as the quota's"
+meant = "a_turn_ended_for_its_quota_is_exhausted_with_the_words_it_gives"
+runs = ["rest-devin-wire-log"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = 'if event.get("cause").and_then(Value::as_str) == Some("quota_exhausted") {'
+replace = 'if event.get("cause").and_then(Value::as_str) == Some("quota_exhausted_unread") {'
+
+# --- the stand-ins' `cf` forms (packaged-smoke-silently-broken) ---
+#
+# The smoke's fake chief put a task on the board with `cf task add --to lead`, a form that went; the
+# stand-in answered whatever `cf` said, and nothing turned red for a day. A stand-in's form that no
+# longer parses must turn a case of the rig red: the stand-in chief gives `cf task add` none of the
+# flags its DISPATCH line holds, which asks for no tier, and `cf` refuses it.
+
+[[plant]]
+name = "held-rest: the stand-in chief's task add is given none of its flags, a form cf refuses"
+meant = "a_test_is_a_task_the_chief_puts_on_the_board_a_tester_of_its_tier_takes_it_in_a_window_with_the_testers_text_and_the_brief_and_its_results_come_back_as_the_result"
+runs = ["rest-rig-tiered-test"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = "            words.extend(dispatch[1].trim().split(' ').map(str::to_owned));"
+replace = "            let _ = &dispatch[1];"
+
+# --- the Windows app's update check (windows-update-check-platform-not-found) ---
+
+[[plant]]
+name = "held-rest: the Mac checks the feed for a page and installs nothing itself"
+meant = "only_the_mac_installs_an_update_itself_and_any_other_platform_reads_the_feed_for_its_release_and_page"
+platforms = ["macos"]
+runs = ["rest-app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = 'const INSTALLS_IN_APP: bool = cfg!(target_os = "macos");'
+replace = "const INSTALLS_IN_APP: bool = false;"
+
+[[plant]]
+name = "held-rest: Windows asks the updater's own check for its platform in a feed that has none"
+meant = "only_the_mac_installs_an_update_itself_and_any_other_platform_reads_the_feed_for_its_release_and_page"
+platforms = ["windows"]
+runs = ["rest-app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = 'const INSTALLS_IN_APP: bool = cfg!(target_os = "macos");'
+replace = "const INSTALLS_IN_APP: bool = true;"
+
+[[plant]]
+name = "held-rest: the dialog offers Download where the release is a page's"
+meant = "offers a release's download page where the app installs nothing itself, never Download or Install"
+runs = ["rest-page-updates"]
+
+[[plant.edit]]
+file = "app/ui/updates.js"
+find = "    const byPage = current?.page != null"
+replace = "    const byPage = false"
+
+# --- B7 of the field reports of 2026-10-15: transcript depth ---
+
+[[plant]]
+name = "held-rest: transcript pages: a search sends none of its words"
+meant = "a_search_says_how_many_items_say_its_words_and_shows_a_long_one_around_them"
+runs = ["rest-cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = '                query.append_pair("find", find);'
+replace = "                let _ = find;"
+
+[[plant]]
+name = "held-rest: transcript pages: page 0 is a page"
+meant = "the_last_items_and_a_page_are_one_or_the_other_and_a_page_is_a_number_from_one"
+runs = ["rest-cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "            .filter(|page| *page >= 1)"
+replace = "            .filter(|_| true)"
+
+[[plant]]
+name = "held-rest: transcript pages: a page counts its items from the one before its first"
+meant = "a_page_says_where_it_is_among_them_and_how_to_read_the_one_before"
+runs = ["rest-cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "        let first = last.saturating_sub(PER_PAGE) + 1;"
+replace = "        let first = last.saturating_sub(PER_PAGE);"
+
+# --- A3 of the same: the notice comes before the result ---
+
+[[plant]]
+name = "held-rest: the chief is never told a worker goes on in the background"
+meant = "the_note_that_a_worker_goes_on_is_the_chiefs_before_the_result_and_nothing_is_said_after_it"
+runs = ["rest-engine-pending-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            if to_tell && watching != Watching::Waiting {"
+replace = "            if false && to_tell && watching != Watching::Waiting {"

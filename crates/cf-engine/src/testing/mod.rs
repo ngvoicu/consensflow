@@ -36,11 +36,14 @@ pub use host::{window_of, FakeHost, OnRequest};
 pub use operations::Restarted;
 pub use recorder::Recorder;
 pub use seams::{
-    CountingLaunchIds, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv, FakeRoles,
-    FakeRoster, FakeTrace, MODELS,
+    CountingLaunchIds, FakeAppSettings, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv,
+    FakeRoles, FakeTrace, MODELS,
 };
 pub use time::TestTime;
-pub use window::{COMPACTING, TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED};
+pub use window::{
+    COMPACTING, DECLINED_OFFER, DECLINE_CHOICE, DIALOG_OPEN, HOOK_ASK_MS, HOOK_ASK_QUESTION,
+    HOOK_ASK_THEN, TRUST_PROMPT, TRUST_QUESTION, TRUST_QUOTED, TRUST_UNPLACED,
+};
 
 /// What a note that replaces a role says before the role text, which a test
 /// that quotes it to the window of a worker needs word for word.

@@ -13,7 +13,6 @@ bytes.workspace = true
 cf-base.workspace = true
 # The daemon's end of the bridge, which no other crate turns on.
 cf-bridge = { workspace = true, features = ["local"] }
-cf-catalog.workspace = true
 cf-engine.workspace = true
 cf-harness.workspace = true
 cf-ledger.workspace = true

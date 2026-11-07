@@ -1,0 +1,389 @@
+{
+ "families": [
+  {
+   "aliases": [],
+   "family_label": "Adaptive",
+   "family_uid": "Adaptive",
+   "slug": "adaptive",
+   "variants": [
+    {
+     "cost_summary": "$0.5 / 1M Input \u00b7 $0.1 / 1M Cached input \u00b7 $2 / 1M Output",
+     "description": "Automatically balances quality and cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Adaptive",
+     "model_uid": "adaptive"
+    }
+   ]
+  },
+  {
+   "aliases": [
+    "swe"
+   ],
+   "family_label": "SWE-2",
+   "family_uid": "swe-2",
+   "slug": "swe-2",
+   "variants": [
+    {
+     "cost_tier": "Free",
+     "is_beta": false,
+     "is_new": false,
+     "label": "SWE-2 High",
+     "max_context_tokens": 262000,
+     "max_output_tokens": 128000,
+     "model_uid": "swe-2-high"
+    },
+    {
+     "cost_tier": "Free",
+     "is_beta": false,
+     "is_new": false,
+     "label": "SWE-2 Medium",
+     "max_context_tokens": 262000,
+     "max_output_tokens": 128000,
+     "model_uid": "swe-2-medium"
+    },
+    {
+     "cost_tier": "Free",
+     "is_beta": false,
+     "is_new": false,
+     "label": "SWE-2 Max",
+     "max_context_tokens": 262000,
+     "max_output_tokens": 128000,
+     "model_uid": "swe-2-max"
+    },
+    {
+     "cost_summary": "$1 / 1M Input \u00b7 $0.1 / 1M Cached input \u00b7 $5 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "SWE-2 Medium Lightning",
+     "max_context_tokens": 262144,
+     "max_output_tokens": 128000,
+     "model_uid": "swe-2-medium-lightning"
+    },
+    {
+     "cost_summary": "$1 / 1M Input \u00b7 $0.1 / 1M Cached input \u00b7 $5 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "SWE-2 High Lightning",
+     "max_context_tokens": 262144,
+     "max_output_tokens": 128000,
+     "model_uid": "swe-2-high-lightning"
+    },
+    {
+     "cost_summary": "$1 / 1M Input \u00b7 $0.1 / 1M Cached input \u00b7 $5 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "SWE-2 Max Lightning",
+     "max_context_tokens": 262144,
+     "max_output_tokens": 128000,
+     "model_uid": "swe-2-max-lightning"
+    }
+   ]
+  },
+  {
+   "aliases": [],
+   "family_label": "Claude Opus 5.5",
+   "family_uid": "claude-opus-5-5",
+   "slug": "claude-opus-5.5",
+   "variants": [
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 Medium",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-medium"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 Low",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-low"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 High",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-high"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 XHigh",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-xhigh"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 Max",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-max"
+    },
+    {
+     "cost_summary": "$8 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $40 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 Low Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-low-fast"
+    },
+    {
+     "cost_summary": "$8 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $40 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 Medium Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-medium-fast"
+    },
+    {
+     "cost_summary": "$8 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $40 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 High Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-high-fast"
+    },
+    {
+     "cost_summary": "$8 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $40 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 XHigh Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-xhigh-fast"
+    },
+    {
+     "cost_summary": "$8 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $40 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Claude Opus 5.5 Max Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "claude-opus-5-5-max-fast"
+    }
+   ]
+  },
+  {
+   "aliases": [],
+   "family_label": "GPT-6 Sol",
+   "family_uid": "gpt-6-sol",
+   "slug": "gpt-6-sol",
+   "variants": [
+    {
+     "cost_summary": "$2 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $10 / 1M Output",
+     "cost_tier": "Med cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol Medium Thinking",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-medium"
+    },
+    {
+     "cost_summary": "$2 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $10 / 1M Output",
+     "cost_tier": "Med cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol No Thinking",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-none"
+    },
+    {
+     "cost_summary": "$2 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $10 / 1M Output",
+     "cost_tier": "Med cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol Low Thinking",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-low"
+    },
+    {
+     "cost_summary": "$2 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $10 / 1M Output",
+     "cost_tier": "Med cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol High Thinking",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-high"
+    },
+    {
+     "cost_summary": "$2 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $10 / 1M Output",
+     "cost_tier": "Med cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol XHigh Thinking",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-xhigh"
+    },
+    {
+     "cost_summary": "$2 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $10 / 1M Output",
+     "cost_tier": "Med cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol Max Thinking",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-max"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol No Thinking Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-none-priority"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol Low Thinking Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-low-priority"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol Medium Thinking Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-medium-priority"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol High Thinking Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-high-priority"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol XHigh Thinking Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-xhigh-priority"
+    },
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $20 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "GPT-6 Sol Max Thinking Fast",
+     "max_context_tokens": 1000000,
+     "max_output_tokens": 128000,
+     "model_uid": "gpt-6-sol-max-priority"
+    }
+   ]
+  },
+  {
+   "aliases": [],
+   "family_label": "Kimi K3",
+   "family_uid": "kimi-k3",
+   "slug": "kimi-k3",
+   "variants": [
+    {
+     "cost_summary": "$3 / 1M Input \u00b7 $0.3 / 1M Cached input \u00b7 $15 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Kimi K3 High",
+     "max_context_tokens": 1048576,
+     "max_output_tokens": 131072,
+     "model_uid": "kimi-k3-high"
+    },
+    {
+     "cost_summary": "$3 / 1M Input \u00b7 $0.3 / 1M Cached input \u00b7 $15 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Kimi K3 Low",
+     "max_context_tokens": 1048576,
+     "max_output_tokens": 131072,
+     "model_uid": "kimi-k3-low"
+    },
+    {
+     "cost_summary": "$3 / 1M Input \u00b7 $0.3 / 1M Cached input \u00b7 $15 / 1M Output",
+     "cost_tier": "High cost",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Kimi K3 Max",
+     "max_context_tokens": 1048576,
+     "max_output_tokens": 131072,
+     "model_uid": "kimi-k3-max"
+    }
+   ]
+  },
+  {
+   "aliases": [],
+   "family_label": "Fusion",
+   "family_uid": "fusion",
+   "slug": "fusion",
+   "variants": [
+    {
+     "cost_summary": "$4 / 1M Input \u00b7 $0.2 / 1M Cached input \u00b7 $20 / 1M Output \u00b7 Sidekick: Free",
+     "cost_tier": "High cost",
+     "description": "Pairs frontier intelligence with cost-efficient execution",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Fusion (Claude Opus 5.5 Medium + SWE-2 Medium)",
+     "max_context_tokens": 1000000,
+     "model_uid": "fusion-claude-opus-5-5-medium-sidekick-swe-2-medium"
+    },
+    {
+     "cost_summary": "$8 / 1M Input \u00b7 $0.4 / 1M Cached input \u00b7 $40 / 1M Output \u00b7 Sidekick: Free",
+     "cost_tier": "High cost",
+     "description": "Pairs frontier intelligence with cost-efficient execution",
+     "is_beta": false,
+     "is_new": false,
+     "label": "Fusion (Claude Opus 5.5 Medium Fast + SWE-2 Medium)",
+     "max_context_tokens": 1000000,
+     "model_uid": "fusion-claude-opus-5-5-medium-fast-sidekick-swe-2-medium"
+    }
+   ]
+  }
+ ]
+}

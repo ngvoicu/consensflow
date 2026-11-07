@@ -116,7 +116,7 @@ fn write_roster(rig: &Rig, id: &str, kind: &str) -> cf_e2e::Result {
         "schemaVersion": 1,
         "agents": [{ "id": id, "kind": kind, "model": "fake" }],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// Whether Codex's rollout of the thread `thread` has the answer, which it writes

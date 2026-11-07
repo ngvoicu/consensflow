@@ -128,10 +128,14 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     })
 }
 
+/// How long this run is planned to take, five harnesses in every seat: the longest live case,
+/// and what the kit asked of the logins of every case before cases stated their lengths.
+const PLANNED: std::time::Duration = std::time::Duration::from_secs(90 * 60);
+
 #[test]
 #[ignore = "opt-in: spends the machine's quota on five harnesses; cargo xtask live approval (npm run live:approval)"]
 fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat() -> Result {
-    let log = Log::begin("live approval")?;
+    let log = Log::begin("live approval")?.lasting(PLANNED);
     let (chiefs, steps) = limits()?;
     // A harness the run was limited to, or named a model for, is asked for: a machine
     // that lacks it is the error. Any other it lacks is left out, and the report says so.

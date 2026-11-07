@@ -7,7 +7,6 @@
 //! Node trace of the same test to be held against.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -30,8 +29,8 @@ use super::host::FakeHost;
 use super::operations::{answer, nothing};
 use super::recorder::Recorder;
 use super::seams::{
-    CountingLaunchIds, FakeComputerUse, FakeCredentials, FakeLaunchFiles, FakeLog, FakePaneEnv,
-    FakeRoles, FakeRoster, FakeTrace,
+    CountingLaunchIds, FakeAppSettings, FakeComputerUse, FakeCredentials, FakeLaunchFiles, FakeLog,
+    FakePaneEnv, FakeRoles, FakeTrace, MODELS,
 };
 use super::time::TestTime;
 use crate::dispatcher::Dispatcher;
@@ -134,11 +133,14 @@ pub struct Context {
     pub adapter: Rc<FakeAdapter>,
     /// The fake of Codex's own, which answers for it when the test made it so.
     pub codex: Rc<FakeAdapter>,
-    pub roster: Rc<FakeRoster>,
+    /// What the app says, as a test sets it.
+    pub app_settings: Rc<FakeAppSettings>,
     /// The role texts the engine is given, which a test may say were rewritten.
     pub roles: Rc<FakeRoles>,
     pub trace: Rc<FakeTrace>,
     pub log: Rc<FakeLog>,
+    /// What the engine gives a window's environment: a test may say its home is the project's.
+    pub pane_env: Rc<FakePaneEnv>,
     pub launch_files: Rc<FakeLaunchFiles>,
     /// What the machine says of computer use: none of it, unless a test says so.
     pub computer_use: Rc<FakeComputerUse>,
@@ -179,19 +181,14 @@ impl Context {
             table = table.with("codex", &codex);
         }
         let adapters = Rc::new(table);
-        let roster = Rc::new(FakeRoster {
-            recorder: recorder.clone(),
-            gone: RefCell::new(HashSet::new()),
-            retired: RefCell::new(HashMap::new()),
-            designers: RefCell::new(HashSet::new()),
-            broken: Cell::new(false),
-            model: RefCell::new(None),
+        let app_settings = Rc::new(FakeAppSettings {
             app_specs: RefCell::new(AppSpecs::default()),
             app_specs_asked: Cell::new(0),
         });
         let roles = Rc::new(FakeRoles {
             recorder: recorder.clone(),
             rewritten: RefCell::new(String::new()),
+            with_staff: Cell::new(false),
             cf: RefCell::new(CfWord::bare()),
         });
         let trace = Rc::new(FakeTrace {
@@ -199,6 +196,10 @@ impl Context {
             lines: RefCell::new(Vec::new()),
             forgets: Cell::new(false),
             forgotten: RefCell::new(Vec::new()),
+        });
+        let pane_env = Rc::new(FakePaneEnv {
+            recorder: recorder.clone(),
+            home_is_the_project: std::cell::Cell::new(false),
         });
         let log = Rc::new(FakeLog {
             recorder: recorder.clone(),
@@ -222,10 +223,8 @@ impl Context {
                 recorder: recorder.clone(),
                 ledger: Rc::clone(&ledger),
             }),
-            pane_env: Rc::new(FakePaneEnv {
-                recorder: recorder.clone(),
-            }),
-            roster: Rc::clone(&roster) as Rc<_>,
+            pane_env: Rc::clone(&pane_env) as Rc<_>,
+            app_settings: Rc::clone(&app_settings) as Rc<_>,
             roles: Rc::clone(&roles) as Rc<_>,
             trace: Rc::clone(&trace) as Rc<_>,
             log: Rc::clone(&log) as Rc<_>,
@@ -261,10 +260,11 @@ impl Context {
             background,
             adapter,
             codex,
-            roster,
+            app_settings,
             roles,
             trace,
             log,
+            pane_env,
             launch_files,
             computer_use,
             dispatcher,
@@ -316,7 +316,7 @@ impl Context {
         let dispatcher = Rc::clone(&self.dispatcher);
         let asked = request.clone();
         let opening = self.operation("openProject", json!([request]), answer, async move {
-            let request = NewProject::from_json(&asked)?;
+            let request = NewProject::from_json(&staffed(&asked))?;
             dispatcher.open_project(request).await
         });
         self.run(opening)
@@ -448,9 +448,38 @@ fn app(staff: Vec<Value>) -> Value {
     json!({
         "directory": "/work/app",
         "name": "app",
-        "chief": { "harness": "claude-code", "agent": "apollo" },
+        "chief": { "harness": "claude-code", "model": "claude-opus-5" },
         "staff": staff,
     })
+}
+
+/// A project's request as a test gives it, as Node's was given (each member named by its
+/// ready-made agent, `{agent: 'zeus', …}`), as this ledger takes it (harness-models): the
+/// agent's name is the member's model's name, so its handle is the one Node's had, and its
+/// model is the one Node's roster gave that agent ([`MODELS`]), none for any other, as
+/// Node's roster gave none.
+pub fn staffed(request: &Value) -> Value {
+    let mut request = request.clone();
+    if let Some(Value::Array(staff)) = request.get_mut("staff") {
+        for member in staff.iter_mut() {
+            *member = modelled(member);
+        }
+    }
+    request
+}
+
+/// A member as a test gives it, as this ledger takes it: see [`staffed`].
+pub fn modelled(member: &Value) -> Value {
+    let mut member = member.clone();
+    if let Value::Object(fields) = &mut member {
+        if let Some(Value::String(agent)) = fields.shift_remove("agent") {
+            if let Some((_, model)) = MODELS.iter().find(|(name, _)| *name == agent) {
+                fields.insert("model".to_owned(), json!(model));
+            }
+            fields.insert("modelName".to_owned(), json!(agent));
+        }
+    }
+    member
 }
 
 /// A member of a project's first staff, on Claude Code.

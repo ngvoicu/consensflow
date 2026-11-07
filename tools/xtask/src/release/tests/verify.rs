@@ -8,16 +8,14 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
 use super::fake::{
-    archive_name, archive_url, good_release, latest, sha256, sums_of, write, Fake, World,
-    ARCHIVE_SIG, OTHER_KEY,
+    archive_name, archive_sig, archive_url, good_release, latest, sha256, sign_sums, signature_of,
+    write, Fake, World, KEY_ID, OTHER_KEY,
 };
 use super::{refusal, words};
 use crate::release::{verify, Error, Pace, Release};
 
 const VERSION: &str = "3.0.6-alpha.1";
 const TAG: &str = "v3.0.6-alpha.1";
-/// The id of the key the stand-in checkout pins, as its public key says it.
-const KEY_ID: &str = "384B143B9E2BED9E";
 
 /// A checkout at the alpha, tagged and pushed, and a GitHub that holds its release
 /// as it should be and serves it on feed-alpha.
@@ -48,8 +46,8 @@ fn verified(world: &World, fake: &mut Fake, version: &str) -> (Result<String, Er
 }
 
 /// The trusted comment of the stand-in archive's signature.
-fn trusted_comment() -> String {
-    let text = String::from_utf8(STANDARD.decode(ARCHIVE_SIG.trim()).unwrap()).unwrap();
+fn trusted_comment(version: &str) -> String {
+    let text = String::from_utf8(STANDARD.decode(archive_sig(version).trim()).unwrap()).unwrap();
     text.lines()
         .find_map(|line| line.strip_prefix("trusted comment: "))
         .unwrap()
@@ -58,15 +56,17 @@ fn trusted_comment() -> String {
 
 /// What a release that is as it should be says of itself, its feeds being `feeds`.
 fn good_report(version: &str, feeds: &[&str]) -> String {
-    let listed = good_release(version).len() - 1;
+    let listed = good_release(version).len() - 2;
     let archive = archive_name(version);
     let mut text = format!(
         "release verify: v{version} on ngvoicu/consensflow\n  \
          SHA256SUMS lists {listed} files, each in the release and hashing as listed\n  \
+         SHA256SUMS.sig signs SHA256SUMS under the key v{version}'s tauri.conf.json pins, \
+         as ConsensFlow_{version}_SHA256SUMS\n  \
          {archive} is signed by the key v{version}'s tauri.conf.json pins (minisign public key: {KEY_ID}): \
          the file and its trusted comment hold, \"{}\"\n  \
          a copy of {archive} with one byte changed is refused\n",
-        trusted_comment()
+        trusted_comment(version)
     );
     for feed in feeds {
         text += &format!(
@@ -163,10 +163,15 @@ fn an_archive_signed_by_another_key_than_the_one_the_tag_pins_fails() {
     let said = refusal(verified(&world, &mut fake, VERSION).0);
     assert_eq!(
         said,
-        does_not_verify(&[format!(
-            "{archive} does not verify against the key {TAG}'s tauri.conf.json pins: \
-             The signature was created with a different key than the one provided"
-        )])
+        does_not_verify(&[
+            "SHA256SUMS.sig does not hold: it does not sign SHA256SUMS under the update key \
+             (The signature was created with a different key than the one provided)"
+                .to_owned(),
+            format!(
+                "{archive} does not verify against the key {TAG}'s tauri.conf.json pins: \
+                 The signature was created with a different key than the one provided"
+            ),
+        ])
     );
 }
 
@@ -183,17 +188,16 @@ fn the_key_is_the_one_the_tag_pins_not_the_one_the_checkout_pins_now() {
 fn a_signature_whose_trusted_comment_was_changed_fails() {
     let (world, mut fake) = published();
     let archive = archive_name(VERSION);
-    let text = String::from_utf8(STANDARD.decode(ARCHIVE_SIG.trim()).unwrap()).unwrap();
-    let forged = text.replace("file:archive.bin", "file:another.bin");
+    let text = String::from_utf8(STANDARD.decode(archive_sig(VERSION).trim()).unwrap()).unwrap();
+    let forged = text.replace(&format!("file:{archive}"), "file:another.bin");
     assert_ne!(forged, text);
     let sig = STANDARD.encode(forged);
     let files = files_of(&mut fake);
     files.insert(format!("{archive}.sig"), sig.clone().into_bytes());
     // Everything else is consistent with the new .sig: the sums, and the feed's entry.
-    let entry = latest(VERSION).replace(ARCHIVE_SIG.trim(), &sig);
+    let entry = latest(VERSION).replace(archive_sig(VERSION).trim(), &sig);
     files.insert("latest.json".to_owned(), entry.clone().into_bytes());
-    let sums = sums_of(files);
-    files.insert("SHA256SUMS".to_owned(), sums.into_bytes());
+    sign_sums(files, VERSION);
     fake.feeds.insert("feed-alpha".to_owned(), entry);
     let said = refusal(verified(&world, &mut fake, VERSION).0);
     assert_eq!(
@@ -260,13 +264,70 @@ fn the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_to
     let files = files_of(&mut fake);
     let mut sums = String::from_utf8(files["SHA256SUMS"].clone()).unwrap();
     sums += "garbage\n";
-    files.insert("SHA256SUMS".to_owned(), sums.into_bytes());
+    files.insert("SHA256SUMS".to_owned(), sums.clone().into_bytes());
+    files.insert("SHA256SUMS.sig".to_owned(), signature_of(&sums, VERSION));
     assert_eq!(
         refusal(verified(&world, &mut fake, VERSION).0),
         does_not_verify(&[
             "SHA256SUMS holds a line that is not \"<sha-256>  <name>\": \"garbage\"".to_owned()
         ])
     );
+}
+
+/// The trusted comment a stand-in `.sig` (the base64 of its text) says.
+fn trusted_comment_of(sig: &[u8]) -> String {
+    let text = String::from_utf8(STANDARD.decode(sig).unwrap()).unwrap();
+    text.lines()
+        .find_map(|line| line.strip_prefix("trusted comment: "))
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn a_release_without_the_signature_of_its_sha256sums_fails() {
+    let (world, mut fake) = published();
+    files_of(&mut fake).remove("SHA256SUMS.sig");
+    assert_eq!(
+        refusal(verified(&world, &mut fake, VERSION).0),
+        does_not_verify(&[
+            "SHA256SUMS.sig is not in the release, and the installers need it".to_owned()
+        ])
+    );
+}
+
+#[test]
+fn a_signature_of_the_sums_that_does_not_hold_fails() {
+    let name = format!("ConsensFlow_{VERSION}_SHA256SUMS");
+    // One of the sums, but bound to another release's name.
+    let wrong_name = signature_of(
+        &String::from_utf8(good_release(VERSION)["SHA256SUMS"].clone()).unwrap(),
+        "3.0.5",
+    );
+    let named = format!(
+        "the signature is for {:?}, not {name}",
+        trusted_comment_of(&wrong_name)
+    );
+    for (sig, why) in [
+        // A well formed signature, but of what is not the release's sums.
+        (
+            signature_of("another SHA256SUMS\n", VERSION),
+            "it does not sign SHA256SUMS under the update key (The signature verification failed)"
+                .to_owned(),
+        ),
+        (wrong_name, named),
+        // Nothing a signature is.
+        (
+            b"no signature\n".to_vec(),
+            "the signature file is not a minisign signature".to_owned(),
+        ),
+    ] {
+        let (world, mut fake) = published();
+        files_of(&mut fake).insert("SHA256SUMS.sig".to_owned(), sig);
+        assert_eq!(
+            refusal(verified(&world, &mut fake, VERSION).0),
+            does_not_verify(&[format!("SHA256SUMS.sig does not hold: {why}")])
+        );
+    }
 }
 
 #[test]
@@ -294,8 +355,7 @@ fn an_update_archive_or_signature_the_release_lacks_fails_for_the_update_needs_b
         let (world, mut fake) = published();
         let files = files_of(&mut fake);
         files.remove(&lacks);
-        let sums = sums_of(files);
-        files.insert("SHA256SUMS".to_owned(), sums.into_bytes());
+        sign_sums(files, VERSION);
         // The feed's entry still names it; the sums are consistent with what is left.
         let said = refusal(verified(&world, &mut fake, VERSION).0);
         assert!(
@@ -366,11 +426,10 @@ fn a_feed_whose_latest_json_is_not_the_releases_fails() {
 fn a_feed_whose_signature_is_not_the_sig_fails() {
     let (world, mut fake) = published();
     // The release's own latest.json and the feed's agree, and carry another signature.
-    let other = latest(VERSION).replace(ARCHIVE_SIG.trim(), "RWQ-not-the-signature");
+    let other = latest(VERSION).replace(archive_sig(VERSION).trim(), "RWQ-not-the-signature");
     let files = files_of(&mut fake);
     files.insert("latest.json".to_owned(), other.clone().into_bytes());
-    let sums = sums_of(files);
-    files.insert("SHA256SUMS".to_owned(), sums.into_bytes());
+    sign_sums(files, VERSION);
     fake.feeds.insert("feed-alpha".to_owned(), other);
     assert_eq!(
         refusal(verified(&world, &mut fake, VERSION).0),
@@ -400,8 +459,7 @@ fn a_feed_whose_address_gives_nothing_fails_with_what_curl_said() {
     let moved = latest(VERSION).replace(&url, "https://example.invalid/none.tar.gz");
     let files = files_of(&mut fake);
     files.insert("latest.json".to_owned(), moved.clone().into_bytes());
-    let sums = sums_of(files);
-    files.insert("SHA256SUMS".to_owned(), sums.into_bytes());
+    sign_sums(files, VERSION);
     fake.feeds.insert("feed-alpha".to_owned(), moved);
     assert_eq!(
         refusal(verified(&world, &mut fake, VERSION).0),

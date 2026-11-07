@@ -158,3 +158,39 @@ fn longest_result(tasks: &[&TaskRow], of: impl Fn(&TaskRow) -> bool) -> i64 {
         .max()
         .unwrap_or(0)
 }
+
+/// What a read of a ledger's copy of the windows' words adds to its `WHERE` (its rows as
+/// `t`) to leave out the items only the history shows (migration 0032, chief-harness:
+/// thinking, a call still running, a compaction no item says), which no measure of a
+/// run's words counts; nothing for a ledger from before them, which has none.
+pub(crate) fn words_only(db: &rusqlite::Connection) -> rusqlite::Result<&'static str> {
+    let has = db
+        .prepare("SELECT 1 FROM pragma_table_info('transcript') WHERE name = 'drawn_only'")?
+        .exists([])?;
+    Ok(if has { " AND t.drawn_only = 0" } else { "" })
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use crate::ledger_file::migrations;
+
+    /// A ledger of the first `count` migrations.
+    fn ledger_of(count: usize) -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        for migration in migrations().unwrap().iter().take(count) {
+            db.execute_batch(migration).unwrap();
+        }
+        db
+    }
+
+    #[test]
+    fn a_read_of_the_words_leaves_out_the_historys_own_items_where_a_ledger_has_them() {
+        let all = migrations().unwrap().len();
+        let db = ledger_of(all);
+        assert_eq!(super::words_only(&db).unwrap(), " AND t.drawn_only = 0");
+        // A ledger from before migration 0032 has none, and is read as it was.
+        assert_eq!(super::words_only(&ledger_of(27)).unwrap(), "");
+    }
+}

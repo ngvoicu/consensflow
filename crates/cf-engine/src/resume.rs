@@ -331,17 +331,23 @@ impl Dispatcher {
             .into_iter()
             .filter(|lane| !matches!(lane.participant.role.as_str(), "chief" | "human"))
             .filter_map(|lane| {
-                let task = lane
-                    .tasks
-                    .iter()
-                    .find(|task| {
-                        matches!(task.state.as_str(), "working" | "waiting")
-                            && task.assignee.as_ref() == Some(&lane.participant.handle)
-                    })?
-                    .number;
-                Some((lane.participant, task))
+                let task = lane.tasks.iter().find(|task| {
+                    matches!(task.state.as_str(), "working" | "waiting")
+                        && task.assignee.as_ref() == Some(&lane.participant.handle)
+                })?;
+                // Shown working for the words that resumed it, which never went in: the
+                // window it was claimed for is gone, and the words open the next, which
+                // is given no note that a turn was cut (T-1153's F2).
+                let numbered = (task.number, task.state.as_str());
+                match self.withdraw_resume_claim(project.id, numbered, "ConsensFlow stopped") {
+                    Ok(true) => return None,
+                    Ok(false) => {}
+                    Err(failed) => return Some(Err(failed)),
+                }
+                Some(Ok((lane.participant, task.number)))
             })
-            .filter(|(participant, _)| !self.agent_gone(participant))
+            .collect::<Result<Vec<_>, EngineError>>()?
+            .into_iter()
             .map(|(participant, task)| {
                 let paid = self.seams.ledger.borrow().stop_of(participant.id)?;
                 Ok((participant.id, Coming::Member { task, paid }))

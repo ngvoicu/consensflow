@@ -97,9 +97,10 @@ impl User {
         self.root.join(name)
     }
 
-    /// The names of the launcher in its folder: `.cmd` where Windows has them.
+    /// The names of the launcher in its folder: where Windows has them, the launch file the
+    /// program beside it (`cf.exe`) reads.
     fn command(&self, name: &str) -> PathBuf {
-        let extension = if cfg!(windows) { ".cmd" } else { "" };
+        let extension = if cfg!(windows) { ".launch" } else { "" };
         self.at("consensflow/bin")
             .join(format!("{name}{extension}"))
     }
@@ -137,12 +138,15 @@ impl User {
         self.run_at(&own_cf(), args)
     }
 
-    /// A copy of the binary in a folder of its own under this user's: another `cf`.
+    /// A copy of the binary in a folder of its own under this user's: another `cf`, in a bundle of
+    /// its own, whose shim (the program the terminal's command is on Windows) is beside it.
     fn copy(&self, folder: &str) -> PathBuf {
         let place = self.at(folder);
         fs::create_dir_all(&place).expect("a folder");
         let copy = place.join(own_cf().file_name().expect("a name"));
         fs::copy(own_cf(), &copy).expect("a copy");
+        #[cfg(windows)]
+        fs::copy(env!("CARGO_BIN_EXE_cf-shim"), place.join("cf-shim.exe")).expect("a shim");
         copy
     }
 }

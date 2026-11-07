@@ -127,27 +127,3 @@ fn a_property_is_what_the_body_has_and_null_has_none_to_read() {
         Err("Cannot read properties of null (reading 'id')".to_owned())
     );
 }
-
-#[test]
-fn the_fields_of_a_roster_input_are_an_object_s_or_none_and_null_names_what_it_read_first() {
-    assert_eq!(
-        fields(&json!({ "name": "zed", "model": "m" }), "name"),
-        Ok(json!({ "name": "zed", "model": "m" })
-            .as_object()
-            .cloned()
-            .unwrap())
-    );
-    for other in [
-        json!([]),
-        json!(["name"]),
-        json!("x"),
-        json!(5),
-        json!(false),
-    ] {
-        assert_eq!(fields(&other, "name"), Ok(Map::new()), "{other}");
-    }
-    assert_eq!(
-        fields(&Value::Null, "workTier"),
-        Err("Cannot read properties of null (reading 'workTier')".to_owned())
-    );
-}

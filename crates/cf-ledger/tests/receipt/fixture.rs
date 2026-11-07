@@ -86,7 +86,9 @@ impl World {
         )
         .expect("a ledger");
         let member = |agent: &str| NewMember {
-            agent: agent.into(),
+            model: None,
+            effort: None,
+            model_name: Some(agent.into()),
             harness: "claude-code".into(),
             designer: false,
             roles: vec!["worker".into()],
@@ -98,12 +100,15 @@ impl World {
                 name: "app".into(),
                 chief: NewChief {
                     harness: "claude-code".into(),
-                    agent: Some("apollo".into()),
+                    model: Some("apollo".into()),
+                    effort: None,
                 },
                 staff: vec![member("zeus"), member("diana")],
                 gate,
                 wake_up: None,
                 specs: None,
+                staff_rules: None,
+                compaction: None,
             })
             .expect("a project");
         Self {

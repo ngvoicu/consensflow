@@ -53,15 +53,15 @@ runs = ["holds"]
 [[plant.edit]]
 file = "crates/cf-launcher/src/repair.rs"
 find = '''
-    if !file.exists() {
+    } else {
         return Repair::Absent;
-    }'''
+    };'''
 replace = '''
-    if !file.exists() {
+    } else {
         let _ = std::fs::create_dir_all(file.parent().unwrap_or(file));
         let _ = write_launcher(file, &launcher(windows, cf, None), windows);
         return Repair::Rewritten;
-    }'''
+    };'''
 
 [[plant]]
 name = "flip: the repair makes a command where there was none, seen by the app’s tests"
@@ -71,12 +71,12 @@ runs = ["app-test-launcher"]
 [[plant.edit]]
 file = "crates/cf-launcher/src/repair.rs"
 find = '''
-    if !file.exists() {
+    } else {
         return Repair::Absent;
-    }'''
+    };'''
 replace = '''
-    if !file.exists() {
+    } else {
         let _ = std::fs::create_dir_all(file.parent().unwrap_or(file));
         let _ = write_launcher(file, &launcher(windows, cf, None), windows);
         return Repair::Rewritten;
-    }'''
+    };'''

@@ -54,11 +54,32 @@ pub(crate) fn human_sends(context: &Context, handle: &str, text: &str) {
     });
 }
 
+/// The same where the window attaches the images a paste names (Claude Code): its record
+/// shows the paste behind the placeholders of its pictures, and the harness's own item
+/// for their sources after it.
+pub(crate) fn human_sends_pictures(context: &Context, handle: &str, text: &str) {
+    let mut given = context.adapter.recorded_as_sent(handle, text);
+    let answer = context.adapter.item(Role::Assistant, "ok");
+    context.adapter.with(handle, |agent| {
+        agent.items.append(&mut given);
+        agent.items.push(answer);
+        agent.settled = true;
+    });
+}
+
 /// T-1's words to go on, carrying the chief's note, sat unsent in zeus's box, and
 /// the chief paused T-1 again while the Enter for them looked at the screen,
 /// taking the note back: no key went, the words went back to their queue, and the
 /// paste stays in the box (round 11's sequence). The words, and the note.
 fn carrier_withheld(context: &Context) -> (Tiers<'_>, MessageView, MessageView) {
+    carrier_withheld_saying(context, "Carry on")
+}
+
+/// The same, the words to go on being `words`.
+fn carrier_withheld_saying<'a>(
+    context: &'a Context,
+    words: &str,
+) -> (Tiers<'a>, MessageView, MessageView) {
     let tiers = at_work(context);
     let project = tiers.project.id;
     context.pause_task(project, 1);
@@ -68,7 +89,7 @@ fn carrier_withheld(context: &Context) -> (Tiers<'_>, MessageView, MessageView) 
         agent.arrive = false;
     });
     let note = note(context, project, "zeus-amber-pine", "Use tabs");
-    context.resume_task(project, 1, "Carry on");
+    context.resume_task(project, 1, words);
     let words = tiers.task(1).messages.last().cloned().expect("the words");
     for _ in 0..2 {
         context.pass().unwrap();
@@ -126,6 +147,54 @@ fn words_the_human_sent_from_the_box_are_taken_for_arrived_and_never_pasted_agai
     assert_eq!(clears(&context), 0, "nothing pressed into an empty box");
 }
 
+/// T-810, the stale withheld Enter of a paste that held a picture: the words to go on name
+/// one by its path, the window attaches it, and the human sent the paste from the box. The
+/// window's record shows the words behind the placeholder, the path gone; they are taken for
+/// arrived, never pasted again, and the box is pressed no key.
+#[test]
+fn words_that_name_a_picture_which_the_human_sent_from_the_box_are_taken_for_arrived_behind_their_placeholder(
+) {
+    let context = Context::new();
+    context.adapter.attaches_images.set(true);
+    context.adapter.drops_blanks.set(true);
+    let (tiers, words, withdrawn) =
+        carrier_withheld_saying(&context, "Carry on\n/work/images/desk.png");
+    let sent = pasted(&context, ZEUS, words.id);
+    assert!(sent.contains("/work/images/desk.png"), "{sent}");
+    human_sends_pictures(&context, "zeus-amber-pine", &sent);
+    let record = context.adapter.agent("zeus-amber-pine").items;
+    assert!(
+        record
+            .iter()
+            .any(|item| item.text.starts_with("[Image #1][ConsensFlow m-")
+                && !item.text.contains("desk.png")),
+        "the record keeps the words behind the placeholder: {record:?}"
+    );
+    context.pass().unwrap();
+
+    let again = resumed_again(&context, &tiers);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        times_handed(&context, SEAM, words.id),
+        1,
+        "the words went once"
+    );
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(
+        context.message(withdrawn.id).state,
+        "delivered",
+        "the note went in the paste the human sent"
+    );
+    assert_eq!(
+        times_handed(&context, SEAM, again.id),
+        1,
+        "the new words go"
+    );
+    assert_eq!(clears(&context), 0, "nothing pressed into an empty box");
+}
+
 /// The same across a Close: the window the Close could not close had its Enter
 /// withheld while closed, and the human sent the note in its box before the Resume.
 #[test]
@@ -143,7 +212,7 @@ fn a_note_the_human_sent_from_the_box_while_closed_is_taken_for_arrived_at_the_r
     );
     context.host.refuse_kills.set(false);
     context.advance(11_000);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     context.pass().unwrap();
     assert_eq!(
         context.message(note.id).state,
@@ -260,15 +329,16 @@ fn a_note_taken_back_after_its_carrier_was_handed_over_reads_delivered_once_the_
 
 /// Calliope's review of 2026-10-21, round 11 (P3-3): Claude Code ends at a second
 /// Control-C in a row. The key that empties the box goes only into a window that
-/// printed nothing for a while (a human who just cleared their own draft with one
+/// shows the same for a while (a human who just cleared their own draft with one
 /// made Claude print its warning) and holds nothing the human typed since the
-/// window was read ready; otherwise the pass waits.
+/// window was read ready; otherwise the pass waits. A window that prints and shows
+/// the same is quiet (T-1083).
 #[test]
 fn the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed() {
     for (snapshot, why) in [
-        (json!({ "outputQuietMs": 500 }), "printing"),
+        (json!({ "screenQuietMs": 500 }), "printing"),
         (
-            json!({ "outputQuietMs": 5_000, "unsent": true }),
+            json!({ "screenQuietMs": 5_000, "unsent": true }),
             "typed into",
         ),
     ] {
@@ -293,7 +363,7 @@ fn the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed() {
 
         context
             .host
-            .set_snapshot(json!({ "outputQuietMs": 5_000, "unsent": false }));
+            .set_snapshot(json!({ "outputQuietMs": 40, "screenQuietMs": 5_000, "unsent": false }));
         context.pass().unwrap();
         assert_eq!(
             clears(&context),
@@ -406,7 +476,7 @@ fn a_window_that_never_goes_quiet_for_the_key_fails_its_delivery_in_the_end() {
     let context = Context::new();
     let (tiers, _, _) = carrier_withheld(&context);
     let again = resumed_again(&context, &tiers);
-    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 500 }));
     for _ in 0..16 {
         context.advance(11_000);
         context.pass().unwrap();
@@ -468,7 +538,7 @@ fn an_earlier_copy_of_a_withheld_paste_is_not_taken_for_the_human_sending_it() {
     );
     context.host.refuse_kills.set(false);
     context.advance(11_000);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     context.pass().unwrap();
     assert_eq!(
         context.message(note.id).state,
@@ -659,7 +729,7 @@ fn a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered
     );
     context.host.refuse_kills.set(false);
     context.advance(11_000);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     context.pass().unwrap();
     assert_eq!(
         context.message(note.id).state,
@@ -670,7 +740,7 @@ fn a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered
     let paste = pasted(&context, &chief, note.id);
 
     context.resume_project(project.id).unwrap();
-    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 500 }));
     for _ in 0..16 {
         context.advance(11_000);
         context.pass().unwrap();
@@ -678,7 +748,7 @@ fn a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered
     assert_eq!(context.message(note.id).state, "failed", "given up");
 
     human_sends(&context, "chief", &paste);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     context.adapter.with("chief", |agent| agent.arrive = true);
     let next = context.note(project.id, "zeus", "chief", "again");
     for _ in 0..3 {
@@ -713,7 +783,7 @@ fn the_wait_for_a_quiet_window_starts_again_after_a_gap_longer_than_the_arrival_
     let context = Context::new();
     let (tiers, _, _) = carrier_withheld(&context);
     let again = resumed_again(&context, &tiers);
-    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 500 }));
     context.pass().unwrap();
     *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsent))));
     for _ in 0..4 {
@@ -729,7 +799,7 @@ fn the_wait_for_a_quiet_window_starts_again_after_a_gap_longer_than_the_arrival_
         "no attempt spent on the first look after the gap"
     );
 
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     context.pass().unwrap();
     assert_eq!(
         times_handed(&context, SEAM, again.id),

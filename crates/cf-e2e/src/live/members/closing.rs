@@ -15,6 +15,7 @@ use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
+use super::descent::{Machine, Running, ThisMachine};
 use super::shown;
 use crate::live::claude::Process;
 use crate::process::Run;
@@ -60,9 +61,16 @@ fn parsed(listing: &str) -> Vec<Listed> {
 /// The processes of the machine, with their groups, or why they could not be listed.
 type Listing = std::result::Result<Vec<Listed>, String>;
 
-/// The processes of the machine now, with their groups, as `ps` lists them: why it
-/// could not, on a machine with no `ps` or one that did not end well.
+/// The processes of the machine now, with their groups: as `ps` lists them on macOS and
+/// Linux, as Windows' process table lists them on Windows ([`on_windows`]), which has no
+/// `ps` (T-1079). Why it could not, on a machine with no `ps` or one that did not end well.
 fn listing() -> Listing {
+    if cfg!(windows) {
+        return ThisMachine
+            .processes()
+            .map(|all| on_windows(&all))
+            .map_err(|failed| failed.to_string());
+    }
     let ran = Run::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,command="])
         .inheriting_env()
@@ -78,6 +86,22 @@ fn listing() -> Listing {
         ended.lines().next().unwrap_or_default(),
         ran.stderr.trim()
     ))
+}
+
+/// The processes of Windows' table as a listing of the machine: Windows has no process
+/// groups, so every process is in none (group 0), and what a window's program left is found
+/// by the parents alone.
+fn on_windows(all: &[Running]) -> Vec<Listed> {
+    all.iter()
+        .map(|process| Listed {
+            process: Process {
+                pid: process.identity.pid,
+                ppid: process.ppid,
+                command: process.command.clone(),
+            },
+            group: 0,
+        })
+        .collect()
 }
 
 /// The processes of `all` that descend from `root`, by the parent each was started
@@ -293,6 +317,46 @@ mod tests {
     }
 
     #[test]
+    fn windows_table_is_a_listing_with_no_groups_and_what_a_rig_left_is_found_by_its_parents() {
+        let running = |pid: u32, ppid: u32, command: &str| Running {
+            identity: super::super::descent::Identity { pid, started: 10 },
+            ppid,
+            command: command.to_owned(),
+            exe: None,
+        };
+        let table = [
+            running(100, 4, "cargo test"),
+            running(200, 100, r#""C:\Windows\System32\conhost.exe" 0x4"#),
+            running(300, 200, r#""C:\Program Files\nodejs\node.exe" job.js"#),
+            running(400, 4, "notepad.exe"),
+        ];
+        let listed = on_windows(&table);
+        assert_eq!(
+            listed
+                .iter()
+                .map(|one| (one.process.pid, one.process.ppid, one.group))
+                .collect::<Vec<_>>(),
+            [(100, 4, 0), (200, 100, 0), (300, 200, 0), (400, 4, 0)]
+        );
+        assert_eq!(
+            listed[2].process.command,
+            r#""C:\Program Files\nodejs\node.exe" job.js"#
+        );
+        // What the test's own process started, whatever the depth, and nothing of the others.
+        let tree: Vec<u32> = descendants(&listed, 100)
+            .iter()
+            .map(|one| one.process.pid)
+            .collect();
+        assert_eq!(tree, [200, 300]);
+        let started: BTreeSet<u32> = [200, 300].into();
+        let left: Vec<u32> = left_of(&listed, &started)
+            .iter()
+            .map(|process| process.pid)
+            .collect();
+        assert_eq!(left, [200, 300]);
+    }
+
+    #[test]
     fn what_a_rig_started_is_what_descends_from_it_by_the_parents_whatever_their_depth() {
         let all = [
             listed(1, 0, 1, "launchd"),
@@ -420,6 +484,19 @@ mod tests {
         for pid in [900_001, 900_003, 900_004] {
             assert!(left.contains(&format!("{pid} (")), "{pid}: {failed}");
         }
+    }
+
+    /// The machine's processes are listed, this test's own among them, on every machine: on
+    /// Windows by its process table, as Git Bash's `ps` refused `-x` (T-1226).
+    #[test]
+    fn the_machines_processes_are_listed_with_this_test_among_them() {
+        let all = listing().expect("the machine's processes are listed");
+        let own = std::process::id();
+        assert!(
+            all.iter().any(|listed| listed.process.pid == own),
+            "{own} is not among {} processes",
+            all.len()
+        );
     }
 
     #[test]

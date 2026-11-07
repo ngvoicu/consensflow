@@ -11,7 +11,7 @@
 harness-claude-computer-use = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use"]
 engine-computer-use = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "computer_use::"]
 daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use"]
-page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app|omputer use|both parts"]
+page-computer-use = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "computer use|computer-use|another app|omputer use|both blocks|permissions can't be read"]
 daemon-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::"]
 regression-terminal-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_terminals_environment_reached_the_daemon_and_no_window"]
 live-kit-shim = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
@@ -253,8 +253,10 @@ runs = ["live-kit-shim"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
-find = '''fake | fake-chief) exec {} \"$@\" ;;'''
-replace = '''fake | fake-chief) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;'''
+find = '''
+{}) exec {} \"$@\" ;;'''
+replace = '''
+{}) CLAUDE_CONFIG_DIR=\"$HOME/.claude\" exec {} \"$@\" ;;'''
 
 [[plant]]
 name = "parity env: a Claude window keeps the billing key an rc exports"

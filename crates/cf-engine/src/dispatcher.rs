@@ -16,7 +16,8 @@
 //! leaves for it (`resume`), the human's wake-up calls, which nudge a chief
 //! at rest (`wake_ups`), and a role that changed under a conversation whose
 //! harness keeps its first instructions, which its resumed window is told in a
-//! message (`role_change`).
+//! message (`role_change`), and a chief at rest whose specs or rules for the staff the
+//! human changed under its open window, which it is told in a note (`role_news`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on
@@ -30,7 +31,6 @@ use std::task::{Context, Poll, Waker};
 
 use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
-use cf_ledger::model::fits_role;
 use cf_ledger::{
     DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
 };
@@ -38,19 +38,21 @@ use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::background::leaving;
+use crate::chief_model::held_for_no_default;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
 use crate::pacing;
+use crate::privacy::PrivacyState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{moved_hold, out_words, News, SchedulerState, Unwell};
+use crate::scheduler::{busy_turn, moved_hold, out_words, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
-use crate::shown::Shown;
+use crate::shown::{Part, Shown};
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
-use crate::turn_end::{last_paste, lost_in_turn};
+use crate::turn_end::{last_paste, lost_in_turn, Turn};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -72,13 +74,13 @@ pub fn require_open(project: &ProjectView) -> Result<(), EngineError> {
     }
 }
 
-/// A chief runs on one of the human's saved agents, never on a harness's
-/// own default model: asked for without one, the daemon says what to pick.
-pub fn require_chief_agent(agent: Option<&str>) -> Result<&str, EngineError> {
-    agent.filter(|agent| !agent.is_empty()).ok_or_else(|| {
+/// A chief runs on a harness and a model of it the human picked (CHF-04): asked for
+/// without a model, the daemon says what to pick.
+pub fn require_chief_model(model: Option<&str>) -> Result<&str, EngineError> {
+    model.filter(|model| !model.is_empty()).ok_or_else(|| {
         EngineError::said(
-            "no-chief-agent",
-            "pick one of your saved agents for the chief: its harness, model and effort come with it",
+            "no-chief-model",
+            "pick a harness for the chief, and one of its models",
         )
     })
 }
@@ -115,6 +117,8 @@ pub struct Dispatcher {
     pub(crate) computer_use: ComputerUseState,
     /// What the passes keep of the steps they went on without (`steps`).
     pub(crate) steps: StepsState,
+    /// What was told of macOS privacy dialogs raised in the app's name (`privacy`).
+    pub(crate) privacy: PrivacyState,
 }
 
 impl Dispatcher {
@@ -134,6 +138,7 @@ impl Dispatcher {
             trust: TrustState::default(),
             computer_use: ComputerUseState::default(),
             steps: StepsState::default(),
+            privacy: PrivacyState::default(),
         })
     }
 
@@ -214,25 +219,18 @@ impl Dispatcher {
         self.require_adapter(harness)
     }
 
-    /// The chief asked for: one of the human's saved agents, on its harness,
-    /// whose windows ConsensFlow opens, and no image agent: it only designs.
-    fn require_chief(&self, harness: &str, agent: Option<&str>) -> Result<(), EngineError> {
-        let agent = require_chief_agent(agent)?;
+    /// The chief asked for: a harness whose windows ConsensFlow opens, and a model of
+    /// it. Whether the harness lists that model is the daemon's to ask, which reads the
+    /// lists ([`cf_proto::models`]).
+    fn require_chief(&self, harness: &str, model: Option<&str>) -> Result<(), EngineError> {
+        let model = require_chief_model(model)?;
         self.require_adapter(harness)?;
-        let saved = self.seams.roster.agent(agent)?.ok_or_else(|| {
-            EngineError::said("unknown-agent", format!("{agent} is not among your agents"))
-        })?;
-        if !fits_role(saved.designer, "chief") {
-            return Err(EngineError::said(
-                "image-agent-chief",
-                format!("{agent} is an image agent, which can only be an image designer"),
-            ));
-        }
+        cf_ledger::model::require_model_id(model)?;
         Ok(())
     }
 
-    /// A new project: the ledger records it with its chief, on the saved
-    /// agent it names, and its staff, and with the wake-up calls and the specs
+    /// A new project: the ledger records it with its chief, on the harness and the
+    /// model it names, and its staff, and with the wake-up calls and the specs
     /// the request says, all in one write; its chief window opens after the
     /// answer, on the project as that write left it, so its first launch has
     /// the specs.
@@ -240,7 +238,7 @@ impl Dispatcher {
         self: &Rc<Self>,
         request: NewProject,
     ) -> Result<Option<ProjectView>, EngineError> {
-        self.require_chief(&request.chief.harness, request.chief.agent.as_deref())?;
+        self.require_chief(&request.chief.harness, request.chief.model.as_deref())?;
         for member in &request.staff {
             self.require_adapter(&member.harness)?;
         }
@@ -251,7 +249,10 @@ impl Dispatcher {
         self.project_now(project.id)
     }
 
-    /// The human's Close: the project is suspended and every window of it goes.
+    /// The human's Close: the project is suspended and every window of it goes. It is the
+    /// human's own shutdown, no pause: a window kept because it ignored a pause's rounds goes
+    /// with the rest (T-1199: a pause never closes a window, and the Close and the app's quit
+    /// still close them all; the task stays paused for the project's Resume).
     pub async fn close_project(
         self: &Rc<Self>,
         project: i64,
@@ -760,6 +761,9 @@ impl Dispatcher {
             self.keep_proof(record.id, conversation, gone, Some(&record))?;
         }
         let delivering = record.delivery.borrow_mut().delivering.take();
+        // What was pasted into the window, read before a delivery it did not take goes back
+        // to its queue: its screen may show it (Calliope's P2c, T-994).
+        let pasted = self.pastes_on_screen(record.id)?;
         // What a launch that was to say the role first still owed the window
         // that exited: the role it was never told.
         let owed = self.owed(&record)?;
@@ -774,6 +778,8 @@ impl Dispatcher {
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
         let said_yes = trust::yes_at_exit(&record, &shown);
+        // What the engine had sent this window, told before `closed` clears it.
+        let sent = record.window.borrow().sent_to.contains(pane);
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -819,7 +825,7 @@ impl Dispatcher {
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)
         } else {
-            closed
+            closed.clone()
         };
         let first = delivering
             .as_ref()
@@ -892,6 +898,32 @@ impl Dispatcher {
             // window of a launch that was to say the role: it did not come up, and
             // is tried again (`settle_exited_launch`).
             let own = record.window.borrow().own_exit_of(pane).is_some();
+            // A launch whose harness ended it with a code of failure before it came up,
+            // its screen saying it no longer has the model the launch asked for, closes
+            // nothing: the chief opens again at once on the harness's default (CHF-06).
+            // A refusal at launch has no record to say it in, so its screen is read; a
+            // window that came up, or ended with no failure, is read in no screen's words
+            // (Calliope's P1, T-955). A window came up where its record showed a message it
+            // was handed (`confirm_delivered`), its launch's first one among them: not where its
+            // program started (Claude Code's `started` answers at once), nor where its record
+            // shows anything (a resumed conversation's shows its history at once). The
+            // screen is read only at the launch, an exit within its budget of the window's
+            // open (a refusal ends a launch within a second; a window handed nothing that
+            // lived on was no launch refused), and without what ConsensFlow pasted into it,
+            // which may quote the words (Calliope's P2c, T-994).
+            let (up, opened) = {
+                let window = record.window.borrow();
+                (window.took, window.opened_at)
+            };
+            let at_its_launch =
+                opened.is_some_and(|opened| self.now() - opened <= self.seams.limits.launch_ms);
+            if project.state == "open" && !own && !up && at_its_launch && shown.ended_failing() {
+                let said = shown.clone().without_pastes(&pasted);
+                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))? {
+                    self.reopen_without(&record, gone);
+                    return Ok(());
+                }
+            }
             if project.state == "open" && !own && !launch_owed {
                 self.seams
                     .ledger
@@ -906,7 +938,10 @@ impl Dispatcher {
                         .ledger
                         .borrow()
                         .message(first)?
-                        .is_some_and(|message| message.state == "delivered"),
+                        // A role the window read the moment it had it is `read`, not `delivered`.
+                        .is_some_and(|message| {
+                            matches!(message.state.as_str(), "delivered" | "read")
+                        }),
                     None => false,
                 };
                 if at_launch && !came_up && shown.is_known() {
@@ -928,7 +963,55 @@ impl Dispatcher {
                     .await?;
             }
         } else {
+            // What the window was doing when it closed under its task, from its conversation's
+            // record, where the close is not the engine's own (which says why it closed
+            // instead): the note names the last tool call, which no screen of the window says
+            // (T-823, kluris T-153). A participant that moved on while the record was read
+            // settles nothing more of this exit, as after `settle_gone`. No stop and no close of
+            // the engine's own was under way when it is not an own close: a signal that ended
+            // the program came from outside ConsensFlow, which the note says.
+            let own_close = record.window.borrow().own_exit_of(pane).is_some();
+            let last_call = if own_close
+                || self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .active_task(record.id, false)?
+                    .is_none()
+            {
+                None
+            } else {
+                let launches = record.window.borrow().launches;
+                let call = self.last_call_of(participant.id).await;
+                if !self.still_as_it_went(&record, launches) {
+                    self.changed();
+                    return Ok(());
+                }
+                call
+            };
+            let shown = if own_close {
+                shown
+            } else {
+                let part = if sent { Part::Sent } else { Part::NotSent };
+                shown.with_part(part).with_last_call(last_call)
+            };
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
+            // A task shown working (or waiting) for the words that resumed it, which had not
+            // gone in, goes back to queued with them: the claim was its window's, and the
+            // words reopen the window. Paused here, the window's exit would undo the chief's
+            // resume (T-1153's F1).
+            let task = match task {
+                Some(thread)
+                    if self.withdraw_resume_claim(
+                        project.id,
+                        (thread.task.number, thread.task.state.as_str()),
+                        "its window closed",
+                    )? =>
+                {
+                    None
+                }
+                other => other,
+            };
             // What the host lists is the turn's work, by its own proof, as it was when the
             // window closed.
             let left = shown.left_running();
@@ -1085,8 +1168,11 @@ impl Dispatcher {
         if project.state != "open" {
             return Ok(());
         }
-        // A chief whose agent is gone stays closed: its launch told the human, who switches it.
-        if participant.role == "chief" && self.agent_gone(participant) {
+        // A chief held for want of a model to start on, as the ledger keeps it, is stepped
+        // to nothing: what waits for it stays queued for the chief the human switches in,
+        // and no delivery is begun to be given back, nor its harness read, pass after pass
+        // (Calliope's P2a, T-994). The launch's own hold stays behind it.
+        if participant.role == "chief" && held_for_no_default(participant) {
             return Ok(());
         }
         // A chief whose window keeps failing to start is tried again ever more slowly.
@@ -1130,10 +1216,6 @@ impl Dispatcher {
         if participant.role == "chief" {
             return Ok(());
         }
-        // A member whose agent is gone must not wait for a window that will not open.
-        if self.agent_gone(participant) {
-            return self.without_agent(project, participant, None);
-        }
         // A member's session is its task's: with the window gone and nothing due to it, nobody is doing the work.
         let task = self
             .seams
@@ -1172,6 +1254,16 @@ impl Dispatcher {
                 return Ok(());
             }
         };
+        // A dialog of its harness's that waits for a key is told of, and one only its screen
+        // shows holds the window as one its harness says it waits on (`dialogs`).
+        let observed = self
+            .watch_dialog(project, participant, record, observed)
+            .await?;
+        // A command of the window that waits on a macOS privacy dialog holds it (`privacy`).
+        let observed = self.watch_privacy(record, observed).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
         record.delivery.borrow_mut().lost = observed.lost().len();
         // Which look this is, for a rest to be read over looks that follow each other.
         let looked = self.looked(record);
@@ -1264,6 +1356,11 @@ impl Dispatcher {
                     None => Activity::of(state),
                 }
             };
+            // A look of the host's own, out of the Node traces: it costs no turn.
+            let activity = self.fallback_lane(record, activity).await;
+            if self.forgotten(record) {
+                return Ok(());
+            }
             self.set_activity(record, activity)?;
         }
         self.copy(participant, record, &observed)?;
@@ -1285,7 +1382,10 @@ impl Dispatcher {
         }
         self.record_quota(record, &owner, observed.quota.clone());
         self.tell_drift(project, participant, record, &observed)?;
-        if self.refused_here(record, &owner) {
+        // A chief's turn its busy model refused is the human's to hear, as before (T-1112): the
+        // chief has no task to hold and try again, and a hold would lose its turn unheard.
+        let chief_busy = participant.role == "chief" && busy_turn(&observed);
+        if !chief_busy && self.refused_here(record, &owner) {
             return self
                 .out_of_quota(project, participant, record, &owner, &observed)
                 .await;
@@ -1349,6 +1449,9 @@ impl Dispatcher {
             }
             // A held task's window that went on with it by itself: its task goes on.
             self.went_on_by_itself(project, participant, &observed)?;
+            // A resumed task whose window is at work on it reads working while its words
+            // wait for the window's rest.
+            self.show_resumed_at_work(project, participant, record, &observed)?;
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
@@ -1363,12 +1466,22 @@ impl Dispatcher {
                 // turn left is ended; the window closes below if it is free (`turn_end`), once
                 // its screen is drawn where its task is done (`still_drawing`).
                 let watching = self.watch_monitors(participant, record, &observed).await;
-                self.collect(project, participant, record, &observed, watching)
+                let turn = self
+                    .collect(project, participant, record, &observed, watching)
                     .await?;
+                // A turn that came to nothing may be one that never began on what its
+                // window was given (`never_began`).
+                if matches!(turn, Turn::Open) {
+                    self.watch_begun(project, participant, record, &observed)
+                        .await?;
+                }
             }
             if self.close_if_free(record).await? {
                 return Ok(());
             }
+        } else if chief_busy {
+            self.tell_chief_failed(project, participant, record, &observed)
+                .await?;
         } else if observed.failed && !self.cut_short(&observed) {
             // A refusal for quota is the quota's to say; any other failure is the human's to hear.
             self.tell_chief_failed(project, participant, record, &observed)
@@ -1405,6 +1518,13 @@ impl Dispatcher {
             return self
                 .await_switch(project, participant, record, &observed, idle)
                 .await;
+        }
+        // A setting its role is built from may have changed under the window: it is told
+        // now, as a wake-up is queued, and the note goes in by the way every message does,
+        // ahead of the wake-up's. Only a chief's window was told a role at its launch that a
+        // setting changes (`role_news`).
+        if project.state == "open" && idle {
+            self.tell_role_news(project, participant, record)?;
         }
         // A closed project's window that its Close could not close is given nothing
         // until the Resume, as no closed project is: what waits for it is the Resume's
@@ -1505,10 +1625,15 @@ impl Dispatcher {
         let until = owner.out_until.clone().unwrap_or_default();
         let reported = record.quota.borrow().reported.clone();
         let unwell = Unwell::of(reported.as_deref());
-        self.set_activity(
-            record,
-            Activity::because(ActivityState::Out, out_words(&until, unwell)),
-        )?;
+        // A window of a member out for its busy model whose own record shows no refusal says
+        // so too (T-1112).
+        let words = match unwell {
+            None if self.busy_until(owner.id).as_deref() == Some(until.as_str()) => {
+                format!("model busy, tried again at {until}")
+            }
+            _ => out_words(&until, unwell),
+        };
+        self.set_activity(record, Activity::because(ActivityState::Out, words))?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
         if participant.role != "chief" && self.refused_unhandled(record) {
@@ -1531,8 +1656,8 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// The human's Switch chief: the chief goes on in a fresh window on the
-    /// saved `agent` on `harness`, its first message the handoff.
+    /// The human's Switch chief: the chief goes on in a fresh window on `harness` and
+    /// `model`, its first message the handoff.
     pub async fn switch_chief(
         self: &Rc<Self>,
         project: i64,
@@ -1540,7 +1665,7 @@ impl Dispatcher {
         when: SwitchWhen,
         note: bool,
     ) -> Result<Option<ProjectView>, EngineError> {
-        self.require_chief(&to.harness, Some(&to.agent))?;
+        self.require_chief(&to.harness, Some(&to.model))?;
         let found = self.known_project(project)?;
         let chief = found
             .participants
@@ -1599,14 +1724,22 @@ impl Dispatcher {
         // the quota now, not for a job of an earlier turn (`turn_end`).
         record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
-        let reset = self.reset_of(reported.as_deref());
         let unwell = Unwell::of(reported.as_deref());
+        // A busy model is tried again after a backoff of the engine's, by its tries (T-1112).
+        let reset = if let Some(Unwell::Busy(_)) = unwell {
+            self.busy_reset(project, participant)?
+        } else {
+            self.reset_of(reported.as_deref())
+        };
         let marked = self.seams.ledger.borrow_mut().mark_out(
             owner.id,
             &reset,
             unwell.map_or("out of quota", Unwell::hold),
         )?;
         let until = marked.out_until.clone().unwrap_or_default();
+        if let Some(Unwell::Busy(_)) = unwell {
+            self.marked_busy(owner.id, &until);
+        }
         self.set_activity(
             record,
             Activity::because(ActivityState::Out, out_words(&until, unwell)),
@@ -1619,6 +1752,7 @@ impl Dispatcher {
                 match unwell {
                     Some(Unwell::Account(_)) => "its account is unavailable",
                     Some(Unwell::Moved(_)) => "its model moved on its own",
+                    Some(Unwell::Busy(_)) => "its model was busy",
                     None => "the harness ran out of quota",
                 },
             )?;
@@ -1685,6 +1819,16 @@ impl Dispatcher {
             }
         };
         record.hold.act(&*self.seams.spawn, work).await;
+    }
+
+    /// The record whose window has the pane `pane`, if one does (not the records of
+    /// participants forgotten while their window was open).
+    pub(crate) fn record_of_pane(&self, pane: &Pane) -> Option<Rc<Record>> {
+        self.records
+            .borrow()
+            .values()
+            .find(|record| record.window.borrow().pane.as_ref() == Some(pane))
+            .cloned()
     }
 
     /// What failed apart from any pass or request is written down.

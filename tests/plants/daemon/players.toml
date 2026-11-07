@@ -19,16 +19,6 @@
 #   `close`, where the database is compared, as the page's were.
 
 [[plant]]
-name = "players: the screens take an agent’s route (/api/whoami)"
-meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
-runs = ["daemon-api"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/mod.rs"
-find = '        "/api/preferences" => Some(Screen::Preferences),'
-replace = '        "/api/preferences" | "/api/whoami" => Some(Screen::Preferences),'
-
-[[plant]]
 name = "players: a screen’s path without the UI token falls through to the API"
 meant = "every_trace_of_the_api_is_answered_as_node_answered_it"
 runs = ["daemon-api"]

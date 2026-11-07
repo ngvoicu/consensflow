@@ -602,3 +602,73 @@ fn a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_it
         assert!(exits[0].get("survivor").is_none(), "{:?}", exits[0]);
     }
 }
+
+/// The stand-in of a window that repaints what it shows, through the console's own calls
+/// (ConPTY draws what they leave as the terminal's bytes): its box, drawn again with the
+/// colours reset and the cursor put back where it was every 50 ms (4 s); then one
+/// character of it changed, and that box repainted on.
+const REPAINTS_WHAT_IT_SHOWS: &str =
+    "function repaint($n, $box) { for ($i = 0; $i -lt $n; $i++) { \
+     [Console]::SetCursorPosition(0, 16); [Console]::Write($box); [Console]::ResetColor(); \
+     [Console]::SetCursorPosition(2, 17); Start-Sleep -Milliseconds 50 } }; \
+     repaint 80 '> Ask anything'; repaint 1200 '> Tsk anything'";
+
+/// A window that repaints what it shows is quiet by its screen, and a character changed is a
+/// change, through Windows' ConPTY as on a Unix pty (`pane_handlers::tests`' twin, T-1083).
+/// ConPTY sends on only what changed in its console's cells, so whether the repaints reach
+/// the host as bytes is ConPTY's, and not asked here.
+#[test]
+fn a_window_that_repaints_what_it_shows_is_quiet_by_its_screen_through_conpty() {
+    let _pty_guard = serial_pty_test();
+    let Host {
+        panes,
+        inputs,
+        bridge: connected,
+        mut daemon,
+        printed: seen,
+    } = Host::start(false);
+    let mut events = Vec::new();
+    let opened = daemon.ask(
+        "pane.open",
+        json!({
+            "id": "repaint-pane", "generation": 1,
+            "cwd": std::env::temp_dir(),
+            "argv": powershell(REPAINTS_WHAT_IT_SHOWS),
+            "env": {},
+            "size": {"rows": 24, "cols": 80},
+            "backlogBytes": 1 << 20,
+        }),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let shows = |snapshot: &Value, text: &str| {
+        snapshot["tail"]
+            .as_array()
+            .is_some_and(|lines| lines.iter().any(|line| line.as_str() == Some(text)))
+    };
+    let mut look = || {
+        // ConPTY's cursor question, answered as the page answers it.
+        while let Ok((_, bytes)) = seen.try_recv() {
+            if bytes.windows(4).any(|query| query == b"\x1b[6n") {
+                let answered = daemon.ask(
+                    "pane.reply",
+                    json!({"id":"repaint-pane","generation":1,"bytes":b"\x1b[1;1R".to_vec()}),
+                    &mut events,
+                );
+                assert_eq!(answered["ok"], true, "{answered}");
+            }
+        }
+        daemon.ask(
+            "pane.snapshot",
+            json!({"id":"repaint-pane","generation":1,"tail":4}),
+            &mut events,
+        )
+    };
+    let (repainting, changed) = super::tests::quiet_by_screen::watch(&mut look, &shows);
+    super::tests::quiet_by_screen::check(&repainting, &changed, false);
+
+    let _ = panes.kill(&crate::pty::PaneKey::new("repaint-pane", 1));
+    inputs.close_and_drain();
+    drop(daemon);
+    connected.bridge.wait_closed().expect("the bridge closes");
+}

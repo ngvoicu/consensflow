@@ -9,7 +9,8 @@
  * it bundles, come from the daemon (`app()`, as `specs.get` answers): nothing of
  * it is typed here. The daemon checks the folder (inside the project, never `..`)
  * and keeps all three. In Project settings the section saves, and a change reaches
- * the chief when it next starts, which the dialog says; the controls keep what the
+ * the chief as soon as it is at rest where its window is open, else when it next
+ * starts, which the dialog says; the controls keep what the
  * human typed while the board is drawn again, and are set again when what the
  * project says changed. In New project there is nothing to save yet: the section
  * holds what the human sets, and `values` is what the project starts with, and its
@@ -49,7 +50,9 @@ export class SpecsGroup {
    * `page` the section saves, for the project the dialog is for: `page.project()`
    * is that project, not the one the page shows, `page.daemon` asks the daemon,
    * `page.act` runs a change and redraws the page, `page.note` tells the human
-   * what came of it and `page.report` says a refusal on the status line. With
+   * what came of it, `page.report` says a refusal on the status line and
+   * `page.chiefRunning()` says whether the chief of that project has a window
+   * open, which is told of a change now and not at its next launch. With
    * none it only holds what is set in it (`values`), as New project's does.
    * `app()` is what the daemon last said of the app's specs and the Specmint it
    * bundles (`{ app, applied, specmint }`), or null where the page has none yet.
@@ -198,6 +201,9 @@ export class SpecsGroup {
    */
   async #save() {
     const project = this.#page.project()
+    // Asked now, for the project the dialog is for: the board may show another by the time
+    // the daemon answers.
+    const running = this.#page.chiefRunning()
     const body = { project, ...this.#said() }
     let refused = null
     await this.#page.act(async () => {
@@ -207,10 +213,10 @@ export class SpecsGroup {
         refused = cause instanceof Error ? cause.message : String(cause)
       }
     })
-    const saved =
-      body.on === false
-        ? 'Specs are off in this project: the chief is told so when it next starts.'
-        : 'Saved: the specs reach the chief when it next starts.'
+    // A chief whose window is open is told as soon as it is at rest; one that is not has
+    // the change in the role it is launched with.
+    const when = running ? 'the chief is told now' : 'the chief is told at its next launch'
+    const saved = body.on === false ? `Specs are off in this project: ${when}.` : `Saved: ${when}.`
     // Said where the human is typing, after the board was drawn again; a dialog left (shut, or
     // opened on another project since) is not the place for a refusal, and the status line says it.
     const here = this.#page.project() === project

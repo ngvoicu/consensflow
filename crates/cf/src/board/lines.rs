@@ -33,22 +33,22 @@ pub fn a_pool(pool: Option<&Value>, tier: Option<&Value>) -> String {
 }
 
 /// One task: its number and state, whose it is or who it waits for, who
-/// asked, and its title.
+/// asked, and its title. What it waits for is said whoever has it: a task given
+/// to a window or to the chief itself waits on the board as one for a tier does,
+/// and `cf task edit T-3 --needs -T-1` lets it go of one (T-798).
 pub fn task_line(task: &Value) -> String {
+    let blocked_by = list(task.get("blockedBy"));
+    let blocked = if blocked_by.is_empty() {
+        String::new()
+    } else {
+        format!("blocked by {} · ", tasks(numbers(blocked_by)))
+    };
     let whose = match task.get("assignee") {
-        Some(Value::Null) => {
-            let blocked_by = list(task.get("blockedBy"));
-            let blocked = if blocked_by.is_empty() {
-                String::new()
-            } else {
-                format!("blocked by {} · ", tasks(numbers(blocked_by)))
-            };
-            format!(
-                "{blocked}for {}",
-                a_pool(task.get("pool"), task.get("tier"))
-            )
-        }
-        assignee => format!("@{}", js::text(assignee)),
+        Some(Value::Null) => format!(
+            "{blocked}for {}",
+            a_pool(task.get("pool"), task.get("tier"))
+        ),
+        assignee => format!("{blocked}@{}", js::text(assignee)),
     };
     format!(
         "T-{} [{}] {whose} ← @{}: {}",
@@ -113,9 +113,9 @@ pub fn message_line(message: &Value) -> String {
 }
 
 /// The numbers of the answers among `messages` that still wait in the queue
-/// to be pasted: the ones a command that wrote every body of `messages` in
-/// full has written whole, and so says it has. An answer already read, or
-/// withheld, or any other kind of message, is not one of them: a thread is the
+/// to be pasted, or are being pasted: the ones a command that wrote every body of
+/// `messages` in full has written whole, and so says it has. An answer already
+/// read, or withheld, or any other kind of message, is not one of them: a thread is the
 /// task's, and the rest of it is not the reader's to receive one by one.
 pub fn waiting_answers(messages: &[Value]) -> Vec<i64> {
     messages
@@ -126,18 +126,24 @@ pub fn waiting_answers(messages: &[Value]) -> Vec<i64> {
 }
 
 /// The number of a message `cf inbox read` wrote whole, when it still waits in
-/// the queue to be pasted: whatever its kind, the board decides what a read in
-/// the inbox receives. A question, a result or a note read there is the
-/// reader's, and is not typed in after it (T-260).
+/// the queue to be pasted, or is being pasted: whatever its kind, the board
+/// decides what a read in the inbox receives. A question, a result or a note read
+/// there is the reader's, and is not typed in after it (T-260). One being pasted
+/// is read all the same, and the board keeps the read until the paste is settled:
+/// a window runs `cf` as soon as it has the message, before the daemon has seen
+/// the paste arrive.
 pub fn waiting_message(message: &Value) -> Vec<i64> {
     waiting(message).into_iter().collect()
 }
 
-/// The number of a message that still waits in the queue.
+/// The number of a message that still waits in the queue or is being pasted.
 fn waiting(message: &Value) -> Option<i64> {
-    (message.get("state").and_then(Value::as_str) == Some("queued"))
-        .then(|| message.get("id").and_then(Value::as_i64))
-        .flatten()
+    matches!(
+        message.get("state").and_then(Value::as_str),
+        Some("queued" | "delivering")
+    )
+    .then(|| message.get("id").and_then(Value::as_i64))
+    .flatten()
 }
 
 /// The items of a JSON list; none when it is no list.
@@ -173,6 +179,13 @@ mod tests {
             task_line(&testing),
             "T-6 [open] blocked by T-3 · for a standard tester ← @chief: Run T-3"
         );
+        // A task given to a window, or the chief's own step, says what it waits for too.
+        let held = json!({ "number": 7, "state": "open", "assignee": "chief", "requester": "chief",
+            "title": "Release notes", "blockedBy": [1, 2], "pool": "worker", "tier": "standard" });
+        assert_eq!(
+            task_line(&held),
+            "T-7 [open] blocked by T-1, T-2 · @chief ← @chief: Release notes"
+        );
     }
 
     #[test]
@@ -189,7 +202,8 @@ mod tests {
     }
 
     #[test]
-    fn the_answers_still_waiting_to_be_pasted_are_the_queued_ones_and_only_the_answers() {
+    fn the_answers_still_waiting_to_be_pasted_or_being_pasted_are_the_queued_ones_and_only_the_answers(
+    ) {
         let messages = [
             json!({ "id": 3, "kind": "task", "state": "delivered", "body": "Parser" }),
             json!({ "id": 5, "kind": "answer", "state": "queued", "body": "JSON" }),
@@ -200,7 +214,7 @@ mod tests {
             json!({ "id": 10, "kind": "result", "state": "queued", "body": "Parser done" }),
             json!({ "kind": "answer", "state": "queued", "body": "no id" }),
         ];
-        assert_eq!(waiting_answers(&messages), [5, 9]);
+        assert_eq!(waiting_answers(&messages), [5, 8, 9]);
         assert!(waiting_answers(&[]).is_empty());
     }
 

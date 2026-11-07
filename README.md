@@ -8,8 +8,8 @@ terminal of its own, and every result comes back to the board. You see it
 all in one window: the board on the left, the agents' terminals on the right.
 
 ConsensFlow works through the coding agents you already use (Claude Code,
-Codex, Pi and Devin), with your own logins. It stores no passwords
-and needs no API keys.
+Codex, Pi, Devin and Muse Code), with your own logins. It stores no
+passwords and needs no API keys.
 
 ## What it does
 
@@ -27,8 +27,8 @@ and needs no API keys.
   agent's harness, and the window closes when the work is done. Its
   conversation is kept, so a follow-up continues where it stopped.
 - **Work by tier, not by name.** The chief asks for the kind of member a task
-  needs (critical, complex, standard or light), and ConsensFlow gives the task
-  to a free member of that tier. Work is shared across the staff.
+  needs (critical, complex, standard or light), and ConsensFlow gives each
+  task a new window of a member of that tier. Work is shared across the staff.
 - **Plans with an order.** A task can wait for others to be accepted first,
   so a plan of many tasks runs in its own order, in parallel where it can.
 - **Pause, resume and tell.** Stop any task and keep its window and work, or
@@ -53,8 +53,9 @@ Install the ones you want to use, and sign in to each once in a terminal:
 | Codex       | `npm install -g @openai/codex`, or its own installer |
 | Pi          | `npm install -g @earendil-works/pi-coding-agent`, or its own installer |
 | Devin       | Devin's own CLI installer (version 3000.10.21 or later) |
+| Muse Code   | Meta's installer (version 1.4.13 or later) |
 
-You don't need all four: one is enough to start. **Settings → Harnesses**
+You don't need all five: one is enough to start. **Settings → Harnesses**
 shows which are installed, their versions, and whether ConsensFlow is set up
 for each. ConsensFlow prepares what it needs for a harness by itself, the
 first time one of its windows opens.

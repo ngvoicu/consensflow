@@ -98,11 +98,21 @@ impl Home {
     }
 }
 
-/// A launcher is `cf` on POSIX and `cf.cmd` on Windows.
+/// A launcher is `cf` on POSIX and, on Windows, `cf.launch`: the file the program beside it
+/// (`cf.exe`, the shim) reads.
 pub fn launcher_name() -> &'static str {
     if cfg!(windows) {
-        "cf.cmd"
+        "cf.launch"
     } else {
         "cf"
     }
+}
+
+/// The `cf` of a bundle in a folder of the home's root, with the shim a bundle carries beside
+/// it (a launcher on Windows is made from it).
+pub fn bundle_cf(home: &Home) -> PathBuf {
+    let bundle = home.root().join("bundle");
+    fs::create_dir_all(&bundle).unwrap();
+    fs::write(bundle.join("cf-shim.exe"), "the shim of the bundle").unwrap();
+    bundle.join("cf")
 }

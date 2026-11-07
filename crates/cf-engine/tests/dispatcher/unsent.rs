@@ -68,7 +68,7 @@ fn presses_no_enter_again_into_a_window_where_the_human_has_typed_since_the_past
     context.pass().unwrap();
     context
         .host
-        .set_snapshot(json!({ "outputQuietMs": 60_000, "unsent": true }));
+        .set_snapshot(json!({ "outputQuietMs": 60_000, "screenQuietMs": 60_000, "unsent": true }));
     context.advance(11_000);
     context.pass().unwrap();
     let enters: Vec<Value> = context

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { chromium, expect, test } from '@playwright/test'
 
 import { tempEnv } from '../../tests/helpers.mjs'
-import { addAgent, agentsServer } from './agents-server.mjs'
+import { agentsServer } from './agents-server.mjs'
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
 /**
@@ -36,14 +36,40 @@ test.afterEach(() => {
 
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 const MEMBER = ['worker', 'advisor', 'reviewer', 'tester']
+/**
+ * What the fixture's members run on, by handle (harness-models: a member holds its own model
+ * and effort, and is shown by them).
+ */
+const RUNS = {
+  zeus: { model: 'claude-sonnet-5', effort: 'high' },
+  diana: { model: 'gpt-5.6-luna', effort: 'low' },
+  athena: { model: 'muse-spark' },
+  hera: { model: 'gpt-6-astra', effort: 'max' },
+  kronos: { model: 'openrouter/anthropic/claude-opus-5.5', effort: 'xhigh' },
+}
+/** A member of the last staff, as `staff.last` answers it: what it runs on, its tier and roles. */
+const lastMember = (name, harness, roles, tier = 'standard') => ({
+  harness,
+  ...RUNS[name],
+  modelName: RUNS[name].model,
+  designer: false,
+  tier,
+  role: roles[0],
+  roles,
+})
+
 const participant = (id, handle, role, extra = {}) => ({
   id,
   projectId: 1,
   handle,
   role,
   roles: [role],
-  agent: MEMBER.includes(role) ? handle : null,
+  agent: null,
   harness: role === 'human' ? null : 'claude-code',
+  ...(MEMBER.includes(role) ? (RUNS[handle] ?? {}) : {}),
+  // The fixture's members are named for nobody's model (zeus): the daemon says so, and the
+  // card says what each runs on.
+  ...(MEMBER.includes(role) ? { nameApart: true } : {}),
   designer: false,
   tier: MEMBER.includes(role) ? 'standard' : null,
   outUntil: null,
@@ -53,14 +79,16 @@ const participant = (id, handle, role, extra = {}) => ({
   ...extra,
 })
 
-/** A session of a member: its own participant, named after the member, on the member's agent. */
+/** A session of a member: its own participant, named after the member, on what the member runs on. */
 const session = (id, member, name, role = 'worker', extra = {}) =>
   participant(id, `${member.handle}-${name}`, role, {
     memberId: member.id,
     member: member.handle,
     session: name,
-    agent: member.agent,
     harness: member.harness,
+    model: member.model,
+    effort: member.effort,
+    modelName: member.modelName,
     tier: member.tier,
     ...extra,
   })
@@ -96,8 +124,60 @@ const message = (id, kind, sender, recipient, body, minutesAgo = 1, extra = {}) 
   ...extra,
 })
 
+/** A fresh listing of `models`, as a harness gives one. */
+const listed = (models) => ({
+  models,
+  readAt: 1_793_000_000_000,
+  freshness: { state: 'fresh' },
+  how: 'the harness itself',
+})
+
 function model() {
   return {
+    // What each harness lists of its models, by its program's name, and how its own
+    // window switches its model.
+    models: {
+      claude: {
+        listing: listed([
+          { id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: [] },
+          { id: 'claude-sonnet-5', label: 'Sonnet 5', efforts: [] },
+        ]),
+        switchHelp: 'Claude switches with /model and s.',
+      },
+      codex: {
+        listing: listed([
+          { id: 'gpt-6-astra', label: 'GPT-6 Astra', efforts: [] },
+          { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', efforts: [] },
+        ]),
+        switchHelp: 'Codex switches with /model and s.',
+      },
+      pi: {
+        listing: listed([
+          { id: 'muse-spark', provider: 'meta', label: 'Muse Spark', efforts: [] },
+          {
+            id: 'muse-spark-1.3-contributor',
+            provider: 'meta',
+            label: 'Muse Spark 1.3',
+            efforts: [],
+            contributor: true,
+          },
+        ]),
+        switchHelp: 'Pi switches with /model and Enter.',
+      },
+      devin: { listing: listed([{ id: 'swe-2', label: 'SWE-2', efforts: [] }]) },
+      muse: {
+        listing: listed([
+          { id: 'muse-spark-1.3', label: 'Muse Spark 1.3', efforts: [] },
+          {
+            id: 'muse-spark-1.3-contributor',
+            label: 'Muse Spark 1.3',
+            efforts: [],
+            contributor: true,
+          },
+        ]),
+        switchHelp: 'Muse switches with /model, and Enter makes it the default.',
+      },
+    },
     projects: [
       { id: 1, name: 'harbour', directory: '/work/harbour', state: 'open' },
       {
@@ -105,55 +185,6 @@ function model() {
         name: 'foundry',
         directory: '/work/foundry',
         state: 'suspended',
-      },
-    ],
-    // Every agent, as the roster lists it: the catalog's and the human's own, each with its tier.
-    agents: [
-      {
-        name: 'zeus',
-        harness: 'claude',
-        model: 'claude-sonnet-5',
-        effort: 'high',
-        profile: { workTier: 'standard' },
-      },
-      {
-        name: 'diana',
-        harness: 'codex',
-        model: 'gpt-5.6-luna',
-        effort: 'low',
-        profile: { workTier: 'light' },
-      },
-      {
-        name: 'athena',
-        harness: 'pi',
-        model: 'muse-spark',
-        profile: { workTier: 'light' },
-      },
-      // Last in the roster, first on offer: the pick lists go by tier.
-      {
-        name: 'hera',
-        harness: 'codex',
-        model: 'gpt-6-astra',
-        effort: 'max',
-        profile: { workTier: 'critical' },
-      },
-      // Hidden by the human's preference: never on offer, though a member on it still runs.
-      {
-        name: 'kronos',
-        harness: 'pi',
-        model: 'openrouter/anthropic/claude-opus-5.5',
-        effort: 'xhigh',
-        profile: { workTier: 'complex' },
-        hidden: true,
-      },
-      // The image agent, a Codex agent that designs: an image designer, and nothing else,
-      // never the chief.
-      {
-        name: 'pygmalion',
-        harness: 'codex',
-        designer: true,
-        model: 'codex-image',
-        profile: { workTier: 'light' },
       },
     ],
     // What the app says of specs for every project, as the agents file keeps it (each part
@@ -193,7 +224,7 @@ function model() {
             pane: null,
           },
           {
-            participant: participant(2, 'chief', 'chief'),
+            participant: participant(2, 'chief', 'chief', { model: 'claude-opus-5-5' }),
             tasks: [task(1, 'Ship the release notes', 'working', 'human', 'chief', 12)],
             activity: { state: 'working' },
             pane: { id: 'p1-chief', generation: 5 },
@@ -352,7 +383,73 @@ async function open(page, data = model()) {
       })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'agents.list': () => answer({ agents: data.agents, missing: data.missing ?? [] }),
+      'harnesses.missing': () => answer({ missing: data.missing ?? [] }),
+      // What a harness lists of its models, by its program's name (CHF-07): the fixture's,
+      // or a refusal a test names for it (`modelsRefusal`).
+      'models.get': ({ harness }) => {
+        const refused = data.modelsRefusal?.[harness]
+        if (refused !== undefined) return { ok: false, error: refused }
+        const { listing, switchHelp = null } = data.models[harness]
+        return answer({
+          harness,
+          listing,
+          default: null,
+          contributorWarning:
+            'Contributor model: Meta may train on what it sees, including your code.',
+          switchHelp,
+        })
+      },
+      // Add member and Edit member (T-1143): the member named by its model's id and its
+      // effort (`cf_ledger::handles`, HMD-12), or a refusal a test names.
+      'member.add': (body) => {
+        if (data.memberRefusal !== undefined) return { ok: false, error: data.memberRefusal }
+        // Named as the daemon names it: Pi's id without its provider, then the effort.
+        const id = body.harness === 'pi' ? body.model.replace(/^[^/]+\//, '') : body.model
+        const words = [id, body.effort]
+          .filter(Boolean)
+          .join('-')
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter(Boolean)
+        const handle = data.memberHandle ?? words.join('-')
+        return answer({ member: { handle, roles: body.roles, tier: body.tier } })
+      },
+      'member.edit': (body) => {
+        if (data.memberRefusal !== undefined) return { ok: false, error: data.memberRefusal }
+        // The name holds the model it runs on (HMD-12): an edited member is renamed by the
+        // daemon, its windows with it, and the board says the name it left. A test names
+        // the new handle (`editRenames`) as the daemon would make it.
+        const lane = data.boards[body.project]?.lanes.find(
+          (one) => one.participant.handle === body.member,
+        )
+        if (data.editRenames && lane) {
+          const words = [body.model.replace(/^[^/]+\//, ''), body.effort]
+            .filter(Boolean)
+            .join('-')
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter(Boolean)
+          const handle = data.editRenames === true ? words.join('-') : data.editRenames
+          for (const other of data.boards[body.project].lanes) {
+            const mine = other.participant
+            if (mine.handle === body.member || mine.member === body.member) {
+              const own = mine.session ? `-${mine.session}` : ''
+              mine.formerHandles = [...(mine.formerHandles ?? []), mine.handle]
+              mine.handle = `${handle}${own}`
+              if (mine.member) mine.member = handle
+              Object.assign(mine, {
+                harness: body.harness,
+                model: body.model,
+                effort: body.effort,
+                modelName: body.model,
+                tier: body.tier,
+              })
+            }
+          }
+          return answer({ member: { handle, tier: body.tier } })
+        }
+        return answer({ member: { handle: body.member, tier: body.tier } })
+      },
       'staff.last': () => answer({ staff: data.lastStaff ?? [] }),
       'member.roles': ({ project, agent, roles }) => {
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
@@ -363,8 +460,11 @@ async function open(page, data = model()) {
       // A project's computer use, as the daemon reads it (`computerUse` of the model, on macOS
       // with no grant and Claude Code's off, unless a test says otherwise), and the System
       // Settings panes it opens, by name.
-      'computer_use.get': ({ project }) => {
+      'computer_use.get': ({ project, directory }) => {
         const said = data.computerUse ?? {}
+        // Of a saved project's folder, or of a folder asked for before there is a project (New
+        // project): as the daemon reads Claude Code's own configuration for either.
+        const folder = directory ?? data.boards[project]?.project.directory
         return answer({
           system: said.system ?? 'macos',
           grantsOf: said.grantsOf ?? null,
@@ -375,7 +475,7 @@ async function open(page, data = model()) {
           harnesses: {
             'claude-code': {
               on: said.on ?? false,
-              folder: data.boards[project]?.project.directory,
+              folder,
             },
             codex: { setUp: said.codexSetUp ?? false },
           },
@@ -448,21 +548,21 @@ async function open(page, data = model()) {
         }
         return answer({ project: shownProject(project)[0] })
       },
-      // The size the Claude members' windows compact at, as the daemon keeps it: a whole number
-      // of tokens from 100,000 to 1,000,000, or none (null or left out) for Claude's own point,
-      // refused in its words otherwise.
+      // The size the members' windows compact at, whatever their harness, as the daemon keeps
+      // it: a whole number of tokens from 100,000 to 1,000,000, or none (null or left out) for
+      // each harness's own point, refused in its words otherwise.
       'project.compaction': ({ project, compaction }) => {
         const size = compaction ?? null
         if (size !== null && !(Number.isInteger(size) && size >= 100000 && size <= 1000000)) {
           return {
             ok: false,
             error:
-              "the compaction window for Claude members is a whole number of tokens from 100000 to 1000000, or none for Claude's own point",
+              "the compaction size is a whole number of tokens from 100000 to 1000000, or none for each harness's own point",
           }
         }
         for (const shown of shownProject(project)) {
-          if (size === null) delete shown.claudeCompaction
-          else shown.claudeCompaction = size
+          if (size === null) delete shown.compaction
+          else shown.compaction = size
         }
         return answer({ project: shownProject(project)[0] })
       },
@@ -568,10 +668,54 @@ async function open(page, data = model()) {
       },
       // A start the daemon refuses is refused whole, in its words, and no project is made (a
       // test says which words with `openRefusal`).
-      'project.open': ({ directory }) =>
-        data.openRefusal
-          ? { ok: false, error: data.openRefusal }
-          : answer({ project: { id: 3, name: 'new', directory } }),
+      'project.open': (body) => {
+        if (data.openRefusal) return { ok: false, error: data.openRefusal }
+        const project = { id: 3, name: 'new', directory: body.directory }
+        // This runs in the page: a participant as the board has one, written out here.
+        const person = (id, handle, role, harness) => ({
+          id,
+          projectId: 3,
+          handle,
+          role,
+          roles: [role],
+          agent: null,
+          harness,
+          designer: false,
+          tier: null,
+          outUntil: null,
+          memberId: null,
+          member: null,
+          session: null,
+        })
+        // A test that goes on to the new project (`openMakesBoard`) has it made as the daemon makes
+        // one: what the human said in New project is kept with it, for its Project settings.
+        if (data.openMakesBoard) {
+          Object.assign(project, { state: 'open', gate: body.gate === true })
+          if (body.rules !== undefined) project.staffRules = body.rules
+          if (body.compaction !== undefined) project.compaction = body.compaction
+          data.projects.push(project)
+          data.boards[3] = {
+            project,
+            open: [],
+            lanes: [
+              {
+                participant: person(30, 'human', 'human', null),
+                tasks: [],
+                activity: { state: 'closed' },
+                pane: null,
+              },
+              {
+                participant: { ...person(31, 'chief', 'chief', body.harness), model: body.model },
+                tasks: [],
+                activity: { state: 'working' },
+                pane: { id: 'p3-chief', generation: 1 },
+              },
+            ],
+          }
+          data.inbox[3] = []
+        }
+        return answer({ project })
+      },
     }
     const invoke = async (command, args = {}) => {
       window.__calls.push([
@@ -603,7 +747,7 @@ async function open(page, data = model()) {
         window.__output = args.onOutput
         return { ok: true }
       }
-      // An agents screen's address, as Rust hands it: the daemon's page with
+      // The harnesses screen's address, as Rust hands it: the daemon's page with
       // the UI token, or why there is none.
       if (command === 'agents_screen') {
         // Held by a test (`hold(page, 'agents_screen')`), as the app holds it while the
@@ -615,7 +759,7 @@ async function open(page, data = model()) {
         }
         return data.screens
           ? { ok: true, url: `${data.screens.url}/${args.page}?token=${data.screens.token}` }
-          : { ok: false, error: 'the agents screens are not available: the daemon is not up' }
+          : { ok: false, error: 'the harnesses screen is not available: the daemon is not up' }
       }
       if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue')
         return { ok: true, ticket: 't' }
@@ -728,19 +872,33 @@ const calls = (page, operation) =>
     operation,
   )
 
-/** What a chief pick list offers: each tier group's agents, and whether each is disabled. */
-const chiefGroups = (select) =>
+/** Picks a chief's harness, then one of its models, by what each says, as the human does (CHF-07). */
+async function pickChief(dialog, harness, model) {
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: harness })
+  const models = dialog.locator('[name="chiefModel"]')
+  await expect(models).toBeEnabled()
+  await models.selectOption({ label: model })
+}
+
+/** What a select offers: each option's words, and whether it is disabled. */
+const offered = (select) =>
   select
-    .locator('optgroup')
-    .evaluateAll((all) =>
-      all.map((group) => [
-        group.label,
-        [...group.querySelectorAll('option')].map((option) => [
-          option.textContent.split(' · ')[0],
-          option.disabled,
-        ]),
-      ]),
-    )
+    .locator('option')
+    .evaluateAll((all) => all.map((option) => [option.textContent, option.disabled]))
+
+/**
+ * Add member's form (T-1143): a role, a harness by its name, one of the models it lists by
+ * its label, an effort and a tier, each where given.
+ */
+async function pickMember(dialog, { role, harness, model, effort, tier }) {
+  const add = dialog.locator('.staff-add')
+  if (role !== undefined) await add.locator('[name="role"]').selectOption(role)
+  await add.locator('[name="memberHarness"]').selectOption({ label: harness })
+  await expect(add.locator('[name="memberModel"]')).toBeEnabled()
+  await add.locator('[name="memberModel"]').selectOption({ label: model })
+  if (effort !== undefined) await add.locator('[name="memberEffort"]').selectOption(effort)
+  if (tier !== undefined) await add.locator('[name="memberTier"]').selectOption(tier)
+}
 
 test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({
   page,
@@ -1055,7 +1213,7 @@ test("shows a task waiting for a member in its requester's backlog, with the tie
   )
   await expect(card.locator('.card-route')).toHaveText('for a standard worker')
   await expect(page.locator('tr[data-handle="zeus"] .row-meta')).toHaveText(
-    'worker · standard · claude-code · claude-sonnet-5 · high',
+    'worker · standard · Claude Code · claude-sonnet-5 · high',
   )
 })
 
@@ -1189,14 +1347,14 @@ test("keeps a removed member's tasks on the board, on the row of whoever asked: 
   await expect(chief.locator('td[data-state="queued"] button.card')).toHaveCount(0)
 })
 
-test("says the effort an agent runs at, after its model: on a member's row, a session's, and the chief's card", async ({
+test("says the effort an agent runs at, after its model: on a member's row and a session's; the chief's card its harness and model", async ({
   page,
 }) => {
   const data = model()
   const { lanes } = data.boards[1]
   Object.assign(lanes.find((lane) => lane.participant.handle === 'chief').participant, {
-    agent: 'hera',
     harness: 'codex',
+    model: 'gpt-6-astra',
   })
   const zeus = lanes.find((lane) => lane.participant.handle === 'zeus').participant
   lanes.push(
@@ -1216,15 +1374,16 @@ test("says the effort an agent runs at, after its model: on a member's row, a se
   await open(page, data)
   await unfold(page)
   const meta = (handle) => page.locator(`tr[data-handle="${handle}"] .row-meta`)
+  // The chief's card: its harness and model, and no effort, which a chief is not picked at.
   await expect(
     page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta'),
-  ).toHaveText('codex · gpt-6-astra · max')
-  await expect(meta('zeus')).toHaveText('worker · standard · claude-code · claude-sonnet-5 · high')
+  ).toHaveText('Codex · gpt-6-astra')
+  await expect(meta('zeus')).toHaveText('worker · standard · Claude Code · claude-sonnet-5 · high')
   await expect(meta('zeus-amber-pine')).toHaveText(
-    'worker session of @zeus · claude-code · claude-sonnet-5 · high',
+    'worker session of @zeus · Claude Code · claude-sonnet-5 · high',
   )
   // An agent with no effort shows none.
-  await expect(meta('athena')).toHaveText('advisor · light · pi · muse-spark')
+  await expect(meta('athena')).toHaveText('advisor · light · Pi · muse-spark')
 })
 
 test('shows what a task on the board waits for, on its card and in its drawer', async ({
@@ -1298,7 +1457,7 @@ test("shows a tester's test tasks as cards on its row like any task, and a test 
   )
   await open(page, data)
   const tess = page.locator('tr[data-handle="tess"]')
-  await expect(tess.locator('.row-meta')).toHaveText(/^tester · light · pi/)
+  await expect(tess.locator('.row-meta')).toHaveText(/^tester · light · Pi/)
   await expect(tess.locator('td[data-state="working"] button.card[data-task="9"]')).toHaveCount(1)
   await expect(tess.locator('td[data-state="done"] button.card[data-task="10"]')).toHaveCount(1)
   const waiting = page.locator(
@@ -2008,6 +2167,24 @@ test('offers Finish for any working task of a member, held or not, and for none 
   await expect(finishOf(page, 'Task T-2')).toHaveCount(0)
 })
 
+test("offers Finish for a task that waits on a question, which the chief or the human may take as the result of its worker's last words", async ({
+  page,
+}) => {
+  // The words a turn ended on may be raised as a question that nobody meant (T-1119): the
+  // task waits, and Finish is the way to take them as the result.
+  const data = heldModel()
+  data.finishLeaves = { jobs: 0, agents: 0 }
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(14, 'Install the toolchain', 'waiting', 'chief', 'zeus', 4))
+  data.tasks['1:14'] = { ...lane.tasks.at(-1), messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="14"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-14' })).toBeVisible()
+  await expect(finishOf(page, 'Task T-14')).toHaveCount(1)
+  await finishOf(page, 'Task T-14').click()
+  await expect.poll(() => calls(page, 'task.finish')).toEqual([{ project: 1, task: 14 }])
+})
+
 test('says nothing of waiting on a task that is paused, though its lane is held for it, and offers Finish, which takes what its worker said last', async ({
   page,
 }) => {
@@ -2320,44 +2497,53 @@ test('offers no delete on a closed project until it is resumed: its finished tas
 test('says so on the board when the project has no members yet', async ({ page }) => {
   const data = model()
   const board = data.boards[1]
-  board.lanes = board.lanes.filter((lane) => lane.participant.agent === null)
+  board.lanes = board.lanes.filter((lane) => ['human', 'chief'].includes(lane.participant.role))
   board.open = []
   await open(page, data)
   const table = page.getByRole('table', { name: 'Tasks' })
   await expect(table.locator('tr.board-empty')).toHaveText(
-    'No members yet: add the agents this project may use under Project settings.',
+    'No members yet: add the members this project may use under Project settings.',
   )
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(
     page.getByRole('dialog', { name: 'Project settings' }).locator('tbody tr.staff-empty'),
-  ).toHaveText('Nobody yet: add the agents this project may use.')
+  ).toHaveText('Nobody yet: add the members this project may use.')
   await open(page)
   await expect(table.locator('tr.board-empty')).toHaveCount(0)
 })
 
-test('takes a chief switched to a saved agent for no member: the board says it has none, and that agent joins the staff', async ({
+test('takes a chief on another harness for no member: the board says it has none, and a member joins the staff on a model', async ({
   page,
 }) => {
   const data = model()
   const board = data.boards[1]
   board.lanes = board.lanes.filter((lane) => ['human', 'chief'].includes(lane.participant.role))
   board.open = []
-  // Switch chief to a saved agent: the chief runs on hera now.
-  Object.assign(board.lanes[1].participant, { agent: 'hera', harness: 'codex' })
+  // The chief runs on Codex, a member's harness too: it is still no member.
+  Object.assign(board.lanes[1].participant, { harness: 'codex', model: 'gpt-6-astra' })
   await open(page, data)
   await expect(page.locator('tr.board-empty')).toHaveText(
-    'No members yet: add the agents this project may use under Project settings.',
+    'No members yet: add the members this project may use under Project settings.',
   )
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await expect(dialog.locator('tbody tr')).toHaveText([
-    'Nobody yet: add the agents this project may use.',
+  await expect(dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr')).toHaveText([
+    'Nobody yet: add the members this project may use.',
   ])
-  await dialog.getByLabel('Agent').selectOption('hera')
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra', tier: 'critical' })
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
-    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
+    .toEqual([
+      {
+        project: 1,
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        tier: 'critical',
+        roles: ['worker'],
+      },
+    ])
   expect(await calls(page, 'member.roles')).toEqual([])
 })
 
@@ -2550,6 +2736,11 @@ test("names a compaction's summary in what a window wrote as one, never as what 
     'Compaction summary',
   ])
   await expect(items.nth(1)).toHaveAttribute('data-compaction', 'true')
+  // Drawn as one: its border and its label in the theme's amber, the other's not.
+  const amber = 'rgb(231, 185, 104)'
+  await expect(items.nth(1)).toHaveCSS('border-left-color', amber)
+  await expect(items.nth(1).locator('.transcript-head')).toHaveCSS('color', amber)
+  await expect(items.nth(0)).not.toHaveCSS('border-left-color', amber)
 })
 
 /** T-2 with a long answer in what its window wrote. */
@@ -2670,97 +2861,71 @@ test('redraws a drawer whose task changed, its fold still open and read again', 
   await expect(drawer.locator('.transcript-body').nth(2)).toHaveText('Covering the errors.')
 })
 
-test('a member whose agent is gone says so on the board and in the staff, with Remove at hand', async ({
+test('a member the update could not run on what it ran on says it needs an edit, on its row and in the staff, with Edit at hand', async ({
   page,
 }) => {
   const data = model()
-  data.agents = data.agents.filter((agent) => agent.name !== 'diana')
-  data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana').agentMissing = true
-  await open(page, data)
-  const row = page.locator('tr[data-handle="diana"]')
-  await expect(row.locator('.row-status')).toHaveText(
-    'No agent named diana any more: define one under Agents, or remove @diana from the staff',
-  )
-  await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
-  await page.getByRole('button', { name: 'Project settings' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  const member = dialog.locator('tr[data-handle="diana"]')
-  await expect(member.locator('.member-meta')).toHaveText(
-    'no agent named diana any more: define one under Agents, or remove it',
-  )
-  await expect(member.getByRole('button', { name: 'Remove Worker @diana' })).toBeVisible()
-})
-
-test('a project staffed with Khnum after the release that dropped it says it left the catalog, and offers other agents', async ({
-  page,
-}) => {
-  // Khnum, Devin's SWE-1.6 Slow, left the catalog on 2026-10-25: Devin no longer offers it.
-  // The staff saved before still names it, and so does the chief.
-  const why = 'Devin no longer offers SWE-1.6 Slow'
-  const data = model()
-  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  Object.assign(chief.participant, { agent: 'khnum', harness: 'devin' })
-  Object.assign(chief, {
-    agentMissing: true,
-    agentRetired: why,
-    activity: { state: 'closed' },
-    pane: null,
-  })
   data.boards[1].lanes.push({
-    participant: participant(9, 'khnum', 'worker', { harness: 'devin', tier: 'light' }),
+    participant: participant(9, 'my-coder', 'worker', {
+      agent: 'my-coder',
+      harness: 'codex',
+      model: null,
+      effort: null,
+      tier: 'standard',
+      needsEdit: true,
+    }),
     tasks: [],
     activity: { state: 'closed' },
     pane: null,
-    agentMissing: true,
-    agentRetired: why,
   })
   await open(page, data)
-  const row = page.locator('tr[data-handle="khnum"]')
+  const row = page.locator('tr[data-handle="my-coder"]')
   await expect(row.locator('.row-status')).toHaveText(
-    'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Remove @khnum from the staff and add another agent',
+    'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it',
   )
   await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
-  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
-  await expect(card.locator('.terminal-status')).toHaveText(
-    'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Switch the chief to another agent',
-  )
-  // The staff row says so, with Remove at hand, and the pick list beside it offers the others.
+  // It runs on no default, and says so.
+  await expect(row.locator('.row-meta')).toContainText('no model: needs an edit')
+  await expect(row.locator('.row-meta')).not.toContainText('default')
   await page.getByRole('button', { name: 'Project settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Project settings' })
-  const member = settings.locator('tr[data-handle="khnum"]')
-  await expect(member.locator('.member-meta')).toHaveText(
-    'khnum left the catalog: Devin no longer offers SWE-1.6 Slow. Remove it and add another agent',
+  const member = settings.locator('tr[data-handle="my-coder"]')
+  await expect(member.locator('.member-gone')).toHaveText(
+    'The update could not tell what my-coder ran on: edit it to a model its harness lists, or remove it.',
   )
-  await expect(member.getByRole('button', { name: 'Remove Worker @khnum' })).toBeVisible()
-  await expect(settings.getByLabel('Agent').locator('option', { hasText: /^khnum / })).toHaveCount(
-    0,
-  )
-  await expect(settings.getByLabel('Agent').locator('option')).not.toHaveCount(0)
-  await settings.getByRole('button', { name: 'Close' }).click()
-  // Switch chief says it too, above the agents the chief may go on with.
-  await card.getByRole('button', { name: 'Switch the chief to another agent' }).click()
-  const switching = page.getByRole('dialog', { name: 'Switch the chief' })
-  await expect(switching.getByRole('status')).toHaveText(
-    'The chief runs on khnum, which left the catalog: Devin no longer offers SWE-1.6 Slow. Pick another agent.',
-  )
-  await expect(
-    switching.getByLabel('The chief runs on').locator('option', { hasText: /^khnum / }),
-  ).toHaveCount(0)
-  await switching.getByLabel('The chief runs on').selectOption('hera')
-  await switching.getByRole('button', { name: 'Switch', exact: true }).click()
-  await expect
-    .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 1, agent: 'hera', when: 'turn', note: false }])
+  await expect(member.getByRole('button', { name: 'Edit @my-coder' })).toBeVisible()
 })
 
-test('Switch chief says nothing of a gone agent while the chief runs on one it has', async ({
+test('a chief the update could not tell the model of says so on its card, and Switch chief gives it one', async ({
   page,
 }) => {
-  await open(page)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { harness: 'claude-code', model: null, needsEdit: true })
+  chief.activity = { state: 'closed' }
+  chief.pane = null
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  await expect(card.locator('.terminal-status')).toHaveText(
+    "Needs a model: ConsensFlow couldn't tell which model this chief used before the update. Pick one with Switch chief; what was written to the chief waits until then",
+  )
+  await expect(card.locator('.terminal-status')).toHaveAttribute('data-state', 'missing')
+  await expect(card.locator('.terminal-meta')).toHaveText('Claude Code · no model: needs an edit')
+  // The way out is on the card: Switch chief, to a model the harness lists.
+  await card.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
-  await expect(dialog).toBeVisible()
-  await expect(dialog.locator('.chief-gone')).toBeHidden()
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([{ project: 1, harness: 'codex', model: 'gpt-6-astra', when: 'turn', note: false }])
+  // The daemon takes the mark off with the switch: the card says what the chief runs on.
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    Object.assign(lane.participant, { harness: 'codex', model: 'gpt-6-astra', needsEdit: false })
+  })
+  await expect(card.locator('.terminal-meta')).toHaveText('Codex · gpt-6-astra')
+  await expect(card.locator('.terminal-status')).not.toContainText('Needs a model')
 })
 
 test("says on the chief's card in the dock what the chief is doing and runs on, and switches it from there", async ({
@@ -2768,13 +2933,14 @@ test("says on the chief's card in the dock what the chief is doing and runs on, 
 }) => {
   const data = model()
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  Object.assign(chief.participant, { agent: 'hera', harness: 'codex' })
+  Object.assign(chief.participant, { harness: 'codex', model: 'gpt-6-astra' })
   chief.activity = { state: 'waiting', reason: 'permission to run a command' }
   await open(page, data)
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
   await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
   await expect(card.locator('.terminal-status')).toHaveText('Waiting: permission to run a command')
-  await expect(card.locator('.terminal-meta')).toHaveText('codex · gpt-6-astra · max')
+  // Its harness and the model it runs on: a chief runs on no saved agent.
+  await expect(card.locator('.terminal-meta')).toHaveText('Codex · gpt-6-astra')
   // Out of quota, it says until when, whatever its window does.
   await changed(page, () => {
     const chief = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
@@ -2786,40 +2952,55 @@ test("says on the chief's card in the dock what the chief is doing and runs on, 
   // Switch chief is on the card: none on the board, though the chief's row is there for its tasks.
   await expect(page.locator('tr[data-handle="chief"]')).toHaveCount(1)
   const board = page.getByRole('region', { name: 'Board' })
-  const switchChief = { name: 'Switch the chief to another agent' }
+  const switchChief = { name: 'Switch the chief to another harness or model' }
   await expect(board.getByRole('button', switchChief)).toHaveCount(0)
   await card.getByRole('button', switchChief).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  // What the chief runs on now is no switch.
-  expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toContainEqual([
-    'T1 · Critical work',
-    [['hera', true]],
+  // The harness and model the chief runs on now is no switch.
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Codex' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
+  expect(await offered(dialog.locator('[name="chiefModel"]'))).toEqual([
+    ['Pick a model', true],
+    ['gpt-6-astra', true],
+    ['gpt-5.6-luna', false],
   ])
 })
 
-test("keeps the chief's card in the dock while its window is down: its agent gone, it says so, and Switch chief is the way on", async ({
+test("says on the chief's card the model its window ran on, where the human switched it there", async ({
   page,
 }) => {
   const data = model()
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  Object.assign(chief.participant, { agent: 'astraeus', harness: 'codex' })
-  // A chief whose agent is gone has no window: it does not open without one.
-  Object.assign(chief, { agentMissing: true, activity: { state: 'closed' }, pane: null })
+  Object.assign(chief.participant, { ranOn: 'claude-sonnet-5' })
+  await open(page, data)
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta'),
+  ).toHaveText('Claude Code · claude-sonnet-5')
+  // And Switch chief takes that one for the chief's: the pick it was is a switch now.
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Claude Code' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
+  expect(await offered(dialog.locator('[name="chiefModel"]'))).toEqual([
+    ['Pick a model', true],
+    ['claude-opus-5-5', false],
+    ['claude-sonnet-5', true],
+  ])
+})
+
+test("keeps the chief's card in the dock while its window is down, and Switch chief is the way on", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief, { activity: { state: 'closed' }, pane: null })
   await open(page, data)
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
-  const status = card.locator('.terminal-status')
-  await expect(status).toHaveText(
-    'No agent named astraeus any more: define one under Agents, or switch the chief',
-  )
-  await expect(status).toHaveAttribute('data-state', 'missing')
   await expect(card.locator('.terminal-host')).toHaveCount(0)
-  await card.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await card.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByRole('status')).toHaveText(
-    'The chief runs on astraeus, which is no longer among your agents: pick another agent.',
-  )
 })
 
 test('a terminal and a board too narrow for its columns keep a visible scrollbar', async ({
@@ -2969,17 +3150,15 @@ test('a button kept across redraws acts on what the board shows now', async ({ p
   // worker role now takes that role only, and asks nothing.
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await dialog.getByLabel('Role').selectOption('reviewer')
-  await dialog.getByLabel('Agent').selectOption('zeus')
-  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await changed(page, () => {
+    const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    zeus.participant.roles = ['worker', 'reviewer']
+  })
   await expect(dialog.locator('tr[data-handle="zeus"]')).toHaveCount(2)
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
-    .toEqual([
-      { project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] },
-      { project: 1, agent: 'zeus', roles: ['reviewer'] },
-    ])
+    .toEqual([{ project: 1, agent: 'zeus', roles: ['reviewer'] }])
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Close' }).click()
   // A project deleted and another of the same name in its place: the
@@ -3146,23 +3325,31 @@ async function selecting(page, line) {
 }
 
 // On a Mac, Cmd+C copies and Ctrl+C stays the program's interrupt, selection
-// or not; Ctrl+Shift+C copies on every system.
-test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
-  page,
-}) => {
-  const { copied, sent } = await selecting(page, 'copy this line')
-  await page.keyboard.press('Control+Shift+C')
-  expect(await copied()).toEqual(['copy'])
-  expect(await sent()).toEqual([])
-  await page.mouse.dblclick(
-    ...(await page
-      .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
-      .boundingBox()
-      .then((box) => [box.x + 6, box.y + 6])),
-  )
-  await page.keyboard.press('Control+C')
-  await expect.poll(sent).toEqual([[3]])
-  expect(await copied()).toEqual(['copy'])
+// or not; Ctrl+Shift+C copies on every system. The page tells a Mac by the
+// browser's user agent, which this sets, as the cases on Windows set theirs: the
+// suite runs on Linux (T-1161).
+test.describe('on a Mac', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  })
+  test('interrupts with Ctrl+C on a Mac even with text selected, and copies with Ctrl+Shift+C', async ({
+    page,
+  }) => {
+    const { copied, sent } = await selecting(page, 'copy this line')
+    await page.keyboard.press('Control+Shift+C')
+    expect(await copied()).toEqual(['copy'])
+    expect(await sent()).toEqual([])
+    await page.mouse.dblclick(
+      ...(await page
+        .locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+        .boundingBox()
+        .then((box) => [box.x + 6, box.y + 6])),
+    )
+    await page.keyboard.press('Control+C')
+    await expect.poll(sent).toEqual([[3]])
+    expect(await copied()).toEqual(['copy'])
+  })
 })
 
 test.describe('on Windows', () => {
@@ -3224,110 +3411,253 @@ test.describe('on Windows', () => {
   })
 })
 
-/**
- * Complex agents on four harnesses at every effort, listed out of order, and
- * the order a pick list offers them in: harness by harness, the hardest
- * thinking first (Codex's ultra above max, an agent naming no effort last),
- * then by name.
- */
-function ladder() {
-  const agent = (name, harness, effort) => ({
-    name,
-    harness,
-    model: `${harness}-model`,
-    ...(effort ? { effort } : {}),
-    profile: { workTier: 'complex' },
-  })
-  return {
-    agents: [
-      agent('larch', 'devin', 'low'),
-      agent('ash', 'claude'),
-      agent('birch', 'claude', 'low'),
-      agent('kapok', 'devin', 'max'),
-      agent('cedar', 'claude', 'max'),
-      agent('ivy', 'pi', 'minimal'),
-      agent('dogwood', 'claude', 'xhigh'),
-      agent('elm', 'claude', 'medium'),
-      agent('gum', 'codex', 'medium'),
-      agent('fir', 'claude', 'high'),
-      agent('hazel', 'codex', 'ultra'),
-      agent('juniper', 'pi', 'high'),
-      agent('alder', 'claude', 'high'),
-    ],
-    order: [
-      'cedar',
-      'dogwood',
-      'alder',
-      'fir',
-      'elm',
-      'birch',
-      'ash',
-      'hazel',
-      'gum',
-      'juniper',
-      'ivy',
-      'kapok',
-      'larch',
-    ],
+test('the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief', async ({
+  page,
+}) => {
+  await open(page)
+  for (const [button, name] of [
+    ['New project', 'New project'],
+    ['Switch the chief to another harness or model', 'Switch the chief'],
+  ]) {
+    await page.getByRole('button', { name: button }).click()
+    const dialog = page.getByRole('dialog', { name })
+    const harness = dialog.locator('[name="chiefHarness"]')
+    const models = dialog.locator('[name="chiefModel"]')
+    // Every harness installed here, in their order, none picked; the model waits for one.
+    expect(await offered(harness)).toEqual([
+      ['Pick a harness', true],
+      ['Claude Code', false],
+      ['Codex', false],
+      ['Pi', false],
+      ['Devin', false],
+      ['Muse Code', false],
+    ])
+    await expect(harness).toHaveValue('')
+    await expect(models).toBeDisabled()
+    // The effort waits for a model, and a model that lists none has none to pick.
+    const effort = dialog.locator('[name="chiefEffort"]')
+    await expect(effort).toBeDisabled()
+    // Its models, as the harness lists them; none picked; the harness's own switch said.
+    await harness.selectOption({ label: 'Pi' })
+    await expect(models).toBeEnabled()
+    await expect(models).toHaveValue('')
+    expect(await offered(models)).toEqual([
+      ['Pick a model', true],
+      ['meta/muse-spark', false],
+      ['meta/muse-spark-1.3-contributor', false],
+    ])
+    const help = dialog.locator('.chief-help')
+    await expect(help).toHaveText('Pi switches with /model and Enter.')
+    // A contributor model says what it is beside it.
+    await models.selectOption({ label: 'meta/muse-spark-1.3-contributor' })
+    await expect(help).toHaveText(
+      'Contributor model: Meta may train on what it sees, including your code. Pi switches with /model and Enter.',
+    )
+    expect(await offered(effort)).toEqual([['No effort to pick', true]])
+    // Another harness: its own models, nothing picked again.
+    await harness.selectOption({ label: 'Devin' })
+    await expect(models).toBeEnabled()
+    await expect(models).toHaveValue('')
+    expect(await offered(models)).toEqual([
+      ['Pick a model', true],
+      ['swe-2', false],
+    ])
+    // Muse Code: no switch for one conversation, which its help says.
+    await harness.selectOption({ label: 'Muse Code' })
+    await expect(models).toBeEnabled()
+    expect(await offered(models)).toEqual([
+      ['Pick a model', true],
+      ['muse-spark-1.3', false],
+      ['muse-spark-1.3-contributor', false],
+    ])
+    await expect(dialog.locator('.chief-help')).toHaveText(
+      'Muse switches with /model, and Enter makes it the default.',
+    )
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
   }
+})
+
+/**
+ * What a harness lists of its models, as `models.get` answers it from the harness's recorded
+ * answer (CHF-03's fixtures, read by its adapter: `crates/cf-harness/src/page_listings.rs`
+ * writes these files and fails while they differ).
+ */
+const recordedListing = (harness) =>
+  JSON.parse(
+    readFileSync(join(import.meta.dirname, 'fixtures', 'models', `${harness}.json`), 'utf8'),
+  )
+
+/** A page whose harnesses list what they were recorded listing. */
+function recordedModels(data = model()) {
+  for (const harness of ['claude', 'codex', 'pi', 'devin', 'muse']) {
+    data.models[harness] = { ...data.models[harness], listing: recordedListing(harness) }
+  }
+  return data
 }
 
-/** A pick list's groups as the human reads them: each label, and the names of its agents. */
-const pickGroups = (select) =>
-  select
-    .locator('optgroup')
-    .evaluateAll((all) =>
-      all.map((group) => [
-        group.label,
-        [...group.querySelectorAll('option')].map((option) => option.textContent.split(' · ')[0]),
-      ]),
-    )
-
-test("the staff's pick list orders a tier's agents by harness, then by effort from max down to none, then by name", async ({
+test("adds a member on a model its harness lists, the harness's own listing, never a saved agent", async ({
   page,
 }) => {
-  const data = model()
-  const { agents, order } = ladder()
-  data.agents.push(...agents)
-  await open(page, data)
+  await open(page, recordedModels())
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  // zeus and diana are workers already: the rest of the roster is on offer.
-  expect(await pickGroups(dialog.getByLabel('Agent'))).toEqual([
-    ['T1 · Critical work', ['hera']],
-    ['T2 · Complex work', order],
-    ['T4 · Light work', ['athena']],
+  const add = dialog.getByRole('group', { name: 'Add a member' })
+  const harness = add.locator('[name="memberHarness"]')
+  const models = add.locator('[name="memberModel"]')
+  // Every harness installed here, none picked; the model waits for one.
+  expect(await offered(harness)).toEqual([
+    ['Pick a harness', true],
+    ['Claude Code', false],
+    ['Codex', false],
+    ['Pi', false],
+    ['Devin', false],
+    ['Muse Code', false],
   ])
-  await expect(dialog.getByLabel('Agent').locator('option', { hasText: /^cedar · / })).toHaveText(
-    'cedar · claude-model · claude · max',
-  )
+  await expect(models).toBeDisabled()
+  await harness.selectOption({ label: 'Claude Code' })
+  await expect(models).toBeEnabled()
+  // Claude Code's models as its `initialize` answered, by its own labels and ids.
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['claude-opus-5-5', false],
+    ['claude-fable-5-1', false],
+    ['claude-sonnet-5-5', false],
+    ['claude-haiku-5-5', false],
+  ])
+  expect(
+    await models.locator('option:not([disabled])').evaluateAll((all) => all.map((o) => o.value)),
+  ).toEqual(['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-5-5'])
+  // No saved agent is offered: the catalog's (zeus, hera…) are not a member's models.
+  await expect(add.getByLabel('Agent')).toHaveCount(0)
+  for (const agent of ['zeus', 'hera', 'diana', 'athena', 'pygmalion']) {
+    await expect(add.locator('option', { hasText: agent })).toHaveCount(0)
+  }
 })
 
-test("the chief's pick list groups as the staff's does, by tier, then harness and effort, in New project and Switch chief", async ({
+test("asks the chief's effort where its model lists efforts, and sends it with the harness and the model, in New project and Switch chief", async ({
+  page,
+}) => {
+  await open(page, recordedModels())
+  // New project: Opus lists five efforts; nothing starts until one is picked.
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-opus-5-5')
+  const effort = made.dialog.locator('[name="chiefEffort"]')
+  await expect(effort).toBeEnabled()
+  expect(await offered(effort)).toEqual([
+    ['Pick an effort', true],
+    ['low', false],
+    ['medium', false],
+    ['high', false],
+    ['xhigh', false],
+    ['max', false],
+  ])
+  await made.start.click()
+  await expect(made.dialog.locator('.chief-help')).toHaveText(
+    'Pick the effort Claude Code runs claude-opus-5-5 at.',
+  )
+  expect(await calls(page, 'project.open')).toEqual([])
+  await effort.selectOption('high')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'high',
+        gate: false,
+        staff: [],
+      },
+    ])
+  // Switch chief: the effort goes with the harness and the model.
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
+  await pickChief(dialog, 'Claude Code', 'claude-sonnet-5-5')
+  await dialog.locator('[name="chiefEffort"]').selectOption('max')
+  await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'chief.switch'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'claude-code',
+        model: 'claude-sonnet-5-5',
+        effort: 'max',
+        when: 'turn',
+        note: false,
+      },
+    ])
+})
+
+test("Refresh beside the chief's model reads the picked harness's models again, in New project and Switch chief", async ({
+  page,
+}) => {
+  await open(page)
+  for (const [button, name] of [
+    ['New project', 'New project'],
+    ['Switch the chief to another harness or model', 'Switch the chief'],
+  ]) {
+    await page.evaluate(() => {
+      window.__calls.length = 0
+    })
+    await page.getByRole('button', { name: button }).click()
+    const dialog = page.getByRole('dialog', { name })
+    const models = dialog.locator('[name="chiefModel"]')
+    await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Devin' })
+    await expect(models).toBeEnabled()
+    await page.evaluate(() => {
+      window.__model.models.devin.listing.models.push({ id: 'swe-3', label: 'SWE-3', efforts: [] })
+    })
+    await dialog
+      .getByRole('group', { name: 'The chief' })
+      .getByRole('button', { name: 'Refresh models' })
+      .click()
+    await expect(models.locator('option')).toHaveText(['Pick a model', 'swe-2', 'swe-3'])
+    expect(await calls(page, 'models.get')).toEqual([
+      { harness: 'devin' },
+      { harness: 'devin', refresh: true },
+    ])
+    await page.evaluate(() => {
+      window.__model.models.devin.listing.models.pop()
+    })
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+  }
+})
+
+test("a harness whose models cannot be read leaves the chief's model unpicked, and says why", async ({
   page,
 }) => {
   const data = model()
-  const { agents, order } = ladder()
-  data.agents.push(...agents)
+  data.modelsRefusal = { codex: 'codex answered nothing' }
+  data.models.devin.listing = {
+    models: [],
+    readAt: null,
+    freshness: { state: 'stale', why: 'devin is not logged in' },
+    how: '',
+  }
   await open(page, data)
-  // Every harness is installed here; Pi's kronos is hidden and pygmalion draws, so neither is on offer.
-  const expected = [
-    ['T1 · Critical work', ['hera']],
-    ['T2 · Complex work', order],
-    ['T3 · Standard work', ['zeus']],
-    ['T4 · Light work', ['diana', 'athena']],
-  ]
   await page.getByRole('button', { name: 'New project' }).click()
-  const fresh = page.getByRole('dialog', { name: 'New project' })
-  expect(await pickGroups(fresh.getByLabel('The chief runs on'))).toEqual(expected)
-  await fresh.getByRole('button', { name: 'Cancel' }).click()
-  await expect(fresh).toBeHidden()
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
-  const switching = page.getByRole('dialog', { name: 'Switch the chief' })
-  expect(await pickGroups(switching.getByLabel('The chief runs on'))).toEqual(expected)
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const harness = dialog.locator('[name="chiefHarness"]')
+  const models = dialog.locator('[name="chiefModel"]')
+  await harness.selectOption({ label: 'Codex' })
+  await expect(dialog.locator('.chief-help')).toHaveText(
+    "Codex's models could not be read: codex answered nothing",
+  )
+  await expect(models).toBeDisabled()
+  await harness.selectOption({ label: 'Devin' })
+  await expect(dialog.locator('.chief-help')).toHaveText(
+    'Devin lists no model: devin is not logged in.',
+  )
+  await expect(models).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect(dialog).toBeVisible()
+  expect(await calls(page, 'project.open')).toEqual([])
 })
 
-test('shows the staff as one row per member and role, and adds a saved agent in a role it fits', async ({
+test('shows the staff as one row per member and role, and adds a member in a role, on a model its harness lists', async ({
   page,
 }) => {
   const data = model()
@@ -3353,11 +3683,12 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
   await expect(table.locator('tbody tr')).toHaveText([
     /@zeus.*Worker/,
     /@diana.*Worker/,
-    /@hera.*gpt-6-astra · codex · max · critical.*Reviewer/,
+    /@hera.*gpt-6-astra · max · critical · Codex.*Reviewer/,
   ])
-  // Each member says what it runs: model, harness, effort and its tier.
+  // Each member says its tier and its harness, and what it runs only where its name does not
+  // (zeus is named for no model): its model's id and its effort.
   await expect(table.locator('tbody tr').first().locator('.member-meta')).toHaveText(
-    'claude-sonnet-5 · claude · high · standard',
+    'claude-sonnet-5 · high · standard · Claude Code',
   )
   await expect(table.locator('tbody tr').first().locator('td').nth(1)).toHaveText('Worker')
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
@@ -3367,66 +3698,41 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
     'Tester',
     'Image designer',
   ])
-  // A worker: every agent that does not hold the role yet, grouped by work tier, the most critical first.
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'hera · gpt-6-astra · codex · max',
-    'athena · muse-spark · pi',
-  ])
-  await expect(dialog.getByLabel('Agent').locator('optgroup')).toHaveCount(2)
-  // An advisor: every agent but the image agent, which only draws.
-  await dialog.getByLabel('Role').selectOption('advisor')
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'hera · gpt-6-astra · codex · max',
-    'zeus · claude-sonnet-5 · claude · high',
-    'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · pi',
-  ])
-  expect(
-    await dialog
-      .getByLabel('Agent')
-      .locator('optgroup')
-      .evaluateAll((g) => g.map((n) => n.label)),
-  ).toEqual(['T1 · Critical work', 'T3 · Standard work', 'T4 · Light work'])
-  await dialog.getByLabel('Agent').selectOption('athena')
-  await dialog.getByRole('button', { name: 'Add to staff' }).click()
-  await expect
-    .poll(() => calls(page, 'member.add'))
-    .toEqual([{ project: 1, agent: 'athena', roles: ['advisor'] }])
-  await expect(page.locator('#status')).toHaveText('@athena joined the staff as Advisor.')
-  // A second role for a member already on the staff adds to its roles.
-  await dialog.getByLabel('Role').selectOption('reviewer')
-  // Each choice says what it runs, the model's effort level included; hera reviews already.
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'zeus · claude-sonnet-5 · claude · high',
-    'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · pi',
-  ])
-  await dialog.getByLabel('Agent').selectOption('zeus')
-  await dialog.getByRole('button', { name: 'Add to staff' }).click()
-  await expect
-    .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer'] }])
-  await expect(page.locator('#status')).toHaveText('@zeus is Reviewer now too.')
-  // An image designer is an image agent, and an image agent is nothing else.
-  await dialog.getByLabel('Role').selectOption('designer')
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'pygmalion · codex-image · codex',
-  ])
-  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeEnabled()
-  await expect(dialog.locator('#staff-hint')).toBeHidden()
+  // Add member names no saved agent: a harness, then a model it lists (T-1143).
+  await expect(dialog.getByLabel('Agent')).toHaveCount(0)
+  await pickMember(dialog, {
+    role: 'advisor',
+    harness: 'Pi',
+    model: 'meta/muse-spark',
+    tier: 'light',
+  })
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
     .toEqual([
-      { project: 1, agent: 'athena', roles: ['advisor'] },
-      { project: 1, agent: 'pygmalion', roles: ['designer'] },
+      {
+        project: 1,
+        harness: 'pi',
+        model: 'meta/muse-spark',
+        effort: null,
+        tier: 'light',
+        roles: ['advisor'],
+      },
     ])
+  await expect(page.locator('#status')).toHaveText('@muse-spark joined the staff as Advisor.')
+  // An image designer draws on Codex: the harness select offers it alone.
+  await dialog.getByLabel('Role').selectOption('designer')
+  expect(await offered(dialog.locator('[name="memberHarness"]'))).toEqual([
+    ['Pick a harness', true],
+    ['Codex', false],
+  ])
 })
 
-test('adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles', async ({
+test('adds a member as a tester, or as one more role of a member, in the place a tester has among the roles', async ({
   page,
 }) => {
-  await open(page)
+  const data = model()
+  await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(
@@ -3440,76 +3746,57 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
     'Tester',
     'Image designer',
   ])
-  // Any agent may test but the image agent, which only draws.
-  await dialog.getByLabel('Role').selectOption('tester')
-  await expect(dialog.getByLabel('Agent').locator('option')).toHaveText([
-    'hera · gpt-6-astra · codex · max',
-    'zeus · claude-sonnet-5 · claude · high',
-    'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · pi',
-  ])
-  await dialog.getByLabel('Agent').selectOption('athena')
+  // Any harness's model may test.
+  await pickMember(dialog, { role: 'tester', harness: 'Devin', model: 'swe-2', tier: 'light' })
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
-    .toEqual([{ project: 1, agent: 'athena', roles: ['tester'] }])
-  await expect(page.locator('#status')).toHaveText('@athena joined the staff as Tester.')
-  // A member on the staff already takes it as one role more.
-  await dialog.getByLabel('Agent').selectOption('zeus')
+    .toEqual([
+      {
+        project: 1,
+        harness: 'devin',
+        model: 'swe-2',
+        effort: null,
+        tier: 'light',
+        roles: ['tester'],
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Tester.')
+  // A model a member runs already: the daemon gives that member the role, and the page says so.
+  await page.evaluate(() => {
+    window.__model.memberHandle = 'zeus'
+  })
+  await pickMember(dialog, { harness: 'Claude Code', model: 'claude-sonnet-5', tier: 'standard' })
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
-  await expect
-    .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'tester'] }])
   await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
 })
 
-test('says why no image designer is on offer: Codex, which image agents run through, is not here, or each is one already', async ({
+test('an image designer is picked on Codex alone, and Add member says so when Codex is not here', async ({
   page,
 }) => {
   const data = model()
-  // Codex is not installed here: the image agent goes with it.
-  Object.assign(
-    data.agents.find((agent) => agent.name === 'pygmalion'),
-    { hidden: true, notInstalled: true },
-  )
+  // Codex is not installed here.
+  data.missing = ['codex']
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const hint = dialog.locator('#staff-hint')
   await dialog.getByLabel('Role').selectOption('designer')
   await expect(hint).toHaveText(
-    'No image agent is on offer here: image agents run through Codex; install it from Agents, Harnesses.',
+    'Image designers draw on Codex, which is not installed here: install it from Agents, Harnesses.',
   )
   await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
-  await dialog.getByRole('button', { name: 'Close' }).click()
-  // Codex is back, and pygmalion draws for harbour already.
-  await page.evaluate(() => {
-    const pygmalion = window.__model.agents.find((agent) => agent.name === 'pygmalion')
-    delete pygmalion.hidden
-    delete pygmalion.notInstalled
-    window.__model.boards[1].lanes.push({
-      participant: {
-        ...window.__model.boards[1].lanes[2].participant,
-        id: 12,
-        handle: 'pygmalion',
-        role: 'designer',
-        roles: ['designer'],
-        agent: 'pygmalion',
-        harness: 'codex',
-        designer: true,
-        tier: 'light',
-      },
-      tasks: [],
-      activity: { state: 'closed' },
-      pane: null,
-    })
-    window.__listeners.get('state-changed')()
-  })
-  await expect(page.locator('tr[data-handle="pygmalion"]')).toHaveCount(1)
-  await page.getByRole('button', { name: 'Project settings' }).click()
-  await dialog.getByLabel('Role').selectOption('designer')
-  await expect(hint).toHaveText('Every image agent is on the staff as Image designer already.')
-  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
+  // Another role: the harnesses installed here, Codex not among them.
+  await dialog.getByLabel('Role').selectOption('worker')
+  await expect(hint).toBeHidden()
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeEnabled()
+  expect(await offered(dialog.locator('[name="memberHarness"]'))).toEqual([
+    ['Pick a harness', true],
+    ['Claude Code', false],
+    ['Pi', false],
+    ['Devin', false],
+    ['Muse Code', false],
+  ])
 })
 
 test("drops one role from a member's row, and asks before its last", async ({ page }) => {
@@ -3546,49 +3833,57 @@ test('takes a member off the staff once the human confirms', async ({ page }) =>
   await expect(page.locator('#status')).toHaveText('@zeus left the staff.')
 })
 
-test("offers, after a role is picked, the agents the staff shown does not hold it with: this project's, as it is now", async ({
+test("Add member reads a harness's models once while the dialog is open, says it reads them, and reads them again at Refresh or at the next opening", async ({
   page,
 }) => {
-  await open(page, twoOpen())
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  const offered = () =>
-    dialog
-      .getByLabel('Agent')
-      .locator('option')
-      .evaluateAll((options) => options.map((option) => option.value))
-  // harbour's staff seen first, then a reviewer role added there.
-  await page.getByRole('button', { name: 'Project settings' }).click()
-  await dialog.getByLabel('Role').selectOption('reviewer')
-  await dialog.getByLabel('Agent').selectOption('zeus')
-  await dialog.getByRole('button', { name: 'Add to staff' }).click()
-  await expect(dialog.locator('tr[data-handle="zeus"]')).toHaveCount(2)
-  await dialog.getByLabel('Role').selectOption('advisor')
-  await dialog.getByLabel('Role').selectOption('reviewer')
-  expect(await offered()).not.toContain('zeus')
+  const harness = dialog.locator('[name="memberHarness"]')
+  const models = dialog.locator('[name="memberModel"]')
+  const reads = async () =>
+    (await calls(page, 'models.get')).filter((body) => body.harness === 'devin')
+  // The staff's harnesses are read as the dialog opens, for the marks of gone models.
+  await expect.poll(() => calls(page, 'models.get')).toContainEqual({ harness: 'claude' })
+  // A read the daemon holds, of a harness nobody on the staff runs: the model select says it
+  // is reading.
+  await hold(page, 'models.get')
+  await harness.selectOption({ label: 'Devin' })
+  await expect(models.locator('option')).toHaveText(["Reading Devin's models…"])
+  await expect(models).toBeDisabled()
+  await letGo(page, 'models.get')
+  await expect(models).toBeEnabled()
+  // Another harness and back: Devin's read is the one already made.
+  await harness.selectOption({ label: 'Pi' })
+  await expect(models).toBeEnabled()
+  await harness.selectOption({ label: 'Devin' })
+  await expect(models).toBeEnabled()
+  expect(await reads()).toEqual([{ harness: 'devin' }])
+  // Refresh reads it again from the harness, and keeps the model picked where it is still listed.
+  await models.selectOption({ label: 'swe-2' })
+  await dialog.getByRole('button', { name: 'Refresh models' }).click()
+  await expect.poll(reads).toEqual([{ harness: 'devin' }, { harness: 'devin', refresh: true }])
+  await expect(models).toHaveValue('swe-2')
+  // The next opening reads it afresh at its first ask.
   await dialog.getByRole('button', { name: 'Close' }).click()
-  // foundry has nobody on its staff: every agent may work there.
-  await chooseProject(page, 'foundry')
-  await expect(page.locator('#project-title')).toHaveText('foundry')
   await page.getByRole('button', { name: 'Project settings' }).click()
-  await dialog.getByLabel('Role').selectOption('advisor')
-  await dialog.getByLabel('Role').selectOption('worker')
-  expect(await offered()).toEqual(['hera', 'zeus', 'diana', 'athena'])
+  await harness.selectOption({ label: 'Devin' })
+  await expect(models).toBeEnabled()
+  expect(await reads()).toHaveLength(3)
 })
 
-test('keeps a pending removal and the chosen agent when the daemon redraws the staff', async ({
+test('keeps a pending removal and what Add member has picked when the daemon redraws the staff', async ({
   page,
 }) => {
-  const data = model()
-  data.agents.push({
-    name: 'hera',
-    harness: 'pi',
-    model: 'muse-spark',
-    profile: { workTier: 'light' },
-  })
-  await open(page, data)
+  await open(page)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await dialog.getByLabel('Agent').selectOption('hera')
+  await pickMember(dialog, {
+    role: 'reviewer',
+    harness: 'Codex',
+    model: 'gpt-6-astra',
+    tier: 'complex',
+  })
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   const boards = () =>
     page.evaluate(() => window.__calls.filter(([, args]) => args.operation === 'board.get').length)
@@ -3598,33 +3893,201 @@ test('keeps a pending removal and the chosen agent when the daemon redraws the s
     await expect.poll(boards).toBeGreaterThan(before)
   }
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
-  await expect(dialog.getByLabel('Agent')).toHaveValue('hera')
+  await expect(dialog.getByLabel('Role')).toHaveValue('reviewer')
+  await expect(dialog.locator('[name="memberHarness"]')).toHaveValue('codex')
+  await expect(dialog.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
+  await expect(dialog.locator('[name="memberTier"]')).toHaveValue('complex')
 })
 
-test('says why the staff picker offers nobody: every saved agent holds the role, or none is saved', async ({
+test('Add member saves nothing until a tier is picked: the tier starts empty, whatever the model and its effort', async ({
   page,
 }) => {
-  const data = model()
-  // Only the staff's own agents are saved, and both are workers already.
-  data.agents = data.agents.filter((agent) => ['zeus', 'diana'].includes(agent.name))
-  await open(page, data)
+  await open(page, recordedModels())
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const hint = dialog.locator('#staff-hint')
-  await expect(hint).toHaveText('Every saved agent is on the staff as Worker already.')
-  await expect(dialog.getByLabel('Agent')).toBeDisabled()
-  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
-  // Another role: both are on offer again.
-  await dialog.getByLabel('Role').selectOption('reviewer')
+  const effort = dialog.locator('[name="memberEffort"]')
+  const tier = dialog.locator('[name="memberTier"]')
+  const add = dialog.getByRole('button', { name: 'Add to staff' })
+  // Nothing picked: it says what to pick first.
+  await add.click()
+  await expect(hint).toHaveText('Pick a harness for the member.')
+  // The model's efforts, as Muse lists them for it, the one it runs by default picked.
+  await pickMember(dialog, { harness: 'Muse Code', model: 'muse-spark-1.2' })
+  expect(await offered(effort)).toEqual([
+    ['Pick an effort', true],
+    ['minimal', false],
+    ['low', false],
+    ['medium', false],
+    ['high', false],
+    ['xhigh', false],
+  ])
+  await expect(effort).toHaveValue('high')
+  expect(await offered(tier)).toEqual([
+    ['Pick a tier', true],
+    ['Critical work', false],
+    ['Complex work', false],
+    ['Standard work', false],
+    ['Light work', false],
+  ])
+  // No tier is picked for the human, and nothing is saved without one.
+  await expect(tier).toHaveValue('')
+  await add.click()
+  await expect(hint).toHaveText(
+    "Pick the member's tier: the work the chief gives it, from critical to light.",
+  )
+  expect(await calls(page, 'member.add')).toEqual([])
+  await tier.selectOption('standard')
+  await add.click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'muse',
+        model: 'muse-spark-1.2',
+        effort: 'high',
+        tier: 'standard',
+        roles: ['worker'],
+      },
+    ])
   await expect(hint).toBeHidden()
-  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeEnabled()
-  await dialog.getByRole('button', { name: 'Close' }).click()
-  await page.evaluate(() => {
-    window.__model.agents = []
-  })
+})
+
+test("Add member marks a contributor model and a stale list, as the chief's picker does", async ({
+  page,
+}) => {
+  const data = model()
+  data.models.devin.listing = {
+    ...data.models.devin.listing,
+    freshness: { state: 'stale', why: 'devin models list failed: offline' },
+  }
+  await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
-  await expect(hint).toHaveText('No saved agents yet: add one under Settings, Agents.')
-  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const help = dialog.locator('.member-help')
+  await pickMember(dialog, { harness: 'Pi', model: 'meta/muse-spark-1.3-contributor' })
+  await expect(help).toHaveText(
+    'Contributor model: Meta may train on what it sees, including your code.',
+  )
+  await pickMember(dialog, { harness: 'Devin', model: 'swe-2' })
+  await expect(help).toHaveText('This list may be out of date: devin models list failed: offline.')
+})
+
+test("Add member offers Devin's efforts for a model as Devin lists them, and sends the model and the effort, never one joined id", async ({
+  page,
+}) => {
+  await open(page, recordedModels())
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await pickMember(dialog, { harness: 'Devin', model: 'claude-opus-5-5-fast' })
+  expect(await offered(dialog.locator('[name="memberEffort"]'))).toEqual([
+    ['Pick an effort', true],
+    ['low', false],
+    ['medium', false],
+    ['high', false],
+    ['xhigh', false],
+    ['max', false],
+  ])
+  await dialog.locator('[name="memberEffort"]').selectOption('medium')
+  await dialog.locator('[name="memberTier"]').selectOption('standard')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'devin',
+        model: 'claude-opus-5-5-fast',
+        effort: 'medium',
+        tier: 'standard',
+        roles: ['worker'],
+      },
+    ])
+})
+
+test('Edit member moves a member to another model, effort and tier its harness lists, and Cancel leaves it as it was', async ({
+  page,
+}) => {
+  const data = model()
+  data.models.claude.listing = listed([
+    { id: 'claude-sonnet-5', label: 'Sonnet 5', efforts: ['low', 'medium', 'high'] },
+    { id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: ['high', 'max'] },
+  ])
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const add = dialog.locator('.staff-add')
+  await dialog.getByRole('button', { name: 'Edit @zeus' }).click()
+  // The form takes the member as it is: its harness, its model, its effort and its tier.
+  await expect(add.locator('legend')).toHaveText('Edit @zeus')
+  await expect(dialog.getByLabel('Role')).toBeDisabled()
+  await expect(add.locator('[name="memberHarness"]')).toHaveValue('claude-code')
+  await expect(add.locator('[name="memberModel"]')).toHaveValue('claude-sonnet-5')
+  await expect(add.locator('[name="memberEffort"]')).toHaveValue('high')
+  await expect(add.locator('[name="memberTier"]')).toHaveValue('standard')
+  // Cancel: nothing is sent, and the form adds again.
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(add.locator('legend')).toHaveText('Add a member')
+  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeVisible()
+  expect(await calls(page, 'member.edit')).toEqual([])
+  // Another model and tier, saved.
+  await dialog.getByRole('button', { name: 'Edit @zeus' }).click()
+  await expect(add.locator('[name="memberModel"]')).toHaveValue('claude-sonnet-5')
+  await add.locator('[name="memberModel"]').selectOption({ label: 'claude-opus-5-5' })
+  await add.locator('[name="memberEffort"]').selectOption('max')
+  await add.locator('[name="memberTier"]').selectOption('critical')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        tier: 'critical',
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText(
+    '@zeus runs claude-opus-5-5 from its next window.',
+  )
+  await expect(add.locator('legend')).toHaveText('Add a member')
+})
+
+test('marks a member whose harness no longer lists its model, and Refresh takes the mark off once it lists it again', async ({
+  page,
+}) => {
+  const data = model()
+  // Claude Code lists Opus 5.5 only: zeus runs Sonnet 5.
+  data.models.claude.listing = listed([{ id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: [] }])
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const zeus = dialog.locator('tr[data-handle="zeus"]')
+  await expect(zeus).toHaveAttribute('data-model-gone', 'claude-sonnet-5')
+  await expect(zeus.locator('mark.model-gone')).toHaveText('claude-sonnet-5')
+  await expect(zeus.locator('.member-gone')).toHaveText(
+    'Claude Code no longer lists claude-sonnet-5: edit it to a model it lists.',
+  )
+  // diana's Codex lists her model: no mark.
+  await expect(dialog.locator('tr[data-handle="diana"]')).not.toHaveAttribute('data-model-gone')
+  // Claude Code lists it again, and the human's Refresh reads it.
+  await page.evaluate(() => {
+    window.__model.models.claude.listing.models.push({
+      id: 'claude-sonnet-5',
+      label: 'Sonnet 5',
+      efforts: [],
+    })
+  })
+  await dialog.locator('[name="memberHarness"]').selectOption({ label: 'Claude Code' })
+  await dialog.getByRole('button', { name: 'Refresh models' }).click()
+  await expect
+    .poll(() => calls(page, 'models.get'))
+    .toContainEqual({ harness: 'claude', refresh: true })
+  await expect(zeus).not.toHaveAttribute('data-model-gone')
+  await expect(zeus.locator('.member-gone')).toHaveCount(0)
 })
 
 test('starts a project with human approval required, and posts the checkbox with the staff', async ({
@@ -3636,30 +4099,44 @@ test('starts a project with human approval required, and posts the checkbox with
   const gate = dialog.getByLabel('Human approval required', { exact: false })
   await expect(gate).not.toBeChecked()
   await gate.check()
-  await dialog.getByLabel('The chief runs on').selectOption('zeus')
+  await pickChief(dialog, 'Claude Code', 'claude-sonnet-5')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', agent: 'zeus', gate: true, staff: [] }])
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: true,
+        staff: [],
+      },
+    ])
 })
 
-test('starts no project until its chief is picked: a chief runs on a saved agent, never on a default', async ({
+test('starts no project until its chief is picked, a harness and one of its models: never a default', async ({
   page,
 }) => {
   await open(page)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  const chief = dialog.getByLabel('The chief runs on')
-  await expect(chief).toHaveValue('')
-  await expect(chief.locator('option').first()).toHaveText('Pick an agent')
+  const harness = dialog.locator('[name="chiefHarness"]')
+  await expect(harness).toHaveValue('')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect(dialog).toBeVisible()
+  // A harness alone is no chief: its model is required too.
+  await harness.selectOption({ label: 'Pi' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect(dialog).toBeVisible()
   expect(await calls(page, 'project.open')).toEqual([])
-  await chief.selectOption('hera')
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', agent: 'hera', gate: false, staff: [] }])
+    .toEqual([
+      { directory: '/work/fresh', harness: 'pi', model: 'meta/muse-spark', gate: false, staff: [] },
+    ])
   await expect(dialog).toBeHidden()
 })
 
@@ -3670,9 +4147,12 @@ async function newProject(page) {
   const section = (name) => dialog.getByRole('group', { name, exact: true })
   return {
     dialog,
-    chief: dialog.getByLabel('The chief runs on'),
+    chief: {
+      harness: dialog.locator('[name="chiefHarness"]'),
+      model: dialog.locator('[name="chiefModel"]'),
+    },
     start: dialog.getByRole('button', { name: 'Start project' }),
-    refusal: dialog.getByRole('alert'),
+    refusal: dialog.locator('.dialog-refusal'),
     staff: section('Staff'),
     approval: section('Human approval').getByRole('checkbox'),
     calls: {
@@ -3690,18 +4170,37 @@ async function newProject(page) {
       version: section('Specs').locator('.specs-version'),
       save: section('Specs').getByRole('button', { name: 'Save specs' }),
     },
+    rules: {
+      group: section('Rules for the staff'),
+      text: section('Rules for the staff').getByLabel('The rules'),
+      count: section('Rules for the staff').locator('.staff-rules-count'),
+      save: section('Rules for the staff').getByRole('button', { name: 'Save rules' }),
+    },
+    compaction: {
+      group: section('Compaction'),
+      own: section('Compaction').getByRole('radio', {
+        name: "The harness's own point",
+      }),
+      size: section('Compaction').getByRole('radio', { name: 'A size' }),
+      tokens: section('Compaction').getByLabel('Size in tokens, 100,000 to 1,000,000'),
+      hint: section('Compaction').locator('.members-compaction-hint'),
+      save: section('Compaction').getByRole('button', {
+        name: 'Save compaction',
+      }),
+    },
+    computerUse: section('Computer use'),
   }
 }
 
-test('New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has', async ({
+test('New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
   page,
 }) => {
   const data = model()
-  data.lastStaff = [{ agent: 'zeus', roles: ['worker', 'reviewer'] }]
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['worker', 'reviewer'])]
   await open(page, data)
   const made = await newProject(page)
   const { dialog } = made
-  // The folder, the chief, and then the four sections of Project settings, in its order.
+  // The folder, the chief, and then the sections of Project settings, in its order.
   expect(
     await dialog
       .locator('form > label, form > fieldset')
@@ -3712,9 +4211,22 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
             : node.querySelector('[name]').name,
         ),
       ),
-  ).toEqual(['directory', 'chief', 'Staff', 'Human approval', 'Wake-up calls', 'Specs'])
+  ).toEqual([
+    'directory',
+    'The chief',
+    'Staff',
+    'Rules for the staff',
+    'Compaction',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+    'Computer use',
+  ])
   // The defaults: the last project's staff, approval off, wake-ups off and specs following the app's setting.
-  await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/, /zeus.*Reviewer/])
+  await expect(made.staff.locator('tbody tr')).toHaveText([
+    /claude-sonnet-5.*Worker/,
+    /claude-sonnet-5.*Reviewer/,
+  ])
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
   await expect(made.calls.every).toHaveValue('1')
@@ -3730,7 +4242,17 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.variant.locator('option:checked')).toHaveText('As the app says (core)')
   await expect(made.specs.version).toHaveText('Specmint 3.0.0')
+  // The rules and the compaction as a project that never said any has them.
+  await expect(made.rules.text).toHaveValue('')
+  await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
+  await expect(made.compaction.own).toBeChecked()
+  await expect(made.compaction.size).not.toBeChecked()
+  await expect(made.compaction.tokens).toBeDisabled()
+  await expect(made.compaction.tokens).toHaveValue('')
   // Nothing is saved before there is a project: no Save, and nothing of when a change reaches the chief.
+  await expect(made.rules.save).toBeHidden()
+  await expect(made.compaction.save).toBeHidden()
+  await expect(made.rules.group.locator('.dialog-help [data-live]')).toBeHidden()
   await expect(made.calls.save).toBeHidden()
   await expect(made.specs.save).toBeHidden()
   await expect(made.specs.group.locator('.specs-help [data-live]')).toBeHidden()
@@ -3740,46 +4262,57 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   const markup = (id) =>
     page.evaluate(
       (id) =>
-        // The shared sections only: Computer use, the rules for the staff and the Claude members'
-        // compaction are Project settings' own.
-        [
-          ...document.querySelectorAll(
-            `#${id} .project-section:not(.computer-use):not(.staff-rules):not(.claude-compaction)`,
-          ),
-        ]
-          .slice(1)
-          .map((section) => {
-            const copy = section.cloneNode(true)
-            const variant = copy.querySelector('[name="specsVariant"]')
-            if (variant !== null) {
-              const [first] = variant.options
-              first.textContent = ''
-              variant.replaceChildren(first)
-              copy.querySelector('[name="specs"] [value="follow"]').textContent = ''
-              copy.querySelector('[name="specsFolder"]').removeAttribute('placeholder')
-              copy.querySelector('.specs-version').textContent = ''
-            }
-            return copy.outerHTML.replaceAll(' hidden=""', '')
-          }),
+        // Every section but Staff, which each dialog draws for itself: one markup for the rest.
+        [...document.querySelectorAll(`#${id} .project-section`)].slice(1).map((section) => {
+          const copy = section.cloneNode(true)
+          // What each dialog gives its own: the rules' counter's id, and the field's reference to it.
+          copy.querySelector('.staff-rules-count')?.removeAttribute('id')
+          copy.querySelector('[name="staff-rules"]')?.removeAttribute('aria-describedby')
+          // What the section draws from what it reads, which is the dialog's own.
+          for (const drawn of copy.querySelectorAll(
+            '.computer-use-harnesses, .computer-use-apps, .computer-use-grants, .computer-use-grants-of',
+          )) {
+            drawn.replaceChildren()
+          }
+          const variant = copy.querySelector('[name="specsVariant"]')
+          if (variant !== null) {
+            const [first] = variant.options
+            first.textContent = ''
+            variant.replaceChildren(first)
+            copy.querySelector('[name="specs"] [value="follow"]').textContent = ''
+            copy.querySelector('[name="specsFolder"]').removeAttribute('placeholder')
+            copy.querySelector('.specs-version').textContent = ''
+          }
+          return copy.outerHTML.replaceAll(' hidden=""', '')
+        }),
       id,
     )
   const [here, there] = [
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(3)
+  expect(here).toHaveLength(6)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await made.start.click()
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
         gate: false,
-        staff: [{ agent: 'zeus', roles: ['worker', 'reviewer'] }],
+        staff: [
+          {
+            harness: 'claude-code',
+            model: 'claude-sonnet-5',
+            effort: 'high',
+            tier: 'standard',
+            roles: ['worker', 'reviewer'],
+          },
+        ],
       },
     ])
 })
@@ -3789,7 +4322,7 @@ test('New project: starts a project with its approval, wake-up calls and specs s
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await made.approval.check()
   await made.calls.on.check()
   await made.calls.every.fill('2')
@@ -3804,7 +4337,8 @@ test('New project: starts a project with its approval, wake-up calls and specs s
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
         gate: true,
         staff: [],
         wakeUp: { on: true, every: 2, unit: 'days', text: 'Anything left on the board?' },
@@ -3823,7 +4357,7 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   // A variant alone is a word of the project's: it follows the app's setting, with that variant.
   await made.specs.variant.selectOption('core-html')
   // The calls left off, an hour apart no more, are the human's word too.
@@ -3835,7 +4369,8 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
         gate: false,
         staff: [],
         wakeUp: { on: false, every: 45, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS },
@@ -3845,7 +4380,7 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
   await expect(made.dialog).toBeHidden()
   // Off needs no folder or variant, as in Project settings.
   await page.getByRole('button', { name: 'New project' }).click()
-  await made.chief.selectOption('hera')
+  await pickChief(made.dialog, 'Codex', 'gpt-6-astra')
   await made.specs.mode.selectOption('off')
   await expect(made.specs.folder).toBeDisabled()
   await expect(made.specs.variant).toBeDisabled()
@@ -3862,22 +4397,23 @@ test('New project: a start the daemon refuses is said in the dialog in the daemo
   page,
 }) => {
   const data = model()
-  data.lastStaff = [{ agent: 'zeus', roles: ['worker'] }]
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['worker'])]
   data.openRefusal =
     'the specs folder is a folder inside the project: it stays inside it, with no `..`'
   await open(page, data)
   const made = await newProject(page)
-  await made.chief.selectOption('hera')
+  await pickChief(made.dialog, 'Codex', 'gpt-6-astra')
   await made.specs.mode.selectOption('on')
   await made.specs.folder.fill('../elsewhere')
   await made.start.click()
   await expect(made.refusal).toHaveText(data.openRefusal)
   // The dialog is as the human left it, to mend and try again.
   await expect(made.dialog).toBeVisible()
-  await expect(made.chief).toHaveValue('hera')
+  await expect(made.chief.harness).toHaveValue('codex')
+  await expect(made.chief.model).toHaveValue('gpt-6-astra')
   await expect(made.specs.mode).toHaveValue('on')
   await expect(made.specs.folder).toHaveValue('../elsewhere')
-  await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/])
+  await expect(made.staff.locator('tbody tr')).toHaveText([/claude-sonnet-5.*Worker/])
   // Nothing was started: the project shown is the one that was, and the status line says nothing.
   await expect(page.locator('#project-title')).toHaveText('harbour')
   await expect(page.locator('#status')).toHaveText('')
@@ -3903,7 +4439,7 @@ test('New project: a number that is no whole number of at least one holds the st
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   // The browser holds a number under one, or none, or no whole number: nothing is asked of the daemon.
   for (const bad of ['0', '-3', '1.5', '']) {
     await made.calls.every.fill(bad)
@@ -3943,7 +4479,7 @@ test("New project: the new chief's terminal has the keyboard once its project is
   }
   await open(page, data)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await made.start.click()
   await expect(page.locator('#project-title')).toHaveText('new')
   await expect(made.dialog).toBeHidden()
@@ -3958,7 +4494,7 @@ test('New project: a start asked twice while the daemon answers is asked of it o
   data.openRefusal = 'the wake-up text must be text, not empty, at most 1000000 characters'
   await open(page, data)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await made.calls.on.check()
   await made.calls.words.fill('   ')
   await hold(page, 'project.open')
@@ -3978,7 +4514,7 @@ test('Enter in the number of the wake-up calls or in the specs folder of New pro
 }) => {
   await open(page)
   const made = await newProject(page)
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await made.calls.every.press('Enter')
   await made.specs.folder.fill('docs')
   await made.specs.folder.press('Enter')
@@ -3988,6 +4524,176 @@ test('Enter in the number of the wake-up calls or in the specs folder of New pro
   expect(await calls(page, 'project.specs')).toEqual([])
   await made.start.click()
   await expect.poll(() => calls(page, 'project.open')).toHaveLength(1)
+})
+
+/** Every field a person can press Enter in, in `dialog`: what is on show and not disabled. */
+const fieldsIn = (dialog) =>
+  dialog.locator(
+    'input:not([type=hidden]):not(:disabled):visible, select:not(:disabled):visible, textarea:not(:disabled):visible',
+  )
+
+/** What a field is, to say which one failed: its tag, type and name. */
+const fieldName = (field) =>
+  field.evaluate((node) =>
+    `${node.tagName.toLowerCase()}${node.type ? `[${node.type}]` : ''} ${node.name || node.getAttribute('aria-label') || ''}`.trim(),
+  )
+
+test('Enter in any field of New project starts no project, and is a new line in a text area; Start alone does', async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = {
+    on: true,
+    codexSetUp: true,
+    permissions: { accessibility: true, screenRecording: false },
+  }
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['worker'])]
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  // A size chosen, so the field that takes one can be pressed in too.
+  await made.compaction.size.check()
+  const fields = fieldsIn(made.dialog)
+  const count = await fields.count()
+  // The folder, the chief's three, the staff's, and every field of every section.
+  expect(count).toBeGreaterThanOrEqual(16)
+  for (let at = 0; at < count; at += 1) {
+    const field = fields.nth(at)
+    const name = await fieldName(field)
+    const isText = await field.evaluate((node) => node.tagName === 'TEXTAREA')
+    const before = isText ? await field.inputValue() : null
+    await field.press('Enter')
+    expect(await calls(page, 'project.open'), `Enter in ${name} started a project`).toEqual([])
+    await expect(made.dialog, `Enter in ${name} closed the dialog`).toBeVisible()
+    // A text area keeps what Enter is for: a new line.
+    if (isText) expect(await field.inputValue(), `Enter in ${name}`).toBe(`${before}\n`)
+  }
+  // None of it saved anything either: there is no project to save for.
+  for (const operation of ['wakeup.set', 'project.specs', 'project.rules', 'project.compaction']) {
+    expect(await calls(page, operation), operation).toEqual([])
+  }
+  // Enter keeps what it is for on a button: its press.
+  await made.computerUse
+    .getByRole('button', { name: 'Open System Settings for Accessibility' })
+    .press('Enter')
+  await expect.poll(() => calls(page, 'computer_use.open')).toEqual([{ pane: 'accessibility' }])
+  expect(await calls(page, 'project.open')).toEqual([])
+  await made.start.click()
+  await expect.poll(() => calls(page, 'project.open')).toHaveLength(1)
+})
+
+test('Enter in a field of a section of Project settings adds nobody to the staff, saves no other section and leaves the dialog open', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'claude-code')
+  data.computerUse = { on: true, permissions: { accessibility: true, screenRecording: false } }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  // Add a member is filled in, so a form that was submitted would add it.
+  await pickMember(dialog, {
+    role: 'worker',
+    harness: 'Codex',
+    model: 'gpt-6-astra',
+    tier: 'standard',
+  })
+  await dialog
+    .getByRole('group', { name: 'Compaction' })
+    .getByRole('radio', { name: 'A size' })
+    .check()
+  const sections = dialog.locator('fieldset.project-section:not(:has(> .staff))')
+  const fields = fieldsIn(sections)
+  const count = await fields.count()
+  expect(count).toBeGreaterThanOrEqual(8)
+  // What a field saves of its own section on Enter, as it always did: the number of the calls and the specs' folder.
+  const OWN = { 'wakeup-every': 'wakeup.set', specsFolder: 'project.specs' }
+  const OPERATIONS = [
+    'member.add',
+    'member.edit',
+    'member.roles',
+    'project.gate',
+    'wakeup.set',
+    'project.specs',
+    'project.rules',
+    'project.compaction',
+  ]
+  const tally = async () =>
+    Object.fromEntries(
+      await Promise.all(
+        OPERATIONS.map(async (operation) => [operation, (await calls(page, operation)).length]),
+      ),
+    )
+  for (let at = 0; at < count; at += 1) {
+    const field = fields.nth(at)
+    const name = await fieldName(field)
+    const isText = await field.evaluate((node) => node.tagName === 'TEXTAREA')
+    const before = await tally()
+    await field.press('Enter')
+    // Whatever was asked of the daemon has come back before it is counted.
+    await page.evaluate(() => new Promise((done) => setTimeout(done, 40)))
+    const after = await tally()
+    const own = OWN[await field.getAttribute('name')]
+    const expected = { ...before }
+    if (own !== undefined) expected[own] += 1
+    expect(after, `Enter in ${name}`).toEqual(expected)
+    await expect(dialog, `Enter in ${name} closed the dialog`).toBeVisible()
+    if (isText) expect(await field.inputValue()).toMatch(/\n$/)
+  }
+  expect(await calls(page, 'member.add')).toEqual([])
+})
+
+test('no id is held by two elements of the page, and what a field is described or labelled by is in its own dialog', async ({
+  page,
+}) => {
+  await open(page)
+  // The sections are one markup cloned into two dialogs: what one says by an id, the other must not share.
+  const found = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll('[id]')].map((node) => node.id)
+    const duplicates = ids.filter((id, at) => ids.indexOf(id) !== at)
+    // A description or a label is read from inside the dialog it is in (a menu's aria-controls
+    // may name another dialog, which is what it opens).
+    const strays = []
+    for (const node of document.querySelectorAll('[aria-describedby], [aria-labelledby]')) {
+      const home = node.closest('dialog') ?? document
+      for (const attribute of ['aria-describedby', 'aria-labelledby']) {
+        for (const id of (node.getAttribute(attribute) ?? '').split(/\s+/).filter(Boolean)) {
+          const target = document.getElementById(id)
+          if (target === null || !home.contains(target)) strays.push(`${attribute}=${id}`)
+        }
+      }
+    }
+    return { duplicates, strays }
+  })
+  expect(found).toEqual({ duplicates: [], strays: [] })
+})
+
+test("each dialog's rules for the staff are described by its own counter, whatever the other says", async ({
+  page,
+}) => {
+  await open(page)
+  const rulesOf = (dialog) =>
+    dialog.getByRole('group', { name: 'Rules for the staff', exact: true }).getByLabel('The rules')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await rulesOf(settings).fill('abc')
+  await expect(rulesOf(settings)).toHaveAccessibleDescription('3 of 8,000 bytes · 1 of 150 lines')
+  await settings.getByRole('button', { name: 'Close' }).click()
+  const made = await newProject(page)
+  await made.rules.text.fill('abcdef\nghi')
+  await expect(made.rules.text).toHaveAccessibleDescription('10 of 8,000 bytes · 2 of 150 lines')
+  // Two counters, one for each dialog's field: neither field names the other's.
+  const references = await page.evaluate(() =>
+    [...document.querySelectorAll('textarea[name="staff-rules"]')].map((field) => [
+      field.closest('dialog').id,
+      field.getAttribute('aria-describedby'),
+    ]),
+  )
+  expect(references.map(([dialog]) => dialog).sort()).toEqual([
+    'new-project-dialog',
+    'project-settings-dialog',
+  ])
+  expect(new Set(references.map(([, id]) => id)).size).toBe(2)
 })
 
 test('New project opens on the defaults every time: what was set in it before is not kept', async ({
@@ -4002,9 +4708,17 @@ test('New project opens on the defaults every time: what was set in it before is
   await made.specs.mode.selectOption('on')
   await made.specs.folder.fill('docs')
   await made.specs.variant.selectOption('tdd-html')
+  await made.rules.text.fill('Never push to upstream.')
+  await made.compaction.size.check()
+  await made.compaction.tokens.fill('250000')
   await made.dialog.getByRole('button', { name: 'Cancel' }).click()
   await expect(made.dialog).toBeHidden()
   await page.getByRole('button', { name: 'New project' }).click()
+  await expect(made.rules.text).toHaveValue('')
+  await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
+  await expect(made.compaction.own).toBeChecked()
+  await expect(made.compaction.tokens).toHaveValue('')
+  await expect(made.compaction.tokens).toBeDisabled()
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
   await expect(made.calls.every).toHaveValue('1')
@@ -4015,44 +4729,326 @@ test('New project opens on the defaults every time: what was set in it before is
   await expect(made.specs.folder).toBeEnabled()
 })
 
-test("offers a new project's chief only the agents on a harness installed here, by tier", async ({
+/** The legends of a dialog's sections, in the order they are drawn, hidden ones too. */
+const legendsOf = (page, id) =>
+  page.evaluate(
+    (id) =>
+      [...document.querySelectorAll(`#${id} fieldset.project-section > legend`)].map(
+        (legend) => legend.textContent,
+      ),
+    id,
+  )
+
+/**
+ * The sections of Project settings that New project does not hold, by their legends, and why
+ * each stays out (T-1268). A section is in both dialogs, drawn from the one markup the page
+ * holds (`#project-sections`), or it is here with its reason: a section added to Project
+ * settings alone fails this test until it is one or the other. Staff is in both, and drawn by
+ * each for itself.
+ */
+const NEW_PROJECT_LACKS = {}
+
+test('New project holds every section Project settings holds, in its order, but those named with a reason', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['worker'])]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = await legendsOf(page, 'project-settings-dialog')
+  await page
+    .getByRole('dialog', { name: 'Project settings' })
+    .getByRole('button', { name: 'Close' })
+    .click()
+  await newProject(page)
+  const made = await legendsOf(page, 'new-project-dialog')
+  // Each exception is a section Project settings has and New project lacks, and a reason.
+  for (const [legend, reason] of Object.entries(NEW_PROJECT_LACKS)) {
+    expect(settings, legend).toContain(legend)
+    expect(made, legend).not.toContain(legend)
+    expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
+  }
+  expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
+  expect(made).toHaveLength(7)
+})
+
+test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  // Counted against the bounds as the human types, as in Project settings.
+  await made.rules.text.fill(STAFF_RULES)
+  await expect(made.rules.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
+  await expect(made.rules.group).toContainText('No secrets: no passwords, tokens or keys')
+  // A size is checked as it is typed, and a first one starts from the proposal's.
+  await made.compaction.size.check()
+  await expect(made.compaction.tokens).toBeEnabled()
+  await expect(made.compaction.tokens).toHaveValue('400000')
+  await made.compaction.tokens.fill('250000')
+  await expect(made.compaction.hint).toBeHidden()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        rules: STAFF_RULES,
+        compaction: 250000,
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  // They start with the project, in the one write that makes it: nothing is saved afterwards.
+  for (const operation of ['project.rules', 'project.compaction']) {
+    expect(await calls(page, operation), operation).toEqual([])
+  }
+})
+
+test('New project: rules over a bound, or a size that is no whole number in the range, hold the start back as they hold the save in Project settings, and say why', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  // 8,001 bytes of rules.
+  await made.rules.text.fill('x'.repeat(8_001))
+  await expect(made.rules.count).toHaveClass(/over/)
+  await expect(made.rules.text).toHaveAttribute('aria-invalid', 'true')
+  await made.start.click()
+  await expect(made.refusal).toContainText('8,000 bytes')
+  // A size outside the range.
+  await made.rules.text.fill('Short.')
+  await made.compaction.size.check()
+  await made.compaction.tokens.fill('99999')
+  await expect(made.compaction.hint).toHaveText(
+    'A size is a whole number from 100,000 to 1,000,000.',
+  )
+  await expect(made.compaction.tokens).toHaveAttribute('aria-invalid', 'true')
+  await made.start.click()
+  await expect(made.refusal).toContainText('A size is a whole number from 100,000 to 1,000,000.')
+  expect(await calls(page, 'project.open')).toEqual([])
+  // Put right, it starts, with both.
+  await made.compaction.tokens.fill('100000')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        rules: 'Short.',
+        compaction: 100000,
+      },
+    ])
+})
+
+test('New project: a project made with rules, a compaction size and computer use said opens in Project settings with them', async ({
+  page,
+}) => {
+  const data = model()
+  data.openMakesBoard = true
+  data.computerUse = { on: true, permissions: { accessibility: true, screenRecording: false } }
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.rules.text.fill(STAFF_RULES)
+  await made.compaction.size.check()
+  await made.compaction.tokens.fill('300000')
+  // Computer use is Claude Code's own switch for the folder, read and not written: what the dialog
+  // says of it for the folder is what the project's settings say of it once the project is there.
+  await expect(made.computerUse.getByRole('heading', { name: 'Claude Code' })).toBeVisible()
+  const said = await computerUse(made.dialog)
+  await made.start.click()
+  await expect(made.dialog).toBeHidden()
+  await expect(page.locator('#project-title')).toHaveText('new')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = (name) => dialog.getByRole('group', { name, exact: true })
+  await expect(section('Rules for the staff').getByLabel('The rules')).toHaveValue(STAFF_RULES)
+  await expect(section('Compaction').getByRole('radio', { name: 'A size' })).toBeChecked()
+  await expect(
+    section('Compaction').getByLabel('Size in tokens, 100,000 to 1,000,000'),
+  ).toHaveValue('300000')
+  expect(await computerUse(dialog)).toEqual(said)
+  expect(said.map(({ block }) => block)).toEqual(['claude-code', 'permissions'])
+})
+
+test("New project: computer use is read for the folder picked, shown while the chief or a member runs on a harness that has one, and opens the panes as Project settings' does", async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = {
+    on: true,
+    codexSetUp: true,
+    permissions: { accessibility: true, screenRecording: false },
+  }
+  await open(page, data)
+  const made = await newProject(page)
+  // No project yet, so the folder is what is asked about, and nothing is asked of a project.
+  await expect.poll(() => calls(page, 'computer_use.get')).toEqual([{ directory: '/work/fresh' }])
+  // No harness picked: no computer use to say.
+  await expect(made.computerUse).toBeHidden()
+  // A chief on Pi has none; on Claude Code it has, for the folder.
+  await pickChief(made.dialog, 'Pi', 'meta/muse-spark')
+  await expect(made.computerUse).toBeHidden()
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await expect(made.computerUse).toBeVisible()
+  expect(await computerUse(made.dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'On for this project',
+      lines: [CLAUDE_ON],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [MEND, KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'not allowed', OPEN],
+      ],
+    },
+  ])
+  // A member on Codex adds Codex's block and its column, and the panes stay one button each.
+  await pickMember(made.dialog, {
+    role: 'worker',
+    harness: 'Codex',
+    model: 'gpt-6-astra',
+    tier: 'standard',
+  })
+  await made.dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  expect((await computerUse(made.dialog)).map(({ block }) => block)).toEqual([
+    'claude-code',
+    'codex',
+    'permissions',
+  ])
+  await expect(made.computerUse.getByRole('button')).toHaveText([OPEN, OPEN])
+  await made.computerUse
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
+    .click()
+  await expect.poll(() => calls(page, 'computer_use.open')).toEqual([{ pane: 'screen-recording' }])
+  // The member leaves: Codex's block goes with it.
+  await made.dialog.getByRole('button', { name: /^Remove Worker/ }).click()
+  expect((await computerUse(made.dialog)).map(({ block }) => block)).toEqual([
+    'claude-code',
+    'permissions',
+  ])
+  // A start sends nothing of computer use: there is nothing of it to keep.
+  await made.start.click()
+  await expect.poll(async () => (await calls(page, 'project.open')).length).toBe(1)
+  expect(Object.keys((await calls(page, 'project.open'))[0]).sort()).toEqual([
+    'directory',
+    'gate',
+    'harness',
+    'model',
+    'staff',
+  ])
+})
+
+test('New project: back from System Settings, computer use is read again for the folder picked, and only while the dialog is open', async ({
+  page,
+}) => {
+  const data = model()
+  data.computerUse = { on: true, permissions: { accessibility: false, screenRecording: false } }
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  const accessibility = made.computerUse.locator(
+    'tr[data-grant="accessibility"] .computer-use-status',
+  )
+  await expect(accessibility).toHaveText('not allowed')
+  // The human allows it in System Settings and comes back to the app.
+  await page.evaluate(() => {
+    window.__model.computerUse = {
+      on: true,
+      permissions: { accessibility: true, screenRecording: false },
+    }
+    window.dispatchEvent(new Event('focus'))
+  })
+  await expect(accessibility).toHaveText('allowed')
+  expect(await calls(page, 'computer_use.get')).toEqual([
+    { directory: '/work/fresh' },
+    { directory: '/work/fresh' },
+  ])
+  // A dialog that is shut asks nothing.
+  await made.dialog.getByRole('button', { name: 'Cancel' }).click()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await page.evaluate(() => new Promise((done) => setTimeout(done, 100)))
+  expect(await calls(page, 'computer_use.get')).toHaveLength(2)
+})
+
+test("offers a new project's chief only the harnesses installed here, and its staff only members on them", async ({
   page,
 }) => {
   const data = model()
   data.missing = ['claude', 'devin']
-  data.agents.push({
-    name: 'ares',
-    harness: 'devin',
-    model: 'swe-1-6-slow',
-    profile: { workTier: 'light' },
-    hidden: true,
-    notInstalled: true,
-  })
-  data.lastStaff = [{ agent: 'ares', roles: ['worker'] }]
+  data.lastStaff = [
+    {
+      ...lastMember('zeus', 'devin', ['worker'], 'light'),
+      model: 'swe-1-6-slow',
+      modelName: 'ares',
+    },
+    lastMember('diana', 'codex', ['worker'], 'light'),
+  ]
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  // Claude Code and Devin are not installed here, and Pi's one agent is hidden; pygmalion
-  // is a Codex agent, but an image agent is never the chief.
-  expect(await chiefGroups(dialog.getByLabel('The chief runs on'))).toEqual([
-    ['T1 · Critical work', [['hera', false]]],
-    [
-      'T4 · Light work',
-      [
-        ['diana', false],
-        ['athena', false],
-      ],
-    ],
+  // Claude Code and Devin are not installed here.
+  expect(await offered(dialog.locator('[name="chiefHarness"]'))).toEqual([
+    ['Pick a harness', true],
+    ['Codex', false],
+    ['Pi', false],
+    ['Muse Code', false],
   ])
-  await expect(dialog.locator('tr[data-agent="ares"]')).toHaveCount(0)
-  await expect(dialog.locator('option', { hasText: 'ares' })).toHaveCount(0)
+  await expect(dialog.locator('tr[data-model="swe-1-6-slow"]')).toHaveCount(0)
+  await expect(dialog.locator('tr[data-model="gpt-5.6-luna"]')).toHaveCount(1)
+  expect(await offered(dialog.locator('[name="memberHarness"]'))).toEqual([
+    ['Pick a harness', true],
+    ['Codex', false],
+    ['Pi', false],
+    ['Muse Code', false],
+  ])
+})
+
+test("starts a new project's staff on the model as its harness's list names it, which is not Devin's launch id for the effort", async ({
+  page,
+}) => {
+  const data = model()
+  // Devin's member holds the id its launch passes for the effort (`swe-2-max`); the list holds
+  // `swe-2`, which is what the daemon takes for a pick, with the effort beside it.
+  data.lastStaff = [
+    {
+      ...lastMember('zeus', 'devin', ['worker'], 'light'),
+      model: 'swe-2-max',
+      modelName: 'swe-2',
+      effort: 'max',
+    },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const row = dialog.locator('tr[data-model="swe-2"]')
+  await expect(row).toHaveCount(1)
+  await expect(row.locator('.member-name')).toHaveText('swe-2')
+  await expect(row.locator('.member-meta')).toHaveText('Devin · max · light')
+  await expect(dialog.locator('tr[data-model="swe-2-max"]')).toHaveCount(0)
 })
 
 test('refuses a new project when no harness is installed here, and says where to get one', async ({
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin', 'muse']
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   await expect(page.locator('#status')).toHaveText(
@@ -4088,25 +5084,22 @@ test('starts no project without a folder: none chosen, or no picker in this wind
   await expect(page.getByRole('dialog', { name: 'New project' })).toBeHidden()
 })
 
-test('says in New project who may be picked: nobody yet, or no agent saved at all', async ({
+test('says in New project who may be picked: nobody yet, and how a member is added', async ({
   page,
 }) => {
   await open(page)
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  const rows = dialog.getByRole('table', { name: 'Agents for the staff' }).locator('tbody tr')
+  const rows = dialog.getByRole('table', { name: 'Members for the staff' }).locator('tbody tr')
   await page.getByRole('button', { name: 'New project' }).click()
-  await expect(rows).toHaveText(['Nobody yet: pick a role, then an agent whose model suits it.'])
+  await expect(rows).toHaveText([
+    'Nobody yet: pick a role, a harness, a model and a tier, then Add.',
+  ])
   await expect(dialog.locator('#new-project-hint')).toBeHidden()
-  await dialog.getByRole('button', { name: 'Cancel' }).click()
-  await page.evaluate(() => {
-    window.__model.agents = []
-  })
-  await page.getByRole('button', { name: 'New project' }).click()
-  await expect(rows).toHaveText(['No agents saved yet: add some under Agents first.'])
-  await expect(dialog.locator('#new-project-hint')).toHaveText(
-    'No saved agents yet: add one under Settings, Agents.',
-  )
-  await expect(dialog.locator('[name="pickAgent"]')).toBeDisabled()
+  // Add with nothing picked adds nobody.
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(rows).toHaveText([
+    'Nobody yet: pick a role, a harness, a model and a tier, then Add.',
+  ])
 })
 
 test('shows and sets human approval from Project settings, which has no review policy', async ({
@@ -4138,7 +5131,7 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
@@ -4153,7 +5146,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Rules for the staff',
-    'Compaction for Claude members',
+    'Compaction',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -4162,7 +5155,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
   for (const name of [
     'Staff',
     'Rules for the staff',
-    'Compaction for Claude members',
+    'Compaction',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -4210,10 +5203,20 @@ test('Project settings: each section saves in its own way as before, and none sa
     .toEqual([{ project: 1, on: true, folder: 'docs', variant: null }])
   expect(await calls(page, 'wakeup.set')).toHaveLength(1)
   // The staff as a member is added, at once.
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra', tier: 'critical' })
   await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
-    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
+    .toEqual([
+      {
+        project: 1,
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        tier: 'critical',
+        roles: ['worker'],
+      },
+    ])
   expect(await calls(page, 'project.gate')).toHaveLength(1)
 })
 
@@ -4246,12 +5249,68 @@ test('saves the specs on Enter in the folder and adds nobody to the staff', asyn
   expect(await calls(page, 'member.roles')).toEqual([])
 })
 
+/** The model's first project with its chief's window closed. */
+function chiefClosed() {
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.role === 'chief').pane = null
+  return data
+}
+
+test('a project whose chief has no window open says its specs reach the chief at its next launch, and the chief is told now where it has one', async ({
+  page,
+}) => {
+  await open(page, chiefClosed())
+  const specs = await openSpecs(page)
+  await specs.mode.selectOption('on')
+  await specs.save.click()
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(1)
+  await expect(specs.note).toHaveText('Saved: the chief is told at its next launch.')
+  await specs.mode.selectOption('off')
+  await specs.save.click()
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(2)
+  await expect(specs.note).toHaveText(
+    'Specs are off in this project: the chief is told at its next launch.',
+  )
+  // Its window opens (Resume): the same save now says it is told now.
+  await page.evaluate(() => {
+    const chief = window.__model.boards[1].lanes.find((lane) => lane.participant.role === 'chief')
+    chief.pane = { id: 'p1-chief', generation: 6 }
+  })
+  await specs.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await openSpecs(page)
+  await again.mode.selectOption('on')
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(3)
+  await expect(again.note).toHaveText('Saved: the chief is told now.')
+})
+
+test('the rules for the staff say the chief is told now where its window is open, and every window gets them when it next starts', async ({
+  page,
+}) => {
+  await open(page, chiefClosed())
+  const section = await rulesGroup(page)
+  await section.rules.fill(STAFF_RULES)
+  await section.save.click()
+  await expect.poll(() => calls(page, 'project.rules')).toHaveLength(1)
+  await expect(page.locator('#status')).toHaveText(
+    'The rules for the staff are saved: each window of the staff is given them when it next starts.',
+  )
+  await section.rules.fill('')
+  await section.save.click()
+  await expect.poll(() => calls(page, 'project.rules')).toHaveLength(2)
+  await expect(page.locator('#status')).toHaveText(
+    'The project has no rules for the staff now: windows that start from now on are given none.',
+  )
+})
+
 test('a project follows the app’s setting for specs until it says on or off, and the dialog says when a change takes hold', async ({
   page,
 }) => {
   await open(page)
   const specs = await openSpecs(page)
-  await expect(specs.group).toContainText('A change reaches the chief when it next starts')
+  await expect(specs.group).toContainText(
+    'A change reaches the chief as soon as it is at rest if its window is open, else when it next starts',
+  )
   // It says nothing: it follows what the human set for every project (Settings, Specs).
   await expect(specs.mode).toHaveValue('follow')
   await expect(specs.mode.locator('option:checked')).toHaveText(/^Follow the app's setting/)
@@ -4276,10 +5335,9 @@ test('a project follows the app’s setting for specs until it says on or off, a
   await expect
     .poll(() => calls(page, 'project.specs'))
     .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: 'tdd' }])
-  await expect(specs.note).toHaveText('Saved: the specs reach the chief when it next starts.')
-  await expect(page.locator('#status')).toHaveText(
-    'Saved: the specs reach the chief when it next starts.',
-  )
+  // The chief of this board has a window open: it is told now, at its rest.
+  await expect(specs.note).toHaveText('Saved: the chief is told now.')
+  await expect(page.locator('#status')).toHaveText('Saved: the chief is told now.')
   // The board is drawn again and the dialog shows what the daemon keeps.
   await expect(specs.mode).toHaveValue('on')
   await expect(specs.folder).toHaveValue('docs/specs')
@@ -4292,9 +5350,7 @@ test('a project follows the app’s setting for specs until it says on or off, a
   await specs.save.click()
   await expect.poll(async () => (await calls(page, 'project.specs')).length).toBe(2)
   expect((await calls(page, 'project.specs'))[1]).toMatchObject({ project: 1, on: false })
-  await expect(specs.note).toHaveText(
-    'Specs are off in this project: the chief is told so when it next starts.',
-  )
+  await expect(specs.note).toHaveText('Specs are off in this project: the chief is told now.')
   await expect(specs.mode).toHaveValue('off')
 
   // Back to following the app's setting: it says none of the three.
@@ -4437,11 +5493,19 @@ test('New project says what following the app means as Project settings does, an
   await expect(made.specs.version).toHaveText('Specmint 3.1.0')
   // Chosen and taken back, the section is as it opened and the project starts with no word of specs.
   await made.specs.variant.selectOption('')
-  await made.chief.selectOption('zeus')
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
   await made.start.click()
   await expect
     .poll(() => calls(page, 'project.open'))
-    .toEqual([{ directory: '/work/fresh', agent: 'zeus', gate: false, staff: [] }])
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+      },
+    ])
 })
 
 test('New project opened again shows the version of the variant it opens with, not of the one chosen before it was cancelled', async ({
@@ -4549,7 +5613,7 @@ test('saves the rules for the staff as written, by their own Save, shows what th
     .toEqual([{ project: 1, rules: `  ${STAFF_RULES}\n\n` }])
   await expect(section.rules).toHaveValue(STAFF_RULES)
   await expect(page.locator('#status')).toHaveText(
-    'The rules for the staff are saved: each window of the project is given them when it next starts.',
+    'The rules for the staff are saved: the chief is told now, and each window of the staff is given them when it next starts.',
   )
   // No other section saved with them.
   for (const operation of ['wakeup.set', 'project.specs', 'project.gate']) {
@@ -4564,7 +5628,7 @@ test('saves the rules for the staff as written, by their own Save, shows what th
   await expect.poll(() => calls(page, 'project.rules')).toHaveLength(2)
   expect((await calls(page, 'project.rules'))[1]).toEqual({ project: 1, rules: '' })
   await expect(page.locator('#status')).toHaveText(
-    'The project has no rules for the staff now: windows that start from now on are given none.',
+    'The project has no rules for the staff now: the chief is told now, and windows that start from now on are given none.',
   )
 })
 
@@ -4611,23 +5675,23 @@ test("says a refusal of the rules for the staff in their section, in the daemon'
   await expect(section.rules).toHaveValue('a\u0007b')
 })
 
-/** Project settings open on project 1, and its section of the Claude members' compaction. */
+/** Project settings open on project 1, and its section of the members' compaction. */
 async function compactionGroup(page) {
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  const group = dialog.getByRole('group', { name: 'Compaction for Claude members' })
+  const group = dialog.getByRole('group', { name: 'Compaction', exact: true })
   return {
     dialog,
     group,
-    own: group.getByRole('radio', { name: "Claude's own point" }),
+    own: group.getByRole('radio', { name: "The harness's own point" }),
     size: group.getByRole('radio', { name: 'A size' }),
     amount: group.getByLabel('Size in tokens, 100,000 to 1,000,000'),
-    hint: group.locator('.claude-compaction-hint'),
+    hint: group.locator('.members-compaction-hint'),
     save: group.getByRole('button', { name: 'Save compaction' }),
   }
 }
 
-test("Project settings offers Claude's own point for the Claude members' compaction until the human chooses a size, and says what it does", async ({
+test("Project settings offers each harness's own point for the members' compaction until the human chooses a size, and says in one line what it does", async ({
   page,
 }) => {
   await open(page)
@@ -4638,23 +5702,22 @@ test("Project settings offers Claude's own point for the Claude members' compact
   await expect(section.amount).toHaveValue('')
   await expect(section.save).toBeEnabled()
   await expect(section.hint).toBeHidden()
-  // One line, in the section: what it does and who it leaves alone.
-  await expect(section.group).toContainText(
-    "From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.",
-  )
-  // And the margin Claude keeps, which is Claude's to change: said as the version we measured it on.
-  await expect(section.group).toContainText(
-    'Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.',
-  )
+  // One line, in the section, true of every harness: what it does, what a size above a
+  // model's own window does, and who it leaves alone.
+  await expect(section.group.locator('.dialog-help')).toHaveText([
+    "From its next start, each member's harness compacts its conversation at about this size, by its own rule; a size above a model's own window leaves the harness's own point. The chief is not affected.",
+  ])
+  // Nothing of the old Claude-only section is left.
+  await expect(section.group).not.toContainText('Claude')
   // Opening sends nothing.
   expect(await calls(page, 'project.compaction')).toEqual([])
 })
 
-test("Project settings shows the size the board has for the Claude members' compaction", async ({
+test("Project settings shows the size the board has for the members' compaction", async ({
   page,
 }) => {
   const data = model()
-  data.boards[1].project.claudeCompaction = 400000
+  data.boards[1].project.compaction = 400000
   await open(page, data)
   const section = await compactionGroup(page)
   await expect(section.size).toBeChecked()
@@ -4665,7 +5728,7 @@ test("Project settings shows the size the board has for the Claude members' comp
   expect(await calls(page, 'project.compaction')).toEqual([])
 })
 
-test("saves the choice of a size by its own Save, shows what the daemon kept, and saves Claude's own point again as none", async ({
+test("saves the choice of a size by its own Save, shows what the daemon kept, and saves the harness's own point again as none", async ({
   page,
 }) => {
   await open(page)
@@ -4682,7 +5745,7 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
     .toEqual([{ project: 1, compaction: 250000 }])
   await expect(section.amount).toHaveValue('250000')
   await expect(page.locator('#status')).toHaveText(
-    "The project's Claude members compact at about 250,000 tokens: each window is given it when it next starts.",
+    "The project's members compact at about 250,000 tokens: each window is given it when it next starts.",
   )
   // No other section saved with it.
   for (const operation of ['project.rules', 'wakeup.set', 'project.specs', 'project.gate']) {
@@ -4692,7 +5755,7 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
   const again = await compactionGroup(page)
   await expect(again.size).toBeChecked()
   await expect(again.amount).toHaveValue('250000')
-  // Claude's own point again: none is saved, and the size is not kept in the field.
+  // The harness's own point again: none is saved, and the size is not kept in the field.
   await again.own.check()
   await expect(again.amount).toBeDisabled()
   await again.save.click()
@@ -4701,11 +5764,11 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
   await expect(again.own).toBeChecked()
   await expect(again.amount).toHaveValue('')
   await expect(page.locator('#status')).toHaveText(
-    "The project's Claude members use Claude's own point again: windows that start from now on are given no size.",
+    "The project's members use their harness's own point again: windows that start from now on are given no size.",
   )
 })
 
-test('holds the size to the range Claude takes, and Save back while it is not a whole number in it', async ({
+test('holds the size to the range the ledger takes, and Save back while it is not a whole number in it', async ({
   page,
 }) => {
   await open(page)
@@ -4738,7 +5801,7 @@ test('holds the size to the range Claude takes, and Save back while it is not a 
       await expect(section.amount, text).toHaveAttribute('aria-invalid', 'true')
     }
   }
-  // Claude's own point is saved whatever the field holds.
+  // The harness's own point is saved whatever the field holds.
   await section.amount.fill('99999')
   await section.own.check()
   await expect(section.save).toBeEnabled()
@@ -4746,7 +5809,7 @@ test('holds the size to the range Claude takes, and Save back while it is not a 
   expect(await calls(page, 'project.compaction')).toEqual([])
 })
 
-test("says a refusal of the Claude members' compaction in its section and keeps what was chosen", async ({
+test("says a refusal of the members' compaction in its section and keeps what was chosen", async ({
   page,
 }) => {
   await open(page)
@@ -5045,11 +6108,10 @@ test("lists every member under the chief, with no staff groups, on the board and
 })
 
 /**
- * The agents screens behind Settings, served as the daemon serves them, for
- * a page that is handed their address; `env` is the daemon's, where its
- * agents are kept.
+ * The daemon's screen behind Settings (Harnesses), served as the daemon serves it, for a page
+ * that is handed its address; `env` is the daemon's.
  */
-async function agentsScreens() {
+async function daemonScreens() {
   const t = tempEnv()
   const server = await agentsServer(t.env)
   return {
@@ -5073,68 +6135,12 @@ async function openScreen(page, name) {
   return page.getByRole('dialog', { name })
 }
 
-const agentsRead = (page) =>
-  page.evaluate(() => window.__calls.filter(([, args]) => args?.operation === 'agents.list').length)
-
-test('opens Agents from Settings in a dialog over the board, the daemon’s agents in it; Close goes back to Settings and reads the agents again', async ({
-  page,
-}) => {
-  const daemon = await agentsScreens()
-  try {
-    await open(page, { ...model(), screens: daemon.screens })
-    const agents = await openScreen(page, 'Agents')
-    await expect(agents).toBeVisible()
-    await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeHidden()
-    await expect(agents.getByRole('button', { name: 'Close' })).toBeFocused()
-    const screen = agents.frameLocator('iframe')
-    await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
-    await expect(screen.locator('#agents .member .callsign', { hasText: /^eos$/ })).toBeVisible()
-    const read = await agentsRead(page)
-    await agents.getByRole('button', { name: 'Close' }).click()
-    await expect(agents).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
-    // What the screen changed (a model, a tier) is on the board's agents too.
-    await expect.poll(() => agentsRead(page)).toBe(read + 1)
-    expect(await page.getByRole('dialog').count()).toBe(0)
-  } finally {
-    await daemon.close()
-  }
-})
-
-test('Agents asked for while the daemon starts says it waits, a click meanwhile asks nothing more, and it opens once the daemon is up', async ({
-  page,
-}) => {
-  const daemon = await agentsScreens()
-  try {
-    await open(page, { ...model(), screens: daemon.screens })
-    const status = page.locator('#status')
-    const asked = () =>
-      page.evaluate(() => window.__calls.filter(([c]) => c === 'agents_screen').length)
-    await hold(page, 'agents_screen')
-    const agents = await openScreen(page, 'Agents')
-    await expect(status).toHaveText("Agents opens once ConsensFlow's daemon is up.")
-    await expect(agents).toBeHidden()
-    // Clicked again, and Harnesses too: nothing more is asked while the first waits.
-    await openScreen(page, 'Agents')
-    expect(await asked()).toBe(1)
-    await openScreen(page, 'Harnesses')
-    await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeHidden()
-    expect(await asked()).toBe(1)
-    await letGo(page, 'agents_screen')
-    await expect(agents).toBeVisible()
-    await expect(status).toHaveText('')
-    expect(await page.getByRole('dialog').count()).toBe(1)
-  } finally {
-    await daemon.close()
-  }
-})
-
 test('opens Harnesses from Settings in a dialog where a check runs against the daemon; Escape goes back to Settings', async ({
   page,
 }) => {
   // The harnesses are stand-ins at 1.2.3 that count how often they are asked their version,
   // which a check does once; what the feeds say of a newer release is theirs to say.
-  const daemon = await agentsScreens()
+  const daemon = await daemonScreens()
   try {
     await open(page, { ...model(), screens: daemon.screens })
     const harnesses = await openScreen(page, 'Harnesses')
@@ -5160,77 +6166,17 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
 test('Escape pressed inside a screen closes its dialog, as it closes every other dialog', async ({
   page,
 }) => {
-  const daemon = await agentsScreens()
+  const daemon = await daemonScreens()
   try {
     await open(page, { ...model(), screens: daemon.screens })
-    const agents = await openScreen(page, 'Agents')
-    await agents.frameLocator('iframe').getByRole('searchbox').fill('eos')
+    const harnesses = await openScreen(page, 'Harnesses')
+    await harnesses
+      .frameLocator('iframe')
+      .getByRole('button', { name: 'Check all harnesses' })
+      .focus()
     await page.keyboard.press('Escape')
-    await expect(agents).toBeHidden()
+    await expect(harnesses).toBeHidden()
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
-  } finally {
-    await daemon.close()
-  }
-})
-
-test('a screen opened again keeps what the human left on it, and lists the agents saved meanwhile', async ({
-  page,
-}) => {
-  const daemon = await agentsScreens()
-  try {
-    await open(page, { ...model(), screens: daemon.screens })
-    let agents = await openScreen(page, 'Agents')
-    let screen = agents.frameLocator('iframe')
-    await screen.getByLabel('Show', { exact: true }).selectOption('mine')
-    await expect(screen.locator('#agents')).toHaveText('No agents match these filters.')
-    await agents.getByRole('button', { name: 'Close' }).click()
-    // Saved elsewhere while the screen was closed: `cf agent add`, say.
-    addAgent({ name: 'newbie', harness: 'codex', model: 'gpt-6-astra' }, daemon.env)
-    agents = await openScreen(page, 'Agents')
-    screen = agents.frameLocator('iframe')
-    await expect(screen.locator('#agents .member .callsign')).toHaveText(['newbie'])
-    await expect(screen.getByLabel('Show', { exact: true })).toHaveValue('mine')
-  } finally {
-    await daemon.close()
-  }
-})
-
-/**
- * The preferences the daemon keeps in the agents file of the home `env` names: none
- * until it has written the file. A poll gives up on a reader that throws, and the
- * first read may come before the write (it did once, in a whole run of the suite).
- */
-const preferencesIn = (env) => {
-  try {
-    return JSON.parse(readFileSync(join(env.CONSENSFLOW_HOME, 'agents.json'), 'utf8')).preferences
-  } catch {
-    return undefined
-  }
-}
-
-test('the Agents screen has no box for specs any more: what the app says of them is in Settings, under Specs', async ({
-  page,
-}) => {
-  const daemon = await agentsScreens()
-  try {
-    await open(page, { ...model(), screens: daemon.screens })
-    const agents = await openScreen(page, 'Agents')
-    const screen = agents.frameLocator('iframe')
-    await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
-    // The other choice is where it was, and keeps the agents file as it did.
-    const own = screen.getByLabel('Claude and OpenAI models only', { exact: false })
-    await expect(own).not.toBeChecked()
-    await expect(screen.locator('[name="specs"]')).toHaveCount(0)
-    await expect(screen.getByLabel('Plan big work as specs', { exact: false })).toHaveCount(0)
-    await own.check()
-    await expect.poll(() => preferencesIn(daemon.env)).toEqual({ ownHarnessOnly: true })
-    // With specs off and no folder or variant named, what the screen is told of the human's
-    // choices says nothing of specs: the agents file reads as it always did.
-    const listed = await screen.locator('body').evaluate(async () => {
-      const response = await fetch('/api/agents', { headers })
-      return (await response.json()).preferences
-    })
-    expect(listed).toEqual({ ownHarnessOnly: true })
   } finally {
     await daemon.close()
   }
@@ -5255,17 +6201,13 @@ async function openSpecsSettings(page) {
   }
 }
 
-test('Settings has Specs as a third entry, under Agents and Harnesses, and it opens a dialog of the page, Settings closed behind it', async ({
+test('Settings has Specs as a second entry, under Harnesses, and it opens a dialog of the page, Settings closed behind it', async ({
   page,
 }) => {
   await open(page)
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
-  await expect(settings.locator('.settings-menu li button')).toHaveText([
-    'Agents',
-    'Harnesses',
-    'Specs',
-  ])
+  await expect(settings.locator('.settings-menu li button')).toHaveText(['Harnesses', 'Specs'])
   await settings.getByRole('button', { name: 'Specs' }).click()
   const specs = page.getByRole('dialog', { name: 'Specs', exact: true })
   await expect(specs).toBeVisible()
@@ -5702,9 +6644,9 @@ test('Settings, Specs: a change the daemon refuses once the dialog is shut is sa
 
 test('a screen that cannot open says why, and no dialog opens', async ({ page }) => {
   await open(page)
-  await openScreen(page, 'Agents')
+  await openScreen(page, 'Harnesses')
   await expect(page.locator('#status')).toHaveText(
-    'the agents screens are not available: the daemon is not up',
+    'the harnesses screen is not available: the daemon is not up',
   )
   expect(await page.getByRole('dialog').count()).toBe(0)
 })
@@ -5855,7 +6797,9 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
     await expect(board.getByRole('button', { name })).toHaveCount(0)
   }
   // Nor is the chief switched from anywhere: its card in the dock went with its window.
-  const switchChief = page.getByRole('button', { name: 'Switch the chief to another agent' })
+  const switchChief = page.getByRole('button', {
+    name: 'Switch the chief to another harness or model',
+  })
   await expect(switchChief).toHaveCount(0)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
@@ -6552,7 +7496,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
   await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
     'Staff',
     'Rules for the staff',
-    'Compaction for Claude members',
+    'Compaction',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6969,6 +7913,49 @@ function allOn(data, harness) {
 }
 
 /**
+ * What the Computer use section of Project settings shows (T-1266): each block in its order, a
+ * harness's (by its word) or the permissions', with its heading, the status on its heading's
+ * line, its muted lines, and for the permissions the columns (the apps) and each pane's row:
+ * its name, each app's status, and its one button.
+ */
+const computerUse = (dialog) =>
+  dialog.locator('fieldset.computer-use').evaluate((section) => {
+    const text = (node) => node.textContent.replace(/\s+/g, ' ').trim()
+    return [...section.querySelectorAll('.computer-use-block')]
+      .filter((block) => block.closest('[hidden]') === null)
+      .map((block) => {
+        const shown = { block: block.dataset.harness ?? 'permissions' }
+        shown.heading = text(block.querySelector('.computer-use-head'))
+        const status = block.querySelector('.computer-use-title .computer-use-status')
+        if (status !== null) shown.status = text(status)
+        shown.lines = [...block.querySelectorAll('.dialog-help')]
+          .filter((line) => line.closest('[hidden]') === null && !line.hidden)
+          .map(text)
+        const columns = [...block.querySelectorAll('thead th')].map(text).filter(Boolean)
+        if (columns.length > 0) shown.columns = columns
+        const rows = [...block.querySelectorAll('tbody tr')].map((row) =>
+          [...row.children].map((cell) => text(cell)),
+        )
+        if (rows.length > 0) shown.rows = rows
+        return shown
+      })
+  })
+
+/** The distance from each block of the section to the next, in px. */
+const computerUseGaps = (dialog) =>
+  dialog.locator('fieldset.computer-use').evaluate((section) => {
+    const blocks = [...section.querySelectorAll('.computer-use-block')].filter(
+      (block) => block.closest('[hidden]') === null,
+    )
+    return blocks
+      .slice(1)
+      .map(
+        (block, at) =>
+          block.getBoundingClientRect().top - blocks[at].getBoundingClientRect().bottom,
+      )
+  })
+
+/**
  * What Project settings and ConsensFlow's note say when a permission reads missing and
  * ConsensFlow is on in the list all the same (T-903): macOS keeps a grant for one copy of
  * the app, and the copy that was allowed may not be the installed one.
@@ -6980,23 +7967,17 @@ const MEND =
 const noteAbout = (names) =>
   `Claude Code's computer use is on for this project, but ConsensFlow can't control the screen until you allow it ${names} in System Settings → Privacy & Security. ${MEND}`
 
-/** What the Computer use section of Project settings says, line by line. */
-const computerUseLines = (dialog) =>
-  dialog.locator('fieldset.computer-use').evaluate((section) =>
-    [
-      ...section.querySelectorAll(
-        '.computer-use-head, .computer-use-line, .computer-use-grant, .computer-use-mend',
-      ),
-    ]
-      .filter((node) => node.closest('[hidden]') === null)
-      .map((node) =>
-        [...node.childNodes]
-          .map((child) => child.textContent)
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim(),
-      ),
-  )
+const CLAUDE_OFF =
+  'Turn it on in a Claude Code window of this project: /mcp → computer-use → Enable.'
+const CLAUDE_ON = "It works through ConsensFlow's permissions, below."
+const CODEX_SET_UP =
+  "Set up in the ChatGPT app. It works through its own app's permissions, below, which ConsensFlow can't read."
+const CODEX_NOT_SET_UP = 'Set it up in the ChatGPT app, then allow Codex Computer Use below.'
+const KEPT =
+  "These are the Mac's, for every project. A permission you change in System Settings may need ConsensFlow to be quit and opened again."
+const OPEN = 'Open System Settings'
+const ACCESSIBILITY = 'Accessibility'
+const SCREEN = 'Screen & System Audio Recording'
 
 test('Project settings: a project with no member on a harness with computer use, the chief included, shows no computer use', async ({
   page,
@@ -7057,14 +8038,27 @@ test('Project settings: computer use says where Claude Code turns it on, and eac
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Off for this project.',
-    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
-    "ConsensFlow's permissions, for every project",
-    'Accessibility: allowed Open System Settings',
-    'Screen & System Audio Recording: not allowed Open System Settings',
-    MEND,
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Off for this project',
+      lines: [CLAUDE_OFF],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [MEND, KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'not allowed', OPEN],
+      ],
+    },
+  ])
+  // Only what needs the human's hand is marked: the one that is not allowed.
+  await expect(dialog.locator('.computer-use-status[data-state="missing"]')).toHaveText([
+    'not allowed',
   ])
   await dialog
     .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
@@ -7085,24 +8079,42 @@ test('Project settings: computer use that is on says so, and on Windows says Cla
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'On for this project (/work/harbour).',
-    "ConsensFlow's permissions, for every project",
-    'Accessibility: allowed Open System Settings',
-    'Screen & System Audio Recording: allowed Open System Settings',
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'On for this project',
+      lines: [CLAUDE_ON],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'allowed', OPEN],
+      ],
+    },
   ])
+  // No path of the project is shown: the section is of the project the dialog is for.
+  await expect(dialog.locator('fieldset.computer-use')).not.toContainText('/work/harbour')
   await dialog.getByRole('button', { name: 'Close' }).click()
   await page.evaluate(() => {
     window.__model.computerUse = { system: 'windows', permissions: null }
   })
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Claude Code has no computer use on Windows.',
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Not available on Windows',
+      lines: [],
+    },
   ])
   await expect(dialog.locator('.computer-use-permissions')).toBeHidden()
+  await expect(dialog.locator('fieldset.computer-use').getByRole('button')).toHaveCount(0)
 })
 
 test("Project settings: a ConsensFlow started from another app says the permissions shown are that app's", async ({
@@ -7118,15 +8130,27 @@ test("Project settings: a ConsensFlow started from another app says the permissi
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Off for this project.',
-    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
-    "ConsensFlow's permissions, for every project",
-    "This ConsensFlow was started from com.apple.Terminal, so these are that app's permissions, not ConsensFlow's.",
-    'Accessibility: allowed Open System Settings',
-    'Screen & System Audio Recording: not allowed Open System Settings',
-    MEND,
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Off for this project',
+      lines: [CLAUDE_OFF],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [
+        "This ConsensFlow was started from com.apple.Terminal, so these are that app's permissions, not ConsensFlow's.",
+        MEND,
+        KEPT,
+      ],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'allowed', OPEN],
+        [SCREEN, 'not allowed', OPEN],
+      ],
+    },
   ])
 })
 
@@ -7159,28 +8183,34 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
 }) => {
   const data = model()
   allOn(data, 'codex')
-  data.computerUse = { permissions: { accessibility: true, screenRecording: true } }
+  // Run from a terminal, ConsensFlow's permissions are that app's: said where they are shown, and
+  // nowhere else, so not for Codex, whose block has none of ConsensFlow's.
+  data.computerUse = {
+    grantsOf: 'com.apple.Terminal',
+    permissions: { accessibility: true, screenRecording: true },
+  }
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  // ConsensFlow's own permissions are not Codex's: they are not shown for it.
-  expect(await computerUseLines(dialog)).toEqual([
-    'Codex',
-    'Not set up on this Mac.',
-    'Set it up in the ChatGPT app.',
-    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
-    'Accessibility Open System Settings',
-    'Screen & System Audio Recording Open System Settings',
+  // ConsensFlow's own permissions are not Codex's: they are not shown for it, and Codex's are
+  // read by nobody, so each says unknown, with its pane to open as every row has.
+  expect(await computerUse(dialog)).toEqual([
+    { block: 'codex', heading: 'Codex', status: 'Not set up', lines: [CODEX_NOT_SET_UP] },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'Codex Computer Use'],
+      rows: [
+        [ACCESSIBILITY, 'unknown', OPEN],
+        [SCREEN, 'unknown', OPEN],
+      ],
+    },
   ])
-  await expect(dialog.locator('.computer-use-permissions')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Open System Settings for Accessibility' }).click()
   await dialog
-    .getByRole('button', { name: 'Open System Settings for Accessibility (Codex Computer Use)' })
-    .click()
-  await dialog
-    .getByRole('button', {
-      name: 'Open System Settings for Screen & System Audio Recording (Codex Computer Use)',
-    })
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
     .click()
   await expect
     .poll(() => calls(page, 'computer_use.open'))
@@ -7191,12 +8221,18 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
   })
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Codex',
-    'Set up on this Mac, for every project.',
-    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
-    'Accessibility Open System Settings',
-    'Screen & System Audio Recording Open System Settings',
+  expect(await computerUse(dialog)).toEqual([
+    { block: 'codex', heading: 'Codex', status: 'Set up', lines: [CODEX_SET_UP] },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'Codex Computer Use'],
+      rows: [
+        [ACCESSIBILITY, 'unknown', OPEN],
+        [SCREEN, 'unknown', OPEN],
+      ],
+    },
   ])
   await dialog.getByRole('button', { name: 'Close' }).click()
   await page.evaluate(() => {
@@ -7204,10 +8240,13 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
   })
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual(['Codex', 'Codex has no computer use on Windows.'])
+  expect(await computerUse(dialog)).toEqual([
+    { block: 'codex', heading: 'Codex', status: 'Not available on Windows', lines: [] },
+  ])
+  await expect(dialog.locator('fieldset.computer-use').getByRole('button')).toHaveCount(0)
 })
 
-test("Project settings: a project with Claude Code and Codex members shows both parts, and ConsensFlow's permissions once", async ({
+test('Project settings: a project with Claude Code and Codex members shows both blocks, and one permissions block with a column for each app and one button for each pane', async ({
   page,
 }) => {
   const data = model()
@@ -7222,19 +8261,180 @@ test("Project settings: a project with Claude Code and Codex members shows both 
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
-  expect(await computerUseLines(dialog)).toEqual([
-    'Claude Code',
-    'Off for this project.',
-    'Turn it on in a Claude Code window in /work/harbour: /mcp → computer-use → Enable.',
-    'Codex',
-    'Set up on this Mac, for every project.',
-    "It works through Codex Computer Use's own permissions, not ConsensFlow's: allow Codex Computer Use in each of these.",
-    'Accessibility Open System Settings',
-    'Screen & System Audio Recording Open System Settings',
-    "ConsensFlow's permissions, for every project",
-    'Accessibility: not allowed Open System Settings',
-    'Screen & System Audio Recording: allowed Open System Settings',
-    MEND,
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'Off for this project',
+      lines: [CLAUDE_OFF],
+    },
+    { block: 'codex', heading: 'Codex', status: 'Set up', lines: [CODEX_SET_UP] },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [MEND, KEPT],
+      columns: ['Permission', 'ConsensFlow', 'Codex Computer Use'],
+      rows: [
+        [ACCESSIBILITY, 'not allowed', 'unknown', OPEN],
+        [SCREEN, 'allowed', 'unknown', OPEN],
+      ],
+    },
+  ])
+  // The two panes both apps need are opened by one button each, not by one for each app.
+  const section = dialog.locator('fieldset.computer-use')
+  await expect(section.getByRole('button')).toHaveText([OPEN, OPEN])
+  await section.getByRole('button', { name: 'Open System Settings for Accessibility' }).click()
+  await section
+    .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
+    .click()
+  await expect
+    .poll(() => calls(page, 'computer_use.open'))
+    .toEqual([{ pane: 'accessibility' }, { pane: 'screen-recording' }])
+})
+
+test('Project settings: the blocks of computer use sit the same distance apart, however many there are', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'codex')
+  data.boards[1].lanes.find((l) => l.participant.role === 'chief').participant.harness =
+    'claude-code'
+  data.computerUse = {
+    codexSetUp: true,
+    permissions: { accessibility: true, screenRecording: false },
+  }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  const gaps = await computerUseGaps(dialog)
+  expect(gaps).toHaveLength(2)
+  // Room between them, the same each time.
+  expect(gaps[0]).toBeGreaterThanOrEqual(8)
+  expect(Math.abs(gaps[0] - gaps[1])).toBeLessThan(1)
+  // Windows has the two blocks and no more, as far apart.
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.computerUse = { system: 'windows', permissions: null }
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  const windows = await computerUseGaps(dialog)
+  expect(windows).toHaveLength(1)
+  expect(Math.abs(windows[0] - gaps[0])).toBeLessThan(1)
+})
+
+test('Project settings: the sections are the same distance apart and spaced alike inside, and each that saves does so with the same button in the same place', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'claude-code')
+  data.computerUse = { permissions: { accessibility: true, screenRecording: false } }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  const sections = await dialog.evaluate((node) => {
+    const all = [...node.querySelectorAll('fieldset.project-section')].filter(
+      (section) => section.closest('[hidden]') === null && !section.hidden,
+    )
+    return all.map((section, at) => {
+      const box = section.getBoundingClientRect()
+      const style = getComputedStyle(section)
+      const save = [...section.querySelectorAll('button')].find((button) =>
+        /^Save /.test(button.textContent),
+      )
+      const inner =
+        box.right -
+        Number.parseFloat(style.paddingRight) -
+        Number.parseFloat(style.borderRightWidth)
+      return {
+        name: section.querySelector('legend').textContent,
+        above: at === 0 ? null : box.top - all[at - 1].getBoundingClientRect().bottom,
+        inside: style.rowGap,
+        save:
+          save === undefined
+            ? null
+            : {
+                text: save.textContent,
+                primary: save.classList.contains('primary-button'),
+                inActions: save.parentElement.classList.contains('dialog-actions'),
+                fromEdge: Math.round(inner - save.getBoundingClientRect().right),
+              },
+      }
+    })
+  })
+  expect(sections.map(({ name }) => name)).toEqual([
+    'Staff',
+    'Rules for the staff',
+    'Compaction',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+    'Computer use',
+  ])
+  // The same room between the sections, and inside each, so no group runs into the next.
+  expect(new Set(sections.slice(1).map(({ above }) => Math.round(above))).size).toBe(1)
+  expect(sections[1].above).toBeGreaterThanOrEqual(12)
+  expect(new Set(sections.map(({ inside }) => inside))).toEqual(new Set(['12px']))
+  // A section that saves has one primary button, at the end of its own line of actions.
+  const saves = sections.filter(({ save }) => save !== null).map(({ name, save }) => [name, save])
+  expect(saves).toEqual([
+    ['Rules for the staff', { text: 'Save rules', primary: true, inActions: true, fromEdge: 0 }],
+    ['Compaction', { text: 'Save compaction', primary: true, inActions: true, fromEdge: 0 }],
+    ['Wake-up calls', { text: 'Save wake-up calls', primary: true, inActions: true, fromEdge: 0 }],
+    ['Specs', { text: 'Save specs', primary: true, inActions: true, fromEdge: 0 }],
+  ])
+})
+
+test("Project settings: the compaction's two choices read as the approval's checkbox does, in the same colour and size", async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  const looks = (labels) =>
+    labels.evaluateAll((all) =>
+      all.map((label) => {
+        const style = getComputedStyle(label)
+        return [style.color, style.fontSize]
+      }),
+    )
+  const [approval] = await looks(dialog.locator('label:has([name="gate"])'))
+  const choices = await looks(
+    dialog.getByRole('group', { name: 'Compaction' }).locator('label:has([type="radio"])'),
+  )
+  expect(choices).toEqual([approval, approval])
+})
+
+test("Project settings: a Claude Code member on a Mac whose permissions can't be read shows them unknown, each with its pane to open", async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'claude-code')
+  data.computerUse = { on: true, permissions: null }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('group', { name: 'Computer use' })).toBeVisible()
+  expect(await computerUse(dialog)).toEqual([
+    {
+      block: 'claude-code',
+      heading: 'Claude Code',
+      status: 'On for this project',
+      lines: [CLAUDE_ON],
+    },
+    {
+      block: 'permissions',
+      heading: 'Permissions in System Settings',
+      lines: [KEPT],
+      columns: ['Permission', 'ConsensFlow'],
+      rows: [
+        [ACCESSIBILITY, 'unknown', OPEN],
+        [SCREEN, 'unknown', OPEN],
+      ],
+    },
   ])
 })
 
@@ -7392,20 +8592,24 @@ test('Project settings: open for a project they show and save its own, whole, wh
   await expect
     .poll(() => calls(page, 'project.specs'))
     .toEqual([{ project: 1, on: true, folder: 'docs', variant: 'tdd' }])
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra', tier: 'critical' })
   await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
-    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
-  await dialog.getByLabel('Role').selectOption('advisor')
-  await dialog.getByLabel('Agent').selectOption('zeus')
-  await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
-  await expect
-    .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer', 'advisor'] }])
+    .toEqual([
+      {
+        project: 1,
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        tier: 'critical',
+        roles: ['worker'],
+      },
+    ])
   // foundry has a zeus too, with one role: it is harbour's, with two, that loses one.
   await dialog.getByRole('button', { name: 'Remove Reviewer @zeus' }).click()
-  await expect.poll(() => calls(page, 'member.roles')).toHaveLength(2)
-  expect((await calls(page, 'member.roles'))[1]).toEqual({
+  await expect.poll(() => calls(page, 'member.roles')).toHaveLength(1)
+  expect((await calls(page, 'member.roles'))[0]).toEqual({
     project: 1,
     agent: 'zeus',
     roles: ['worker'],
@@ -7480,7 +8684,10 @@ async function leftWithSavesOnTheirWay(page, words, { next = false } = {}) {
 test('Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it', async ({
   page,
 }) => {
-  await open(page, twoWithOwnSettings())
+  // foundry's chief has no window open, harbour's has: what the save says is harbour's.
+  const data = twoWithOwnSettings()
+  data.boards[2].lanes.find((lane) => lane.participant.role === 'chief').pane = null
+  await open(page, data)
   const left = await leftWithSavesOnTheirWay(page, 'Harbour: anything left?', { next: true })
   const { calling, specs, dialog } = left
   // harbour's answers come now: nothing of them is in foundry's dialog.
@@ -7489,9 +8696,9 @@ test('Project settings: a save answered after the dialog was left for another pr
     'Wake-up calls are on: the chief is asked every 3 hours.',
   )
   await letGo(page, 'project.specs')
-  await expect(page.locator('#status')).toHaveText(
-    'Saved: the specs reach the chief when it next starts.',
-  )
+  // harbour's chief has a window open: it is told now, though the dialog was left for foundry's
+  // (whose chief has none) before the daemon answered.
+  await expect(page.locator('#status')).toHaveText('Saved: the chief is told now.')
   await settled(page)
   expect(await shownIn(dialog)).toEqual(FOUNDRYS)
   await expect(specs.locator('.specs-note')).toBeHidden()
@@ -7608,10 +8815,20 @@ test('Project settings: open for a closed project from its menu and from the boa
   // Its approval and its staff are saved too, for foundry.
   await section('Human approval').getByRole('checkbox').uncheck()
   await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 2, gate: false }])
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra', tier: 'critical' })
   await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
-    .toEqual([{ project: 2, agent: 'hera', roles: ['worker'] }])
+    .toEqual([
+      {
+        project: 2,
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        tier: 'critical',
+        roles: ['worker'],
+      },
+    ])
   await dialog.getByRole('button', { name: 'Remove Worker @athena' }).click()
   await dialog.getByRole('button', { name: 'Remove @athena', exact: true }).click()
   await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 2, agent: 'athena' }])
@@ -7788,40 +9005,49 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
 }) => {
   const data = model()
   data.lastStaff = [
-    { agent: 'zeus', roles: ['worker', 'reviewer'] },
-    { agent: 'diana', roles: ['worker'] },
-    { agent: 'hera', roles: ['worker'] },
+    lastMember('zeus', 'claude-code', ['worker', 'reviewer']),
+    lastMember('diana', 'codex', ['worker'], 'light'),
+    lastMember('hera', 'codex', ['worker'], 'critical'),
   ]
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await expect(dialog.getByLabel('Project folder')).toHaveValue('/work/fresh')
-  const table = dialog.getByRole('table', { name: 'Agents for the staff' })
-  // The last staff, one row per agent and role, by role and then by tier.
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  // The last staff, one row per member and role, by role and then by tier, each named by its
+  // model and saying what it runs on.
   await expect(table.locator('tbody tr')).toHaveText([
-    /hera.*gpt-6-astra · codex · max · critical.*Worker/,
-    /zeus.*claude-sonnet-5 · claude · high · standard.*Worker/,
-    /diana.*gpt-5.6-luna · codex · low · light.*Worker/,
-    /zeus.*Reviewer/,
+    /^gpt-6-astra.*Codex · max · critical.*Worker/,
+    /^claude-sonnet-5.*Claude Code · high · standard.*Worker/,
+    /^gpt-5.6-luna.*Codex · low · light.*Worker/,
+    /^claude-sonnet-5.*Reviewer/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
-  await dialog.getByLabel('The chief runs on').selectOption('athena')
-  await dialog.locator('[name="pickRole"]').selectOption('advisor')
-  await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
-    'hera · gpt-6-astra · codex · max',
-    'zeus · claude-sonnet-5 · claude · high',
-    'diana · gpt-5.6-luna · codex · low',
-    'athena · muse-spark · pi',
-  ])
-  await dialog.locator('[name="pickAgent"]').selectOption('athena')
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  // A member as Add member picks one: a role, a harness, a model it lists and a tier.
+  await pickMember(dialog, {
+    role: 'advisor',
+    harness: 'Pi',
+    model: 'meta/muse-spark',
+    tier: 'light',
+  })
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  // The image designer: the image agent alone.
-  await dialog.locator('[name="pickRole"]').selectOption('designer')
-  await expect(dialog.locator('[name="pickAgent"]').locator('option')).toHaveText([
-    'pygmalion · codex-image · codex',
-  ])
+  // The row of the member just picked names its model by its id, as its harness takes it (Pi's
+  // with its provider), never by what the harness's list calls the model.
+  await expect(
+    table.locator('tbody tr', { hasText: 'Advisor' }).locator('.member-name'),
+  ).toHaveText('meta/muse-spark')
+  await pickMember(dialog, {
+    role: 'designer',
+    harness: 'Codex',
+    model: 'gpt-5.6-luna',
+    tier: 'light',
+  })
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await dialog.getByRole('button', { name: 'Remove Worker diana' }).click()
+  await expect(
+    table.locator('tbody tr', { hasText: 'Image designer' }).locator('.member-name'),
+  ).toHaveText('gpt-5.6-luna')
+  await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
   await expect(table.locator('tbody tr')).toHaveCount(5)
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
@@ -7829,16 +9055,73 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     .toEqual([
       {
         directory: '/work/fresh',
-        agent: 'athena',
+        harness: 'pi',
+        model: 'meta/muse-spark',
         gate: false,
         staff: [
-          { agent: 'zeus', roles: ['worker', 'reviewer'] },
-          { agent: 'hera', roles: ['worker'] },
-          { agent: 'athena', roles: ['advisor'] },
-          { agent: 'pygmalion', roles: ['designer'] },
+          {
+            harness: 'claude-code',
+            model: 'claude-sonnet-5',
+            effort: 'high',
+            tier: 'standard',
+            roles: ['worker', 'reviewer'],
+          },
+          {
+            harness: 'codex',
+            model: 'gpt-6-astra',
+            effort: 'max',
+            tier: 'critical',
+            roles: ['worker'],
+          },
+          {
+            harness: 'pi',
+            model: 'meta/muse-spark',
+            effort: null,
+            tier: 'light',
+            roles: ['advisor'],
+          },
+          {
+            harness: 'codex',
+            model: 'gpt-5.6-luna',
+            effort: null,
+            tier: 'light',
+            roles: ['designer'],
+          },
         ],
       },
     ])
+})
+
+test('New project keeps an image designer a member of its own beside a worker on the same model, in either order', async ({
+  page,
+}) => {
+  await open(page)
+  for (const order of [
+    ['worker', 'designer'],
+    ['designer', 'worker'],
+  ]) {
+    await page.getByRole('button', { name: 'New project' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New project' })
+    await pickChief(dialog, 'Codex', 'gpt-6-astra')
+    for (const role of order) {
+      await pickMember(dialog, { role, harness: 'Codex', model: 'gpt-5.6-luna', tier: 'light' })
+      await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+    }
+    await dialog.getByRole('button', { name: 'Start project' }).click()
+    const one = (role) => ({
+      harness: 'codex',
+      model: 'gpt-5.6-luna',
+      effort: null,
+      tier: 'light',
+      roles: [role],
+    })
+    await expect
+      .poll(async () => (await calls(page, 'project.open')).at(-1)?.staff)
+      .toEqual(order.map(one))
+    await page.evaluate(() => {
+      window.__calls = []
+    })
+  }
 })
 
 test("docks the chief's terminal and a member's own, offers no Open terminal for them, and feeds them their output", async ({
@@ -8067,7 +9350,7 @@ test('starts a project while the board shown is on its way, and its windows go o
   })
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  await dialog.getByLabel('The chief runs on').selectOption('zeus')
+  await pickChief(dialog, 'Claude Code', 'claude-sonnet-5')
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect(page.locator('#project-title')).toHaveText('new')
   await page.evaluate(() => {
@@ -8760,7 +10043,7 @@ test("keeps the chief's card first in the dock while its window is down and a se
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
   await expect(card.locator('.terminal-status')).toHaveText('Starting')
   await expect(
-    card.getByRole('button', { name: 'Switch the chief to another agent' }),
+    card.getByRole('button', { name: 'Switch the chief to another harness or model' }),
   ).toBeVisible()
   await expect(page.locator('#stage .stage-empty')).toHaveCount(0)
   await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
@@ -8993,7 +10276,7 @@ test('keeps the order the cards came into the dock in across a switch to another
   await expect.poll(() => docked(page)).toEqual(shown)
 })
 
-test("sizes the dock's cards: beside the board the chief's the whole dock and each other two-thirds of it, with the board folded two-thirds and the last third", async ({
+test("sizes the dock's cards: beside the board the chief's the whole dock and each other two-thirds of it, with the board folded three-quarters and the last quarter", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -9028,21 +10311,77 @@ test("sizes the dock's cards: beside the board the chief's the whole dock and ea
   now = await measure()
   expect(now.room.width).toBeLessThan(320)
   for (const card of now.cards) expect(card.width).toBeCloseTo(now.room.width, 0)
-  // The board folded: the chief's two-thirds of the row, the other the last
-  // third, whole beside it.
+  // The board folded: the chief's three-quarters of the row, the other the
+  // last quarter, whole beside it.
   await squeeze('ArrowLeft', 40)
   await page.getByRole('button', { name: 'Hide board' }).click()
   await expect.poll(async () => (await measure()).dock).toBeGreaterThan(1200)
   now = await measure()
   const [chief, other] = now.cards
-  expect(chief.width).toBeCloseTo(((now.room.width - now.room.gap) * 2) / 3, 0)
-  expect(other.width).toBeCloseTo((now.room.width - now.room.gap) / 3, 0)
+  expect(chief.width).toBeCloseTo(((now.room.width - now.room.gap) * 3) / 4, 0)
+  expect(other.width).toBeCloseTo((now.room.width - now.room.gap) / 4, 0)
   expect(other.inView).toBe(true)
   // Back beside the board, the cards are as they were.
   await page.getByRole('button', { name: 'Show board' }).click()
   await expect
     .poll(async () => (await cardsOf(page))[0].width)
     .toBeCloseTo((await roomOf(page)).width, 0)
+})
+
+test("with the board folded fills the row with the chief's card alone, three-quarters of it beside another window, and the row again when it leaves", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  // harbour keeps a session's terminal shown; foundry's dock is its chief's alone.
+  await open(page, { ...twoOpen(atWork()), realTerminals: true })
+  await unfold(page)
+  const resizes = () =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_resize' && args.id === 'p1-chief')
+        .map(([, args]) => args.cols),
+    )
+  await expect.poll(async () => (await resizes()).length).toBe(1)
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  const room = await roomOf(page)
+  const [threeQuarters, quarter] = [((room.width - room.gap) * 3) / 4, (room.width - room.gap) / 4]
+  // Two cards beside the folded board: the chief's three-quarters of the row,
+  // the other's the last quarter, whole beside it.
+  let now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(threeQuarters, 0)
+  expect(now[1].width).toBeCloseTo(quarter, 0)
+  expect(now[1].inView).toBe(true)
+  // Folding grew the chief's card: its terminal took the new size once, wider.
+  await expect.poll(async () => (await resizes()).length).toBe(2)
+  // Alone — the other project's dock is its chief's alone: the whole row.
+  await chooseProject(page, 'foundry')
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(room.width, 0)
+  // Back to harbour's two: three-quarters and the last quarter again, as wide
+  // as the card left them, so no new size for its terminal.
+  await chooseProject(page, 'harbour')
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus-amber-pine'])
+  now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(threeQuarters, 0)
+  expect(now[1].width).toBeCloseTo(quarter, 0)
+  await page.waitForTimeout(300)
+  expect((await resizes()).length).toBe(2)
+  // The session's card hidden from its own Hide: the chief's is the whole row
+  // again, and its terminal takes that size once, wider still.
+  await page
+    .locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+    .getByRole('button', { name: "Hide @zeus · amber-pine's terminal" })
+    .click()
+  await expect.poll(() => docked(page)).toEqual(['chief'])
+  now = await cardsOf(page)
+  expect(now[0].width).toBeCloseTo(room.width, 0)
+  await expect.poll(async () => (await resizes()).length).toBe(3)
+  const [beside, folded, alone] = await resizes()
+  expect(folded).toBeGreaterThan(beside)
+  expect(alone).toBeGreaterThan(folded)
 })
 
 test('snaps the row of terminals to its padding: scrolled to its start, no sliver of the next card shows', async ({
@@ -9582,41 +10921,42 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
   await expect(page.getByRole('complementary', { name: 'Task T-3' })).toBeVisible()
 })
 
-test('switches the chief from its card to a saved agent on a harness installed here, after its turn or now', async ({
+test('switches the chief from its card to a harness installed here and a model of it, after its turn or now', async ({
   page,
 }) => {
   const data = model()
   data.missing = ['devin']
-  // The chief runs on zeus: what it runs on now is no switch.
-  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.agent =
-    'zeus'
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await expect(dialog).toBeVisible()
-  const select = dialog.getByLabel('The chief runs on')
-  // An agent is picked, never a default: nothing is chosen yet.
-  await expect(select).toHaveValue('')
-  await expect(select.locator('option').first()).toHaveText('Pick an agent')
-  // Devin is not installed here, and a hidden agent (Pi's one) is never on offer.
-  expect(await chiefGroups(select)).toEqual([
-    ['T1 · Critical work', [['hera', false]]],
-    ['T3 · Standard work', [['zeus', true]]],
-    [
-      'T4 · Light work',
-      [
-        ['diana', false],
-        ['athena', false],
-      ],
-    ],
+  const harness = dialog.locator('[name="chiefHarness"]')
+  const models = dialog.locator('[name="chiefModel"]')
+  // A harness is picked, never a default: nothing is chosen yet; Devin is not installed here.
+  await expect(harness).toHaveValue('')
+  expect(await offered(harness)).toEqual([
+    ['Pick a harness', true],
+    ['Claude Code', false],
+    ['Codex', false],
+    ['Pi', false],
+    ['Muse Code', false],
   ])
-  await select.selectOption('hera')
+  // Only the harness and model the chief is on are no switch: another model of its
+  // harness is a fresh conversation with the handoff.
+  await harness.selectOption({ label: 'Claude Code' })
+  await expect(models).toBeEnabled()
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['claude-opus-5-5', true],
+    ['claude-sonnet-5', false],
+  ])
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
   await dialog.getByLabel('First ask the chief to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 1, agent: 'hera', when: 'now', note: true }])
+    .toEqual([{ project: 1, harness: 'codex', model: 'gpt-6-astra', when: 'now', note: true }])
   await expect(dialog).toBeHidden()
 })
 
@@ -9625,17 +10965,18 @@ test('opens Switch chief letting the chief finish its turn, whatever was picked 
 }) => {
   await open(page)
   const switchChief = page.getByRole('button', {
-    name: 'Switch the chief to another agent',
+    name: 'Switch the chief to another harness or model',
   })
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
   await switchChief.click()
-  await dialog.getByLabel('The chief runs on').selectOption('diana')
+  await pickChief(dialog, 'Codex', 'gpt-5.6-luna')
   await dialog.getByLabel('Switch now, cutting its turn off').check()
   await dialog.getByLabel('First ask the chief to write down where things stand').check()
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect(dialog).toBeHidden()
   await switchChief.click()
-  await expect(dialog.getByLabel('The chief runs on')).toHaveValue('')
+  await expect(dialog.locator('[name="chiefHarness"]')).toHaveValue('')
+  await expect(dialog.locator('[name="chiefModel"]')).toBeDisabled()
   await expect(dialog.getByLabel('Let it finish its turn, then switch')).toBeChecked()
   await expect(
     dialog.getByLabel('First ask the chief to write down where things stand'),
@@ -9646,12 +10987,12 @@ test("the chief's card says when a switch waits for its turn", async ({ page }) 
   const data = model()
   data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').switching = {
     harness: 'codex',
-    agent: 'hera',
+    model: 'gpt-6-astra',
   }
   await open(page, data)
   await expect(
     page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
-  ).toHaveText('Switching the chief to hera after this turn')
+  ).toHaveText('Switching the chief to Codex (gpt-6-astra) after this turn')
   await expect(page.locator('.row-status[data-state="switching"]')).toHaveCount(0)
 })
 
@@ -9684,32 +11025,38 @@ test('says a message waits for what the human typed in a window out of quota too
   )
 })
 
-test("offers a chief still on its harness's own default every saved agent, and moves it to one", async ({
+test('offers a chief from before it had a model every model, and moves it to one', async ({
   page,
 }) => {
-  // A project opened before chiefs were agents: its chief names none.
-  await open(page)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  // A project opened before a chief was a harness and a model: its chief names none.
+  const data = model()
+  delete data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.model
+  await open(page, data)
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
-  const select = dialog.getByLabel('The chief runs on')
-  const disabled = (await chiefGroups(select)).flatMap(([, options]) =>
-    options.filter(([, off]) => off),
-  )
-  expect(disabled).toEqual([])
-  await select.selectOption('zeus')
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Claude Code' })
+  await expect(dialog.locator('[name="chiefModel"]')).toBeEnabled()
+  expect(await offered(dialog.locator('[name="chiefModel"]'))).toEqual([
+    ['Pick a model', true],
+    ['claude-opus-5-5', false],
+    ['claude-sonnet-5', false],
+  ])
+  await pickChief(dialog, 'Claude Code', 'claude-sonnet-5')
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 1, agent: 'zeus', when: 'turn', note: false }])
+    .toEqual([
+      { project: 1, harness: 'claude-code', model: 'claude-sonnet-5', when: 'turn', note: false },
+    ])
 })
 
 test('refuses Switch chief when no harness is installed here, and says where to get one', async ({
   page,
 }) => {
   const data = model()
-  data.missing = ['claude', 'codex', 'pi', 'devin']
+  data.missing = ['claude', 'codex', 'pi', 'devin', 'muse']
   await open(page, data)
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   await expect(page.locator('#status')).toHaveText(
     'No harness is installed here: install one from Agents, Harnesses.',
   )
@@ -9795,11 +11142,11 @@ test("acts on the project a control was drawn for, while another one's board is 
 
 test('switches the chief only of the project it was asked for', async ({ page }) => {
   await open(page, twoOpen())
-  // The agents come slowly; the human chooses foundry before the dialog is up.
+  // What is installed comes slowly; the human chooses foundry before the dialog is up.
   await page.evaluate(() => {
-    window.__delay['agents.list'] = 300
+    window.__delay['harnesses.missing'] = 300
   })
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   await chooseProject(page, 'foundry')
   await expect(page.locator('#project-title')).toHaveText('foundry')
   await page.waitForTimeout(500)
@@ -9808,13 +11155,13 @@ test('switches the chief only of the project it was asked for', async ({ page })
   await page.evaluate(() => {
     window.__delay = {}
   })
-  await page.getByRole('button', { name: 'Switch the chief to another agent' }).click()
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Switch the chief' })
-  await dialog.getByLabel('The chief runs on').selectOption('diana')
+  await pickChief(dialog, 'Codex', 'gpt-5.6-luna')
   await dialog.getByRole('button', { name: 'Switch', exact: true }).click()
   await expect
     .poll(() => calls(page, 'chief.switch'))
-    .toEqual([{ project: 2, agent: 'diana', when: 'turn', note: false }])
+    .toEqual([{ project: 2, harness: 'codex', model: 'gpt-5.6-luna', when: 'turn', note: false }])
 })
 
 test('says the daemon is down while it is, why, and what comes next, and reads everything again once it is back', async ({
@@ -9857,12 +11204,14 @@ test('says the daemon is down while it is, why, and what comes next, and reads e
     window.__down = null
   })
   const [agents, boards] = [
-    (await calls(page, 'agents.list')).length,
+    (await calls(page, 'harnesses.missing')).length,
     (await calls(page, 'board.get')).length,
   ]
   await daemonStatus({ available: true, cause: null, retrying: false })
   await expect(banner).toBeHidden()
-  await expect.poll(async () => (await calls(page, 'agents.list')).length).toBeGreaterThan(agents)
+  await expect
+    .poll(async () => (await calls(page, 'harnesses.missing')).length)
+    .toBeGreaterThan(agents)
   await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)
   await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
 })
@@ -10224,10 +11573,11 @@ test.describe('file drop on a Mac', () => {
     const zeus = await middleOf(page, 'zeus')
     await dragged.enter(page, ['/a/b.png'], told(zeus))
     expect(await marked(page)).toEqual(['zeus'])
-    // Its window ends: its card goes, and the dock has nothing there.
+    // Its window ends: its card goes, the chief's taking the row the place is
+    // in — the drop was meant for the window that went, not the card there now.
     await zeusWindow(null)
     await expect.poll(() => docked(page)).toEqual(['chief'])
-    expect(await cardAt(page, zeus)).toBeNull()
+    expect(await cardAt(page, zeus)).toBe('chief')
     await dragged.over(page, told(zeus))
     expect(await marked(page)).toEqual([])
     // Dropped where it was: nothing is typed, and the status line says the window went.
@@ -10235,9 +11585,12 @@ test.describe('file drop on a Mac', () => {
     const went = "Nothing was typed: @zeus's window has closed."
     await expect.poll(() => heard(page)).toEqual([went])
     await expect(page.locator('#status')).toHaveAttribute('data-tone', 'error')
-    // The next drag, dropped there with no window ending under it, says nothing.
+    // The next drag, dropped there with no window ending under it, is the
+    // chief's card's like anywhere on it: it takes the drop and says nothing.
     await dragged.enter(page, ['/a/b.png'], told(zeus))
+    expect(await marked(page)).toEqual(['chief'])
     await dragged.drop(page, ['/a/b.png'], told(zeus))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['/a/b.png'])
     // Nor does a drop elsewhere, though a window ended under the file before it moved on.
     await zeusWindow(8)
     await expect.poll(() => docked(page)).toEqual(['chief', 'zeus'])
@@ -10250,7 +11603,7 @@ test.describe('file drop on a Mac', () => {
     await dragged.drop(page, ['/a/b.png'], head)
     expect(await heard(page)).toEqual([went])
     expect(await typedInto(page, 'p1-zeus')).toEqual([])
-    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    expect(await typedInto(page, 'p1-chief')).toEqual(['/a/b.png'])
   })
 
   test('types nothing on a closed project’s dock, though an open one’s windows live on off screen', async ({
@@ -10635,3 +11988,404 @@ test('hears each event of the app with one listener, as the app keeps every one 
     'check-updates': 1,
   })
 })
+
+/**
+ * Models are shown by their id (spec harness-models, HMD-12): every model select offers each
+ * model as its harness takes it, never the name its harness's list gives it (`Opus`); Pi's
+ * with its provider, Devin's by the id its list holds with the effort picked beside it.
+ */
+const IDS = {
+  'Claude Code': ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+  Codex: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6.1-terra', 'gpt-6-sol'],
+  Devin: ['adaptive', 'swe-2', 'swe-2-lightning', 'claude-opus-5-5', 'claude-opus-5-5-fast'],
+  'Muse Code': ['muse-wonder-1.0', 'muse-spark-1.3', 'muse-spark-1.3-contributor'],
+  Pi: [
+    'anthropic/claude-fable-5',
+    'anthropic/claude-fable-5-1',
+    'anthropic/claude-haiku-4-5',
+    'kimi-coding/k3',
+  ],
+}
+
+test("the model selects of New project, Switch chief, Add member and Edit member show each model's id, as its harness takes it", async ({
+  page,
+}) => {
+  const data = shotData('after')
+  await open(page, data)
+  const ids = async (select) =>
+    (await offered(select)).map(([text]) => text).filter((text) => text !== 'Pick a model')
+  // A listed id is there, in each harness's list, and no display name is.
+  const known = (harness) =>
+    JSON.parse(
+      readFileSync(join(import.meta.dirname, 'fixtures', 'models', `${harness}.json`), 'utf8'),
+    ).models
+  const listedModels = ['claude', 'codex', 'devin', 'muse', 'pi'].flatMap(known)
+  const idsOf = new Set(
+    listedModels.flatMap((model) => [
+      model.id,
+      model.provider ? `${model.provider}/${model.id}` : model.id,
+    ]),
+  )
+  // The names the lists give their models, which are no ids (`Opus`, `GPT-6.1-Sol`).
+  const labels = new Set(
+    listedModels.map((model) => model.label).filter((label) => !idsOf.has(label)),
+  )
+  for (const [button, name] of [
+    ['New project', 'New project'],
+    ['Switch the chief to another harness or model', 'Switch the chief'],
+  ]) {
+    await page.getByRole('button', { name: button }).click()
+    const dialog = page.getByRole('dialog', { name })
+    for (const [harness, wanted] of Object.entries(IDS)) {
+      await dialog.locator('[name="chiefHarness"]').selectOption({ label: harness })
+      const models = dialog.locator('[name="chiefModel"]')
+      await expect(models).toBeEnabled()
+      const offeredIds = await ids(models)
+      expect(offeredIds.slice(0, wanted.length), `${name}: ${harness}`).toEqual(wanted)
+      for (const text of offeredIds)
+        expect(labels.has(text), `${name}: ${text} is a label`).toBe(false)
+    }
+    // Devin: the listed id, and its effort picked beside it.
+    await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Devin' })
+    await dialog.locator('[name="chiefModel"]').selectOption({ label: 'swe-2-lightning' })
+    expect(await offered(dialog.locator('[name="chiefEffort"]'))).toEqual([
+      ['Pick an effort', true],
+      ['medium', false],
+      ['high', false],
+      ['max', false],
+    ])
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+  }
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const add = settings.locator('.staff-add')
+  for (const [harness, wanted] of Object.entries(IDS)) {
+    await add.locator('[name="memberHarness"]').selectOption({ label: harness })
+    await expect(add.locator('[name="memberModel"]')).toBeEnabled()
+    expect((await ids(add.locator('[name="memberModel"]'))).slice(0, wanted.length)).toEqual(wanted)
+  }
+  // Edit member: the select holds the member's own id, picked, and the others by theirs.
+  await settings.getByRole('button', { name: 'Edit @claude-opus-5-5-high' }).first().click()
+  await expect(add.locator('[name="memberModel"]')).toHaveValue('claude-opus-5-5')
+  expect((await ids(add.locator('[name="memberModel"]'))).slice(0, 4)).toEqual(IDS['Claude Code'])
+})
+
+/**
+ * A member's name holds its model and effort (`@claude-opus-5-5-high`), so what stands under
+ * it is its role, its tier and its harness, as the harness is called; a name that holds none
+ * (the image designer on its harness's default) is followed by what it runs on too.
+ */
+test("a member's card says its role, tier and harness under a name that holds its model, and what it runs on only under one that does not", async ({
+  page,
+}) => {
+  await open(page, shotData('after'))
+  const meta = (handle, role) =>
+    page.locator(`tr[data-handle="${handle}"][data-role="${role}"] .row-meta`)
+  await expect(meta('claude-opus-5-5-high', 'worker')).toHaveText('worker · complex · Claude Code')
+  await expect(meta('claude-opus-5-5-high', 'tester')).toHaveText('tester · complex · Claude Code')
+  await expect(meta('claude-fable-5-1-max', 'reviewer')).toHaveText(
+    'reviewer · critical · Claude Code',
+  )
+  await expect(meta('gpt-6-astra-xhigh', 'advisor')).toHaveText('advisor · critical · Codex')
+  await expect(meta('swe-2-max', 'worker')).toHaveText('worker · light · Devin')
+  // A window of one: whose it is, and its harness.
+  await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+  await expect(meta('claude-opus-5-5-high-amber-pine', 'worker')).toHaveText(
+    'worker session of @claude-opus-5-5-high · Claude Code',
+  )
+  // The designer's name holds no model: what it runs on is said (its harness's default).
+  await expect(meta('codex-default', 'designer')).toHaveText(
+    'designer · light · Codex · Codex default',
+  )
+  // The same two lines in Project settings' table, where the role is a column of its own.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const table = page
+    .getByRole('dialog', { name: 'Project settings' })
+    .getByRole('table', { name: 'On the staff' })
+  const rows = table.locator('tbody tr')
+  await expect(rows.filter({ hasText: '@gpt-6-astra-xhigh' }).locator('.member-meta')).toHaveText(
+    'critical · Codex',
+  )
+  await expect(rows.filter({ hasText: '@codex-default' }).locator('.member-meta')).toHaveText(
+    'Codex default · light · Codex',
+  )
+})
+
+/**
+ * The name holds the model (HMD-12): Edit member to another model or effort renames the member,
+ * and the board shows the new name on its rows and its windows', the status line says it.
+ */
+test('Edit member to another model renames the member: its rows and its windows take the new name, and the status line says so', async ({
+  page,
+}) => {
+  await open(page, shotData('after'))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Edit @claude-opus-5-5-high' }).first().click()
+  await pickMember(settings, {
+    harness: 'Codex',
+    model: 'gpt-6.1-sol',
+    effort: 'max',
+    tier: 'critical',
+  })
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect(page.locator('#status')).toHaveText(
+    '@claude-opus-5-5-high is @gpt-6-1-sol-max now, and runs gpt-6.1-sol from its next window.',
+  )
+  expect(await calls(page, 'member.edit')).toEqual([
+    {
+      project: 1,
+      member: 'claude-opus-5-5-high',
+      harness: 'codex',
+      model: 'gpt-6.1-sol',
+      effort: 'max',
+      tier: 'critical',
+    },
+  ])
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await expect(page.locator('tr[data-handle="claude-opus-5-5-high"]')).toHaveCount(0)
+  await expect(page.locator('tr[data-handle="gpt-6-1-sol-max"] .row-name')).toHaveText([
+    '@gpt-6-1-sol-max',
+    '@gpt-6-1-sol-max',
+  ])
+  await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+  await expect(page.locator('tr[data-handle="gpt-6-1-sol-max-amber-pine"] .row-name')).toHaveText(
+    '@gpt-6-1-sol-max · amber-pine',
+  )
+})
+
+/**
+ * A window at work when its member is edited (HMD-12): the daemon renames the member and the
+ * window, and the window goes on. The page shows its terminal by the window's pane, never by the
+ * name it had: after the edit the card is there under the new name, its emulator is not
+ * disposed, nothing says the window is gone, and it is still in the dock the human put it in.
+ */
+test('Edit member renames a member whose window is at work and its terminal stays: the same card, emulator and place, under the new name', async ({
+  page,
+}) => {
+  await open(page, shotData('after'))
+  await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+  await page
+    .getByRole('button', { name: "Show @claude-opus-5-5-high · amber-pine's terminal" })
+    .click()
+  const card = (handle) => page.locator(`#stage .terminal-card[data-handle="${handle}"]`)
+  await expect(card('claude-opus-5-5-high-amber-pine')).toHaveCount(1)
+  const emulator = () =>
+    page.evaluate(() => {
+      const found = window.__emulators.filter(
+        (one) => document.querySelector('#stage')?.contains(one.host) || one.disposed,
+      )
+      return found.map((one) => one.disposed)
+    })
+  expect(await emulator()).toEqual([false, false])
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Edit @claude-opus-5-5-high' }).first().click()
+  await pickMember(settings, {
+    harness: 'Codex',
+    model: 'gpt-6.1-sol',
+    effort: 'max',
+    tier: 'critical',
+  })
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect(page.locator('#status')).toContainText('is @gpt-6-1-sol-max now')
+  await settings.getByRole('button', { name: 'Close' }).click()
+  // The window's card is the one it was, under its new name: none went, none was made.
+  await expect(card('gpt-6-1-sol-max-amber-pine')).toHaveCount(1)
+  await expect(card('claude-opus-5-5-high-amber-pine')).toHaveCount(0)
+  await expect(page.locator('#stage .terminal-gone, #stage .stage-empty')).toHaveCount(0)
+  expect(await emulator()).toEqual([false, false])
+})
+
+/**
+ * Shots for the review of the model ids (HMD-12): the staff list, New project's and Switch
+ * chief's selects, and a member's card before and after an edit, in dark and light. Not a
+ * check: it writes PNGs into `CF_SHOTS_DIR` where that is set, and skips where it is not.
+ * `CF_SHOTS_VARIANT` says the board of the shot: `before` is alpha.2's (names and labels from
+ * the harness's list), `after` this build's (ids), on the recorded lists of the harnesses.
+ */
+const SHOTS = process.env.CF_SHOTS_DIR
+const SHOT_VARIANT = process.env.CF_SHOTS_VARIANT ?? 'after'
+
+/** The recorded list of `harness`, as a harness gives one. */
+const recorded = (harness) =>
+  listed(
+    JSON.parse(
+      readFileSync(join(import.meta.dirname, 'fixtures', 'models', `${harness}.json`), 'utf8'),
+    ).models,
+  )
+
+/** The staff of a real board (kluris's), as the variant names it. */
+function shotData(variant) {
+  const after = variant === 'after'
+  const name = (before, id) => (after ? id : before)
+  const by = (label, id) => (after ? id : label)
+  const data = model()
+  data.models.claude.listing = recorded('claude')
+  data.models.codex.listing = recorded('codex')
+  data.models.devin.listing = recorded('devin')
+  data.models.muse.listing = recorded('muse')
+  data.models.pi.listing = recorded('pi')
+  const staff = (id, handle, roles, tier, extra) =>
+    participant(id, handle, roles[0], {
+      roles,
+      tier,
+      ...(after ? { nameApart: false } : { agent: null }),
+      ...extra,
+    })
+  const opus = staff(
+    3,
+    name('opus-high', 'claude-opus-5-5-high'),
+    ['worker', 'tester'],
+    'complex',
+    {
+      harness: 'claude-code',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+      modelName: by('Opus', 'claude-opus-5-5'),
+    },
+  )
+  const fable = staff(4, name('fable-max', 'claude-fable-5-1-max'), ['reviewer'], 'critical', {
+    harness: 'claude-code',
+    model: 'claude-fable-5-1',
+    effort: 'max',
+    modelName: by('Fable', 'claude-fable-5-1'),
+  })
+  const astra = staff(5, name('gpt-6-astra-xhigh', 'gpt-6-astra-xhigh'), ['advisor'], 'critical', {
+    harness: 'codex',
+    model: 'gpt-6-astra',
+    effort: 'xhigh',
+    modelName: by('GPT-6-Astra', 'gpt-6-astra'),
+  })
+  const swe = staff(6, 'swe-2-max', ['worker'], 'light', {
+    harness: 'devin',
+    model: 'swe-2-max',
+    effort: 'max',
+    modelName: by('SWE-2', 'swe-2'),
+  })
+  const sonnet = staff(
+    7,
+    name('sonnet-xhigh', 'claude-sonnet-5-5-xhigh'),
+    ['worker', 'reviewer'],
+    'standard',
+    {
+      harness: 'claude-code',
+      model: 'claude-sonnet-5-5',
+      effort: 'xhigh',
+      modelName: by('Sonnet', 'claude-sonnet-5-5'),
+    },
+  )
+  const designer = staff(8, 'codex-default', ['designer'], 'light', {
+    harness: 'codex',
+    designer: true,
+    ...(after ? { nameApart: true } : {}),
+  })
+  const window = (member, id, words) =>
+    session(id, member, words, 'worker', after ? { nameApart: false } : {})
+  const apart = (member) => (after ? member : member)
+  const lanes = data.boards[1].lanes
+  lanes.splice(
+    2,
+    2,
+    {
+      participant: apart(opus),
+      tasks: [task(2, 'Write the parser', 'working', 'chief', opus.handle, 4)],
+      activity: { state: 'working' },
+      pane: null,
+    },
+    {
+      participant: window(opus, 10, 'amber-pine'),
+      tasks: [task(7, 'Fix the build', 'working', 'chief', `${opus.handle}-amber-pine`, 2)],
+      activity: { state: 'working' },
+      pane: { id: 'p1-w', generation: 1 },
+    },
+    {
+      participant: fable,
+      tasks: [task(3, 'Review the parser', 'done', 'chief', fable.handle, 6)],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    {
+      participant: astra,
+      tasks: [task(4, 'Advise on the schema', 'queued', 'chief', astra.handle, 1)],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    {
+      participant: swe,
+      tasks: [task(5, 'Add the tests', 'working', 'chief', swe.handle, 3)],
+      activity: { state: 'idle' },
+      pane: null,
+    },
+    {
+      participant: sonnet,
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    {
+      participant: designer,
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  lanes[1].participant.model = 'claude-opus-5-5'
+  lanes[1].participant.effort = 'xhigh'
+  data.editRenames = after
+  return data
+}
+
+for (const scheme of ['dark', 'light']) {
+  test(`shots: the staff list, New project, Switch chief and an edit, ${scheme}`, async ({
+    page,
+  }, testInfo) => {
+    test.skip(!SHOTS, 'CF_SHOTS_DIR names where the shots go')
+    test.setTimeout(60_000)
+    await page.setViewportSize({ width: 1500, height: 940 })
+    await page.emulateMedia({ colorScheme: scheme })
+    await open(page, shotData(SHOT_VARIANT))
+    const shot = (name, target = page) =>
+      target.screenshot({ path: join(SHOTS, `${name}-${SHOT_VARIANT}-${scheme}.png`) })
+    await expect(page.getByRole('heading', { name: 'harbour' })).toBeVisible()
+    await shot('staff-list')
+    // The selects, listed open: a native pop-up is no part of a page's shot.
+    for (const [button, name, harness, file] of [
+      ['New project', 'New project', 'Claude Code', 'new-project'],
+      ['Switch the chief to another harness or model', 'Switch the chief', 'Codex', 'switch-chief'],
+    ]) {
+      await page.getByRole('button', { name: button }).click()
+      const dialog = page.getByRole('dialog', { name })
+      await dialog.locator('[name="chiefHarness"]').selectOption({ label: harness })
+      const models = dialog.locator('[name="chiefModel"]')
+      await expect(models).toBeEnabled()
+      await models.evaluate((select) => {
+        select.size = Math.min(select.options.length, 9)
+      })
+      await shot(file, dialog)
+      await dialog.getByRole('button', { name: 'Cancel' }).click()
+    }
+    // A member's card before and after an edit: the name follows the model it runs on.
+    const row = (handle) => page.locator(`tr[data-handle="${handle}"][data-role="worker"]`).first()
+    const before = row(SHOT_VARIANT === 'after' ? 'claude-opus-5-5-high' : 'opus-high')
+    await shot('member-card-before-edit', before)
+    await page.getByRole('button', { name: 'Project settings' }).click()
+    const settings = page.getByRole('dialog', { name: 'Project settings' })
+    await shot('project-settings', settings)
+    if (SHOT_VARIANT === 'after') {
+      await settings.getByRole('button', { name: 'Edit @claude-opus-5-5-high' }).first().click()
+      await pickMember(settings, {
+        harness: 'Codex',
+        model: 'gpt-6.1-sol',
+        effort: 'max',
+        tier: 'critical',
+      })
+      await settings.getByRole('button', { name: 'Save member' }).click()
+      await expect(page.locator('#status')).toContainText('is @gpt-6-1-sol-max now')
+      await shot('project-settings-after-edit', settings)
+      await settings.getByRole('button', { name: 'Close' }).click()
+      await shot('member-card-after-edit', row('gpt-6-1-sol-max'))
+    }
+    testInfo.annotations.push({ type: 'shots', description: SHOTS })
+  })
+}

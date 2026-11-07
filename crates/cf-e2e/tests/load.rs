@@ -58,10 +58,7 @@ fn the_daemon_stays_up_delivers_every_task_and_logs_nothing_wrong_while_several_
         .chain(workers.iter().cloned())
         .map(|id| json!({ "id": id, "kind": "claude-code", "model": "fake" }))
         .collect();
-    files::write(
-        &rig.home().join("agents.json"),
-        format!("{}\n", json!({ "schemaVersion": 1, "agents": agents })),
-    )?;
+    rig.stand_ins(&json!({ "agents": agents }))?;
     let mut opened = Vec::new();
     for at in 0..projects {
         let directory = rig.workspace().join(format!("project-{}", at + 1));

@@ -1,26 +1,15 @@
-//! The two pages, carried as text: the agents and the harness diagnostics, each
-//! with its inline style and script, and what every screen carries for the
-//! app's frame (`FRAMED`). Node built them as template literals; here they are
-//! the files they came out as, with `$TOKEN` (inside the quotes the script's
-//! `JSON.stringify(token)` writes) and `$VERSION` where Node interpolated,
-//! which are the recorded pages (`tests/goldens/pages`) to the byte. The files
+//! The page, carried as text: the harness diagnostics, with its inline style and
+//! script, and what every screen carries for the app's frame (`FRAMED`). Node
+//! built it as a template literal; here it is the file it came out as, with
+//! `$TOKEN` (inside the quotes the script's `JSON.stringify(token)` writes) where
+//! Node interpolated, which is the recorded page (`tests/goldens/pages`) to the byte. The files
 //! are the source now, edited by hand; the screens' traces hold the page the
 //! daemon serves to the recorded copy, so a page and its copy change together.
 
 use cf_base::js;
 use serde_json::Value;
 
-use crate::start::VERSION;
-
-const AGENTS: &str = include_str!("pages/agents.html");
 const HARNESSES: &str = include_str!("pages/harnesses.html");
-
-/// The agents page for the UI token `token`, which its script sends with every
-/// request, and this build's version in its heading. The token goes in last, so
-/// that what it holds is never read as a place for the version.
-pub fn agents(token: &str) -> String {
-    with_token(&AGENTS.replacen("$VERSION", VERSION, 1), token)
-}
 
 /// The harness diagnostics for the UI token `token`.
 pub fn harnesses(token: &str) -> String {

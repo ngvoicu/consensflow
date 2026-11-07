@@ -8,10 +8,10 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_catalog::WorkTier;
 use cf_engine::roles::{
     role_instructions, with_staff_rules, ProjectSpecs, StaffRow, STAFF_RULES_HEADING,
 };
+use cf_proto::agents::WorkTier;
 use cf_proto::cf_word::{CfWord, Shell};
 use cf_proto::specs::Variant;
 use regex::Regex;
@@ -58,6 +58,15 @@ fn teaches_only_the_boards_commands(role: &str) {
         ] {
             assert!(text.contains(command), "{role} learns {command}");
         }
+        // A question raised from a turn's last words ends with a line that says how to take
+        // them as the result (T-1119): the chief's text says what the line is.
+        assert!(
+            found(
+                r#"One ending "\(ConsensFlow: … If they are its result: `cf task finish T-5`\.\)"\s+is a turn's last words: answer it, or finish the task\."#,
+                &text
+            ),
+            "the chief learns the line of a question raised from a turn's end"
+        );
         // The chief asks the human in its terminal: no command asks on the board.
         assert!(!text.contains("cf ask"));
         assert!(
@@ -70,10 +79,10 @@ fn teaches_only_the_boards_commands(role: &str) {
         ));
         assert!(
             found(
-                r"\| Member \| Roles \| Work tier \|\n\|---\|---\|---\|\n\| zeus \| worker, reviewer \| Standard work \|",
+                r"\| Member \| Model \| Roles \| Work tier \|\n\|---\|---\|---\|---\|\n\| zeus \| Opus · high \| worker, reviewer \| Standard work \|",
                 &text
             ),
-            "the staff table: name, roles, tier"
+            "the staff table: name, model, roles, tier"
         );
         assert!(!found(r"tags|PM(?-u:\b)", &text), "no tags, no PM");
         assert!(
@@ -105,7 +114,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             &text
         ));
         assert!(found(
-            r"A tier nobody on the staff holds\s+goes to the nearest one somebody does",
+            r"A tier nobody on the staff holds\s+goes to the nearest one somebody does, the next one up first; you are told\s+whose\.",
             &text
         ));
         assert!(text.contains("do not run the command to see the refusal: ask"));
@@ -118,6 +127,17 @@ fn teaches_only_the_boards_commands(role: &str) {
         );
         assert!(text.contains("final message of your turn"));
         assert!(text.contains("Questions go to the chief, never to another member"));
+        assert!(
+            found(
+                r"To wait for the chief's answer, ask with `cf ask`, never in your\s+last words\.",
+                &text
+            ),
+            "{role} is told that a question in its last words is its result"
+        );
+        assert!(
+            !text.contains("the human"),
+            "{role} is asked and answers only through the chief"
+        );
         assert!(found(
             r"(?i)never read another agent's\s+session files",
             &text
@@ -275,6 +295,52 @@ fn tells_the_chief_one_member_runs_as_many_tasks_at_once_as_it_is_given() {
     ));
 }
 
+/// A chief that read a member as a person who can be busy chained its work through one
+/// window with `--after` and let all of it wait behind a window that stuck (Gabriel's field
+/// board, T-6 then T-8 then T-9, 2026-11-02): a member is a model, and no task waits for one.
+#[test]
+fn never_says_a_member_is_free_or_busy() {
+    let text = instructions("chief", &[zeus()]);
+    let said = Regex::new(r"(?i)\b(free|busy)\b").unwrap().find(&text);
+    assert!(
+        said.is_none(),
+        "the chief's text says a member is free or busy: {:?}",
+        said.map(|word| &text[word.start().saturating_sub(60)..word.end() + 60])
+    );
+}
+
+#[test]
+fn tells_the_chief_each_task_gets_a_new_window_of_a_member_of_its_role_and_tier() {
+    assert!(found(
+        r"Each task gets a new window of a member of that role and tier on this\s+project's staff; you never pick the member\.",
+        &instructions("chief", &[zeus()])
+    ));
+}
+
+#[test]
+fn tells_the_chief_a_member_is_a_model_that_runs_any_number_of_tasks_at_once_each_in_its_own_window(
+) {
+    let text = instructions("chief", &[zeus()]);
+    assert!(found(
+        r"Each member is a\s+model, not a person: it runs any number of tasks at once, each in its own\s+window\.\n\n\| Member \|",
+        &text
+    ));
+    // It comes with the staff, and the rule that the human may change it stays.
+    assert!(found(
+        r"`cf staff` shows them as they are now\. Each member is a\s+model",
+        &text
+    ));
+}
+
+#[test]
+fn tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_starts_at_once_beside_it(
+) {
+    assert!(found(
+        r"the next step of that window's own work, only when it needs what that window already knows \(carry out the plan or findings it just wrote, part 2 after its part 1\); reviews, parallel work and work for another role stay fresh, and start at once beside that window's work\n",
+        &instructions("chief", &[zeus()])
+    ));
+}
+
 #[test]
 fn tells_every_window_its_messages_arrive_pasted_and_are_its_to_act_on() {
     for role in [
@@ -325,7 +391,7 @@ fn says_so_when_the_staff_is_empty() {
 }
 
 #[test]
-fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task(
+fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done(
 ) {
     let text = instructions("chief", &[zeus()]);
     assert!(found(
@@ -333,15 +399,23 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r"A window still at work on T-3\s+takes it too: it waits for T-3 to be accepted and goes in then\.",
+        r"It waits for T-3 and for the\s+window's other done tasks to be accepted, and goes in then\.",
+        &text
+    ));
+    assert!(
+        !text.contains("A window still at work on T-3"),
+        "a follow-up of a task with its result in waits too"
+    );
+    assert!(found(
+        r"A window on\s+another\s+task refuses and tells\s+you to open the task for its tier instead\.",
         &text
     ));
     assert!(found(
-        r"A window on\s+another task refuses and tells you to open the task for its tier instead\.",
+        r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task no window has yet \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
         &text
     ));
     assert!(found(
-        r#"cf task edit T-3 "…"\s+replace the brief of a task no window has yet \(open, queued, or paused\)"#,
+        r#"cf task edit\|reopen\|resume T-3 … --title "…"\s+a new title; edit takes it alone, in any state"#,
         &text
     ));
     assert!(

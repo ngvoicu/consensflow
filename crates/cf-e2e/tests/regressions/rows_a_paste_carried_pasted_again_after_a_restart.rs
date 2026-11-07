@@ -35,7 +35,6 @@
 //! come again glued in front of them.
 
 use cf_e2e::devin_store;
-use cf_e2e::files;
 use cf_e2e::rig::{Config, Pasted, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
@@ -121,7 +120,7 @@ fn write_roster(rig: &Rig, harness: Harness) -> cf_e2e::Result {
             { "id": "worker", "kind": harness.kind(), "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// What a case is about: the project, the worker's handle and its conversation.

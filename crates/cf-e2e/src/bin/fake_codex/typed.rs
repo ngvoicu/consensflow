@@ -7,6 +7,10 @@ use std::io::Read;
 use std::sync::mpsc;
 use std::thread;
 
+/// What is sent on for an Escape typed alone (not the start of a paste's mark or of a key's
+/// sequence): the TUI stops the turn at work.
+pub const ESCAPE: &str = "\u{1b}";
+
 /// What marks the start and the end of a paste in a terminal that says so.
 const PASTE_MARKS: [&str; 2] = ["\u{1b}[200~", "\u{1b}[201~"];
 
@@ -33,7 +37,13 @@ pub fn typed() -> mpsc::Receiver<String> {
 /// to Enter, without the marks of a paste, and one with nothing in it is none.
 fn completed(pending: &mut String, chunk: &str) -> Vec<String> {
     let mut lines = Vec::new();
-    for typed in chunk.chars() {
+    let mut chars = chunk.chars().peekable();
+    while let Some(typed) = chars.next() {
+        // An Escape alone: no `[` or `O` after it in what came.
+        if typed == '\u{1b}' && !matches!(chars.peek(), Some('[' | 'O')) {
+            lines.push(ESCAPE.to_owned());
+            continue;
+        }
         if typed != '\r' && typed != '\n' {
             pending.push(typed);
             continue;
@@ -63,6 +73,18 @@ mod tests {
             ["Reply with exactly: X"]
         );
         assert_eq!(pending, "");
+    }
+
+    #[test]
+    fn an_escape_alone_is_the_tuis_stop_and_a_pastes_marks_are_none() {
+        let mut pending = String::new();
+        assert_eq!(completed(&mut pending, "\u{1b}"), [ESCAPE]);
+        assert_eq!(pending, "");
+        assert_eq!(
+            completed(&mut pending, "\u{1b}[200~go\u{1b}[201~\r"),
+            ["go"]
+        );
+        assert_eq!(completed(&mut pending, "\u{1b}[A"), Vec::<String>::new());
     }
 
     #[test]

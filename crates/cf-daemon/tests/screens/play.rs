@@ -1,8 +1,7 @@
 //! One trace of the screens, played against the daemon's front. Each step is
 //! made as the trace says, and each answer is held to Node's: its status, its
-//! type and its bytes (key order, absent against null), the roster file before
-//! and after each exchange and no other file of the folder changed, the roster's
-//! change told as often as it should be, and the ledger left as Node left it: a
+//! type and its bytes (key order, absent against null), the files of the folder
+//! changed as the trace says, and the ledger left as Node left it: a
 //! trace whose ledger left a database is played to its `close`, where the
 //! database is compared.
 
@@ -15,8 +14,7 @@ use crate::support::trace::{self, Tally};
 use crate::world::World;
 use crate::wrote::{held, snapshot, Snapshot};
 
-/// The pages as Node's generator wrote them, `$TOKEN` and `$VERSION` for what goes in.
-const AGENTS_PAGE: &str = include_str!("../goldens/pages/agents.html");
+/// The page as Node's generator wrote it, `$TOKEN` for what goes in.
 const HARNESSES_PAGE: &str = include_str!("../goldens/pages/harnesses.html");
 
 /// The exchanges whose answer is not Node's to the byte, and why: the request's
@@ -24,20 +22,7 @@ const HARNESSES_PAGE: &str = include_str!("../goldens/pages/harnesses.html");
 /// '}' in JSON at position 1 (line 1 column 2)`) and the daemon says in its own
 /// (`the request body is not valid JSON: ` and `serde_json`'s, which say where):
 /// by trace, the exchange's `id`. Every other answer is held to its bytes.
-pub const DEPARTURES: [(&str, u64); 12] = [
-    ("corners-screens-002", 1),
-    ("corners-screens-002", 2),
-    ("corners-screens-002", 3),
-    ("corners-screens-003", 1),
-    ("corners-screens-003", 2),
-    ("corners-screens-003", 3),
-    ("corners-screens-003", 4),
-    ("corners-screens-003", 5),
-    ("corners-screens-003", 6),
-    ("corners-screens-003", 7),
-    ("corners-screens-003", 8),
-    ("corners-screens-009", 12),
-];
+pub const DEPARTURES: [(&str, u64); 1] = [("corners-screens-009", 12)];
 
 /// The words the daemon says where Node said V8's of a body that is no JSON.
 const OWN_WORDS: &str = "the request body is not valid JSON: ";
@@ -144,8 +129,7 @@ impl Game<'_> {
             "{label}: a token of a window is none of a screen's"
         );
 
-        // What was told and woken before this exchange is no part of it.
-        self.rig().take_told();
+        // What was woken before this exchange is no part of it.
         self.rig().take_kicks();
         let before = snapshot(&self.world);
         let reply = send(
@@ -164,11 +148,6 @@ impl Game<'_> {
 
         self.holds_the_answer(&label, step, &reply);
         self.holds_the_files(&label, step, &before, &after);
-        assert_eq!(
-            self.rig().take_told(),
-            usize::from(tells(method, target, reply.status)),
-            "{label}: the roster's change is told once for a write that was made, else never"
-        );
         assert_eq!(
             self.rig().take_kicks(),
             0,
@@ -200,16 +179,11 @@ impl Game<'_> {
         }
     }
 
-    /// A page as Node served it for the UI token: the recorded one with the token
-    /// and the version of this build put in.
+    /// The page as Node served it for the UI token: the recorded one with the token
+    /// put in.
     fn page(&self, name: &str) -> String {
-        let page = match name {
-            "agents" => AGENTS_PAGE,
-            "harnesses" => HARNESSES_PAGE,
-            other => panic!("{}: a page named {other}", self.name),
-        };
-        page.replace("$TOKEN", &self.token)
-            .replace("$VERSION", cf_daemon::start::VERSION)
+        assert_eq!(name, "harnesses", "{}: a page named {name}", self.name);
+        HARNESSES_PAGE.replace("$TOKEN", &self.token)
     }
 
     /// The files the exchange changed are the ones the trace says, each as it was
@@ -273,18 +247,4 @@ fn says_it_in_its_own_words(recorded: &str, body: &[u8]) -> bool {
         && daemon["error"]
             .as_str()
             .is_some_and(|words| words.starts_with(OWN_WORDS))
-}
-
-/// Whether an exchange is a write to the roster that was made: the four routes
-/// that change it, answered with a success.
-fn tells(method: &str, target: &str, status: u16) -> bool {
-    let path = target.split('?').next().unwrap_or(target);
-    let writes = match method {
-        "POST" => path == "/api/agents" || path == "/api/preferences",
-        "PATCH" | "DELETE" => path
-            .strip_prefix("/api/agents/")
-            .is_some_and(|name| !name.is_empty() && !name.contains('/')),
-        _ => false,
-    };
-    writes && (200..300).contains(&status)
 }

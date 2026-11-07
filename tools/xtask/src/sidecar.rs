@@ -81,6 +81,17 @@ impl Platform {
             Self::MacOs | Self::Other => "cf",
         }
     }
+
+    /// The program the bundle carries beside its `cf` for the terminal's command,
+    /// where the command is a program: on Windows (`cf-launcher`'s shim, which a
+    /// `.cmd` could not be, since cmd.exe cuts a many-line argument at its first
+    /// line). A launcher of `sh` is a script, and has none.
+    fn shim(self) -> Option<&'static str> {
+        match self {
+            Self::Windows => Some("cf-shim.exe"),
+            Self::MacOs | Self::Other => None,
+        }
+    }
 }
 
 /// What a step reaches outside the files it works on; see the module.

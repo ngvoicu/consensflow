@@ -23,9 +23,11 @@
 //! answer by them.
 
 mod directives;
+mod drawn;
 mod fields;
 mod images;
 mod inputs;
+mod kinds;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -41,8 +43,10 @@ use self::images::output_text;
 use self::inputs::{Inputs, Telling};
 use super::paths::transcript;
 use super::quota::codex_quota;
-use crate::shared::quota::{Level, Quota};
+use crate::shared::quota::{busy_refusal, Level, Quota};
 use crate::shared::record::cache::Look;
+use crate::shared::record::calls::{describe, LastCall};
+use crate::shared::record::drawn::{beside_item, took, Detail, Kind};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
@@ -80,10 +84,61 @@ fn handed_out(item: &Item) -> Item {
     }
 }
 
+/// A record's time in milliseconds since the epoch, where it is a timestamp's text.
+fn millis(at: &Value) -> Option<i64> {
+    at.as_str().and_then(time::parse)
+}
+
 /// The `codex_error_info` of a turn Codex ended for a limit: its usage limit
 /// (as Codex 0.163 names a plan or balance that has no quota too), or a rate
 /// limit it gave up retrying. The chief's rule (T-95): wait on any limit.
 const LIMITS: [&str; 2] = ["usage_limit_exceeded", "rate_limit_exceeded"];
+
+/// The `codex_error_info` of a turn its server refused for a moment (T-1112): its model at
+/// capacity ("Selected model is at capacity. Please try a different model.",
+/// `errored-task-complete.jsonl`, codex-cli 0.153.4), the server's own error, or capacity
+/// held for a policy ("Policy-restricted capacity is unavailable. Please try again later.").
+/// The names are `CodexErrorInfo`'s in the binary of Codex 0.166.0.
+const BUSY: [&str; 3] = [
+    "server_overloaded",
+    "internal_server_error",
+    "policy_capacity_unavailable",
+];
+
+/// The `codex_error_info` that name the status of a request Codex gave up on, as an object
+/// (`{"<kind>": {"http_status_code": 503}}`; the names and the field are in the binary of
+/// Codex 0.166.0, the object's shape is serde's for its variants, unrecorded): a refusal for a
+/// moment where the status is a server's error.
+const GAVE_UP: [&str; 4] = [
+    "http_connection_failed",
+    "response_stream_connection_failed",
+    "response_stream_disconnected",
+    "response_too_many_failed_attempts",
+];
+
+/// Whether a turn's `error` is its server's refusal for a moment: by its `codex_error_info`,
+/// or, where that names nothing more (none, `other`), by the words every harness shares
+/// (`busy_refusal`).
+fn busy(error: Option<&Value>) -> bool {
+    match field(error, "codex_error_info") {
+        Some(Value::String(info)) if info == "other" => words_busy(error),
+        Some(Value::String(info)) => BUSY.contains(&info.as_str()),
+        Some(Value::Object(kinds)) => GAVE_UP.iter().any(|kind| {
+            kinds
+                .get(*kind)
+                .and_then(|gave_up| gave_up.get("http_status_code"))
+                .and_then(Value::as_f64)
+                .is_some_and(|status| busy_refusal("", Some(status)))
+        }),
+        None | Some(Value::Null) => words_busy(error),
+        Some(_) => false,
+    }
+}
+
+/// Whether the words of a turn's `error` say its server refused for a moment.
+fn words_busy(error: Option<&Value>) -> bool {
+    Rollout::error_words(error).is_some_and(|said| busy_refusal(&said, None))
+}
 
 /// What a rollout said so far.
 struct Rollout {
@@ -103,10 +158,25 @@ struct Rollout {
     quota: Option<Arc<Quota>>,
     /// The latest model Codex rerouted a turn to on its own (MUS-24).
     rerouted: Option<Arc<ModelMoved>>,
+    /// The last tool call the rollout shows, as a line (`calls::describe`).
+    last_call: Option<Arc<LastCall>>,
     records: usize,
     /// The place among the records of the one being read.
     reading: usize,
     keys: Keys,
+    /// The items only the history shows (a reasoning's summary, a command still running, a
+    /// compaction), in the order the rollout said them.
+    beside: Vec<Beside>,
+    /// Each command still running among them, by its id: its place among them.
+    running: HashMap<Arc<str>, usize>,
+}
+
+/// An item only the history shows, the place among the items it stands before, and
+/// whether it was a command whose item Codex has completed since.
+struct Beside {
+    place: usize,
+    item: Item,
+    answered: bool,
 }
 
 /// An item as the rollout left it, and the text Codex marked its final
@@ -124,6 +194,9 @@ struct Call {
     turn: Key,
     /// The tool it called (`name`), when the call named one.
     tool: Option<Arc<str>>,
+    /// What the history draws of it, and the time of its record.
+    detail: Detail,
+    made: Option<i64>,
 }
 
 /// A turn as the rollout told it.
@@ -149,6 +222,8 @@ enum End {
     Failed {
         refusal: Option<Arc<Quota>>,
         said: Option<String>,
+        /// The kind of the error, in plain words (`kinds::plain`).
+        kind: Option<String>,
     },
     /// `turn_aborted`.
     Cancelled,
@@ -167,10 +242,38 @@ impl Rollout {
             latest_turn: Key::Null,
             quota: None,
             rerouted: None,
+            last_call: None,
             records: 0,
             reading: 0,
             keys: Keys::default(),
+            beside: Vec::new(),
+            running: HashMap::new(),
         }
+    }
+
+    /// An item only the history shows, where it stands: after the items so far.
+    fn beside(&mut self, item: Item) {
+        self.beside.push(Beside {
+            place: self.items.len(),
+            item,
+            answered: false,
+        });
+    }
+
+    /// A `compacted` record: Codex compacted the thread. No item of its words: the
+    /// history's alone, by its place among the records.
+    fn compacted(&mut self, payload: Option<&Value>, at: Value, seq: &Value) {
+        let id = Arc::from(format!("compacted:{}", js::text(Some(seq))));
+        let summary = field(payload, "message")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        self.beside(beside_item(
+            id,
+            Role::Custom,
+            summary,
+            Some(at),
+            Detail::of(Kind::Compaction),
+        ));
     }
 
     /// `codexTurn`: the turn `key` names, made when the rollout first names
@@ -229,6 +332,12 @@ impl Rollout {
             }
             (Some("function_call" | "custom_tool_call"), _) => {
                 let call = self.keys.of(field(payload, "call_id"));
+                // The arguments of a function call are JSON text, a custom tool's input is text.
+                let called = field(payload, "arguments").or_else(|| field(payload, "input"));
+                let name = field(payload, "name").and_then(Value::as_str);
+                if let Some(line) = describe(name, called) {
+                    self.last_call = Some(line);
+                }
                 if call.truthy() && turn.truthy() {
                     if let Some(open) = self.turn(&turn) {
                         open.tools.insert(call.clone());
@@ -236,13 +345,42 @@ impl Rollout {
                     let tool = field(payload, "name")
                         .and_then(Value::as_str)
                         .map(Arc::from);
-                    self.calls.insert(call, Call { turn, tool });
+                    let detail = drawn::called(payload);
+                    let made = millis(&at);
+                    self.calls.insert(
+                        call,
+                        Call {
+                            turn,
+                            tool,
+                            detail,
+                            made,
+                        },
+                    );
+                }
+            }
+            // What Codex keeps readable of its model's thinking: a reasoning's summary.
+            (Some("reasoning"), _) => {
+                if let Some(said) = drawn::reasoning(payload) {
+                    let id = match field(payload, "id").and_then(Value::as_str) {
+                        Some(id) if !id.is_empty() => Arc::from(format!("{id}:thinking")),
+                        _ => Arc::from(format!("reasoning:{}", js::text(Some(seq)))),
+                    };
+                    self.beside(beside_item(
+                        id,
+                        Role::Custom,
+                        &said,
+                        Some(at),
+                        Detail::of(Kind::Thinking),
+                    ));
                 }
             }
             (Some("function_call_output" | "custom_tool_call_output"), _) => {
                 let call = self.keys.of(field(payload, "call_id"));
                 let called = self.calls.get(&call);
                 let tool = called.and_then(|called| called.tool.clone());
+                let mut detail =
+                    called.map_or_else(|| Detail::of(Kind::Tool), |called| called.detail.clone());
+                let made = called.and_then(|called| called.made);
                 let owner = match called {
                     Some(called) if !called.turn.is_nullish() => called.turn.clone(),
                     _ => turn,
@@ -250,8 +388,13 @@ impl Rollout {
                 if let Some(open) = self.turn(&owner) {
                     open.tools.remove(&call);
                 }
+                let (status, took_ms) = drawn::ended(field(payload, "output"));
+                detail.status = Some(status);
+                detail.took_ms = took_ms.or_else(|| took(made, millis(&at)));
                 let output = output_text(field(payload, "output"), tool.as_deref());
-                self.add_item(field(payload, "id"), Role::Tool, output, true, at, seq)?;
+                let place =
+                    self.add_item(field(payload, "id"), Role::Tool, output, true, at, seq)?;
+                self.items[place].item.detail = Some(Arc::new(detail));
             }
             _ => {}
         }
@@ -293,6 +436,7 @@ impl Rollout {
                     End::Failed {
                         refusal: self.refusal(error, &at),
                         said: Self::error_words(error),
+                        kind: kinds::plain(error),
                     }
                 } else {
                     End::Complete(field(payload, "last_agent_message").cloned())
@@ -356,6 +500,19 @@ impl Rollout {
                     "its login was refused: {}",
                     Self::error_words(error).unwrap_or_default()
                 ),
+            }));
+        }
+        // A server that refused for a moment (T-1112): no failure and no quota, held and tried
+        // again by the engine. Codex gave up its own retries before it wrote this.
+        if busy(error) {
+            return Some(Arc::new(Quota::Busy {
+                at: at.as_str().and_then(time::parse).map(time::iso),
+                because: Self::error_words(error)
+                    .unwrap_or_else(|| "the server refused for a moment".to_owned())
+                    .trim()
+                    .chars()
+                    .take(300)
+                    .collect(),
             }));
         }
         if !info.is_some_and(|info| LIMITS.contains(&info)) {
@@ -461,6 +618,19 @@ impl Rollout {
                             open.tools.insert(command);
                         }
                     }
+                    // Running, until Codex completes it: the history's alone.
+                    if let Some(id) = field(native, "id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                    {
+                        let id: Arc<str> = Arc::from(id);
+                        if !self.running.contains_key(&id) && !self.places.contains_key(&id) {
+                            let mut detail = drawn::command(native);
+                            detail.status = Some(crate::shared::record::drawn::Status::Running);
+                            self.running.insert(Arc::clone(&id), self.beside.len());
+                            self.beside(beside_item(id, Role::Tool, "", Some(at), detail));
+                        }
+                    }
                     return Ok(());
                 }
                 if let Some(open) = self.turn(turn) {
@@ -469,7 +639,35 @@ impl Rollout {
                 // `String(output)`, where V8 throws on an object with a
                 // `toString` of its own.
                 let output = or_empty(field(native, "aggregated_output"))?;
-                self.add_item(field(native, "id"), Role::Tool, output, true, at, seq)?;
+                if let Some(place) = field(native, "id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| self.running.remove(id))
+                {
+                    self.beside[place].answered = true;
+                }
+                let detail = drawn::command(native);
+                let place =
+                    self.add_item(field(native, "id"), Role::Tool, output, true, at, seq)?;
+                self.items[place].item.detail = Some(Arc::new(detail));
+            }
+            // The edit a patch made (Codex 0.166): no item Node read, the history's alone.
+            Some("FileChange") if completed => {
+                if let Some(id) = field(native, "id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                {
+                    let said = field(native, "stdout")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let detail = drawn::file_change(native);
+                    self.beside(beside_item(
+                        Arc::from(id),
+                        Role::Tool,
+                        said,
+                        Some(at),
+                        detail,
+                    ));
+                }
             }
             Some("SubAgentActivity") => {
                 let agent = self.keys.of(field(native, "agent_thread_id"));
@@ -548,6 +746,7 @@ impl Rollout {
                 commentary: false,
                 synthetic: false,
                 compaction: false,
+                detail: None,
             },
             final_text: None,
             began: self.reading,
@@ -620,6 +819,10 @@ impl Parser for Rollout {
         match record.get("type").and_then(Value::as_str) {
             Some("response_item") => self.response_item(payload, at, &seq),
             Some("event_msg") => self.event(payload, at, &seq),
+            Some("compacted") => {
+                self.compacted(payload, at, &seq);
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -648,10 +851,17 @@ impl Answer for Rollout {
             .map(|kept| handed_out(&kept.item))
             .collect();
         record.lines.places = Some(self.items.iter().map(|kept| kept.began).collect());
+        record.beside = self
+            .beside
+            .iter()
+            .filter(|beside| !beside.answered)
+            .map(|beside| (beside.place, beside.item.clone()))
+            .collect();
         record.in_flight = in_flight;
         record.failed = matches!(end, Some((_, End::Failed { .. })));
-        if let Some((_, End::Failed { said, .. })) = end {
+        if let Some((_, End::Failed { said, kind, .. })) = end {
             record.failure.clone_from(said);
+            record.failure_kind.clone_from(kind);
         }
         record.quota = match end {
             Some((
@@ -664,6 +874,7 @@ impl Answer for Rollout {
             _ => self.quota.clone(),
         };
         record.model_moved.clone_from(&self.rerouted);
+        record.last_call.clone_from(&self.last_call);
         record.settlement = match end {
             _ if in_flight => Settlement::InFlight,
             // A task_complete whose final answer cannot be matched proves nothing.

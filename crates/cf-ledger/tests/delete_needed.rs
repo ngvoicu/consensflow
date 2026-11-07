@@ -39,10 +39,13 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             name: "app".into(),
             chief: NewChief {
                 harness: "claude-code".into(),
-                agent: Some("apollo".into()),
+                model: Some("apollo".into()),
+                effort: None,
             },
             staff: vec![NewMember {
-                agent: "zeus".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
                 harness: "claude-code".into(),
                 designer: false,
                 roles: vec!["worker".into()],
@@ -51,6 +54,8 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .expect("a project")
 }

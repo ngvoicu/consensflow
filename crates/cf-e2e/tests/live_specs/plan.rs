@@ -17,9 +17,10 @@ pub enum Step {
     /// Specs off: the chief is told nothing of them, a small ask goes on the board
     /// as a task, and no specs folder appears.
     Off,
-    /// Specs on, taking effect at the chief's next launch: the window is launched
-    /// with the section of specs and the skill of the variant, a copy of the
-    /// harness's own where it has the variant, of ConsensFlow's where it has not.
+    /// Specs on: the chief is told while its window is open (or, with `--apply launch`,
+    /// the window is launched with the section of specs), and the skill of the variant
+    /// is a copy of the harness's own where it has the variant, of ConsensFlow's where it
+    /// has not.
     Source,
     /// Specs on: a small ask still goes straight on the board, and no spec is made.
     Small,

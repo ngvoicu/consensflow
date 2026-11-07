@@ -345,6 +345,8 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         asking: false,
         failed: false,
         failure: None,
+        failure_kind: None,
+        last_call: None,
         took_back: false,
         model_moved: None,
         model_drift: None,
@@ -352,7 +354,9 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         settlement,
         pending: Default::default(),
         monitors: Vec::new(),
+        commands: Vec::new(),
         lines: Box::default(),
+        beside: Vec::new(),
     }))
 }
 
@@ -367,6 +371,7 @@ fn settled_record(thread: &str) -> Arc<Reading> {
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     };
     reading(vec![item], Settlement::Settled, None)
 }
@@ -575,4 +580,45 @@ fn says_a_move_the_record_holds_before_a_refusal_it_shows_too() {
         .serve("GET /session", [shows(Some(THREAD), true)]);
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.quota.as_deref(), Some(&moved.as_quota()));
+}
+
+/// What a Codex window keeps running is its broker's word of Codex's background terminals
+/// (`GET /terminals`), which no process tree lists (T-1137); a broker that gives no list
+/// says Codex could not tell.
+#[test]
+fn what_a_codex_window_keeps_running_is_its_brokers_list_of_codexs_background_terminals() {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("any"),
+    });
+    let (adapter, fakes) =
+        adapter_with(&home, Some(Rc::clone(&stand) as Rc<dyn Records>), "", true);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let list = json!({ "launchId": LAUNCH, "commands": ["node ./tick-cf-stops-live.cjs 360 background-ticks.txt"] });
+    fakes
+        .loopback
+        .serve("GET /terminals", [replies(&list.to_string())]);
+    assert_eq!(
+        finished(window.kept_commands()),
+        Some(vec![
+            "node ./tick-cf-stops-live.cjs 360 background-ticks.txt".to_owned()
+        ])
+    );
+    let asked: Vec<String> = fakes
+        .loopback
+        .take_asked()
+        .into_iter()
+        .map(|request| request.url)
+        .collect();
+    assert!(
+        asked.len() == 1 && asked[0].ends_with("/terminals"),
+        "{asked:?}"
+    );
+    fakes
+        .loopback
+        .serve("GET /terminals", [replies("not a list")]);
+    assert_eq!(finished(window.kept_commands()), None);
 }

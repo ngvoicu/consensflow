@@ -71,7 +71,7 @@ fn a_chief_whose_window_is_unfit_for_work_closes_without_its_project_and_the_hum
 /// `while_drawing` says so, and say they are unfit at the third ask.
 fn never_drawn(while_drawing: bool) -> (Context, Rc<Cell<u32>>) {
     let context = Context::new();
-    context.host.set_snapshot(json!({ "outputQuietMs": null }));
+    context.host.set_snapshot(json!({ "screenQuietMs": null }));
     context.adapter.ready_while_drawing.set(while_drawing);
     let asked = Rc::new(Cell::new(0));
     let counted = Rc::clone(&asked);
@@ -424,7 +424,7 @@ fn a_members_unfit_window_whose_kill_is_refused_goes_with_its_message_and_whoeve
     assert_eq!(
         named("chief"),
         [format!(
-            "T-1 failed: what @chief told its window, m-{0}, did not reach it ({WHY}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, m-{0}, not delivered, so that you can send them again:\n\nUse the grammar in the docs",
+            "T-1 failed: what @chief told its window, m-{0}, did not reach it ({WHY}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, m-{0}, not delivered, so that you can send them again:\n\nUse the grammar in the docs",
             note.id
         )]
     );
@@ -576,7 +576,7 @@ fn a_members_unfit_window_whose_kill_is_never_answered_has_its_message_fail_afte
             .filter(|said| said.contains(&words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {words}, did not reach it ({WHY}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "T-1 failed: what @chief told its window, {words}, did not reach it ({WHY}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(

@@ -9,6 +9,12 @@
 //! scrollback: what scrolled off is not kept. A resize moves nothing around.
 //! Nothing here answers the program: a program that asks the terminal a
 //! question is answered by the page, or by the daemon's `pane.reply`.
+//!
+//! It also says whether a chunk changed what it shows ([`Screen::feed`]), which is how
+//! the pane host tells a screen at rest from one at work: a harness can print and
+//! change nothing a person sees (Muse Code 1.4.14, after a command it ran in the
+//! background was stopped, writes colour resets and a move of the cursor to where it
+//! is every 50 ms, T-1083), and a screen that only does that is at rest.
 
 mod grid;
 mod parser;
@@ -46,29 +52,44 @@ pub struct Cursor {
 pub struct Screen {
     parser: Parser,
     grid: Grid,
+    /// The digest of what the screen showed after the last chunk ([`Grid::digest`]).
+    shows: u64,
 }
 
 impl Screen {
     pub fn new(rows: u16, cols: u16) -> Self {
+        let grid = Grid::new(usize::from(rows), usize::from(cols));
         Self {
             parser: Parser::default(),
-            grid: Grid::new(usize::from(rows), usize::from(cols)),
+            shows: grid.digest(),
+            grid,
         }
     }
 
     /// The program printed `bytes`. They may end anywhere, even inside a
-    /// character or an escape sequence: the rest is in the next chunk.
-    pub fn feed(&mut self, bytes: &[u8]) {
+    /// character or an escape sequence: the rest is in the next chunk. Says whether
+    /// what the screen shows changed with them: a character, where it is, whether it
+    /// is drawn styled, the alternate screen shown or put away. Colours, the cursor,
+    /// and text drawn again over the same text change nothing shown. Limit: a frame
+    /// that blanks a line and draws it again, read from the pty in two pieces, shows
+    /// the blank line between them, and that is a change.
+    pub fn feed(&mut self, bytes: &[u8]) -> bool {
         let grid = &mut self.grid;
         for &byte in bytes {
             self.parser
                 .advance(byte, &mut |action| grid.perform(action));
         }
+        let shows = self.grid.digest();
+        let changed = shows != self.shows;
+        self.shows = shows;
+        changed
     }
 
-    /// The pty has another size now.
+    /// The pty has another size now. The resize is the host's and no change of the
+    /// program's: what the program draws for the new size is.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.grid.resize(usize::from(rows), usize::from(cols));
+        self.shows = self.grid.digest();
     }
 
     /// The last `max` lines the screen shows, the oldest first: no empty
@@ -76,14 +97,7 @@ impl Screen {
     /// `$`) with no letter or digit in it, and each without the blanks that
     /// end it. A text that wrapped at the edge of the screen is one line.
     pub fn tail(&self, max: usize) -> Vec<String> {
-        let mut lines: Vec<String> = self
-            .grid
-            .lines()
-            .into_iter()
-            .filter(|line| line.chars().any(char::is_alphanumeric))
-            .collect();
-        lines.drain(..lines.len().saturating_sub(max));
-        lines
+        cf_proto::panes::word_tail(self.grid.lines(), max)
     }
 
     /// The last `max` lines of the screen as it is drawn, the oldest first,
@@ -130,9 +144,10 @@ impl PaneScreen {
         }
     }
 
-    /// The program printed `bytes` ([`Screen::feed`]).
-    pub fn feed(&self, bytes: &[u8]) {
-        self.locked().feed(bytes);
+    /// The program printed `bytes` ([`Screen::feed`]): whether what the screen
+    /// shows changed with them.
+    pub fn feed(&self, bytes: &[u8]) -> bool {
+        self.locked().feed(bytes)
     }
 
     /// The pty has another size now ([`Screen::resize`]).

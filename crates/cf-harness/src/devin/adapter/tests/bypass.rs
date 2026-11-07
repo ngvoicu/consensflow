@@ -32,15 +32,18 @@ fn changed(session: &str, mode: &str) -> String {
     format!("{record}\n")
 }
 
-/// A pane host whose window has held still for `quiet` milliseconds, and takes every
-/// paste unless `refuse` says it writes nothing.
+/// A pane host whose window's screen has held still for `quiet` milliseconds while its
+/// output never does (what it prints changes nothing shown: `/bypass` waits on the screen,
+/// T-1083), and takes every paste unless `refuse` says it writes nothing.
 fn host(
     quiet: Rc<Cell<f64>>,
     refuse: Rc<Cell<bool>>,
 ) -> AnsweringHost<impl Fn(&str) -> Result<Value, crate::contract::HostError>> {
     AnsweringHost::new(move |op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "outputQuietMs": quiet.get() }),
+            "pane.snapshot" => {
+                json!({ "ok": true, "outputQuietMs": 0, "screenQuietMs": quiet.get() })
+            }
             "pane.write_paste" if refuse.get() => json!({ "ok": false, "admitted": false }),
             _ => json!({ "ok": true }),
         })
@@ -191,7 +194,7 @@ fn an_enter_the_host_did_not_take_is_pressed_again_at_the_next_look() {
     let keys = Rc::clone(&taken);
     let host = AnsweringHost::new(move |op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "outputQuietMs": 2_000 }),
+            "pane.snapshot" => json!({ "ok": true, "screenQuietMs": 2_000 }),
             "pane.input" if !keys.get() => json!({ "ok": false, "error": "stale" }),
             _ => json!({ "ok": true }),
         })
@@ -223,7 +226,7 @@ fn host_while(
     AnsweringHost::new(move |op| {
         if op == "pane.snapshot" {
             append(&wire, &meanwhile);
-            return Ok(json!({ "ok": true, "outputQuietMs": 2_000 }));
+            return Ok(json!({ "ok": true, "screenQuietMs": 2_000 }));
         }
         Ok(json!({ "ok": true }))
     })
@@ -334,7 +337,7 @@ fn a_window_that_never_draws_is_asked_as_it_draws_and_its_time_runs_all_the_same
     // The host says it has printed nothing.
     let host = AnsweringHost::new(|op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "outputQuietMs": null }),
+            "pane.snapshot" => json!({ "ok": true, "screenQuietMs": null }),
             _ => json!({ "ok": true }),
         })
     });
@@ -374,7 +377,7 @@ fn what_the_human_typed_and_has_not_sent_holds_the_window_before_the_mode_is_see
     let window = window(&fakes, &wire, Some("mild-coin"));
     let host = AnsweringHost::new(|op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "outputQuietMs": 2_000, "unsent": true }),
+            "pane.snapshot" => json!({ "ok": true, "screenQuietMs": 2_000, "unsent": true }),
             _ => json!({ "ok": true }),
         })
     });

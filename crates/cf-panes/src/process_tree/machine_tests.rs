@@ -125,6 +125,83 @@ fn a_close_signals_the_windows_by_its_parents_and_its_session_and_none_of_what_t
     assert_eq!(machine.sent(libc::SIGKILL), the_windows());
 }
 
+/// The numbers of what `closing` holds, in order.
+fn pids_of(closing: &std::collections::HashSet<crate::background::ProcessKey>) -> Vec<i32> {
+    let mut pids: Vec<i32> = closing
+        .iter()
+        .map(|key| i32::try_from(key.pid).expect("a process number"))
+        .collect();
+    pids.sort_unstable();
+    pids
+}
+
+#[test]
+fn what_a_close_ends_is_the_windows_own_with_the_job_a_detached_shell_left_in_its_session_and_no_job_that_left_it(
+) {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+
+    let closing = tree.closing_by(&machine).expect("what a close ends");
+
+    // The program, the tool shell and its jobs, and the job the detached shell left in the
+    // program's session (its parent has gone); not the job that left the session, nor a stranger.
+    assert_eq!(pids_of(&closing), the_windows());
+    assert!(machine.signalled_none(), "a look signals nothing");
+}
+
+#[test]
+fn a_process_the_selection_names_that_the_bound_refuses_is_not_one_a_close_ends() {
+    // The selection takes the strangers' session for the window's (as a marker that other
+    // programs hand on would: a process only the pane's marker ties to the window), and the
+    // bound, which asks for the program, a parent or the session the program leads, allows none
+    // of them: a close leaves them running, and the host names them as possibly the window's,
+    // never as work a close ends.
+    let machine = Machine::new(strangers_in_a_session_nobody_leads());
+    let table = machine.processes().expect("the table");
+    let mut tree = tree_of(&table);
+    tree.session = Some(STRANGERS);
+    let chosen = tree.select(&table, &HashMap::new());
+    for stranger in [the_tests_own_parent(), BUILD, USERS_SHELL, USERS_JOB, LEFT] {
+        assert!(
+            chosen.contains_key(&stranger),
+            "the selection names {stranger}: {chosen:?}"
+        );
+    }
+
+    let closing = tree.closing_by(&machine).expect("what a close ends");
+
+    // The program and the shell and jobs under it by the process that started each: the job a
+    // detached shell left in the program's session is not named by a selection that has the
+    // strangers' session for the window's.
+    assert_eq!(pids_of(&closing), [PROGRAM, SHELL, JOB, DEEP]);
+}
+
+#[test]
+fn a_job_seen_under_the_program_that_left_the_session_with_its_shell_gone_is_not_one_a_close_ends_unless_the_selection_names_it(
+) {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+    // A look while the shell runs sees the job under it.
+    tree.members_by(&machine).expect("a look");
+    // The shell is gone and its job runs on, in the shell's own session, with no marker.
+    let later = Machine::new(vec![
+        table[0].clone(),
+        table[2].clone(),
+        table[5].clone(),
+        table[9].clone(),
+    ]);
+
+    let closing = tree.closing_by(&later).expect("what a close ends");
+
+    // The bound allows the job (it was seen the window's), and the selection does not name it
+    // (its parent has gone, it is in no session of the window's and shows no marker): a close
+    // leaves it running. The limit of `process_tree`: it is not work the close ends, and the
+    // host does not name it as that.
+    assert_eq!(pids_of(&closing), [PROGRAM]);
+}
+
 #[test]
 fn a_close_ends_what_a_program_that_exited_left_in_its_session_though_init_is_now_its_parent() {
     // T-375: a window's program exits over a job that holds its terminal, which no look

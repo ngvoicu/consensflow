@@ -189,39 +189,6 @@ find = '''    begun.starts_with("PSL-") || begun.starts_with("Reply with only th
 replace = '''    line.contains("PSL-") || begun.starts_with("Reply with only the sum of")'''
 
 [[plant]]
-name = "devin round: a Devin agent's effort is given whatever levels the catalog runs its model at"
-meant = "a_devin_agent_on_a_model_listed_with_no_level_is_launched_with_no_effort"
-runs = ["devin-round-roster"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/roster.rs"
-find = '''                (Some(harness), Some(model)) => {
-                    self.catalog.launch_effort(harness, model, row.effort())
-                }'''
-replace = '''                (Some(_), Some(_)) => row.effort(),'''
-
-[[plant]]
-name = "devin round: a Devin model the catalog runs bare keeps the agent's effort"
-meant = "a_devin_model_listed_with_no_level_is_run_by_an_id_devin_lists_at_every_effort"
-runs = ["devin-round-catalog"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/catalog.rs"
-find = '''        (at_effort || !bare).then_some(effort)'''
-replace = '''        (at_effort || !bare || effort.is_empty() || true).then_some(effort)'''
-
-[[plant]]
-name = "devin round: a Devin model's family is looked for by the model as named, its variant words in it"
-meant = "a_devin_agent_on_a_model_the_catalog_runs_bare_and_never_at_its_effort_runs_bare"
-runs = ["devin-round-catalog"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/catalog.rs"
-find = '''        let family = DevinModel::of(model).family;'''
-replace = '''        let family = DevinModel::of(model).family.len().min(0) + model.len();
-        let family = &model[..family];'''
-
-[[plant]]
 name = "devin round: a home made in a folder reached through a link is named by its real path"
 meant = "a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link"
 runs = ["devin-round-isolation"]
@@ -232,12 +199,3 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''        self.parent = folder.to_path_buf();'''
 replace = '''        self.parent = files::real_path(folder);'''
 
-[[plant]]
-name = "devin round: Devin declares it takes the effort as a flag of its own, not in the model's id"
-meant = "devin_alone_writes_the_level_into_the_model_id_and_every_other_harness_takes_a_flag"
-runs = ["devin-round-catalog-lib", "devin-round-catalog", "devin-round-roster"]
-
-[[plant.edit]]
-file = "crates/cf-catalog/src/catalog.rs"
-find = '''        Harness::Devin => (&["low", "medium", "high", "xhigh", "max"], true),'''
-replace = '''        Harness::Devin => (&["low", "medium", "high", "xhigh", "max"], false),'''

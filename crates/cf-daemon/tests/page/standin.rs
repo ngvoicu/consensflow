@@ -192,12 +192,14 @@ impl Seam {
                         .note(format!("answered, where Node refused: {}", said["refusal"]));
                     return;
                 }
-                let ours = serde_json::to_value(value).unwrap_or(Value::Null);
-                let theirs = if said["result"].get("$undefined").is_some() {
+                let mut ours = serde_json::to_value(value).unwrap_or(Value::Null);
+                let mut theirs = if said["result"].get("$undefined").is_some() {
                     Value::Null
                 } else {
                     said["result"].clone()
                 };
+                cf_ledger::testing::hold_apart_what_members_run_on(&mut ours);
+                cf_ledger::testing::hold_apart_what_members_run_on(&mut theirs);
                 if let Some(why) = differs("the answer", ours.to_string(), theirs.to_string()) {
                     self.notes.note(why);
                 }
@@ -228,8 +230,10 @@ fn project_json(request: &NewProject) -> Value {
         .staff
         .iter()
         .map(|member| {
+            // Node's member named its ready-made agent, its handle: this one's name of
+            // its model, which a trace's request gave it ([`super::player`]).
             json!({
-                "agent": member.agent,
+                "agent": member.model_name.clone().or_else(|| member.model.clone()),
                 "harness": member.harness,
                 "designer": member.designer,
                 "tier": member.tier,
@@ -240,7 +244,7 @@ fn project_json(request: &NewProject) -> Value {
     json!({
         "directory": request.directory,
         "name": request.name,
-        "chief": { "harness": request.chief.harness, "agent": request.chief.agent },
+        "chief": { "harness": request.chief.harness, "model": request.chief.model },
         "gate": request.gate,
         "staff": staff,
     })
@@ -305,11 +309,12 @@ impl Engine for Standin {
             SwitchWhen::Turn => "turn",
         };
         let request =
-            json!({ "harness": to.harness, "agent": to.agent, "when": when, "note": note });
+            json!({ "harness": to.harness, "model": to.model, "when": when, "note": note });
         let mut seam = self.seam("switchChief", vec![json!(project), request]);
         let switch = ChiefSwitch {
             harness: to.harness,
-            agent: to.agent,
+            model: to.model,
+            effort: None,
             cut: false,
         };
         let answered = seam

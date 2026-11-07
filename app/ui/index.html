@@ -120,19 +120,12 @@
     <form class="dialog-form" method="dialog">
       <h2 id="settings-title">Settings</h2>
       <menu class="settings-menu">
-        <li><button class="quiet-button" type="button" data-agents-page="" aria-controls="agents-dialog">Agents</button><span>The catalog and your own agents: model, effort and tier.</span></li>
         <li><button class="quiet-button" type="button" data-agents-page="harnesses" aria-controls="harnesses-dialog">Harnesses</button><span>Which coding tools are installed, and their updates.</span></li>
         <li><button class="quiet-button" type="button" id="specs-settings-button" aria-controls="specs-dialog">Specs</button><span>Plan big work as specs in every project, and the Specmint ConsensFlow brings.</span></li>
       </menu>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit">Close</button>
       </div>
-    </form>
-  </dialog>
-  <dialog id="agents-dialog" class="screen" aria-label="Agents">
-    <iframe title="Agents" sandbox="allow-forms allow-same-origin allow-scripts" referrerpolicy="no-referrer"></iframe>
-    <form class="dialog-actions" method="dialog">
-      <button class="quiet-button" type="submit" autofocus>Close</button>
     </form>
   </dialog>
   <dialog id="harnesses-dialog" class="screen" aria-label="Harnesses">
@@ -161,30 +154,22 @@
     </form>
   </dialog>
   <!-- The history viewer (core/history-viewer.js): everything kept of a participant's
-       conversations, from the History button on its window's head, a page at a time. -->
+       conversations, from the History button on its window's head, as one stream drawn to
+       the approved mock (chief-harness CHF-20): the title, the search, the close above it. -->
   <dialog id="history-dialog" class="screen history-viewer" aria-labelledby="history-title">
     <header class="history-head">
       <h2 class="history-title" id="history-title">History</h2>
-      <span class="history-who"></span>
+      <span class="history-formerly" hidden></span>
       <span class="spacer"></span>
-      <button class="quiet-button" type="button" name="history-refresh">Refresh</button>
-    </header>
-    <p class="history-hint">Not stored: tool calls and thinking.</p>
-    <div class="history-bar">
       <form class="history-search" role="search">
-        <input type="search" name="history-find" maxlength="1000" placeholder="Find in the history" aria-label="Find in the history" title="A search holds at most 1,000 characters">
-        <button class="quiet-button" type="submit">Find</button>
+        <input type="search" name="history-find" maxlength="1000" placeholder="Search history" aria-label="Search history" title="A search holds at most 1,000 characters">
       </form>
-      <label class="history-switch"><input type="checkbox" name="history-tools"> Show tool output</label>
-      <span class="spacer"></span>
-      <button class="quiet-button" type="button" name="history-older">Older</button>
-      <span class="history-page" role="status"></span>
-      <button class="quiet-button" type="button" name="history-newer">Newer</button>
-    </div>
-    <section class="history-body" aria-label="The conversations" tabindex="0"></section>
-    <form class="dialog-actions" method="dialog">
-      <button class="quiet-button" type="submit" autofocus>Close</button>
-    </form>
+      <button class="history-icon" type="button" name="history-refresh" tabindex="0" aria-label="Refresh" title="Read the most recent again">↻</button>
+      <form method="dialog">
+        <button class="history-icon" type="submit" tabindex="0" aria-label="Close" title="Close">×</button>
+      </form>
+    </header>
+    <section class="history-body" aria-label="The history" tabindex="0" autofocus></section>
   </dialog>
   <!-- What the app says of specs for every project that does not say otherwise, and the Specmint
        it brings (core/specs-settings.js): each control saves as it changes, and the variants and
@@ -192,7 +177,7 @@
   <dialog id="specs-dialog" class="settings" aria-labelledby="specs-title">
     <form class="dialog-form">
       <h2 id="specs-title">Specs</h2>
-      <p class="dialog-help">With specs on, a chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. A project's own Specs settings win over these. A change reaches a chief when it next starts: after Resume, or when you switch the chief.</p>
+      <p class="dialog-help">With specs on, a chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. A project's own Specs settings win over these. A change reaches a chief whose window is open as soon as it is at rest, and any other when it next starts: after Resume, or when you switch the chief.</p>
       <label class="check"><input type="checkbox" name="on">Plan big work as specs in every project that doesn't say otherwise</label>
       <label>Specs folder, inside the project
         <input name="folder" autocomplete="off" spellcheck="false">
@@ -221,24 +206,43 @@
     <form class="dialog-form">
       <h2 id="new-project-title">New project</h2>
       <label>Project folder<input name="directory" readonly></label>
-      <label>The chief runs on
-        <select name="chief" required></select>
-      </label>
+      <fieldset class="chief-pick">
+        <legend>The chief</legend>
+        <label>Harness
+          <select name="chiefHarness" required></select>
+        </label>
+        <label>Model
+          <select name="chiefModel" required disabled></select>
+        </label>
+        <label>Effort
+          <select name="chiefEffort" disabled></select>
+        </label>
+        <button class="quiet-button" type="button" name="chiefRefresh">Refresh models</button>
+        <p class="dialog-help chief-help" role="status" hidden></p>
+      </fieldset>
       <fieldset class="project-section staff-pick">
         <legend>Staff</legend>
-        <p class="dialog-help">Pick a role, then an agent. The last project's staff is here already.</p>
-        <table class="staff" aria-label="Agents for the staff">
+        <p class="dialog-help">Pick a role, a harness, one of its models, an effort and a tier, then Add. The last project's staff is here already.</p>
+        <table class="staff" aria-label="Members for the staff">
           <thead>
-            <tr><th>Agent</th><th>Role</th><th></th></tr>
+            <tr><th>Member</th><th>Role</th><th></th></tr>
           </thead>
           <tbody id="new-project-staff"></tbody>
         </table>
-        <div class="staff-add">
-          <label>Role<select name="pickRole"></select></label>
-          <label>Agent<select name="pickAgent"></select></label>
-          <button class="quiet-button" type="button" id="new-project-add">Add</button>
-        </div>
-        <p class="staff-hint" id="new-project-hint" hidden></p>
+        <!-- A member as Add member picks one (core/dialogs.js, MemberPicker). -->
+        <fieldset class="staff-add">
+          <legend>Add a member</legend>
+          <label>Role<select name="role"></select></label>
+          <label>Harness<select name="memberHarness"></select></label>
+          <label>Model<select name="memberModel" disabled></select></label>
+          <label>Effort<select name="memberEffort" disabled></select></label>
+          <label>Tier<select name="memberTier"></select></label>
+          <button class="quiet-button" type="button" name="memberRefresh">Refresh models</button>
+          <button class="quiet-button" type="button" name="memberAdd">Add</button>
+          <button class="quiet-button" type="button" name="memberCancel" hidden>Cancel</button>
+          <p class="dialog-help member-help" role="status" hidden></p>
+          <p class="staff-hint" id="new-project-hint" hidden></p>
+        </fieldset>
       </fieldset>
       <div data-project-sections></div>
       <p class="dialog-refusal" role="alert" hidden></p>
@@ -252,11 +256,21 @@
   <dialog id="switch-chief-dialog" aria-labelledby="switch-chief-title">
     <form class="dialog-form">
       <h2 id="switch-chief-title">Switch the chief</h2>
-      <p class="dialog-help">The chief goes on in a new window on the saved agent you pick, with its harness, model and effort. Its first message is the handoff: what you and the chiefs before it said, and what waits on the board. The staff keeps working.</p>
-      <p class="dialog-help chief-gone" role="status" hidden></p>
-      <label>The chief runs on
-        <select name="chief" required></select>
-      </label>
+      <p class="dialog-help">The chief goes on in a new window on the harness and model you pick: a fresh conversation, whose first message is the handoff, what you and the chiefs before it said and what waits on the board. The staff keeps working. To change only the model, switch it in the chief's own window instead: it keeps its conversation, and ConsensFlow follows it.</p>
+      <fieldset class="chief-pick">
+        <legend>The chief</legend>
+        <label>Harness
+          <select name="chiefHarness" required></select>
+        </label>
+        <label>Model
+          <select name="chiefModel" required disabled></select>
+        </label>
+        <label>Effort
+          <select name="chiefEffort" disabled></select>
+        </label>
+        <button class="quiet-button" type="button" name="chiefRefresh">Refresh models</button>
+        <p class="dialog-help chief-help" role="status" hidden></p>
+      </fieldset>
       <fieldset>
         <legend>If the chief is in the middle of a turn</legend>
         <label class="check"><input type="radio" name="when" value="turn" checked>Let it finish its turn, then switch</label>
@@ -285,59 +299,30 @@
       <h2 id="project-settings-title">Project settings</h2>
       <fieldset class="project-section">
         <legend>Staff</legend>
-        <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks. An image designer draws: only an image agent is one, and an image agent takes no other role. A member may hold more than one role: one row here per role.</p>
+        <p class="dialog-help">The chief names the tier a task needs and ConsensFlow gives each task a new window of a member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks. An image designer draws, on Codex, and takes no other role. A member is a harness, one of its models, an effort and a tier, and is named by the model's id and the effort. Edit one to another model or effort and it takes the new name. A member may hold more than one role: one row here per role.</p>
         <table class="staff" aria-label="On the staff">
           <thead>
             <tr><th>Member</th><th>Role</th><th></th></tr>
           </thead>
           <tbody id="staff-members"></tbody>
         </table>
+        <!-- Add member and Edit member (core/dialogs.js, MemberPicker): a model its harness lists
+             of itself, at an effort it lists, in the tier the human picks (T-1143). -->
         <fieldset class="staff-add">
           <legend>Add a member</legend>
           <label>Role<select name="role"></select></label>
-          <label>Agent<select name="agent"></select></label>
-          <button class="primary-button" type="submit">Add to staff</button>
+          <label>Harness<select name="memberHarness"></select></label>
+          <label>Model<select name="memberModel" disabled></select></label>
+          <label>Effort<select name="memberEffort" disabled></select></label>
+          <label>Tier<select name="memberTier"></select></label>
+          <button class="quiet-button" type="button" name="memberRefresh">Refresh models</button>
+          <button class="primary-button" type="submit" name="memberAdd">Add to staff</button>
+          <button class="quiet-button" type="button" name="memberCancel" hidden>Cancel</button>
+          <p class="dialog-help member-help" role="status" hidden></p>
           <p class="staff-hint" id="staff-hint" hidden></p>
         </fieldset>
       </fieldset>
-      <!-- The rules for the staff (core/staff-rules.js): the human's own text, which every window
-           of the project is given after its role; written here only. -->
-      <fieldset class="project-section staff-rules">
-        <legend>Rules for the staff</legend>
-        <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. A change reaches each window when it next starts: a new task's window, or after Resume.</p>
-        <label>The rules<textarea name="staff-rules" rows="8" spellcheck="false" aria-describedby="staff-rules-count"></textarea></label>
-        <p class="staff-rules-count" id="staff-rules-count" aria-live="polite"></p>
-        <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
-        <div class="dialog-actions"><button class="primary-button" type="button" name="staff-rules-save">Save rules</button></div>
-      </fieldset>
-      <!-- Compaction for Claude members (core/claude-compaction.js): the size at which the
-           project's Claude member windows compact, or Claude's own point; the chief never; chosen here only. -->
-      <fieldset class="project-section claude-compaction">
-        <legend>Compaction for Claude members</legend>
-        <p class="dialog-help">From its next start a member's Claude window compacts at about this size, in place of your Claude settings (an exported CLAUDE_CODE_AUTO_COMPACT_WINDOW still comes first), and never above the model's own window. The chief is not affected.</p>
-        <p class="dialog-help claude-compaction-margin">Claude compacts a little before its window reaches this size: about 33k tokens before it, in Claude Code 2.1.x.</p>
-        <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="own" checked> Claude's own point</label>
-        <label class="claude-compaction-choice"><input type="radio" name="claude-compaction-choice" value="size"> A size</label>
-        <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="claude-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
-        <p class="staff-hint claude-compaction-hint" role="alert" hidden></p>
-        <div class="dialog-actions"><button class="primary-button" type="button" name="claude-compaction-save">Save compaction</button></div>
-      </fieldset>
       <div data-project-sections></div>
-      <!-- Computer use (core/computer-use.js): a part for each harness of the project's with a
-           computer use of its own, shown only while one of its members runs on it, and
-           ConsensFlow's macOS permissions once for the parts that work through them. -->
-      <fieldset class="project-section computer-use" hidden>
-        <legend>Computer use</legend>
-        <p class="dialog-help">Lets an agent see and control the screen.</p>
-        <div class="computer-use-harnesses"></div>
-        <div class="computer-use-permissions" hidden>
-          <h3 class="computer-use-head">ConsensFlow's permissions, for every project</h3>
-          <p class="computer-use-line computer-use-grants-of" hidden></p>
-          <ul class="computer-use-grants"></ul>
-          <p class="dialog-help computer-use-mend" hidden></p>
-          <p class="dialog-help">A permission you change in System Settings may need ConsensFlow to be quit and opened again.</p>
-        </div>
-      </fieldset>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>
@@ -345,9 +330,31 @@
   </dialog>
 
   <!-- The sections of a project's settings that Project settings and New project share, one markup
-       for both: each dialog has a copy (core/project-sections.js). What only a saved project has is
-       marked data-live: New project does not show it. -->
+       for both: each dialog has a copy (core/project-sections.js), and a section is added here or
+       nowhere (T-1268). What only a saved project has (a Save, and when a change reaches the chief)
+       is marked data-live: New project does not show it. -->
   <template id="project-sections">
+    <!-- The rules for the staff (core/staff-rules.js): the human's own text, which every window
+         of the project is given after its role; written here only. -->
+    <fieldset class="project-section staff-rules">
+      <legend>Rules for the staff</legend>
+      <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. <span data-live>A change reaches the chief as soon as it is at rest, and each other window when it next starts: a new task's window, or after Resume.</span></p>
+      <label>The rules<textarea name="staff-rules" rows="8" spellcheck="false"></textarea></label>
+      <p class="staff-rules-count" aria-live="polite"></p>
+      <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="staff-rules-save">Save rules</button></div>
+    </fieldset>
+    <!-- Compaction (core/compaction.js): the size at which every member window of the project
+         compacts, whatever its harness, or each harness's own point; the chief never; chosen here only. -->
+    <fieldset class="project-section members-compaction">
+      <legend>Compaction</legend>
+      <p class="dialog-help">From its next start, each member's harness compacts its conversation at about this size, by its own rule; a size above a model's own window leaves the harness's own point. The chief is not affected.</p>
+      <label class="check"><input type="radio" name="members-compaction-choice" value="own" checked>The harness's own point</label>
+      <label class="check"><input type="radio" name="members-compaction-choice" value="size">A size</label>
+      <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="members-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
+      <p class="staff-hint members-compaction-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="members-compaction-save">Save compaction</button></div>
+    </fieldset>
     <fieldset class="project-section">
       <legend>Human approval</legend>
       <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
@@ -355,7 +362,7 @@
     <fieldset class="project-section wakeup-section">
       <legend>Wake-up calls</legend>
       <label class="check"><input type="checkbox" name="wakeup-on">Wake the chief now and then</label>
-      <p class="wakeup-help">A chief that stopped while work is left carries on: it is asked whether it still has work to do. Nothing is sent while the project is closed, or while you have typed to the chief and not sent it; its answer stays in its terminal.</p>
+      <p class="wakeup-help">A chief that stopped while work is left carries on: it is asked whether it still has work to do. Nothing is sent while the project is closed, or while you have typed to the chief and not sent it; its answer stays in its terminal. A chief whose last note to you is unread is left alone for up to three calls, a call never comes at once after your words to it, and calls come further apart after answers that only wrote to you.</p>
       <div class="wakeup-when">
         <label>Every<input type="number" name="wakeup-every" min="1" step="1" required></label>
         <label>Unit<select name="wakeup-unit"><option value="minutes">minutes</option><option value="hours">hours</option><option value="days">days</option></select></label>
@@ -366,7 +373,7 @@
     </fieldset>
     <fieldset class="project-section project-specs">
       <legend>Specs</legend>
-      <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, in Specs. <span data-live>A change reaches the chief when it next starts: after Resume, or when you switch the chief.</span></p>
+      <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, in Specs. <span data-live>A change reaches the chief as soon as it is at rest if its window is open, else when it next starts: after Resume, or when you switch the chief.</span></p>
       <label>Specs
         <select name="specs">
           <option value="follow">Follow the app's setting</option>
@@ -386,7 +393,30 @@
         </span>
       </label>
       <p class="staff-hint specs-note" role="status" hidden></p>
-      <button class="quiet-button" type="button" name="specs-save" data-live>Save specs</button>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="specs-save">Save specs</button></div>
+    </fieldset>
+    <!-- Computer use (core/computer-use.js): a block for each harness of the project's with a
+         computer use of its own, shown only while one of its members runs on it, and one block
+         for the macOS permissions they work through, a column for each app and a row for each
+         pane, each block headed and spaced the same. -->
+    <fieldset class="project-section computer-use" hidden>
+      <legend>Computer use</legend>
+      <p class="dialog-help">Lets an agent see and control the screen.</p>
+      <div class="computer-use-harnesses"></div>
+      <div class="computer-use-block computer-use-permissions" hidden>
+        <div class="computer-use-title">
+          <h3 class="computer-use-head">Permissions in System Settings</h3>
+        </div>
+        <p class="dialog-help computer-use-grants-of" hidden></p>
+        <table class="staff computer-use-table" aria-label="Permissions in System Settings">
+          <thead>
+            <tr class="computer-use-apps"></tr>
+          </thead>
+          <tbody class="computer-use-grants"></tbody>
+        </table>
+        <p class="dialog-help computer-use-mend" hidden></p>
+        <p class="dialog-help">These are the Mac's, for every project. A permission you change in System Settings may need ConsensFlow to be quit and opened again.</p>
+      </div>
     </fieldset>
   </template>
 

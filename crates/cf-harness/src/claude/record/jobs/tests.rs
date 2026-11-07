@@ -20,7 +20,7 @@ fn over(text: &str) -> Vec<&str> {
 fn started(ids: &[&str]) -> Jobs {
     let mut jobs = Jobs::default();
     for id in ids {
-        jobs.started(Arc::from(*id), None);
+        jobs.started(Arc::from(*id), None, None, None);
     }
     jobs
 }
@@ -179,7 +179,7 @@ fn a_summary_ends_the_jobs_it_names_but_those_it_marks_running_and_no_job_it_doe
     let ids: Vec<String> = (1..=22).map(|n| format!("b{n:02}")).collect();
     let mut jobs = Jobs::default();
     for id in &ids {
-        jobs.started(Arc::from(id.as_str()), None);
+        jobs.started(Arc::from(id.as_str()), None, None, None);
     }
     let mut text = String::from("<task-notification>");
     for id in &ids[..20] {
@@ -215,7 +215,12 @@ fn words_that_are_no_notification_name_no_job() {
 /// The monitor `byuz6ka89` of the live run of 2026-10-21, on a command.
 fn armed() -> Jobs {
     let mut jobs = Jobs::default();
-    jobs.started(Arc::from("byuz6ka89"), Some(watch(Source::Command)));
+    jobs.started(
+        Arc::from("byuz6ka89"),
+        Some(watch(Source::Command)),
+        None,
+        None,
+    );
     jobs
 }
 
@@ -308,7 +313,12 @@ fn only_claude_codes_own_words_of_a_monitors_end_alone_in_its_notification_are_a
     let noticed = |jobs: &Jobs| (jobs.running(), jobs.noticed_count());
     // A socket's monitor: its notice is kept and counted, and it is no command's.
     let mut jobs = Jobs::default();
-    jobs.started(Arc::from("byuz6ka89"), Some(watch(Source::Socket)));
+    jobs.started(
+        Arc::from("byuz6ka89"),
+        Some(watch(Source::Socket)),
+        None,
+        None,
+    );
     jobs.ended_by(&Written::event("byuz6ka89", "tick lines", expired), None);
     assert_eq!(noticed(&jobs), (1, 1));
     assert_eq!(jobs.monitors()[0].source, Source::Socket);
@@ -379,6 +389,71 @@ fn a_relaunch_retires_what_runs_and_a_later_word_of_its_end_settles_it() {
     jobs.ended_by(&notification("b", "stopped"), None);
     assert_eq!((jobs.running(), jobs.retired()), (0, 1));
     // A job the new process starts runs, and is no retired one.
-    jobs.started(Arc::from("d"), None);
+    jobs.started(Arc::from("d"), None, None, None);
     assert_eq!((jobs.running(), jobs.retired()), (1, 1));
+}
+
+#[test]
+fn a_command_that_runs_is_told_by_when_it_began_and_a_monitor_is_none_of_them() {
+    // T-1181: the hold note names the commands a turn left running. A command asked to run
+    // in the background began when its record was written; a monitor is no command.
+    let mut jobs = Jobs::default();
+    jobs.started(Arc::from("b1"), None, Some(7_200_000), None);
+    jobs.started(
+        Arc::from("m1"),
+        Some(watch(Source::Command)),
+        Some(7_300_000),
+        None,
+    );
+    jobs.started(Arc::from("b2"), None, None, None);
+    let commands = jobs.commands();
+    assert_eq!(
+        commands,
+        [
+            Command {
+                id: Arc::from("b1"),
+                since: Some(7_200_000),
+                limit_ms: None
+            },
+            Command {
+                id: Arc::from("b2"),
+                since: None,
+                limit_ms: None
+            },
+        ]
+    );
+    assert_eq!(jobs.running(), 3, "the monitor is a job all the same");
+    assert_eq!(jobs.monitors().len(), 1);
+    // A command that ends is no longer one, and one that never began is not one.
+    jobs.ended_by(&notification("b1", "completed"), None);
+    jobs.ended_by(&notification("zz", "completed"), None);
+    assert_eq!(jobs.commands().len(), 1);
+    jobs.stopped("b2");
+    assert_eq!(jobs.commands(), []);
+}
+
+#[test]
+fn a_command_a_time_limit_moved_into_the_background_began_that_limit_before_its_record() {
+    // The field board's T-299: a foreground Bash with a 10-minute limit passed it at
+    // 02:00:23Z and ran on for 100 minutes. The record that says Claude Code moved it is
+    // written at the limit, so the command began 600 s before.
+    let mut jobs = Jobs::default();
+    let at = 1_792_548_023_000; // the record's time
+    jobs.started(Arc::from("bfxgkew9o"), None, Some(at), Some(600_000));
+    assert_eq!(
+        jobs.commands(),
+        [Command {
+            id: Arc::from("bfxgkew9o"),
+            since: Some(at - 600_000),
+            limit_ms: Some(600_000),
+        }]
+    );
+    // Started again under the same id (a record read twice, a resumed session): the latest
+    // word of its start stands.
+    jobs.started(Arc::from("bfxgkew9o"), None, Some(at + 1_000), None);
+    assert_eq!(jobs.commands()[0].limit_ms, None);
+    assert_eq!(jobs.commands()[0].since, Some(at + 1_000));
+    // A relaunch retires it with the rest.
+    jobs.retire();
+    assert_eq!(jobs.commands(), []);
 }

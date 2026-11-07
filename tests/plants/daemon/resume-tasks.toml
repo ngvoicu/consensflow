@@ -370,7 +370,7 @@ runs = ["ledger-suspended", "engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "        .filter(|because| because.contains(MAY_STILL_RUN))"
+find = "        .filter(|because| warns(because))"
 replace = "        .filter(|_| false)"
 
 [[plant]]
@@ -461,8 +461,8 @@ runs = ["ledger-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    let warnings = warnings_queued(store, &task)?;"
-replace = "    let warnings = Vec::new();"
+find = "        warnings = warnings_queued(store, &task)?;"
+replace = "        warnings = Vec::new();"
 
 [[plant]]
 name = "resume tasks: a delivery that waited for its window goes into a closed project's"
@@ -685,14 +685,12 @@ find = '''
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 replace = '''
         if withdrawn_if_stale(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 
 [[plant]]
 name = "resume tasks: the human hears that a pause note withdrawn at its last attempt did not reach the chief"
@@ -1010,12 +1008,8 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = '''                sql_list(&HELD_TASK_STATES)
-            ),
-            params![participant_id, number],'''
-replace = '''                sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat())
-            ),
-            params![participant_id, number],'''
+find = "        Giving::Resumed(number) => (number, HELD_TASK_STATES.to_vec()),"
+replace = "        Giving::Resumed(number) => (number, [&HELD_TASK_STATES[..], &[\"paused\"]].concat()),"
 
 [[plant]]
 name = "resume tasks: a paused task of a session is resumed into its window at work on another"
@@ -1024,12 +1018,8 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = '''                sql_list(&HELD_TASK_STATES)
-            ),
-            params![participant_id, number],'''
-replace = '''                sql_list(&["never"])
-            ),
-            params![participant_id, number],'''
+find = "        Giving::Resumed(number) => (number, HELD_TASK_STATES.to_vec()),"
+replace = "        Giving::Resumed(number) => (number, vec![\"never\"]),"
 
 # --- a continuation dies with its task (round 8) ---
 
@@ -1355,14 +1345,12 @@ find = '''
         if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 replace = '''
         if withdrawn_on_its_way(store, &message)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
         }
-        store.db.execute(
-            "UPDATE message SET state = 'failed','''
+        // Served whole'''
 
 [[plant]]
 name = "resume tasks: the transport lets go of a continuation whose task is not at work"

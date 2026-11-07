@@ -55,10 +55,11 @@ pub fn dispatch_brief(tier: &str, marker: &str) -> String {
 }
 
 /// What the human types to the chief to have it send a follow-up to the window that
-/// did the task `number`.
+/// did the task `number`: accept the task, which its result waits for, then the
+/// follow-up (one of a task with its result in waits for that acceptance).
 pub fn continue_brief(number: i64, marker: &str) -> String {
     format!(
-        "Run exactly this command in your shell, then reply with one line:\ncf task add --after T-{number} \"Reply with exactly: {marker}\""
+        "Run exactly these commands in your shell, one after the other, then reply with one line:\ncf task accept T-{number}\ncf task add --after T-{number} \"Reply with exactly: {marker}\""
     )
 }
 
@@ -281,7 +282,8 @@ mod tests {
     fn the_follow_up_is_a_task_after_the_one_the_window_did() {
         assert_eq!(
             continue_brief(3, "BENCH_AGAIN_PI"),
-            "Run exactly this command in your shell, then reply with one line:\n\
+            "Run exactly these commands in your shell, one after the other, then reply with one line:\n\
+             cf task accept T-3\n\
              cf task add --after T-3 \"Reply with exactly: BENCH_AGAIN_PI\""
         );
     }

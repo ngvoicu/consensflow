@@ -11,9 +11,9 @@ use super::lines::{
     a_pool, message_line, numbers, printed_body, task_head, task_line, tasks, waiting_answers,
 };
 use super::usage::{task_usage, ADD_USAGE};
-use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
+use super::words::{quoted, require_text, split, task_number, task_numbers, Shape, Split};
 use super::{brief, transcript};
-use super::{help_of, text_of, Failure, Said};
+use super::{help_of, Failure, Said};
 
 /// The flags of `cf task add`.
 const ADD: Shape = Shape {
@@ -29,10 +29,26 @@ const ADD: Shape = Shape {
     leading: 0,
 };
 
-/// The flags of `cf task reopen` and `cf task resume`, which give the window
-/// words of their own.
-const BRIEFED: Shape = Shape {
+/// The flag that gives a task a new title: the brief's first line otherwise.
+const TITLE: &str = "--title";
+
+/// The flags of the other commands that move a task: their words may come from a file.
+const FILED: Shape = Shape {
     valued: &[brief::FILE],
+    ..Shape::TEXT
+};
+
+/// The flags of `cf task reopen` and `cf task resume`, which give the window words of their
+/// own, and a new title if they like.
+const BRIEFED: Shape = Shape {
+    valued: &[brief::FILE, TITLE],
+    ..Shape::TEXT
+};
+
+/// The flags of `cf task edit`: a brief and a title as any other, and the tier, the tasks it
+/// needs and the tasks that wait for it, which may stand alone.
+const EDIT: Shape = Shape {
+    valued: &[brief::FILE, TITLE, "--tier", "--needs", "--before"],
     ..Shape::TEXT
 };
 
@@ -96,12 +112,14 @@ pub fn command(
     }
 }
 
-/// The flags of the task command `verb`, after its task.
+/// The flags of the task command `verb`, after its task. Every command that
+/// moves a task takes words, so every one takes a file of them too.
 fn shape_of(verb: &str) -> Shape {
     match verb {
         "get" => GET,
-        "reopen" | "resume" | "edit" => BRIEFED,
-        _ => Shape::TEXT,
+        "edit" => EDIT,
+        "reopen" | "resume" => BRIEFED,
+        _ => FILED,
     }
 }
 
@@ -115,13 +133,13 @@ fn add(
     if words.asks_for_help() {
         return Ok(help_of(&["task", "add"]));
     }
-    let tier = words.value("--tier");
+    let tier = words.value("--tier")?;
     let after = words
-        .value("--after")
+        .value("--after")?
         .map(|after| task_number(Some(after)))
         .transpose()?;
-    let needs = task_numbers(words.value("--needs"))?;
-    let before = task_numbers(words.value("--before"))?;
+    let needs = task_numbers(words.each("--needs"))?;
+    let before = task_numbers(words.each("--before"))?;
     let mine = words.on("--self");
     // Your own work needs no board while you are at it; on the board it is a
     // wake-up: the brief comes back to this window when what it waits for is accepted.
@@ -135,7 +153,6 @@ fn add(
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
     let brief = require_text(brief::brief_of(&words, given, input)?, ADD_USAGE)?;
-    let sent = brief::sent(&brief);
 
     let mut body = Map::new();
     if mine {
@@ -157,7 +174,7 @@ fn add(
         if words.on("--test") {
             body.insert("test".into(), true.into());
         }
-        if let Some(purpose) = words.value("--purpose") {
+        if let Some(purpose) = words.value("--purpose")? {
             body.insert("purpose".into(), purpose.into());
         }
     }
@@ -167,11 +184,13 @@ fn add(
     if let Some(before) = &before {
         body.insert("before".into(), json!(before));
     }
-    body.insert("body".into(), brief.into());
+    body.insert("body".into(), brief.clone().into());
 
     let created = board.post("/api/tasks", &Value::Object(body))?;
     let task = created.part("task")?;
     let number = js::text(task.get("number"));
+    // The new task's number is known only now, and the last line names it.
+    let sent = brief::sent(&number, &brief);
     // With human approval required, nothing moves until the human passes it on.
     let gated = if js::truthy(created.value().get("gated")) && !mine {
         " The human approves each message before it moves."
@@ -198,7 +217,7 @@ fn add(
         )
     } else if let Some(after) = after {
         format!(
-            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits}",
+            "T-{number} continues in @{}, the window that did T-{after}; its result arrives in your inbox.{gated}{waits} If that window cannot go on in its conversation when T-{number} starts, T-{number} waits paused for your word (cf task edit T-{number}, then cf task resume T-{number}).",
             js::text(task.get("assignee"))
         )
     } else {
@@ -210,13 +229,14 @@ fn add(
         let nearest = match created.value().get("asked") {
             None => String::new(),
             asked => format!(
-                " (no {} {} is on the staff, so the nearest tier)",
+                " (no {} {} is on the staff, so the nearest tier{})",
                 js::text(asked),
-                js::text(pool)
+                js::text(pool),
+                held_by(created.value())
             ),
         };
         format!(
-            "T-{number} is on the board for {}{nearest}; the first free one gets it, and its result arrives in your inbox.{waits}{holds}{gated}",
+            "T-{number} is on the board for {}{nearest}; it starts in a new window of one, and its result arrives in your inbox.{waits}{holds}{gated}",
             a_pool(pool, tier.as_ref())
         )
     };
@@ -305,8 +325,13 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
         }
         kept.push(lane);
         if !lane_tasks.is_empty() {
+            // A lane on a harness says the model and effort it runs on (harness-models).
+            let runs_on = match lane.get("runsOn").and_then(Value::as_str) {
+                Some(runs_on) => format!(", {runs_on}"),
+                None => String::new(),
+            };
             lines.push(format!(
-                "@{} ({})",
+                "@{} ({}{runs_on})",
                 js::text(lane.get("handle")),
                 js::text(lane.get("role"))
             ));
@@ -411,31 +436,58 @@ fn moved(
 ) -> Result<Said, Failure> {
     let briefed = matches!(action, "reopen" | "resume" | "edit");
     let words = split(rest, shape_of(action));
-    let text = if briefed {
-        brief::brief_of(&words, given, input)?
-    } else {
-        text_of(words.text, input)?
-    };
-    if matches!(action, "done" | "reopen" | "edit" | "resume") && js::trim(&text).is_empty() {
+    // `cf task edit T-3 --tier light` changes the tier alone: its brief stays.
+    let tier = words
+        .value("--tier")?
+        .filter(|_| action == "edit")
+        .map(str::to_owned);
+    let needs = links_of("--needs", &words, action)?;
+    let before = links_of("--before", &words, action)?;
+    let alone = tier.is_some() || needs.is_some() || before.is_some();
+    let title = new_title(&words)?;
+    let text = brief::brief_of(&words, given, input)?;
+    // An edit with a title and nothing else changes the title alone.
+    let retitling = action == "edit" && title.is_some() && js::trim(&text).is_empty() && !alone;
+    if matches!(action, "done" | "reopen" | "edit" | "resume")
+        && js::trim(&text).is_empty()
+        && (action != "edit" || !alone)
+        && !retitling
+    {
         let what = match action {
             "done" => "your result",
             "edit" => "the new brief",
             "resume" => "what to do now",
             _ => "the follow-up",
         };
-        return Err(Failure::Usage(format!(
-            "cf task {action} T-{number} \"{what}\""
-        )));
+        return Err(Failure::Usage(match action {
+            "edit" => format!(
+                "cf task edit T-{number} \"{what}\", or --tier <tier>, --needs T-4 or --before T-9"
+            ),
+            _ => format!("cf task {action} T-{number} \"{what}\""),
+        }));
     }
     // What the words that send a window on say of themselves.
-    let sent = if briefed {
-        format!("\n{}", brief::sent(&text))
+    let sent = if briefed && !text.is_empty() {
+        format!("\n{}", brief::sent(number, &text))
     } else {
         String::new()
     };
     let mut body = Map::new();
-    if !text.is_empty() {
+    let has_brief = !text.is_empty();
+    if has_brief {
         body.insert("body".into(), text.into());
+    }
+    if let Some(tier) = &tier {
+        body.insert("tier".into(), tier.as_str().into());
+    }
+    if let Some(needs) = &needs {
+        body.insert("needs".into(), needs.clone());
+    }
+    if let Some(before) = &before {
+        body.insert("before".into(), before.clone());
+    }
+    if let Some(title) = &title {
+        body.insert("title".into(), title.as_str().into());
     }
     let path = format!("/api/tasks/{number}/{action}");
     let mut answer = board.post(&path, &Value::Object(body))?;
@@ -444,17 +496,26 @@ fn moved(
         Some(dropped) => went_with_it(answer.list(Some(dropped), "dropped")?),
         None => String::new(),
     };
+    // What the window was counted running when the task was finished, which the accept's close ends.
+    let running = match answer.value().get("running") {
+        Some(running) => still_running(number, running),
+        None => String::new(),
+    };
     let task = answer.take("task")?;
+    // A resume's line names no title, so a new one is said.
+    let titled = title.as_ref().map_or_else(String::new, |title| {
+        format!(" Its title is now {}.", quoted(title))
+    });
     let said = match action {
         "pause" => format!(
             "T-{number} is paused: its window stops and its work waits. Resume it with: {} task resume T-{number} \"what to do now\"",
             board.cf()
         ),
         "resume" if task.get("state").and_then(Value::as_str) == Some("open") => format!(
-            "T-{number} is back on the board for {}: the window that had it has ended.",
+            "T-{number} is back on the board for {}: the window that had it has ended.{titled}",
             a_pool(task.get("pool"), task.get("tier"))
         ),
-        "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
+        "resume" => format!("T-{number} resumes in @{} with your words.{titled}", js::text(task.get("assignee"))),
         "finish" => {
             let count = |field: &str| answer.value().get(field).and_then(Value::as_u64);
             finishing(number, &task, count("jobs"), count("agents"))
@@ -464,23 +525,182 @@ fn moved(
             "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on.{}",
             on_its_way(answer.value())
         ),
-        "edit" => format!(
-            "T-{number} has your new brief; no window had the old one, and the ledger keeps it. {}",
+        "edit" if retitling => format!(
+            "T-{number} has the title {}; its brief is as it was, and the ledger keeps the old title. {}",
+            quoted(title.as_deref().unwrap_or_default()),
             task_line(&task)
         ),
+        "edit" => edited(
+            number,
+            &task,
+            answer.value(),
+            Changed {
+                brief: has_brief,
+                tier: tier.is_some(),
+                needs: needs.is_some(),
+                before: before.is_some(),
+            },
+        ),
+        "accept" => format!("{}{running}", task_line(&task)),
         _ => format!("{}{dropped}", task_line(&task)),
     };
     Ok(Said::new(task, format!("{said}{sent}")))
 }
 
-/// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
-/// `agents` the worker's harness still counted are said to run on until its window closes,
-/// or past it where the host cannot tell what is the window's (on Windows a program runs
-/// before its Job Object holds it, and on the Mac what left the window's session is not
-/// found, so the close does not end all of it).
-fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) -> String {
-    let who = js::text(task.get("assignee"));
-    let (jobs, agents) = (jobs.unwrap_or(0), agents.unwrap_or(0));
+/// The members of the tier a task went to when nobody held the one asked, as `: @anubis`.
+fn held_by(answered: &Value) -> String {
+    answered
+        .get("heldBy")
+        .and_then(Value::as_array)
+        .map(|held| {
+            held.iter()
+                .map(|handle| format!("@{}", js::text(Some(handle))))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|held| !held.is_empty())
+        .map_or_else(String::new, |held| format!(": {held}"))
+}
+
+/// What `cf task edit` was given to change.
+struct Changed {
+    brief: bool,
+    tier: bool,
+    needs: bool,
+    before: bool,
+}
+
+/// The task numbers of `list` as `T-3, T-4`, or `nothing`.
+fn numbers_said(list: Option<&Value>) -> String {
+    // A task's needs are `{ number, state }`; the tasks that wait for it are numbers.
+    let numbers: Vec<String> = list
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .map(|item| format!("T-{}", js::text(Some(item.get("number").unwrap_or(item)))))
+                .collect()
+        })
+        .unwrap_or_default();
+    if numbers.is_empty() {
+        "nothing".to_owned()
+    } else {
+        numbers.join(", ")
+    }
+}
+
+/// `--needs` or `--before` read as the list it changes: `T-3,T-4` replaces what the task has,
+/// `+T-5,-T-6` adds and removes. Only `cf task edit` takes them.
+fn links_of(
+    flag: &str,
+    words: &super::words::Split,
+    action: &str,
+) -> Result<Option<Value>, Failure> {
+    let Some(word) = words.value(flag)?.filter(|_| action == "edit") else {
+        return Ok(None);
+    };
+    let parts: Vec<&str> = word.split(',').map(js::trim).collect();
+    let signed = parts
+        .iter()
+        .filter(|part| part.starts_with(['+', '-']))
+        .count();
+    let number = |part: &str| task_number(Some(part.trim_start_matches(['+', '-'])));
+    if signed == 0 {
+        let set: Result<Vec<u64>, Failure> = parts.iter().map(|part| number(part)).collect();
+        return Ok(Some(json!(set?)));
+    }
+    if signed < parts.len() {
+        return Err(Failure::Usage(format!(
+            "{flag} takes T-3,T-4 to replace the list, or +T-5,-T-6 to add and remove: not both in one"
+        )));
+    }
+    let (mut add, mut remove) = (Vec::new(), Vec::new());
+    for part in parts {
+        match part.starts_with('+') {
+            true => add.push(number(part)?),
+            false => remove.push(number(part)?),
+        }
+    }
+    Ok(Some(json!({ "add": add, "remove": remove })))
+}
+
+/// What `cf task edit` says: the brief is the task's now, the ledger keeps the old; the task is
+/// for another tier (the nearest one somebody holds, when nobody holds the tier asked, and who
+/// holds it); it needs other tasks now, and other tasks wait for it; and no window had it.
+fn edited(number: u64, task: &Value, answered: &Value, changed: Changed) -> String {
+    let now = a_pool(task.get("pool"), task.get("tier"));
+    let nearest = match answered.get("asked") {
+        None => String::new(),
+        asked => format!(
+            " (no {} {} is on the staff, so the nearest tier{})",
+            js::text(asked),
+            js::text(task.get("pool")),
+            held_by(answered)
+        ),
+    };
+    let mut parts = Vec::new();
+    if changed.brief {
+        parts.push("has your new brief".to_owned());
+    }
+    if changed.tier {
+        parts.push(format!("is for {now}{nearest}"));
+    }
+    if changed.needs {
+        parts.push(format!("needs {}", numbers_said(task.get("needs"))));
+    }
+    if changed.before {
+        parts.push(format!(
+            "is waited for by {}",
+            numbers_said(answered.get("waiting"))
+        ));
+    }
+    let last = parts.pop().unwrap_or_default();
+    let lead = match parts.is_empty() {
+        true => last,
+        false => format!("{} and {last}", parts.join(", ")),
+    };
+    let tail = if changed.brief {
+        "; no window had the old one, and the ledger keeps it."
+    } else if changed.tier {
+        "; no window had it."
+    } else {
+        "."
+    };
+    format!("T-{number} {lead}{tail} {}", task_line(task))
+}
+
+/// The title `--title` gives, if it is given: it takes a title, and the title says something.
+fn new_title(words: &Split) -> Result<Option<String>, Failure> {
+    if !words.given(TITLE) {
+        return Ok(None);
+    }
+    match words.value(TITLE)? {
+        Some(title) if !js::trim(title).is_empty() => Ok(Some(title.to_owned())),
+        _ => Err(Failure::Usage(format!(
+            "{TITLE} takes the new title: {TITLE} \"…\""
+        ))),
+    }
+}
+
+/// What an accept says of the background work the task's window was counted running when
+/// the chief or the human finished the task (`running`: `jobs` and `agents`): the close of the
+/// window after the accept ends it, so it is said with the accept's own words, to the chief,
+/// who accepted knowing (T-691). The count is the finish's; what ran then may have ended since.
+/// Nothing for a window that ran nothing.
+fn still_running(number: u64, running: &Value) -> String {
+    let count = |field: &str| running.get(field).and_then(Value::as_u64).unwrap_or(0);
+    let (jobs, agents) = (count("jobs"), count("agents"));
+    let Some(left) = background_work(jobs, agents) else {
+        return String::new();
+    };
+    let them = if jobs + agents == 1 { "it" } else { "them" };
+    format!(
+        "\nT-{number}'s window was running {left} when it was finished; accepting closes the window and ends {them}."
+    )
+}
+
+/// "1 background job", "2 background jobs and 1 background agent or workflow": what a window's
+/// turn left running, as the harness counted it; none when it left nothing.
+fn background_work(jobs: u64, agents: u64) -> Option<String> {
     let plural = |count: u64, one: &str, many: &str| match count {
         1 => format!("1 {one}"),
         _ => format!("{count} {many}"),
@@ -491,13 +711,26 @@ fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) 
         "background agent or workflow",
         "background agents or workflows",
     );
-    let left = match (jobs, agents) {
-        (0, 0) => return format!(
+    match (jobs, agents) {
+        (0, 0) => None,
+        (_, 0) => Some(jobs_said),
+        (0, _) => Some(agents_said),
+        _ => Some(format!("{jobs_said} and {agents_said}")),
+    }
+}
+
+/// What `cf task finish` says: the result is recorded, and nothing is ended. The `jobs` and
+/// `agents` the worker's harness still counted are said to run on until its window closes,
+/// or past it where the host cannot tell what is the window's (on Windows a program runs
+/// before its Job Object holds it, and on the Mac what left the window's session is not
+/// found, so the close does not end all of it).
+fn finishing(number: u64, task: &Value, jobs: Option<u64>, agents: Option<u64>) -> String {
+    let who = js::text(task.get("assignee"));
+    let (jobs, agents) = (jobs.unwrap_or(0), agents.unwrap_or(0));
+    let Some(left) = background_work(jobs, agents) else {
+        return format!(
             "T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing ends nothing its turn left running."
-        ),
-        (_, 0) => jobs_said,
-        (0, _) => agents_said,
-        _ => format!("{jobs_said} and {agents_said}"),
+        );
     };
     let they = if jobs + agents == 1 { "it" } else { "they" };
     format!(
@@ -838,6 +1071,29 @@ and 2 idle sessions (`cf task list --all`)";
         );
     }
 
+    /// A lane says in its head the model and effort it runs on, after its role, where its name
+    /// does not say them (harness-models, HMD-12: the board leaves `runsOn` out of a lane
+    /// whose name holds them); a lane that says none is as it was.
+    #[test]
+    fn a_lane_s_head_says_the_model_and_effort_it_runs_on_where_its_name_does_not() {
+        let mut chief = lane("chief", "chief", &[card(2, "working", Some("chief"))]);
+        chief["runsOn"] = json!("claude-opus-5-5 · xhigh");
+        let named = lane(
+            "claude-opus-5-5-high",
+            "worker",
+            &[card(3, "working", Some("claude-opus-5-5-high"))],
+        );
+        let text = listed(&[], &json!([chief, named]));
+        let heads: Vec<&str> = text.lines().filter(|line| line.starts_with('@')).collect();
+        assert_eq!(
+            heads,
+            [
+                "@chief (chief, claude-opus-5-5 · xhigh)",
+                "@claude-opus-5-5-high (worker)"
+            ]
+        );
+    }
+
     /// What `cf task add words…` posted and printed, the board answering with `answer`.
     fn added(words: &[&str], answer: &Value) -> (Option<Value>, String) {
         let api = scripted(vec![reply(201, answer.clone())]);
@@ -868,7 +1124,7 @@ and 2 idle sessions (`cf task list --all`)";
         );
         assert_eq!(
             said,
-            "T-3 is on the board for a standard tester; the first free one gets it, and its result arrives in your inbox.\nSent: 7 characters, ending \"Run T-2\"."
+            "T-3 is on the board for a standard tester; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 7 characters, ending \"Run T-2\"."
         );
         // Beside the others, and with none of them it is a plain task.
         let (posted, _) = added(
@@ -882,6 +1138,113 @@ and 2 idle sessions (`cf task list --all`)";
         );
         let (posted, _) = added(&["--tier", "light", "Write it"], &answer);
         assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
+    }
+
+    /// A chief that read of a free member after every task it added took a member
+    /// for a person who can be busy, and chained its work through one window (T-1129, T-1134):
+    /// whatever the task waits for, the receipt says a member of its role and tier takes it in a
+    /// new window, and says nothing of a member free or busy.
+    #[test]
+    fn a_task_added_is_never_said_to_wait_for_a_free_member_and_goes_to_a_new_window() {
+        let task = |pool: &str, tier: Value, blocked: Value| {
+            json!({ "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
+                "title": "T", "blockedBy": blocked, "pool": pool, "tier": tier },
+                "message": null, "gated": false })
+        };
+        let mut gated = task("worker", json!("standard"), json!([]));
+        gated["gated"] = json!(true);
+        let mut nearest = task("worker", json!("complex"), json!([]));
+        nearest["asked"] = json!("critical");
+        let cases = [
+            (
+                vec!["--tier", "standard", "A"],
+                task("worker", json!("standard"), json!([])),
+            ),
+            (
+                vec!["--advice", "--tier", "complex", "A"],
+                task("advisor", json!("complex"), json!([])),
+            ),
+            (
+                vec!["--review", "--tier", "light", "A"],
+                task("reviewer", json!("light"), json!([])),
+            ),
+            (
+                vec!["--test", "--tier", "standard", "A"],
+                task("tester", json!("standard"), json!([])),
+            ),
+            (
+                vec!["--design", "A"],
+                task("designer", Value::Null, json!([])),
+            ),
+            (vec!["--tier", "critical", "A"], nearest),
+            (
+                vec!["--tier", "standard", "--needs", "T-2", "A"],
+                task("worker", json!("standard"), json!([2])),
+            ),
+            (
+                vec!["--tier", "standard", "--before", "T-9,T-10", "A"],
+                task("worker", json!("standard"), json!([])),
+            ),
+            (vec!["--tier", "standard", "A"], gated),
+        ];
+        for (words, answer) in cases {
+            let (_, said) = added(&words, &answer);
+            let line = said.lines().next().unwrap_or_default();
+            for word in line.split(|c: char| !c.is_alphabetic()) {
+                let word = word.to_lowercase();
+                assert!(
+                    word != "free" && word != "busy",
+                    "`cf task add {words:?}` says a member is {word}: {line}"
+                );
+            }
+            assert!(
+                line.contains(
+                    "; it starts in a new window of one, and its result arrives in your inbox."
+                ),
+                "`cf task add {words:?}` does not say the task gets a new window: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_accept_says_what_the_finish_left_running_which_the_close_of_the_window_ends() {
+        let accepted = |running: Value| {
+            let mut answer = json!({ "task": card(3, "accepted", Some("zeus")) });
+            if !running.is_null() {
+                answer["running"] = running;
+            }
+            let api = scripted(vec![reply(200, answer)]);
+            let words = vec!["accept".to_owned(), "T-3".to_owned()];
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut "".as_bytes(),
+            )
+            .ok()
+            .map(|said| said.text)
+            .unwrap()
+        };
+        let line = "T-3 [accepted] @zeus ← @chief: Task 3";
+        assert_eq!(accepted(Value::Null), line);
+        assert_eq!(
+            accepted(json!({ "jobs": 0, "agents": 0 })),
+            line,
+            "a window that ran nothing is not warned of"
+        );
+        assert_eq!(
+            accepted(json!({ "jobs": 1, "agents": 0 })),
+            format!("{line}\nT-3's window was running 1 background job when it was finished; accepting closes the window and ends it.")
+        );
+        assert_eq!(
+            accepted(json!({ "jobs": 2, "agents": 1 })),
+            format!("{line}\nT-3's window was running 2 background jobs and 1 background agent or workflow when it was finished; accepting closes the window and ends them.")
+        );
+        assert_eq!(
+            accepted(json!({ "jobs": 0, "agents": 2 })),
+            format!("{line}\nT-3's window was running 2 background agents or workflows when it was finished; accepting closes the window and ends them.")
+        );
     }
 
     /// What `cf task edit words…` posted and printed, the board answering with `answer`.
@@ -926,7 +1289,7 @@ and 2 idle sessions (`cf task list --all`)";
         // A new brief is words that give a window work: the reply says how they end (B6).
         assert_eq!(
             said,
-            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2\nSent: 17 characters, ending \"Parse the new way\"."
+            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2\nT-2: sent 17 characters, ending \"Parse the new way\"."
         );
         // Or on the standard input, as a heredoc gives it: its last newline is its own.
         let (posted, _) = edited(&["T-2", "-"], "Parse\nthe new way\n", &answer);
@@ -952,7 +1315,7 @@ and 2 idle sessions (`cf task list --all`)";
             )]
         );
         assert!(
-            said.ends_with("\nSent: 17 characters, ending \"Parse the new way\"."),
+            said.ends_with("\nT-2: sent 17 characters, ending \"Parse the new way\"."),
             "{said}"
         );
     }
@@ -969,10 +1332,200 @@ and 2 idle sessions (`cf task list --all`)";
             &mut std::io::empty(),
         );
         assert!(
-            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\""),
+            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\", or --tier <tier>, --needs T-4 or --before T-9"),
             "a usage line was expected"
         );
         assert!(api.received().is_empty());
+    }
+
+    #[test]
+    fn a_tier_alone_is_posted_with_no_brief() {
+        let answer = json!({ "task": card(2, "open", None) });
+        let api = scripted(vec![reply(200, answer)]);
+        let words: Vec<String> = ["edit", "T-2", "--tier", "light"]
+            .iter()
+            .map(|word| (*word).to_owned())
+            .collect();
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        let posted: Vec<_> = api
+            .received()
+            .into_iter()
+            .map(|got| (got.path.clone(), got.json()))
+            .collect();
+        assert_eq!(
+            posted,
+            [(
+                "/api/tasks/2/edit".to_owned(),
+                Some(json!({ "tier": "light" }))
+            )]
+        );
+        assert!(
+            said.text
+                .starts_with("T-2 is for a standard worker; no window had it. T-2 [open]"),
+            "{}",
+            said.text
+        );
+    }
+
+    #[test]
+    fn a_tier_goes_with_a_brief_from_the_words_standard_input_or_a_file_in_one_command() {
+        let answer = json!({ "task": card(2, "open", None) });
+        let (posted, said) = edited(
+            &["T-2", "--tier", "light", "Parse the new way"],
+            "",
+            &answer,
+        );
+        assert_eq!(
+            posted,
+            [(
+                "/api/tasks/2/edit".to_owned(),
+                Some(json!({ "body": "Parse the new way", "tier": "light" }))
+            )]
+        );
+        assert!(
+            said.starts_with(
+                "T-2 has your new brief and is for a standard worker; no window had the old one"
+            ),
+            "{said}"
+        );
+        // The flag may stand after the words, and the words be standard input.
+        let (posted, _) = edited(
+            &["T-2", "-", "--tier", "light"],
+            "Parse\nthe new way\n",
+            &answer,
+        );
+        assert_eq!(
+            posted[0].1,
+            Some(json!({ "body": "Parse\nthe new way", "tier": "light" }))
+        );
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("brief.md");
+        std::fs::write(&file, "From a file\n").unwrap();
+        let (posted, _) = edited(
+            &["T-2", "--file", file.to_str().unwrap(), "--tier", "complex"],
+            "",
+            &answer,
+        );
+        assert_eq!(
+            posted[0].1,
+            Some(json!({ "body": "From a file", "tier": "complex" }))
+        );
+    }
+
+    #[test]
+    fn a_tier_the_staff_does_not_hold_is_said_with_the_members_of_the_tier_it_went_to() {
+        let answer = json!({
+            "task": card(2, "open", None),
+            "asked": "complex",
+            "heldBy": ["zeus", "diana"],
+        });
+        let (_, said) = edited(&["T-2", "--tier", "complex"], "", &answer);
+        assert!(
+            said.starts_with(
+                "T-2 is for a standard worker (no complex worker is on the staff, so the nearest tier: @zeus, @diana); no window had it."
+            ),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_task_added_for_a_tier_nobody_holds_says_whose_tier_it_went_to() {
+        let answer = json!({
+            "task": { "number": 5, "state": "open", "assignee": null, "requester": "chief",
+                "title": "Run it", "blockedBy": [], "pool": "tester", "tier": "standard" },
+            "message": null,
+            "asked": "complex",
+            "heldBy": ["anubis"],
+            "gated": false,
+        });
+        let (_, said) = added(&["--test", "--tier", "complex", "Run it"], &answer);
+        assert!(
+            said.contains("(no complex tester is on the staff, so the nearest tier: @anubis)"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_list_of_needs_replaces_and_a_signed_one_adds_and_removes() {
+        let answer = json!({ "task": card(2, "open", None), "waiting": [9, 10] });
+        for (words, sent) in [
+            (["--needs", "T-3,T-4"], json!([3, 4])),
+            (["--needs", "T-3"], json!([3])),
+            (["--needs", "+T-5"], json!({ "add": [5], "remove": [] })),
+            (["--needs", "-T-5"], json!({ "add": [], "remove": [5] })),
+            (
+                ["--needs", "+T-5,-T-6"],
+                json!({ "add": [5], "remove": [6] }),
+            ),
+        ] {
+            let (posted, said) = edited(&["T-2", words[0], words[1]], "", &answer);
+            assert_eq!(
+                posted,
+                [(
+                    "/api/tasks/2/edit".to_owned(),
+                    Some(json!({ "needs": sent }))
+                )],
+                "{words:?}"
+            );
+            assert!(said.starts_with("T-2 needs nothing. T-2 [open]"), "{said}");
+        }
+        let (posted, said) = edited(&["T-2", "--before", "-T-9"], "", &answer);
+        assert_eq!(
+            posted[0].1,
+            Some(json!({ "before": { "add": [], "remove": [9] } }))
+        );
+        assert!(
+            said.starts_with("T-2 is waited for by T-9, T-10. T-2 ["),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn the_flags_and_a_brief_go_in_one_command_and_a_list_that_mixes_is_a_usage_failure() {
+        let answer = json!({ "task": card(2, "open", None), "waiting": [9] });
+        let (posted, said) = edited(
+            &[
+                "T-2", "--tier", "light", "--needs", "+T-3", "--before", "T-9", "-",
+            ],
+            "A new brief\n",
+            &answer,
+        );
+        assert_eq!(
+            posted[0].1,
+            Some(json!({
+                "body": "A new brief",
+                "tier": "light",
+                "needs": { "add": [3], "remove": [] },
+                "before": [9],
+            }))
+        );
+        assert!(
+            said.starts_with("T-2 has your new brief, is for a standard worker, needs nothing and is waited for by T-9;"),
+            "{said}"
+        );
+        let api = scripted(vec![]);
+        for list in ["T-3,+T-4", "T-3,-T-4", "T-x", "+T-"] {
+            let words: Vec<String> = ["edit", "T-2", "--needs", list]
+                .iter()
+                .map(|word| (*word).to_owned())
+                .collect();
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let said = command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut std::io::empty(),
+            );
+            assert!(matches!(said, Err(Failure::Usage(_))), "{list}");
+        }
+        assert!(api.received().is_empty(), "the board is asked nothing");
     }
 
     #[test]
@@ -1010,7 +1563,7 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(posted, Some(json!({ "after": 3, "body": "Tests" })));
         assert_eq!(
             said,
-            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted.\nSent: 5 characters, ending \"Tests\"."
+            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted. If that window cannot go on in its conversation when T-5 starts, T-5 waits paused for your word (cf task edit T-5, then cf task resume T-5).\nT-5: sent 5 characters, ending \"Tests\"."
         );
     }
 
@@ -1065,6 +1618,135 @@ and 2 idle sessions (`cf task list --all`)";
                 said.text,
                 format!("T-7 is finished: what @zeus-amber-pine said last is its result, which reaches your inbox. Finishing does not end what its turn left running {words} until its window closes, or past it where the host cannot tell what is the window's."),
                 "{jobs} {agents}"
+            );
+        }
+    }
+
+    /// What `cf task <words…>` posted (its path and its body) and printed, the board
+    /// answering with `answer`; or why `cf` refused it before it asked the board.
+    fn moved_by(
+        words: &[&str],
+        answer: &Value,
+    ) -> Result<(Option<(String, Value)>, String), Failure> {
+        let api = scripted(vec![reply(200, answer.clone())]);
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+        let said = command(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )?;
+        let posted = api
+            .received()
+            .into_iter()
+            .next()
+            .and_then(|got| got.json().map(|json| (got.path, json)));
+        Ok((posted, said.text))
+    }
+
+    /// What a command written wrong was told.
+    fn wrongly(failure: Failure) -> String {
+        match failure {
+            Failure::Usage(said) => said,
+            other => panic!("not a command written wrong: {other:?}"),
+        }
+    }
+
+    fn retitled(state: &str, title: &str) -> Value {
+        json!({ "task": {
+            "number": 3, "state": state, "assignee": "zeus-pale", "requester": "chief",
+            "title": title, "blockedBy": [], "pool": null, "tier": null,
+        } })
+    }
+
+    #[test]
+    fn edit_takes_a_title_alone_for_a_task_in_any_state_and_says_the_brief_is_as_it_was() {
+        let (posted, said) = moved_by(
+            &["edit", "T-3", "--title", "Parser and lexer"],
+            &retitled("working", "Parser and lexer"),
+        )
+        .unwrap();
+        assert_eq!(
+            posted,
+            Some((
+                "/api/tasks/3/edit".to_owned(),
+                json!({ "title": "Parser and lexer" })
+            ))
+        );
+        assert_eq!(
+            said,
+            "T-3 has the title \"Parser and lexer\"; its brief is as it was, and the ledger keeps the old title. T-3 [working] @zeus-pale ← @chief: Parser and lexer"
+        );
+    }
+
+    #[test]
+    fn edit_reopen_and_resume_send_a_title_with_their_words_wherever_it_stands() {
+        for (verb, state) in [
+            ("edit", "open"),
+            ("reopen", "working"),
+            ("resume", "working"),
+        ] {
+            for words in [
+                [verb, "T-3", "More words", "--title", "New scope"],
+                [verb, "T-3", "--title", "New scope", "More words"],
+            ] {
+                let (posted, said) = moved_by(&words, &retitled(state, "New scope"))
+                    .unwrap_or_else(|refused| panic!("{words:?}: {refused:?}"));
+                assert_eq!(
+                    posted,
+                    Some((
+                        format!("/api/tasks/3/{verb}"),
+                        json!({ "body": "More words", "title": "New scope" })
+                    )),
+                    "{words:?}"
+                );
+                assert!(said.contains("New scope"), "{said}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_title_that_says_nothing_is_a_command_written_wrong_and_the_board_is_not_asked() {
+        for words in [
+            vec!["edit", "T-3", "--title"],
+            vec!["edit", "T-3", "--title", ""],
+            vec!["edit", "T-3", "--title", "  "],
+            vec!["reopen", "T-3", "More", "--title", " "],
+            vec!["resume", "T-3", "More", "--title"],
+        ] {
+            let api = scripted(vec![reply(200, retitled("working", "x"))]);
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let owned: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+            let refused = command(
+                &owned,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut std::io::empty(),
+            )
+            .err()
+            .expect("a refusal");
+            assert_eq!(
+                wrongly(refused),
+                "--title takes the new title: --title \"…\"",
+                "{words:?}"
+            );
+            assert!(api.received().is_empty(), "{words:?}");
+        }
+    }
+
+    #[test]
+    fn a_reopen_and_a_resume_still_ask_for_their_words_when_they_are_given_a_title() {
+        for (verb, asked) in [("reopen", "the follow-up"), ("resume", "what to do now")] {
+            let refused = moved_by(
+                &[verb, "T-3", "--title", "New scope"],
+                &retitled("working", "New scope"),
+            )
+            .unwrap_err();
+            assert_eq!(
+                wrongly(refused),
+                format!("cf task {verb} T-3 \"{asked}\""),
+                "{verb}"
             );
         }
     }

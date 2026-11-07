@@ -107,6 +107,21 @@ pub(super) fn environment(
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
+    // A stand-in Devin keeps its store and settings in the rig's own home, whatever folders of
+    // the machine's a caller passed: Devin's are under `APPDATA` on Windows, and the live kit
+    // gives the machine's own, which put the stand-in's store in the machine owner's (zeewin2,
+    // T-1207: its writes failed on the real store's foreign keys, and nothing was kept).
+    if config.devin.is_some() {
+        env.retain(|(name, _)| name != "APPDATA" && name != "LOCALAPPDATA");
+        env.push((
+            "APPDATA".to_owned(),
+            text(&home.join("AppData").join("Roaming")),
+        ));
+        env.push((
+            "LOCALAPPDATA".to_owned(),
+            text(&home.join("AppData").join("Local")),
+        ));
+    }
     // A harness's home of the run's own is where its windows run, whatever else was set.
     for (name, value) in homes {
         env.retain(|(held, _)| held != name);
@@ -195,7 +210,13 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     }
     match &config.muse {
         Some((install, crate::muse::Run::Echo { turn_ms })) => {
-            crate::muse::write_stand_in(&own, install, *turn_ms, &root.join("muse-argv.log"))?;
+            crate::muse::write_stand_in(
+                &own,
+                install,
+                *turn_ms,
+                &files::real_path(&home),
+                &root.join("muse-argv.log"),
+            )?;
         }
         Some((install, crate::muse::Run::Live { real_home })) => {
             crate::muse::seed_live_home(&home, real_home)?;
@@ -228,6 +249,68 @@ pub(super) fn own_commands(root: &Path, config: &Config) -> PathBuf {
     }
 }
 
+/// The folders a Muse keeps under the XDG folders, each by the variable that moves it and
+/// where it is below the home: its settings, and its sessions, which the daemon reads to
+/// learn the session a window opened (`cf_harness::muse::paths`).
+#[cfg(unix)]
+const MUSE_FOLDERS: [(&str, &str); 2] = [
+    ("XDG_CONFIG_HOME", ".config"),
+    ("XDG_DATA_HOME", ".local/share"),
+];
+
+/// Gives the daemon the rig's Muse folders where a harness's home moved the XDG folders it
+/// reads them under (`homes`: Devin's moves all four, and a home's variables are the rig's
+/// last word): a link `muse` there to the rig's own (`<root>/home/.config/muse`, `…/.local/
+/// share/muse`), where the rig's Muse, echo or live, keeps its settings and sessions. Two
+/// harnesses on the XDG layout share its folders, each in its own folder below them. Without
+/// it the daemon read Muse's sessions in Devin's data folder and never found the session a
+/// window opened: the window read "starting" for good, its brief never pasted (T-1081). A
+/// link the rig left there before (a home lasts the run, a rig starts again on it) is put
+/// back; anything else of that name is the rig's to refuse, never to replace.
+#[cfg(unix)]
+pub(super) fn give_muse_its_folders(
+    root: &Path,
+    config: &Config,
+    homes: &[(String, String)],
+) -> Result {
+    if config.muse.is_none() {
+        return Ok(());
+    }
+    let own = files::real_path(&root.join("home"));
+    for (variable, below) in MUSE_FOLDERS {
+        let Some(moved) = homes
+            .iter()
+            .rev()
+            .find(|(name, _)| name == variable)
+            .map(|(_, value)| PathBuf::from(value))
+        else {
+            continue;
+        };
+        let target = own.join(below).join("muse");
+        files::make_dir(&target)?;
+        if files::real_path(&moved) == own.join(below) {
+            continue;
+        }
+        files::make_dir(&moved)?;
+        let link = moved.join("muse");
+        match std::fs::symlink_metadata(&link) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                std::fs::remove_file(&link).map_err(Error::file("remove", &link))?;
+            }
+            Ok(_) => {
+                return Err(Error::Daemon(format!(
+                    "{} holds a Muse folder of a harness's home: the rig's Muse keeps its own in {}, and the daemon would read the other",
+                    link.display(),
+                    target.display()
+                )))
+            }
+            Err(_) => {}
+        }
+        std::os::unix::fs::symlink(&target, &link).map_err(Error::file("link", &link))?;
+    }
+    Ok(())
+}
+
 /// The command `name` in `dir`, which starts `program`: a script that runs the
 /// program the variable `var` names, or on Windows the shim of `program`.
 fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
@@ -239,10 +322,13 @@ fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
     }
 }
 
-/// The roster a fresh rig starts with: a chief and a worker, on the stand-in.
-pub(super) fn write_roster(root: &Path) -> Result<()> {
+/// The file of the stand-ins a case seats, in the rig's folder beside the home: the case's
+/// own, which the daemon never reads ([`super::Rig::stand_ins`]).
+pub const STAND_INS: &str = "stand-ins.json";
+
+/// The stand-ins a fresh rig starts with: a chief and a worker, on the stand-in.
+pub(super) fn write_stand_ins(root: &Path) -> Result<()> {
     let roster = json!({
-        "schemaVersion": 1,
         "agents": [
             { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
@@ -252,10 +338,7 @@ pub(super) fn write_roster(root: &Path) -> Result<()> {
         text: roster.to_string(),
         source,
     })?;
-    files::write(
-        &root.join("consensflow").join("agents.json"),
-        format!("{text}\n"),
-    )
+    files::write(&root.join(STAND_INS), format!("{text}\n"))
 }
 
 #[cfg(test)]
@@ -315,6 +398,7 @@ mod tests {
         let muse = crate::muse::Installed {
             binary: PathBuf::from("/bin/muse-bin-1.4.14"),
             version: "1.4.14".to_owned(),
+            stand_in: None,
         };
         let with = config().muse(muse, 10);
         let env = environment(&linked, &linked.join("fake-bin"), &with, &[]);
@@ -549,14 +633,47 @@ mod tests {
             .path()
             .join("home/.claude/projects/integration")
             .is_dir());
-        write_roster(root.path()).unwrap();
-        let roster: Value = serde_json::from_str(
-            &files::read_string(&root.path().join("consensflow/agents.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(roster["schemaVersion"], 1);
+        write_stand_ins(root.path()).unwrap();
+        let roster: Value =
+            serde_json::from_str(&files::read_string(&root.path().join(STAND_INS)).unwrap())
+                .unwrap();
+        assert!(!root.path().join("consensflow/agents.json").exists());
         assert_eq!(roster["agents"][0]["id"], "chief");
         assert_eq!(roster["agents"][1]["model"], "fake");
+    }
+
+    /// A rig with a stand-in Devin keeps Devin's folders in its own home, over the machine's a
+    /// caller passed (the live kit passes `APPDATA`), and a rig without one keeps what it was
+    /// given (T-1207).
+    #[test]
+    fn a_rig_given_a_stand_in_devin_keeps_its_folders_in_the_rigs_home_over_the_machines() {
+        let root = Path::new("root");
+        let owners = config()
+            .var("APPDATA", "C:/Users/owner/AppData/Roaming")
+            .var("LOCALAPPDATA", "C:/Users/owner/AppData/Local");
+        let env = environment(
+            root,
+            &root.join("fake-bin"),
+            &owners.clone().devin("/the/fake-devin"),
+            &[],
+        );
+        assert_eq!(
+            var(&env, "APPDATA"),
+            root.join("home")
+                .join("AppData")
+                .join("Roaming")
+                .to_string_lossy()
+        );
+        assert_eq!(
+            var(&env, "LOCALAPPDATA"),
+            root.join("home")
+                .join("AppData")
+                .join("Local")
+                .to_string_lossy()
+        );
+        assert_eq!(env.iter().filter(|(name, _)| name == "APPDATA").count(), 1);
+        let env = environment(root, &root.join("fake-bin"), &owners, &[]);
+        assert_eq!(var(&env, "APPDATA"), "C:/Users/owner/AppData/Roaming");
     }
 
     #[test]
@@ -715,6 +832,7 @@ mod tests {
         crate::muse::Installed {
             binary,
             version: "1.4.14-R7309.1".to_owned(),
+            stand_in: None,
         }
     }
 
@@ -724,6 +842,91 @@ mod tests {
     fn muse_at(bin: &Path, real: &Path, weekly: u64) -> crate::muse::Installed {
         files::write(&real.join(".config").join("muse").join("auth.json"), "{}\n").unwrap();
         muse_in(bin, weekly)
+    }
+
+    /// T-1152 (the live matrix's board 0, 2026-11-03): one rig seats a live Muse and Devin. Devin's
+    /// home of the run's own moves `XDG_DATA_HOME` for the whole rig, its daemon too, and the
+    /// daemon finds a fresh Muse window's session in the data folder that variable names. The
+    /// launcher gave Muse the rig's own folder whatever the window had, so the daemon read
+    /// another folder (Devin's, whose `muse` was a link to the person's own), never found the
+    /// window's session, and failed its task. Muse writes where the daemon reads, and neither
+    /// is the person's.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_muse_beside_devin_writes_its_sessions_where_the_daemon_reads_them_and_not_in_the_persons(
+    ) {
+        use crate::rig::HarnessHome;
+        let (bin, person, root) = (
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+        );
+        let (config_home, data_home) = (
+            person.path().join(".config"),
+            person.path().join(".local").join("share"),
+        );
+        files::write(
+            &data_home.join("devin").join("credentials.toml"),
+            "key = 1\n",
+        )
+        .unwrap();
+        files::write(&config_home.join("devin").join("config.json"), "{}\n").unwrap();
+        files::write(&data_home.join("muse").join("session-index.db"), "theirs").unwrap();
+        files::write(&config_home.join("muse").join("settings.json"), "{}\n").unwrap();
+        let install = muse_at(bin.path(), person.path(), 50);
+        // The machine's Muse, as the launcher runs it: it notes the data folder it was given.
+        let noted = root.path().join("noted");
+        let answer = files::read_string(&install.binary).unwrap();
+        files::write_executable(
+            &install.binary,
+            answer.replacen(
+                "|| exit 9",
+                &format!(
+                    "|| {{ printf '%s' \"$XDG_DATA_HOME\" > '{}'; exit 0; }}",
+                    noted.display()
+                ),
+                1,
+            ),
+        )
+        .unwrap();
+        let devin =
+            crate::live::isolation::Isolation::devin(person.path(), &config_home, &data_home)
+                .made_in(root.path());
+        let given = Config::new("/the/stand-in").muse_live(install, person.path());
+        let fake_bin = write_fake_install(root.path(), &given).unwrap();
+        let homes = devin.vars().unwrap();
+        let env = environment(root.path(), &fake_bin, &given, &homes);
+        // What the daemon reads a Muse window's sessions by, and what the product's launch adds
+        // to the window (`XDG_DATA_HOME` by its real path, where it is reached through a link).
+        let daemon = files::real_path(Path::new(var(&env, "XDG_DATA_HOME")));
+        let mut window = env.clone();
+        window.retain(|(name, _)| name != "XDG_DATA_HOME");
+        window.push((
+            "XDG_DATA_HOME".to_owned(),
+            daemon.to_string_lossy().into_owned(),
+        ));
+        let ran = crate::process::Run::new(own_commands(root.path(), &given).join("muse"))
+            .vars(window)
+            .run()
+            .unwrap();
+        assert_eq!(ran.code, Some(0), "{ran}");
+        let written = files::read_string(&noted).unwrap();
+        assert_eq!(
+            files::real_path(Path::new(&written)),
+            daemon,
+            "Muse writes its sessions where the daemon reads them"
+        );
+        let muse_data = daemon.join("muse");
+        assert_ne!(
+            files::real_path(&muse_data),
+            files::real_path(&data_home.join("muse")),
+            "the folder is not the person's own"
+        );
+        assert!(
+            !muse_data.join("session-index.db").exists(),
+            "nothing of the person's Muse is reached there"
+        );
+        devin.finish().unwrap();
     }
 
     /// T-1076, at T-1123's share: every rig that runs the machine's Muse live asks its

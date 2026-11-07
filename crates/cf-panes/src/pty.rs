@@ -24,10 +24,13 @@ thread_local! {
     /// Whether a test has the exit watcher of the windows this thread opens fail to start.
     static WATCH_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+mod holding;
 #[cfg(test)]
 mod keys;
 mod output_end;
 mod owed;
+#[cfg(all(test, windows))]
+mod probe;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 mod sentinel;
 mod turn;

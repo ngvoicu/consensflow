@@ -29,10 +29,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {"
-replace = '''    if taker.member_id.is_some()
-        && (on_other_work(store, taker.id, giving)? || has_task_in(store, taker.id, &["open"])?)
-    {'''
+find = "        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &[\"paused\"]].concat()),"
+replace = "        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &[\"paused\", \"open\"]].concat()),"
 
 [[plant]]
 name = "follow-ups queue: a follow-up waiting on the board makes its session busy to every door"
@@ -41,10 +39,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {"
-replace = '''    if taker.member_id.is_some()
-        && (on_other_work(store, taker.id, giving)? || has_task_in(store, taker.id, &["open"])?)
-    {'''
+find = "        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &[\"paused\"]].concat()),"
+replace = "        Giving::Task | Giving::SentBack(_) => (0, [&HELD_TASK_STATES[..], &[\"paused\", \"open\"]].concat()),"
 
 [[plant]]
 name = "follow-ups queue: a follow-up paused while it waited is resumed into a window at work on another"

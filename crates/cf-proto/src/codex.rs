@@ -108,6 +108,17 @@ pub struct Session {
     pub idle: Option<bool>,
 }
 
+/// What a broker says to `GET /terminals`: the commands Codex keeps running for the thread
+/// the window shows (its background terminals, `thread/backgroundTerminals/list`), each by
+/// its command line; none while the window shows no thread. Codex starts a command with no
+/// shell, so that no process tree names one as a turn's work (T-1137).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Terminals {
+    pub launch_id: String,
+    pub commands: Vec<String>,
+}
+
 /// What the daemon hands a broker at `POST /deliver`: the text for the
 /// thread `session_id`, until `expires_at` (milliseconds since the epoch).
 #[derive(Debug, Clone, PartialEq, Deserialize)]

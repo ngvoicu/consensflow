@@ -417,3 +417,23 @@ fn a_question_asked_while_its_task_works_has_its_door_open() {
         Claim::Waiting
     );
 }
+
+#[test]
+fn a_text_of_several_lines_answers_a_one_question_ask_with_options_and_reaches_the_window_whole() {
+    // The field report of 2026-10-26 (T-637): a chief's heredoc of several lines and a
+    // bulleted list was refused for a question with two options, "one answer per question
+    // (1)", where the same words on one line were taken.
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.expect("a brief").id);
+    w.deliver(brief);
+    let question = w.ask_with_options("zeus", task).id;
+    let words = "red, and so:\n- the deep one\n- not the pale one\n\nBegin with the first.";
+    let answer = w.answer(question, words);
+    assert_eq!(
+        answer.body,
+        format!("Colour: {words}"),
+        "every line of it is what the window that asked is given"
+    );
+    assert_eq!(answer.choices, serde_json::json!([[words]]));
+}

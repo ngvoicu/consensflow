@@ -1,6 +1,6 @@
 import { button, element } from '../dom.js'
-import { itemLabel, laneName } from './board.js'
-import { HARNESS_NAMES } from './dialogs.js'
+import { itemLabel } from './board.js'
+import { render } from './markdown.js'
 
 /** The most characters a search holds: the daemon refuses more. */
 const FIND_MOST = 1_000
@@ -8,43 +8,61 @@ const FIND_MOST = 1_000
 /** How many times an item copied again as it is read whole is read again from its start. */
 const READS_OF_A_CHANGING_ITEM = 3
 
+/** How many of its last lines a call's output shows folded. */
+const FOLDED_LINES = 5
+
+/**
+ * A line in which a command's output says how it exited, as each harness writes one:
+ * Claude Code's `Exit code 1` (first), Devin's `Exit code: 1`, Pi's `Command exited with
+ * code 1` (last), Codex's `Process exited with code 1`, and Muse Code's JSON line
+ * `"exit_code": 1,` (fifth of twelve).
+ */
+const EXIT_LINE =
+  /^\s*(?:(?:exit code:?|(?:command|process) exited with code)\s*-?\d+|"exit_code"\s*:\s*-?\d+\s*,?)\s*$/i
+
+/** A header of a call that reads, edits or writes a file: its verb, its path, its lines. */
+const FILE_CALL = /^(read|edit|write) (.+?)(:\d+(?:-\d+)?)?$/
+
 /**
  * The history viewer: everything ConsensFlow keeps of a participant's
  * conversations, from the History button on its window's head (the chief's, a
  * session's). It reads through the daemon (`history.get`, `history.part`), a
  * page at a time, and changes nothing.
  *
- * One column, oldest above. Each conversation has a heading: the harness and
- * the agent it ran on, from when until when, and what ended it as far as the
- * ledger knows (a Switch chief; the window going to another conversation, a
- * `/clear`, `/new` or `/resume`; a window that opened on a fresh one); the
- * one going on now says so. Its items are labelled as the task drawer labels
- * them, a compaction's summary as one. A delivery ConsensFlow made to this
- * participant shows as its line, as `cf history` says it, and opens on a click
- * to what went in. The first page is the most recent; Older goes on from the
- * oldest item shown and Newer from the newest, so no page repeats or skips an
- * item, whatever comes or grows meanwhile. A search keeps the items that hold
- * its words in any case, and says where it stopped when it went through as
- * much as one read may; it holds 1,000 characters at most, as the daemon does,
- * and says so of a longer one. Show tool output adds the tools' outputs. A
- * long item shows a part (from its start, or where the search found it), and
- * is read whole on asking, a part at a time by its place, every part of one
- * copy of it. Everything shows as text, never as markup.
+ * One stream, oldest above, drawn as a harness draws its own (chief-harness
+ * CHF-20, the approved mock): the items of every conversation, titled History,
+ * with no heading, harness, model or name anywhere in it (CHF-11), but the name a member
+ * had before the members were named by their model (harness-models): its row keeps it, and
+ * a quiet line beside the title says it. Each item is
+ * drawn by its kind (`prompt`, `text`, `thinking`, `tool`, `compaction`,
+ * `notice`), or by its role where an older build copied it with none:
+ * - the human's words and ConsensFlow's deliveries, in full, as blue blocks;
+ * - the agent's words as markdown, and thinking dimmed, on the stream itself;
+ * - a tool's call as a block: its header, its output folded to its last lines (an exit
+ *   line kept in sight), its change as red and green rows, the time it took, and green,
+ *   red or grey by how it stands;
+ * - a compaction as a violet block, its tokens, its summary on a click.
+ *
+ * The first page is the most recent; a quiet first row loads the page before
+ * the oldest item shown above it, so no item repeats or is skipped, whatever
+ * comes or grows meanwhile, and Refresh reads the most recent again. A read
+ * that goes through as much as one may before it finds anything says so in
+ * that row, and goes on from where it stopped. A search keeps the items whose
+ * words or call header hold it in any case; it holds 1,000 characters at most,
+ * as the daemon does, and says so of a longer one. A long item shows a part
+ * (from its start, or where the search found it), and a click row reads it
+ * whole, a part at a time by its place, every part of one copy of it.
+ * Everything shows as text, never as markup.
  */
 export class HistoryViewer {
   #dialog
-  #title
-  #who
+  #formerly
   #find
-  #tools
-  #newer
-  #older
-  #status
   #body
   #page
   /**
-   * What is shown: whose history (the project's id and the participant), and the
-   * places the pages before and after this one go on from.
+   * What is shown: whose history (the project's id and the participant's handle),
+   * the search it shows, and the place the page before the items shown goes on from.
    */
   #shown = null
   /** Each read is numbered: what comes back for a read the human has left since is not shown. */
@@ -54,24 +72,15 @@ export class HistoryViewer {
   constructor(dialog, page) {
     this.#dialog = dialog
     this.#page = page
-    this.#title = dialog.querySelector('.history-title')
-    this.#who = dialog.querySelector('.history-who')
     this.#find = dialog.querySelector('[name="history-find"]')
-    this.#tools = dialog.querySelector('[name="history-tools"]')
-    this.#newer = dialog.querySelector('[name="history-newer"]')
-    this.#older = dialog.querySelector('[name="history-older"]')
-    this.#status = dialog.querySelector('.history-page')
+    this.#formerly = dialog.querySelector('.history-formerly')
     this.#body = dialog.querySelector('.history-body')
     dialog.querySelector('.history-search').addEventListener('submit', (event) => {
       event.preventDefault()
-      void this.#read({})
+      void this.#read()
     })
-    this.#tools.addEventListener('change', () => void this.#read({}))
-    // A newer page goes on from the top; any other is read from its newest, at the bottom.
-    this.#newer.addEventListener('click', () => void this.#read({ after: this.#shown.newer }, true))
-    this.#older.addEventListener('click', () => void this.#read({ before: this.#shown.older }))
     dialog.querySelector('[name="history-refresh"]').addEventListener('click', () => {
-      void this.#read({})
+      void this.#read()
     })
     // Shut, it holds nothing, and what is still on its way is not shown.
     dialog.addEventListener('close', () => {
@@ -83,38 +92,35 @@ export class HistoryViewer {
 
   /** Opens on the most recent page of `participant`'s history. */
   async open(participant) {
-    const name = laneName(participant)
     this.#shown = {
       project: participant.projectId,
       handle: participant.handle,
-      name,
+      formerly: formerly(participant),
+      find: '',
       older: null,
-      newer: null,
     }
-    this.#title.textContent = `History of ${name}`
-    this.#who.textContent = [
-      HARNESS_NAMES[participant.harness] ?? participant.harness,
-      participant.agent,
-    ]
-      .filter(Boolean)
-      .join(' · ')
     this.#find.value = ''
-    this.#tools.checked = false
+    const once = this.#shown.formerly
+    this.#formerly.textContent =
+      once.length > 0
+        ? `once ${once.map((name) => `@${name}`).join(', then ')}, before members were named by their model's id`
+        : ''
+    this.#formerly.hidden = once.length === 0
     this.#body.replaceChildren(element('p', 'history-note', 'Reading the history…'))
     if (!this.#dialog.open) this.#dialog.showModal()
-    await this.#read({})
+    await this.#read()
   }
 
   /**
-   * Reads the page `place` says (before a place, after one, or the most recent) with the
-   * search and the tools as the human set them, and shows it scrolled to its newest, or
-   * to its `top`.
+   * Reads the most recent page with the search as the human set it, and shows it scrolled
+   * to its newest; or, `before` a place, the page before it, drawn above the items shown
+   * with what was in view kept where it was.
    */
-  async #read(place, top = false) {
+  async #read(before = null) {
     const shown = this.#shown
     if (shown === null) return
     const read = ++this.#reads
-    const find = this.#find.value.trim()
+    const find = before ? shown.find : this.#find.value.trim()
     const characters = [...find].length
     if (characters > FIND_MOST) {
       this.#body.replaceChildren(
@@ -126,21 +132,32 @@ export class HistoryViewer {
       )
       return
     }
-    const asked = {
-      project: shown.project,
-      handle: shown.handle,
-      tools: this.#tools.checked,
-      ...place,
-    }
+    // Every call is drawn with the rest: the tools' outputs are asked for.
+    const asked = { project: shown.project, handle: shown.handle, tools: true }
     if (find) asked.find = find
+    if (before) asked.before = before
     try {
       const { history } = await this.#page.daemon('history.get', asked)
       if (read !== this.#reads) return
+      shown.find = find
       shown.older = history.older
-      shown.newer = history.newer
-      this.#drawPaging(history)
-      this.#body.replaceChildren(...this.#draw(history, find))
-      this.#body.scrollTop = top ? 0 : this.#body.scrollHeight
+      const whole = (shown) => this.#whole(shown)
+      const items = history.items.map((item) => drawItem(item, whole, find))
+      const list = this.#body.querySelector('ol.history-items')
+      if (before && list) {
+        const below = this.#body.scrollHeight - this.#body.scrollTop
+        list.querySelector('.history-earlier-row')?.remove()
+        this.#body.querySelector('.history-note')?.remove()
+        list.prepend(...this.#earlier(history, find), ...items)
+        this.#body.scrollTop = this.#body.scrollHeight - below
+        // Still nothing to show: the notice says what this read found, not the one before.
+        if (!list.querySelector('.history-item')) {
+          this.#body.replaceChildren(...this.#draw(history, find, items))
+        }
+        return
+      }
+      this.#body.replaceChildren(...this.#draw(history, find, items))
+      this.#body.scrollTop = this.#body.scrollHeight
     } catch (cause) {
       if (read !== this.#reads) return
       this.#body.replaceChildren(
@@ -149,40 +166,52 @@ export class HistoryViewer {
     }
   }
 
-  #drawPaging({ older, newer, partial }) {
-    const where = newer === null ? 'The most recent' : 'Earlier items'
-    this.#status.textContent = partial
-      ? `${where}; the search stopped here to stay quick: Older searches further back`
-      : where
-    this.#newer.disabled = newer === null
-    this.#older.disabled = older === null
-  }
-
-  /** A page as it shows: each conversation's heading and items, or what there is none of. */
-  #draw(history, find) {
-    const { name } = this.#shown
-    const shown = history.conversations.some((conversation) => conversation.items.length > 0)
-    if (history.conversations.length === 0 || (find && !shown)) {
-      let none = `Nothing is kept of ${name}'s conversations yet.`
+  /** A page as it shows: the row for what comes before it, and its items in one list. */
+  #draw(history, find, items) {
+    const drawn = []
+    if (history.items.length === 0) {
+      let none = history.partial ? 'Nothing to show yet.' : 'Nothing is kept of this history yet.'
       if (find) {
         none = history.partial
-          ? `Nothing found yet that holds "${find}": Older searches further back.`
-          : `Nothing in ${name}'s history holds "${find}".`
+          ? `Nothing found yet that holds "${find}".`
+          : `Nothing in this history holds "${find}".`
       }
-      return [element('p', 'history-note', none)]
+      drawn.push(element('p', 'history-note', none))
     }
-    return history.conversations.map((conversation) =>
-      drawConversation(conversation, (item) => this.#whole(conversation.id, item)),
-    )
+    const list = element('ol', 'history-items')
+    list.append(...this.#earlier(history, find), ...items)
+    if (list.childElementCount > 0) drawn.push(list)
+    return drawn
   }
 
   /**
-   * The whole text of item `item` of conversation `conversation`, read a part at a time by
-   * its place, and the copy of it it is (its revision). Every part is of one copy of it: a
-   * part of another (the item was copied again meanwhile) reads it again from its start, so
-   * no text of two copies is shown; after three reads it changed in, the viewer says so.
+   * The quiet first row that loads the page before the items shown, where there is one:
+   * it says where a read or a search stopped to stay quick.
    */
-  async #whole(conversation, item) {
+  #earlier(history, find) {
+    if (history.older === null) return []
+    let said = '… earlier history, click to load'
+    if (history.partial) {
+      said = find
+        ? '… the search stopped here to stay quick, click to search further back'
+        : '… the read stopped here to stay quick, click to read further back'
+    }
+    const row = element('li', 'history-earlier-row')
+    const load = rowButton(said, 'history-earlier', () => {
+      load.disabled = true
+      void this.#read(this.#shown.older)
+    })
+    row.append(load)
+    return [row]
+  }
+
+  /**
+   * The whole text of item `item`, read a part at a time by its place (its conversation and
+   * row), and the copy of it it is (its revision). Every part is of one copy of it: a part of
+   * another (the item was copied again meanwhile) reads it again from its start, so no text
+   * of two copies is shown; after three reads it changed in, the viewer says so.
+   */
+  async #whole(item) {
     const { project, handle } = this.#shown
     for (let tries = 0; tries < READS_OF_A_CHANGING_ITEM; tries += 1) {
       let text = ''
@@ -192,7 +221,7 @@ export class HistoryViewer {
         const { part } = await this.#page.daemon('history.part', {
           project,
           handle,
-          conversation,
+          conversation: item.conversation,
           row: item.row,
           from,
         })
@@ -207,114 +236,218 @@ export class HistoryViewer {
   }
 }
 
-/** A conversation: its heading, then its items on the page; `whole` reads a cut item whole. */
-function drawConversation(conversation, whole) {
-  const section = element('section', 'history-conversation')
-  section.dataset.conversation = String(conversation.id)
-  const runsOn = [HARNESS_NAMES[conversation.harness] ?? conversation.harness, conversation.agent]
-    .filter(Boolean)
-    .join(' · ')
-  const heading = element('h3', 'history-heading', runsOn)
-  section.setAttribute('aria-label', `${runsOn}, ${period(conversation)}`)
-  const about = [period(conversation)]
-  const ended = endedWords(conversation)
-  if (ended) about.push(ended)
-  if (conversation.toolsLeftOut > 0) {
-    // Counted so far and no further: that many, or more.
-    const more = conversation.moreToolsLeftOut === true
-    const outputs = conversation.toolsLeftOut === 1 && !more ? 'output' : 'outputs'
-    const count = more ? `${conversation.toolsLeftOut} or more` : conversation.toolsLeftOut
-    about.push(`${count} tool ${outputs} left out`)
-  }
-  section.append(heading, element('p', 'history-about', about.join(' · ')))
-  const list = element('ol', 'transcript history-items')
-  list.append(...conversation.items.map((item) => drawItem(item, whole)))
-  section.append(list)
-  return section
+/**
+ * What an item is drawn as: what its reader said of it, else what its role says (a
+ * compaction's summary a compaction), as `Item::kind` says it.
+ */
+function kindOf(item) {
+  if (item.kind) return item.kind
+  if (item.compaction) return 'compaction'
+  return { user: 'prompt', assistant: 'text', tool: 'tool' }[item.role] ?? 'notice'
 }
 
 /**
- * One item, labelled as the drawer labels it; a delivery as its line, opened on a
- * click; a part of a long one with the way to read it whole, which draws it again.
+ * A quiet row a click acts on, in the keyboard's way too: WebKit's Tab passes a button by
+ * unless it says it takes the keyboard.
  */
-function drawItem(item, whole) {
-  const entry = element('li', 'transcript-item history-item')
-  entry.dataset.role = item.role
-  if (item.compaction) entry.dataset.compaction = 'true'
-  const head = [itemLabel(item)]
-  if (item.at) head.push(clock(item.at))
-  if (!item.complete) head.push('still writing')
-  entry.append(element('div', 'transcript-head', head.join(' · ')))
-  if (item.cut) {
-    const said = item.cut.from > 0 ? `… from character ${item.cut.from + 1}` : 'Its first part'
-    const more = button(
-      `Show the whole item (${measure(item.cut.bytes)})`,
-      'quiet-button',
-      async () => {
-        more.disabled = true
-        try {
-          const { text, revision } = await whole(item)
-          // A delivery is said only on a part from the start: its line and its place hold
-          // in the whole of the copy the page showed. Another, copied since, is drawn as it is.
-          const delivery = revision === item.cut.revision ? item.delivery : undefined
-          entry.replaceWith(drawItem({ ...item, text, delivery, cut: undefined }, whole))
-        } catch (cause) {
-          more.disabled = false
-          more.after(
-            element(
-              'span',
-              'history-refusal',
-              cause instanceof Error ? cause.message : String(cause),
-            ),
-          )
-        }
-      },
-    )
-    const cut = element('p', 'history-cut', said)
-    cut.append(' ', more)
-    entry.append(cut)
+function rowButton(text, className, action) {
+  const row = button(text, `history-row ${className}`, action)
+  row.tabIndex = 0
+  return row
+}
+
+/** Whether `text` holds the search `find` (folded, as the daemon folds), where there is one. */
+const holds = (text, find) => !!find && !!text && text.toLowerCase().includes(find.toLowerCase())
+
+/**
+ * One item, drawn by its kind; a part of a long one with the row that reads it whole,
+ * which draws it again. During a search (`find`), what holds its words is drawn in sight.
+ */
+function drawItem(item, whole, find = '') {
+  const kind = kindOf(item)
+  const entry = element('li', 'history-item')
+  entry.dataset.id = item.id
+  entry.dataset.kind = kind
+  if (item.at) entry.title = clock(item.at)
+  if (kind === 'tool') drawCall(entry, item, find)
+  else if (kind === 'compaction') drawCompaction(entry, item, find)
+  else if (kind === 'text') {
+    const words = element('div', 'history-markdown')
+    words.append(...render(item.text))
+    entry.append(words)
+  } else entry.append(...said(kind, item))
+  if (!item.complete && kind !== 'tool') {
+    entry.append(element('p', 'history-quiet', 'still writing…'))
   }
-  if (!item.delivery) {
-    entry.append(element('pre', 'transcript-body', item.text))
-    return entry
-  }
-  // What the human typed with it, then the delivery, folded to its line.
-  const typed = item.text.slice(0, item.delivery.at).trim()
-  if (typed) entry.append(element('pre', 'transcript-body', typed))
-  const delivery = element('details', 'history-delivery')
-  delivery.append(
-    element('summary', null, item.delivery.line),
-    element('pre', 'transcript-body', item.text.slice(item.delivery.at)),
-  )
-  entry.append(delivery)
+  if (item.cut) drawCut(entry, item, whole, find)
   return entry
+}
+
+/**
+ * The words of a prompt, a thought or a notice, as text: a delivery after what the human
+ * typed with it, both whole, in the one block (the owner's decision, O3).
+ */
+function said(kind, item) {
+  const className = kind === 'thinking' ? 'history-text history-thinking' : 'history-text'
+  if (!item.delivery) return [element('pre', className, item.text)]
+  const typed = item.text.slice(0, item.delivery.at).trim()
+  const delivered = element('pre', className, item.text.slice(item.delivery.at))
+  return typed ? [element('pre', className, typed), delivered] : [delivered]
+}
+
+/**
+ * A call: its header, its change, its output folded to its last lines with the exit line
+ * kept in sight where it failed, and the time it took; green, red or grey by how it
+ * stands (`unknown` where an older build said nothing of it).
+ */
+function drawCall(entry, item, find) {
+  const status = ['ok', 'failed', 'running'].includes(item.status) ? item.status : 'unknown'
+  entry.dataset.status = status
+  entry.append(callHeader(item.header ?? item.name ?? itemLabel(item)))
+  if (item.diff) entry.append(drawDiff(item.diff))
+  // An edit's change says what it did: its tool's words of it only where it failed, or
+  // where they hold what a search looks for.
+  if (!item.diff || status === 'failed' || holds(item.text, find)) {
+    entry.append(...drawOutput(item.text, status, find))
+  }
+  if (status === 'running') entry.append(element('p', 'history-took', 'Still running'))
+  else if (typeof item.tookMs === 'number') {
+    entry.append(element('p', 'history-took', `Took ${took(item.tookMs)}`))
+  }
+}
+
+/** A call's header: a file's verb, path and lines each their own colour, else the line. */
+function callHeader(header) {
+  const head = element('div', 'history-call')
+  const file = FILE_CALL.exec(header)
+  if (!file) {
+    head.append(element('span', 'history-verb', header))
+    return head
+  }
+  head.append(
+    element('span', 'history-verb', file[1]),
+    ' ',
+    element('span', 'history-path', file[2]),
+  )
+  if (file[3]) head.append(element('span', 'history-range', file[3]))
+  return head
+}
+
+/** An edit's change as rows: removed red, added green, a hunk's place and the rest quiet. */
+function drawDiff(diff) {
+  const rows = element('div', 'history-diff')
+  for (const line of diff.split('\n')) {
+    const row = element('div', 'history-diff-row', line)
+    if (line.startsWith('@@') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+      row.dataset.sign = 'place'
+    } else if (line.startsWith('-')) row.dataset.sign = 'removed'
+    else if (line.startsWith('+')) row.dataset.sign = 'added'
+    else row.dataset.sign = 'kept'
+    rows.append(row)
+  }
+  return rows
+}
+
+/**
+ * A call's output: its last lines, under a row that unfolds the rest, and a failed call's
+ * exit line where they do not hold it. Blank lines at its end are no lines of it. During a
+ * search, the lines are shown from the first that holds its words, where that is further up.
+ */
+function drawOutput(text, status, find) {
+  const lines = text.replace(/\s+$/, '').split('\n')
+  if (lines.length === 1 && lines[0] === '') return []
+  const output = element('pre', 'history-output')
+  let hidden = Math.max(0, lines.length - FOLDED_LINES)
+  if (holds(text, find)) {
+    const first = lines.findIndex((line) => holds(line, find))
+    // Words that span lines are shown with the whole output.
+    hidden = Math.min(hidden, first === -1 ? 0 : first)
+  }
+  if (hidden === 0) {
+    output.textContent = lines.join('\n')
+    return [output]
+  }
+  const shown = lines.slice(hidden)
+  output.textContent = shown.join('\n')
+  const exit =
+    status === 'failed' && !shown.some((line) => EXIT_LINE.test(line))
+      ? lines.slice(0, hidden).findLast((line) => EXIT_LINE.test(line))
+      : undefined
+  const pinned = exit === undefined ? null : element('pre', 'history-exit', exit.trim())
+  const fold = rowButton(`… (${hidden} earlier lines, click to expand)`, 'history-fold', () => {
+    output.textContent = lines.join('\n')
+    pinned?.remove()
+    fold.remove()
+  })
+  return pinned ? [fold, output, pinned] : [fold, output]
+}
+
+/**
+ * A compaction: its mark, its tokens, and its summary on a click where it wrote one, or
+ * open where it holds what a search looks for.
+ */
+function drawCompaction(entry, item, find) {
+  entry.append(element('div', 'history-call', '[compaction]'))
+  const tokens =
+    typeof item.tokens === 'number'
+      ? `Compacted from ${item.tokens.toLocaleString('en')} tokens`
+      : 'Compacted'
+  if (!item.text) {
+    entry.append(element('p', 'history-quiet', tokens))
+    return
+  }
+  const summary = element('pre', 'history-text', item.text)
+  summary.hidden = !holds(item.text, find)
+  const expand = rowButton(`${tokens} (click to expand)`, 'history-expand', () => {
+    summary.hidden = !summary.hidden
+    expand.setAttribute('aria-expanded', String(!summary.hidden))
+  })
+  expand.setAttribute('aria-expanded', String(!summary.hidden))
+  entry.append(expand, summary)
+}
+
+/**
+ * The row that reads a long item whole, after the part shown (before it, where a search
+ * showed a part from further on): read, the item is drawn again whole, a delivery said
+ * only of the copy the page showed.
+ */
+function drawCut(entry, item, whole, find) {
+  const size = measure(item.cut.bytes)
+  const said =
+    item.cut.from > 0
+      ? `… (${size} in all, shown from character ${(item.cut.from + 1).toLocaleString('en')}, click to load it whole)`
+      : `… (${size} in all, click to load the rest)`
+  const more = rowButton(said, 'history-more', async () => {
+    more.disabled = true
+    try {
+      const { text, revision } = await whole(item)
+      // A delivery is said only of the copy the page showed: another, copied since, is
+      // drawn as it is.
+      const delivery = revision === item.cut.revision ? item.delivery : undefined
+      entry.replaceWith(drawItem({ ...item, text, delivery, cut: undefined }, whole, find))
+    } catch (cause) {
+      more.disabled = false
+      entry.querySelector('.history-refusal')?.remove()
+      more.after(
+        element('p', 'history-refusal', cause instanceof Error ? cause.message : String(cause)),
+      )
+    }
+  })
+  if (item.cut.from > 0) entry.prepend(more)
+  else entry.append(more)
+}
+
+/** How long a call took, as the mock says it: `0.1s`, `1.2s`, `1m 1.5s`. */
+function took(ms) {
+  const seconds = ms / 1000
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${(seconds - minutes * 60).toFixed(1)}s`
 }
 
 /** A size as the page says it. */
 const measure = (bytes) =>
   bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
-
-/** From when until when, or since when for the one going on now. */
-const period = ({ startedAt, endedAt }) =>
-  endedAt ? `${clock(startedAt)} to ${clock(endedAt)}` : `since ${clock(startedAt)}, going on now`
-
-/** What ended a conversation, as far as the ledger knows; none for the one going on now. */
-function endedWords({ endedAt, endedBy }) {
-  if (!endedAt) return null
-  if (endedBy === null) return 'ended (the ledger does not say why)'
-  if (endedBy.by === 'switch') {
-    const to = [HARNESS_NAMES[endedBy.harness] ?? endedBy.harness, endedBy.agent]
-      .filter(Boolean)
-      .join(' · ')
-    return `ended by Switch chief, to ${to}`
-  }
-  if (endedBy.by === 'window') {
-    return endedBy.resumed
-      ? 'ended when the window resumed an earlier conversation (/resume)'
-      : 'ended when the window went to another conversation (/clear, /new or /resume)'
-  }
-  return 'ended when a window opened on a fresh conversation'
-}
 
 const two = (number) => String(number).padStart(2, '0')
 
@@ -323,4 +456,22 @@ function clock(iso) {
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return String(iso)
   return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}`
+}
+
+/**
+ * The names a member, or a window of one, went by before it was named by its model's id
+ * (harness-models), the oldest first: the ready-made agent its row still names, where its
+ * handle is no longer that name (none for the chief, whose agent was only what it ran on),
+ * then each name it left (`formerHandles`). A window's own are its member's names with its
+ * two words after, which it leaves out.
+ */
+function formerly(participant) {
+  if (participant.role === 'chief') return []
+  const session = participant.session ? `-${participant.session}` : null
+  const left = (participant.formerHandles ?? []).map((handle) =>
+    session !== null && handle.endsWith(session) ? handle.slice(0, -session.length) : handle,
+  )
+  const names = participant.agent ? [participant.agent, ...left] : left
+  const now = participant.member ?? participant.handle
+  return names.filter((name, at) => name !== now && names.indexOf(name) === at)
 }

@@ -1631,7 +1631,7 @@ fn a_chief_opened_again_at_rest_whose_window_never_comes_up_is_closed_the_human_
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()
@@ -1715,7 +1715,7 @@ fn codex_chief_at_rest_after_a_restart(context: &Context) -> (i64, Restarted<'_>
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()
@@ -1911,7 +1911,7 @@ fn a_chief_window_with_a_first_message_that_exits_while_it_is_waited_for_is_give
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [],
         }))
         .unwrap()
@@ -2071,7 +2071,7 @@ fn a_chief_window_given_up_after_it_began_a_turn_on_its_result_opens_again_told_
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "codex", "agent": "apollo" },
+            "chief": { "harness": "codex", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()
@@ -2359,7 +2359,7 @@ fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_h
         tiers
             .notes("chief")
             .into_iter()
-            .filter(|note| note.starts_with("T-1 goes on in the background: @zeus-amber-pine ended its turn with 1 background job running"))
+            .filter(|note| note.starts_with("T-1 is still working in the background (1 command)"))
             .count()
     };
     assert_eq!(held(&tiers), 1, "told of the hold before the Close");
@@ -2561,7 +2561,7 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(
@@ -2615,7 +2615,7 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(

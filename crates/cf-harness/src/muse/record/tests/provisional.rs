@@ -3,7 +3,7 @@
 //! and, **provisional (the binary's strings only)**, a refusal for quota (MUS-14 and
 //! MUS-23, T-770's), apart from the recorded cases.
 
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::{intent, record_of, run};
 use crate::records::{Quota, Role, Settlement};
@@ -109,9 +109,15 @@ fn a_turn_refused_for_the_accounts_limits_says_the_quota_spent_at_its_time() {
         );
         assert!(quota.at().is_some_and(|at| at.starts_with("2026-10-26T")));
     }
-    for reason in ["API error 500: upstream", "tool failed"] {
-        assert_eq!(refused(reason).quota, None, "{reason}");
-    }
+    // A server's error is a refusal for a moment (T-1112); a tool's failure is the turn's.
+    assert!(
+        refused("API error 500: upstream")
+            .quota
+            .as_deref()
+            .is_some_and(Quota::busy),
+        "a 500"
+    );
+    assert_eq!(refused("tool failed").quota, None);
     // A later turn that got through says no refusal.
     let after = record_of(&[
         run(2, "t1", json!({ "kind": "started" })),
@@ -216,4 +222,49 @@ fn a_refusal_that_names_its_limit_and_reset_is_exhausted_until_then_and_the_seco
             "{reason}"
         );
     }
+}
+
+#[test]
+fn the_last_call_is_the_last_of_the_calls_a_turn_committed_as_a_line() {
+    // T-823: what a window was doing when it closed under its task. Muse writes a call's
+    // `args` as JSON text (the recorded logs), or as an object.
+    let committed = |seq: u64, calls: Value| {
+        run(
+            seq,
+            "t1",
+            json!({ "kind": "assistant_tool_calls_committed", "tool_calls": calls }),
+        )
+    };
+    let records = vec![
+        intent(1, "t1", "Test it."),
+        run(2, "t1", json!({ "kind": "started" })),
+        committed(
+            3,
+            json!([{ "name": "bash", "args": "{\"command\":\"make build\"}", "call_id": "c1" }]),
+        ),
+    ];
+    assert_eq!(
+        record_of(&records).last_call,
+        Some(crate::records::LastCall::shell("bash", "make build"))
+    );
+    let mut later = records.clone();
+    later.push(committed(
+        4,
+        json!([
+            { "name": "bash", "args": "{\"command\":\"cargo test --workspace\"}", "call_id": "c2" },
+            { "name": "read_file", "args": { "path": "src/lib.rs" }, "id": "c3" },
+        ]),
+    ));
+    assert_eq!(
+        record_of(&later).last_call,
+        Some(crate::records::LastCall::on("read_file", "src/lib.rs"))
+    );
+    assert_eq!(
+        record_of(&[
+            intent(1, "t1", "Hi."),
+            run(2, "t1", json!({ "kind": "started" }))
+        ])
+        .last_call,
+        None
+    );
 }

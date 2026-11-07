@@ -176,10 +176,21 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
         .unwrap();
     // 3.0.4 stops there, and the upgrade runs migration 0019 on what it left (and
     // the viewer's 0020, the Resume's 0021 and 0022, 0023 of the conversation a
-    // paste went into, the exit proof's 0024, the meeting's 0025 and the staff's
-    // rules' 0026).
+    // paste went into, the exit proof's 0024, the meeting's 0025, the staff's rules'
+    // 0026, the model lists' 0027, the chief's model's 0028, 0029, which took the
+    // history's heading indexes out, 0030, a member's tier the human chose, 0031, a
+    // member's own model, 0032, what the history draws of an item, 0033, which named every
+    // member by its model's id, and 0034, which named the compaction column for every member).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0034(&db).unwrap();
+        cf_ledger::testing::undo_migration_0033(&db).unwrap();
+        cf_ledger::testing::undo_migration_0032(&db).unwrap();
+        cf_ledger::testing::undo_migration_0031(&db).unwrap();
+        cf_ledger::testing::undo_migration_0030(&db).unwrap();
+        cf_ledger::testing::undo_migration_0029(&db).unwrap();
+        cf_ledger::testing::undo_migration_0028(&db).unwrap();
+        cf_ledger::testing::undo_migration_0027(&db).unwrap();
         cf_ledger::testing::undo_migration_0026(&db).unwrap();
         cf_ledger::testing::undo_migration_0025(&db).unwrap();
         cf_ledger::testing::undo_migration_0024(&db).unwrap();

@@ -224,6 +224,8 @@ pub(super) struct Request {
     pub(super) specs: Option<Variant>,
     /// The folder its project keeps its specs in, relative to the project.
     pub(super) folder: &'static str,
+    /// The size its project's members compact at, where the project chose one.
+    pub(super) compaction: Option<u32>,
 }
 
 impl Default for Request {
@@ -241,6 +243,7 @@ impl Default for Request {
             first_message_ms: FIRST_MESSAGE_MS,
             specs: None,
             folder: ".specs",
+            compaction: None,
         }
     }
 }
@@ -295,7 +298,7 @@ pub(super) fn prepare_as(
                 folder: request.folder,
                 skill,
             }),
-        compaction: None,
+        compaction: request.compaction,
         first_message_ms: request.first_message_ms,
         starts_given_up: 0,
     };
@@ -361,11 +364,14 @@ pub(super) fn settled(session: &str) -> Record {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         }],
         in_flight: false,
         asking: false,
         failed: false,
         failure: None,
+        failure_kind: None,
+        last_call: None,
         took_back: false,
         model_moved: None,
         model_drift: None,
@@ -373,7 +379,9 @@ pub(super) fn settled(session: &str) -> Record {
         settlement: Settlement::Settled,
         pending: Default::default(),
         monitors: Vec::new(),
+        commands: Vec::new(),
         lines: Box::default(),
+        beside: Vec::new(),
     }
 }
 

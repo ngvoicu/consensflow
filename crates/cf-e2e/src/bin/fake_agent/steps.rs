@@ -11,6 +11,17 @@
 //! - A line `STEPS <n> <words>` is a turn that works through `n` steps, each saying `Step
 //!   <i> of <n>` and calling a tool, and then answers the words: the progress a worker
 //!   writes before its report, and the report.
+//! - A line `SAID <words> THEN <line>` is a turn that writes `words`, calls a tool, and goes on
+//!   with `line` as the line it was given: the first words a window writes in answer to a
+//!   question before it works, then its work, then what that answers (T-1151: Devin, Claude
+//!   Code, Codex and Muse all write the answer to a tell first and run a tool after it).
+//!   `line` may itself be a `REPLY <words> THEN …`, so the window also answers with `cf answer`.
+//! - A line `ASKING <question> THEN <line>` (it begins its line) is a turn that asks the chief with `cf ask` (a question
+//!   that needs no answer, as T-837's worker asked: its task waits from then on), calls a tool for
+//!   it (a step whose result is what `cf ask` printed, as Claude Code records it), and goes on
+//!   with `line` as the line it was given: the work after the question, then what that answers
+//!   (T-1204). `line` may be a `PACED <n> <seconds> …`, so the chief can answer while the turn is at
+//!   work and the answer is typed in only when it ends.
 //! - A line `CLAUDE-JOB [--silent] [--exec] [--at-once] [--asks] [--stopped] <seconds> <words>
 //!   :: <report>` is a turn that starts a job as Claude Code's Bash tool does with
 //!   `run_in_background` (a process of the window's tree that runs that long, as `BACKGROUND`
@@ -57,7 +68,7 @@ use serde_json::{json, Value};
 
 use crate::background::{until_up, THINKING};
 use crate::records::Records;
-use crate::reply::{Reply, Window};
+use crate::reply::{reply_to, run_cf, Reply, Window};
 
 /// What opens the text of a notification, which is how a message that is one is told.
 const NOTIFICATION: &str = "<task-notification>";
@@ -72,6 +83,8 @@ pub struct Step {
     pub monitor: Option<(String, u64)>,
     /// The command the monitor's call names, where it names one.
     pub watches: Option<String>,
+    /// What the call printed, where a case needs it to be words (`cf ask`'s): "ok" otherwise.
+    pub printed: Option<String>,
 }
 
 impl Step {
@@ -82,6 +95,26 @@ impl Step {
             job: None,
             monitor: None,
             watches: None,
+            printed: None,
+        }
+    }
+
+    /// The words a turn writes before it calls its first tool.
+    pub fn saying(words: &str) -> Self {
+        Self {
+            said: words.to_owned(),
+            job: None,
+            monitor: None,
+            watches: None,
+            printed: None,
+        }
+    }
+
+    /// The call of `cf ask`, which printed `printed`.
+    pub fn asking(printed: &str) -> Self {
+        Self {
+            printed: Some(printed.to_owned()),
+            ..Self::saying("Asking the chief")
         }
     }
 
@@ -92,6 +125,7 @@ impl Step {
             job: Some(id.to_owned()),
             monitor: None,
             watches: None,
+            printed: None,
         }
     }
 
@@ -102,6 +136,7 @@ impl Step {
             job: None,
             monitor: Some((id.to_owned(), timeout_ms)),
             watches: None,
+            printed: None,
         }
     }
 
@@ -268,10 +303,27 @@ pub fn report_of(text: &str) -> Option<String> {
 /// What a turn does and answers: the steps it works through first, and its reply.
 pub type Worked = (Vec<Step>, Reply);
 
+/// The question of the `ASKING <question> THEN <line>` line of `text`, and `text` with the rest
+/// of the line in its place, as `SAID … THEN …` hands its rest on. The line begins a line: the
+/// words of a `DISPATCH` line that hands it to a worker are not the chief's to act on.
+fn asking_in(text: &str) -> Option<(String, String)> {
+    static ASKING: OnceLock<Regex> = OnceLock::new();
+    let asking = pattern::once(&ASKING, r"(?m)^ASKING (.+?) THEN (.+)$").captures(text)?;
+    let whole = asking.get(0)?;
+    let on = format!(
+        "{}{}{}",
+        &text[..whole.start()],
+        &asking[2],
+        &text[whole.end()..]
+    );
+    Some((asking[1].to_owned(), on))
+}
+
 /// The turn `text` asks for, if it is one of the steps': a notification's, answering the
 /// report it carries, or a line of this module's.
 pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
     static STEPS: OnceLock<Regex> = OnceLock::new();
+    static SAID: OnceLock<Regex> = OnceLock::new();
     static JOB: OnceLock<Regex> = OnceLock::new();
     static MONITOR: OnceLock<Regex> = OnceLock::new();
     static ENDS: OnceLock<Regex> = OnceLock::new();
@@ -283,6 +335,19 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
     }
     if is_notification(text) {
         return Some(Ok((Vec::new(), Reply::Text(STILL_WAITING.to_owned()))));
+    }
+    if let Some((question, on)) = asking_in(text) {
+        // The question is asked now, before the work, as an agent asks and goes on.
+        let printed = run_cf(&["ask".to_owned(), question]);
+        return Some(reply_to(&on, window).map(|answer| (vec![Step::asking(&printed)], answer)));
+    }
+    if let Some(said) = pattern::once(&SAID, r"(?m)\bSAID (.+?) THEN (.+)$").captures(text) {
+        // The rest of the line begins a line of its own, as `REPLY … THEN …` hands it on, so
+        // its verb is found whatever words came before `SAID`; the lines around it stay.
+        let (whole, words, rest) = (said.get(0)?, said[1].to_owned(), said[2].to_owned());
+        let line = text[..whole.start()].rfind('\n').map_or(0, |at| at + 1);
+        let on = format!("{}{rest}{}", &text[..line], &text[whole.end()..]);
+        return Some(reply_to(&on, window).map(|answer| (vec![Step::saying(&words)], answer)));
     }
     if let Some(steps) = pattern::once(&STEPS, r"(?m)^STEPS (\d+) (.+)$").captures(text) {
         let Ok(count) = steps[1].parse::<u64>() else {
@@ -533,7 +598,7 @@ fn result_of(call: &str, step: &Step) -> Value {
         (None, Some((id, _))) => format!(
             "Monitor started (task {id}, expires in 30m unless the source ends first; you get one notice at expiry — re-arm if you still need the watch). You will be notified on each event."
         ),
-        (None, None) => "ok".to_owned(),
+        (None, None) => step.printed.clone().unwrap_or_else(|| "ok".to_owned()),
     };
     let mut record = json!({
         "type": "user",
@@ -631,6 +696,49 @@ mod tests {
             seeded: false,
             put_back: Arc::default(),
         }
+    }
+
+    #[test]
+    fn a_said_line_writes_its_words_in_a_step_and_goes_on_with_the_rest_of_its_line() {
+        // A tell as the window is pasted it: the header, the chief's words on one line, the
+        // trailer. The verb is found after other words; its rest is a line of its own.
+        let tell = "[ConsensFlow m-2 · T-1 · question from @chief]\nStop now. SAID First words THEN SLEEP 0 Reply with exactly: LAST\n\nT-1 is paused for this.";
+        let (worked, answer) = reply(tell, &window())
+            .expect("a said line")
+            .expect("it is made");
+        let said: Vec<&str> = worked.iter().map(|step| step.said.as_str()).collect();
+        assert_eq!(said, ["First words"], "one step, its words, a tool after");
+        assert_eq!(answer, Reply::Text("LAST".to_owned()));
+        // No such line, no such step.
+        assert!(reply("Stop now. First words", &window()).is_none());
+    }
+
+    #[test]
+    fn an_asking_line_gives_its_question_and_hands_the_rest_of_its_line_on() {
+        // Not run here: `cf ask` would reach whatever board this shell belongs to.
+        let task = "[ConsensFlow m-1 · T-1 · task from @chief]\nASKING Disk notice, no answer needed THEN PACED 3 4 The write-up\n\nTrailer.";
+        let (question, on) = asking_in(task).expect("an asking line");
+        assert_eq!(question, "Disk notice, no answer needed");
+        assert_eq!(
+            on,
+            "[ConsensFlow m-1 · T-1 · task from @chief]\nPACED 3 4 The write-up\n\nTrailer."
+        );
+        assert_eq!(asking_in("STEPS 2 The write-up"), None);
+        // The chief's line that hands the work to a worker is not an asking line of its own.
+        assert_eq!(
+            asking_in("DISPATCH --tier standard ASKING Which grammar? THEN SAY Asked."),
+            None
+        );
+        let step =
+            Step::asking("m-4 asked @chief. The answer arrives as a message; end your turn now.");
+        assert_eq!(
+            result_of("toolu-1", &step)["message"]["content"][0]["content"],
+            "m-4 asked @chief. The answer arrives as a message; end your turn now."
+        );
+        assert_eq!(
+            result_of("toolu-1", &Step::progress(1, 2))["message"]["content"][0]["content"],
+            "ok"
+        );
     }
 
     #[test]

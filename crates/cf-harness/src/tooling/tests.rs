@@ -732,6 +732,56 @@ fn the_unsent_question_answers_the_adapters_decision_of_a_snapshot() {
 }
 
 #[test]
+fn the_models_question_reads_as_the_daemon_and_says_why_a_harness_has_none() {
+    let env = json!({ "PATH": "" });
+    assert_eq!(
+        answer(&json!({ "op": "models", "kind": "claude-code", "env": env })),
+        Err("claude is not installed on this machine".to_owned())
+    );
+    // A kind no harness runs as is none.
+    assert_eq!(
+        answer(&json!({ "op": "models", "kind": "kimi", "env": env })),
+        Err("no harness runs as kimi".to_owned())
+    );
+}
+
+#[test]
+fn the_last_used_question_reads_a_conversation_as_a_chiefs_reopen_does() {
+    let config = tempfile::tempdir().unwrap();
+    let folder = config.path().join("projects").join("-work");
+    fs::create_dir_all(&folder).unwrap();
+    let entry = |model: &str| {
+        json!({
+            "type": "assistant",
+            "isSidechain": false,
+            "effort": "low",
+            "message": { "model": model, "content": [{ "type": "text", "text": "OK" }] },
+        })
+        .to_string()
+    };
+    fs::write(
+        folder.join("s-1.jsonl"),
+        format!(
+            "{}\n{}\n",
+            entry("claude-sonnet-5-5"),
+            entry("claude-haiku-5-5")
+        ),
+    )
+    .unwrap();
+    let env = json!({ "CLAUDE_CONFIG_DIR": config.path().to_str().unwrap(), "HOME": "/nowhere" });
+    let ask = |session: &str| {
+        answer(&json!({ "op": "last_used", "kind": "claude-code", "session": session, "env": env }))
+    };
+    assert_eq!(
+        ask("s-1"),
+        Ok(
+            json!({ "model": "claude-haiku-5-5", "effort": "low", "thinking": null, "byHarness": false })
+        )
+    );
+    assert_eq!(ask("s-2"), Ok(Value::Null), "no such conversation");
+}
+
+#[test]
 fn a_question_for_no_op_names_every_op_the_table_of_the_tool_has() {
     // The table at the head of `tooling.rs` is the list of what the tool answers; the error
     // for a question that asks for another says the same (T-816: it lacked `muse_models` and
@@ -746,5 +796,59 @@ fn a_question_for_no_op_names_every_op_the_table_of_the_tool_has() {
     let refused = answer(&json!({ "op": "no_such_op" })).unwrap_err();
     for op in ops {
         assert!(refused.contains(op), "{op} is not in: {refused}");
+    }
+}
+
+#[test]
+fn a_transcript_is_read_after_each_of_its_lines_as_the_product_reads_it() {
+    let line = |record: Value| {
+        let mut record = record;
+        record["sessionId"] = json!("s1");
+        record["isSidechain"] = json!(false);
+        record.to_string()
+    };
+    let text = [
+        line(json!({
+            "type": "user", "uuid": "u1", "parentUuid": null,
+            "message": { "role": "user", "content": "Hello" },
+        })),
+        line(json!({
+            "type": "assistant", "uuid": "a1", "parentUuid": "u1",
+            "message": {
+                "id": "m1", "role": "assistant",
+                "content": [{ "type": "text", "text": "Hi" }],
+                "stop_reason": "end_turn",
+            },
+        })),
+        line(json!({
+            "type": "system", "subtype": "turn_duration", "uuid": "d1", "parentUuid": "a1",
+            "durationMs": 5, "messageCount": 2,
+        })),
+    ]
+    .join("\n");
+    let read = answer(&ask(
+        "claude_prefixes",
+        json!({ "session": "s1", "text": text }),
+    ))
+    .unwrap();
+    let states: Vec<(i64, &str)> = read
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|prefix| {
+            (
+                prefix["lines"].as_i64().unwrap(),
+                prefix["reading"]["settlement"]["state"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    // The turn begins at the prompt, and an answer that ended it settles it at its boundary.
+    assert_eq!(states, [(1, "in-flight"), (2, "in-flight"), (3, "settled")]);
+    assert!(
+        read[0]["reading"].get("items").is_none(),
+        "the words are left out"
+    );
+    for missing in [json!({ "text": text }), json!({ "session": "s1" })] {
+        assert!(answer(&ask("claude_prefixes", missing)).is_err());
     }
 }

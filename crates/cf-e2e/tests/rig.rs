@@ -78,6 +78,8 @@ mod background_close;
 mod background_work;
 #[path = "rig/cf_native.rs"]
 mod cf_native;
+#[path = "rig/chief_model.rs"]
+mod chief_model;
 #[path = "rig/codex_session.rs"]
 mod codex_session;
 #[path = "rig/core_board.rs"]
@@ -124,6 +126,10 @@ mod live_members;
 mod live_support;
 #[path = "rig/meeting.rs"]
 mod meeting;
+#[path = "rig/members_compaction.rs"]
+mod members_compaction;
+#[path = "rig/muse_role.rs"]
+mod muse_role;
 #[path = "rig/muse_window.rs"]
 mod muse_window;
 #[path = "rig/pacing.rs"]

@@ -16,7 +16,7 @@ use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
     Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard, TaskThread,
-    RESUME_WORDS,
+    TaskView, RESUME_WORDS,
 };
 use serde_json::Value;
 
@@ -24,7 +24,7 @@ use crate::deliveries::Delivering;
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::seams::{EngineError, SavedAgent};
+use crate::seams::EngineError;
 
 /// What the note to the human says of an account refused again as soon as its
 /// task went on.
@@ -51,6 +51,20 @@ const NEVER: &str = "9999-12-31T23:59:59.998Z";
 /// holds across a restart of the daemon (its schema takes no column for it).
 const MOVED: &str = "9999-12-31T23:59:59.999Z";
 
+/// How long a task whose model was busy waits before it is tried again (T-1112), by how many
+/// times in a row its window was refused so: a minute, then two, then four. The harness has
+/// already retried for seconds before it gave up (Claude Code and Codex do, with backoffs of
+/// their own), so a provider at capacity is past its seconds and into its minutes: these try
+/// again within the few minutes such a spell lasts, and three tries take seven minutes.
+const BUSY_BACKOFF_MS: [i64; 3] = [60_000, 120_000, 240_000];
+
+/// How long a task whose model was busy at every try waits between tries once they are spent,
+/// held with its window because no other member of its tier is free (T-1112).
+const BUSY_HOLD_MS: i64 = 5 * 60_000;
+
+/// What the ledger keeps of a member out, and of a task held, while its model is busy.
+pub(crate) const BUSY_HOLD: &str = "model busy";
+
 /// Whether `until`, a member's time out, is a hold no time ends: [`NEVER`] or [`MOVED`].
 pub(crate) fn never(until: &str) -> bool {
     until.starts_with("9999-")
@@ -61,13 +75,15 @@ pub(crate) fn moved_hold(until: &str) -> bool {
     until == MOVED
 }
 
-/// Why a member is held for no time: its account refused for what only its human cures
-/// (MUS-23), or its harness moved its window's model on its own (MUS-24). The words are the
-/// reader's.
+/// Why a member is held other than for a quota that resets: for no time, its account
+/// refused for what only its human cures (MUS-23), or its harness moved its window's model on
+/// its own (MUS-24); or for a moment, its model busy (T-1112), tried again after a backoff of
+/// the engine's. The words are the reader's.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Unwell<'a> {
     Account(&'a str),
     Moved(&'a str),
+    Busy(&'a str),
 }
 
 impl<'a> Unwell<'a> {
@@ -76,13 +92,14 @@ impl<'a> Unwell<'a> {
         match quota {
             Some(Quota::Unavailable { because, .. }) => Some(Unwell::Account(because)),
             Some(Quota::Moved { because, .. }) => Some(Unwell::Moved(because)),
+            Some(Quota::Busy { because, .. }) => Some(Unwell::Busy(because)),
             _ => None,
         }
     }
 
     fn because(self) -> &'a str {
         match self {
-            Unwell::Account(because) | Unwell::Moved(because) => because,
+            Unwell::Account(because) | Unwell::Moved(because) | Unwell::Busy(because) => because,
         }
     }
 
@@ -91,8 +108,15 @@ impl<'a> Unwell<'a> {
         match self {
             Unwell::Account(_) => "account unavailable",
             Unwell::Moved(_) => "model moved",
+            Unwell::Busy(_) => BUSY_HOLD,
         }
     }
+}
+
+/// Whether a window's last turn failed on a refusal of its busy model (T-1112): a server
+/// error, its model overloaded or at capacity, which waiting cures.
+pub(crate) fn busy_turn(observed: &Observed) -> bool {
+    observed.failed && observed.quota.as_deref().is_some_and(Quota::busy)
 }
 
 /// What a window of a member out says it is doing: out of quota until the reset, or, where
@@ -101,6 +125,7 @@ pub(crate) fn out_words(until: &str, unwell: Option<Unwell<'_>>) -> String {
     match unwell {
         Some(Unwell::Account(because)) => format!("unavailable: {because}"),
         Some(Unwell::Moved(because)) => format!("moved: {because}"),
+        Some(Unwell::Busy(because)) => format!("model busy, tried again at {until}: {because}"),
         None if moved_hold(until) => "model moved on its own".to_owned(),
         None if never(until) => "unavailable".to_owned(),
         None => format!("out of quota until {until}"),
@@ -164,6 +189,15 @@ pub(crate) struct SchedulerState {
     /// news a teammate's turn can undo. In memory, so a restart may bring a chief
     /// on a weekly limit back once more (one refused turn, one note).
     tried: RefCell<HashMap<i64, String>>,
+    /// The tasks whose window's model was busy (T-1112), each with how many times in a row it
+    /// was refused so: the backoff grows with it, and once the tries are spent the task goes
+    /// to another free member of its tier. A turn of the task that gets through clears it. In
+    /// memory: a restart of the daemon counts again from none, at most three tries more.
+    busy: RefCell<HashMap<i64, usize>>,
+    /// The members out because their model was busy, each with the time it was marked out
+    /// until: their lane and the board say so, not that they are out of quota. In memory, as
+    /// the ledger keeps no kind of a member's time out; after a restart they read as out.
+    busy_out: RefCell<HashMap<i64, String>>,
 }
 
 /// The same refusal: the one a record's reading gave, or one of the same time.
@@ -259,6 +293,19 @@ impl Dispatcher {
             if !task.blocked_by.is_empty() {
                 continue;
             }
+            // A tier nobody on the staff holds any more (its last member left, or its
+            // model moved to another tier) goes to the nearest one somebody does, as at
+            // `cf task add`: its requester is told once which.
+            let retiered = self
+                .seams
+                .ledger
+                .borrow_mut()
+                .retier_open_task(project.id, task.number)?;
+            let mut task = task;
+            if let Some(moved) = retiered {
+                self.tell_retiered(project, &task, &moved.from, &moved.to, &moved.holders)?;
+                task.tier = Some(moved.to);
+            }
             let candidates = self
                 .seams
                 .ledger
@@ -282,10 +329,6 @@ impl Dispatcher {
                     .waiting_noted
                     .borrow_mut()
                     .insert(task.id, project.id);
-                let why: Vec<String> = candidates
-                    .iter()
-                    .filter_map(|member| self.why_not_free(member))
-                    .collect();
                 let pool = if task.pool.as_deref() == Some("designer") {
                     "image designer".to_owned()
                 } else {
@@ -295,6 +338,25 @@ impl Dispatcher {
                         task.pool.as_deref().unwrap_or("null")
                     )
                 };
+                let mut why: Vec<String> = candidates
+                    .iter()
+                    .filter_map(|member| self.why_not_free(member))
+                    .collect();
+                // A wait always says why: nobody holds the role (the last member of it left
+                // after the task was given), or, if it ever came to it, that no member is free.
+                if why.is_empty() {
+                    why.push(match candidates.is_empty() {
+                        true => format!(
+                            "no {} is on the staff (ask the human for one, in your terminal)",
+                            if task.pool.as_deref() == Some("designer") {
+                                "image designer"
+                            } else {
+                                task.pool.as_deref().unwrap_or("member")
+                            }
+                        ),
+                        false => "none of them is free".to_owned(),
+                    });
+                }
                 self.seams.ledger.borrow_mut().note(
                     project.id,
                     &NewNote {
@@ -314,9 +376,38 @@ impl Dispatcher {
         Ok(assigned)
     }
 
+    /// Tells a task's requester, once, that the tier it asked went to the nearest
+    /// one somebody holds, and whose it is.
+    fn tell_retiered(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        from: &str,
+        to: &str,
+        holders: &[String],
+    ) -> Result<(), EngineError> {
+        let pool = task.pool.as_deref().unwrap_or("member");
+        let members: Vec<String> = holders.iter().map(|handle| format!("@{handle}")).collect();
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: task.requester.clone(),
+                task: Some(task.number),
+                body: format!(
+                    "T-{} asked for a {from} {pool}; none is on the staff, so it goes to the {to} tier: {}.",
+                    task.number,
+                    members.join(", ")
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
     /// Why a member is not free, the first reason that holds for it: on a
-    /// harness whose windows open, its agent saved, not out of quota, not
-    /// low on it; none when it is free.
+    /// harness whose windows open, not out of quota, not low on it; none when
+    /// it is free.
     fn why_not_free(&self, candidate: &Candidate) -> Option<String> {
         let member = &candidate.member;
         let harness = member.harness.as_deref().unwrap_or("null");
@@ -326,28 +417,11 @@ impl Dispatcher {
                 member.handle, member.handle
             ));
         }
-        let agent = member.agent.as_deref();
-        match agent.map_or(Some(None), |name| self.saved_agent(name)) {
-            None => {
-                return Some(format!(
-                    "@{}'s agent cannot be read (your agents file needs fixing: see Agents)",
-                    member.handle
-                ));
-            }
-            Some(None) => {
-                let agent = agent.unwrap_or("null");
-                return Some(match self.seams.roster.retired(agent) {
-                    Some(why) => format!(
-                        "@{} has no agent any more ({agent} left the catalog: {why}; remove @{} from the staff and add another agent)",
-                        member.handle, member.handle
-                    ),
-                    None => format!(
-                        "@{} has no agent any more ({agent} is not among your agents: define it, or remove the member)",
-                        member.handle
-                    ),
-                });
-            }
-            Some(Some(_)) => {}
+        if member.needs_edit {
+            return Some(needs_an_edit_because(
+                &member.handle,
+                member.agent.as_deref(),
+            ));
         }
         if self.out(member.out_until.as_deref()) {
             let until = member.out_until.as_deref().unwrap_or_default();
@@ -359,6 +433,11 @@ impl Dispatcher {
             } else if never(until) {
                 format!(
                     "@{}'s account is unavailable (its billing or login was refused)",
+                    member.handle
+                )
+            } else if self.busy_until(member.id).as_deref() == Some(until) {
+                format!(
+                    "@{}'s model is busy (ConsensFlow tries it again at {until})",
                     member.handle
                 )
             } else {
@@ -598,6 +677,10 @@ impl Dispatcher {
         owner: &ParticipantView,
         unwell: Unwell<'_>,
     ) -> Result<(), EngineError> {
+        // A busy model is the requester's to hear, once, and nothing for the human to do (T-1112).
+        if let Unwell::Busy(_) = unwell {
+            return Ok(());
+        }
         let mark = (owner.id, owner.out_since.clone().unwrap_or_default());
         if !self.scheduler.unwell_noted.borrow_mut().insert(mark) {
             return Ok(());
@@ -612,6 +695,7 @@ impl Dispatcher {
                 "@{}: {because}. Nothing is sent to it until you say it may go on: put it back on the model you chose, or accept this one, then press Try again now on @{}.",
                 participant.handle, owner.handle
             ),
+            Unwell::Busy(_) => unreachable!("a busy model is told above"),
         };
         self.seams.ledger.borrow_mut().note(
             project.id,
@@ -901,6 +985,10 @@ impl Dispatcher {
             return Ok(());
         }
         for task in self.active_work(project, participant)? {
+            if let Some(Unwell::Busy(because)) = unwell {
+                self.hold_busy(project, participant, owner, &task, until, because)?;
+                continue;
+            }
             let again = match refused_at {
                 Some(at) if unwell.is_none() => self.refused_its_resume(participant, &task, at)?,
                 _ => false,
@@ -933,6 +1021,7 @@ impl Dispatcher {
                         &participant.handle,
                         because,
                     )?,
+                    Unwell::Busy(_) => unreachable!("a busy model's task is held above"),
                 };
             } else if again {
                 self.tell_the_human_it_may_need_them(project, participant, owner, &task)?;
@@ -947,6 +1036,146 @@ impl Dispatcher {
             }
         }
         Ok(())
+    }
+
+    /// A task whose window's model was busy (T-1112): one more try refused. It is held until
+    /// `until`, the backoff its tries name ([`Dispatcher::busy_reset`]), and goes on in its
+    /// window then, as a task held for its quota does. Once [`BUSY_BACKOFF_MS`]'s tries were
+    /// refused too, a task given by tier goes back to the board while another member of its
+    /// tier is free: its member is out until the backoff, so the board gives it to that one,
+    /// and the release tells its requester where it went. While none is, it is held on, tried
+    /// every [`BUSY_HOLD_MS`]. Its requester is told once that it waits and why, in plain
+    /// words, at the first refusal that holds it, and of no try after: a note withdrawn
+    /// before it was given is told again.
+    fn hold_busy(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        owner: &ParticipantView,
+        task: &TaskCard,
+        until: &str,
+        because: &str,
+    ) -> Result<(), EngineError> {
+        let tries = {
+            let mut busy = self.scheduler.busy.borrow_mut();
+            let tries = busy.entry(task.id).or_insert(0);
+            *tries += 1;
+            *tries
+        };
+        // A task given by name is the ledger's to keep with its member: it releases only a
+        // task given by tier (`check_release`, in `another_is_free`).
+        if tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+            self.scheduler.busy.borrow_mut().remove(&task.id);
+            self.seams.ledger.borrow_mut().release_task(
+                project.id,
+                task.number,
+                &format!("its model was busy at {tries} tries in a row: {because}"),
+            )?;
+            return Ok(());
+        }
+        self.seams
+            .ledger
+            .borrow_mut()
+            .hold_task(project.id, task.number, until, BUSY_HOLD)?;
+        if !self.told_busy(project, task)? {
+            self.seams.ledger.borrow_mut().note_hold_busy(
+                project.id,
+                &task.requester,
+                task.number,
+                &participant.handle,
+                because,
+                task.pool.is_some(),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Whether a member of `task`'s tier other than `owner` is free to take it now, and the
+    /// ledger would let it go back to the board.
+    fn another_is_free(
+        &self,
+        project: &ProjectView,
+        owner: &ParticipantView,
+        task: &TaskCard,
+    ) -> Result<bool, EngineError> {
+        if self
+            .seams
+            .ledger
+            .borrow()
+            .check_release(project.id, task.number)
+            .is_err()
+        {
+            return Ok(false);
+        }
+        let candidates = self
+            .seams
+            .ledger
+            .borrow()
+            .candidates(project.id, task.number)?;
+        Ok(candidates
+            .iter()
+            .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none()))
+    }
+
+    /// Whether `task`'s requester was given, or is to be given, the note that its window's
+    /// model is busy: a note withdrawn before it was given told nobody.
+    fn told_busy(&self, project: &ProjectView, task: &TaskCard) -> Result<bool, EngineError> {
+        let Some(requester) = project
+            .participants
+            .iter()
+            .find(|participant| participant.handle == task.requester)
+        else {
+            return Ok(false);
+        };
+        Ok(self
+            .seams
+            .ledger
+            .borrow()
+            .inbox(requester.id, i64::MAX)?
+            .iter()
+            .any(|message| {
+                message.kind == "note"
+                    && message.task_number == Some(task.number)
+                    && message.state != "cancelled"
+                    && cf_ledger::is_busy_note(task.number, &message.body)
+            }))
+    }
+
+    /// When a window whose model was busy is tried again (T-1112): after the backoff the most
+    /// tries of its tasks name, [`BUSY_HOLD_MS`] once they are spent; its member is out until
+    /// then, and takes no other work.
+    pub(crate) fn busy_reset(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Result<String, EngineError> {
+        let busy = self.scheduler.busy.borrow();
+        let tries = self
+            .active_work(project, participant)?
+            .iter()
+            .filter_map(|task| busy.get(&task.id).copied())
+            .max()
+            .unwrap_or(0);
+        let wait = BUSY_BACKOFF_MS.get(tries).copied().unwrap_or(BUSY_HOLD_MS);
+        Ok(time::iso(self.now() + wait))
+    }
+
+    /// A member marked out until `until` because its model was busy: said so, not out of quota.
+    pub(crate) fn marked_busy(&self, member: i64, until: &str) {
+        self.scheduler
+            .busy_out
+            .borrow_mut()
+            .insert(member, until.to_owned());
+    }
+
+    /// Until when a member is out because its model was busy, where it is.
+    pub(crate) fn busy_until(&self, member: i64) -> Option<String> {
+        self.scheduler.busy_out.borrow().get(&member).cloned()
+    }
+
+    /// A task whose window's model was busy got a turn through: its tries begin again.
+    fn busy_over(&self, task: i64) {
+        self.scheduler.busy.borrow_mut().remove(&task);
     }
 
     /// Whether a refusal at `refused_at` (ms) answered the daemon's own words
@@ -1041,6 +1270,7 @@ impl Dispatcher {
         if !last.complete && !working {
             return Ok(());
         }
+        self.busy_over(task.id);
         self.seams
             .ledger
             .borrow_mut()
@@ -1102,7 +1332,10 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let now = time::iso(self.now());
         for task in self.active_work(project, participant)? {
-            if task.state == "queued" {
+            // A queued task is on its way to the window already, and so is one that reads
+            // working or waiting while the words that resumed it wait (`resumed_at_work`):
+            // held and resumed here, its window would be told to go on twice (T-1153's F3).
+            if task.state == "queued" || self.resume_words_wait(project.id, task.number)? {
                 continue;
             }
             self.seams.ledger.borrow_mut().hold_task(
@@ -1197,44 +1430,6 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// A member whose agent is gone from the human's agents runs on no
-    /// default: its tiered work goes back to the board for another member,
-    /// with whatever was on its way to it withdrawn, and a request given to
-    /// it by name fails so the requester hears why.
-    pub(crate) fn without_agent(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        delivering: Option<Delivering>,
-    ) -> Result<(), EngineError> {
-        let agent = participant.agent.as_deref().unwrap_or("null");
-        let because = self.gone_because(agent);
-        let tiered: Vec<TaskCard> = self
-            .active_work(project, participant)?
-            .into_iter()
-            .filter(|task| task.pool.is_some())
-            .collect();
-        for task in &tiered {
-            self.seams
-                .ledger
-                .borrow_mut()
-                .release_task(project.id, task.number, &because)?;
-        }
-        match delivering {
-            Some(delivering) => self.settle_failure(
-                delivering,
-                &format!(
-                    "{because}: {}",
-                    self.member_remedy(agent, &participant.handle)
-                ),
-                false,
-            )?,
-            None if !tiered.is_empty() => self.changed(),
-            None => {}
-        }
-        Ok(())
-    }
-
     /// A held task's window that went on with it by itself, in a turn of its own
     /// that got through: Claude Code continues once its limit resets, or the
     /// human typed into it (T-95). That turn begins with a user's words that are
@@ -1308,6 +1503,35 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// A member that runs nothing now: its tiered work goes back to the board for another
+    /// member with `because`, and what was on its way to it (`delivering`) fails, so its
+    /// requester hears why.
+    pub(crate) fn release_its_work(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        because: &str,
+        delivering: Option<Delivering>,
+    ) -> Result<(), EngineError> {
+        let tiered: Vec<TaskCard> = self
+            .active_work(project, participant)?
+            .into_iter()
+            .filter(|task| task.pool.is_some())
+            .collect();
+        for task in &tiered {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .release_task(project.id, task.number, because)?;
+        }
+        match delivering {
+            Some(delivering) => self.settle_failure(delivering, because, false)?,
+            None if !tiered.is_empty() => self.changed(),
+            None => {}
+        }
+        Ok(())
+    }
+
     /// The work a participant holds and has not finished: queued, working or waiting.
     fn active_work(
         &self,
@@ -1324,42 +1548,6 @@ impl Dispatcher {
             .into_iter()
             .filter(|task| matches!(task.state.as_str(), "queued" | "working" | "waiting"))
             .collect())
-    }
-
-    /// Why `agent` is gone, as a task taken back or a launch says it: a
-    /// ready-made agent the catalog no longer carries says why it went; any
-    /// other is no longer among the human's agents.
-    pub(crate) fn gone_because(&self, agent: &str) -> String {
-        match self.seams.roster.retired(agent) {
-            Some(why) => format!("{agent} left the catalog: {why}"),
-            None => format!("{agent} is no longer among your agents"),
-        }
-    }
-
-    /// What the human does about a member whose agent is gone: picks another
-    /// agent for one the catalog no longer carries, or adds theirs back.
-    fn member_remedy(&self, agent: &str, handle: &str) -> String {
-        if self.seams.roster.retired(agent).is_some() {
-            format!("remove @{handle} from the staff and add another agent")
-        } else {
-            format!("add it back under Agents, or remove @{handle} from the staff")
-        }
-    }
-
-    /// A participant whose saved agent the human has since deleted.
-    pub(crate) fn agent_gone(&self, participant: &ParticipantView) -> bool {
-        participant
-            .agent
-            .as_deref()
-            .is_some_and(|name| matches!(self.saved_agent(name), Some(None)))
-    }
-
-    /// A saved agent as the roster has it now: its row, or none when it is
-    /// gone. While the human's agents file cannot be read it is not known:
-    /// nobody counts as free for new work, and nobody's agent as gone, so no
-    /// work is taken back for a typo.
-    fn saved_agent(&self, name: &str) -> Option<Option<SavedAgent>> {
-        self.seams.roster.agent(name).ok()
     }
 
     /// A deleted project's open tasks wait for nobody now: what their
@@ -1392,6 +1580,15 @@ fn rank<'a>(mut free: Vec<&'a Candidate>, candidates: &[Candidate]) -> Vec<&'a C
         )
     });
     free
+}
+
+/// Why a member that needs an edit (T-1202), `handle`, runs nothing: the update could not
+/// tell what its agent (`agent`) ran on, and it runs on no default.
+pub(crate) fn needs_an_edit_because(handle: &str, agent: Option<&str>) -> String {
+    format!(
+        "@{handle} needs an edit: the update could not tell what it ran on ({} is in no catalog and no agents file); edit it under Project settings, or remove it",
+        agent.unwrap_or("its agent")
+    )
 }
 
 #[cfg(test)]

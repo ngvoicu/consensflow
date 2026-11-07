@@ -14,7 +14,8 @@ fn an_operations_work_is_small_where_it_is_made_its_steps_and_holds_on_the_heap(
     let dispatcher = Rc::clone(&context.dispatcher);
     let to = SwitchTo {
         harness: "claude-code".to_owned(),
-        agent: "apollo".to_owned(),
+        model: "apollo".to_owned(),
+        effort: None,
     };
     let sizes = [
         ("pass", std::mem::size_of_val(&dispatcher.pass())),

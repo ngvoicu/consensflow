@@ -127,6 +127,42 @@ fn each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_fin
         )),
         Some(RoleText::File("/d/role".to_owned()))
     );
+    // Muse: a file its SessionStart hook hands it, named in the hook of its `-c hooks=`, as
+    // its launch writes it (T-954's `live specs muse`: a role file in a folder with a blank,
+    // and one with a quote, in the POSIX form; the Windows form quotes nothing).
+    let hooks = |command: &str, windows: &str| {
+        format!(
+            "hooks={}",
+            json!({ "SessionStart": [ { "matcher": "", "hooks": [ {
+                "type": "command", "command": command, "commandWindows": windows, "timeout": 10,
+            } ] } ] })
+        )
+    };
+    assert_eq!(
+        role_of(&frame(
+            &json!([
+                "/b/muse-bin-1.4.14",
+                "-c",
+                hooks(
+                    "'/b/cf' hook muse-session '/r o/it'\\''s/SKILL.md' '/r/sessions.jsonl'",
+                    ""
+                ),
+                "--model",
+                "muse-spark-1.3"
+            ]),
+            &json!({})
+        )),
+        Some(RoleText::File("/r o/it's/SKILL.md".to_owned()))
+    );
+    assert_eq!(
+        muse_role_file(&hooks(
+            "",
+            r"C:\b\cf.exe hook muse-session C:\r\SKILL.md C:\r\sessions.jsonl"
+        )),
+        Some(r"C:\r\SKILL.md".to_owned())
+    );
+    assert_eq!(muse_role_file("hooks={}"), None);
+    assert_eq!(muse_role_file("--yolo"), None);
     // A window given its role in none of these ways is one the run cannot read.
     assert_eq!(role_of(&frame(&json!(["claude"]), &json!({}))), None);
 }

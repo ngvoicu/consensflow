@@ -19,6 +19,7 @@ use std::io::{self, Read, Write};
 
 use cf_board::{Board, BoardError};
 use cf_proto::cf_word::CfWord;
+use cf_proto::questions::ASKED_THEN_END_THE_TURN;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
@@ -30,7 +31,20 @@ use words::{message_id, quoted, require_text, split, task_number, Shape};
 /// The flags of `cf note`.
 const NOTE: Shape = Shape {
     switches: &["--human"],
+    valued: &[brief::FILE],
     ..Shape::TEXT
+};
+
+/// The flags of `cf ask`.
+const ASK: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::TEXT
+};
+
+/// The flags of `cf answer`, which names its message first.
+const ANSWER: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::NUMBERED
 };
 
 /// The flags of `cf tell`, which names its task first.
@@ -228,10 +242,10 @@ fn command(
         "help" | "--help" | "-h" => Ok(Said::usage(usage().to_string())),
         "task" => task::command(rest, given, board, input),
         "inbox" => inbox(rest, board),
-        "note" => note(rest, board, input),
-        "ask" => ask(rest, board, input),
+        "note" => note(rest, given, board, input),
+        "ask" => ask(rest, given, board, input),
         "tell" => tell(rest, given, board, input),
-        "answer" => answer(rest, board, input),
+        "answer" => answer(rest, given, board, input),
         "staff" => staff(rest, board),
         "history" => history(rest, board),
         "whoami" => whoami(rest, board),
@@ -275,11 +289,16 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
             message_line(&message),
             printed_body(&message, board.cf())
         );
-        let delivered = message.get("state").and_then(Value::as_str) == Some("delivered");
+        // A role goes in by a note, and a window reads it as soon as it has the paste:
+        // before the daemon has seen the paste arrive, as often as after.
+        let reached = matches!(
+            message.get("state").and_then(Value::as_str),
+            Some("delivered" | "delivering")
+        );
         let told = message
             .get("id")
             .and_then(Value::as_i64)
-            .filter(|_| role && delivered);
+            .filter(|_| role && reached);
         let waiting = lines::waiting_message(&message);
         let said = Said::new(message, text);
         return Ok(match told {
@@ -296,7 +315,12 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(messages, text))
 }
 
-fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+fn note(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let words = split(rest, NOTE);
     if words.asks_for_help() {
         return Ok(help_of(&["note"]));
@@ -305,7 +329,11 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
     let mut body = Map::new();
     body.insert(
         "body".into(),
-        require_text(text_of(words.text, input)?, "cf note \"what to know\"")?.into(),
+        require_text(
+            brief::brief_of(&words, given, input)?,
+            "cf note \"what to know\"",
+        )?
+        .into(),
     );
     if human {
         body.insert("to".into(), "human".into());
@@ -319,8 +347,13 @@ fn note(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
     Ok(Said::new(message, text))
 }
 
-fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::TEXT);
+fn ask(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let words = split(rest, ASK);
     if words.asks_for_help() {
         return Ok(help_of(&["ask"]));
     }
@@ -330,12 +363,16 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
             "the human is not asked with cf ask: the chief asks them in its own terminal".into(),
         ));
     }
-    let question = require_text(text_of(words.text, input)?, "cf ask \"your question\"")?;
+    let question = require_text(
+        brief::brief_of(&words, given, input)?,
+        "cf ask \"your question\"",
+    )?;
     let message = posted(board, "/api/questions", body_of(question))?;
     let text = format!(
-        "m-{} asked @{}. The answer arrives as a message; end your turn now.",
+        "m-{} asked @{}. {}",
         js::text(message.get("id")),
-        js::text(message.get("recipient"))
+        js::text(message.get("recipient")),
+        ASKED_THEN_END_THE_TURN
     );
     Ok(Said::new(message, text))
 }
@@ -355,7 +392,7 @@ fn tell(
         brief::brief_of(&words, given, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
-    let sent = brief::sent(&what);
+    let sent = brief::sent(number, &what);
     let mut answer = board.post(
         &format!("/api/tasks/{number}/tell"),
         &Value::Object(body_of(what)),
@@ -388,8 +425,13 @@ fn tell(
     Ok(Said::new(message, format!("{text}\n{sent}")))
 }
 
-fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::NUMBERED);
+fn answer(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let words = split(rest, ANSWER);
     if words.asks_for_help() {
         return Ok(help_of(&["answer"]));
     }
@@ -399,7 +441,7 @@ fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, 
     body.insert(
         "body".into(),
         require_text(
-            text_of(words.text, input)?,
+            brief::brief_of(&words, given, input)?,
             "cf answer m-<id> \"your answer\"",
         )?
         .into(),
@@ -426,17 +468,27 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let mut answer = board.get("/api/staff")?;
     let members = answer.take("members")?;
     let text = match answer.list(Some(&members), "members")? {
-        [] => {
-            "No agents are on this project staff yet; the human adds them in the app.".to_string()
-        }
+        [] => "No members are on this project's staff yet; the human adds them in the app."
+            .to_string(),
         all => all
             .iter()
             .map(|member| {
+                // A name that holds the model and effort says no more of them: the member's
+                // roles, its tier and its harness follow it. One whose name holds none (a
+                // designer on its harness's default, a member that needs an edit) says what
+                // it runs on.
+                let apart = member.get("nameApart").and_then(Value::as_bool) == Some(true);
+                let runs = if apart {
+                    format!(" · {}", runs_on(member))
+                } else {
+                    String::new()
+                };
                 format!(
-                    "@{} · {} · {}",
+                    "@{}{runs} · {} · {} · {}",
                     js::text(member.get("handle")),
                     js::join(list(member.get("roles")), "+"),
-                    js::text(member.get("tier"))
+                    js::text(member.get("tier")),
+                    js::text(member.get("harnessName"))
                 )
             })
             .collect::<Vec<_>>()
@@ -445,16 +497,27 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(members, text))
 }
 
+/// What a member of `cf staff` runs on where its name does not say it (spec harness-models,
+/// HMD-12): its model as its harness's list names it, its id, and its effort
+/// (`gpt-6-astra · high`), or its harness's default model, or that it needs an edit.
+fn runs_on(member: &Value) -> String {
+    let mut shown = js::text(member.get("modelName")).into_owned();
+    if let Some(effort) = member.get("effort").and_then(Value::as_str) {
+        shown = format!("{shown} · {effort}");
+    }
+    shown
+}
+
 fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let words = split(rest, HISTORY);
     if words.asks_for_help() {
         return Ok(help_of(&["history"]));
     }
     let mut query = form_urlencoded::Serializer::new(String::new());
-    if let Some(page) = words.value("--page") {
+    if let Some(page) = words.value("--page")? {
         query.append_pair("page", page);
     }
-    if let Some(find) = words.value("--find") {
+    if let Some(find) = words.value("--find")? {
         query.append_pair("find", find);
     }
     if words.on("--tools") {
@@ -506,7 +569,8 @@ fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {
 /// The text a command was given, or standard input when it is `-`: a brief
 /// in a quoted heredoc (`cf task add --tier standard - <<'BRIEF'`) reaches
 /// the board as written, where the shell would run the backticks and `$( )`
-/// of a double-quoted one. The final newline is the heredoc's, not the text's.
+/// of a double-quoted one. The final line ending is the heredoc's, not the text's: a `\n`,
+/// or the `\r\n` that PowerShell and `type` end what they pipe with.
 /// The commands that give a window work take a file as well (`brief`).
 fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
     if text != "-" {
@@ -517,7 +581,19 @@ fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
         .read_to_end(&mut bytes)
         .map_err(|cause| Failure::Failed(format!("cannot read standard input ({cause})")))?;
     let text = String::from_utf8_lossy(&bytes);
-    Ok(text.strip_suffix('\n').unwrap_or(&text).to_string())
+    let text = without_byte_order_mark(&text);
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(text);
+    Ok(text.to_owned())
+}
+
+/// `text` without the byte order mark it may begin with, which is no part of the words: Windows
+/// PowerShell 5.1 puts one before what it pipes to a program, and Notepad at the start of a file
+/// it saves as UTF-8.
+pub(super) fn without_byte_order_mark(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
 /// `{ body }`, the request most commands send.

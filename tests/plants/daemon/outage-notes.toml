@@ -1,0 +1,348 @@
+# One note for one cause, and no note of a failure that is no longer true (3.0.7-alpha.4 fixes,
+# T-1196; the field board of 2026-11-03: the Mac's DNS dropped, six working tasks failed on the
+# harness's "API Error: Can't reach the API server … (ENOTFOUND)" over 25 minutes, and the chief,
+# given its notes one at a time, took 13 of them, most after it had reopened the six). The rules:
+#
+# - the windows of one outage give up each at its own pace: while the requester has not been given
+#   the note of the first, the failures that say the same within half an hour of the newest are
+#   told in that note, which is written again and the old one withdrawn, "superseded by m-<new>"
+#   (`cf-ledger`'s `tasks::outage`); the note names the tasks, the words of each failure, that the
+#   same error from several windows looks like an outage of the network or the API, what waits for
+#   them, what their windows' closes ended, and one line that reopens them all;
+# - a single failure, one with other words, one that came half an hour after the last, and one
+#   whose requester was given the note before it are notes of their own, as they always were;
+# - the close of a window is a line of a note of several failures, and a note of its own beside a
+#   note of one;
+# - a task that is no longer failed (reopened, accepted), or no longer waits (called off), leaves
+#   the note that names it, which is written again for the tasks that failed still, or withdrawn;
+#   one given to the chief is its own, and one on its way and not handed over is withdrawn
+#   (`Store::move_task`, as a continuation is).
+#
+# - what tells one outage from the next is a SHA-256 of what the failure said, made where the key is
+#   made (`cf-engine`'s `shown::hashed`): a window's screen or a provider's error can name a key
+#   (T-1217), and the ledger, its log and the engine's memory keep nothing readable of it; no key
+#   stays no key.
+#
+# The engine's cases are `crates/cf-engine/tests/dispatcher/outage_notes.rs`; the ledger's are
+# `crates/cf-ledger/tests/receipt/outage_notes.rs`.
+#
+# One plant takes one rule out; a test of it fails. Every name holds `outage notes:`, so
+# `npm run plants:daemon -- "outage notes:"` runs them all.
+
+[run]
+on-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "outage_notes::"]
+on-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "outage_notes::"]
+on-key = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+
+[[plant]]
+name = "outage notes: the failure's cause is never told to the ledger"
+meant = "six_windows_that_fail_on_the_same_error_over_25_minutes_are_told_in_one_note"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = 'self.fail_task(project, participant.id, &thread.task, &why.said, &why.key)?;'
+replace = 'self.fail_task(project, participant.id, &thread.task, &why.said, "")?;'
+
+[[plant]]
+name = "outage notes: a failure joins no note before it"
+meant = "six_windows_that_fail_on_the_same_error_over_25_minutes_are_told_in_one_note"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '    let earlier: Vec<Told> = if cause.is_empty() {'
+replace = '    let earlier: Vec<Told> = if true {'
+
+[[plant]]
+name = "outage notes: a failure joins a note of another error"
+meant = "failures_with_different_errors_are_two_notes"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '&& note.key == cause'
+replace = '&& true'
+
+[[plant]]
+name = "outage notes: there is no span a failure may join a note within"
+meant = "a_failure_with_the_same_error_after_the_span_is_a_note_of_its_own"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '.is_some_and(|newest| at - newest <= SAME_ERROR_WITHIN_MS)'
+replace = '.is_some_and(|newest| at - newest <= SAME_ERROR_WITHIN_MS * 1000)'
+
+[[plant]]
+name = "outage notes: the span is counted from the oldest failure of a note"
+meant = "a_failure_with_the_same_error_just_within_the_span_is_told_in_the_note_before_it"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+.map(|member| member.at)
+                        .max()
+                        .is_some_and('''
+replace = '''
+.map(|member| member.at)
+                        .min()
+                        .is_some_and('''
+
+[[plant]]
+name = "outage notes: a failure joins a note the chief was given already"
+meant = "a_failure_after_the_chief_was_given_the_note_is_a_note_of_its_own"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
+replace = 'const PENDING: &str = "(1 = 1)";'
+
+[[plant]]
+name = "outage notes: a note the chief was given is withdrawn when its task is reopened"
+meant = "a_note_already_given_is_left_when_its_task_is_reopened"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
+replace = 'const PENDING: &str = "(1 = 1)";'
+
+[[plant]]
+name = "outage notes: the notes a failure takes in are not withdrawn"
+meant = "six_windows_that_fail_on_the_same_error_over_25_minutes_are_told_in_one_note"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+    withdraw_each(
+        store,
+        project_id,
+        replaces,
+        &format!("superseded by m-{}", sent.id),
+    )?;
+'''
+replace = '''
+    let _ = replaces;
+'''
+
+[[plant]]
+name = "outage notes: what waits for the tasks is not listed in the note"
+meant = "what_waits_for_those_tasks_is_a_list_in_the_note_and_no_note_of_its_own"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '    if !waiting.is_empty() {'
+replace = '    if false {'
+
+[[plant]]
+name = "outage notes: the words that reopen them all are changed"
+meant = "six_windows_that_fail_on_the_same_error_over_25_minutes_are_told_in_one_note"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = 'body.push_str(&format!("\nReopen them all with: {}", reopen.join("; ")));'
+replace = 'body.push_str(&format!("\nReopen them with: {}", reopen.join("; ")));'
+
+[[plant]]
+name = "outage notes: a single failure is told in the words of several"
+meant = "a_single_failure_is_told_as_it_always_was_and_its_close_in_a_note_of_its_own"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '    if let [only] = members {'
+replace = '    if let [only] = &members[..0] {'
+
+[[plant]]
+name = "outage notes: the close of a window is a note of its own"
+meant = "the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_own"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = 'self.seams.ledger.borrow_mut().tell_closed('
+replace = 'self.seams.ledger.borrow_mut().note('
+
+[[plant]]
+name = "outage notes: the closes that wait when a failure joins a note stay notes of their own"
+meant = "the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_own"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+    if members.len() > 1 {
+        for (number, message, line)'''
+replace = '''
+    if false {
+        for (number, message, line)'''
+
+[[plant]]
+name = "outage notes: the close of a window joins no note of failures"
+meant = "the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_own"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = 'if members.len() < 2 || !members.iter()'
+replace = 'if true || !members.iter()'
+
+[[plant]]
+name = "outage notes: a task that is no longer failed leaves the notes that name it"
+meant = "a_task_reopened_before_its_note_was_given_leaves_the_note_and_the_notes_of_what_waits"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '            no_longer_failed(self, task, to)?;'
+replace = '            let _ = (task, to);'
+
+[[plant]]
+name = "outage notes: a note of several still names a task that is no longer failed"
+meant = "a_note_of_several_is_written_again_for_those_that_failed_still"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '        if store.task_row(project_id, member.task)?.state == "failed" {'
+replace = '        if store.task_row(project_id, member.task)?.state != "no such state" {'
+
+[[plant]]
+name = "outage notes: a note of several is withdrawn when one of its tasks is no longer failed"
+meant = "a_note_of_several_is_written_again_for_those_that_failed_still"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+    let live = failed_still(store, project_id, &told.members)?;
+    if live.is_empty() {'''
+replace = '''
+    let live = failed_still(store, project_id, &told.members)?;
+    if live.len() < told.members.len() {'''
+
+[[plant]]
+name = "outage notes: the notes of the tasks that wait for a reopened task are left"
+meant = "a_task_reopened_before_its_note_was_given_leaves_the_note_and_the_notes_of_what_waits"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '    for (id, number) in waiting {'
+replace = '    for (id, number) in waiting.into_iter().take(0) {'
+
+[[plant]]
+name = "outage notes: a task called off is still named a waiter and its note stays"
+meant = "a_waiter_called_off_leaves_the_notes_that_it_waits"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '            no_longer_waiting(self, task, to)?;'
+replace = '            let _ = (task, to);'
+
+[[plant]]
+name = "outage notes: the note of a failure no note of failures kept stays when its task is accepted"
+meant = "a_failure_a_delivery_gave_up_is_withdrawn_with_its_task_as_well"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '    withdraw_each(store, project_id, &plain, &why)?;'
+replace = '    let _ = (&plain, &why);'
+
+[[plant]]
+name = "outage notes: a failure that says nothing of its cause joins a note"
+meant = "failures_that_say_nothing_of_their_cause_are_never_one_note"
+runs = ["on-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '    let earlier: Vec<Told> = if cause.is_empty() {'
+replace = '    let earlier: Vec<Told> = if false {'
+
+[[plant]]
+name = "outage notes: a note on its way and not handed over stays when its task is reopened"
+meant = "a_note_on_its_way_to_the_chief_that_was_not_handed_over_leaves_with_its_task"
+runs = ["on-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
+replace = '''
+const PENDING: &str = "(state = 'queued')";'''
+
+[[plant]]
+name = "outage notes: only the newest two hundred failures told are looked at for a note still to be given"
+meant = "a_note_still_to_be_given_is_joined_however_many_failures_were_told_since"
+runs = ["on-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = 'AND at >= ? ORDER BY id DESC",'
+replace = 'AND at >= ? ORDER BY id DESC LIMIT 200",'
+
+[[plant]]
+name = "outage notes: the key of a screen is kept as its lines, readable, in the ledger"
+meant = "a_failure_whose_screen_names_a_key_leaves_no_part_of_it_in_the_ledger"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "        hashed(&self.screen_folded())"
+replace = "        self.screen_folded()"
+
+[[plant]]
+name = "outage notes: the key of a harness's words is kept as the words, readable, in the ledger"
+meant = "a_failure_whose_harness_quotes_a_key_leaves_no_part_of_it_in_the_ledger"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "    hashed(&words_folded(words))"
+replace = "    words_folded(words)"
+
+[[plant]]
+name = "outage notes: the hash of a key keeps the folded text, readable"
+meant = "an_outage_key_is_a_hash_that_tells_equal_failures_and_keeps_nothing_readable"
+runs = ["on-key"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = """    Sha256::digest(folded.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()"""
+replace = "    folded.to_owned()"
+
+[[plant]]
+name = "outage notes: the hash of a key is the same for every failure"
+meant = "failures_with_different_errors_are_two_notes"
+runs = ["on-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "    Sha256::digest(folded.as_bytes())\n"
+replace = "    Sha256::digest(b\"outage\")\n"
+
+[[plant]]
+name = "outage notes: a failure that said nothing the engine could tell is hashed into a cause"
+meant = "an_outage_key_is_a_hash_that_tells_equal_failures_and_keeps_nothing_readable"
+runs = ["on-key"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = """    if folded.is_empty() {
+        return String::new();
+    }
+    Sha256::digest"""
+replace = "    Sha256::digest"

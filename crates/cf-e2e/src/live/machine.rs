@@ -31,9 +31,11 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
-use super::isolation::Isolation;
+use super::isolation::{lasting, Isolation};
 use super::login::Login;
+use super::PLANNED;
 use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
 use crate::{checkout, files, Error, Result};
@@ -195,10 +197,10 @@ impl Installed {
     }
 
     /// This harness, whose home of the run's own, if it has one, is made in `folder` as
-    /// `folder` spells it ([`Isolation::made_in`]).
-    pub fn with_homes_in(mut self, folder: &Path) -> Result<Self> {
+    /// `folder` spells it ([`Isolation::made_in`]), for a run that takes `planned`.
+    pub fn with_homes_in(mut self, folder: &Path, planned: Duration) -> Result<Self> {
         if self.isolation.is_some() {
-            self.isolation = Isolation::of_machine(self.harness, &self.home)?
+            self.isolation = Isolation::of_machine_lasting(self.harness, &self.home, planned)?
                 .map(|isolation| Arc::new(isolation.made_in(folder)));
         }
         Ok(self)
@@ -218,6 +220,38 @@ impl Installed {
                 self.harness.name()
             ))),
         }
+    }
+
+    /// The variables the kit gives its windows (its Claude Code config folder, its home of the
+    /// run's own), for a read of it with no rig and no window: `harness-ask`'s (CHF-03's model
+    /// lists). [`Installed::finish_homes`] is the look at the person's setup after it.
+    pub fn home_vars(&self) -> Result<Vec<(String, String)>> {
+        let mut vars = Vec::new();
+        if let Some(config) = &self.claude_config {
+            let folder = config.folder()?;
+            vars.push((
+                "CLAUDE_CONFIG_DIR".to_owned(),
+                folder.to_string_lossy().into_owned(),
+            ));
+        }
+        if let Some(isolation) = &self.isolation {
+            vars.extend(isolation.vars()?);
+        }
+        Ok(vars)
+    }
+
+    /// What a read on [`Installed::home_vars`] came to: an error that names what it changed
+    /// of the person's setup or login, as a rig's end says it.
+    pub fn finish_homes(&self) -> Result {
+        let config = self
+            .claude_config
+            .as_ref()
+            .map_or(Ok(()), |config| config.finish());
+        let home = self
+            .isolation
+            .as_ref()
+            .map_or(Ok(()), |isolation| isolation.finish());
+        config.and(home)
     }
 
     /// This harness, whose windows are given no home of the run's own: for a case that is
@@ -552,16 +586,46 @@ fn rig_keeping_claude_in(
 /// the person's own `~/.config/muse` and `~/.local/share/muse` (T-946: the members kit's live
 /// pacing run wrote them). A Muse the launcher cannot be made for stops the run before anything
 /// is spent.
+///
+/// On Windows, which has no `exec`, the rig's Muse is the `muse-stand-in` program of this crate
+/// ([`crate::muse::Installed::through`]), found beside the test program that runs
+/// ([`muse_stand_in_beside`]): it runs the machine's Muse in the rig's own folders on a copy of the
+/// person's login (T-1084), where before this kit refused a rig that seats Muse there (T-985).
 fn muse_of(install: &Installed) -> crate::muse::Installed {
     let folder = install
         .command
         .parent()
         .map(|folder| folder.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let home = install.home.to_string_lossy();
-    crate::muse::installed_on(&folder, Some(&home)).unwrap_or_else(|why| {
+    let place = install.home.join(".local").join("bin");
+    let found = crate::muse::installed_on(&folder, Some(&place)).unwrap_or_else(|why| {
         panic!("a rig that seats Muse runs it through its own launcher, and {why}")
-    })
+    });
+    if !cfg!(windows) {
+        return found;
+    }
+    let program = std::env::current_exe().unwrap_or_else(|why| {
+        panic!("a rig that seats Muse on Windows finds its stand-in beside the test program, and the test program is not known: {why}")
+    });
+    let stand_in = muse_stand_in_beside(&program);
+    assert!(
+        stand_in.is_file(),
+        "a rig that seats Muse on Windows runs it through the `muse-stand-in` program of cf-e2e, which cargo builds beside the tests, and {} is not there",
+        stand_in.display()
+    );
+    found.through(&stand_in.to_string_lossy())
+}
+
+/// Where the rig's Muse on Windows, the `muse-stand-in` program of this crate, is for the test
+/// program `test_program`: one folder above the tests' own. Cargo puts a package's programs in
+/// `target/debug` and its tests in `target/debug/deps`, and builds the programs before it runs a
+/// test.
+fn muse_stand_in_beside(test_program: &Path) -> PathBuf {
+    let programs = test_program
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new("."));
+    programs.join(format!("muse-stand-in{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// A rig for `installs`, one of which is the machine's Claude Code, whose Claude
@@ -592,8 +656,16 @@ pub fn rig_with_stand_ins(
 
 /// The machine's `harness`, found as a person's shell finds it, with the home
 /// its login is read from. A machine without it, or without the home it logs
-/// in at, is an error that says what to do.
+/// in at, is an error that says what to do. The logins it runs on must last a case
+/// of the length [`PLANNED`] and its margin; a case that is longer says so
+/// ([`installed_for`], [`Log::lasting`](super::Log::lasting)).
 pub fn installed(harness: Harness) -> Result<Installed> {
+    installed_for(harness, PLANNED)
+}
+
+/// [`installed`], for a case planned to take `planned`: the logins its windows run on must
+/// last that much and [`super::isolation::MARGIN`] when the home is made, or the run is refused.
+pub fn installed_for(harness: Harness, planned: Duration) -> Result<Installed> {
     let name = harness.name();
     let command = command(name)?;
     let home = home_of(
@@ -613,7 +685,7 @@ pub fn installed(harness: Harness) -> Result<Installed> {
     if !has_login(&places) {
         return Err(no_login(harness, &places));
     }
-    let installed = with_homes(Installed::at(harness, command, home))?;
+    let installed = with_homes(Installed::at(harness, command, home), planned)?;
     // A machine with no Node has a harness that needs none (a native one).
     Ok(match command_folder("node") {
         Some(node) => installed.with_node(node),
@@ -626,12 +698,14 @@ pub fn installed(harness: Harness) -> Result<Installed> {
 /// with a copy of the login and none of the person's other files, and the person's setup
 /// checked when the run is over. Every harness found goes through here, so that no live
 /// case has to make one, or can forget to.
-fn with_homes(mut installed: Installed) -> Result<Installed> {
+fn with_homes(mut installed: Installed, planned: Duration) -> Result<Installed> {
     let harness = installed.harness;
-    if let Some(login) = Login::of_machine().filter(|_| harness == Harness::Claude) {
+    if let Some(login) =
+        Login::of_machine_lasting(lasting(planned)).filter(|_| harness == Harness::Claude)
+    {
         installed = installed.with_claude_config(Arc::new(login));
     }
-    if let Some(isolation) = Isolation::of_machine(harness, installed.home())? {
+    if let Some(isolation) = Isolation::of_machine_lasting(harness, installed.home(), planned)? {
         installed = installed.with_isolation(Arc::new(isolation));
     }
     Ok(installed)

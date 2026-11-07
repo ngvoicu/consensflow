@@ -141,16 +141,22 @@ fn presses_enter_once_more_for_a_paste_its_window_has_not_sent_into_a_quiet_wind
     let note = context.note(project.id, "zeus", "chief", "hello");
     context.pass().unwrap();
     context.advance(9_000);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 5_000, "screenQuietMs": 5_000 }));
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "not before the record had its time");
     // Printing a moment ago: being typed into, or still drawing.
-    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 500, "screenQuietMs": 500 }));
     context.advance(2_000);
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "not into a window that just printed");
     // Quiet now: the Enter sends what sat in the input, and the record shows it.
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 5_000, "screenQuietMs": 5_000 }));
     let (adapter, header) = (
         Rc::downgrade(&context.adapter),
         delivery_text(&note, &[], &CfWord::bare()),
@@ -179,7 +185,9 @@ fn pastes_again_once_its_arrival_window_passes_when_one_more_enter_did_not_bring
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     context.adapter.with("chief", |agent| agent.arrive = false);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 5_000, "screenQuietMs": 5_000 }));
     let note = context.note(project.id, "zeus", "chief", "hello");
     context.pass().unwrap();
     context.advance(11_000);

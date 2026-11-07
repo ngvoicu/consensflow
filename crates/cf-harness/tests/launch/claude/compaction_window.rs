@@ -11,7 +11,11 @@ use super::*;
 /// A worker's settings file as it has always been written, byte for byte: Claude's
 /// permission mode, the classic renderer, the board's answer to a question and the
 /// Stop hook. The question hook runs the bundle's own `cf` by its whole path, quoted
-/// (`{cf}`, T-1049): a login shell can find another `cf` first.
+/// (`{cf}`, T-1049): a login shell can find another `cf` first. On a Mac it holds the reads
+/// Claude is denied besides (T-1194, `private_folders`).
+#[cfg(not(windows))]
+const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions","deny":["Read(~/Music)","Read(~/Music/**)","Read(~/Pictures/*.photoslibrary)","Read(~/Pictures/*.photoslibrary/**)"]},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+#[cfg(windows)]
 const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
 
 /// [`WORKER_SETTINGS`] as `home`'s adapter writes it: its bundle's `cf`, quoted.
@@ -25,10 +29,13 @@ fn worker_settings(home: &Home) -> String {
 }
 
 /// The chief's: the same, with Claude's own question dialog in place of the board's.
+#[cfg(not(windows))]
+const CHIEF_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions","deny":["Read(~/Music)","Read(~/Music/**)","Read(~/Pictures/*.photoslibrary)","Read(~/Pictures/*.photoslibrary/**)"]},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+#[cfg(windows)]
 const CHIEF_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
 
 /// The settings file the prepared launch gave the window, as written.
-fn settings_text(plan: &Prepared) -> String {
+pub(super) fn settings_text(plan: &Prepared) -> String {
     let at = plan
         .argv
         .iter()
@@ -37,7 +44,7 @@ fn settings_text(plan: &Prepared) -> String {
     fs::read_to_string(&plan.argv[at + 1]).unwrap()
 }
 
-fn settings_of(plan: &Prepared) -> Value {
+pub(super) fn settings_of(plan: &Prepared) -> Value {
     serde_json::from_str(&settings_text(plan)).unwrap()
 }
 
@@ -173,5 +180,6 @@ fn plain_copy(request: &Request) -> Request {
         specs: request.specs,
         compaction: request.compaction,
         folder: request.folder,
+        directory: request.directory.clone(),
     }
 }

@@ -9,7 +9,8 @@
 //! What should have happened: the follow-up is taken, waits on the board for T-3 to
 //! be accepted, and goes into that same window then, as the follow-up of a finished
 //! task does; of two queued behind one window, the first goes first, and the second
-//! once the first has its result.
+//! once the first is accepted (since T-1118 a window takes nothing new while a result
+//! of it waits for the chief's decision; it went once the first had its result).
 //!
 //! The case is that shape on the rig, with the chief's own `cf` in its window: T-1
 //! is at work when T-2 and T-3 are added after it.
@@ -101,10 +102,16 @@ fn a_follow_up_added_while_its_window_is_at_work_waits_for_the_task_and_goes_int
     })?;
     assert_eq!(task(&project, 2)?.1, session, "the same window");
     assert_eq!(task(&project, 3)?.0, "open", "behind T-2");
+    // T-2 has its result in: the window takes nothing new until the chief decides it
+    // (T-1118), so T-3 still waits; accepted, T-2 lets it go.
+    rig.wait_for("T-2 to be done", secs(180), || {
+        Ok(task(&project, 2)?.0 == "done")
+    })?;
+    assert_eq!(task(&project, 3)?.0, "open", "T-2 is not decided");
+    cf(&rig, &chief, &["task", "accept", "T-2"])?;
     rig.wait_for("T-3 to be done", secs(180), || {
         Ok(task(&project, 3)?.0 == "done")
     })?;
-    assert_eq!(task(&project, 2)?.0, "done", "T-2 had its result first");
     assert_eq!(task(&project, 3)?.1, session, "the same window");
     rig.close()?;
     Ok(())

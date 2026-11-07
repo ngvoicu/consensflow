@@ -32,8 +32,8 @@ runs = ["ep-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/ownership.rs"
-find = "        let gone = self.seams.ledger.borrow().program_gone(conversation.id)?;"
-replace = "        let gone = self.seams.ledger.borrow().program_gone(conversation.id)? && false;"
+find = "                if self.seams.ledger.borrow().program_gone(conversation.id)? {"
+replace = "                if self.seams.ledger.borrow().program_gone(conversation.id)? && false {"
 
 [[plant]]
 name = "exit proof rig: a follow-up added after the app's restart goes to a new conversation, as T-530 did"

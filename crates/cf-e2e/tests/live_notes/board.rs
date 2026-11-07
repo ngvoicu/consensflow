@@ -64,7 +64,9 @@ pub fn chief_state(members: &Members) -> Result<String> {
 /// own, and its store says which is the newest of the run's folder.
 pub fn record_of(chief: Harness, members: &Members) -> Result<Option<Record>> {
     let env = members.rig().environment();
-    let session = if chief == Harness::Devin {
+    // A Devin or Muse window is given no session id: its session is the newest of the
+    // chief's folder.
+    let session = if matches!(chief, Harness::Devin | Harness::Muse) {
         ask::newest_session(chief.kind(), members.folder(), 0, env)?
     } else {
         let pane = format!("p{}-chief", members.project().id());

@@ -354,7 +354,7 @@ fn played(
     disruption: Disruption,
     target: &Target,
 ) -> Outcome {
-    play(stage, watch, disruption, target, &with()).unwrap()
+    play(stage, watch, disruption, target, false, &with()).unwrap()
 }
 
 fn said(outcome: &Outcome) -> &str {
@@ -730,6 +730,7 @@ fn a_kill_whose_task_another_resumed_to_working_before_any_read_ends_its_wait_at
         &mut watch,
         Disruption::Kill,
         &target,
+        false,
         &With {
             within: Duration::from_secs(30),
             ..with()
@@ -887,4 +888,110 @@ fn a_compact_whose_chief_never_came_to_rest_after_it_failed() {
         "{said}"
     );
     assert_eq!(evidence.screen, ["❯ "]);
+}
+
+/// An ordinary turn of the chief's at `at` (milliseconds): the delivery of a worker's result,
+/// and the work it began.
+fn chief_turn(at: i64) -> [Value; 2] {
+    let stamp = |at: i64| crate::clock::iso(jiff::Timestamp::from_millisecond(at).unwrap());
+    [
+        json!({ "timestamp": stamp(at), "type": "user", "message": { "role": "user",
+            "content": "[ConsensFlow m-9 · T-4 · result from @long-worker]\nDone." } }),
+        json!({ "timestamp": stamp(at + 1000), "type": "assistant", "message": { "role": "assistant",
+            "stop_reason": "tool_use", "content": [{ "type": "tool_use", "name": "Bash", "input": {} }] } }),
+    ]
+}
+
+#[test]
+fn a_compact_whose_chief_went_on_to_a_turn_of_its_own_before_the_wait_looked_came_to_rest() {
+    // T-1069 (T-695), `10:compact`: the compaction was recorded, and the chief had begun
+    // phase 3's work by the time the checkpoint asked whether its window was idle. A chief
+    // whose record goes on after the compaction with a turn of its own is no chief held
+    // working by it: the checkpoint is for the one that never comes to rest.
+    let now = jiff::Timestamp::now().as_millisecond();
+    let mut after = vec![boundary(now - 500), boundary(now + 60_000)];
+    after.extend(chief_turn(now + 62_000));
+    let mut watch = Looks {
+        last: Some(chief_look(&[boundary(now - 500)])),
+        then: Some(chief_look(&after)),
+    };
+    let mut stage = Script {
+        chief_state: "working",
+        ..Script::new()
+    };
+    let outcome = played(
+        &mut stage,
+        &mut watch,
+        Disruption::Compact,
+        &Target::Project,
+    );
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(
+        said(&outcome)
+            .ends_with("its record says it compacted, and the chief went on to a turn of its own"),
+        "{}",
+        said(&outcome)
+    );
+}
+
+/// The restart that sets A5's shape up: [`play`] with the compaction typed again first.
+fn restarted_after_compacting(stage: &mut Script, watch: &mut Looks) -> Outcome {
+    play(
+        stage,
+        watch,
+        Disruption::Restart,
+        &Target::Project,
+        true,
+        &with(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_restart_that_sets_a5_up_compacts_the_idle_chief_again_and_restarts_while_the_record_ends_in_it(
+) {
+    // T-1069 (T-695): the restart came a turn after the compaction and read none. The setup is
+    // the compaction typed into the idle chief again, and the restart at once.
+    let now = jiff::Timestamp::now().as_millisecond();
+    let mut watch = Looks {
+        last: Some(chief_look(&[boundary(now - 500)])),
+        then: Some(chief_look(&[boundary(now - 500), boundary(now + 60_000)])),
+    };
+    let outcome = restarted_after_compacting(&mut Script::new(), &mut watch);
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(
+        said(&outcome).contains("compacted again")
+            && said(&outcome).ends_with("the owner resumed the project"),
+        "{}",
+        said(&outcome)
+    );
+    // A compaction that never came, said as the compaction's failure and no restart made.
+    let mut watch = Looks {
+        last: Some(chief_look(&[boundary(now - 500)])),
+        then: Some(chief_look(&[boundary(now - 500)])),
+    };
+    let mut stage = Script::new();
+    let outcome = restarted_after_compacting(&mut stage, &mut watch);
+    assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
+    assert!(said(&outcome).ends_with("no new compaction came into its record"));
+    assert_eq!(*stage.project.borrow(), "open", "the app was not quit");
+}
+
+#[test]
+fn a_restart_that_sets_a5_up_waits_for_the_next_moment_when_the_chief_had_a_turn_again_before_it() {
+    let now = jiff::Timestamp::now().as_millisecond();
+    let mut after = vec![boundary(now - 500), boundary(now + 60_000)];
+    after.extend(chief_turn(now + 62_000));
+    let mut watch = Looks {
+        last: Some(chief_look(&[boundary(now - 500)])),
+        then: Some(chief_look(&after)),
+    };
+    let mut stage = Script {
+        chief_state: "working",
+        ..Script::new()
+    };
+    let outcome = restarted_after_compacting(&mut stage, &mut watch);
+    assert!(matches!(outcome, Outcome::Missed(_)), "{outcome:?}");
+    assert!(said(&outcome).contains("had a turn"), "{}", said(&outcome));
+    assert_eq!(*stage.project.borrow(), "open", "the app was not quit");
 }

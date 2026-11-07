@@ -333,7 +333,7 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;"
+find = "        store.move_task(&task, \"done\", detail)?;"
 replace = '''
         queue(
             store,
@@ -347,7 +347,7 @@ replace = '''
                 ..Queued::default()
             },
         )?;
-        store.move_task(&task, "done", json!({ "result": message_id }))?;'''
+        store.move_task(&task, "done", detail)?;'''
 
 [[plant]]
 name = "tell queued: a result recorded twice passes the rig's case"
@@ -357,7 +357,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        store.move_task(&task, \"done\", json!({ \"result\": message_id }))?;"
+find = "        store.move_task(&task, \"done\", detail)?;"
 replace = '''
         queue(
             store,
@@ -371,7 +371,7 @@ replace = '''
                 ..Queued::default()
             },
         )?;
-        store.move_task(&task, "done", json!({ "result": message_id }))?;'''
+        store.move_task(&task, "done", detail)?;'''
 
 [[plant]]
 name = "tell queued: a result pasted twice into the chief's window passes the dispatcher's case"

@@ -12,7 +12,9 @@
 
 use super::*;
 use crate::claude::record::jobs::Written;
-use crate::shared::record::reading::{End, Monitor, Notice, Pending, Record, Role, Source};
+use crate::shared::record::reading::{
+    Command, End, Monitor, Notice, Pending, Record, Role, Source,
+};
 
 /// The id Claude Code gave the job.
 const JOB: &str = "bayehs8y4";
@@ -1156,4 +1158,128 @@ fn a_task_stop_whose_result_names_no_stop_call_or_is_an_error_ends_nothing() {
     assert_eq!(at(&failed, end).1, 2);
     // The monitor whose notice of its expiry came is pending still (`jobs`).
     assert_eq!(at(&records, end).1, 1);
+}
+
+/// The record of the result of a foreground Bash call whose time limit passed: Claude Code
+/// moved the command into the background and it goes on running. The shape of 2464 records
+/// of this Mac's (Claude Code 2.1.3xx): `backgroundTaskId` and `timedOutAfterMs` beside the
+/// usual fields, and the words Claude Code writes of it. Written at `at`.
+fn moved_by_its_limit(
+    uuid: &str,
+    parent: &str,
+    call: &str,
+    id: &str,
+    limit_ms: i64,
+    at: &str,
+) -> Value {
+    let said = format!(
+        "Command did not complete within its {}s timeout and was moved to the background (ID: {id}). Output is being written to: /tmp/claude/tasks/{id}.output. You will be notified when it completes.",
+        limit_ms / 1000
+    );
+    having(
+        user(
+            uuid,
+            json!(parent),
+            json!([tool_result(json!(call), json!(said))]),
+        ),
+        json!({
+            "timestamp": at,
+            "toolUseResult": { "stdout": "", "stderr": "", "interrupted": false, "isImage": false, "noOutputExpected": false, "backgroundTaskId": id, "timedOutAfterMs": limit_ms }
+        }),
+    )
+}
+
+/// What the latest look of `stage` says of the commands a turn left.
+fn commands_of(stage: &mut Stage) -> Vec<Command> {
+    let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+        panic!("a reading");
+    };
+    record.commands.clone()
+}
+
+#[test]
+fn a_command_a_time_limit_moved_to_the_background_is_told_by_the_limit_and_when_it_began() {
+    // The field board's T-299 (T-1181): a foreground Bash with a 10-minute limit passed it at
+    // 02:00:23Z, and Claude Code moved it into the background, where it ran for 100 minutes
+    // with its worker none the wiser. The reading says the command, when it began (the
+    // limit before the record that moves it) and that a limit moved it.
+    let mut records = turn_leaving("unused");
+    // The turn's job is the moved command instead.
+    records[2] = moved_by_its_limit(
+        "u2",
+        "a1",
+        "t1",
+        "bfxgkew9o",
+        600_000,
+        "2026-11-02T02:00:23.000Z",
+    );
+    let mut stage = Stage::new();
+    stage.write(&records);
+    assert_eq!(says(&mut stage), (Settlement::Settled, 1));
+    assert_eq!(
+        commands_of(&mut stage),
+        [Command {
+            id: Arc::from("bfxgkew9o"),
+            since: Some(1_793_584_223_000),
+            limit_ms: Some(600_000),
+        }]
+    );
+    // Its end is a notification as any job's, and no command is left.
+    stage.append(&[woken("w1", "d1", &notice("bfxgkew9o", "killed"))]);
+    assert_eq!(commands_of(&mut stage), []);
+}
+
+#[test]
+fn a_command_that_was_asked_to_run_in_the_background_began_when_its_record_was_written() {
+    let mut records = turn_leaving(JOB);
+    records[2] = having(
+        records[2].clone(),
+        json!({ "timestamp": "2026-11-02T02:00:23.000Z" }),
+    );
+    let mut stage = Stage::new();
+    stage.write(&records);
+    assert_eq!(
+        commands_of(&mut stage),
+        [Command {
+            id: Arc::from(JOB),
+            since: Some(1_793_584_823_000),
+            limit_ms: None,
+        }]
+    );
+    // A record that says no time, or one that is no time, names none; the command is there.
+    for stamp in [None, Some("yesterday")] {
+        let mut records = turn_leaving(JOB);
+        if let Some(stamp) = stamp {
+            records[2] = having(records[2].clone(), json!({ "timestamp": stamp }));
+        }
+        let mut stage = Stage::new();
+        stage.write(&records);
+        assert_eq!(
+            commands_of(&mut stage),
+            [Command {
+                id: Arc::from(JOB),
+                since: None,
+                limit_ms: None,
+            }],
+            "{stamp:?}"
+        );
+    }
+}
+
+#[test]
+fn a_monitor_is_no_command_and_a_limit_that_is_no_positive_number_moved_nothing() {
+    // The monitor of the live run keeps its place among the monitors only.
+    let record = read_to_the_expiry(|_| {});
+    assert_eq!(record.monitors.len(), 1);
+    assert_eq!(record.commands, []);
+    // `timedOutAfterMs` that is zero, negative or no number says no limit moved it.
+    for limit in [json!(0), json!(-5), json!("600000"), Value::Null] {
+        let mut records = turn_leaving(JOB);
+        records[2]["toolUseResult"]["timedOutAfterMs"] = limit.clone();
+        let mut stage = Stage::new();
+        stage.write(&records);
+        let commands = commands_of(&mut stage);
+        assert_eq!(commands.len(), 1, "{limit}");
+        assert_eq!(commands[0].limit_ms, None, "{limit}");
+    }
 }

@@ -66,7 +66,7 @@ fn a_tell_to_a_queued_task_says_the_words_wait_for_its_window_and_nothing_is_pau
     assert_eq!(code, Some(0));
     assert_eq!(
         printed,
-        "T-3 is queued: m-12 waits for @zeus-amber-pine's window and goes in after its brief. Nothing is paused, and nothing waits for an answer.\nSent: 18 characters, ending \"Use the v2 grammar\".\n"
+        "T-3 is queued: m-12 waits for @zeus-amber-pine's window and goes in after its brief. Nothing is paused, and nothing waits for an answer.\nT-3: sent 18 characters, ending \"Use the v2 grammar\".\n"
     );
     assert_eq!(
         asked(&api),
@@ -90,7 +90,7 @@ fn a_tell_to_an_open_task_says_the_words_are_added_to_its_brief_for_whichever_wi
     assert_eq!(code, Some(0));
     assert_eq!(
         printed,
-        "T-3 is open: no window has it yet, so your words are added to its brief and go, once, to whichever window takes it. Nothing is paused, and nothing waits for an answer.\nSent: 18 characters, ending \"Use the v2 grammar\".\n"
+        "T-3 is open: no window has it yet, so your words are added to its brief and go, once, to whichever window takes it. Nothing is paused, and nothing waits for an answer.\nT-3: sent 18 characters, ending \"Use the v2 grammar\".\n"
     );
 }
 
@@ -101,7 +101,7 @@ fn a_tell_to_a_task_in_its_window_says_it_is_paused_as_it_always_did() {
     assert_eq!(code, Some(0));
     assert_eq!(
         printed,
-        "T-3 is paused and m-12 put to @zeus-amber-pine; its answer arrives as a message. Then: cf task resume T-3 \"…\"\nSent: 12 characters, ending \"Stop: use v2\".\n"
+        "T-3 is paused and m-12 put to @zeus-amber-pine; its answer arrives as a message. Then: cf task resume T-3 \"…\"\nT-3: sent 12 characters, ending \"Stop: use v2\".\n"
     );
 }
 

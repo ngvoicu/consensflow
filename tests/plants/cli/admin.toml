@@ -5,27 +5,6 @@
 # held and not merely written down.
 
 [[plant]]
-name = "setup and doctor: the roster is read before the launcher is made"
-meant = "every_case_says_writes_and_exits_as_node_did"
-runs = ["goldens"]
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/setup.rs"
-find = "let prepared = prepare_app(env, &own_cf()?);"
-replace = '''
-let saved = agents_saved(env)?;
-    let prepared = prepare_app(env, &own_cf()?);'''
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/setup.rs"
-find = '''
-        agents_saved(env)?
-    )?;'''
-replace = '''
-        saved
-    )?;'''
-
-[[plant]]
 name = "setup and doctor: the words of setup are read after the launcher is made"
 meant = "every_case_says_writes_and_exits_as_node_did"
 runs = ["goldens"]
@@ -76,16 +55,6 @@ find = '''
         writeln!(out, "{line}")?;
     }'''
 replace = "    let _ = &prepared.report;"
-
-[[plant]]
-name = "setup and doctor: the agents are counted one short"
-meant = "every_case_says_writes_and_exits_as_node_did"
-runs = ["goldens"]
-
-[[plant.edit]]
-file = "crates/cf/src/standalone/mod.rs"
-find = "Ok(roster(env, &catalog)?.list()?.len())"
-replace = "Ok(roster(env, &catalog)?.list()?.len() - 1)"
 
 [[plant]]
 name = "setup and doctor: doctor reads its words"
@@ -241,8 +210,8 @@ runs = ["goldens"]
 
 [[plant.edit]]
 file = "crates/cf/tests/cli_goldens/paired.rs"
-find = 'entry["text"] = Value::String(native(text));'
-replace = 'entry["text"] = Value::String(text.to_owned());'
+find = '        let text = native(text);'
+replace = '        let text = text.to_owned();'
 
 [[plant]]
 name = "setup and doctor: paired: a command of another runtime is held to Node’s word of it"

@@ -35,6 +35,15 @@ once, with the reason here and in the commit.
   `sweep`. Each such reading lost the repeated user item and nothing else (its
   other items, their order, `inFlight`, `failed`, `quota` and `settlement` are
   Node's); no look was added or taken, so the counts in `../records/main.rs` stand.
+- **A Claude window on a Mac is denied reads of the Music and Photos libraries** (2026-11-03,
+  T-1194, a user's Mac showed "Allow ConsensFlow to access your music, video activity, and media
+  library in Apple Music?" over a Claude Code window). Node wrote a window's settings file with
+  `permissions` holding the permission mode alone. On a Mac the Rust adapter adds `deny`, four
+  reads (`Read(~/Music)`, `Read(~/Music/**)`, `Read(~/Pictures/*.photoslibrary)` and its
+  contents), unless the window's folder is inside one of them (`claude/install.rs`,
+  `private_reads`). `launch/scenarios.darwin.json` moved for it in the 43 settings files its
+  Claude scenarios recorded (`tools/move_claude_private_reads_goldens.py`, which can be run again
+  after a merge); the Windows recording is as Node left it, since nothing is denied there.
 - **A Claude window opened again on a turn the app's quit cut** (2026-10-11, the
   human's report that the daemon seemed not to send responses; found by
   `npm run live:resume-cut` and `npm run live:restart-cut`). The quit ends a
@@ -350,3 +359,14 @@ and the hash that names a bundle of an extension is `$HASH`.
   Node's was `unknown`; `inFlight`, `failed`, `quota` and the items are Node's. The
   other Pi readings are unmoved (a failure that is not yet quiet is in flight in
   both, and the extension's evidence settled it already). Moved by hand.
+- **The offers a launch turns off** (2026-11-03, T-1183). Node started Claude Code with no
+  variable of its own and Codex with two settings. Their offers that wait in a window for a
+  key nobody presses are turned off for each launch alone: every Claude Code window starts
+  with `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` (its surveys take a digit under the prompt),
+  and every Codex window with `-c notice.hide_rate_limit_model_nudge=true`,
+  `-c features.tool_suggest=false` and `-c features.skill_mcp_dependency_install=false` after
+  `allow_login_shell=false`. `launch/` moved for it in each prepared answer of those two
+  harnesses, 39 of Claude Code's and 92 of Codex's in each platform's file, and in nothing
+  else. The move is `tools/move_harness_dialog_goldens.py`, which leaves an answer already
+  moved as it is: after a merge brings rows of the old shape, run it on each file and let
+  the scenarios test check it.

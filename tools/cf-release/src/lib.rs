@@ -22,3 +22,24 @@ mod update;
 pub mod version;
 
 pub use cli::run;
+
+/// The cargo a test starts: one file for every crate that starts one
+/// (`crates/cf-process/src/nested_cargo.rs`), which this crate includes because it takes no
+/// dependency on the product.
+#[cfg(test)]
+#[path = "../../../crates/cf-process/src/nested_cargo.rs"]
+#[allow(dead_code)] // The file serves crates that start more than the probes here do.
+mod nested_cargo;
+
+/// This process's environment but for the variables cargo gave the test: what the cargo a test
+/// starts is given (`nested_cargo`).
+#[cfg(test)]
+fn env_without_the_tests_own() -> cf_base::env::Env {
+    let env = cf_base::env::Env::from_process();
+    cf_base::env::Env::from_vars(
+        env.iter()
+            .filter(|(name, _)| !name.to_str().is_some_and(nested_cargo::given_to_a_test))
+            .map(|(name, value)| (name.to_os_string(), value.to_os_string()))
+            .collect::<Vec<_>>(),
+    )
+}

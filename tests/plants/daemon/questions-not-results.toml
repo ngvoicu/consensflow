@@ -1,0 +1,564 @@
+# A worker's turn that ends on a question to the chief is a question, not a result (T-1119, from the
+# owner's field report of 2026-11-02). Two workers on another board ended their turns with a question
+# in their own words ("Should I continue with the live A/B runs and the packet/socket capture, or stop
+# here so you can review the findings first?"; "has the Build Tools 2022 install … finished? … I'm
+# waiting for your answer.") and not with `cf ask`. Since 3.0.7-alpha.1 a turn's end is the task's
+# result, so the chief was shown results, "Decide with: cf task accept | cf task reopen", which
+# `cf answer` cannot reach, and a task that had done none of its work showed done.
+#
+# The rule (`crates/cf-engine/src/turn_end/asks.rs`), applied in `Dispatcher::collect`
+# (`crates/cf-engine/src/turn_end.rs`) where a final answer would be recorded as the result: the last
+# paragraph of the worker's own words says it waits for the chief ("waiting for your go", "when you
+# reply"; a negation before it takes it back, "nothing is waiting for your answer"), or ends with a
+# question mark and asks in the first person what to do ("Should I", "Do you want me to"). The answer
+# is then put to the chief as the worker's question, as `cf ask` puts one: the task waits, the window
+# stays, and `cf answer` reaches it. A report that ends with an open question about its product, a
+# wait for a lock or an agent, an offer, work that awaits review and a description of the feature are
+# results. The staff's text says it in one sentence (`skill/core/staff.md`). The rule was counted on a
+# copy of a real ledger: 18 of 1,963 results of members, none that the chief accepted; 12 ended on a
+# question mark and 11 were accepted.
+#
+# Round 2 (the review of T-1125, T-1119 again): the cue is in the last sentence and code, quotes, table
+# rows and block quotes are not the worker's voice; a wait needs what the chief gives (not a review);
+# an offer is a result; a negation reaches back to a "but"/"and"; a raised question ends with the line
+# that says how to finish; Finish takes a waiting task and withdraws the question; the page offers it.
+#
+# Each plant takes one rule out again. The names begin with `questions not results`, so
+# `cargo xtask plants daemon "questions not results"` runs them.
+
+[run]
+qnr-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "questions_not_results::"]
+qnr-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end::asks::"]
+qnr-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "teach_the_"]
+qnr-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_workers_question_in_its_last_words"]
+qnr-fake = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "a_line_that_says_words"]
+qnr-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "finished_questions"]
+qnr-ledger-answers = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
+qnr-help = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
+qnr-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "waits on a question"]
+
+[[plant]]
+name = "questions not results: a final answer is never looked at for a question"
+meant = "a_turn_that_ends_asking_whether_to_go_on_is_a_question_to_the_chief_and_its_task_waits"
+runs = ["qnr-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if asks_the_chief(&words_of(&answers.final_run)) {
+'''
+replace = '''        if false && asks_the_chief(&words_of(&answers.final_run)) {
+'''
+
+[[plant]]
+name = "questions not results: the rig's worker that asks in its last words is given its question as a result"
+meant = "a_turn_that_ends_asking_whether_to_go_on_is_a_question_the_chief_answers_and_the_reply_is_the_result"
+runs = ["qnr-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if asks_the_chief(&words_of(&answers.final_run)) {
+'''
+replace = '''        if false && asks_the_chief(&words_of(&answers.final_run)) {
+'''
+
+[[plant]]
+name = "questions not results: the question is not about the worker's task"
+meant = "a_turn_that_ends_saying_it_waits_for_the_chiefs_answer_is_a_question_and_its_task_waits"
+runs = ["qnr-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''                    task: Some(thread.task.number),
+                    ..NewQuestion::default()'''
+replace = '''                    task: None,
+                    ..NewQuestion::default()'''
+
+[[plant]]
+name = "questions not results: the rule reads the lines ConsensFlow puts after the worker's words"
+meant = "a_question_taken_past_a_line_lost_in_its_turn_is_still_a_question_and_carries_the_line"
+runs = ["qnr-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if asks_the_chief(&words_of(&answers.final_run)) {
+'''
+replace = '''        if asks_the_chief(&words) {
+'''
+
+[[plant]]
+name = "questions not results: a raised question has no line that says how to finish"
+meant = "a_raised_question_tells_the_chief_it_was_the_last_words_of_a_turn_and_how_to_finish"
+runs = ["qnr-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            let body = with_finish_line(words, &participant.handle, thread.task.number);
+'''
+replace = '''            let body = words;
+'''
+
+[[plant]]
+name = "questions not results: Finish refuses a task that waits"
+meant = "the_chief_takes_a_raised_questions_words_as_the_result_and_no_question_is_left_open"
+runs = ["qnr-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '"working" | "waiting" | "paused"'
+replace = '"working" | "paused"'
+
+[[plant]]
+name = "questions not results: a Finish leaves the open question to be answered"
+meant = "a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answer_it"
+runs = ["qnr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        if finished_by_word {
+            withdraw_open_questions(store, &task, "was finished")?;
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "questions not results: a withdrawn question is answered"
+meant = "a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answer_it"
+runs = ["qnr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '        if question.state == "cancelled" && !has_any_answer(store, question_id)? {'
+replace = '        if false {'
+
+[[plant]]
+name = "questions not results: a withdrawal takes a question that has an answer"
+meant = "a_question_with_an_answer_that_stands_is_left_as_it_is"
+runs = ["qnr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''                AND NOT {}",
+            has_standing_answer("message")'''
+replace = '''                AND NOT {}",
+            "0"'''
+
+[[plant]]
+name = "questions not results: a withdrawal takes the chief's tell"
+meant = "the_chiefs_tell_is_not_a_question_of_the_window_and_is_left_alone"
+runs = ["qnr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "task_id = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0"
+replace = "task_id = ?2 AND ?3 = ?3 AND kind = 'question'"
+
+[[plant]]
+name = "questions not results: a withdrawn question with an answer that failed is refused another"
+meant = "questions::an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_obliging"
+runs = ["qnr-ledger-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '        if question.state == "cancelled" && !has_any_answer(store, question_id)? {'
+replace = '        if question.state == "cancelled" {'
+
+[[plant]]
+name = "questions not results: the window's own result withdraws its question"
+meant = "the_windows_own_done_leaves_its_open_question_to_be_answered_as_it_always_did"
+runs = ["qnr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '    record(store, project_id, number, body, &ACTIVE_TASK_STATES, false)'
+replace = '    record(store, project_id, number, body, &ACTIVE_TASK_STATES, true)'
+
+[[plant]]
+name = "questions not results: a Finish leaves the door of a question open"
+meant = "a_question_open_at_a_harness_door_is_shut_out_of_waiting_by_the_finish"
+runs = ["qnr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {
+            shut_doors(store, &task, assignee)?;
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "questions not results: the page offers no Finish for a task that waits"
+meant = "offers Finish for a task that waits on a question, which the chief or the human may take as the result of its worker's last words"
+runs = ["qnr-page"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "const FINISHABLE = ['working', 'waiting', 'paused']"
+replace = "const FINISHABLE = ['working', 'paused']"
+
+[[plant]]
+name = "questions not results: the usage says Finish takes a working or paused task"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["qnr-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "take what a working, waiting or paused task's worker"
+replace = "take what a working or paused task's worker"
+
+[[plant]]
+name = "questions not results: the chief's text does not say what a raised question's line is"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["qnr-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "   it. One ending \"(ConsensFlow: … If they are its result: `{{cf}} task finish T-5`.)\"\n   is a turn's last words: answer it, or finish the task. A window lost to a\n   crash pauses its task and tells you; resume it.\n"
+replace = "   it. A window lost to a\n   crash pauses its task and tells you; resume it.\n"
+
+[[plant]]
+name = "questions not results: the staff's text does not say a question is asked with cf ask"
+meant = "teach_the_worker_only_the_board_s_commands"
+runs = ["qnr-text"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = "turn has ended. To wait for the chief's answer, ask with `{{cf}} ask`, never in your\nlast words.\n"
+replace = "turn has ended.\n"
+
+[[plant]]
+name = "questions not results: the rig's stand-in answers nothing to a SAY line"
+meant = "a_line_that_says_words_is_answered_with_them_whole"
+runs = ["qnr-fake"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '''        return Ok(Reply::Text(said[1].trim_end().to_owned()));
+'''
+replace = '''        return Ok(Reply::Text(String::new()));
+'''
+
+[[plant]]
+name = "questions not results: a worker's wait for the chief is never a question"
+meant = "a_worker_that_waits_for_the_chiefs_answer_asks"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    !paragraph.is_empty() && (waits(&paragraph) || asks_what_next(&paragraph))
+'''
+replace = '''    !paragraph.is_empty() && asks_what_next(&paragraph)
+'''
+
+[[plant]]
+name = "questions not results: a first-person question is never a question"
+meant = "a_worker_that_asks_whether_to_go_on_stop_or_wait_asks"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    !paragraph.is_empty() && (waits(&paragraph) || asks_what_next(&paragraph))
+'''
+replace = '''    !paragraph.is_empty() && waits(&paragraph)
+'''
+
+[[plant]]
+name = "questions not results: any question about going on is a question, whoever asks it"
+meant = "a_question_about_going_on_that_is_no_first_person_ask_is_none"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    MODALS.iter().any(|cue| at_word_edges(sentence, cue))
+        && GO_ON.iter().any(|verb| at_word_edges(sentence, verb))'''
+replace = '    GO_ON.iter().any(|verb| at_word_edges(sentence, verb))'
+
+[[plant]]
+name = "questions not results: an offer is a question: a first-person ask needs no go-on verb"
+meant = "an_offer_and_a_question_about_the_work_are_results"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    MODALS.iter().any(|cue| at_word_edges(sentence, cue))
+        && GO_ON.iter().any(|verb| at_word_edges(sentence, verb))'''
+replace = '    MODALS.iter().any(|cue| at_word_edges(sentence, cue))'
+
+[[plant]]
+name = "questions not results: the cue may be in any sentence of the paragraph"
+meant = "the_cue_is_in_the_sentence_that_ends_with_the_question_mark"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    let sentence = sentence_around(asked, asked.len() - 1);
+'''
+replace = '''    let sentence = asked;
+'''
+
+[[plant]]
+name = "questions not results: a bullet does not begin a sentence"
+meant = "the_cue_is_in_the_sentence_that_ends_with_the_question_mark"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "        Some('!' | '?' | BULLET) => true,"
+replace = "        Some('!' | '?') => true,"
+
+[[plant]]
+name = "questions not results: an ellipsis ends a sentence"
+meant = "a_worker_that_asks_whether_to_go_on_stop_or_wait_asks"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''            !text[..at].ends_with('.')
+                && text[at + 1..]'''
+replace = '            text[at + 1..]'
+
+[[plant]]
+name = "questions not results: a cue inside another word is a cue"
+meant = "a_phrase_inside_another_word_is_none"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''        !before.is_some_and(char::is_alphanumeric)
+            && !after.is_some_and(|c| c.is_alphanumeric() || c == '\'')'''
+replace = '''        let _ = (before, after);
+        true'''
+
+[[plant]]
+name = "questions not results: the whole answer decides, not its last paragraph"
+meant = "only_the_last_paragraph_decides"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''            if block.is_empty() {
+                continue;
+            }
+            break;'''
+replace = '            continue;'
+
+[[plant]]
+name = "questions not results: fenced code is the worker's voice"
+meant = "a_description_of_the_feature_or_of_an_interface_is_a_result"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "        if fenced || trimmed.starts_with('|') || trimmed.starts_with('>') {"
+replace = "        if trimmed.starts_with('|') || trimmed.starts_with('>') {"
+
+[[plant]]
+name = "questions not results: a table row is the worker's voice"
+meant = "a_description_of_the_feature_or_of_an_interface_is_a_result"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "        if fenced || trimmed.starts_with('|') || trimmed.starts_with('>') {"
+replace = "        if fenced || trimmed.starts_with('>') {"
+
+[[plant]]
+name = "questions not results: a block quote is the worker's voice"
+meant = "a_description_of_the_feature_or_of_an_interface_is_a_result"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "        if fenced || trimmed.starts_with('|') || trimmed.starts_with('>') {"
+replace = "        if fenced || trimmed.starts_with('|') {"
+
+[[plant]]
+name = "questions not results: inline code is the worker's voice"
+meant = "a_question_that_is_not_the_workers_to_ask_is_none"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "    let spoken = without_quotes(&without_spans(&straight, '`'));"
+replace = '    let spoken = without_quotes(&straight);'
+
+[[plant]]
+name = "questions not results: double-quoted words are the worker's voice"
+meant = "a_description_of_the_feature_or_of_an_interface_is_a_result"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "    let doubles = without_spans(text, '\"');"
+replace = '    let doubles = text.to_owned();'
+
+[[plant]]
+name = "questions not results: single-quoted words are the worker's voice"
+meant = "a_negator_in_quoted_words_does_not_count_and_a_wait_in_them_neither"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '        if opens {'
+replace = '        if false && opens {'
+
+[[plant]]
+name = "questions not results: a wait is for anything the chief might give, a review too"
+meant = "finished_work_that_awaits_review_or_feedback_is_a_result"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    words.iter().any(|word| GIVEN.contains(word))
+        || words.windows(2).any(|pair| pair == ["green", "light"])'''
+replace = '    !words.is_empty()'
+
+[[plant]]
+name = "questions not results: a decision is a wait whatever it is for"
+meant = "finished_work_that_awaits_review_or_feedback_is_a_result"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '    words.iter().any(|word| GIVEN.contains(word))'
+replace = '    words.iter().any(|word| GIVEN.contains(word) || *word == "decision")'
+
+[[plant]]
+name = "questions not results: a decision to go on is no wait"
+meant = "a_worker_that_waits_for_the_chiefs_answer_asks"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    if DECISIONS
+        .iter()
+        .any(|decision| clause.starts_with(decision))
+    {
+        return true;
+    }
+'''
+replace = ''
+
+[[plant]]
+name = "questions not results: the chief's possessive needs no word of what it gives"
+meant = "a_description_of_the_feature_or_of_an_interface_is_a_result"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "            Some('\\'') => rest.strip_prefix(\"'s\").is_some_and(gives),"
+replace = "            Some('\\'') => true,"
+
+[[plant]]
+name = "questions not results: a word that goes on from 'you' is a wait for the chief"
+meant = "a_phrase_inside_another_word_is_none"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''            Some(next) => !next.is_alphanumeric() && next != '\'',
+            None => true,
+        };
+    }
+    if let Some(rest) = after.strip_prefix("the chief")'''
+replace = '''            Some(_) => true,
+            None => true,
+        };
+    }
+    if let Some(rest) = after.strip_prefix("the chief")'''
+
+[[plant]]
+name = "questions not results: a wait phrase may stand inside another word"
+meant = "a_wait_phrase_that_stands_in_another_word_is_none"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''            starts_a_word(paragraph, at)
+                && waits_for_who(after.trim_start())'''
+replace = "            waits_for_who(after.trim_start())"
+
+[[plant]]
+name = "questions not results: a negation takes nothing back from a wait"
+meant = "a_negation_takes_back_a_wait"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''        if NEGATORS.contains(word) || word.ends_with("n't") {
+            return true;
+        }'''
+replace = '''        if NEGATORS.contains(word) || word.ends_with("n't") {
+            return false;
+        }'''
+
+[[plant]]
+name = "questions not results: a 'but' or 'and' does not end a negation"
+meant = "a_negation_takes_back_a_wait"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''        if TURNS.contains(word) {
+            return false;
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "questions not results: a negation takes nothing back from 'when you reply'"
+meant = "going_on_when_the_chief_answers_is_the_workers_own_and_a_negation_takes_it_back"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''                && has_first_person(sentence_around(paragraph, at))
+                && !negated(&paragraph[..at])'''
+replace = '                && has_first_person(sentence_around(paragraph, at))'
+
+[[plant]]
+name = "questions not results: 'when you reply' is the worker's wherever it stands"
+meant = "going_on_when_the_chief_answers_is_the_workers_own_and_a_negation_takes_it_back"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''                && has_first_person(sentence_around(paragraph, at))
+'''
+replace = ''
+
+[[plant]]
+name = "questions not results: 'when you reply' is a wait though more follows it"
+meant = "going_on_when_the_chief_answers_is_the_workers_own_and_a_negation_takes_it_back"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''                && ends_there
+'''
+replace = ''
+
+[[plant]]
+name = "questions not results: a wait phrase may start inside another word"
+meant = "a_wait_phrase_that_stands_in_another_word_is_none"
+runs = ["qnr-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = '''    !paragraph[..at]
+        .chars()
+        .next_back()
+        .is_some_and(char::is_alphanumeric)'''
+replace = '    paragraph.len() > at'
+
+[[plant]]
+name = "questions not results: the rig's Finish of a task that waits is refused"
+meant = "the_chief_finishes_a_raised_question_and_its_words_are_the_result"
+runs = ["qnr-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '"working" | "waiting" | "paused"'
+replace = '"working" | "paused"'
+

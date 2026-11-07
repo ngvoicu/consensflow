@@ -177,6 +177,110 @@ async fn the_chief_moves_a_task_with_the_verbs_and_each_wakes_the_dispatcher_onc
 }
 
 #[tokio::test]
+async fn the_chief_accepts_a_failed_task_on_the_words_of_what_it_checked_and_they_are_its_result() {
+    // T-1111: a designer's session died after it had saved both files, and `cf task accept`
+    // was refused. The ledger decides on the task as it is when the verb comes: a failed one
+    // takes the words, a done one is accepted as it was.
+    let scene = scene();
+    let number = working_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .fail_task(scene.project.id, number, "Selected model is at capacity")
+        .unwrap();
+    let route = format!("{number}/accept");
+
+    // Without words it is refused in the words that say what to type, and wakes nothing.
+    for body in ["{}", r#"{"body":"  "}"#] {
+        let said = post(&scene, &scene.chief, &route, body).await;
+        assert_eq!(
+            refused(&said),
+            (
+                400,
+                "checked-needed",
+                format!(
+                    "T-{number} failed: accepting it takes the words of what you checked, which are its result: cf task accept T-{number} \"what I checked\""
+                )
+                .as_str()
+            ),
+            "{body}"
+        );
+    }
+    assert_eq!(state_of(&scene, number), "failed");
+    assert_eq!(scene.kicks.get(), 0);
+
+    // A window that is no coordinator may not, with or without words.
+    let said = post(&scene, &scene.zeus, &route, r#"{"body":"It is fine"}"#).await;
+    assert_eq!(said.0, 403, "{said:?}");
+    assert_eq!(state_of(&scene, number), "failed");
+
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &route,
+        r#"{"body":"Both files are saved and whole"}"#,
+    )
+    .await;
+    assert_eq!(
+        (status, said["task"]["state"].clone()),
+        (200, json!("accepted")),
+        "{said}"
+    );
+    assert_eq!(scene.kicks.get(), 1, "what waits for it is woken");
+    let (status, thread) = get(&scene, &scene.chief, &number.to_string()).await;
+    assert_eq!(status, 200);
+    let results: Vec<_> = thread["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["kind"] == "result")
+        .collect();
+    assert_eq!(results.len(), 1, "{thread}");
+    assert_eq!(results[0]["body"], "Both files are saved and whole");
+    assert_eq!(results[0]["sender"], "chief");
+}
+
+#[tokio::test]
+async fn a_done_tasks_accept_is_as_it_was_whatever_words_come_with_it() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let (status, _) = post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/accept"),
+        r#"{"body":"Looks right"}"#,
+    )
+    .await;
+    assert_eq!(
+        (status, said["task"]["state"].clone()),
+        (200, json!("accepted")),
+        "{said}"
+    );
+    let (_, thread) = get(&scene, &scene.chief, &number.to_string()).await;
+    let results: Vec<_> = thread["task"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["kind"] == "result")
+        .map(|message| message["body"].clone())
+        .collect();
+    assert_eq!(
+        results,
+        [json!("Done.")],
+        "the worker's result stays the result"
+    );
+}
+
+#[tokio::test]
 async fn the_chief_asks_the_engine_to_finish_a_task_and_what_it_refuses_is_refused_in_its_words() {
     // Only the engine reads the window: it is asked, in the chief's name, and the route
     // answers with the task done, the dispatcher woken for what follows.
@@ -571,6 +675,66 @@ async fn a_tell_goes_the_way_its_task_is_on_once_its_words_are_in() {
 }
 
 #[tokio::test]
+async fn a_tell_of_a_task_shown_working_for_the_words_that_resumed_it_is_kept_behind_them() {
+    // T-1153's F5: at work (or waiting for an answer) on the turn before the words that
+    // resumed it, the task is queued for them still. A pause here would withdraw them.
+    let scene = scene();
+    let number = working_task(&scene);
+    let words = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.pause_task(1, number, Some("chief"), None).unwrap();
+        let resumed = ledger
+            .resume_task(1, number, Some("chief"), "Go on, or say you finished")
+            .unwrap();
+        ledger.work_while_resumed(1, number).unwrap();
+        resumed.message.unwrap().id
+    };
+    assert_eq!(state_of(&scene, number), "working");
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/tell"),
+        r#"{"body":"Also check the lexer"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [&said["message"]["kind"], &said["task"]["state"]],
+        [&json!("note"), &json!("working")],
+        "kept for the window, the task not stopped"
+    );
+    let words = scene
+        .context
+        .ledger
+        .borrow()
+        .message(words)
+        .unwrap()
+        .unwrap();
+    assert_eq!(words.state, "queued", "the resume's words stand");
+
+    // Once the words are in, a tell is a tell again: it stops the task.
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.begin_delivery(words.id).unwrap();
+        ledger
+            .confirm_delivery(words.id, Some(&json!({ "item": "words" })))
+            .unwrap();
+    }
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/tell"),
+        r#"{"body":"And the parser"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [&said["message"]["kind"], &said["task"]["state"]],
+        [&json!("question"), &json!("paused")]
+    );
+}
+
+#[tokio::test]
 async fn a_cancel_says_which_of_the_callers_words_its_window_never_had_went_with_it() {
     let scene = scene();
     let (number, _) = queued_task(&scene);
@@ -721,4 +885,541 @@ async fn the_chief_replaces_the_brief_of_a_task_no_window_has_and_is_refused_for
         )
     );
     assert_eq!(scene.kicks.get(), kicks);
+}
+
+/// A light worker joins the scene's staff, which has zeus, a standard one.
+fn hera_joins(scene: &crate::testing::Scene) {
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            scene.project.id,
+            &cf_ledger::NewMember {
+                model: None,
+                effort: None,
+                model_name: Some("hera".to_owned()),
+                harness: "claude-code".to_owned(),
+                designer: false,
+                roles: vec!["worker".to_owned()],
+                tier: "light".to_owned(),
+            },
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn the_chief_changes_the_tier_of_a_task_no_window_has_with_the_brief_or_without_it() {
+    let scene = scene();
+    hera_joins(&scene);
+    let open = open_task(&scene);
+    // The tier alone: its brief stays.
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"light"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["tier"], "light");
+    assert_eq!(said["task"]["title"], "Lexer");
+    assert!(said.get("asked").is_none(), "{said}");
+    assert_eq!(
+        scene.kicks.get(),
+        1,
+        "the board is woken: a member may be free for it"
+    );
+    // The brief too, in the same command.
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"standard","body":"Lexer, the new way"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (
+            said["task"]["tier"].as_str(),
+            said["task"]["title"].as_str()
+        ),
+        (Some("standard"), Some("Lexer, the new way"))
+    );
+}
+
+#[tokio::test]
+async fn a_tier_nobody_holds_is_the_nearest_and_the_answer_says_which_and_whose() {
+    let scene = scene();
+    hera_joins(&scene);
+    let open = open_task(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"critical"}"#,
+    )
+    .await;
+    // The task has no purpose, which critical work names.
+    assert_eq!(refused(&(status, said)).1, "purpose-required");
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"complex"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["tier"], "standard");
+    assert_eq!(said["asked"], "complex");
+    assert_eq!(said["heldBy"], json!(["zeus"]));
+}
+
+#[tokio::test]
+async fn a_tier_that_is_no_tier_and_a_brief_that_is_no_words_are_refused_before_anything_changes() {
+    let scene = scene();
+    let open = open_task(&scene);
+    for (body, code) in [
+        (r#"{"tier":"huge"}"#, "invalid-tier"),
+        (r#"{"tier":5}"#, "invalid-tier"),
+        (r#"{"tier":"light","body":5}"#, "invalid-text"),
+        (r#"{"tier":"light","body":"  "}"#, "invalid-text"),
+        (r#"{"tier":null}"#, "invalid-text"),
+    ] {
+        let said = post(&scene, &scene.chief, &format!("{open}/edit"), body).await;
+        assert_eq!(said.1["error"], code, "{body}: {said:?}");
+    }
+    assert_eq!(scene.kicks.get(), 0);
+    let (_, read) = get(&scene, &scene.chief, &open.to_string()).await;
+    assert_eq!(
+        (read["task"]["tier"].as_str(), read["task"]["body"].as_str()),
+        (Some("standard"), Some("Lexer"))
+    );
+}
+
+#[tokio::test]
+async fn the_chief_changes_what_a_task_needs_and_what_waits_for_it_by_a_list_or_by_adding_and_removing(
+) {
+    let scene = scene();
+    let (a, b, c) = (open_task(&scene), open_task(&scene), open_task(&scene));
+    let edit = format!("{c}/edit");
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &edit,
+        &format!(r#"{{"needs":[{a},{b}]}}"#),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["blockedBy"], json!([a, b]));
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &edit,
+        &format!(r#"{{"needs":{{"remove":[{a}]}}}}"#),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["blockedBy"], json!([b]));
+    // What waits for it, said back.
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{a}/edit"),
+        &format!(r#"{{"before":{{"add":[{b}]}}}}"#),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["waiting"], json!([b]));
+    assert_eq!(scene.kicks.get(), 3);
+}
+
+#[tokio::test]
+async fn a_list_that_is_none_a_task_not_there_and_a_circle_are_refused_in_the_ledgers_words() {
+    let scene = scene();
+    let (a, b) = (open_task(&scene), open_task(&scene));
+    post(
+        &scene,
+        &scene.chief,
+        &format!("{a}/edit"),
+        &format!(r#"{{"needs":[{b}]}}"#),
+    )
+    .await;
+    for (route, body, status, code) in [
+        (a, r#"{"needs":"T-2"}"#.to_owned(), 400, "invalid-needs"),
+        (
+            a,
+            r#"{"before":{"add":"T-2"}}"#.to_owned(),
+            400,
+            "invalid-needs",
+        ),
+        (a, r#"{"needs":[0]}"#.to_owned(), 400, "invalid-needs"),
+        (a, r#"{"needs":[99]}"#.to_owned(), 404, "unknown-task"),
+        (b, format!(r#"{{"needs":[{a}]}}"#), 409, "circular-needs"),
+    ] {
+        let said = post(&scene, &scene.chief, &format!("{route}/edit"), &body).await;
+        assert_eq!(
+            (said.0, said.1["error"].as_str()),
+            (status, Some(code)),
+            "{body}"
+        );
+    }
+}
+
+/// T-1118: the title is the brief's first line, and a reopen or a resume adds words but
+/// keeps it. `title` sets it with any of the three, and `edit` takes it alone, in any
+/// state, the brief as it is.
+#[tokio::test]
+async fn the_chief_gives_a_task_a_new_title_alone_with_edit_in_any_state_and_the_brief_stays() {
+    let scene = scene();
+    let working = working_task(&scene);
+    let kicks = scene.kicks.get();
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{working}/edit"),
+        r#"{"title":"Parser, and the lexer too"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "Parser, and the lexer too");
+    assert_eq!(said["task"]["state"], "working", "the state is as it was");
+    assert_eq!(scene.kicks.get(), kicks + 1);
+    let (_, read) = get(&scene, &scene.chief, &working.to_string()).await;
+    assert_eq!(read["task"]["title"], "Parser, and the lexer too");
+    assert_eq!(read["task"]["body"], "Parser", "its brief is as it was");
+
+    // A task that is over is retitled too.
+    post(
+        &scene,
+        &scene.zeus,
+        &format!("{working}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    post(&scene, &scene.chief, &format!("{working}/accept"), "{}").await;
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{working}/edit"),
+        r#"{"title":"Parser, the lexer and the docs"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "Parser, the lexer and the docs");
+    assert_eq!(said["task"]["state"], "accepted");
+}
+
+#[tokio::test]
+async fn a_new_brief_with_a_title_is_titled_so_and_without_one_by_its_first_line() {
+    let scene = scene();
+    let open = open_task(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"body":"A new brief\nin two lines","title":"The new scope"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "The new scope");
+    let (_, read) = get(&scene, &scene.chief, &open.to_string()).await;
+    assert_eq!(read["task"]["body"], "A new brief\nin two lines");
+
+    let (_, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"body":"Another brief\nin two lines"}"#,
+    )
+    .await;
+    assert_eq!(
+        said["task"]["title"], "Another brief",
+        "the first line, as it was"
+    );
+
+    // A brief a window has is not replaced, and its title is not changed by the refusal.
+    let working = working_task(&scene);
+    let said = post(
+        &scene,
+        &scene.chief,
+        &format!("{working}/edit"),
+        r#"{"body":"Another","title":"Not this"}"#,
+    )
+    .await;
+    assert_eq!(said.1["error"], "already-given");
+    let (_, read) = get(&scene, &scene.chief, &working.to_string()).await;
+    assert_eq!(read["task"]["title"], "Parser");
+}
+
+#[tokio::test]
+async fn a_reopen_and_a_resume_take_a_title_and_keep_the_brief() {
+    let scene = scene();
+    let number = working_task(&scene);
+    post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/reopen"),
+        r#"{"body":"Also the lexer","title":"Parser and lexer"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_ne!(said["task"]["state"], "done");
+    assert_eq!(said["task"]["title"], "Parser and lexer");
+
+    post(&scene, &scene.chief, &format!("{number}/pause"), "{}").await;
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/resume"),
+        r#"{"body":"Go on, with the docs too","title":"Parser, lexer and docs"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["title"], "Parser, lexer and docs");
+    let (_, read) = get(&scene, &scene.chief, &number.to_string()).await;
+    assert_eq!(read["task"]["body"], "Parser", "the brief is as it was");
+}
+
+#[tokio::test]
+async fn a_title_that_says_nothing_is_refused_and_moves_nothing() {
+    let scene = scene();
+    let number = working_task(&scene);
+    post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    let kicks = scene.kicks.get();
+    for title in [r#""""#, r#""  ""#, "5", "null", "[]"] {
+        let said = post(
+            &scene,
+            &scene.chief,
+            &format!("{number}/reopen"),
+            &format!(r#"{{"body":"More","title":{title}}}"#),
+        )
+        .await;
+        assert_eq!(said.1["error"], "invalid-text", "{title}");
+        assert_eq!(state_of(&scene, number), "done", "{title}: nothing moved");
+    }
+    let said = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/edit"),
+        r#"{"title":"  "}"#,
+    )
+    .await;
+    assert_eq!(said.1["error"], "invalid-text");
+    assert_eq!(scene.kicks.get(), kicks);
+
+    // And a window that is no coordinator does not retitle.
+    let said = post(
+        &scene,
+        &scene.zeus,
+        &format!("{number}/edit"),
+        r#"{"title":"Mine"}"#,
+    )
+    .await;
+    assert_eq!(said.1["error"], "not-a-coordinator");
+}
+
+#[tokio::test]
+async fn an_accept_says_how_many_jobs_and_agents_the_finish_counted_running() {
+    // T-691: the close of the window after the accept ended a parity run the worker had left
+    // running, and nothing said so.
+    let scene = scene();
+    let number = working_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_finished(scene.project.id, number, "Parser done", (1, 2))
+        .unwrap();
+    let said = post(&scene, &scene.chief, &format!("{number}/accept"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    assert_eq!(said.1["running"], json!({ "jobs": 1, "agents": 2 }));
+    assert_eq!(said.1["task"]["state"], "accepted");
+}
+
+#[tokio::test]
+async fn an_accept_of_a_result_that_left_nothing_running_says_nothing_of_it() {
+    let scene = scene();
+    // The worker's own result waits for its work to end, so there is nothing to say.
+    let given = working_task(&scene);
+    let done = post(
+        &scene,
+        &scene.zeus,
+        &format!("{given}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    assert_eq!(done.0, 200, "{:?}", done.1);
+    let said = post(&scene, &scene.chief, &format!("{given}/accept"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    assert!(said.1.get("running").is_none(), "{:?}", said.1);
+}
+
+/// Edit member renames a member and its windows (HMD-12), a window at work too, and the window
+/// goes on: its token names its participant by id, so `cf` keeps answering to it under the new
+/// name. It reads its task, finishes it, and what the chief answered it before the rename still
+/// reaches it; the task is its own under the new name, and the old name is nobody's.
+#[tokio::test]
+async fn a_window_at_work_keeps_running_cf_with_its_token_after_its_member_is_renamed() {
+    let scene = scene();
+    let project = scene.project.id;
+    let zeus = scene.id("zeus");
+    // The chief's task for the standard workers goes to a window of zeus, which takes it up.
+    let created = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            project,
+            &cf_ledger::NewTask {
+                from: "chief".to_owned(),
+                pool: Some("worker".to_owned()),
+                tier: Some("standard".to_owned()),
+                body: "Parser".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap();
+    let number = created.task.number;
+    let moved = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .assign_task(project, number, zeus)
+        .unwrap();
+    let window = moved.task.assignee.clone().expect("a window has the task");
+    assert!(window.starts_with("zeus-"), "{window}");
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let brief = moved.message.as_ref().expect("its brief").id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+    }
+    let window_id = scene
+        .context
+        .ledger
+        .borrow()
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .participants
+        .iter()
+        .find(|participant| participant.handle == window)
+        .unwrap()
+        .id;
+    // Its token, as the engine issues it when the window opens; a question it asked on the
+    // task, and the chief's answer, which waits for it.
+    let token = scene.context.credentials.issue(project, window_id);
+    let asked = cf_ledger::NewQuestion {
+        from: Some(window.clone()),
+        to: "chief".to_owned(),
+        body: Some("Which?".to_owned()),
+        task: Some(number),
+        ..cf_ledger::NewQuestion::default()
+    };
+    let question = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .ask(project, &asked)
+        .unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .answer(
+            question.id,
+            scene.id("chief"),
+            Some(&json!("Use the first.")),
+            None,
+        )
+        .unwrap();
+    // The human edits zeus to another model while the window works.
+    let edited = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .edit_member(
+            project,
+            "zeus",
+            &cf_ledger::MemberEdit {
+                harness: "claude-code".to_owned(),
+                model: Some("claude-opus-5-5".to_owned()),
+                effort: Some("high".to_owned()),
+                model_name: Some("claude-opus-5-5".to_owned()),
+                tier: "standard".to_owned(),
+            },
+        )
+        .unwrap();
+    assert_eq!(edited.handle, "claude-opus-5-5-high");
+    let renamed = format!(
+        "claude-opus-5-5-high-{}",
+        window.strip_prefix("zeus-").unwrap()
+    );
+    // The same token: who the window is now, and the task, its own under the new name.
+    let (status, said) = api_whoami(&scene, &token).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["participant"]["handle"], renamed.as_str());
+    assert_eq!(said["task"]["number"], number);
+    assert_eq!(said["task"]["assignee"], renamed.as_str());
+    let (status, said) = get(&scene, &token, &number.to_string()).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["assignee"], renamed.as_str());
+    // What the chief answered before reaches it, by its id.
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .next_delivery(window_id)
+            .unwrap()
+            .map(|message| message.body),
+        Some("Use the first.".to_owned())
+    );
+    // It finishes its task with the token it had.
+    let (status, said) = post(
+        &scene,
+        &token,
+        &format!("{number}/done"),
+        r#"{"body":"Done."}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "done");
+    assert_eq!(said["task"]["assignee"], renamed.as_str());
+    // The old name is no one's: the board holds no participant by it.
+    let names: Vec<String> = scene
+        .context
+        .ledger
+        .borrow()
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .map(|participant| participant.handle)
+        .collect();
+    assert!(
+        !names.iter().any(|name| name == "zeus" || *name == window),
+        "{names:?}"
+    );
+}
+
+async fn api_whoami(scene: &crate::testing::Scene, token: &str) -> (u16, serde_json::Value) {
+    crate::api::routes::tests::support::api(scene, Method::GET, "/api/whoami", token, "").await
 }

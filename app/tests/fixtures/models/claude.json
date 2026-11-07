@@ -1,0 +1,54 @@
+{
+  "models": [
+    {
+      "id": "claude-opus-5-5",
+      "label": "Opus",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "markedDefault": true
+    },
+    {
+      "id": "claude-fable-5-1",
+      "label": "Fable",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "label": "Sonnet",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "label": "Haiku",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    }
+  ],
+  "readAt": 1793000000000,
+  "freshness": {
+    "state": "fresh"
+  },
+  "how": "claude -p --input-format stream-json: the SDK's initialize control request"
+}

@@ -8,6 +8,13 @@
 //! attachments, as Claude's input box makes them: a `[Image #N]` for each at the head of
 //! the message, the lines gone, and a record of the paths after it (`images`).
 //!
+//! A window launched on the model `CF_TEST_GONE_MODEL` names opens, and each turn fails at
+//! once in Claude Code's words, its record a `<synthetic>` API error naming the model, the
+//! window up still, as Claude Code 2.1.312's does (`gone_launch.py`, 2026-10-29). Its answers say the model and effort it was launched on (`--model`,
+//! `--effort`), and `/model <model> [<effort>]` typed alone switches them, as the human's
+//! own switch in Claude Code's window does, with the key that keeps it to the
+//! conversation: the records of the command name no model, and the next answer does.
+//!
 //! The window of the participant `CF_TEST_NO_LOGIN` names has no login: it
 //! prints that and stays, doing nothing else (`CF_TEST_NO_LOGIN_EXITS`: and
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
@@ -61,6 +68,11 @@
 //! Escape in that time cancels it as Claude Code 2.1.310 does: the words before a
 //! command, a sibling of the bare command, and no more, and the `/compact` put back in
 //! its input box, where what is pasted next goes after it.
+//! A message with a line `LSP-OFFER <seconds>` offers to install an LSP plugin as its turn
+//! works, the dialog on its screen that long or until a digit answers it, and one with a line
+//! `SURVEY` draws
+//! the session survey unless the window's environment turns surveys off; one with a line
+//! `HOOK-ASK <seconds>` asks as a plugin's hook asks for a call (`offers`).
 //!
 //! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set (milliseconds,
 //! or `<member> <milliseconds>` for that member's windows alone) continues by
@@ -69,6 +81,15 @@
 //! (`CF_TEST_QUOTA_FILE` is gone) and that many milliseconds have passed, it says
 //! the limit was reset and takes a turn on the meta prompt Claude sends
 //! (`AUTO_CONTINUE`), queued behind any turn it is in, as Claude's timer is.
+//!
+//! The windows of the member `CF_TEST_RESULTS_RECORDED_LATE` names (`chief 100000`) show
+//! nothing of a result pasted into them for that many milliseconds, at rest, then take it,
+//! as Claude Code did on a loaded Mac (T-760: no record for three minutes after a hand-over),
+//! their screen showing the message and a spinner meanwhile.
+//!
+//! The window of a participant `CF_TEST_RESUMED_ANEW` names, opened again on its
+//! conversation (`--resume`), writes its record anew: empty, then what it is given from
+//! there, as a harness may that rewrites it (T-1118's stale transcript).
 //!
 //! The window of a participant `CF_TEST_TRUST` names, opened in a git repository it
 //! was never told to trust, asks whether to trust it first, as Claude Code does
@@ -108,6 +129,8 @@ mod images;
 mod input_box;
 #[path = "fake_agent/noise.rs"]
 mod noise;
+#[path = "fake_agent/offers.rs"]
+mod offers;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -159,6 +182,13 @@ const NO_LOGIN: &str =
 
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
+
+/// What Claude Code writes of a turn its provider refused for good, its model unknown to it.
+const GONE: &str = "API Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"model: claude-gone does not exist\"}}";
+
+/// What Claude Code writes of a turn its provider refused for a moment, its model overloaded
+/// (Anthropic's 529).
+const BUSY: &str = "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}";
 
 /// The meta prompt Claude Code sends by itself once a refused account has quota
 /// again (2.1.278 and later; this Mac's transcripts).
@@ -244,6 +274,7 @@ fn run(
     let pid = std::process::id();
     let mut records = Records::new(Path::new(&config), &launch.session, pid)
         .map_err(|failed| failed.to_string())?;
+    records.runs_on(launch.model.clone(), launch.effort.clone());
     let status_file: PathBuf = records.status_file().to_path_buf();
     // The ids of the processes started, for the test beside the daemon's home.
     let beside = Path::new(&home).parent().unwrap_or(Path::new("."));
@@ -260,6 +291,10 @@ fn run(
         own_var(variable)
             .is_some_and(|wanted| !wanted.is_empty() && is_session_of(&participant, &wanted))
     };
+    // A window opened again on its conversation that writes its record anew.
+    if launch.resuming && named("CF_TEST_RESUMED_ANEW") {
+        records.begin_anew().map_err(|failed| failed.to_string())?;
+    }
     if named("CF_TEST_NO_LOGIN") || named("CF_TEST_NO_LOGIN_EXITS") {
         let mut out = io::stdout().lock();
         out.write_all(NO_LOGIN.as_bytes())
@@ -301,7 +336,11 @@ fn run(
     }
     // Its terminal is read from the start, raw, as a TUI reads it: the question
     // before the prompt takes its keys from the same reader.
-    let mut keys = Keys::start();
+    let mut keys = Keys::start_tracing(Some(
+        Path::new(&config)
+            .join("sessions")
+            .join(format!("input-{pid}.jsonl")),
+    ));
     let answer = trust::ask(Path::new(&config), asking, &mut keys, || {
         if !grows {
             return Ok(());
@@ -361,7 +400,10 @@ fn run(
     } else {
         " · bypass permissions on"
     };
-    say(&format!("fake agent {said} on {}{mode}\n", launch.session))
+    // No session id on the screen: a UUID is four groups of hex and more, which the close's
+    // note takes for a key and withholds the whole screen for (failure-why, T-1227); the tests
+    // read the words before it.
+    say(&format!("fake agent {said} on its conversation{mode}\n"))
         .map_err(|failed| failed.to_string())?;
     if let (trust::Answer::Yes, Some(after)) = (&answer, trust::leaves_after()) {
         thread::sleep(after);
@@ -446,6 +488,10 @@ fn run(
                 Event::Interrupt => leave(&status_file, 0),
             }
         }
+        // A digit typed alone answers an offer that is open, as Claude Code's lists take one.
+        if offers::takes(keys.typed()) {
+            keys.clear();
+        }
         // What a cancelled command put back in the box, as Claude Code puts it back.
         if let Some(text) = put_back
             .lock()
@@ -502,6 +548,34 @@ fn slow_start(said: Option<&str>, participant: &str) -> Duration {
         .map_or(Duration::ZERO, |(_, wait)| wait_of(Some(wait)))
 }
 
+/// How long the window of `participant` shows nothing of the message `text`, at rest, before it
+/// takes it: a result to a window `said` names (`<member> <milliseconds>`), and no other message.
+fn recorded_late(text: &str, said: Option<&str>, participant: &str) -> Duration {
+    if text.contains(" result from @") {
+        slow_start(said, participant)
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// How often a window that holds a message back draws its spinner.
+const SPINNER_EVERY: Duration = Duration::from_secs(3);
+
+/// The window holds `text` back for `late`, its record showing nothing of it and its status at
+/// rest, while its screen shows the message it took and a spinner, as a loaded Claude Code
+/// drew it (T-760): the screen printing is what tells it is taking the message in.
+fn hold_with_a_spinner(text: &str, late: Duration) {
+    let first = text.lines().next().unwrap_or_default();
+    let _ = say(&format!("> {first}\n"));
+    let until = std::time::Instant::now() + late;
+    let mut frame = 0_u32;
+    while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
+        frame += 1;
+        let _ = say(&format!("✻ Taking it in… ({frame})\r\n"));
+        thread::sleep(left.min(SPINNER_EVERY));
+    }
+}
+
 /// How long the message `text` stays in the hooks of its prompt: a line
 /// `HOOKS <seconds> <words>`.
 fn hooks_of(text: &str) -> Option<Duration> {
@@ -531,6 +605,9 @@ const CAVEAT: &str = "<local-command-caveat>The messages below were made by a co
 /// while idle (`compact`), and runs no turn (the long run's compaction, which its
 /// watch finds in the record).
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
+    if let Some((model, effort)) = model_switch(text) {
+        return switch_model(records, pid, model, effort);
+    }
     if is_compact(text) {
         // Its time, which an Escape cuts short.
         let compacting = || {
@@ -550,6 +627,16 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
         }
         return Ok(());
     }
+    // A result the window shows nothing of for a while, at rest, as Claude Code did on a loaded
+    // Mac (T-760: no record for three minutes after the hand-over).
+    let late = recorded_late(
+        text,
+        own_var("CF_TEST_RESULTS_RECORDED_LATE").as_deref(),
+        &window.participant,
+    );
+    if !late.is_zero() {
+        hold_with_a_spinner(text, late);
+    }
     if text == AUTO_CONTINUE_MARK {
         records
             .append(pid, notice("Usage limit reset · continuing automatically"))
@@ -564,6 +651,49 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     let done = turn(records, pid, window, text);
     window.stop.end();
     done
+}
+
+/// What Claude Code says of a turn on a model the account does not have.
+fn gone_model(model: &str) -> String {
+    format!(
+        "There's an issue with the selected model ({model}). It may not exist or you may not have access to it. Run /model to pick a different model.\r\n"
+    )
+}
+
+/// What the human types to switch the model, its words the model and, after it, the
+/// effort: `/model <model> [<effort>]`, as Claude Code's picker leaves it.
+const MODEL: &str = "/model ";
+
+/// The model and the effort `text` switches to, where it is `/model` with a model.
+fn model_switch(text: &str) -> Option<(String, Option<String>)> {
+    let mut words = text.trim().strip_prefix(MODEL)?.split_whitespace();
+    let model = words.next()?.to_owned();
+    Some((model, words.next().map(str::to_owned)))
+}
+
+/// The human switched the model in the window, with the key that keeps it to the
+/// conversation (CHF-05): no turn, and the records Claude Code writes of the command,
+/// which name no model; its next answer says the one switched to.
+fn switch_model(
+    records: &mut Records,
+    pid: u32,
+    model: String,
+    effort: Option<String>,
+) -> Result<(), String> {
+    let said = format!("Set model to {model}");
+    for content in [
+        "<command-name>/model</command-name>".to_owned(),
+        format!("<local-command-stdout>{said}</local-command-stdout>"),
+    ] {
+        records
+            .append(
+                pid,
+                json!({ "type": "user", "message": { "role": "user", "content": content } }),
+            )
+            .map_err(|cause| cause.to_string())?;
+    }
+    records.runs_on(Some(model), effort);
+    Ok(())
 }
 
 /// Whether `text`, sent, is `/compact`: alone, or with words after it, whatever
@@ -755,16 +885,70 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     if text.lines().any(|line| line.starts_with("TORN ")) {
         tear(records, pid, window).map_err(failed)?;
     }
+    // Claude Code's offers that wait for a key, drawn as the turn works (`offers`).
+    if offers::survey_in(text) {
+        offers::survey().map_err(failed)?;
+    }
+    if let Some(open) = offers::offer_in(text) {
+        offers::offer(records, pid, open, offers::turn_ends_in(text)).map_err(failed)?;
+    }
+    if let Some(open) = offers::permission_ask_in(text) {
+        offers::permission_ask(records, pid, open).map_err(failed)?;
+    }
+    if let Some(open) = offers::hook_ask_in(text) {
+        if offers::hook_ask(records, pid, open).map_err(failed)? {
+            // Claude Code's "No" to a hook's ask, with no words of the user's, aborts the turn:
+            // the call is refused, the user's interrupt ends the turn, and no answer is written.
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "user",
+                        "message": { "role": "user", "content": [{ "type": "text", "text": "[Request interrupted by user for tool use]" }] },
+                    }),
+                )
+                .map_err(failed)?;
+            return records.status(pid, "idle").map_err(failed);
+        }
+    }
     // What it did before it answers: the steps a worker's progress is, among them the call
     // that runs a job in the background or arms a monitor, and what it answers.
-    let (worked, reply) = match tool::reply(text, window).or_else(|| build::reply(text, window)) {
-        Some(reply) => (Vec::new(), reply?),
-        None => match steps::reply(text, window) {
-            Some(worked) => worked?,
-            None => (Vec::new(), reply_to(text, window)?),
-        },
+    let gone = records
+        .model()
+        .is_some_and(|model| own_var("CF_TEST_GONE_MODEL").as_deref() == Some(model));
+    let (worked, reply) = if gone {
+        (Vec::new(), Reply::Gone)
+    } else {
+        match tool::reply(text, window).or_else(|| build::reply(text, window)) {
+            Some(reply) => (Vec::new(), reply?),
+            None => match steps::reply(text, window) {
+                Some(worked) => worked?,
+                None => (Vec::new(), reply_to(text, window)?),
+            },
+        }
     };
     steps::write(records, pid, &window.session, &worked).map_err(failed)?;
+    // A turn that works at a pace writes a step, works a while, and writes the next: an
+    // Escape in one of the whiles stops it there.
+    let reply = match reply {
+        Reply::Worked(steps, gap, answer) => {
+            let mut stopped = false;
+            for step in &steps {
+                steps::write(records, pid, &window.session, std::slice::from_ref(step))
+                    .map_err(failed)?;
+                if window.stop.work(gap) {
+                    stopped = true;
+                    break;
+                }
+            }
+            if stopped {
+                Reply::Stopped
+            } else {
+                Reply::Text(answer)
+            }
+        }
+        other => other,
+    };
     // The message id numbers the records so far, this one not yet among them.
     let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
     match reply {
@@ -779,6 +963,50 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     json!({
                         "type": "user",
                         "message": { "role": "user", "content": [{ "type": "text", "text": INTERRUPTED }] },
+                    }),
+                )
+                .map_err(failed)?;
+        }
+        Reply::Gone => {
+            // Claude Code's own record of the refusal: a `<synthetic>` API error in the
+            // model's name, the window up still (`tools/probes/chief-harness/gone_launch.py`).
+            let model = records.model().unwrap_or_default().to_owned();
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "assistant",
+                        "isApiErrorMessage": true,
+                        "message": {
+                            "id": id,
+                            "role": "assistant",
+                            "model": "<synthetic>",
+                            "content": [{ "type": "text", "text": gone_model(&model).trim_end() }],
+                        },
+                    }),
+                )
+                .map_err(failed)?;
+        }
+        Reply::ApiError(status) => {
+            // The provider refused with an error of its API: Claude writes it as a record.
+            let (error, words) = if status == 529 {
+                ("overloaded", BUSY)
+            } else {
+                ("invalid_request", GONE)
+            };
+            records
+                .append(
+                    pid,
+                    json!({
+                        "type": "assistant",
+                        "isApiErrorMessage": true,
+                        "apiErrorStatus": status,
+                        "error": error,
+                        "message": {
+                            "id": id,
+                            "role": "assistant",
+                            "content": [{ "type": "text", "text": words }],
+                        },
                     }),
                 )
                 .map_err(failed)?;
@@ -803,7 +1031,8 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                 .map_err(failed)?;
             continue_later(records, pid, window).map_err(failed)?;
         }
-        Reply::Text(reply) => {
+        // `Worked` was turned into a text or a stop above.
+        Reply::Text(reply) | Reply::Worked(_, _, reply) => {
             // The work is done (a `cf` it ran has answered) and the answer is
             // not yet written: the turn is open in the record that long.
             wait_as_told("CF_TEST_ANSWER_MS");
@@ -1204,6 +1433,26 @@ mod tests {
         assert_eq!(continues_after(said, "reviewer-amber-pine"), None);
     }
 
+    /// A result is written late to the window of the member named, and no other message is, nor
+    /// a result to another window (T-760's shape, the matrix's `field-late-record`).
+    #[test]
+    fn a_result_is_recorded_late_by_the_window_named_and_nothing_else_is() {
+        let said = Some("chief 100000");
+        let result = "[ConsensFlow m-4 · T-1 · result from @matrix-worker-amber]\nA_DONE";
+        assert_eq!(
+            recorded_late(result, said, "chief"),
+            Duration::from_millis(100_000)
+        );
+        assert_eq!(recorded_late(result, said, "worker-amber"), Duration::ZERO);
+        assert_eq!(recorded_late(result, None, "chief"), Duration::ZERO);
+        let brief = "[ConsensFlow m-1 · T-1 · task from @chief]\nReply with exactly: A";
+        assert_eq!(recorded_late(brief, said, "chief"), Duration::ZERO);
+        assert_eq!(
+            recorded_late("Put one task on the board", said, "chief"),
+            Duration::ZERO
+        );
+    }
+
     #[test]
     fn a_slow_start_is_for_the_windows_of_the_member_it_names_alone() {
         let said = Some("worker 8000");
@@ -1235,5 +1484,49 @@ mod tests {
         for text in [None, Some(""), Some("soon"), Some("-5"), Some("1.5")] {
             assert_eq!(wait_of(text), Duration::ZERO, "{text:?}");
         }
+    }
+
+    #[test]
+    fn an_answer_says_its_model_and_effort_and_a_typed_model_switches_them_naming_none_itself() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        records.runs_on(Some("fake-chief".to_owned()), Some("high".to_owned()));
+        let answer =
+            || json!({ "type": "assistant", "message": { "role": "assistant", "content": [] } });
+        records.append(7, answer()).unwrap();
+        let (model, effort) = model_switch("/model fake-switched low").unwrap();
+        switch_model(&mut records, 7, model, effort).unwrap();
+        records.append(7, answer()).unwrap();
+        let written = written_from(config.path(), 0);
+        let said: Vec<(String, &serde_json::Value, &serde_json::Value)> = written
+            .iter()
+            .map(|record| {
+                (
+                    shape(record),
+                    &record["message"]["model"],
+                    &record["effort"],
+                )
+            })
+            .collect();
+        let none = serde_json::Value::Null;
+        assert_eq!(
+            said,
+            [
+                ("assistant".to_owned(), &json!("fake-chief"), &json!("high")),
+                ("user <command-name".to_owned(), &none, &none),
+                ("user <local-command-stdout".to_owned(), &none, &none),
+                (
+                    "assistant".to_owned(),
+                    &json!("fake-switched"),
+                    &json!("low")
+                ),
+            ]
+        );
+        assert_eq!(
+            model_switch("/model fake-x"),
+            Some(("fake-x".to_owned(), None))
+        );
+        assert_eq!(model_switch("/models"), None);
+        assert_eq!(model_switch("Use /model x"), None);
     }
 }

@@ -5,6 +5,7 @@
 
 mod adapter;
 pub(crate) mod index;
+pub(crate) mod last_used;
 mod launch;
 pub mod models;
 mod msp;
@@ -19,4 +20,6 @@ mod window;
 pub use adapter::MuseAdapter;
 pub(crate) use screen::read as read_input_box;
 pub(crate) use screen::words as input_box_words;
-pub use session_hook::session_hook;
+pub use session_hook::{
+    blocks, hook_output, parts, session_hook, FILLER, MARK, MOST_PARTS, OUTPUT_LIMIT,
+};

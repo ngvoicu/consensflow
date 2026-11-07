@@ -21,7 +21,9 @@ use super::jobs::Watch;
 use super::patterns::{BARE_COMPACT, CAVEAT, OUTPUT};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
-use crate::shared::quota::{account_refusal, spent_extra_usage, Refusal};
+use crate::shared::quota::{account_refusal, busy_refusal, spent_extra_usage, Refusal};
+use crate::shared::record::calls::{describe, LastCall};
+use crate::shared::record::drawn::{self, Action};
 use crate::shared::record::reading::Source;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
@@ -58,6 +60,10 @@ pub(super) enum Projected {
     Output(Arc<str>),
     /// A boundary record that ends the turn of the answer before it.
     Boundary(Boundary),
+    /// Claude Code's record that it compacted the conversation (`compact_boundary`), and the
+    /// tokens it compacted from where it says (`compactMetadata.preTokens`): what the history
+    /// draws of the summary that follows it.
+    Compacted(Option<u64>),
 }
 
 /// A record that ends the turn of the answer before it.
@@ -96,8 +102,14 @@ pub(super) struct Assistant {
     pub(super) uuid: Option<Arc<str>>,
     /// The text of the message's content.
     pub(super) text: String,
+    /// What its `thinking` blocks say, those that say anything, in order: the history's
+    /// alone, never the message's text.
+    pub(super) thinking: Vec<String>,
     /// The tool calls and results of the content, in order.
     pub(super) blocks: Vec<Block>,
+    /// The last tool call of the main conversation the content makes, as a line
+    /// (`describe`): what the window was doing, for the note of a window that closed.
+    pub(super) last_call: Option<Arc<LastCall>>,
     /// The message stopped as `end_turn` or `stop_sequence`.
     pub(super) ended: bool,
     /// Claude Code's own close of the turn it found cut as it resumed the
@@ -111,6 +123,10 @@ pub(super) struct Assistant {
     /// What the account refused for, where it is its billing or its login: no limit that
     /// resets (MUS-23).
     pub(super) account: Option<Refusal>,
+    /// A refusal of its provider for a moment, which waiting cures: a 5xx or 529
+    /// (`apiErrorStatus`), the error `server_error`, or words that say the model is
+    /// overloaded or at capacity (T-1112). Never a quota's or an account's.
+    pub(super) busy: bool,
     /// The model a message of the main conversation says it was written by, where it names
     /// one (not Claude Code's own `<synthetic>` messages, nor an API error's).
     pub(super) model: Option<Arc<str>>,
@@ -123,9 +139,10 @@ pub(super) struct Assistant {
 /// A block of an assistant's content that opens or closes a call.
 #[derive(Debug, PartialEq)]
 pub(super) enum Block {
-    /// A `tool_use` or `server_tool_use`, by the id it says, and what call of the main
-    /// conversation it is, where the reader reads its result.
-    Use(Option<Value>, Call),
+    /// A `tool_use` or `server_tool_use`, by the id it says, what call of the main
+    /// conversation it is, where the reader reads its result, and what the history draws of
+    /// it ([`Called`]).
+    Use(Option<Value>, Call, Called),
     /// A `tool_result` or `advisor_tool_result`.
     Result(ToolResult),
 }
@@ -139,12 +156,20 @@ pub(super) enum Call {
     Other,
 }
 
+/// What the history draws of a call: its tool's name, and its header ([`drawn::header`]).
+#[derive(Debug, PartialEq)]
+pub(super) struct Called {
+    pub(super) name: Arc<str>,
+    pub(super) header: Arc<str>,
+}
+
 /// The result of a tool in a block: the call it answers, as the block says
-/// it, and its text.
+/// it, its text, and whether it says it is an error (`is_error`).
 #[derive(Debug, PartialEq)]
 pub(super) struct ToolResult {
     pub(super) call: Option<Value>,
     pub(super) text: Result<String, String>,
+    pub(super) failed: bool,
 }
 
 /// A user's record.
@@ -184,13 +209,25 @@ pub(super) struct User {
     /// The job a tool result of the record says it started (see [`job`]), where the record
     /// is of the main conversation (a subagent's jobs are its own, and its end wakes it):
     /// the call the record's first result answers, as the block says it, and the job.
-    pub(super) job: Option<(Option<Value>, Arc<str>)>,
+    pub(super) job: Option<(Option<Value>, Started)>,
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
     /// The record is a `/model` (or `/fast`) the human typed at the prompt, of the main
     /// conversation.
     pub(super) model_command: bool,
+    /// What the record says of its tool's run besides its result (`toolUseResult`): how
+    /// long it took and the change it made, for the history to draw.
+    pub(super) ran: Ran,
+}
+
+/// What a user's record says of a tool's run besides its result (`toolUseResult`), which
+/// is one tool's: how long it took (`durationMs`, which few tools write) and the change an
+/// edit made (`structuredPatch`), as diff lines.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Ran {
+    pub(super) took_ms: Option<u64>,
+    pub(super) diff: Option<String>,
 }
 
 /// A user's record of a `/compact` typed at Claude's prompt.
@@ -262,6 +299,77 @@ fn tool_result(block: &Value) -> ToolResult {
     ToolResult {
         call: said(block.get("tool_use_id")),
         text: claude_tool_text(block.get("content")),
+        failed: block.get("is_error") == Some(&Value::Bool(true)),
+    }
+}
+
+/// What the history draws of a `tool_use` block: its tool's name (`tool` where it names
+/// none), and its header, from what its input says by the tool it is.
+fn called(block: &Value) -> Called {
+    let name = block
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("tool");
+    let input = block.get("input");
+    let says = |member: &str| field(input, member).and_then(Value::as_str);
+    let number = |member: &str| field(input, member).and_then(Value::as_u64);
+    let action = match name {
+        "Bash" => Action::Shell(says("command").unwrap_or_default()),
+        "Read" => Action::Read {
+            path: says("file_path").unwrap_or_default(),
+            from: number("offset"),
+            lines: number("limit"),
+        },
+        "Edit" | "MultiEdit" => Action::Edit(says("file_path").unwrap_or_default()),
+        "NotebookEdit" => Action::Edit(says("notebook_path").unwrap_or_default()),
+        "Write" => Action::Write(says("file_path").unwrap_or_default()),
+        _ => Action::Other {
+            name,
+            about: [
+                "command",
+                "file_path",
+                "pattern",
+                "query",
+                "url",
+                "description",
+            ]
+            .into_iter()
+            .find_map(says),
+        },
+    };
+    Called {
+        name: Arc::from(name),
+        header: drawn::header(action),
+    }
+}
+
+/// What a user's record says of its tool's run besides its result: `durationMs` where it is
+/// a count, and `structuredPatch`'s hunks as diff lines where it holds any.
+fn ran(record: &Value) -> Ran {
+    let result = record.get("toolUseResult");
+    let took_ms = field(result, "durationMs").and_then(Value::as_u64);
+    let hunks = match field(result, "structuredPatch") {
+        Some(Value::Array(hunks)) => hunks.as_slice(),
+        _ => &[],
+    };
+    let mut diff = Vec::new();
+    for hunk in hunks {
+        let number = |name: &str| hunk.get(name).and_then(Value::as_u64).unwrap_or(0);
+        diff.push(format!(
+            "@@ -{},{} +{},{} @@",
+            number("oldStart"),
+            number("oldLines"),
+            number("newStart"),
+            number("newLines")
+        ));
+        if let Some(Value::Array(lines)) = hunk.get("lines") {
+            diff.extend(lines.iter().filter_map(Value::as_str).map(str::to_owned));
+        }
+    }
+    Ran {
+        took_ms,
+        diff: (!diff.is_empty()).then(|| diff.join("\n")),
     }
 }
 
@@ -373,13 +481,16 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let blocks = blocks(content)
         .iter()
         .filter_map(|block| match kind(block) {
-            Some("tool_use" | "server_tool_use") => {
-                Some(Block::Use(said(block.get("id")), call(block, main, made)))
-            }
+            Some("tool_use" | "server_tool_use") => Some(Block::Use(
+                said(block.get("id")),
+                call(block, main, made),
+                called(block),
+            )),
             Some("advisor_tool_result" | "tool_result") => Some(Block::Result(tool_result(block))),
             _ => None,
         })
         .collect();
+    let last_call = blocks_of_main_calls(content, main);
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
     let text = claude_text(content);
     let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
@@ -411,11 +522,20 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let rate_limited = status == Some(429.0)
         || record.get("error").and_then(Value::as_str) == Some("rate_limit")
         || spent;
+    let thinking = self::blocks(content)
+        .iter()
+        .filter(|block| kind(block) == Some("thinking"))
+        .filter_map(|block| block.get("thinking").and_then(Value::as_str))
+        .filter(|thinking| !js::trim(thinking).is_empty())
+        .map(str::to_owned)
+        .collect();
     Projected::Assistant(Box::new(Assistant {
         at: timestamp(record),
+        thinking,
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
         blocks,
+        last_call,
         ended: matches!(
             in_message("stop_reason").and_then(Value::as_str),
             Some("end_turn" | "stop_sequence")
@@ -430,6 +550,11 @@ fn assistant(record: &Value, session: &str) -> Projected {
         } else {
             None
         },
+        busy: refused
+            && !rate_limited
+            && account_refusal(&text, status).is_none()
+            && (record.get("error").and_then(Value::as_str) == Some("server_error")
+                || busy_refusal(&text, status)),
         text,
     }))
 }
@@ -491,6 +616,7 @@ fn user(record: &Value, session: &str) -> Projected {
             .then(|| stopped(record, content))
             .flatten(),
         model_command,
+        ran: ran(record),
     }))
 }
 
@@ -514,16 +640,33 @@ fn is_notification(record: &Value) -> bool {
             || says(field(record.get("origin"), "kind"), "task-notification"))
 }
 
+/// A job a tool's result says it started: its id, and the time limit it passed where that
+/// moved it into the background.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Started {
+    pub(super) id: Arc<str>,
+    /// A foreground command that passed its time limit is moved to the background by Claude
+    /// Code and goes on running, and its result says the limit it passed
+    /// (`toolUseResult.timedOutAfterMs`, milliseconds, with `backgroundTaskId`: 2.1.3xx,
+    /// about a third of the background commands in a field board's records, T-1181). None for a
+    /// command the agent asked to run in the background, and for a monitor.
+    pub(super) limit_ms: Option<i64>,
+}
+
 /// The job a tool's result says it started, by its id: a command run in the background
 /// (`backgroundTaskId`), or a monitor, whose start says its task and its time (2.1.305:
 /// `taskId`, and `timeoutMs`, a number: 0 for one that is `persistent`).
-fn job(record: &Value) -> Option<Arc<str>> {
+fn job(record: &Value) -> Option<Started> {
     let result = record.get("toolUseResult");
     if let Some(id) = text_id(field(result, "backgroundTaskId")) {
-        return Some(id);
+        let limit_ms = field(result, "timedOutAfterMs")
+            .and_then(Value::as_i64)
+            .filter(|limit| *limit > 0);
+        return Some(Started { id, limit_ms });
     }
     field(result, "timeoutMs").and_then(Value::as_i64)?;
-    text_id(field(result, "taskId"))
+    let id = text_id(field(result, "taskId"))?;
+    Some(Started { id, limit_ms: None })
 }
 
 /// The call the first tool result of a user's `content` answers, as its block says it.
@@ -532,6 +675,25 @@ fn first_call(content: Option<&Value>) -> Option<Value> {
         .iter()
         .find(|block| kind(block) == Some("tool_result"))
         .and_then(|block| said(block.get("tool_use_id")))
+}
+
+/// The last `tool_use` of the main conversation's content as a line: what the window ran
+/// last. A subagent's calls (`main` false) and the API's own server tools are no call of the
+/// window's.
+fn blocks_of_main_calls(content: Option<&Value>, main: bool) -> Option<Arc<LastCall>> {
+    if !main {
+        return None;
+    }
+    blocks(content)
+        .iter()
+        .rev()
+        .filter(|block| kind(block) == Some("tool_use"))
+        .find_map(|block| {
+            describe(
+                block.get("name").and_then(Value::as_str),
+                block.get("input"),
+            )
+        })
 }
 
 /// What call of the main conversation (`main`) a `tool_use` block makes, by its tool's
@@ -627,6 +789,9 @@ fn system(record: &Value, session: &str) -> Projected {
         {
             boundary(record, None)
         }
+        Some("compact_boundary") if of_main_conversation(record, session) => Projected::Compacted(
+            field(record.get("compactMetadata"), "preTokens").and_then(Value::as_u64),
+        ),
         _ => Projected::Other,
     }
 }

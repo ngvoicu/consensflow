@@ -1,16 +1,16 @@
 //! What one read of the history costs: the same whatever the history holds
 //! besides the page. A page of the newest items takes as many of SQLite's
-//! steps beside 2,000 conversations and 100,000 tools' outputs it leaves out as
-//! beside none; and headings take a page's room as items do, so a page of
-//! conversations that show no item (tools' outputs alone, left out) holds what
-//! a page holds, and the next goes on past them, each heading once.
+//! steps beside 100,000 tools' outputs it leaves out as beside none; a
+//! conversation that shows no item (tools' outputs alone, left out) is one
+//! lookup of its id, charged, and shows nothing, so a read goes on past
+//! thousands of them to the items before them, as far as its bound, and the
+//! next goes on from where it stopped, each item once.
 
-use std::collections::HashSet;
 use std::time::Instant;
 
 use cf_ledger::{
-    HistoryAsk, HistoryEntry, HistoryFrom, HistoryRead, Ledger, MessageOpening, NewMember, NewNote,
-    Scanned, HISTORY_SCAN_BYTES, MESSAGE_OPENING,
+    HistoryAsk, HistoryFrom, HistoryRead, Ledger, MessageOpening, NewMember, NewNote, Scanned,
+    HISTORY_SCAN_BYTES, MESSAGE_OPENING,
 };
 use serde_json::Value;
 
@@ -47,7 +47,9 @@ fn history(
             .add_member(
                 project.id,
                 &NewMember {
-                    agent: "zeus".into(),
+                    model: None,
+                    effort: None,
+                    model_name: Some("zeus".into()),
                     harness: "pi".into(),
                     designer: false,
                     roles: vec!["worker".into()],
@@ -72,7 +74,7 @@ fn history(
     (ledger, project.id, chief)
 }
 
-/// The newest page, tools left out, with room for the ten items of the user's and their heading alone.
+/// The newest page, tools left out, with room for the ten items of the user's alone.
 fn newest(ledger: &Ledger, project: i64) -> HistoryRead {
     let read = ledger
         .read_history(
@@ -85,38 +87,57 @@ fn newest(ledger: &Ledger, project: i64) -> HistoryRead {
     read
 }
 
+/// The most steps SQLite's machine takes for a conversation that shows no
+/// item: finding its id and finding it has no item to show, measured at 28.
+const STEPS_AN_EMPTY_CONVERSATION: usize = 40;
+
 #[test]
-fn a_page_takes_the_same_steps_beside_2_000_conversations_and_100_000_tools_outputs_left_out() {
+fn a_page_takes_the_same_steps_beside_100_000_tools_outputs_left_out_and_one_lookup_a_conversation_with_none_shown(
+) {
     let small = tempfile::tempdir().expect("a folder");
     let (ledger, project, _) = history(&small, 0, 0, 1_000);
     let alone = newest(&ledger, project).scanned;
-    // Beside the chief's 2,000 earlier conversations and their log, a member's
-    // 2,000 between them and the chief's now.
+    // Beside 100,000 tools' outputs and a member's 2,000 conversations, which
+    // are not the chief's: the same rows, the same bytes, the same steps.
     let large = tempfile::tempdir().expect("a folder");
-    let (ledger, project, _) = history(&large, 2_000, 2_000, 100_000);
-    let read = newest(&ledger, project);
-    let beside = read.scanned;
+    let (ledger, project, _) = history(&large, 0, 2_000, 100_000);
+    let beside = newest(&ledger, project).scanned;
     assert_eq!(
         (
-            read.conversations[0].tools,
-            read.conversations[0].more_tools
+            beside.conversations,
+            beside.rows,
+            beside.bytes,
+            beside.fields
         ),
-        (1_000, true),
-        "counted so far, and said to be more"
-    );
-    // The page beside them went as far as the earlier conversation's heading,
-    // and no further: one conversation more, one row no more.
-    assert_eq!(
-        (beside.conversations, beside.rows, beside.bytes),
-        (alone.conversations + 1, alone.rows, alone.bytes),
+        (alone.conversations, alone.rows, alone.bytes, alone.fields),
         "{alone:?} {beside:?}"
     );
-    // SQLite's steps are the same for the same rows and plan: beside it all,
-    // the page takes those of the one heading more and no others.
     assert!(
         beside.steps < alone.steps + 1_000,
         "the steps grew with what the page leaves out: {alone:?} {beside:?}"
     );
+    // Beside the chief's 2,000 earlier conversations of a tool's output each,
+    // the page has room for one more item and looks for it through them all:
+    // each is one lookup more and no row, and there is nothing older.
+    let earlier = tempfile::tempdir().expect("a folder");
+    let (ledger, project, _) = history(&earlier, 2_000, 0, 1_000);
+    let read = newest(&ledger, project);
+    let past = read.scanned;
+    assert_eq!(
+        (past.conversations, past.rows, past.bytes, past.fields),
+        (
+            alone.conversations + 2_000,
+            alone.rows,
+            alone.bytes,
+            alone.fields
+        ),
+        "{alone:?} {past:?}"
+    );
+    assert!(
+        past.steps <= alone.steps + 2_000 * STEPS_AN_EMPTY_CONVERSATION,
+        "{alone:?} {past:?}"
+    );
+    assert_eq!((read.resume, read.bounded), (None, false));
 }
 
 #[test]
@@ -144,7 +165,10 @@ fn a_read_never_loads_the_role_a_conversation_was_given() {
             &ask(HistoryFrom::Newest, None, false, ROOM),
         )
         .expect("a page");
-    assert_eq!(page.entries.len(), 50);
+    assert_eq!(
+        (page.entries.len(), page.scanned.conversations, page.resume),
+        (0, 50, None)
+    );
     let searched = ledger
         .read_history(
             project.id,
@@ -202,58 +226,50 @@ fn a_message_s_opening_is_its_first_bytes_cut_at_a_character_and_its_body_is_nev
 }
 
 #[test]
-fn headings_fill_a_page_as_items_do_and_the_next_page_goes_on_past_them_each_once() {
-    // A thousand conversations of tools' outputs alone, left out: each shows as
-    // its heading. A room of 20,000 bytes, a twentieth or so of them a page.
+fn pages_of_one_item_go_across_conversations_that_show_none_and_show_each_item_once_in_order() {
+    // A thousand conversations of tools' outputs alone, left out, and every
+    // hundredth one with an item of the user's too. A room of one item a page: each page goes on past the conversations between
+    // items, and every item comes once, in the order it was copied.
     let dir = tempfile::tempdir().expect("a folder");
-    let (ledger, project, _) = history(&dir, 1_000, 0, 0);
-    let room = 20_000;
-    let mut headed: Vec<i64> = Vec::new();
-    let mut items = 0;
+    let mut ledger = ledger_in(&dir);
+    let project = project(&mut ledger);
+    let chief = id_of(&project, "chief");
+    let mut copied = Vec::new();
+    for at in 0..1_000 {
+        let conversation = ledger
+            .start_conversation(chief, "claude-code")
+            .expect("a conversation");
+        let mut items = vec![item(&format!("t-{at}"), "tool", "ok")];
+        if at % 100 == 0 {
+            items.push(item(&format!("u-{at}"), "user", "said"));
+            copied.push(format!("u-{at}"));
+        }
+        ledger
+            .copy_transcript(conversation.id, &items, 0)
+            .expect("copied");
+    }
+    let mut shown: Vec<String> = Vec::new();
     let mut pages = 0;
     let mut from = HistoryFrom::Newest;
     loop {
         let read = ledger
-            .read_history(project, "chief", &ask(from, None, false, room))
+            .read_history(project.id, "chief", &ask(from, None, false, 1))
             .expect("read");
         pages += 1;
-        assert!(pages < 200, "no end");
-        assert!(
-            read.conversations.len() < 40,
-            "a page heads what its room holds: {}",
-            read.conversations.len()
-        );
-        for entry in &read.entries {
-            match entry {
-                HistoryEntry::Heading(key) => headed.push(key.conversation),
-                HistoryEntry::Item(_) => items += 1,
-            }
-        }
+        assert!(pages < 50, "no end");
+        assert!(read.entries.len() <= 1, "{} items", read.entries.len());
+        shown.extend(ids(&read));
         let Some(place) = read.resume else { break };
         from = HistoryFrom::Before(place);
     }
-    assert_eq!(items, 10);
-    assert!(pages > 20, "{pages} pages");
-    let once: HashSet<i64> = headed.iter().copied().collect();
-    assert_eq!(
-        (headed.len(), once.len()),
-        (1_000, 1_000),
-        "every heading once"
-    );
-    let newest = ledger
-        .read_history(project, "chief", &ask(HistoryFrom::Newest, None, false, 1))
-        .expect("read")
-        .entries[0]
-        .key();
-    assert!(
-        !once.contains(&newest.conversation),
-        "the one with items shows them instead"
-    );
+    shown.reverse();
+    assert_eq!(shown, copied);
+    assert_eq!(pages, copied.len(), "the last finds nothing older");
 }
 
 /// The most steps SQLite's machine takes for each conversation, row and part a
-/// read comes to: 170 at the most (a conversation's heading, which reads the
-/// log), measured.
+/// read comes to: 170 at the most when a conversation's heading read the log,
+/// measured, and fewer since.
 const STEPS_A_ROW: usize = 200;
 
 /// What a page takes for a chief of 50,000 items and 200 MB of text in five
@@ -366,7 +382,7 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
     let older = time("older", ask(HistoryFrom::Before(middle), None, false, ROOM));
     fills("older", &older);
     // The words of the 50,000 items, searched from before the 24 MiB one.
-    let before_long = HistoryFrom::Before(first.entries[0].key());
+    let before_long = HistoryFrom::Before(first.entries[0].key);
     time(
         "a word in no item",
         ask(before_long, Some("nowhere"), false, ROOM),
@@ -393,12 +409,22 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
         row: 0,
         part: 0,
     };
-    let headings = time(
-        "a page of the 10,000 conversations of tools' outputs, headings alone",
+    // The 10,000 conversations of tools' outputs show nothing: the read goes
+    // through as many as its bound holds, and says where the next goes on.
+    let none_shown = time(
+        "the 10,000 conversations of tools' outputs, nothing shown",
         ask(HistoryFrom::Before(oldest_big), None, false, ROOM),
     );
-    fills("headings alone", &headings);
-    let long_row = first.entries[0].key().row;
+    // Before the five, the ten items of the conversation the chief was in then,
+    // and none of the 10,000 before it: the read goes through as many as its
+    // bound holds, and says where the next goes on.
+    assert_eq!(ids(&none_shown).len(), 10, "{:?}", none_shown.scanned);
+    assert!(
+        none_shown.bounded && none_shown.resume.is_some(),
+        "{:?}",
+        none_shown.scanned
+    );
+    let long_row = first.entries[0].key.row;
     let started = Instant::now();
     let last = ledger
         .read_history_part(project, "chief", newest, long_row, 393 * 64_000)
@@ -421,5 +447,39 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
     println!(
         "the 24 MiB item whole, {parts} parts: {:?}",
         started.elapsed()
+    );
+}
+
+#[test]
+fn a_read_through_conversations_that_show_no_item_shows_none_and_reads_none_of_their_fields() {
+    // CHF-11: 10,000 conversations of a tool's output each, left out, before the
+    // one the chief is in now. A read from the oldest item of that one shows
+    // nothing of them: it reads only each one's id, charged less than a
+    // heading's lookups and fields were (4,096 and 2,304 bytes a conversation),
+    // so it goes through more of them before its bound.
+    let dir = tempfile::tempdir().expect("a folder");
+    let (ledger, project, _) = history(&dir, 10_000, 0, 0);
+    let newest = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, None, false, 1_000_000),
+        )
+        .expect("read");
+    let oldest = newest.entries.last().expect("an item").key;
+    let read = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Before(oldest), None, false, 1_000_000),
+        )
+        .expect("read");
+    assert!(read.entries.is_empty(), "{} entries", read.entries.len());
+    assert!(read.bounded && read.resume.is_some(), "{:?}", read.scanned);
+    assert_eq!(read.scanned.fields, 0, "{:?}", read.scanned);
+    assert!(
+        read.scanned.conversations > HISTORY_SCAN_BYTES / (4_096 + 2_304),
+        "{:?}",
+        read.scanned
     );
 }

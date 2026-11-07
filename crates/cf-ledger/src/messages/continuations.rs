@@ -151,7 +151,7 @@ fn continuations_of(
 }
 
 /// Withdraws each of `ids` with `reason`, as the log says.
-fn withdraw_each(
+pub(crate) fn withdraw_each(
     store: &mut Store,
     project_id: i64,
     ids: &[i64],

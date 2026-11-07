@@ -13,10 +13,11 @@
 //!
 //! | Harness | Variables | Copied from the owner's | Watched in the owner's |
 //! |---|---|---|---|
-//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, with 2 h of token | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
+//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
 //! | Codex | `CODEX_HOME` | `auth.json` | `auth.json`, `config.toml` |
-//! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
+//! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/` |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
+//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
 //!
 //! **Muse Code** sets none of these: its windows run through the rig's own launcher
 //! ([`crate::muse::write_live_stand_in`], given by [`super::machine::rig`] to every rig that
@@ -25,17 +26,33 @@
 //! alone; so Devin's XDG folders and Muse's never meet. Its row watches the owner's
 //! `~/.config/muse` (`auth.json`, `settings.json`, `trust.json`) and the index of their
 //! sessions (T-946: the members kit's live pacing run wrote the owner's `~/.config/muse`).
+//! On Windows (T-1084) the row is the same, below the owner's profile: Muse honours
+//! `XDG_CONFIG_HOME` and `XDG_DATA_HOME` there, and its login is `auth.json` itself
+//! (`credential_backend: file`) with an access token and an API key in it and no refresh token, so
+//! the launcher's copy of it can use up nothing of the owner's (a run of `muse usage` on copies
+//! left the owner's three files as they were, and the copies worked after one another's runs).
+//!
+//! **Devin on Windows** (T-1084) has no XDG folders: it finds its config and data in
+//! `AppData\Roaming\devin` and its cache in `AppData\Local\devin` by the system's known-folder
+//! call, which ignores `APPDATA` (T-727) and expands `%USERPROFILE%` from the window's
+//! environment. The run's home holds a profile of its own with both folders made, `USERPROFILE`
+//! names it, and `APPDATA` and `LOCALAPPDATA` follow it so that the daemon, which reads Devin's
+//! sessions by `APPDATA`, looks where Devin writes. `HOME` stays the person's (Git and Git Bash
+//! read it); `~/.agents/skills` is read where the system's profile folder is, never written.
 //!
 //! Every harness says its row, or why it has none, in [`Isolation::of_machine_lasting`], with
 //! no arm for "any other": one added later is a decision, not a silence.
 //!
 //! **A login that refreshes.** A refresh token is used once, so a copy that refreshes leaves
-//! the owner's file with a token that no longer works. Pi refreshes an OAuth entry that has
-//! ended, so the run is given an entry only if it lasts the run's length and [`MARGIN`]
-//! ([`pi::login`]); one that does not is a refusal, in words, before anything is spent. Codex
-//! and Devin keep a login that a run does not outlast (Devin's is a key); what Codex rewrote
-//! is said when the run ends. At the end the copies are compared with what was copied, and
-//! the owner's files with their hashes: a difference fails the run, naming the file, and
+//! the owner's file with a token that no longer works. So Pi's copy holds the access token and no
+//! refresh token ([`pi::login`]): it cannot renew, so it cannot use up the owner's, and where the
+//! access token is about to end (less than five minutes left) Pi tries to, is refused, and the run
+//! fails loudly. The run is given an entry only if it lasts the run's length and [`MARGIN`]; one
+//! that does not is a refusal, in words, before anything is spent, except on a test machine, where
+//! Pi is first run once as the owner to renew an entry that has run short ([`super::renew`],
+//! T-1067). Codex and Devin keep a login that a run does not outlast (Devin's is a key); what
+//! Codex rewrote is said when the run ends. At the end the copies are compared with what was
+//! copied, and the owner's files with their hashes: a difference fails the run, naming the file, and
 //! nothing a login holds is said anywhere.
 //!
 //! **`HOME` stays the person's.** The windows are given the person's home all the same, and none
@@ -60,6 +77,8 @@ mod watch;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod windows;
 
 use std::fmt;
 use std::fs;
@@ -74,18 +93,28 @@ use tempfile::TempDir;
 use super::agents;
 use super::login::{private_folder, sweep, write_private};
 use super::machine::Harness;
+use super::renew::{Kept, Renewal, Renewed, TestMachine};
 use crate::process::own_var;
 use crate::rig::HarnessHome;
 use crate::{files, Error, Result};
 use watch::{shown, Seen};
 
-/// How long the longest live suite (the approval run) takes: a login must last that much
-/// and [`MARGIN`] for a live suite to start on a copy of it.
-pub const RUN: Duration = Duration::from_secs(90 * 60);
+/// What a login must last beyond the run, which a case plans the length of
+/// ([`super::Log::lasting`]). A run's copy holds no refresh token, so it can never use up the
+/// owner's ([`super::login`], [`pi`]); what is left to cover is the harness's own look at the end of
+/// the access token: Pi tries to renew an entry with less than five minutes of it left, is refused
+/// and fails the run loudly (measured on zeewin2, T-1067), and Claude Code's look is five minutes too.
+/// So a run is to end five minutes before that, with five minutes more for the end of the run (the
+/// last look, the app's close) and a case that overruns its plan a little.
+pub const MARGIN: Duration = Duration::from_secs(10 * 60);
 
-/// What a login must last beyond the run: the end of the run (the last look, the app's
-/// close) and the time the owner's own use of the harness needs to refresh it first.
-pub const MARGIN: Duration = Duration::from_secs(30 * 60);
+/// How long a login must last for a run that is planned to take `planned`, whatever the harness:
+/// the run and [`MARGIN`]. The case states `planned` ([`super::Log::lasting`]); a login that
+/// would end before that is refused when the run starts, and where it can be (a test machine)
+/// renewed first ([`super::renew`]).
+pub const fn lasting(planned: Duration) -> Duration {
+    Duration::from_secs(planned.as_secs() + MARGIN.as_secs())
+}
 
 /// What the name of a run's home begins with, in the temporary folder: the id of the process
 /// that made it follows, so that one a killed run left behind is known to be nobody's.
@@ -108,16 +137,26 @@ enum Seed {
         providers: Option<Vec<String>>,
         left: Duration,
     },
-    /// A link in `to` to each entry of the owner's folder `from` but the one named `except`:
+    /// A link in `to` to each entry of the owner's folder `from` but those named in `except`:
     /// what other programs of the rig keep in a folder the variables move (another tool's login
-    /// in `XDG_DATA_HOME`), left as it is for them. Where the folders are links' (Devin's, on Unix).
+    /// in `XDG_DATA_HOME`), left as it is for them; never a harness's of the kit's own, which
+    /// has a home of the run's (Muse's, whose sessions the daemon reads in the folder: T-1152).
+    /// Where the folders are links' (Devin's, on Unix).
     #[cfg(unix)]
     Reach {
         from: PathBuf,
         to: PathBuf,
-        except: &'static str,
+        except: &'static [&'static str],
     },
 }
+
+/// The folders the harnesses on the XDG layout keep below its config and data folders, which
+/// a home that moves those folders reaches none of: each is that harness's, the run's own or
+/// the rig's, never the owner's through a link. Devin's home reached the owner's Muse so, and
+/// a rig that seated both read the owner's Muse settings and sessions in place of the rig's
+/// Muse's (T-1081).
+#[cfg(unix)]
+const XDG_HARNESSES: [&str; 2] = ["devin", "muse"];
 
 /// What a harness's home is made of, and what is watched of the owner's.
 #[derive(Debug, Clone)]
@@ -175,10 +214,57 @@ impl Plan {
         }
     }
 
+    /// Devin on Windows (T-1084): a profile of the run's own, below its home, that the system's
+    /// known folders send Devin to. Devin ignores the XDG variables and `APPDATA` (T-727: a
+    /// throwaway `APPDATA` left it on the owner's sessions) and finds its config and data in
+    /// `AppData\Roaming\devin` and its cache in `AppData\Local\devin` by the known-folder call,
+    /// which expands `%USERPROFILE%` from the window's environment (and fails with "path not
+    /// found" where the folders below it are missing: they are made first). So `USERPROFILE`
+    /// moves it. `APPDATA` and `LOCALAPPDATA` move with it, for the daemon, which reads Devin's
+    /// sessions by `APPDATA` first (`cf_harness::devin::paths`): with the owner's passed through,
+    /// it would look in the owner's Roaming for what Devin wrote in the run's (T-1081's class).
+    /// The profile holds a copy of `credentials.toml` (an API key: there is no refresh token to
+    /// strip) and `config.json` from the owner's Roaming folder `owner_roaming`, and nothing else
+    /// of the owner's. `HOME` is not set here: Git and Git Bash read it, and it stays the person's.
+    /// (Devin reads `~/.agents/skills` by the system's profile folder, not the variable, so the
+    /// owner's skills are read there, never written.)
+    fn devin_on_windows(owner_roaming: &Path) -> Self {
+        let profile = PathBuf::from("profile");
+        let roaming = profile.join("AppData").join("Roaming");
+        let local = profile.join("AppData").join("Local");
+        let owner = owner_roaming.join("devin");
+        Self {
+            folders: vec![roaming.clone(), local.clone()],
+            vars: vec![
+                ("USERPROFILE", profile),
+                ("APPDATA", roaming.clone()),
+                ("LOCALAPPDATA", local),
+            ],
+            seeds: vec![
+                Seed::Copy {
+                    from: owner.join("credentials.toml"),
+                    to: roaming.join("devin").join("credentials.toml"),
+                    login: true,
+                },
+                Seed::Copy {
+                    from: owner.join("config.json"),
+                    to: roaming.join("devin").join("config.json"),
+                    login: false,
+                },
+            ],
+            watched: vec![
+                owner.join("credentials.toml"),
+                owner.join("config.json"),
+                owner.join("cli").join("trusted_workspaces.json"),
+            ],
+            records: Vec::new(),
+            described: owner.join("credentials.toml").display().to_string(),
+        }
+    }
+
     /// Muse Code: nothing of the run's own, for the rig's launcher gives its windows their
     /// folders; the owner's login metadata, settings and trust, and the index of their
     /// sessions, which a session of the run's would be written into, are watched.
-    #[cfg(unix)]
     fn muse(config: &Path, data: &Path) -> Self {
         let config = config.join("muse");
         Self {
@@ -199,7 +285,8 @@ impl Plan {
     /// Devin: the four folders of the XDG layout, where it keeps its login and config (and its
     /// sessions, logs and cache); the login (`credentials.toml`, an API key) and `config.json`
     /// are copied. Whatever else the owner keeps in the config and data folders is reached
-    /// through a link, for the other programs of the rig that read it there.
+    /// through a link, for the other programs of the rig that read it there, but the folders
+    /// of the harnesses on the XDG layout ([`XDG_HARNESSES`]).
     #[cfg(unix)]
     fn devin(config: &Path, data: &Path) -> Self {
         Self {
@@ -226,12 +313,12 @@ impl Plan {
                 Seed::Reach {
                     from: config.to_path_buf(),
                     to: "config".into(),
-                    except: "devin",
+                    except: &XDG_HARNESSES,
                 },
                 Seed::Reach {
                     from: data.to_path_buf(),
                     to: "data".into(),
-                    except: "devin",
+                    except: &XDG_HARNESSES,
                 },
             ],
             watched: vec![
@@ -252,7 +339,6 @@ impl Plan {
 }
 
 /// The owner's folder `variable` names, or `below` in their `home` where it names none.
-#[cfg(unix)]
 fn xdg(home: &Path, variable: &str, below: &[&str]) -> PathBuf {
     own_var(variable)
         .filter(|value| !value.is_empty())
@@ -311,21 +397,32 @@ pub struct Isolation {
     plan: Plan,
     /// Where the home is made.
     parent: PathBuf,
+    /// Pi run once as the owner to renew an entry that has run short: only on a test machine
+    /// ([`TestMachine::detect`]); none elsewhere, where such an entry is refused.
+    renewal: Option<Renewal>,
+    /// What the renewals made before the home came to, for the run's report.
+    renewed: Mutex<Vec<Renewed>>,
     made: Mutex<Option<Made>>,
 }
 
 impl Isolation {
-    /// The home of `harness` for a live suite ([`RUN`]), copying the login of the owner whose
+    /// The home of `harness` for a run that takes `run` (a live case states its planned length,
+    /// [`super::Log::lasting`], and an eval its own), copying the login of the owner whose
     /// home is `home` (Codex's: its own folder, `CODEX_HOME`); none for Claude Code, whose config
-    /// folder is [`super::login`]'s, and where the platform's layout
-    /// is not known (Devin's on Windows).
-    pub fn of_machine(harness: Harness, home: &Path) -> Result<Option<Self>> {
-        Self::of_machine_lasting(harness, home, RUN)
+    /// folder is [`super::login`]'s, and where the platform's layout is not known (Devin's on
+    /// Windows). A login that would end before the run and [`MARGIN`] is refused when the home is made.
+    pub fn of_machine_lasting(
+        harness: Harness,
+        home: &Path,
+        run: Duration,
+    ) -> Result<Option<Self>> {
+        Self::of_machine_on(TestMachine::detect(), harness, home, run)
     }
 
-    /// [`Isolation::of_machine`], for a run that takes `run` (an eval states its own length): a
-    /// login that would end before it and [`MARGIN`] is refused when the home is made.
-    pub fn of_machine_lasting(
+    /// [`Isolation::of_machine_lasting`] on `test_machine`, the test machine this run is on, if it
+    /// is on one: only there is a Pi login that has run short renewed.
+    fn of_machine_on(
+        test_machine: Option<TestMachine>,
         harness: Harness,
         home: &Path,
         run: Duration,
@@ -340,7 +437,13 @@ impl Isolation {
                 let agent = machine("PI_CODING_AGENT_DIR")
                     .map_or_else(|| home.join(".pi").join("agent"), PathBuf::from);
                 let model = agents::asked()?.of(Harness::Pi).name.clone();
-                Some(Self::pi(home, &agent, &model, run))
+                let mut pi = Self::pi(home, &agent, &model, run);
+                pi.renewal = test_machine.map(|machine| {
+                    pi::renewal(machine, home, &agent, &model, || {
+                        super::machine::command(Harness::Pi.name())
+                    })
+                });
+                Some(pi)
             }
             #[cfg(unix)]
             Harness::Devin => Some(Self::devin(
@@ -348,19 +451,26 @@ impl Isolation {
                 &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
                 &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),
-            #[cfg(unix)]
+            // Muse honours `XDG_CONFIG_HOME` and `XDG_DATA_HOME` on Windows too, and keeps its
+            // login in `auth.json` there: the same row, below the owner's profile (T-1084).
             Harness::Muse => Some(Self::muse(
                 home,
                 &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
                 &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),
+            // Devin on Windows keeps its folders where the system's known folders put them,
+            // below the profile (T-1084): the owner's Roaming folder is `APPDATA`, else below
+            // the profile.
+            #[cfg(not(unix))]
+            Harness::Devin => {
+                let roaming = machine("APPDATA")
+                    .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from);
+                Some(Self::devin_on_windows(home, &roaming))
+            }
             // Every harness says its home here, so that one added later is a decision and
             // not a silence (T-946: Muse came after T-724's list and ran on the owner's):
-            // Claude Code's config folder is the kit's copy of its login (`super::login`);
-            // Devin's and Muse's folders on Windows are not known.
+            // Claude Code's config folder is the kit's copy of its login (`super::login`).
             Harness::Claude => None,
-            #[cfg(not(unix))]
-            Harness::Devin | Harness::Muse => None,
         })
     }
 
@@ -369,7 +479,6 @@ impl Isolation {
     /// [`super::machine::rig`]), so this home holds nothing and sets nothing; it watches the
     /// owner's Muse files in `config` and `data` (the XDG folders of the owner whose home is
     /// `home`), and fails a run that changed them.
-    #[cfg(unix)]
     pub fn muse(home: &Path, config: &Path, data: &Path) -> Self {
         Self::new(Harness::Muse, home, Plan::muse(config, data))
     }
@@ -384,7 +493,7 @@ impl Isolation {
     /// the Pi model `model` needs, if it lasts a run of `run` and [`MARGIN`].
     pub fn pi(home: &Path, agent: &Path, model: &str, run: Duration) -> Self {
         let providers = pi::provider_of(model).map(|provider| vec![provider]);
-        Self::new(Harness::Pi, home, Plan::pi(agent, providers, run + MARGIN))
+        Self::new(Harness::Pi, home, Plan::pi(agent, providers, lasting(run)))
     }
 
     /// Devin's home, copying the login in the owner's data folder `data` and the config in `config`
@@ -394,12 +503,20 @@ impl Isolation {
         Self::new(Harness::Devin, home, Plan::devin(config, data))
     }
 
+    /// Devin's home on Windows, copying the login in the owner's Roaming folder `roaming` (the
+    /// owner whose profile is `home`).
+    pub fn devin_on_windows(home: &Path, roaming: &Path) -> Self {
+        Self::new(Harness::Devin, home, Plan::devin_on_windows(roaming))
+    }
+
     fn new(harness: Harness, owner_home: &Path, plan: Plan) -> Self {
         Self {
             harness,
             owner_home: owner_home.to_path_buf(),
             plan,
             parent: std::env::temp_dir(),
+            renewal: None,
+            renewed: Mutex::new(Vec::new()),
             made: Mutex::new(None),
         }
     }
@@ -490,13 +607,7 @@ impl Isolation {
                         self.harness.log_in()
                     ))
                 })?;
-                let entries = pi::login(
-                    &text,
-                    providers.as_deref(),
-                    now,
-                    *left,
-                    &shown(from, &self.owner_home),
-                )?;
+                let entries = self.pi_entries(from, providers.as_deref(), &text, now, *left)?;
                 Ok(Some(Placed::File {
                     to: to.clone(),
                     bytes: entries.to_string().into_bytes(),
@@ -510,6 +621,62 @@ impl Isolation {
                 except,
             })),
         }
+    }
+
+    /// The entries of the owner's `auth.json` (`text`, read from `from`) that a run of Pi is
+    /// given, as [`pi::login`] has them: with the entry of the one provider the run needs renewed
+    /// first, once, where it has run short on a test machine. Why the run is refused, with the
+    /// renewal's part in it said, where it is.
+    fn pi_entries(
+        &self,
+        from: &Path,
+        providers: Option<&[String]>,
+        text: &str,
+        now: i64,
+        left: Duration,
+    ) -> Result<Value> {
+        let shown = shown(from, &self.owner_home);
+        let refused = match pi::login(text, providers, now, left, &shown) {
+            Ok(entries) => return Ok(entries),
+            Err(refused) => refused,
+        };
+        let provider = match providers {
+            Some([provider]) => provider,
+            _ => return Err(refused),
+        };
+        let Some(renewal) = self
+            .renewal
+            .as_ref()
+            .filter(|_| pi::renewable(text, provider, now, left))
+        else {
+            return Err(refused);
+        };
+        let kept = Kept {
+            file: shown.clone(),
+            login: format!("Pi's `{provider}` login"),
+            read: &|| {
+                files::read_string(from).map_err(|failed| {
+                    Error::Daemon(format!("Pi's login in {shown} is gone ({failed})"))
+                })
+            },
+            expiry: &|text| pi::expiry(text, provider),
+        };
+        let (fresh, renewed) = renewal
+            .renew(&kept, text)
+            .map_err(|why| Error::Daemon(format!("{refused}. {why}")))?;
+        // What the renewal did is said as it is done, for a run that does not get so far.
+        let _ = writeln!(
+            std::io::stderr(),
+            "note: {}",
+            renewed.said(renewal.machine())
+        );
+        let entries = pi::login(&fresh, providers, now, left, &shown)
+            .map_err(|still| Error::Daemon(format!("{still}. {}", renewal.ended(&renewed, now))));
+        self.renewed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(renewed);
+        entries
     }
 
     /// The file `name` below the folder the variable `variable` names (`CODEX_HOME`,
@@ -585,7 +752,7 @@ enum Placed {
     Links {
         from: PathBuf,
         to: PathBuf,
-        except: &'static str,
+        except: &'static [&'static str],
     },
 }
 
@@ -622,15 +789,15 @@ fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
     }
 }
 
-/// A link in `into` to each entry of `from` but `except`: the program that reads the folder
-/// where the variables moved it finds what it had.
+/// A link in `into` to each entry of `from` but those named in `except`: the program that
+/// reads the folder where the variables moved it finds what it had.
 #[cfg(unix)]
-fn link_each(from: &Path, into: &Path, except: &str) -> Result {
+fn link_each(from: &Path, into: &Path, except: &[&str]) -> Result {
     let Ok(entries) = fs::read_dir(from) else {
         return Ok(());
     };
     for entry in entries.flatten() {
-        if entry.file_name() == except {
+        if except.iter().any(|name| entry.file_name() == *name) {
             continue;
         }
         let link = into.join(entry.file_name());
@@ -679,6 +846,16 @@ impl HarnessHome for Isolation {
     }
 
     fn finish(&self) -> Result {
+        if let Some(renewal) = &self.renewal {
+            for renewed in self
+                .renewed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+            {
+                let _ = writeln!(std::io::stderr(), "{}", renewed.said(renewal.machine()));
+            }
+        }
         let (touched, refreshed) = self.findings();
         if touched.is_empty() && refreshed.is_empty() {
             if let Some(evidence) = self.evidence() {
@@ -720,9 +897,19 @@ fn said(harness: Harness, touched: &[String], refreshed: &[String]) -> String {
         }
     }
     if !refreshed.is_empty() {
+        // Pi is given its login without the refresh token: it cannot have used up the owner's.
+        let hazard = if harness == Harness::Pi {
+            "The copy holds no refresh token, so it cannot have used up the one the owner's file keeps \
+             (that file is checked above), but it was given a login and wrote another"
+                .to_owned()
+        } else {
+            format!(
+                "A refresh token is used once, so the login this machine keeps may now be stale, and {name} \
+                 may ask the owner to log in again"
+            )
+        };
         said.push_str(&format!(
-            "THE RUN'S {} WROTE ITS COPY OF THE LOGIN AGAIN. A refresh token is used once, so the login \
-             this machine keeps may now be stale, and {name} may ask the owner to log in again:\n",
+            "THE RUN'S {} WROTE ITS COPY OF THE LOGIN AGAIN. {hazard}:\n",
             name.to_uppercase()
         ));
         for change in refreshed {

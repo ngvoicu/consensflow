@@ -660,6 +660,18 @@ find = "      if (entry.card.dataset.drop === 'true') {"
 replace = "      if (entry.card.dataset.drop === 'never') {"
 
 [[plant]]
+name = "file drop: a card drawn over the place a window ended under the file takes a drop there"
+meant = "types nothing where a window ended under the file, and says so; nothing where none did"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''    const box = this.#gone?.box
+    if (box && x >= box.left && x < box.right && y >= box.top && y < box.bottom) return null
+    return document.elementFromPoint(x, y)?.closest('.terminal-card') ?? null'''
+replace = '''    return document.elementFromPoint(x, y)?.closest('.terminal-card') ?? null'''
+
+[[plant]]
 name = "file drop: a drop anywhere, once a window ended under the file, is said to have been on it"
 meant = "types nothing where a window ended under the file, and says so; nothing where none did"
 runs = ["page-drop"]

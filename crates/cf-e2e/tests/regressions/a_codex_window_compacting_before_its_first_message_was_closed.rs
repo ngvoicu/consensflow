@@ -22,7 +22,6 @@
 //! window's first message. The daemon is given 15 s for a first message, and the
 //! compaction takes 30.
 
-use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::rollout;
 use serde_json::{json, Value};
@@ -45,7 +44,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// The worker's windows the daemon asked for, in order.
@@ -96,9 +95,12 @@ fn a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_d
         Ok(project.lane(&assignee)?["activity"]["state"] == "closed")
     })?;
 
-    // T-2, a follow-up for the same window, opens it again on its thread with T-2 as its
+    // T-2, a follow-up for the same window (T-1 is accepted first: a follow-up of a task
+    // with its result in waits for that), opens it again on its thread with T-2 as its
     // first message, and the thread compacts for twice the time the daemon gives a first
     // message before it takes it.
+    let ran = rig.cf_in_window(&chief, ["task", "accept", "T-1"])?;
+    assert_eq!(ran.code, Some(0), "{ran}");
     let ran = rig.cf_in_window(
         &chief,
         [

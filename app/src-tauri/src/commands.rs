@@ -1,6 +1,6 @@
 //! What the board page may ask of the app: the daemon's operations it forwards,
 //! its panes' input, size and acknowledgements, its output subscription, and
-//! the address of the agents screens.
+//! the address of the daemon's harnesses screen.
 
 use std::sync::Arc;
 
@@ -108,7 +108,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
         id,
         generation,
         sequence,
-        InputWork::Write(bytes),
+        InputWork::Reply(bytes),
         false,
     )
 }
@@ -235,7 +235,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "message.read",
     "message.approve",
     "message.decline",
-    "agents.list",
+    "harnesses.missing",
     "staff.last",
     "wakeup.get",
     "wakeup.set",
@@ -255,6 +255,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "project.meeting",
     "project.rules",
     "project.compaction",
+    "models.get",
+    "member.edit",
 ];
 
 #[tauri::command]
@@ -329,8 +331,8 @@ pub async fn subscribe_output<R: Runtime>(
     .await
 }
 
-/// The address of one agents screen (the agents, the harnesses): the
-/// daemon's page with the UI token, which the board's page frames in a
+/// The address of the daemon's screen (the harnesses; the saved agents' screen is no
+/// more): the daemon's page with the UI token, which the board's page frames in a
 /// dialog of its own.
 #[tauri::command]
 pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value {
@@ -339,7 +341,7 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
     // Off the async runtime: asked while the daemon is starting, it waits.
     run_blocking("agents_screen", move || {
         let Some(roster) = daemon.roster() else {
-            return json!({"ok":false,"error":"the agents screens are not available: the daemon is not up"});
+            return json!({"ok":false,"error":"the harnesses screen is not available: the daemon is not up"});
         };
         match agents_url(&roster, &page) {
             Ok(url) => json!({"ok":true,"url":url.as_str()}),
@@ -351,9 +353,9 @@ pub async fn agents_screen<R: Runtime>(app: AppHandle<R>, page: String) -> Value
     .await
 }
 
-const AGENTS_PAGES: &[&str] = &["", "harnesses"];
+const AGENTS_PAGES: &[&str] = &["harnesses"];
 
-/// The daemon's page for one agents screen, carrying the UI token.
+/// The daemon's page for its screen (the harnesses), carrying the UI token.
 fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
     if !AGENTS_PAGES.contains(&page) {
         return Err(format!("no agents screen {page:?}"));
@@ -434,9 +436,9 @@ mod tests {
             "token":"secret",
         }))
         .unwrap();
-        assert_eq!(
-            agents_url(&roster, "").unwrap().as_str(),
-            "http://localhost:43123/?token=secret"
+        assert!(
+            agents_url(&roster, "").is_err(),
+            "no screen of saved agents"
         );
         assert_eq!(
             agents_url(&roster, "harnesses").unwrap().as_str(),
@@ -716,6 +718,130 @@ mod tests {
             .map(|byte| u8::from_str_radix(std::str::from_utf8(byte).unwrap(), 16).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(actual, b"KC");
+
+        drop(webview);
+        drop(app);
+    }
+
+    /// The page's terminal answers what the program asked of it (where its cursor is) past
+    /// the human's keys held after their paste (T-1048): Codex on Windows asks as a paste comes
+    /// and reads none of it until it has the answer, and the page's answer waited behind the
+    /// human's held Enter. Here the program records what it reads: the answer, sent once the
+    /// paste and its Enter were admitted, comes back at once and is read before the Enter.
+    #[cfg(unix)]
+    #[test]
+    fn the_pages_reply_goes_past_the_humans_keys_held_after_their_paste() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("replied-command", 1);
+        let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "/bin/stty raw -echo; printf ready; /usr/bin/od -An -tx1 -N {}",
+                        paste.len() + 2
+                    ),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the replied pane");
+        // Held until the window draws the paste, which the recorder never does: at the most.
+        let silent = cf_proto::panes::SilentPaste {
+            pace_us_per_character: 0,
+            drawn_after_ms: 0,
+            quiet_ms: 100,
+            most_ms: 1_500,
+            most_us_per_character: 0,
+        };
+        arbiter
+            .register_with(&key, Some(silent))
+            .expect("register the replied pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader
+            .read_exact(&mut ready)
+            .expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+
+        let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![
+                pane_input_enqueue,
+                pane_reply_enqueue,
+                pane_input_wait
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().expect("invoke URL"),
+                    body: tauri::ipc::InvokeBody::Json(args),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .expect("command succeeds")
+            .deserialize::<Value>()
+            .expect("command response JSON")
+        };
+
+        let pasted = [paste, b"\r"].concat();
+        let typed = invoke(
+            "pane_input_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":1,"bytes":pasted}),
+        );
+        assert_eq!(typed["ok"], true, "{typed}");
+        thread::sleep(Duration::from_millis(200));
+        let replied = invoke(
+            "pane_reply_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":2,"bytes":[82]}),
+        );
+        assert_eq!(replied["ok"], true, "{replied}");
+        let asked = std::time::Instant::now();
+        let answered = invoke("pane_input_wait", json!({"ticket":replied["ticket"]}));
+        assert_eq!(answered["ok"], true, "{answered}");
+        assert!(
+            asked.elapsed() < Duration::from_millis(1_000),
+            "{:?}: the page's answer waited behind the human's held Enter",
+            asked.elapsed()
+        );
+        let sent = invoke("pane_input_wait", json!({"ticket":typed["ticket"]}));
+        assert_eq!(sent["ok"], true, "{sent}");
+        let mut output = Vec::new();
+        reader
+            .read_to_end(&mut output)
+            .expect("read the replied bytes");
+        let actual = output
+            .split(|byte| byte.is_ascii_whitespace())
+            .filter(|field| !field.is_empty())
+            .map(|byte| u8::from_str_radix(std::str::from_utf8(byte).unwrap(), 16).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            actual.ends_with(b"R\r"),
+            "the answer came after the Enter: {actual:?}"
+        );
 
         drop(webview);
         drop(app);

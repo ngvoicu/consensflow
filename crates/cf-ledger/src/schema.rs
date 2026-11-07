@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 26] = [
+pub const MIGRATIONS: [&str; 34] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -39,6 +39,14 @@ pub const MIGRATIONS: [&str; 26] = [
     include_str!("../migrations/0024.sql"),
     include_str!("../migrations/0025.sql"),
     include_str!("../migrations/0026.sql"),
+    include_str!("../migrations/0027.sql"),
+    include_str!("../migrations/0028.sql"),
+    include_str!("../migrations/0029.sql"),
+    include_str!("../migrations/0030.sql"),
+    include_str!("../migrations/0031.sql"),
+    include_str!("../migrations/0032.sql"),
+    include_str!("../migrations/0033.sql"),
+    include_str!("../migrations/0034.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -114,13 +122,22 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
 /// own functions would read it once a part; and brings within their ceilings
 /// the native sessions, harnesses, agents and times an older build wrote past
 /// them, measured in bytes and cut at a character, which SQL's `length()` and
-/// `substr()` count only to a NUL.
+/// `substr()` count only to a NUL. 0031 names every member of a ready-made agent by its
+/// model, which needs a handle made of words SQL cannot make ([`crate::handles`]); 0033
+/// names every member with a model by the model's id.
 fn after(db: &Connection, version: usize) -> Result<(), LedgerError> {
     if version == 20 {
         crate::conversations::head_copied(db)?;
         crate::conversations::split_copied(db)?;
         crate::conversations::cut_sessions(db)?;
         crate::conversations::fields_within(db)?;
+    }
+    if version == 31 {
+        crate::saved_agents::import_saved_agents(db)?;
+        crate::handles::name_members_by_model(db)?;
+    }
+    if version == 33 {
+        crate::handles::name_members_by_id(db)?;
     }
     Ok(())
 }
@@ -137,7 +154,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 26] = [
+        const SHIPPED: [&str; 34] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -164,6 +181,14 @@ mod tests {
             "a1f2833e8d267ce1c97290edde8f5ece4f1083bc67309ef28f2263b7d0ee97ab",
             "3109382f4105ca282475cd2c61959b6dbc2409a63e35fdf97f4787c06127572c",
             "0332445c37a381d105d9f3d4563476039f68122bb59721e47388df545b4d5ad1",
+            "40c33635e8d295fd3e4627945039d738fec8f388cee41a4586ff4f7db1eb4e8e",
+            "31301910ef2d690f1a505af6b238fce655119196717215c4eb648ec60f2f3b67",
+            "62b85e52ff13bb47d900b48629ca79be159622665d66e2a1a0931e8c7e0f87a9",
+            "2a187d9caae6a081baac4f401cd45c976f1ec2b015c249b2f3df83d6a1462cad",
+            "63a67f0a6c3a32d0899abe87eb09c3417e732b063ac2be4fcc64e28dc82aefcc",
+            "e2f198e8ebb4711a7b9ab5191caf31af81e396a5ab0239612d5c259a0e67d96f",
+            "ebe5513f98819c8e3ae9d12c0a7fdf6c6d7a8663cb8e4a7a2d84ba11099f5acf",
+            "8d9ec8a1c0f6ce15f70d6feb72d39de99b76fd247c0170bf5aa0af3616b57143",
         ];
         // A migration added with no hash would pass by the zip below unpinned.
         assert_eq!(

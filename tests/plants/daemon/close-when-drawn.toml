@@ -2,8 +2,9 @@
 # drawn (T-1051, from T-1038's decision 2). Devin 3000.11.228's agent ends its turn some
 # seconds before its screen has typed the answer out; the engine closed the window as it took
 # the result, and whoever watched saw it go mid-typing, frozen on "Typing". Now the result is
-# taken and delivered at once as ever, and only the close waits: until the pane has printed
-# nothing for `DRAWN_QUIET_MS` (1.5 s, the rest that draws a fresh window), or for
+# taken and delivered at once as ever, and only the close waits: until what the pane's screen
+# shows has held still for `DRAWN_QUIET_MS` (1.5 s, the rest that draws a fresh window; since
+# T-1083 the screen's clock, not the output's), or for
 # `STILL_BOUND_MS` (10 s) from the look that found the window free. The engine's tests are
 # `crates/cf-engine/tests/dispatcher/close_when_drawn.rs`; the look at the pane is
 # `EngineHost::quiet`, whose daemon end is tested in `crates/cf-daemon/src/host/tests.rs`.
@@ -20,7 +21,7 @@
 # - the next task of the session waits for the same screen, its requester told nothing;
 # - a task in hand again, and a window that closed (one the human shows again, and hides),
 #   end the wait: the next one is its own;
-# - the daemon's host reads `outputQuietMs` from the snapshot, none for a pane that printed
+# - the daemon's host reads `screenQuietMs` from the snapshot, none for a pane that showed
 #   nothing or an answer that does not say.
 #
 # Every name holds `close when drawn`, so `cargo xtask plants daemon "close when drawn"` runs
@@ -161,10 +162,10 @@ replace = "            let _ = &window;"
 
 [[plant]]
 name = "close when drawn: the daemon's host reads another field for the quiet"
-meant = "how_long_a_pane_has_printed_nothing_is_what_its_snapshot_says_and_none_where_it_says_nothing"
+meant = "how_long_a_panes_screen_has_held_still_is_what_its_snapshot_says_and_none_where_it_says_nothing"
 runs = ["cwd-daemon-host"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/host.rs"
-find = '    answer.get("outputQuietMs").and_then(Value::as_f64)'
-replace = '    answer.get("outputQuiet").and_then(Value::as_f64)'
+find = '    answer.get(SCREEN_QUIET_MS).and_then(Value::as_f64)'
+replace = '    answer.get("screenQuiet").and_then(Value::as_f64)'

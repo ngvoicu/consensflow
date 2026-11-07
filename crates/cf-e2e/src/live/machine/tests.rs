@@ -291,11 +291,15 @@ fn every_harness_found_runs_on_a_home_of_the_runs_own_but_for_the_two_that_are_n
         isolated.push(Harness::Devin);
     }
     for harness in isolated {
-        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me")).unwrap();
+        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me"), PLANNED).unwrap();
         assert!(found.isolation().is_some(), "{harness:?}");
     }
     // Claude Code's is a config folder ([`Login`]).
-    let found = with_homes(Installed::at(Harness::Claude, "/opt/bin/h", "/home/me")).unwrap();
+    let found = with_homes(
+        Installed::at(Harness::Claude, "/opt/bin/h", "/home/me"),
+        PLANNED,
+    )
+    .unwrap();
     assert!(found.isolation().is_none());
 }
 
@@ -756,4 +760,17 @@ fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_pers
     assert!(home.join("auth.json").is_file(), "{}", home.display());
     let bare = Installed::at(Harness::Codex, "codex", &theirs);
     assert!(bare.home_outside_a_rig().is_err());
+}
+
+/// On Windows the rig's Muse is the stand-in program cargo builds beside the tests, one folder
+/// above the test program's own (T-1084).
+#[test]
+fn the_rig_s_muse_on_windows_is_the_stand_in_cargo_built_beside_the_tests() {
+    let exe = std::env::consts::EXE_SUFFIX;
+    let test =
+        Path::new("/t/target/debug/deps").join(format!("live_paste_enter-4234f6de7b1954fd{exe}"));
+    assert_eq!(
+        muse_stand_in_beside(&test),
+        Path::new("/t/target/debug").join(format!("muse-stand-in{exe}"))
+    );
 }

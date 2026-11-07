@@ -138,7 +138,7 @@ fn words_that_never_reach_the_window_fail_the_task_and_the_answer_to_the_brief_i
     );
     assert!(
         tiers.notes("chief").contains(&format!(
-            "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\"\n\nIts words, m-{told}, not delivered, so that you can send them again:\n\nUse the v2 grammar"
+            "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, m-{told}, not delivered, so that you can send them again:\n\nUse the v2 grammar"
         )),
         "{:?}",
         tiers.notes("chief")
@@ -398,7 +398,7 @@ fn an_answer_that_leaves_work_running_while_told_words_wait_is_no_hold_and_its_r
         !tiers
             .notes("chief")
             .iter()
-            .any(|note| note.contains("goes on in the background")),
+            .any(|note| note.contains("is still working in the background")),
         "{:?}",
         tiers.notes("chief")
     );
@@ -561,7 +561,7 @@ fn words_still_on_their_way_when_the_harness_fails_the_task_wait_for_its_reopen(
     assert_eq!(context.message(told).state, "queued");
     assert_eq!(
         tiers.notes("chief"),
-        [format!("T-1 failed: @{session}'s harness reported a failure; it said: \"The model is busy, try another.\"; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\"")]
+        [format!("T-1 failed: @{session}'s harness reported a failure; it said: \"The model is busy, try another.\"; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"")]
     );
 }
 
@@ -595,7 +595,7 @@ fn words_that_never_reach_the_window_are_told_to_whoever_told_them_as_to_the_req
     assert_eq!(context.message(told).state, "failed");
     assert_eq!(context.task(project.id, 1).task.state, "failed");
     let said = format!(
-        "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\""
+        "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
     );
     // The chief told them: its note has them back, word for word.
     let words = format!(
@@ -641,7 +641,7 @@ fn words_told_before_a_window_that_never_comes_up_are_said_to_wait_for_the_reope
     assert_eq!(
         failed,
         [format!(
-            "T-1 failed: the window could not take its first message: Devin never said which session it opened; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: the window could not take its first message: Devin never said which session it opened; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )]
     );
 }
@@ -693,7 +693,7 @@ fn the_teller_of_words_that_never_reach_the_window_hears_which_of_its_own_wait_f
     }
     let failed = |waiting: &str| {
         format!(
-            "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test); the words told its window wait for the reopen: {waiting}. Reopen it with: cf task reopen T-1 \"…\""
+            "T-1 failed: what @chief told its window, m-{told}, did not reach it (refused by the test); the words told its window wait for the reopen: {waiting}. Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )
     };
     // The chief told the words that failed: its note has them back, word for word.

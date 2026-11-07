@@ -2,8 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskMoved, TaskReleased, TaskThread,
-    TaskView,
+    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskEdit, TaskEdited, TaskMoved,
+    TaskReleased, TaskRetiered, TaskThread, TaskView,
 };
 
 impl Ledger {
@@ -26,6 +26,17 @@ impl Ledger {
         tasks::assign_task(&mut self.store, project_id, number, participant_id)
     }
 
+    /// An open task for a tier nobody on the staff holds any more goes to the nearest
+    /// one somebody does: which tier it was for, which it is for, and who holds it;
+    /// none when it stays as it is.
+    pub fn retier_open_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<Option<TaskRetiered>, LedgerError> {
+        tasks::retier_open_task(&mut self.store, project_id, number)
+    }
+
     /// A task given by tier goes back to the board for another member of that tier.
     pub fn release_task(
         &mut self,
@@ -34,6 +45,22 @@ impl Ledger {
         because: &str,
     ) -> Result<TaskReleased, LedgerError> {
         tasks::release_task(&mut self.store, project_id, number, because)
+    }
+
+    /// The engine holds a queued follow-up that cannot go on in the conversation of the task it
+    /// follows: paused, with the mark that it was held for this.
+    pub fn hold_for_context(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::hold_for_context(&mut self.store, project_id, number, because)
+    }
+
+    /// Whether T-`number` was held once for the conversation it could not go on in.
+    pub fn held_for_context(&self, project_id: i64, number: i64) -> Result<bool, LedgerError> {
+        tasks::held_for_context(&self.store, project_id, number)
     }
 
     /// Whether a task may go back to the board for its tier, without moving it; says why not.
@@ -52,14 +79,22 @@ impl Ledger {
     }
 
     /// The chief or the human takes what the worker said last as the task's result: of a
-    /// task at work, or of a paused one.
+    /// task at work, or of a paused one. `left` is how many background jobs and agents its
+    /// window was counted running ([`Ledger::left_running`]).
     pub fn record_finished(
         &mut self,
         project_id: i64,
         number: i64,
         body: &str,
+        left: (usize, usize),
     ) -> Result<TaskMoved, LedgerError> {
-        tasks::record_finished(&mut self.store, project_id, number, body)
+        tasks::record_finished(&mut self.store, project_id, number, body, left)
+    }
+
+    /// The jobs and agents the window of a task finished by the chief or the human was counted
+    /// running then, which the close after its accept ends: `(0, 0)` for any other result.
+    pub fn left_running(&self, project_id: i64, number: i64) -> Result<(i64, i64), LedgerError> {
+        tasks::left_running(&self.store, project_id, number)
     }
 
     /// A coordinator accepts a task's result.
@@ -70,6 +105,17 @@ impl Ledger {
         by: &str,
     ) -> Result<TaskView, LedgerError> {
         tasks::accept_task(&mut self.store, project_id, number, by)
+    }
+
+    /// A coordinator accepts a failed task on `checked`, the words of what they checked.
+    pub fn accept_failed_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        checked: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::accept_failed_task(&mut self.store, project_id, number, by, checked)
     }
 
     /// A worker's task stops without ending; `by` none when ConsensFlow pauses it.
@@ -83,6 +129,40 @@ impl Ledger {
         #[cfg(feature = "test-support")]
         self.watched("pause_task", Some(number))?;
         tasks::pause_task(&mut self.store, project_id, number, by, because)
+    }
+
+    /// ConsensFlow relaunches the window of T-`number` that began no turn on message
+    /// `message_id`, stopped by its own stop `seq`: that message goes back to the window's
+    /// keeping and the task is queued for it, or nothing moves where anything of the stall
+    /// changed (`not-relaunched`).
+    pub fn relaunch_stalled(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        participant_id: i64,
+        message_id: i64,
+        seq: i64,
+        item: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::relaunch_stalled(
+            &mut self.store,
+            project_id,
+            number,
+            participant_id,
+            message_id,
+            seq,
+            item,
+        )
+    }
+
+    /// Whether T-`number` was relaunched in its window: a message of it reached that window.
+    pub fn task_relaunched(&self, project_id: i64, number: i64) -> Result<bool, LedgerError> {
+        tasks::task_relaunched(&self.store, project_id, number)
+    }
+
+    /// Whether message `message_id` was relaunched once already.
+    pub fn was_relaunched(&self, project_id: i64, message_id: i64) -> Result<bool, LedgerError> {
+        tasks::was_relaunched(&self.store, project_id, message_id)
     }
 
     /// ConsensFlow pauses a worker's task whose window it closed itself; in a
@@ -200,6 +280,53 @@ impl Ledger {
         tasks::go_on_in_window(&mut self.store, project_id, number)
     }
 
+    /// A resumed task whose window is at work on it reads working, its resume's words
+    /// still queued for the window's rest. Refused for any other task.
+    pub fn work_while_resumed(
+        &mut self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::work_while_resumed(&mut self.store, project_id, number)
+    }
+
+    /// A task that read working for the words that resumed it ([`Ledger::work_while_resumed`])
+    /// reads queued again, `why` (its window rested, or went) and they have not gone in.
+    /// Refused for any other.
+    pub fn rest_while_resumed(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        why: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::rest_while_resumed(&mut self.store, project_id, number, why)
+    }
+
+    /// The words that resumed the task, where they are queued or held for the human and the
+    /// task is queued, working or waiting: what is told its window meanwhile goes in with
+    /// them. None once they are being pasted or in.
+    pub fn resume_words_not_in(
+        &self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<Option<i64>, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        tasks::resume_words_not_in(&self.store, &task)
+    }
+
+    /// The words that resumed the task of a participant's window, if they are on their way
+    /// to it still (queued, held for the human or being pasted): their message. None for a
+    /// task that was not resumed by words, or whose window has them. The daemon's own bare
+    /// words, which a window that goes on by itself withdraws, are none.
+    pub fn resume_words_waiting(
+        &self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<Option<i64>, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        Ok(tasks::resume_words(&self.store, &task)?.map(|(message, _)| message))
+    }
+
     /// A task the daemon resumed went on: its window got a turn through after
     /// the words that resumed it. Its requester, told it waits, is told once
     /// that it goes on.
@@ -230,6 +357,28 @@ impl Ledger {
         body: &str,
     ) -> Result<TaskView, LedgerError> {
         tasks::edit_task(&mut self.store, project_id, number, by, body)
+    }
+
+    /// The brief, the tier, or both, of a task not yet given to a window, in one step.
+    pub fn edit_task_with(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        edit: &TaskEdit,
+    ) -> Result<TaskEdited, LedgerError> {
+        tasks::edit_task_with(&mut self.store, project_id, number, by, edit)
+    }
+
+    /// The title of a task in any state is `title`; the old one stays in the log.
+    pub fn retitle_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: &str,
+        title: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::retitle_task(&mut self.store, project_id, number, by, title)
     }
 
     /// `from` tells an open task `words`, which no window has yet: they are added
@@ -273,7 +422,46 @@ impl Ledger {
         number: i64,
         reason: &str,
     ) -> Result<TaskView, LedgerError> {
-        tasks::give_up_task(&mut self.store, project_id, number, reason)
+        tasks::give_up_task(&mut self.store, project_id, number, reason, "")
+    }
+
+    /// [`Ledger::give_up_task`] of a task whose failure said what `cause` says (what the
+    /// engine tells one outage from the next by: a hash of it, never the words or the screen,
+    /// which the ledger and its log do not keep): its requester is told in one note of the
+    /// windows that failed alike while it has still to be given the first.
+    pub fn give_up_task_for_cause(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        reason: &str,
+        cause: &str,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::give_up_task(&mut self.store, project_id, number, reason, cause)
+    }
+
+    /// What the note that tells `requester` that task `number` failed adds of the tasks it asked
+    /// for that wait for it: a sentence led by a space, none where nothing of theirs waits. The
+    /// engine writes that note when a delivery that did not arrive failed the task, and the
+    /// failure comes first in it, as in the ledger's own (`give_up_task`).
+    pub fn waiting_for_it(
+        &self,
+        project_id: i64,
+        number: i64,
+        requester: &str,
+    ) -> Result<String, LedgerError> {
+        tasks::waiting_for_it_of(&self.store, project_id, number, requester)
+    }
+
+    /// The requesters of the tasks that wait for the failed task `number`, but `named`, whose
+    /// note of the failure names its own ([`Ledger::waiting_for_it`]), are told that they wait
+    /// for a failed task: the engine says it last, after the words of the failure.
+    pub fn tell_waiting_for_failed(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        named: &str,
+    ) -> Result<(), LedgerError> {
+        tasks::tell_waiting_for_failed(&mut self.store, project_id, number, named)
     }
 
     /// The human takes finished tasks off the board for good, all or none.

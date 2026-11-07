@@ -4,7 +4,9 @@
 //! clock (`looks`), and the files the extension writes beside the session
 //! (`evidence_files`).
 
+mod drawn;
 mod evidence_files;
+mod last_call;
 mod looks;
 mod steps;
 

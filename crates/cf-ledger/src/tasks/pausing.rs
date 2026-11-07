@@ -22,8 +22,8 @@ use super::{
     RESUME_WORDS,
 };
 use crate::messages::{
-    cancel_message, fold, join_pause_note, leave_pause_notes, note_pause, reconcile,
-    release_carried, tell_goes_on, transfer, withdraw_stale, Afterwards,
+    cancel_message, fold, join_pause_note, leave_pause_notes, note_held_for_context, note_pause,
+    reconcile, release_carried, take_back, tell_goes_on, transfer, withdraw_stale, Afterwards,
 };
 use crate::model::{self, sql_list, LedgerError, ACTIVE_TASK_STATES, HELD_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
@@ -94,8 +94,12 @@ fn pause_task_as(
             Some(author) => take_over_pause(store, &task, &author.handle)?,
             None => false,
         };
+        // A pause of the chief's or the human's that lands on a task ConsensFlow paused on its
+        // own, to go on by itself (held for quota, stalled for a brief never begun), takes it
+        // over: it asks its stop as any pause does, and the task goes on only by a resume.
+        let automatic = author.is_some() && !taken && paused_by_consensflow(store, &task)?;
         let pausable = [&["open", "queued"], &ACTIVE_TASK_STATES[..]].concat();
-        if !taken {
+        if !taken && !automatic {
             require_task_state(&task, &pausable, "pause")?;
         }
         if let Some(assignee) = task.assignee_id {
@@ -130,7 +134,7 @@ fn pause_task_as(
             if let Some(because) = because {
                 detail.insert("because".into(), json!(because));
             }
-            pause(store, &task, detail, with_project)?;
+            pause(store, &task, detail, with_project, Stops::Asked)?;
         }
         task_by_id(store, task.id)
     })
@@ -160,6 +164,164 @@ pub(crate) fn unmark_pause(
     })
 }
 
+/// How ConsensFlow's own pause of a task whose window began no turn on a message begins its
+/// reason (`never_began`): the stall a relaunch goes on from.
+pub const NEVER_BEGAN: &str = "its window began no turn on ";
+
+/// Whether `task` is paused by ConsensFlow on its own: its last move to paused named nobody
+/// (held for its member's quota or a busy model, [`hold_task`]; a message its window began
+/// no turn on, [`NEVER_BEGAN`]; its window gone; a window that held several tasks; words that
+/// resumed it in vain; held for the chief's word on the conversation it follows,
+/// [`hold_for_context`]), and not with its project's suspension, which [`take_over_pause`]
+/// takes over. A tell or a pause of the chief's or the
+/// human's takes such a task over (T-1220's P1-1): their stop is asked, of whatever window
+/// holds the task by then (one the human brought back after its window went, T-1223's
+/// P2-3), and the hold's time and the stall's relaunch are the task's no more.
+pub(crate) fn paused_by_consensflow(store: &Store, task: &TaskRow) -> Result<bool, LedgerError> {
+    if task.state != "paused" {
+        return Ok(false);
+    }
+    let with_project: i64 = store.db.query_row(
+        "SELECT paused_with_project FROM task WHERE id = ?",
+        [task.id],
+        |row| row.get(0),
+    )?;
+    if with_project != 0 {
+        return Ok(false);
+    }
+    // The pause is whoever's last made it theirs: its move to paused, or a takeover of the
+    // suspension's pause (`task.pause-taken`, which names who took it).
+    let last: Option<Option<String>> = store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.by') FROM event
+             WHERE project_id = ?1 AND json_valid(data) AND json_extract(data, '$.task') = ?2
+               AND (kind = 'task.pause-taken'
+                    OR (kind = 'task.state' AND json_extract(data, '$.to') = 'paused'))
+             ORDER BY id DESC LIMIT 1",
+            params![task.project_id, task.number],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(matches!(last, Some(None)))
+}
+
+/// ConsensFlow relaunches the window of task T-`number` that began no turn on message
+/// `message_id`, which ConsensFlow's own pause stopped as stop `seq` (`never_began`): that
+/// very message, with what it carried, goes back to the window's keeping
+/// ([`take_back`]), and the task, in the hands of `participant_id` still, is queued for it,
+/// so that the window opened again is given it, once, and the task goes on by itself. Each
+/// condition is the stall's, asked in the write that does it, and a refusal leaves
+/// everything as it was: the task paused by that stall and no other (a newer pause, a tell,
+/// a hold, a resume each move it on), held by `participant_id`, its latest delivered task
+/// message `message_id`; and no delivery is relaunched twice (T-1220's P1-3, P2-5, P3-7).
+pub(crate) fn relaunch_stalled(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    participant_id: i64,
+    message_id: i64,
+    seq: i64,
+    item: &str,
+) -> Result<TaskView, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let refused = |why: String| LedgerError::refused_with("not-relaunched", why, 409);
+        if task.state != "paused" || task.stop_seq != seq {
+            return Err(refused(format!(
+                "T-{number} is {} at stop {}, not paused by the stall that asked stop {seq}",
+                task.state, task.stop_seq
+            )));
+        }
+        if task.assignee_id != Some(participant_id) {
+            return Err(refused(format!("T-{number} is held by another window now")));
+        }
+        if !paused_by_consensflow(store, &task)? {
+            return Err(refused(format!("T-{number} was paused by someone since")));
+        }
+        let held: Option<String> = store.db.query_row(
+            "SELECT held_until FROM task WHERE id = ?",
+            [task.id],
+            |row| row.get(0),
+        )?;
+        if held.is_some() {
+            return Err(refused(format!("T-{number} is held, and goes on by itself")));
+        }
+        let latest = crate::messages::last_pasted(store, participant_id, task.id)?;
+        if latest.as_ref().map(|message| message.id) != Some(message_id)
+            || latest.is_some_and(|message| message.kind != "task")
+        {
+            return Err(refused(format!(
+                "m-{message_id} is not the latest of T-{number}'s messages its window was given"
+            )));
+        }
+        if was_relaunched(store, project_id, message_id)? {
+            return Err(refused(format!("m-{message_id} was relaunched once already")));
+        }
+        leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
+        take_back(
+            store,
+            message_id,
+            "its window began no turn on it, and ConsensFlow relaunched the window",
+        )?;
+        // Where the window's record held the copy that never began (`item`): the message is
+        // received again only by a copy after it (T-1223's P2-2). Its receipt keeps it until a
+        // copy arrives, which writes the receipt of its own.
+        store.db.execute(
+            "UPDATE message SET receipt = json_object('before', ?) WHERE id = ?",
+            params![item, message_id],
+        )?;
+        let task = store.task_row(project_id, number)?;
+        store.move_task(
+            &task,
+            "queued",
+            json!({
+                "by": null,
+                "message": message_id,
+                "because": format!("its window began no turn on m-{message_id}, and ConsensFlow relaunched it"),
+            }),
+        )?;
+        store.log(
+            project_id,
+            "task.relaunched",
+            json!({ "task": number, "message": message_id, "stop": seq, "item": item }),
+        )?;
+        task_by_id(store, task.id)
+    })
+}
+
+/// Whether T-`number` was relaunched in its window (`relaunch_stalled`'s log): a message of
+/// it reached that window before, though the relaunch took it back to give it again, so the
+/// task is no follow-up a window never had (board-friction's `kept_apart`, T-1223's P2-5).
+pub(crate) fn task_relaunched(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event WHERE project_id = ?1 AND kind = 'task.relaunched'
+               AND json_valid(data) AND json_extract(data, '$.task') = ?2",
+        )?
+        .exists(params![project_id, number])?)
+}
+
+/// Whether message `message_id` was relaunched once already (`relaunch_stalled`'s log).
+pub(crate) fn was_relaunched(
+    store: &Store,
+    project_id: i64,
+    message_id: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event WHERE project_id = ?1 AND kind = 'task.relaunched'
+               AND json_valid(data) AND json_extract(data, '$.message') = ?2",
+        )?
+        .exists(params![project_id, message_id])?)
+}
+
 /// The chief or the human (`by`) takes over the pause of a task its project's
 /// suspension paused: their tell or their pause, sent as the Close began, lands
 /// after it. The task stays paused, and the pause is theirs from then on: no
@@ -185,24 +347,42 @@ pub(crate) fn take_over_pause(
     Ok(taken)
 }
 
-/// The move to paused, which is a stop of its own: the task counts it, so two
-/// pauses in one millisecond are two. Its time is kept as the task's last
-/// pause (a tell that reaches the window from then on counts,
-/// `told_since_paused`), and, `with_project`, that its project's suspension
-/// paused it, while the project is suspended. Its window's questions have their
-/// doors shut before anything presses a key, and what a door claimed and nobody
+/// Whether a move to paused asks the task's window to stop.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stops {
+    /// A pause of the chief's or the human's, a tell, ConsensFlow's own of a window that
+    /// went or began nothing, a project's Close: a stop its window owes until it pays it.
+    Asked,
+    /// A wait that is no stop: a hold for quota, whose turn a refusal ended already and
+    /// whose window goes on by itself, or a resume whose words never reached the window.
+    /// Nothing is pressed into the window for it, and nothing closes it (T-1199, bugs 9
+    /// and 10: a hold's stop, pressed into a window that waited to continue by itself,
+    /// closed it, and was left owed through its task's result to the reopen after).
+    NotAsked,
+}
+
+/// The move to paused. One that asks a stop (`stops`) counts it, so two pauses in one
+/// millisecond are two; one that does not leaves the count, and what the window owes,
+/// as it was. Its time is kept as the task's last pause (a tell that reaches the window
+/// from then on counts, `told_since_paused`), and, `with_project`, that its project's
+/// suspension paused it, while the project is suspended. Its window's questions have
+/// their doors shut before anything presses a key, and what a door claimed and nobody
 /// acknowledged is the ledger's again.
 fn pause(
     store: &mut Store,
     task: &TaskRow,
     mut detail: Map<String, Value>,
     with_project: bool,
+    stops: Stops,
 ) -> Result<(), LedgerError> {
-    detail.insert("stop".into(), json!(task.stop_seq + 1));
+    let asked = i64::from(stops == Stops::Asked);
+    if asked == 1 {
+        detail.insert("stop".into(), json!(task.stop_seq + 1));
+    }
     store.move_task(task, "paused", Value::Object(detail))?;
     store.db.execute(
-        "UPDATE task SET paused_at = updated_at, stop_seq = stop_seq + 1 WHERE id = ?",
-        [task.id],
+        "UPDATE task SET paused_at = updated_at, stop_seq = stop_seq + ? WHERE id = ?",
+        params![asked, task.id],
     )?;
     if with_project {
         store.db.execute(
@@ -253,9 +433,11 @@ pub(super) fn shut_doors(store: &Store, task: &TaskRow, window: i64) -> Result<(
 
 /// The daemon holds a task with its window while its member is out of
 /// quota: paused, with the time it goes on by itself (`until`, an ISO
-/// time). Its agent stops as any paused task's does, its window waits to go
-/// on at the reset, and what was on its way to it waits too: the daemon
-/// resumes it with fixed words, and the chief's own are what is kept.
+/// time). A hold asks no stop: the refusal ended the window's turn, and a harness
+/// that waits to continue by itself is left to (Claude Code's "continuing
+/// automatically"); nothing is pressed into the window and nothing closes it. Its
+/// window waits to go on at the reset, and what was on its way to it waits too:
+/// the daemon resumes it with fixed words, and the chief's own are what is kept.
 pub(crate) fn hold_task(
     store: &mut Store,
     project_id: i64,
@@ -278,13 +460,67 @@ pub(crate) fn hold_task(
         detail.insert("by".into(), Value::Null);
         detail.insert("because".into(), json!(because));
         detail.insert("until".into(), json!(until));
-        pause(store, &task, detail, false)?;
+        pause(store, &task, detail, false, Stops::NotAsked)?;
         store.db.execute(
             "UPDATE task SET held_until = ? WHERE id = ?",
             params![until, task.id],
         )?;
         task_by_id(store, task.id)
     })
+}
+
+/// The engine holds a follow-up that cannot go on in the conversation of the task it follows:
+/// the window that did that task closed with no proof its program was gone, which may still
+/// write to the conversation, or its harness holds nothing of the conversation any more. The
+/// task is not given to a window of its own unasked, whose conversation would not remember the
+/// earlier task the brief was written for (the field issue of 2026-10-29: T-68's brief said
+/// "your T-65 snapshot", and it went to a fresh window). It is paused with the mark that it was
+/// held for this (`context` in the move's event), and its requester is told once, in a pause
+/// note of its own kind ([`note_held_for_context`]: `because`, then the way on: rewrite the brief with
+/// `cf task edit` if it counts on the window before, send it on with `cf task resume`, or
+/// cancel it). That note is read as every pause note is, so a task that moves on while it is
+/// being delivered withdraws it, and a warning in `because` ([`NOT_PROVEN_GONE`]) stays in a
+/// note of its own. Only a task still queued for its window is held.
+pub(crate) fn hold_for_context(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+) -> Result<TaskView, LedgerError> {
+    model::require_text(because, "because", 1000)?;
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        require_task_state(&task, &["queued"], "hold")?;
+        let mut detail = Map::new();
+        detail.insert("by".into(), Value::Null);
+        detail.insert("because".into(), json!(because));
+        detail.insert("context".into(), json!(true));
+        // A hold for its conversation is no stop: nothing was given the window yet, and no
+        // turn of its is to be stopped (T-1199).
+        pause(store, &task, detail, false, Stops::NotAsked)?;
+        let requester = store.participant_row(task.requester_id)?.handle;
+        note_held_for_context(store, project_id, &requester, number, because)?;
+        task_by_id(store, task.id)
+    })
+}
+
+/// Whether T-`number` was held once for the conversation it could not go on in
+/// ([`hold_for_context`]): the chief's word that sends it on after that is the chief's
+/// knowing, and the task goes to a conversation of its own without a second hold.
+pub(crate) fn held_for_context(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event
+              WHERE project_id = ? AND kind = 'task.state' AND json_valid(data)
+                AND json_extract(data, '$.task') = ? AND json_extract(data, '$.to') = 'paused'
+                AND json_extract(data, '$.context') = 1",
+        )?
+        .exists(params![project_id, number])?)
 }
 
 /// The daemon ends a task's hold without resuming it, when it cannot go on at
@@ -453,15 +689,18 @@ pub(crate) fn paused_task(
 /// words fail, for they never went in, and its requester is told so, and why, in the
 /// note of the pause (the engine's, [`resumed_in_vain`]); what they carried waits for
 /// the next resume, which carries it
-/// (`fold`). Whether they were such words (T-77: a resume whose window never came up
-/// failed its task, and left the words kept for it queued under a failed task).
+/// (`fold`). The pause asks no stop: a resume never interrupts a window, and one whose
+/// words never went in has nothing of them to stop. Whether they were such words (T-77:
+/// a resume whose window never came up failed its task, and left the words kept for it
+/// queued under a failed task).
 pub(crate) fn pause_again(
     store: &mut Store,
     message: &MessageView,
     task: &TaskRow,
     reason: &str,
 ) -> Result<bool, LedgerError> {
-    if message.kind != "task" || task.state != "queued" {
+    // Queued, or at work already while the words wait (`work_while_resumed`).
+    if message.kind != "task" || !matches!(task.state.as_str(), "queued" | "working") {
         return Ok(false);
     }
     let resumed = store
@@ -489,7 +728,7 @@ pub(crate) fn pause_again(
     let mut detail = Map::new();
     detail.insert("by".into(), Value::Null);
     detail.insert("because".into(), json!(resumed_in_vain(message, reason)));
-    pause(store, task, detail, false)?;
+    pause(store, task, detail, false, Stops::NotAsked)?;
     Ok(true)
 }
 
@@ -588,6 +827,140 @@ pub(crate) fn go_on_in_window(
             _ => return Err(not_going_on(number)),
         }
         reconcile(store, task.id)?;
+        task_by_id(store, task.id)
+    })
+}
+
+/// The words that resumed `task`, still waiting for its window: the task message that
+/// `resume_task` queued as it moved the task from paused to queued, not yet pasted
+/// (`queued` or `gated`) or being pasted (`delivering`), with its state. None where
+/// they are in already, or the task was not resumed by words: the daemon's own bare
+/// ones are none ([`go_on_in_window`] withdraws those when the window goes on by
+/// itself, a turn that got through). Every other task message waiting for a task at
+/// work is a brief or a follow-up of a done task, which are not these.
+pub(crate) fn resume_words(
+    store: &Store,
+    task: &TaskRow,
+) -> Result<Option<(i64, String)>, LedgerError> {
+    let Some(window) = task.assignee_id else {
+        return Ok(None);
+    };
+    let fixed = format!("Resumed: {RESUME_WORDS}");
+    Ok(store
+        .db
+        .prepare(
+            "SELECT m.id, m.state FROM message m
+              WHERE m.task_id = ?1 AND m.recipient_id = ?2 AND m.kind = 'task'
+                AND m.state IN ('queued', 'gated', 'delivering')
+                AND NOT (m.sender_id IS NULL AND m.body = ?3
+                         AND NOT EXISTS (SELECT 1 FROM message c WHERE c.carried_by = m.id))
+                AND EXISTS (SELECT 1 FROM event e
+                             WHERE e.project_id = ?4 AND e.kind = 'task.state'
+                               AND json_extract(e.data, '$.task') = ?5
+                               AND json_extract(e.data, '$.from') = 'paused'
+                               AND json_extract(e.data, '$.to') = 'queued'
+                               AND json_extract(e.data, '$.message') = m.id)
+              ORDER BY m.id DESC LIMIT 1",
+        )?
+        .query_row(
+            params![task.id, window, fixed, task.project_id, task.number],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
+/// A resumed task whose window is at work on it: it reads working, and the words that
+/// resumed it stay queued for the window's rest, as ever. The words wait for the window
+/// to rest (nothing is typed into a turn at work), and until they were pasted the task
+/// read queued, which said the window had not taken it up while it ran commands on it
+/// (T-1139, field bug 8: `cf tell`, the window's answer, `cf task resume`, and the
+/// window going on with the turn the tell began). Only the engine knows the window is at
+/// work on it (its record shows the agent acting after the resume, `resumed_at_work`),
+/// and says so here. Refused for any other task, and for words already being pasted: their
+/// arrival moves the task ([`reconcile`]).
+pub(crate) fn work_while_resumed(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<TaskView, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let waiting = match task.state.as_str() {
+            "queued" => resume_words(store, &task)?,
+            _ => None,
+        };
+        let Some((words, _)) = waiting.filter(|(_, state)| state != "delivering") else {
+            return Err(LedgerError::refused_with(
+                "not-resumed",
+                format!("T-{number} is not waiting for the words that resume it"),
+                409,
+            ));
+        };
+        store.move_task(
+            &task,
+            "working",
+            json!({
+                "by": null,
+                "because": format!(
+                    "its window is at work on it; m-{words}, the words that resumed it, wait for its rest"
+                ),
+            }),
+        )?;
+        // A question its window asked that nobody answered still makes it wait.
+        reconcile(store, task.id)?;
+        task_by_id(store, task.id)
+    })
+}
+
+/// The words that resumed `task`, still to go in: queued or held for the human, not being
+/// pasted ([`resume_words`]). A task that reads working or waiting for them has no window
+/// that has read them, and whatever is told it meanwhile goes in with them.
+pub(crate) fn resume_words_not_in(
+    store: &Store,
+    task: &TaskRow,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(match task.state.as_str() {
+        "queued" | "working" | "waiting" => resume_words(store, task)?
+            .filter(|(_, state)| state != "delivering")
+            .map(|(words, _)| words),
+        _ => None,
+    })
+}
+
+/// The reverse of [`work_while_resumed`]: no window is at work on the task any more, and
+/// the words that resumed it have still not gone in, so it reads queued again until they
+/// are. `why` says so: the window rested and the words are held (the human typed in it and
+/// has not sent it, a screen that never goes quiet), or the window went (it exited, a
+/// Close, a quit). A task that waits for an answer goes back too: its words are what the
+/// window reads first. Refused for any other task, and for words already being pasted.
+pub(crate) fn rest_while_resumed(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    why: &str,
+) -> Result<TaskView, LedgerError> {
+    model::require_text(why, "why", 1000)?;
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let waiting = match task.state.as_str() {
+            "working" | "waiting" => resume_words_not_in(store, &task)?,
+            _ => None,
+        };
+        let Some(words) = waiting else {
+            return Err(LedgerError::refused_with(
+                "not-resumed",
+                format!("T-{number} is not working with the words that resume it waiting"),
+                409,
+            ));
+        };
+        store.move_task(
+            &task,
+            "queued",
+            json!({
+                "by": null,
+                "because": format!("{why}, and m-{words}, the words that resumed it, have not gone in"),
+            }),
+        )?;
         task_by_id(store, task.id)
     })
 }

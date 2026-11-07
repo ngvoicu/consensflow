@@ -218,7 +218,7 @@ fn a_chief_stays_out_when_the_member_that_came_back_runs_on_another_harness() {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "codex", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()
@@ -868,7 +868,10 @@ fn what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_hum
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working", "held for its job");
     let held = tiers.task(1).messages.into_iter().find(|message| {
-        message.kind == "note" && message.body.starts_with("T-1 goes on in the background")
+        message.kind == "note"
+            && message
+                .body
+                .starts_with("T-1 is still working in the background")
     });
     let held = held.expect("the chief is to be told T-1 goes on in the background");
     assert_eq!(

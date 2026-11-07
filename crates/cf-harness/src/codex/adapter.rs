@@ -38,14 +38,15 @@ use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
-use cf_proto::panes::Servers;
+use cf_proto::models::ModelListing;
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, FirstMessage, Held, Launch, Observed, Over, Pane, PaneHost,
-    Prepared, Readiness, Records, Skill, Window, Work,
+    Adapter, Admission, Agent, Dialog, FirstMessage, Held, Launch, LaunchId, Observed, Over, Pane,
+    PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -78,6 +79,38 @@ const WINDOW: [&str; 4] = [
     "-c",
     "allow_login_shell=false",
 ];
+
+/// Codex's offers to switch or install something, which wait in a window for a key nobody
+/// there presses, turned off for the window's launch alone (T-1183, read from Codex 0.166.0):
+/// the nudge near a rate limit to switch to a cheaper model ("Switch to … for lower credit
+/// usage?", `notice.hide_rate_limit_model_nudge`), the model's suggestion to install a plugin
+/// (`tool_suggest`), and the offer to install the MCP servers a skill names
+/// (`skill_mcp_dependency_install`). The features go as configuration, never as `--disable`,
+/// which refuses to start on a Codex that has no such feature; a key Codex does not know is
+/// passed over. What the owner has installed and configured stays as it is.
+const OFFERS: [&str; 6] = [
+    "-c",
+    "notice.hide_rate_limit_model_nudge=true",
+    "-c",
+    "features.tool_suggest=false",
+    "-c",
+    "features.skill_mcp_dependency_install=false",
+];
+
+/// The size the project chose for its members to compact at, as Codex is given it for the
+/// launch alone (at launch and on resume): its `model_auto_compact_token_limit`, which
+/// Codex caps at 90% of the model's window itself (`ModelInfo::auto_compact_token_limit`,
+/// codex-rs 0.166.0), so a size above that leaves Codex's own point. None where the project
+/// chose none, and for the chief, whose launch is never given one.
+fn compaction_limit(size: Option<u32>) -> Vec<String> {
+    size.map(|size| {
+        vec![
+            "-c".to_owned(),
+            format!("model_auto_compact_token_limit={size}"),
+        ]
+    })
+    .unwrap_or_default()
+}
 
 /// Why a message waits while the broker names no thread or cannot take one: a
 /// refusal there would spend the message's attempts in seconds (an answer to a
@@ -122,7 +155,52 @@ impl CodexAdapter {
     }
 }
 
+/// How Codex on Windows reads a paste ([`CodexAdapter::silent_paste`]): about 0.6 ms a
+/// character; its own draw of the paste comes 50 ms or more after it; then 120 ms of quiet;
+/// and at the most a second and a millisecond a character.
+const CODEX_ON_WINDOWS: SilentPaste = SilentPaste {
+    pace_us_per_character: 600,
+    drawn_after_ms: 50,
+    quiet_ms: 120,
+    most_ms: 1_000,
+    most_us_per_character: 1_000,
+};
+
 impl Adapter for CodexAdapter {
+    fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
+        Box::pin(super::models::listed(
+            &self.services.env,
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
+
+    /// What its record says the conversation ran on last (CHF-05): read from its end,
+    /// within a bound, as the reopen of a chief asks.
+    fn last_used<'a>(
+        &'a self,
+        session: &'a str,
+        _asked: Option<&'a str>,
+    ) -> Work<'a, Option<Used>> {
+        Box::pin(async move { super::last_used::last_used(session, &self.services.env) })
+    }
+
+    /// T-445's probe of each harness's own switch (brain `operations/work-in-flight/results/3.0.7/`).
+    fn model_switch(&self) -> Option<&'static str> {
+        Some("To change only the model, type /model in the chief's window and press s to keep it to that conversation: Enter there makes it your Codex default.")
+    }
+
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        super::models::gone(words, asked)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        Box::pin(super::models::default_model(
+            &self.services.env,
+            &*self.services.processes,
+            &*self.services.time,
+        ))
+    }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let services = &self.services;
@@ -179,6 +257,8 @@ impl Adapter for CodexAdapter {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
             }
             args.extend(WINDOW.map(str::to_owned));
+            args.extend(OFFERS.map(str::to_owned));
+            args.extend(compaction_limit(launch.compaction));
             args.extend(invocation.args);
             Ok(Prepared {
                 argv: launch::with_native_bridge(&services.bundle, &executable, args),
@@ -232,6 +312,18 @@ impl Adapter for CodexAdapter {
         }
     }
 
+    /// On Windows Codex reads a paste's key presses without drawing anything, and takes an
+    /// Enter that comes while they are still coming, or within 120 ms of them, for a line break
+    /// in the paste (its `paste_burst`). A measured heuristic (T-1048, Codex 0.166.0 on zeewin2,
+    /// 2026-11-01): a few lines were drawn 150 to 205 ms after the paste; a paste of 7,775
+    /// characters was answered at once by a print at about 10 ms (its reaction to the first
+    /// key) and drawn as `[Pasted Content … chars]` only at about 4.5 s, about 0.6 ms a
+    /// character, and an Enter before that stayed in it. Elsewhere the terminal hands Codex a
+    /// paste whole, and it takes its Enter as it comes.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.services.env.on_windows().then_some(CODEX_ON_WINDOWS)
+    }
+
     /// A resumed thread keeps the developer message its first turn began with:
     /// the role text a launch gives it (the developer instructions of a main
     /// start, see the module `role`) is not given to a resume, and would not be used. Found live on Codex 0.162.1,
@@ -264,6 +356,10 @@ impl Adapter for CodexAdapter {
             folder,
             paths::global_specmint(env, variant),
         )
+    }
+
+    fn place_specmint(&self, specs: &Specs<'_>, id: &LaunchId) -> Result<(), String> {
+        specmint::write_own_of(Harness::Codex, &self.services.env, Some(*specs), id).map(|_| ())
     }
 }
 
@@ -325,6 +421,30 @@ impl Window for CodexWindow {
     /// its status line says it.
     fn compacting(&self, screen: &[String]) -> bool {
         compacting::drawn(screen, &compacting::CODEX)
+    }
+
+    /// Codex reads no dialog of its harness off its screen by shape (3.0.7-alpha.2, T-1240, T-1243).
+    ///
+    /// The engine reads the pane host's tail: no empty line and no rule that says no word. In it Codex's
+    /// composer ("› Ask Codex to do anything"), its footer and the last line of the conversation ("  Worked
+    /// for 5s • 16:00") are one under the other in one column, as a list of choices is, and by their shape
+    /// the shared reader took them for three, with a worker's question above them for the dialog's
+    /// words: a chief at rest was held for a dialog nobody had opened (the live matrix's
+    /// `question-ask-answer`, 2026-11-05). No rule on the screen's words keeps a composer apart from a
+    /// dialog, because the words are the user's: the footer is configured (`tui.status_line`, a
+    /// branch's name that is `enter` or `esc`), Codex hides its line of keys while a draft is in the
+    /// composer, and what the user typed is numbered or quoted as they like. A rule that took a list
+    /// with its keys under it for a dialog (T-1243, `fd1837385`) read such a draft as one, where the
+    /// release head read none.
+    ///
+    /// And the release head read no real Codex dialog off the tail at all: its nudge to switch models,
+    /// its pickers and 27 upstream snapshots of its dialogs were unread, their title and hint lines
+    /// being taken for choices. So reading none loses no dialog that was read, adds no false one, and
+    /// fixes the field's bug. Codex's nudge and install offers stay off at launch (`OFFERS`), and its
+    /// own question tool is the board's. Reading Codex's real dialogs from evidence beyond its footer
+    /// is a follow-up: `issues/codex-dialogs-are-not-read-from-its-screen.md` in consensflow-sme.
+    fn dialog(&self, _screen: &[String]) -> Option<Dialog> {
+        None
     }
 
     fn follow(&self, session: &str) {
@@ -436,6 +556,13 @@ impl Window for CodexWindow {
                 self.at_work.set(shown.idle == Some(false));
             }
         })
+    }
+
+    /// Codex's background terminals, as its broker asks its server for them: a command it
+    /// started with no shell, or kept when a pause interrupted it, is no process the host
+    /// names as the turn's work (T-1137). None where the broker gave no list.
+    fn kept_commands(&self) -> Work<'_, Option<Vec<String>>> {
+        Box::pin(async move { self.channel.terminals(&*self.time, &*self.loopback).await })
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

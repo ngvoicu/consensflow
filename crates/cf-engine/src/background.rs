@@ -29,20 +29,30 @@
 //!
 //! Limits.
 //!
-//! **What escapes.** A command whose shell has ended is not named by the host,
-//! whichever way the agent made it outlive the shell (`nohup … &`, `setsid`,
-//! `disown`, a double fork, `Start-Process`): no chain of processes that run leads
-//! from it to a shell the harness started, and it being a job without a parent proves
-//! nothing of whose it is. The window's close ends it where it can be told to be the
-//! window's, and not otherwise: the pane host signals only the pane's program, what runs
-//! under it by the process that started each, what is in the session the program leads
-//! while it runs, and what a look saw so, however the tree is selected. A job in the
-//! window's session is ended with the window; one that left it (`setsid`, and the shells
-//! of Claude Code and Pi, which lead sessions of their own) with its shell gone, which no
-//! look saw under the shell, is left running, and so is one that only the marker in its
-//! environment says is the window's. On Windows the pane's job object holds what a process
-//! starts wherever it goes, and the close ends it, unless a service made it for it:
-//! `schtasks`, a WMI call. Closing a window does not prove every process it started died.
+//! **What escapes, and what is named though no chain proves it (T-1145).** A command whose shell
+//! has ended (`nohup … &`, `setsid`, `disown`, a double fork, `Start-Process`) is no work of the
+//! *turn* by a chain of processes that run, and the host does not end it as the turn's: but where
+//! the window's tree holds it, the host **names** it as work the window's close ends, so that a
+//! pause keeps the window for it, the chief is told it runs, and a close says what it ended; it
+//! stays named through the marks of the later turns (every paste marks one: T-1153's D1). The
+//! tree holds it on Windows always (the pane's job holds what a process starts wherever it
+//! goes; the host names it when a shell started it, which the job's port told as it began, for
+//! the job holds a build's daemon too, and the chief is not told of that), and on the Mac when it
+//! is in the session the window's program leads or under the program by the process that started
+//! each. Before T-1145 neither Muse's `Start-Process` ping on Windows (T-1126) nor a job
+//! detached with `&` in a window's own session was named, a paused window with only that running
+//! was closed, and the close ended it unnamed. **What is still not named** is a
+//! job on the Mac that left the window's session (`setsid`, and the tool shells of Claude Code, Pi
+//! and Devin, which lead sessions of their own) with its shell gone, whose program is a system
+//! binary (T-1100's answer A keeps it a written limit for 3.0.7): it has
+//! no marker the host can read, no session and no parent that tie it to the window (`cf-panes`'
+//! `background::work` says what was tried), and no close of the window ends it either: it runs on
+//! orphaned, as it did before. The window's close ends it where the tree finds it the window's,
+//! and not otherwise: the pane host signals only the pane's program, what runs under it by the
+//! process that started each, what is in the session the program leads while it runs, and what a
+//! look saw so, however the tree is selected. On Windows the pane's job holds what a process starts
+//! wherever it goes, and the close ends it, unless a service made it for it: `schtasks`, a WMI
+//! call. Closing a window does not prove every process it started died.
 //!
 //! **What keeps a window working.** A worker's answer is its result when its window's
 //! turn has settled, which each harness's reader says of its own record. A Devin
@@ -56,7 +66,8 @@
 //! in the window's mark, and is not the turn's, and the host does not name it at a close.
 
 use cf_harness::contract::Pane;
-use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
+use cf_harness::records::Pending;
+use cf_ledger::{window_closed, NewNote, ParticipantView, ProjectView, TaskThread};
 use cf_proto::panes::{Background, BackgroundProcess, PossiblyLeft};
 
 use crate::dispatcher::Dispatcher;
@@ -103,13 +114,13 @@ impl Dispatcher {
             return Ok(());
         };
         let number = thread.task.number;
-        self.seams.ledger.borrow_mut().note(
+        self.seams.ledger.borrow_mut().tell_closed(
             project.id,
             &NewNote {
                 from: None,
                 to: thread.task.requester.clone(),
                 task: Some(number),
-                body: closed_leaving(&format!("T-{number}'s window closed"), left, possibly),
+                body: closed_leaving(&window_closed(number), left, possibly),
             },
         )?;
         Ok(())
@@ -245,6 +256,75 @@ fn paused_leaving(number: i64, left: &Background) -> String {
         said.push_str(&format!("; {words}"));
     }
     said
+}
+
+/// What closing a window would end, as the note of a pause whose window is kept for it says
+/// it; none where it would end nothing. `left` is what the host lists of the window's turn
+/// (`pane.background`; none where it did not answer, which is no word that nothing runs), and
+/// `pending` the jobs and agents its harness's record says it runs, which no process of the
+/// tree need show (Claude's background agents), and `kept` the commands its harness says it
+/// keeps running (`Window::kept_commands`: Codex's background terminals, which it starts with
+/// no shell, so that the host names none of them, T-1137; none where it could not say). What
+/// the host names as possibly the window's is no part of it: a close does not end that
+/// (`PaneExit::possibly_left`).
+///
+/// **What this cannot see** (T-1117, narrowed by T-1145): a program a harness starts with no shell
+/// (Codex 0.166 runs a bare `ping` as a child of its own: T-1137 reads Codex's own count of its
+/// "background terminals"), and a job detached on the Mac that left the window's session, which
+/// nothing ties to the window and which no close ends either (`cf-panes`' `background::work`).
+/// A job an agent detached that the window's tree holds (`&`, `nohup`, `Start-Process`) is named
+/// now, with the turn's work (`pane.background`): a window that ignored a pause with only that
+/// running is kept. A harness's record that says nothing of the rest leaves it unsaid.
+pub(crate) fn close_would_end(
+    left: Option<&Background>,
+    pending: Pending,
+    kept: Option<&[String]>,
+) -> Option<String> {
+    let mut said = Vec::new();
+    match left {
+        None => said.push("what the host could not list (it gave no answer)".to_owned()),
+        Some(left) if left.total > 0 => said.push(quote_of(&left.processes, left.total)),
+        Some(_) => {}
+    }
+    match kept {
+        None => said.push("what its harness could not list (it gave no answer)".to_owned()),
+        Some([]) => {}
+        Some(commands) => said.push(format!(
+            "the commands its harness keeps running: {}",
+            quote_commands(commands)
+        )),
+    }
+    if pending.jobs > 0 {
+        said.push(counted(
+            pending.jobs,
+            "job",
+            "its harness started in the background",
+        ));
+    }
+    if pending.agents > 0 {
+        said.push(counted(pending.agents, "agent", "of its harness's own"));
+    }
+    (!said.is_empty()).then(|| said.join("; "))
+}
+
+/// The command lines `commands`, as a note quotes them: the first few, each held to one line
+/// and a few characters, what looks like a key or a token hidden, as [`quote`] does.
+fn quote_commands(commands: &[String]) -> String {
+    let listed: Vec<BackgroundProcess> = commands
+        .iter()
+        .take(QUOTED)
+        .map(|command| BackgroundProcess {
+            pid: 0,
+            command: command.clone(),
+        })
+        .collect();
+    quote_of(&listed, commands.len())
+}
+
+/// `count` of `what`, then `whose`: "1 job its harness started", "2 jobs …".
+fn counted(count: usize, what: &str, whose: &str) -> String {
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} {what}{plural} {whose}")
 }
 
 /// What a note says of the processes the host named as possibly a window's and did not end

@@ -606,19 +606,11 @@ fn window_launch(rig: &Rig) -> Option<Vec<String>> {
 }
 
 #[test]
-fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it(
-) -> Outcome {
-    let presets = std::fs::read_to_string(cf_e2e::checkout::path(
-        "crates/cf-catalog/data/presets.json",
-    ))?;
-    assert!(
-        !presets.contains(&format!("\"{MODEL}\"")),
-        "the catalog has {MODEL}: the case needs a model it has not"
-    );
+fn a_task_for_a_member_on_a_model_the_flag_names_is_launched_on_it() -> Outcome {
     let models = agents::parse(Some(&format!("claude={MODEL}:high")), None)?;
     let row = agents::row_on(models.of(Harness::Claude), "light");
-    // The daemon takes the row as the live suites write it: a member of the human's
-    // own, which needs a model and no catalog entry; the run's report says it.
+    // The daemon takes the row as the live suites seat it: a member on that model, at that
+    // effort; the run's report says it.
     let rig = Rig::start(config())?;
     let log = Log::begin("live members")?;
     agents::write_roster(&rig, &[members::stand_in_chief(), row], &log)?;
@@ -628,7 +620,8 @@ fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_laun
     );
     let project = cf_e2e::rig::Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member(&agents::id(Harness::Claude))?;
-    assert_eq!(added["member"]["agent"], "live-claude", "{added}");
+    assert_eq!(added["member"]["model"], MODEL, "{added}");
+    assert_eq!(added["member"]["effort"], "high", "{added}");
     rig.tell(
         project.id(),
         "DISPATCH --tier light Reply with exactly: UNCATALOGUED",

@@ -1,6 +1,6 @@
 //! The staff and the work tiers as the chief reads them.
 
-use cf_catalog::{work_tier_info, WORK_TIERS};
+use cf_proto::agents::{work_tier_info, WORK_TIERS};
 
 use super::{RoleError, StaffRow};
 
@@ -14,17 +14,18 @@ pub fn team_table(members: &[StaffRow]) -> Result<String, RoleError> {
         return Ok(NOBODY.to_owned());
     }
     let mut table = vec![
-        "| Member | Roles | Work tier |".to_owned(),
-        "|---|---|---|".to_owned(),
+        "| Member | Model | Roles | Work tier |".to_owned(),
+        "|---|---|---|---|".to_owned(),
     ];
     for member in members {
-        // Name, roles and tier, nothing else: the chief names a tier and never
-        // picks a member, so it needs no model, route or description here.
+        // Name, model, roles and tier, nothing else: the chief names a tier and never
+        // picks a member; the model says what the member is.
         let tier = member.work_tier.ok_or_else(|| RoleError::NoWorkTier {
             member: member.name.clone(),
         })?;
         let cells = [
             member.name.as_str(),
+            member.model.as_str(),
             &member.roles.join(", "),
             work_tier_info(tier).label,
         ];

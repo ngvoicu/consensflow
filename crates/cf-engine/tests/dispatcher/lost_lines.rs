@@ -60,6 +60,7 @@ fn marked(answer: &str, worker: &str, place: usize) -> String {
 
 /// T-2, which follows T-1 into a window on its conversation.
 fn follow_up(context: &Context, tiers: &Tiers<'_>) {
+    context.accept_if_done(tiers.project.id, 1);
     context.create_task(
         tiers.project.id,
         NewTask {
@@ -456,7 +457,7 @@ fn a_held_turn_that_lost_a_line_says_so_in_the_note_that_it_goes_on_and_is_not_t
     let held: Vec<String> = tiers
         .notes("chief")
         .into_iter()
-        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .filter(|note| note.starts_with("T-1 is still working in the background"))
         .collect();
     assert_eq!(held.len(), 1, "{held:?}");
     assert!(
@@ -570,6 +571,24 @@ fn devins_window_begun_afresh_counts_its_lost_lines_from_none_whatever_the_last_
     assert_eq!(tiers.task(1).task.state, "done");
 
     follow_up(&context, &tiers);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "paused",
+        "held for the chief's word: its window cannot go on in T-1's conversation"
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            tiers.project.id,
+            2,
+            Some("human"),
+            "Go on in a window of your own.",
+        )
+        .unwrap();
     for _ in 0..3 {
         context.pass().unwrap();
     }

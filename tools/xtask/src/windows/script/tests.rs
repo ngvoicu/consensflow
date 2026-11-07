@@ -33,6 +33,7 @@ fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
         command,
         env,
         node: r"C:\Program Files\nodejs",
+        machine: "zeewin2",
         limits: None,
     })
 }
@@ -48,7 +49,7 @@ fn bootstrap() -> String {
 }
 
 /// The lines of a script that give the process a variable of its own, by name
-/// (PATH is the script's).
+/// (PATH and the machine's name, [`TEST_MACHINE`], are the script's).
 fn given(text: &str) -> Vec<String> {
     text.lines()
         .filter_map(|line| {
@@ -57,7 +58,8 @@ fn given(text: &str) -> Vec<String> {
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
                 .collect();
-            (rest[name.len()..].starts_with(" = ") && name != "Path").then_some(name)
+            (rest[name.len()..].starts_with(" = ") && name != "Path" && name != TEST_MACHINE)
+                .then_some(name)
         })
         .collect()
 }
@@ -279,6 +281,40 @@ fn a_run_gives_its_command_no_variable_that_was_not_named() {
     // Only what is named: this machine's environment is not in the script.
     let one = parse_env(&strings(&["A=1"])).unwrap();
     assert_eq!(given(&plain(&one)), ["A"]);
+}
+
+#[test]
+fn a_run_tells_its_command_which_machine_it_is_on_before_the_steps_and_the_command_run() {
+    // The live kit renews the logins of Claude Code and Pi on a machine that has this variable,
+    // and nowhere else (T-1067): nothing but this runner sets it, so it is the signal that a
+    // program was started on a machine that is there to test on.
+    let text = script(&BUILD, "npm run test:integration", &[]);
+    assert!(
+        text.contains("$env:CONSENSFLOW_TEST_MACHINE = 'zeewin2'\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#"Write-Output "== test machine: $env:CONSENSFLOW_TEST_MACHINE""#),
+        "{text}"
+    );
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there"))
+    };
+    assert!(
+        at("$env:CONSENSFLOW_TEST_MACHINE =") < at("foreach ($step in"),
+        "the steps (the build) run on the machine too"
+    );
+    assert!(at("$env:CONSENSFLOW_TEST_MACHINE =") < at(r#"cmd /c "$run 2>&1""#));
+    // The name is the runner's own, said as any value is: a quote twice.
+    let odd = run_script(&Script {
+        machine: "it's",
+        ..longest(&[])
+    });
+    assert!(
+        odd.contains("$env:CONSENSFLOW_TEST_MACHINE = 'it''s'\n"),
+        "{odd}"
+    );
 }
 
 #[test]
@@ -578,6 +614,7 @@ fn script_of_run(id: &str) -> String {
         command: "x",
         env: &[],
         node: r"C:\Program Files\nodejs",
+        machine: "zeewin2",
         limits: None,
     })
 }
@@ -923,6 +960,7 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
             command,
             env,
             node: r"C:\Program Files\nodejs",
+            machine: "zeewin2",
             limits: None,
         }
     }
@@ -1115,6 +1153,7 @@ fn longest(env: &[&str]) -> Script<'static> {
         command,
         env,
         node: r"C:\Program Files\nodejs",
+        machine: "zeewin2",
         limits: None,
     }
 }

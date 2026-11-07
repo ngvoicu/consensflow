@@ -1,12 +1,12 @@
 //! The staff table the chief reads: the cases of Node's skill suite.
 
-use cf_catalog::WorkTier;
 use cf_engine::roles::{team_table, work_tier_list};
+use cf_proto::agents::WorkTier;
 
 use super::support::staff_row;
 
 #[test]
-fn shows_one_row_per_member_name_roles_and_work_tier_and_nothing_to_pick_a_member_by() {
+fn shows_one_row_per_member_name_model_roles_and_work_tier_and_nothing_to_pick_a_member_by() {
     let table = team_table(&[
         staff_row("zeus", &["worker", "reviewer"], WorkTier::Standard),
         staff_row("diana", &["advisor"], WorkTier::Light),
@@ -15,10 +15,10 @@ fn shows_one_row_per_member_name_roles_and_work_tier_and_nothing_to_pick_a_membe
     assert_eq!(
         table,
         [
-            "| Member | Roles | Work tier |",
-            "|---|---|---|",
-            "| zeus | worker, reviewer | Standard work |",
-            "| diana | advisor | Light work |",
+            "| Member | Model | Roles | Work tier |",
+            "|---|---|---|---|",
+            "| zeus | Opus · high | worker, reviewer | Standard work |",
+            "| diana | Opus · high | advisor | Light work |",
         ]
         .join("\n")
     );

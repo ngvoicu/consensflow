@@ -39,18 +39,23 @@ use cf_base::js;
 use cf_harness::contract::{InputBox, Observed};
 use cf_harness::records::Reading;
 use cf_proto::ledger::MessageView;
-use cf_proto::panes::HumanInput;
+use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
 use serde_json::{json, Value};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::returning;
 use crate::seams::EngineError;
-use crate::windows::pane_body;
+use crate::windows::{pane_body, Activity};
 
-/// What the lane of a window read at rest by the fallback says.
+/// What the lane of a window read at rest by the fallback says, its screen quiet for the
+/// settle ([`Dispatcher::fallback_lane`]).
 pub(crate) const FALLBACK: &str =
     "at rest by its record and a quiet screen: its harness says nothing of its own";
+
+/// How the pacing's wait for the screen of a window read by the fallback begins, and its lane
+/// while it waits.
+const SCREEN_CHANGED: &str = "what its screen shows changed within the last ";
 
 /// How the gate's settle wait begins: a window that has just come to rest, which passes by
 /// itself in seconds.
@@ -115,6 +120,9 @@ pub(crate) struct Paced {
     frontier: Frontier,
     rest_ms: i64,
     typed_quiet_ms: Option<i64>,
+    screen_quiet_ms: Option<i64>,
+    /// How long the pane had printed nothing: not what let it go, said beside the screen's
+    /// clock so a window that prints and shows the same is seen as one (T-1083).
     output_quiet_ms: Option<i64>,
     fallback: bool,
 }
@@ -129,6 +137,7 @@ impl Paced {
             "items": self.frontier.items,
             "restMs": self.rest_ms,
             "typedQuietMs": self.typed_quiet_ms,
+            "screenQuietMs": self.screen_quiet_ms,
             "outputQuietMs": self.output_quiet_ms,
         })
     }
@@ -258,6 +267,17 @@ impl Dispatcher {
         returning(window.recheck()).await;
     }
 
+    /// How long the window has read at rest, on the same last item, over looks that
+    /// followed each other: none while it has not (`note_rest`).
+    pub(crate) fn rested_for(&self, record: &Record) -> Option<i64> {
+        record
+            .delivery
+            .borrow()
+            .rest
+            .as_ref()
+            .map(|rest| self.now() - rest.since)
+    }
+
     /// The rest of a window is over: a look at it failed, or it refused a message for
     /// being at work.
     pub(crate) fn rest_ends(&self, record: &Record) {
@@ -310,6 +330,7 @@ impl Dispatcher {
                 frontier: rest.frontier,
                 rest_ms,
                 typed_quiet_ms: None,
+                screen_quiet_ms: None,
                 output_quiet_ms: None,
                 fallback,
             });
@@ -343,7 +364,9 @@ impl Dispatcher {
         };
         record.delivery.borrow_mut().input = HumanInput::of(&snapshot);
         let typed_quiet_ms = ms(&snapshot, "typedQuietMs");
-        let output_quiet_ms = ms(&snapshot, "outputQuietMs");
+        // What the screen shows, not whether the pane prints: a harness can print without
+        // end and change nothing a person sees (T-1083).
+        let screen_quiet_ms = ms(&snapshot, SCREEN_QUIET_MS);
         // None is a window the human never typed in.
         if typed_quiet_ms.is_some_and(|quiet| quiet < settle) {
             return Ok(Pace::Wait(format!(
@@ -351,9 +374,9 @@ impl Dispatcher {
             )));
         }
         let fallback = !window.idle_word();
-        if fallback && output_quiet_ms.is_none_or(|quiet| quiet < settle) {
+        if fallback && screen_quiet_ms.is_none_or(|quiet| quiet < settle) {
             return Ok(Pace::Wait(format!(
-                "its screen printed within the last {seconds} s, and its harness says nothing of its own rest"
+                "{SCREEN_CHANGED}{seconds} s, and its harness says nothing of its own rest"
             )));
         }
         // A paste the host writes still is no rest of the window's.
@@ -365,10 +388,37 @@ impl Dispatcher {
             frontier: rest.frontier,
             rest_ms,
             typed_quiet_ms,
-            output_quiet_ms,
+            screen_quiet_ms,
+            output_quiet_ms: ms(&snapshot, "outputQuietMs"),
             fallback,
         });
         Ok(Pace::Go)
+    }
+
+    /// The lane `activity` of a window read at rest by the fallback ([`FALLBACK`]) says what
+    /// the pacing will find of its screen: a quiet screen only where what it shows has held
+    /// still for the settle, as the pane host says (`EngineHost::quiet`, a look that stays out
+    /// of the Node traces). Else the window reads at rest by its record, and its lane says its
+    /// screen has not held still, which holds a message for it: the lane said a quiet screen
+    /// of a Muse window whose screen the pacing found printing for six minutes (T-1081,
+    /// T-1083). Any other lane is as it was.
+    pub(crate) async fn fallback_lane(&self, record: &Record, activity: Activity) -> Activity {
+        if activity.reason.as_deref() != Some(FALLBACK) {
+            return activity;
+        }
+        let settle = self.seams.limits.settle_ms;
+        let Some(pane) = record.window.borrow().pane.clone() else {
+            return activity;
+        };
+        let quiet = self.seams.host.quiet(&pane).await.ok().flatten();
+        if settle == 0 || quiet.is_some_and(|quiet| quiet >= settle as f64) {
+            return activity;
+        }
+        let seconds = settle as f64 / 1000.0;
+        Activity::because(
+            activity.state,
+            format!("at rest by its record, but {SCREEN_CHANGED}{seconds} s: its harness says nothing of its own, and a message waits for its screen to hold still"),
+        )
     }
 
     /// What a launch put ahead of the window's queue goes at the window's first rest, as

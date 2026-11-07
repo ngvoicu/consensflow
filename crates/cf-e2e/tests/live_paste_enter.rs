@@ -11,17 +11,20 @@
 //! messages go through Codex's own queue), so this is what a human's paste meets in the app.
 //!
 //! The harness named is the chief of a project on the native daemon of a rig, a window the
-//! human types into as the app's page does (`pane.input`, the bytes the terminal sends). Each
-//! case is a paste once the chief is idle, in one of two shapes:
+//! human types into as the app's page does: the bytes its terminal sends for a paste (each line
+//! break a carriage return, between the bracketed paste's markers), as the human's keys
+//! (`pane.typed`, which the pane host takes as the page's). Each case is a paste once the chief
+//! is idle, in one of two shapes:
 //!
 //! - **at once**: the paste and its Enter in one write, as the evals' runner types it;
 //! - **then Enter**: the paste, and Enter a second later, as a person presses it.
 //!
 //! and three lengths: a line, a few lines, and one of about 7,700 characters, which Codex folds
-//! into `[Pasted Content … chars]`. A case's paste went when the board shows the chief at work
-//! after it (the daemon's own `window.activity`); where it does not within five seconds, the
-//! human presses Enter again, up to three times, as the evals' runner does. Each asks for one
-//! word back, so the turn is short.
+//! into `[Pasted Content … chars]`. Each asks for one word back, its own, so the turn is short.
+//! A case's paste went when the board shows the chief at work after it (the daemon's own
+//! `window.activity`), or the window drew the chief's answer, that word alone on a line (the
+//! daemon can miss a turn of less than a second); where neither comes within five seconds, the
+//! human presses Enter again, up to three times, as the evals' runner does.
 //!
 //! ```text
 //! cargo xtask live paste-enter                     Codex
@@ -30,11 +33,17 @@
 //! ```
 //!
 //! The run fails when a paste needed an Enter more than its own, or never went: it says, for
-//! each, how many it took and what the window last drew.
+//! each, how many it took and what the window last drew, and when the pane host wrote its Enter.
+//!
+//! **The cause (T-1048):** on Windows the console hands a paste on to the program as key
+//! presses, and Codex takes an Enter that comes while they are still coming, or within 120 ms
+//! of them, for a line break in the paste (its `paste_burst`). On Windows the pane host now
+//! holds the human's keys after their paste until the window has drawn it and gone quiet, as a
+//! delivery's Enter waits (`cf_panes::arbiter`'s `HOLDS_HUMAN_PASTES`).
 
 use std::path::Path;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{self, find, named, Members, Plan};
 use cf_e2e::live::report::{self, Check};
@@ -84,9 +93,12 @@ impl Shape {
     }
 }
 
-/// The writes a paste of `text` is, in `shape`: one, or the paste and then Enter.
+/// The writes a paste of `text` is, in `shape`: one, or the paste and then Enter. Each line
+/// break is a carriage return, as the page's terminal sends a paste (xterm's
+/// `prepareTextForTerminal`).
 pub fn writes(shape: Shape, text: &str) -> Vec<Vec<u8>> {
-    let paste = [PASTE_BEGINS, text.as_bytes(), PASTE_ENDS].concat();
+    let typed = text.replace("\r\n", "\r").replace('\n', "\r");
+    let paste = [PASTE_BEGINS, typed.as_bytes(), PASTE_ENDS].concat();
     match shape {
         Shape::AtOnce => vec![[paste.as_slice(), ENTER].concat()],
         Shape::ThenEnter => vec![paste, ENTER.to_vec()],
@@ -172,9 +184,64 @@ fn chief_pane(members: &Members) -> Result<serde_json::Value> {
     Ok(members.lane(members.chief())?["pane"].clone())
 }
 
+/// How many of the window's last drawn lines a case reads, blank ones included: enough to hold
+/// the chief's answer above Codex's box, its footer and the blank lines between (eight were
+/// not, in T-1048's first run), and how many of the ones not blank its line shows.
+const DRAWN_LINES: usize = 24;
+const SHOWN_LINES: usize = 6;
+
+/// The last [`SHOWN_LINES`] of `lines`, for a case's line.
+fn shown(lines: &[String]) -> String {
+    lines[lines.len().saturating_sub(SHOWN_LINES)..].join(" | ")
+}
+
+/// How often a case looks whether its paste went.
+const LOOK: Duration = Duration::from_millis(250);
+
+/// The window's last drawn lines, as its screen shows them (`pane.snapshot`'s `bottom`), each
+/// trimmed, the empty ones left out.
+fn drawn(members: &Members, pane: &serde_json::Value) -> Result<Vec<String>> {
+    let snapshot = members.rig().host(
+        "pane.snapshot",
+        serde_json::json!({
+            "id": pane["id"], "generation": pane["generation"], "bottom": DRAWN_LINES,
+        }),
+    )?;
+    Ok(snapshot["bottom"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(|line| line.trim().to_owned())
+        .filter(|line| !line.is_empty())
+        .collect())
+}
+
+/// Whether the window drew the chief's answer to a case that asked for `word`: a line that is
+/// the word alone, past the mark its harness puts before an answer (Codex's `•`, Claude Code's
+/// `⏺`). The paste holds the word only inside its sentence, so a paste still in the box is no
+/// answer.
+pub fn answered(lines: &[String], word: &str) -> bool {
+    lines.iter().any(|line| {
+        line.trim_start_matches(|character: char| !character.is_alphanumeric())
+            .trim_end()
+            == word
+    })
+}
+
 /// One case: the paste written in its shape once the chief is idle, and Enter pressed again
-/// while the chief does not go to work.
-fn case(members: &Members, shape: Shape, text: &str, log: &Log) -> Result<(Went, String)> {
+/// while its paste has not gone. A paste went when the board shows the chief at work after it,
+/// or the window drew the chief's answer, its `word` (the daemon may not see a turn of less
+/// than a second: T-1048's probe). Besides how it went, what the window drew when Enter was
+/// first pressed again, and how long after the paste its Enter was written: the pane host
+/// answers the human's keys once they are written, a held Enter too.
+fn case(
+    members: &Members,
+    shape: Shape,
+    text: &str,
+    word: &str,
+    log: &Log,
+) -> Result<(Went, String, Duration)> {
     find(
         log,
         "the chief to be idle",
@@ -184,45 +251,54 @@ fn case(members: &Members, shape: Shape, text: &str, log: &Log) -> Result<(Went,
     )?;
     let pane = chief_pane(members)?;
     let mark = Trace::read(members.rig()).len();
+    let pasted = Instant::now();
     for (at, write) in writes(shape, text).iter().enumerate() {
         if at > 0 {
             sleep(BEAT);
         }
-        members.press(&pane, write)?;
+        members.rig().types(&pane, write)?;
     }
-    // What the window showed when the human first pressed Enter again: the paste still in its
+    let entered = pasted.elapsed();
+    let went = || -> Result<bool> {
+        Ok(
+            Trace::read(members.rig()).worked_after(members.chief(), mark)
+                || answered(&drawn(members, &pane)?, word),
+        )
+    };
+    // What the window drew when the human first pressed Enter again: the paste still in its
     // box, or a turn that was only slow to start.
     let mut kept = String::new();
     for more in 0..=AGAIN {
-        sleep(TAKES);
-        if Trace::read(members.rig()).worked_after(members.chief(), mark) {
-            return Ok((Went::After(more), kept));
+        let pressed = Instant::now();
+        while pressed.elapsed() < TAKES {
+            if went()? {
+                return Ok((Went::After(more), kept, entered));
+            }
+            sleep(LOOK);
         }
         if more < AGAIN {
             if kept.is_empty() {
-                kept = members.tail(pane["id"].as_str().unwrap_or_default());
+                kept = shown(&drawn(members, &pane)?);
             }
-            log.say("the chief has not gone to work: the human presses Enter again");
-            members.press(&pane, ENTER)?;
+            log.say("the paste has not gone: the human presses Enter again");
+            members.rig().types(&pane, ENTER)?;
         }
     }
-    Ok((
-        Went::Never,
-        members.tail(pane["id"].as_str().unwrap_or_default()),
-    ))
+    Ok((Went::Never, shown(&drawn(members, &pane)?), entered))
 }
 
 /// What each case came to, in order: its shape, its length, and how it went. The rig's close
 /// failing is the error, after every case ran.
-type Ran = Vec<(Shape, &'static str, Result<(Went, String)>)>;
+type Ran = Vec<(Shape, &'static str, Result<(Went, String, Duration)>)>;
 
 /// Every case run on `harness`'s chief, one after another.
 fn pastes(harness: Harness, log: &Log) -> Result<Ran> {
     let members = Members::open(&plan(harness), Path::new(FAKE_AGENT), log)?;
     let mut ran = Vec::new();
-    for (shape, length, text) in cases() {
+    for (at, (shape, length, text)) in cases().into_iter().enumerate() {
         log.say(format!("{length} pasted {}", shape.name()));
-        ran.push((shape, length, case(&members, shape, &text, log)));
+        let word = format!("PASTED{at}");
+        ran.push((shape, length, case(&members, shape, &text, &word, log)));
     }
     members.close()?;
     Ok(ran)
@@ -250,14 +326,9 @@ fn a_prompt_the_human_pastes_and_sends_with_enter_goes_on_that_enter() -> Result
             Ok(ran) => {
                 for (shape, length, came) in ran {
                     let (held, detail) = match came {
-                        Ok((went, screen)) if screen.is_empty() => (went.held(), went.line()),
-                        Ok((went, screen)) => (
-                            went.held(),
-                            format!(
-                                "{}; its screen when Enter was pressed again: {screen}",
-                                went.line()
-                            ),
-                        ),
+                        Ok((went, screen, entered)) => {
+                            (went.held(), outcome(went, &screen, entered))
+                        }
                         Err(failed) => (false, failed.to_string()),
                     };
                     checks.push(Check::new(
@@ -278,6 +349,130 @@ fn a_prompt_the_human_pastes_and_sends_with_enter_goes_on_that_enter() -> Result
     report::conclude(&log, "how each paste went", &checks)
 }
 
+/// The gaps a probe writes Enter after its paste by, for a line and for the long paste: around
+/// where T-1084's run on Muse 1.4.14 on zeewin2 lost it (at once, at every length; a second
+/// later, the long paste) and took it (a second later, a line).
+const LINE_GAPS_MS: [u64; 4] = [30, 100, 250, 600];
+const LONG_GAPS_MS: [u64; 3] = [1_500, 3_000, 6_000];
+
+/// How long after a paste a probe writes down what the window drew, beside its Enter.
+const DRAWN_FOR: Duration = Duration::from_millis(8_000);
+
+/// A probe of the gap a harness loses an Enter in (T-954, as T-1048 and T-1086 measured Codex's
+/// and Devin's): for a line and the long paste, at each gap, the paste written, its Enter
+/// written that long after it, and whether it went, with every change the window drew and
+/// when. A paste that did not go is cleared from the box with one Ctrl-C (Muse's, Codex's and
+/// Devin's way to clear a draft), spending no turn. It judges nothing: what it says is what a
+/// harness's `silent_paste` declaration is measured by.
+#[test]
+#[ignore = "a probe: spends a few short turns of each harness named; cargo xtask live paste-enter muse -- probe_the_gap"]
+fn probe_the_gap_a_window_loses() -> Result {
+    let log = Log::begin("probe paste-enter")?;
+    let harnesses = named(
+        &live::list("harness"),
+        &Harness::ALL,
+        Harness::name,
+        "harness",
+        &DEFAULT,
+    )?;
+    for harness in harnesses {
+        let log = log.scoped(harness.name());
+        let members = Members::open(&plan(harness), Path::new(FAKE_AGENT), &log)?;
+        let mut number = 0;
+        for (length, at, gaps) in [
+            ("a line", 0, &LINE_GAPS_MS[..]),
+            ("a long paste", 2, &LONG_GAPS_MS[..]),
+        ] {
+            for &gap in gaps {
+                let word = format!("PROBE{number}");
+                number += 1;
+                let text = texts(&word, LONG).swap_remove(at).1;
+                let said = gap_case(&members, &text, &word, Duration::from_millis(gap), &log)?;
+                log.say(format!(
+                    "PROBE {length} ({} characters), gap {gap} ms: {said}",
+                    text.chars().count()
+                ));
+            }
+        }
+        members.close()?;
+    }
+    Ok(())
+}
+
+/// One probe: `text` pasted once the chief is idle, Enter written `gap` after it, and what
+/// came of it, with when the window drew each change in [`DRAWN_FOR`].
+fn gap_case(members: &Members, text: &str, word: &str, gap: Duration, log: &Log) -> Result<String> {
+    find(
+        log,
+        "the chief to be idle",
+        IDLE,
+        Duration::from_secs(1),
+        || Ok((members.lane(members.chief())?["activity"]["state"] == "idle").then_some(())),
+    )?;
+    let pane = chief_pane(members)?;
+    let mark = Trace::read(members.rig()).len();
+    let mut last = drawn(members, &pane)?;
+    let mut changes: Vec<String> = Vec::new();
+    let mut look = |last: &mut Vec<String>, since: Instant| -> Result {
+        let now = drawn(members, &pane)?;
+        if now != *last {
+            changes.push(format!(
+                "at {} ms: {}",
+                since.elapsed().as_millis(),
+                shown(&now)
+            ));
+            *last = now;
+        }
+        Ok(())
+    };
+    let pasted = Instant::now();
+    members
+        .rig()
+        .types(&pane, &writes(Shape::ThenEnter, text)[0])?;
+    while pasted.elapsed() < gap {
+        look(&mut last, pasted)?;
+    }
+    let entered = pasted.elapsed().as_millis();
+    members.rig().types(&pane, ENTER)?;
+    let mut went = None;
+    while pasted.elapsed() < gap + DRAWN_FOR {
+        look(&mut last, pasted)?;
+        if went.is_none()
+            && (Trace::read(members.rig()).worked_after(members.chief(), mark)
+                || answered(&last, word))
+        {
+            went = Some(pasted.elapsed().as_millis());
+        }
+        sleep(Duration::from_millis(20));
+    }
+    if went.is_none() {
+        members.rig().types(&pane, b"\x03")?;
+        sleep(Duration::from_secs(1));
+    }
+    let came = went.map_or("did not go: the box was cleared".to_owned(), |at| {
+        format!("went, seen at {at} ms")
+    });
+    Ok(format!(
+        "Enter written {entered} ms after the paste; {came}; drawn: {}",
+        changes.join(" || ")
+    ))
+}
+
+/// A case's line: how it went, when its Enter was written, and what the window showed when the
+/// human first pressed Enter again, where they did.
+fn outcome(went: Went, screen: &str, entered: Duration) -> String {
+    let line = format!(
+        "{} (its Enter written {} ms after the paste)",
+        went.line(),
+        entered.as_millis()
+    );
+    if screen.is_empty() {
+        line
+    } else {
+        format!("{line}; what it drew when Enter was pressed again: {screen}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,6 +486,32 @@ mod tests {
         assert_eq!(
             writes(Shape::ThenEnter, "hi"),
             [b"\x1b[200~hi\x1b[201~".to_vec(), b"\r".to_vec()]
+        );
+    }
+
+    /// A paste's line breaks are carriage returns, as the page's terminal sends them.
+    #[test]
+    fn a_pastes_line_breaks_are_written_as_the_pages_terminal_sends_them() {
+        assert_eq!(
+            writes(Shape::ThenEnter, "one\ntwo\r\nthree")[0],
+            b"\x1b[200~one\rtwo\rthree\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn a_cases_line_says_when_its_enter_was_written_and_the_screen_where_it_was_kept() {
+        assert_eq!(
+            outcome(Went::After(0), "", Duration::from_millis(1_234)),
+            "it went on its own Enter (its Enter written 1234 ms after the paste)"
+        );
+        assert_eq!(
+            outcome(
+                Went::After(1),
+                "[Pasted Content 7775 chars]",
+                Duration::from_millis(9)
+            ),
+            "it went only after 1 more Enter (its Enter written 9 ms after the paste); \
+             what it drew when Enter was pressed again: [Pasted Content 7775 chars]"
         );
     }
 
@@ -319,6 +540,35 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    /// The chief's answer is its word alone on a line, past its harness's mark; the paste
+    /// still in the box, or the answer half drawn, is not (T-1048's probe drew `• PROBE`
+    /// before `• PROBE3`).
+    #[test]
+    fn a_window_answered_where_it_drew_the_word_alone_and_not_where_the_paste_holds_it() {
+        let lines = |drawn: &[&str]| {
+            drawn
+                .iter()
+                .map(|line| (*line).to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert!(answered(
+            &lines(&["• PASTED3", "› Ask Codex to do anything"]),
+            "PASTED3"
+        ));
+        assert!(answered(&lines(&["⏺ PASTED3"]), "PASTED3"));
+        assert!(answered(&lines(&["PASTED3"]), "PASTED3"));
+        assert!(!answered(
+            &lines(&["› Reply with only the word PASTED3, and run no tools."]),
+            "PASTED3"
+        ));
+        assert!(!answered(&lines(&["• PASTED"]), "PASTED3"));
+        assert!(!answered(&lines(&["• PASTED31"]), "PASTED3"));
+        assert!(!answered(
+            &lines(&["› [Pasted Content 7775 chars]"]),
+            "PASTED3"
+        ));
     }
 
     #[test]

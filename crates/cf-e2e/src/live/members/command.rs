@@ -122,22 +122,44 @@ pub fn quiet_command(seconds: u64, windows: bool) -> String {
     }
 }
 
+/// A command that prints a line every `every` seconds, `tick 1` to `tick <ticks>`, and ends by
+/// itself after the last: a turn of a harness that has output to read for as long as it lasts.
+/// Node's, which the shell of every machine runs (a `for … do … /bin/sleep 5; done` loop is
+/// no PowerShell's, where a Codex window on Windows runs its commands, T-1079).
+pub fn ticking_command(ticks: u64, every: u64) -> String {
+    format!("node -e \"{}\"", ticking_script(ticks, every * 1_000))
+}
+
+/// The script of [`ticking_command`]: a tick every `every_ms` milliseconds, `ticks` of them.
+fn ticking_script(ticks: u64, every_ms: u64) -> String {
+    format!(
+        "let n=0;const t=setInterval(()=>{{console.log('tick '+(n+=1));if(n==={ticks})clearInterval(t)}},{every_ms})"
+    )
+}
+
 /// Whether the command line `line`, as a process list or the host's tree gives it, ends
 /// by running `command` (a program, then its words): its last words are the program, as
 /// told or named by a path, quoted or not, with or without `.exe` and in any case, then
 /// exactly the command's words and nothing after them. A shell's line that ends with the
 /// command runs it too (`/bin/sh -c "$0" "$@" sleep 119`). Windows' PowerShell starts a
 /// program it finds on the `PATH` by its path, and the line of a `ping -n 120 127.0.0.1`
-/// it ran is `"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1` (zeewin, 2026-10-16).
+/// it ran is `"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1` (zeewin, 2026-10-16). A
+/// command that names its program by a path (`/sbin/ping`, as the Mac's member is told
+/// it, T-1117) is run by a line that names it by any path, or bare.
 pub fn runs_command(line: &str, command: &str) -> bool {
     let line = line.trim_end();
     match command.split_once(' ') {
         Some((program, words)) => line
             .strip_suffix(words)
             .and_then(|before| before.strip_suffix(' '))
-            .is_some_and(|before| ends_with_program(before, program)),
-        None => ends_with_program(line, command),
+            .is_some_and(|before| ends_with_program(before, file_of(program))),
+        None => ends_with_program(line, file_of(command)),
     }
+}
+
+/// The file `program` names: its last part where it is a path.
+fn file_of(program: &str) -> &str {
+    program.rsplit(['/', '\\']).next().unwrap_or(program)
 }
 
 /// Whether `before`, a command line up to a word, ends with the program `program` as a
@@ -315,6 +337,28 @@ mod tests {
     }
 
     #[test]
+    fn a_ticking_command_is_node_printing_a_tick_every_few_seconds_and_ending_after_the_last() {
+        let command = ticking_command(12, 5);
+        assert!(command.starts_with("node -e \""), "{command}");
+        assert!(command.contains("n===12"), "{command}");
+        assert!(command.contains("},5000)"), "{command}");
+        // Nothing a PowerShell does not read: no `$`, no `;` outside the quoted script.
+        assert!(
+            !command.contains('$') && !command.contains("sleep"),
+            "{command}"
+        );
+        // And the script does what it says, run by this machine's Node.
+        let ran = crate::process::Run::new("node")
+            .args(["-e", &ticking_script(3, 1)])
+            .inheriting_env()
+            .finding_programs()
+            .run()
+            .unwrap();
+        assert_eq!(ran.code, Some(0), "{ran}");
+        assert_eq!(ran.stdout.replace("\r\n", "\n"), "tick 1\ntick 2\ntick 3\n");
+    }
+
+    #[test]
     fn a_quiet_command_is_a_sleep_and_on_windows_a_ping_of_the_machines_own_address_a_reply_more_than_the_seconds(
     ) {
         assert_eq!(quiet_command(45, false), "sleep 45");
@@ -357,6 +401,11 @@ mod tests {
         ));
         assert!(!runs_command(r"C:\tools\noping.exe -n 120 127.0.0.1", ping));
         assert!(!runs_command("-n 120 127.0.0.1", ping));
+        // A command told by its program's path is run by a line naming it by any, or bare.
+        let by_path = "/sbin/ping -c 61 127.0.0.1";
+        assert!(runs_command("/sbin/ping -c 61 127.0.0.1", by_path));
+        assert!(runs_command("ping -c 61 127.0.0.1", by_path));
+        assert!(!runs_command("/sbin/noping -c 61 127.0.0.1", by_path));
     }
 
     #[test]

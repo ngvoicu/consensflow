@@ -12,7 +12,6 @@ use std::rc::Rc;
 use bytes::Bytes;
 use cf_base::refusal::Refusal;
 use cf_bridge::local::{Bridge, BridgeBuilder};
-use cf_catalog::AgentRow;
 use cf_engine::Finished;
 use cf_ledger::{
     open_ledger, MessageView, NewChief, NewMember, NewProject, NewQuestion, Options, ProjectView,
@@ -26,7 +25,7 @@ use tokio::sync::mpsc;
 
 use crate::api::answer::{Answer, Content, Failure};
 use crate::api::body::Body;
-use crate::api::context::{AgentRows, Closing, Context};
+use crate::api::context::{Closing, Context};
 use crate::api::credentials::Credentials;
 use crate::api::request::Request;
 use crate::errors::Errors;
@@ -99,15 +98,6 @@ impl std::io::Write for Said {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
-    }
-}
-
-/// Saved agents none of whose rows are asked for.
-pub struct NoRows;
-
-impl AgentRows for NoRows {
-    fn row(&self, _agent: &str) -> Result<Option<AgentRow>, Refusal> {
-        Ok(None)
     }
 }
 
@@ -232,19 +222,24 @@ pub fn scene() -> Scene {
             name: "app".to_owned(),
             chief: NewChief {
                 harness: "claude-code".to_owned(),
-                agent: Some("mybuilder".to_owned()),
+                model: Some("mybuilder".to_owned()),
+                effort: None,
             },
             staff: Vec::new(),
             gate: false,
             wake_up: None,
             specs: None,
+            staff_rules: None,
+            compaction: None,
         })
         .unwrap();
     ledger
         .add_member(
             project.id,
             &NewMember {
-                agent: "zeus".to_owned(),
+                model: Some("claude-sonnet-5".to_owned()),
+                effort: None,
+                model_name: Some("zeus".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],
@@ -300,9 +295,9 @@ pub fn scene() -> Scene {
             })
         }),
         closing: Closing::new(),
-        roster: Rc::new(NoRows),
         log: Rc::new(Log::new(home.path())),
         trace: Rc::new(Trace::new(home.path())),
+        tooling_calls: false,
     });
     Scene {
         _home: home,

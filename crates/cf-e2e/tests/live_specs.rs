@@ -17,8 +17,8 @@
 //! member is the stand-in worker, which does no work and answers what a brief tells it
 //! to ([`project::BRIEF`]): what the run judges is the chief's.
 //!
-//! The human is the page's calls (`project.specs`, `project.close` and `project.resume`,
-//! which is how the setting takes effect) and the keys typed into the chief's window,
+//! The human is the page's calls (`project.specs`, and with `--apply launch` `project.close`
+//! and `project.resume`, which is how the setting then takes effect) and the keys typed into the chief's window,
 //! which the pane host takes as it takes the app's ([`cf_e2e::live::human`]); the chief
 //! is a real harness that runs `cf` itself. The variant of Specmint is the first of
 //! them the harness has not got installed for its user (`--variant` names another), so
@@ -28,12 +28,14 @@
 //!
 //! 1. `off`: with specs off, the launch of the chief says nothing of them; a small ask
 //!    is a task on the board and no specs folder appears;
-//! 2. `source`: the human turns specs on, which takes effect at the chief's next launch
-//!    (the project is closed and resumed); the daemon logged it, and the window is
-//!    launched with the section of specs that names the folder and the skill, which is
-//!    the harness's own copy or ConsensFlow's ([`launched`]); and a Codex chief's own
-//!    record, its thread's rollout, holds the section after the Resume (the thread
-//!    keeps the instructions it began with, so it is a message of ConsensFlow's that
+//! 2. `source`: the human turns specs on while the chief's window is open (`--apply now`,
+//!    the default; T-1182): the daemon logged it, and the chief is told at its rest, in a
+//!    note delivered to its own window with no new one, that has the section of specs naming
+//!    the folder and the skill, which is the harness's own copy or ConsensFlow's
+//!    ([`launched`]). With `--apply launch` the setting takes effect at the chief's next
+//!    launch (the project is closed and resumed), the window is launched with that section,
+//!    and a Codex chief's own record, its thread's rollout, holds it after the Resume (the
+//!    thread keeps the instructions it began with, so it is a message of ConsensFlow's that
 //!    tells it);
 //! 3. `small`: a small ask still goes straight on the board, no spec is made, and the
 //!    worker's window is launched with nothing of specs;
@@ -107,7 +109,16 @@ fn limits() -> Result<(Vec<Harness>, Vec<plan::Step>, Options)> {
     let steps = plan::steps_named(&named(live::STEPS)).map_err(Error::Daemon)?;
     let variant = plan::variant_named(&named(&live::variable("variant"))).map_err(Error::Daemon)?;
     let folder = live::option("folder").unwrap_or_else(|| FOLDER.to_owned());
-    Ok((chiefs, steps, Options { variant, folder }))
+    let apply = project::Apply::named(live::option("apply").as_deref()).map_err(Error::Daemon)?;
+    Ok((
+        chiefs,
+        steps,
+        Options {
+            variant,
+            folder,
+            apply,
+        },
+    ))
 }
 
 /// The harnesses the plan needs, found on the machine as a person's shell finds them,
@@ -130,11 +141,15 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     })
 }
 
+/// How long this run is planned to take, a chief of each harness: a board of ten minutes and
+/// a plan carried out in twenty-five (`planning`), in each.
+const PLANNED: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a chief of each harness; cargo xtask live specs (npm run live:specs)"]
 fn a_chief_of_every_harness_is_told_of_specs_where_they_are_on_plans_one_and_carries_it_to_the_board(
 ) -> Result {
-    let log = Log::begin("live specs")?;
+    let log = Log::begin("live specs")?.lasting(PLANNED);
     let (chiefs, steps, options) = limits()?;
     // A harness the run was limited to, or named a model for, is asked for: a machine
     // that lacks it is the error. Any other it lacks is left out, and the report says so.

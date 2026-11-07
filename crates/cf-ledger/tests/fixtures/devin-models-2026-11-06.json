@@ -1,0 +1,1005 @@
+{
+ "recorded": "2026-11-06, this Mac, devin models list --format json, as the home ledger kept it",
+ "models": [
+  {
+   "id": "adaptive",
+   "label": "Adaptive",
+   "efforts": []
+  },
+  {
+   "id": "swe-2",
+   "label": "SWE-2",
+   "efforts": [
+    "medium",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "swe-2-high",
+    "max": "swe-2-max",
+    "medium": "swe-2-medium"
+   }
+  },
+  {
+   "id": "swe-2-lightning",
+   "label": "SWE-2 Lightning",
+   "efforts": [
+    "medium",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "swe-2-high-lightning",
+    "max": "swe-2-max-lightning",
+    "medium": "swe-2-medium-lightning"
+   }
+  },
+  {
+   "id": "swe-2-flash",
+   "label": "SWE-2 Flash",
+   "efforts": [
+    "medium",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "swe-2-flash-high",
+    "max": "swe-2-flash-max",
+    "medium": "swe-2-flash-medium"
+   }
+  },
+  {
+   "id": "claude-fable-5-1",
+   "label": "Claude Fable 5.1",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-fable-5-1-high",
+    "low": "claude-fable-5-1-low",
+    "max": "claude-fable-5-1-max",
+    "medium": "claude-fable-5-1-medium",
+    "xhigh": "claude-fable-5-1-xhigh"
+   }
+  },
+  {
+   "id": "claude-opus-5-5",
+   "label": "Claude Opus 5.5",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-opus-5-5-high",
+    "low": "claude-opus-5-5-low",
+    "max": "claude-opus-5-5-max",
+    "medium": "claude-opus-5-5-medium",
+    "xhigh": "claude-opus-5-5-xhigh"
+   }
+  },
+  {
+   "id": "claude-opus-5-5-fast",
+   "label": "Claude Opus 5.5 Fast",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-opus-5-5-high-fast",
+    "low": "claude-opus-5-5-low-fast",
+    "max": "claude-opus-5-5-max-fast",
+    "medium": "claude-opus-5-5-medium-fast",
+    "xhigh": "claude-opus-5-5-xhigh-fast"
+   }
+  },
+  {
+   "id": "gpt-6-astra",
+   "label": "GPT-6 Astra",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-astra-high",
+    "low": "gpt-6-astra-low",
+    "max": "gpt-6-astra-max",
+    "medium": "gpt-6-astra-medium",
+    "xhigh": "gpt-6-astra-xhigh"
+   }
+  },
+  {
+   "id": "gpt-6-astra-priority",
+   "label": "GPT-6 Astra Fast",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-astra-high-priority",
+    "low": "gpt-6-astra-low-priority",
+    "max": "gpt-6-astra-max-priority",
+    "medium": "gpt-6-astra-medium-priority",
+    "xhigh": "gpt-6-astra-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-6-sol",
+   "label": "GPT-6 Sol",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-sol-high",
+    "low": "gpt-6-sol-low",
+    "max": "gpt-6-sol-max",
+    "medium": "gpt-6-sol-medium",
+    "none": "gpt-6-sol-none",
+    "xhigh": "gpt-6-sol-xhigh"
+   }
+  },
+  {
+   "id": "gpt-6-sol-priority",
+   "label": "GPT-6 Sol Fast",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-sol-high-priority",
+    "low": "gpt-6-sol-low-priority",
+    "max": "gpt-6-sol-max-priority",
+    "medium": "gpt-6-sol-medium-priority",
+    "none": "gpt-6-sol-none-priority",
+    "xhigh": "gpt-6-sol-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-6-luna",
+   "label": "GPT-6 Luna",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-luna-high",
+    "low": "gpt-6-luna-low",
+    "max": "gpt-6-luna-max",
+    "medium": "gpt-6-luna-medium",
+    "none": "gpt-6-luna-none",
+    "xhigh": "gpt-6-luna-xhigh"
+   }
+  },
+  {
+   "id": "gpt-6-luna-priority",
+   "label": "GPT-6 Luna Fast",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-luna-high-priority",
+    "low": "gpt-6-luna-low-priority",
+    "max": "gpt-6-luna-max-priority",
+    "medium": "gpt-6-luna-medium-priority",
+    "none": "gpt-6-luna-none-priority",
+    "xhigh": "gpt-6-luna-xhigh-priority"
+   }
+  },
+  {
+   "id": "gemini-4-argon",
+   "label": "Gemini 4 Argon",
+   "efforts": [
+    "low",
+    "medium",
+    "high"
+   ],
+   "launchIds": {
+    "high": "gemini-4-argon-high",
+    "low": "gemini-4-argon-low",
+    "medium": "gemini-4-argon-medium"
+   }
+  },
+  {
+   "id": "kimi-k3-1-pro",
+   "label": "Kimi K3.1 Pro",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "kimi-k3-1-pro-high",
+    "low": "kimi-k3-1-pro-low",
+    "max": "kimi-k3-1-pro-max",
+    "medium": "kimi-k3-1-pro-medium"
+   }
+  },
+  {
+   "id": "glm-5-2",
+   "label": "GLM-5.2 High",
+   "efforts": [
+    "none",
+    "max"
+   ],
+   "launchIds": {
+    "max": "glm-5-2-max",
+    "none": "glm-5-2-none"
+   }
+  },
+  {
+   "id": "glm-5-2-1m",
+   "label": "GLM-5.2 High 1M",
+   "efforts": [
+    "none",
+    "max"
+   ],
+   "launchIds": {
+    "max": "glm-5-2-max-1m",
+    "none": "glm-5-2-none-1m"
+   }
+  },
+  {
+   "id": "glm-5-3",
+   "label": "GLM-5.3",
+   "efforts": [
+    "low",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "glm-5-3-high",
+    "low": "glm-5-3-low",
+    "max": "glm-5-3-max"
+   }
+  },
+  {
+   "id": "claude-sonnet-5-5",
+   "label": "Claude Sonnet 5.5",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-sonnet-5-5-high",
+    "low": "claude-sonnet-5-5-low",
+    "max": "claude-sonnet-5-5-max",
+    "medium": "claude-sonnet-5-5-medium",
+    "xhigh": "claude-sonnet-5-5-xhigh"
+   }
+  },
+  {
+   "id": "gemini-3-8-flash",
+   "label": "Gemini 3.8 Flash",
+   "efforts": [
+    "low",
+    "medium",
+    "high"
+   ],
+   "launchIds": {
+    "high": "gemini-3-8-flash-high",
+    "low": "gemini-3-8-flash-low",
+    "medium": "gemini-3-8-flash-medium"
+   }
+  },
+  {
+   "id": "claude-opus-4-7",
+   "label": "Claude Opus 4.7",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-opus-4-7-high",
+    "low": "claude-opus-4-7-low",
+    "max": "claude-opus-4-7-max",
+    "medium": "claude-opus-4-7-medium",
+    "xhigh": "claude-opus-4-7-xhigh"
+   }
+  },
+  {
+   "id": "claude-opus-4-8",
+   "label": "Claude Opus 4.8",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-opus-4-8-high",
+    "low": "claude-opus-4-8-low",
+    "max": "claude-opus-4-8-max",
+    "medium": "claude-opus-4-8-medium",
+    "xhigh": "claude-opus-4-8-xhigh"
+   }
+  },
+  {
+   "id": "claude-opus-4-8-fast",
+   "label": "Claude Opus 4.8 Fast",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-opus-4-8-high-fast",
+    "low": "claude-opus-4-8-low-fast",
+    "max": "claude-opus-4-8-max-fast",
+    "medium": "claude-opus-4-8-medium-fast",
+    "xhigh": "claude-opus-4-8-xhigh-fast"
+   }
+  },
+  {
+   "id": "claude-opus-5",
+   "label": "Claude Opus 5",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-opus-5-high",
+    "low": "claude-opus-5-low",
+    "max": "claude-opus-5-max",
+    "medium": "claude-opus-5-medium",
+    "xhigh": "claude-opus-5-xhigh"
+   }
+  },
+  {
+   "id": "claude-opus-5-fast",
+   "label": "Claude Opus 5 Fast",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-opus-5-high-fast",
+    "low": "claude-opus-5-low-fast",
+    "max": "claude-opus-5-max-fast",
+    "medium": "claude-opus-5-medium-fast",
+    "xhigh": "claude-opus-5-xhigh-fast"
+   }
+  },
+  {
+   "id": "claude-5-fable",
+   "label": "Claude Fable 5",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-5-fable-high",
+    "low": "claude-5-fable-low",
+    "max": "claude-5-fable-max",
+    "medium": "claude-5-fable-medium",
+    "xhigh": "claude-5-fable-xhigh"
+   }
+  },
+  {
+   "id": "claude-sonnet-5",
+   "label": "Claude Sonnet 5",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-sonnet-5-high",
+    "low": "claude-sonnet-5-low",
+    "max": "claude-sonnet-5-max",
+    "medium": "claude-sonnet-5-medium",
+    "xhigh": "claude-sonnet-5-xhigh"
+   }
+  },
+  {
+   "id": "claude-haiku-5-5",
+   "label": "Claude Haiku 5.5",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "claude-haiku-5-5-high",
+    "low": "claude-haiku-5-5-low",
+    "max": "claude-haiku-5-5-max",
+    "medium": "claude-haiku-5-5-medium",
+    "xhigh": "claude-haiku-5-5-xhigh"
+   }
+  },
+  {
+   "id": "gemini-3-5-flash",
+   "label": "Gemini 3.5 Flash",
+   "efforts": [
+    "minimal",
+    "low",
+    "medium",
+    "high"
+   ],
+   "launchIds": {
+    "high": "gemini-3-5-flash-high",
+    "low": "gemini-3-5-flash-low",
+    "medium": "gemini-3-5-flash-medium",
+    "minimal": "gemini-3-5-flash-minimal"
+   }
+  },
+  {
+   "id": "gemini-3-6-flash",
+   "label": "Gemini 3.6 Flash",
+   "efforts": [
+    "minimal",
+    "low",
+    "medium",
+    "high"
+   ],
+   "launchIds": {
+    "high": "gemini-3-6-flash-high",
+    "low": "gemini-3-6-flash-low",
+    "medium": "gemini-3-6-flash-medium",
+    "minimal": "gemini-3-6-flash-minimal"
+   }
+  },
+  {
+   "id": "gemini-3-7-flash",
+   "label": "Gemini 3.7 Flash",
+   "efforts": [
+    "low",
+    "medium",
+    "high"
+   ],
+   "launchIds": {
+    "high": "gemini-3-7-flash-high",
+    "low": "gemini-3-7-flash-low",
+    "medium": "gemini-3-7-flash-medium"
+   }
+  },
+  {
+   "id": "gpt-5-6-sol",
+   "label": "GPT-5.6 Sol",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-5-6-sol-high",
+    "low": "gpt-5-6-sol-low",
+    "max": "gpt-5-6-sol-max",
+    "medium": "gpt-5-6-sol-medium",
+    "none": "gpt-5-6-sol-none",
+    "xhigh": "gpt-5-6-sol-xhigh"
+   }
+  },
+  {
+   "id": "gpt-5-6-sol-priority",
+   "label": "GPT-5.6 Sol Fast",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-5-6-sol-high-priority",
+    "low": "gpt-5-6-sol-low-priority",
+    "max": "gpt-5-6-sol-max-priority",
+    "medium": "gpt-5-6-sol-medium-priority",
+    "none": "gpt-5-6-sol-none-priority",
+    "xhigh": "gpt-5-6-sol-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-5-6-terra",
+   "label": "GPT-5.6 Terra",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-5-6-terra-high",
+    "low": "gpt-5-6-terra-low",
+    "max": "gpt-5-6-terra-max",
+    "medium": "gpt-5-6-terra-medium",
+    "none": "gpt-5-6-terra-none",
+    "xhigh": "gpt-5-6-terra-xhigh"
+   }
+  },
+  {
+   "id": "gpt-5-6-terra-priority",
+   "label": "GPT-5.6 Terra Fast",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-5-6-terra-high-priority",
+    "low": "gpt-5-6-terra-low-priority",
+    "max": "gpt-5-6-terra-max-priority",
+    "medium": "gpt-5-6-terra-medium-priority",
+    "none": "gpt-5-6-terra-none-priority",
+    "xhigh": "gpt-5-6-terra-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-5-6-luna",
+   "label": "GPT-5.6 Luna",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-5-6-luna-high",
+    "low": "gpt-5-6-luna-low",
+    "max": "gpt-5-6-luna-max",
+    "medium": "gpt-5-6-luna-medium",
+    "none": "gpt-5-6-luna-none",
+    "xhigh": "gpt-5-6-luna-xhigh"
+   }
+  },
+  {
+   "id": "gpt-5-6-luna-priority",
+   "label": "GPT-5.6 Luna Fast",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-5-6-luna-high-priority",
+    "low": "gpt-5-6-luna-low-priority",
+    "max": "gpt-5-6-luna-max-priority",
+    "medium": "gpt-5-6-luna-medium-priority",
+    "none": "gpt-5-6-luna-none-priority",
+    "xhigh": "gpt-5-6-luna-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-6-1-sol",
+   "label": "GPT-6.1 Sol",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-1-sol-high",
+    "low": "gpt-6-1-sol-low",
+    "max": "gpt-6-1-sol-max",
+    "medium": "gpt-6-1-sol-medium",
+    "xhigh": "gpt-6-1-sol-xhigh"
+   }
+  },
+  {
+   "id": "gpt-6-1-sol-priority",
+   "label": "GPT-6.1 Sol Fast",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-1-sol-high-priority",
+    "low": "gpt-6-1-sol-low-priority",
+    "max": "gpt-6-1-sol-max-priority",
+    "medium": "gpt-6-1-sol-medium-priority",
+    "xhigh": "gpt-6-1-sol-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-6-1-terra",
+   "label": "GPT-6.1 Terra",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-1-terra-high",
+    "low": "gpt-6-1-terra-low",
+    "max": "gpt-6-1-terra-max",
+    "medium": "gpt-6-1-terra-medium",
+    "xhigh": "gpt-6-1-terra-xhigh"
+   }
+  },
+  {
+   "id": "gpt-6-1-terra-priority",
+   "label": "GPT-6.1 Terra Fast",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "gpt-6-1-terra-high-priority",
+    "low": "gpt-6-1-terra-low-priority",
+    "max": "gpt-6-1-terra-max-priority",
+    "medium": "gpt-6-1-terra-medium-priority",
+    "xhigh": "gpt-6-1-terra-xhigh-priority"
+   }
+  },
+  {
+   "id": "grok-4-6",
+   "label": "Grok 4.6",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+   ],
+   "launchIds": {
+    "high": "grok-4-6-high",
+    "low": "grok-4-6-low",
+    "medium": "grok-4-6-medium",
+    "xhigh": "grok-4-6-xhigh"
+   }
+  },
+  {
+   "id": "grok-4-7",
+   "label": "Grok 4.7",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+   ],
+   "launchIds": {
+    "high": "grok-4-7-high",
+    "low": "grok-4-7-low",
+    "medium": "grok-4-7-medium",
+    "xhigh": "grok-4-7-xhigh"
+   }
+  },
+  {
+   "id": "muse-wonder-1-0",
+   "label": "Muse Wonder",
+   "efforts": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ],
+   "launchIds": {
+    "high": "muse-wonder-1-0-high",
+    "low": "muse-wonder-1-0-low",
+    "max": "muse-wonder-1-0-max",
+    "medium": "muse-wonder-1-0-medium",
+    "minimal": "muse-wonder-1-0-minimal",
+    "xhigh": "muse-wonder-1-0-xhigh"
+   }
+  },
+  {
+   "id": "nemotron-3-5-super",
+   "label": "Nemotron 3.5 Super None",
+   "efforts": [
+    "none",
+    "medium",
+    "high"
+   ],
+   "launchIds": {
+    "high": "nemotron-3-5-super-high",
+    "medium": "nemotron-3-5-super-medium",
+    "none": "nemotron-3-5-super-none"
+   }
+  },
+  {
+   "id": "kimi-k3",
+   "label": "Kimi K3",
+   "efforts": [
+    "low",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "kimi-k3-high",
+    "low": "kimi-k3-low",
+    "max": "kimi-k3-max"
+   }
+  },
+  {
+   "id": "glm-5-3-flash",
+   "label": "GLM-5.3 Flash",
+   "efforts": [
+    "low",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "glm-5-3-flash-high",
+    "low": "glm-5-3-flash-low",
+    "max": "glm-5-3-flash-max"
+   }
+  },
+  {
+   "id": "deepseek-v4-flash",
+   "label": "DeepSeek V4 Flash",
+   "efforts": [
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "deepseek-v4-flash-high",
+    "max": "deepseek-v4-flash-max"
+   }
+  },
+  {
+   "id": "deepseek-v4-1-flash-1017",
+   "label": "DeepSeek V4.1 Flash None",
+   "efforts": [
+    "none",
+    "low",
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "deepseek-v4-1-flash-1017-high",
+    "low": "deepseek-v4-1-flash-1017-low",
+    "max": "deepseek-v4-1-flash-1017-max",
+    "none": "deepseek-v4-1-flash-1017-none"
+   }
+  },
+  {
+   "id": "swe-1-7",
+   "label": "SWE-1.7 Max",
+   "efforts": [
+    "medium"
+   ],
+   "launchIds": {
+    "medium": "swe-1-7-medium"
+   }
+  },
+  {
+   "id": "claude-opus-4-6",
+   "label": "Claude Opus 4.6",
+   "efforts": []
+  },
+  {
+   "id": "claude-opus-4-6-thinking",
+   "label": "Claude Opus 4.6 Thinking",
+   "efforts": []
+  },
+  {
+   "id": "claude-opus-4-6-1m",
+   "label": "Claude Opus 4.6 1M",
+   "efforts": []
+  },
+  {
+   "id": "claude-opus-4-6-thinking-1m",
+   "label": "Claude Opus 4.6 Thinking 1M",
+   "efforts": []
+  },
+  {
+   "id": "gpt-5-4",
+   "label": "GPT-5.4",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+   ],
+   "launchIds": {
+    "high": "gpt-5-4-high",
+    "low": "gpt-5-4-low",
+    "medium": "gpt-5-4-medium",
+    "none": "gpt-5-4-none",
+    "xhigh": "gpt-5-4-xhigh"
+   }
+  },
+  {
+   "id": "gpt-5-4-priority",
+   "label": "GPT-5.4 Fast",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+   ],
+   "launchIds": {
+    "high": "gpt-5-4-high-priority",
+    "low": "gpt-5-4-low-priority",
+    "medium": "gpt-5-4-medium-priority",
+    "none": "gpt-5-4-none-priority",
+    "xhigh": "gpt-5-4-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-5-5",
+   "label": "GPT-5.5",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+   ],
+   "launchIds": {
+    "high": "gpt-5-5-high",
+    "low": "gpt-5-5-low",
+    "medium": "gpt-5-5-medium",
+    "none": "gpt-5-5-none",
+    "xhigh": "gpt-5-5-xhigh"
+   }
+  },
+  {
+   "id": "gpt-5-5-priority",
+   "label": "GPT-5.5 Fast",
+   "efforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+   ],
+   "launchIds": {
+    "high": "gpt-5-5-high-priority",
+    "low": "gpt-5-5-low-priority",
+    "medium": "gpt-5-5-medium-priority",
+    "none": "gpt-5-5-none-priority",
+    "xhigh": "gpt-5-5-xhigh-priority"
+   }
+  },
+  {
+   "id": "gpt-5-4-mini",
+   "label": "GPT-5.4 Mini",
+   "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+   ],
+   "launchIds": {
+    "high": "gpt-5-4-mini-high",
+    "low": "gpt-5-4-mini-low",
+    "medium": "gpt-5-4-mini-medium",
+    "xhigh": "gpt-5-4-mini-xhigh"
+   }
+  },
+  {
+   "id": "claude-sonnet-4-6",
+   "label": "Claude Sonnet 4.6",
+   "efforts": []
+  },
+  {
+   "id": "claude-sonnet-4-6-thinking",
+   "label": "Claude Sonnet 4.6 Thinking",
+   "efforts": []
+  },
+  {
+   "id": "claude-sonnet-4-6-1m",
+   "label": "Claude Sonnet 4.6 1M",
+   "efforts": []
+  },
+  {
+   "id": "claude-sonnet-4-6-thinking-1m",
+   "label": "Claude Sonnet 4.6 Thinking 1M",
+   "efforts": []
+  },
+  {
+   "id": "kimi-k2-6",
+   "label": "Kimi K2.6",
+   "efforts": []
+  },
+  {
+   "id": "kimi-k2-7",
+   "label": "Kimi K2.7",
+   "efforts": []
+  },
+  {
+   "id": "nemotron-3-ultra",
+   "label": "Nemotron 3 Ultra None",
+   "efforts": [
+    "none",
+    "medium",
+    "high"
+   ],
+   "launchIds": {
+    "high": "nemotron-3-ultra-high",
+    "medium": "nemotron-3-ultra-medium",
+    "none": "nemotron-3-ultra-none"
+   }
+  },
+  {
+   "id": "swe-1-6",
+   "label": "SWE-1.6",
+   "efforts": []
+  },
+  {
+   "id": "deepseek-v4-pro",
+   "label": "DeepSeek V4 Pro",
+   "efforts": [
+    "high",
+    "max"
+   ],
+   "launchIds": {
+    "high": "deepseek-v4-pro-high",
+    "max": "deepseek-v4-pro-max"
+   }
+  }
+ ]
+}

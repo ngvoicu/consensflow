@@ -53,8 +53,19 @@ pub(crate) struct ParticipantRow {
     pub(crate) created_at: String,
     pub(crate) left_at: Option<String>,
     pub(crate) switched_from_harness: Option<String>,
+    pub(crate) switched_from_model: Option<String>,
+    /// The saved agent an old chief ran on when it was switched (a chief from before a
+    /// chief was a model): what the handoff names where no model was picked.
     pub(crate) switched_from_agent: Option<String>,
     pub(crate) switched_from_cut: i64,
+    pub(crate) model: Option<String>,
+    pub(crate) effort: Option<String>,
+    pub(crate) model_name: Option<String>,
+    /// The names it left, oldest first: a JSON list of words.
+    pub(crate) former_handles: String,
+    pub(crate) needs_edit: i64,
+    pub(crate) launched_model: Option<String>,
+    pub(crate) gone_model: Option<String>,
     pub(crate) designer: i64,
     pub(crate) member_handle: Option<String>,
 }
@@ -76,8 +87,16 @@ impl ParticipantRow {
             created_at: row.get("created_at")?,
             left_at: row.get("left_at")?,
             switched_from_harness: row.get("switched_from_harness")?,
+            switched_from_model: row.get("switched_from_model")?,
             switched_from_agent: row.get("switched_from_agent")?,
             switched_from_cut: row.get("switched_from_cut")?,
+            model: row.get("model")?,
+            effort: row.get("effort")?,
+            model_name: row.get("model_name")?,
+            former_handles: row.get("former_handles")?,
+            needs_edit: row.get("needs_edit")?,
+            launched_model: row.get("launched_model")?,
+            gone_model: row.get("gone_model")?,
             designer: row.get("designer")?,
             member_handle: row.get("member_handle")?,
         })
@@ -104,6 +123,26 @@ pub(crate) fn participant_view(row: &ParticipantRow) -> Result<ParticipantView, 
         role: row.role.clone(),
         agent: row.agent.clone(),
         harness: row.harness.clone(),
+        model: row.model.clone(),
+        effort: row.effort.clone(),
+        model_name: row.model_name.clone(),
+        former_handles: serde_json::from_str(&row.former_handles)?,
+        // A member's name, or a window's, that holds its model: the card says no more of it.
+        name_apart: row.role != "human"
+            && row.role != "chief"
+            && !crate::handles::names_its_model(
+                &row.handle,
+                row.model_name.as_deref(),
+                row.model.as_deref(),
+                row.effort.as_deref(),
+            ),
+        needs_edit: row.needs_edit == 1,
+        launched_model: row.launched_model.clone(),
+        gone_model: row.gone_model.clone(),
+        ran_on: row
+            .launched_model
+            .clone()
+            .filter(|launched| Some(launched) != row.model.as_ref()),
         designer: row.designer == 1,
         created_at: row.created_at.clone(),
         left_at: row.left_at.clone(),

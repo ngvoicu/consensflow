@@ -3,12 +3,11 @@
 //! ends a command at its first line break: a reviewer's 6,250-character
 //! question reached the chief as its first line, 528 characters, and `cf` said
 //! it was asked (2026-10-03). The native `cf` runs here outside any window (a
-//! window's token makes `cf` the board), and `cf agent add --description` keeps
-//! the text it is given in the roster's file, so the roster is what shows what
-//! the verb was given.
+//! window's token makes `cf` the board), and a word that is no command is said back
+//! whole, as JSON writes it (`cf: unknown command "…"`), so its error output is what
+//! shows what `cf` was given.
 
 use cf_e2e::{cf, files, ScratchHome};
-use regex::Regex;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -21,52 +20,34 @@ const TEXT: &str = "Întrebarea 1: verific și versiunea în engleză?\n\
                     \n\
                     PLOP-6142";
 
-/// The description the roster keeps for the agent called `name`.
-fn described(home: &ScratchHome, name: &str) -> cf_e2e::Result<Option<String>> {
-    let roster: Value = serde_json::from_str(&files::read_string(
-        &home.consensflow().join("agents.json"),
-    )?)
-    .map_err(|source| cf_e2e::Error::Json {
-        text: "agents.json".to_owned(),
-        source,
-    })?;
-    Ok(roster["agents"]
-        .as_array()
-        .and_then(|agents| agents.iter().find(|row| row["id"] == name))
-        .and_then(|row| row["description"].as_str())
-        .map(str::to_owned))
+/// What `cf` says of `word`, given as its command: that it has none of that name, the word
+/// whole, as JSON writes it.
+fn unknown(word: &str) -> String {
+    format!(
+        "cf: unknown command {} — run `cf help`\n",
+        Value::String(word.to_owned())
+    )
 }
 
 #[test]
 fn are_given_every_argument_whole_line_breaks_quotes_and_and_diacritics() -> Outcome {
     let home = ScratchHome::new()?;
-    let ran = home.cf([
-        "agent",
-        "add",
-        "whole",
-        "--harness",
-        "claude",
-        "--model",
-        "a-model",
-        "--description",
-        TEXT,
-    ])?;
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-    assert_eq!(ran.stdout, "whole  claude  a-model\n");
-    assert_eq!(described(&home, "whole")?.as_deref(), Some(TEXT));
+    let ran = home.cf([TEXT])?;
+    assert_eq!(ran.code, Some(1), "{ran}");
+    assert_eq!(ran.stdout, "");
+    assert_eq!(ran.stderr, unknown(TEXT));
     Ok(())
 }
 
 #[test]
 fn end_as_the_verb_ends_its_words_on_stderr_and_its_exit_code() -> Outcome {
     let home = ScratchHome::new()?;
-    let ran = home.cf(["agent", "add", "lonely"])?;
+    let ran = home.cf(["setup", "lonely"])?;
     assert_eq!(ran.code, Some(1), "{ran}");
     assert_eq!(ran.stdout, "");
-    assert!(
-        Regex::new(r"^cf: lonely needs --harness and --model")?.is_match(&ran.stderr),
-        "{}",
-        ran.stderr
+    assert_eq!(
+        ran.stderr,
+        "cf: Unexpected argument 'lonely'. This command does not take positional arguments\n"
     );
     Ok(())
 }
@@ -86,7 +67,7 @@ fn take_a_many_line_argument_whole_from_powershell() -> Outcome {
         .command("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command"])
         .arg(format!(
-            "$q = Get-Content -Raw -Encoding UTF8 '{}'; & '{}' agent add shell --harness claude --model a-model --description $q",
+            "$q = Get-Content -Raw -Encoding UTF8 '{}'; & '{}' $q",
             question.display(),
             cf::binary()?.display()
         ))
@@ -95,7 +76,7 @@ fn take_a_many_line_argument_whole_from_powershell() -> Outcome {
         // usual limit just to start.
         .limit(Duration::from_secs(180))
         .run()?;
-    assert_eq!(ran.code, Some(0), "{ran}");
-    assert_eq!(described(&home, "shell")?.as_deref(), Some(text.as_str()));
+    assert_eq!(ran.code, Some(1), "{ran}");
+    assert_eq!(ran.stderr, unknown(&text));
     Ok(())
 }

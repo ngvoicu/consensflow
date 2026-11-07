@@ -523,3 +523,88 @@ fn muse_is_read_at_rest_by_the_fallback_its_box_by_its_own_reader_and_its_input_
         Some(InputBox::Empty)
     );
 }
+
+/// A Muse chief's last lines at rest after a worker's question (T-1240), as the engine reads them
+/// (the pane host's tail: no empty line, and no rule that says no word): the rule that names the
+/// voice key, the box's first line after its `❯` (one of Muse's tips, or the words typed there),
+/// and the status line under it in the column of the box's words. Muse says nothing of its dialogs,
+/// and its screen is all the engine has.
+#[test]
+fn a_muse_chief_at_rest_after_a_workers_question_shows_no_dialog() {
+    use crate::testing::screens::{
+        reads_nothing, MUSE_BOX_HOLDING_LINES, MUSE_IDLE_AFTER_QUESTION,
+    };
+    let home = Home::new();
+    let window = home.window(None);
+    reads_nothing(
+        &window,
+        "at rest, its box showing a tip",
+        MUSE_IDLE_AFTER_QUESTION,
+    );
+    reads_nothing(
+        &window,
+        "two lines typed under a question",
+        MUSE_BOX_HOLDING_LINES,
+    );
+}
+
+#[test]
+fn its_card_of_its_quota_is_a_dialog_still() {
+    use crate::testing::screens::{reads_a_dialog, MUSE_QUOTA, MUSE_QUOTA_UNFRAMED};
+    let home = Home::new();
+    let window = home.window(None);
+    for (what, card) in [("framed", MUSE_QUOTA), ("unframed", MUSE_QUOTA_UNFRAMED)] {
+        let dialog = reads_a_dialog(&window, what, card);
+        assert_eq!(
+            dialog.options,
+            ["Keep going", "Switch to Spark", "Turn on contributor mode"],
+            "{what}"
+        );
+    }
+}
+
+/// T-1243's release bar, over the whole corpus (`crate::testing::corpus`): this window reads no screen as a
+/// dialog that `5b7acff7f`'s window read as none, reads every screen labelled a dialog as that window did,
+/// lets only idle prompts and conversations read less, and reads none of Muse's idle screens as a dialog
+/// the engine counts.
+#[test]
+fn the_muse_window_reads_no_screen_as_a_dialog_that_the_release_head_read_as_none() {
+    use crate::testing::corpus::{assert_no_regression, say};
+    let home = Home::new();
+    let window = home.window(None);
+    let audit = assert_no_regression(&window, Harness::Muse, false);
+    println!("{}", say(&audit, Harness::Muse));
+}
+
+/// T-1243: a numbered reply of the user's, echoed in the conversation with a line of words in its
+/// column, under a question of the model's, is the conversation's: `5b7acff7f` read none.
+#[test]
+fn a_muse_chief_at_rest_after_a_numbered_echo_shows_no_dialog() {
+    use crate::testing::screens::{reads_nothing, MUSE_NUMBERED_ECHO_AT_REST};
+    let home = Home::new();
+    let window = home.window(None);
+    reads_nothing(&window, "at rest", MUSE_NUMBERED_ECHO_AT_REST);
+}
+
+/// Muse's card of a peer's admission counts down ("expires in …", read from its binary's strings
+/// only: no screen of it was recorded), and its window takes nothing out of a dialog until one is
+/// (T-1273, T-1277): a time is a word of the request.
+#[test]
+fn a_muse_window_takes_nothing_out_of_a_dialog_that_counts_down() {
+    use crate::contract::Dialog;
+    let home = Home::new();
+    let window = home.window(None);
+    let card = |left: &str| Dialog {
+        question: "Let this peer's messages in?".to_owned(),
+        detail: vec![format!("peer admission \u{b7} expires in {left}")],
+        options: vec!["Yes".to_owned(), "No".to_owned()],
+        asks: true,
+        prompt_below: false,
+        closes_after_s: None,
+    };
+    assert_eq!(window.dialog_identity(&card("4m 12s")), card("4m 12s"));
+    assert_ne!(
+        window.dialog_identity(&card("4m 12s")),
+        window.dialog_identity(&card("3m 12s"))
+    );
+}

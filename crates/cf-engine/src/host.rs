@@ -10,11 +10,14 @@
 //! that came before its open's answer is known by the time the answer is.
 
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
+use cf_proto::panes::SilentPaste;
+use serde_json::Value;
 
 /// What a pane is opened with (`pane.open`): the window's pane, the folder its
 /// program starts in, the program and its arguments, the environment the
-/// engine gives it (the daemon's, the window's own, then its token), and the
-/// variables it drops.
+/// engine gives it (the daemon's, the window's own, then its token), the
+/// variables it drops, and how its harness reads a human's paste where it reads one
+/// silently ([`Adapter::silent_paste`](cf_harness::contract::Adapter::silent_paste)).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenPane {
     pub pane: Pane,
@@ -22,6 +25,7 @@ pub struct OpenPane {
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
     pub drop_env: Vec<String>,
+    pub silent_paste: Option<SilentPaste>,
 }
 
 /// What the host answered an open.
@@ -54,11 +58,25 @@ pub trait EngineHost: PaneHost {
     fn open(&self, open: OpenPane) -> Work<'_, Result<Opened, HostError>>;
     /// Kills `pane`'s program.
     fn kill<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Killed, HostError>>;
-    /// How long `pane` has printed nothing, in milliseconds, as the host's `pane.snapshot`
-    /// says it (`outputQuietMs`): none where the pane has printed nothing yet or the host
-    /// does not say. The engine's look at whether a window's screen is still being drawn
-    /// before it closes the window of a task that is done (`Dispatcher::close_if_free`).
+    /// How long what `pane`'s screen shows has not changed, in milliseconds, as the host's
+    /// `pane.snapshot` says it (`screenQuietMs`): none where its screen has shown nothing yet
+    /// or the host does not say. The engine's look at whether a window's screen is still
+    /// being drawn before it closes the window of a task that is done
+    /// (`Dispatcher::close_if_free`), and at whether the screen of a window read at rest by
+    /// the pacing's fallback is quiet, for its lane to say (`Dispatcher::fallback_lane`).
     /// It is a read of the screen and changes nothing: the Node traces, which hold every
     /// call of the host the engine makes, have none of it, so a fake writes none down.
     fn quiet<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Option<f64>, HostError>>;
+    /// What `pane`'s screen shows now: the host's `pane.snapshot` of its last
+    /// [`cf_proto::panes::TAIL_LINES`] lines, as it answers it. The engine's look for a dialog
+    /// of the window's harness that waits for a key (`Dispatcher::watch_dialog`, T-1183). A
+    /// read of the screen that changes nothing, which the Node traces have none of, as
+    /// [`EngineHost::quiet`].
+    fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>>;
+    /// How many alerts of the system's notification centre are on the Mac's screen now (a
+    /// macOS privacy dialog raised in the app's name is one): none said where the host does
+    /// not say (a Windows host, an older one, a Mac with no window server). The engine's look
+    /// at whether the dialog a window waits on is still up (`Dispatcher::watch_privacy`, T-1194).
+    /// A read that changes nothing, which the Node traces have none of, as [`EngineHost::screen`].
+    fn alerts(&self) -> Work<'_, Result<Option<usize>, HostError>>;
 }

@@ -40,12 +40,15 @@ fn project(name: &str, harness: &str) -> NewProject {
         name: name.into(),
         chief: NewChief {
             harness: harness.into(),
-            agent: None,
+            model: None,
+            effort: None,
         },
         staff: Vec::new(),
         gate: false,
         wake_up: None,
         specs: None,
+        staff_rules: None,
+        compaction: None,
     }
 }
 

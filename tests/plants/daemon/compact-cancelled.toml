@@ -170,7 +170,12 @@ runs = ["compact-cancelled-watch"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/record.rs"
-find = "                Kind::Printed => continue,\n                Kind::Prompt | Kind::Output => {"
+find = "                Kind::Printed => continue,\n"
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = "                Kind::Prompt | Kind::Output => {"
 replace = "                Kind::Prompt | Kind::Output | Kind::Printed => {"
 
 [[plant]]

@@ -65,12 +65,17 @@ fn exit_line(exit: &Value) -> String {
     )
 }
 
-/// What the pane host says of a window it still has: how long it printed nothing,
-/// what is on its way in or typed and not sent, and its screen as it draws it.
+/// What the pane host says of a window it still has: how long it printed nothing and
+/// how long its screen has shown the same, what is on its way in or typed and not sent,
+/// and its screen as it draws it.
 fn snapshot_lines(snapshot: &Value) -> Vec<String> {
     let printed = match snapshot["outputQuietMs"].as_f64() {
         Some(quiet) => format!("it printed last {quiet:.0} ms ago"),
         None => "it has printed nothing".to_owned(),
+    };
+    let printed = match snapshot["screenQuietMs"].as_f64() {
+        Some(quiet) => format!("{printed}, and its screen changed last {quiet:.0} ms ago"),
+        None => format!("{printed}, and its screen has shown nothing"),
     };
     let unsent = snapshot["unsent"]
         .as_str()
@@ -208,13 +213,14 @@ mod tests {
     fn a_window_the_pane_host_has_is_said_by_how_long_it_printed_nothing_what_is_typed_and_its_screen(
     ) {
         let snapshot = json!({
-            "ok": true, "outputQuietMs": 250_000, "unsent": "", "pasteInFlight": false,
-            "inputFailed": false, "tail": ["Devin CLI v3000.11.3", "1181", "1182"],
+            "ok": true, "outputQuietMs": 250_000, "screenQuietMs": 251_000, "unsent": "",
+            "pasteInFlight": false, "inputFailed": false,
+            "tail": ["Devin CLI v3000.11.3", "1181", "1182"],
         });
         assert_eq!(
             snapshot_lines(&snapshot),
             [
-                "its pane host says: it printed last 250000 ms ago; nothing typed and unsent",
+                "its pane host says: it printed last 250000 ms ago, and its screen changed last 251000 ms ago; nothing typed and unsent",
                 "its screen as the pane host draws it: Devin CLI v3000.11.3 ⏎ 1181 ⏎ 1182",
             ]
         );
@@ -225,7 +231,7 @@ mod tests {
         assert_eq!(
             snapshot_lines(&stuck),
             [
-                "its pane host says: it has printed nothing; typed and unsent: Write the whole numbers, a paste is on its way in, its input failed",
+                "its pane host says: it has printed nothing, and its screen has shown nothing; typed and unsent: Write the whole numbers, a paste is on its way in, its input failed",
                 "its screen as the pane host draws it: nothing",
             ]
         );

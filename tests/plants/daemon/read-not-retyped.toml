@@ -110,12 +110,14 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = 'Read::Task => message.kind == "answer",'
-replace = 'Read::Task => message.kind != "task",'
+find = '''Read::Inbox => message.kind != "task" && !says_a_role,
+            Read::Task => message.kind == "answer",'''
+replace = '''Read::Inbox => message.kind != "task" && !says_a_role,
+            Read::Task => message.kind != "task",'''
 
 [[plant]]
 name = "read not retyped: cf says only of an answer it printed in the inbox that it wrote it whole"
-meant = "a_message_cf_inbox_read_printed_whole_while_it_waited_is_acknowledged_and_nothing_else_is"
+meant = "a_message_cf_inbox_read_printed_whole_while_it_waited_or_was_pasted_is_acknowledged_and_nothing_else_is"
 runs = ["cf-lib-board"]
 
 [[plant.edit]]

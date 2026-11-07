@@ -103,8 +103,12 @@ fn bad_choices(why: &str) -> LedgerError {
 }
 
 /// The choices for a question with options: one list of picks per question,
-/// from explicit `choices` or from the text of `body`, one line per
-/// question, the labels matched regardless of case and free text kept as it is.
+/// from explicit `choices` or from the text of `body`, the labels matched
+/// regardless of case and free text kept as it is. An ask of several questions
+/// is answered one line each. An ask of one question is answered by any text:
+/// a label, or the answer's own words in as many lines as they take (a bulleted
+/// list is one answer, not one answer per bullet: T-637, the field report of
+/// 2026-10-26, where a chief's heredoc of several lines was refused).
 pub(crate) fn require_choices(
     questions: &[Question],
     choices: Option<&Value>,
@@ -118,24 +122,33 @@ pub(crate) fn require_choices(
                 None | Some(Value::Null) => String::new(),
                 body => js::text(body).into_owned(),
             };
-            text.split('\n')
+            let lines: Vec<&str> = text
+                .split('\n')
                 .map(js::trim)
                 .filter(|line| !line.is_empty())
-                .enumerate()
-                .map(|(at, line)| {
-                    if questions.get(at).is_some_and(|question| question.multiple) {
-                        Value::from(line.split(',').collect::<Vec<_>>())
-                    } else {
-                        Value::from(vec![line])
-                    }
-                })
-                .collect()
+                .collect();
+            if questions.len() == 1 && lines.len() > 1 {
+                // The one question's answer, whole: its lines are not answers of their own.
+                vec![Value::from(vec![js::trim(&text)])]
+            } else {
+                lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(at, line)| {
+                        if questions.get(at).is_some_and(|question| question.multiple) {
+                            Value::from(line.split(',').collect::<Vec<_>>())
+                        } else {
+                            Value::from(vec![line])
+                        }
+                    })
+                    .collect()
+            }
         }
     };
     if picks.len() != questions.len() {
         return Err(one_answer_each(questions));
     }
-    picks
+    let taken: Vec<Vec<String>> = picks
         .iter()
         .zip(questions)
         .map(|(pick, question)| {
@@ -159,12 +172,6 @@ pub(crate) fn require_choices(
                     if wanted.is_empty() {
                         return Err(bad_choices("empty pick"));
                     }
-                    // A pick in the human's own words ("Something else") is an answer like any other.
-                    if utf16_len(&wanted) > MAX_BODY {
-                        return Err(bad_choices(&format!(
-                            "pick too long (at most {MAX_BODY} characters)"
-                        )));
-                    }
                     let lower = wanted.to_lowercase();
                     Ok(question
                         .options
@@ -174,11 +181,37 @@ pub(crate) fn require_choices(
                 })
                 .collect()
         })
-        .collect()
+        .collect::<Result<_, LedgerError>>()?;
+    // A pick in the human's own words ("Something else") is an answer like any other: it goes
+    // under its question's header with the other picks, and all of that is the answer's text,
+    // which the body limit holds. A pick that does not fit is always refused as a pick too long,
+    // with how long the longest could be (a pick of the limit's own length was once taken here
+    // and then refused by the body's check under another name).
+    let printed = utf16_len(&render_choices(questions, &taken));
+    if printed > MAX_BODY {
+        let longest = taken.iter().flatten().map(|pick| utf16_len(pick)).max();
+        let room = longest.unwrap_or(0).saturating_sub(printed - MAX_BODY);
+        return Err(pick_too_long(room));
+    }
+    Ok(taken)
 }
 
+/// The refusal of a pick that does not fit the answer: how long the longest could be.
+fn pick_too_long(room: usize) -> LedgerError {
+    bad_choices(&format!(
+        "pick too long (at most {room} characters here; the headers of the questions and the other picks count too)"
+    ))
+}
+
+/// The refusal of an answer that does not answer each question once: it says how
+/// many questions the ask has and how they are answered.
 fn one_answer_each(questions: &[Question]) -> LedgerError {
-    bad_choices(&format!("one answer per question ({})", questions.len()))
+    bad_choices(&match questions.len() {
+        1 => "this ask has 1 question; give one answer to it, a label or your own words (any number of lines)".to_owned(),
+        count => format!(
+            "this ask has {count} questions; give one answer to each, one line each in the order asked (a label or your own words)"
+        ),
+    })
 }
 
 /// An answer by choice as text: each question's header and its picks.
@@ -255,6 +288,64 @@ mod tests {
         );
     }
 
+    /// An ask of one question with options, as a chief's `cf answer` meets it.
+    fn asked_once() -> Vec<Question> {
+        require_questions(&json!([
+            { "question": "Go on?", "header": "Go", "options": [
+                { "label": "Approve live tests" },
+                { "label": "Offline preparation only" },
+            ] },
+        ]))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_text_of_several_lines_is_the_one_answer_to_an_ask_of_one_question() {
+        let questions = asked_once();
+        let words =
+            "Approve live tests, but:\n- only on the cheap models\n- stop at the first red\n";
+        let body = json!(words);
+        let picks = require_choices(&questions, None, Some(&body)).unwrap();
+        assert_eq!(
+            picks,
+            [vec![
+                "Approve live tests, but:\n- only on the cheap models\n- stop at the first red"
+            ]],
+            "the lines are not answers of their own: the whole text is one"
+        );
+        assert_eq!(
+            render_choices(&questions, &picks),
+            "Go: Approve live tests, but:\n- only on the cheap models\n- stop at the first red"
+        );
+        // A label alone is still the label, matched whatever its case.
+        let body = json!(" offline preparation ONLY \n");
+        let picks = require_choices(&questions, None, Some(&body)).unwrap();
+        assert_eq!(picks, [vec!["Offline preparation only"]]);
+    }
+
+    #[test]
+    fn a_text_of_several_lines_to_an_ask_of_several_questions_is_still_one_line_each() {
+        let questions = asked();
+        let body = json!("left\nred\nblue");
+        let refused = require_choices(&questions, None, Some(&body)).unwrap_err();
+        assert_eq!(
+            refused.to_string(),
+            "answer: this ask has 2 questions; give one answer to each, one line each in the order asked (a label or your own words)"
+        );
+    }
+
+    #[test]
+    fn an_ask_of_one_question_with_no_words_says_how_it_is_answered() {
+        let questions = asked_once();
+        for body in [json!(""), json!(" \n ")] {
+            let refused = require_choices(&questions, None, Some(&body)).unwrap_err();
+            assert_eq!(
+                refused.to_string(),
+                "answer: this ask has 1 question; give one answer to it, a label or your own words (any number of lines)"
+            );
+        }
+    }
+
     #[test]
     fn refuses_choices_that_do_not_answer_each_question_once() {
         let questions = asked();
@@ -265,12 +356,99 @@ mod tests {
         };
         assert_eq!(
             refused(json!([["Left"]])),
-            "answer: one answer per question (2)"
+            "answer: this ask has 2 questions; give one answer to each, one line each in the order asked (a label or your own words)"
         );
         assert_eq!(
             refused(json!([["Left", "Right"], ["Red"]])),
             "answer: Way: one pick"
         );
         assert_eq!(refused(json!([["Left"], [" "]])), "answer: empty pick");
+    }
+
+    /// A question with one pick to give, and what `choices` or the text of an answer make of
+    /// `pick` for it: the pick as taken, or the refusal.
+    fn picked(pick: &str, by_text: bool) -> Result<Vec<Vec<String>>, String> {
+        let questions = require_questions(&json!([
+            { "question": "Which way?", "header": "Way", "options": [{ "label": "Left" }] },
+        ]))
+        .unwrap();
+        let (choices, body) = (json!([[pick]]), json!(pick));
+        let taken = if by_text {
+            require_choices(&questions, None, Some(&body))
+        } else {
+            require_choices(&questions, Some(&choices), None)
+        };
+        taken.map_err(|refused| refused.to_string())
+    }
+
+    /// How many characters a lone pick may have under the header `Way`: the body limit less
+    /// the header and its colon and space, which the answer prints before it.
+    const ROOM: usize = MAX_BODY - "Way: ".len();
+
+    /// The refusal of a pick that does not fit, with how long the longest could be.
+    fn too_long(room: usize) -> String {
+        format!(
+            "answer: pick too long (at most {room} characters here; the headers of the questions and the other picks count too)"
+        )
+    }
+
+    #[test]
+    fn a_pick_in_the_humans_own_words_is_taken_up_to_the_body_limit_less_its_header() {
+        // 6,000 characters was refused as an empty pick when a pick was capped at
+        // `MAX_TITLE * 10` (the long-message evals, 2026-09-27). The limit counts UTF-16 units,
+        // as the body's does: two bytes of text are one unit, and an emoji is two.
+        let own_words = [
+            "x".repeat(6_000),
+            "x".repeat(MAX_TITLE * 10 + 1),
+            "x".repeat(ROOM),
+            "\u{e9}".repeat(ROOM),
+            "\u{1f642}".repeat(ROOM / 2),
+        ];
+        for pick in own_words {
+            for by_text in [false, true] {
+                assert_eq!(
+                    picked(&pick, by_text),
+                    Ok(vec![vec![pick.clone()]]),
+                    "{} units, by text: {by_text}",
+                    utf16_len(&pick)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pick_that_does_not_fit_the_answer_is_too_long_and_not_empty_or_a_body() {
+        // One unit over, and the body limit itself, which the printed answer exceeds by its header.
+        let over = [
+            "x".repeat(ROOM + 1),
+            "x".repeat(MAX_BODY),
+            "x".repeat(MAX_BODY + 1),
+            "\u{1f642}".repeat(ROOM / 2 + 1),
+        ];
+        for pick in over {
+            for by_text in [false, true] {
+                assert_eq!(
+                    picked(&pick, by_text),
+                    Err(too_long(ROOM)),
+                    "{} units",
+                    utf16_len(&pick)
+                );
+            }
+        }
+        // And an empty one is still empty.
+        assert_eq!(picked(" ", false), Err("answer: empty pick".to_owned()));
+    }
+
+    #[test]
+    fn the_other_picks_and_headers_of_the_answer_count_against_a_pick_too() {
+        // The answer prints `Way: <pick>`, a line break and `Colours: Red`: 18 characters besides it.
+        let questions = asked();
+        let room = MAX_BODY - "Way: ".len() - "\nColours: Red".len();
+        let by_choices = |pick: String| {
+            require_choices(&questions, Some(&json!([[pick], ["Red"]])), None)
+                .map_err(|refused| refused.to_string())
+        };
+        assert!(by_choices("x".repeat(room)).is_ok());
+        assert_eq!(by_choices("x".repeat(room + 1)), Err(too_long(room)));
     }
 }

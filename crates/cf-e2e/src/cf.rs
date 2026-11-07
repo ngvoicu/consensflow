@@ -58,8 +58,17 @@ type Built = OnceLock<std::result::Result<PathBuf, String>>;
 /// run (`BUILT`).
 pub fn binary() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
-    built(&BUILT, "cf", "cf", &[], given())
+    built(&BUILT, "cf", "cf", WITH_SHIM, given())
 }
+
+/// The cargo words that make the `cf` under test whole where the terminal's command is a
+/// program, which is Windows: the shim `cf setup` copies from beside the `cf`
+/// (`cf-launcher`), built in the same run as `cf` is.
+const WITH_SHIM: &[&str] = if cfg!(windows) {
+    &["--bin", "cf-shim"]
+} else {
+    &[]
+};
 
 /// The pane host under test, `consensflow-bridge`: the program that gives each
 /// window its terminal, which the app starts beside the daemon. Built as `cf`
@@ -130,7 +139,7 @@ fn built(
 ) -> Result<&'static Path> {
     built_by(
         cell,
-        Run::new(env!("CARGO")),
+        Run::cargo(),
         &checkout::root(),
         (package, bin, more),
         before,

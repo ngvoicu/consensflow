@@ -1,7 +1,8 @@
 //! A project of the run, being worked on by the human: what the steps share of
 //! reading the board, the windows the daemon opened and the folder the specs are
 //! in, of waiting for them, and of the one thing the human does to the project, which
-//! is to turn its specs on (and the chief's next launch, which they take effect at).
+//! is to turn its specs on (and the chief is told while its window is open, or at its
+//! next launch, as the run asks).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,7 +21,7 @@ use crate::evidence::{self, Files};
 use crate::judge::{self, BoardTask};
 use crate::launched::{self, RoleText};
 use crate::plan::Planned;
-use crate::project::Settings;
+use crate::project::{Apply, Settings};
 
 /// How long the chief's window has to end once the project is closed, how long
 /// the next one has to be opened once it is resumed.
@@ -28,8 +29,11 @@ const ENDS: Duration = Duration::from_secs(90);
 const OPENS: Duration = Duration::from_secs(120);
 
 /// How long a Codex chief resumed has to be told its role again, once its window
-/// is up.
+/// is up, and a running chief to be told its specs turned on.
 const TOLD: Duration = Duration::from_secs(120);
+
+/// What the note that tells a running chief its specs are on begins with.
+const NOW: &str = "Specs are now on in this project: ";
 
 /// A project of the run.
 pub struct Ctx<'a> {
@@ -44,8 +48,10 @@ pub struct Ctx<'a> {
     /// The briefs of the tasks read so far: a brief is read with its task, and
     /// the board's cards have none.
     briefs: RefCell<BTreeMap<i64, String>>,
-    /// The window the chief was launched in once its specs were on.
+    /// The window the chief had once its specs were on.
     on: RefCell<Option<Value>>,
+    /// The note that told the running chief of them, once it did.
+    note: RefCell<Option<String>>,
     /// Where the spec the chief wrote is, from the project's folder, once it has.
     spec: RefCell<Option<String>>,
 }
@@ -69,6 +75,7 @@ impl<'a> Ctx<'a> {
             log,
             briefs: RefCell::new(BTreeMap::new()),
             on: RefCell::new(None),
+            note: RefCell::new(None),
             spec: RefCell::new(None),
         }
     }
@@ -231,11 +238,12 @@ impl<'a> Ctx<'a> {
         *self.spec.borrow_mut() = Some(path.to_owned());
     }
 
-    /// The human turns the project's specs on, on its page, and the chief, whose
-    /// text is as it was until its next launch, is launched again: the project is
-    /// closed and resumed, as the human's Close and Resume do. The window the chief
-    /// has with its specs on, as its `pane.open` says it, once it is idle; the same
-    /// each time it is asked for.
+    /// The human turns the project's specs on, on its page, and the chief has them:
+    /// told at its next rest while its window is open, with no new window
+    /// ([`Apply::Now`], T-1182), or, whose text is as it was until its next launch,
+    /// launched again: the project is closed and resumed, as the human's Close and
+    /// Resume do ([`Apply::Launch`]). The window the chief has with its specs on, as
+    /// its `pane.open` says it, once it is idle; the same each time it is asked for.
     pub fn with_specs_on(&self) -> Result<Value> {
         if let Some(frame) = self.on.borrow().as_ref() {
             return Ok(frame.clone());
@@ -256,6 +264,58 @@ impl<'a> Ctx<'a> {
             "specs are on for the project: {}",
             self.settings.view()
         ));
+        let frame = match self.settings.apply {
+            Apply::Now => self.told_now()?,
+            Apply::Launch => self.launched_again()?,
+        };
+        *self.on.borrow_mut() = Some(frame.clone());
+        Ok(frame)
+    }
+
+    /// The note that told the running chief of its specs, delivered: its words, once
+    /// the run turned them on with [`Apply::Now`].
+    pub fn note(&self) -> Option<String> {
+        self.note.borrow().clone()
+    }
+
+    /// The chief, whose window stays open, is told at its rest: the note is delivered
+    /// to it (read from the ledger, where the product wrote it), its turn on it is
+    /// waited for, and no window was opened for it.
+    fn told_now(&self) -> Result<Value> {
+        let windows = self.chief_windows();
+        let frame = windows
+            .last()
+            .cloned()
+            .ok_or_else(|| Error::Daemon("the daemon opened no window for the chief".to_owned()))?;
+        let mut told = None;
+        self.wait("the running chief to be told of the specs", TOLD, || {
+            told = self
+                .project
+                .inbox("chief")?
+                .into_iter()
+                .find(|note| {
+                    matches!(note["state"].as_str(), Some("delivered" | "read"))
+                        && note["body"]
+                            .as_str()
+                            .is_some_and(|body| body.starts_with(NOW))
+                })
+                .and_then(|note| note["body"].as_str().map(str::to_owned));
+            Ok(told.is_some())
+        })?;
+        self.settles()?;
+        if self.chief_windows().len() != windows.len() {
+            return Err(Error::Daemon(
+                "a window was opened for the chief, which was to be told while it ran".to_owned(),
+            ));
+        }
+        *self.note.borrow_mut() = told;
+        Ok(frame)
+    }
+
+    /// The chief is launched again with its specs on: the project is closed and
+    /// resumed.
+    fn launched_again(&self) -> Result<Value> {
+        let id = self.project.id();
         let windows = self.chief_windows().len();
         let chief = format!("p{id}-chief");
         for op in ["project.close", "project.resume"] {
@@ -299,7 +359,6 @@ impl<'a> Ctx<'a> {
             });
             self.settles()?;
         }
-        *self.on.borrow_mut() = Some(frame.clone());
         Ok(frame)
     }
 }

@@ -153,7 +153,8 @@ fn conduct(
     let file = rig.home().join("consensflow.db");
     let mut request = json!({
         "directory": workspace,
-        "agent": plan.agent.id,
+        "harness": plan.agent.kind,
+        "model": plan.agent.model,
         "staff": plan.staff.to_value(),
     });
     if options.gate {
@@ -457,7 +458,7 @@ fn switch(
     ))?;
     let reply = rig.page(
         "chief.switch",
-        json!({ "project": project, "agent": agent, "when": "turn" }),
+        cf_e2e::rig::chief_body(rig, &agent, json!({ "project": project, "when": "turn" }))?,
     )?;
     if reply["ok"] == false {
         return Err(Error::Refused(format!("chief.switch: {reply}")));

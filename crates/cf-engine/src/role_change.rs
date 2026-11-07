@@ -20,6 +20,13 @@
 //! specs turned on, a member added to the staff or a release that rewrote a text
 //! would never reach a conversation that is resumed. The engine says it itself.
 //!
+//! A chief whose window is open when its specs or the rules for its staff change is told
+//! of the change at its next rest, on every harness, in a note of that section alone
+//! (`role_news`). That note is a note of a role too: it carries the role text the
+//! conversation holds once it is in, recorded in the write that confirms its delivery,
+//! so a resume that finds it equal to the role now says nothing, and one that finds
+//! it different says the whole role as below.
+//!
 //! The ledger records the role text each such conversation was last told. A
 //! launch that resumes one whose text now differs has a note from ConsensFlow
 //! written: the new text in full, said plainly to replace the earlier one. The
@@ -79,7 +86,7 @@
 //! A role too long for one message (more than 16,000 units: a chief's at any staff,
 //! with specs on or not, on the real text, each command of which names the window's
 //! `cf` by its whole path, T-1049; a staff of more than 24 rows without specs, two
-//! roles to a row, before that path; it was 37 and 65 before the chief's rules for
+//! roles to a row, before that path, and before each row named its model, harness-models; it was 37 and 65 before the chief's rules for
 //! smaller contexts, T-1009, 2 and 30 before the sentence on the staff's rules,
 //! T-1012, and 0 and 27 before the words the critical review asked back, T-1074) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`),
@@ -87,17 +94,24 @@
 //! in several messages. Delivered so, it is a role told in part, and not recorded
 //! as told; it is told once the window has read it: `cf inbox read` printed the
 //! note whole and said so, and the ledger then records the role told, in the
-//! write that marks the note read (`receive_read`). `cf` says so of a role up to a
+//! write that marks the note read (`receive_read`). A window runs that command the
+//! moment it has the note, as the note tells it to, which is often before the
+//! daemon has seen the paste arrive: a read that comes while the note is still
+//! `delivering` is kept with it (`cf_ledger`'s `keep_read`, in its receipt) and told
+//! by the write that confirms the delivery (`confirm_delivery`), in the conversation
+//! it was made in. `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 211
-//! rows with specs on, 240 without, on the same text (its bytes are the bound).
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 133
+//! rows with specs on, 152 without, two roles and a model to a row, on the same text (its
+//! bytes are the bound; 195 and 223 before the model column, harness-models).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 46 rows (75 without specs) is read whole,
-//! a staff of 25 with 1,049 bytes and 62 lines to spare.
+//! the most rules and a staff of up to 19 rows (39 without specs) is read whole,
+//! a staff of 19 with 57 bytes and 61 lines to spare (29 and 58 before the model column; a
+//! staff of 25 with the most rules is now told in part and not read whole).
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).
@@ -146,12 +160,20 @@
 //!   goes back to that one, the launch says nothing, though the thread holds the
 //!   cut words after it. A staff that shrinks, or a role that changes again, tells
 //!   the thread a whole one.
-//! - A role told in part is told once `cf inbox read` printed its note after the
-//!   note was confirmed: one the window read while its delivery was still being
-//!   confirmed (it ran the command before the daemon saw the paste arrive) is
-//!   not recorded by that read, and is said again at the next Resume, with the
-//!   line, as one never read. A note printed past `cf`'s bound for a role is not
-//!   said read either: a role that long is said again at every Resume.
+//! - A note printed past `cf`'s bound for a role is not said read: a role that long
+//!   is said again at every Resume, with the line to the human.
+//! - A read kept while the note was on its way tells the role only in the conversation
+//!   it was made in. One that began between the read and the confirmation (a `/clear`
+//!   while the paste was on its way) was not shown what the read printed: it is told
+//!   nothing by it, and the role is said again at its next Resume, with the line.
+//! - A role note read while its paste was on its way and then given up (failed) is
+//!   failed as any is: the read is not looked for, as the thread is not (the bullet
+//!   above on a delivery given up). Any other message so read is `read`, not failed.
+//! - A note whose paste is given back to the queue after the window read it (the
+//!   window went before the daemon saw the paste arrive) keeps the read: a read does
+//!   not receive a role, so the note waits for its paste, and the read tells the role
+//!   if it comes in after all (`settle_replacements`, or the next paste of it). A
+//!   launch withdraws a note that still waits, with the read.
 //! - A resumed Codex window that is given no first message has the turn its
 //!   record ended in read as the old process's, not as its own, until it begins
 //!   one (`LeftOpen`), whether or not a replacement is due. That is a different
@@ -247,7 +269,7 @@ impl Dispatcher {
         let mut told = Vec::new();
         for note in waiting {
             let shown = self
-                .recorded_paste_of(participant.id, note.id, None)
+                .recorded_paste_of(participant.id, note.id, None, None)
                 .await?;
             if let Some(item) = shown {
                 let begun = self.seams.ledger.borrow_mut().begin_delivery(note.id)?;
@@ -289,9 +311,9 @@ impl Dispatcher {
             .adapters
             .adapter(harness)
             .filter(|adapter| adapter.keeps_first_instructions());
-        // A launch that cannot go (no adapter, an agent the human deleted) says
-        // why in its own step, which asks for the text again where this could not.
-        let Some(adapter) = kept.filter(|_| !self.agent_gone(participant)) else {
+        // A launch that cannot go (no adapter) says why in its own step, which asks for
+        // the text again where this could not.
+        let Some(adapter) = kept else {
             return apart(first);
         };
         let Ok(role) = self.role_text(project, participant, &*adapter) else {
@@ -383,6 +405,9 @@ impl Dispatcher {
             &role.instructions,
         )?;
         record.delivery.borrow_mut().greeting = Some(note.id);
+        // It says the role as it is now: what a note of a setting's change would say
+        // is said already (`role_news`).
+        self.told_by_greeting(project, participant, record, &role);
         self.changed();
         Ok(())
     }
@@ -426,7 +451,7 @@ impl Dispatcher {
     /// Whether what a launch or a switch put ahead of `record`'s queue (its prelude) is
     /// not done with: its replacement still owed ([`Dispatcher::owed`], a failed one
     /// included, which the next look settles), or the message it displaced still to go.
-    fn prelude_waits(&self, record: &Record) -> Result<bool, EngineError> {
+    pub(crate) fn prelude_waits(&self, record: &Record) -> Result<bool, EngineError> {
         if self.owed(record)?.is_some() {
             return Ok(true);
         }
@@ -514,6 +539,10 @@ impl Dispatcher {
             ledger.confirm_delivery_telling(message.id, Some(receipt))?;
         } else {
             ledger.confirm_delivery(message.id, Some(receipt))?;
+        }
+        // Its window took work: it came up, whatever its record showed before (CHF-06).
+        if let Some(record) = self.record(message.recipient_id) {
+            record.window.borrow_mut().took = true;
         }
         Ok(())
     }
@@ -615,6 +644,16 @@ pub(crate) struct Answers<'a> {
     /// Finish takes where the turn after it is still under way (a call open, a
     /// notification's turn begun). None where it wrote none complete.
     pub(crate) complete_run: Option<Vec<&'a Item>>,
+    /// What the member wrote after the message it was given and before its first tool call,
+    /// in the items it was written in, where a tool call came after it: its reply. A turn
+    /// that answers a question puts the answer first, and goes on; the words of that answer
+    /// are not the turn's last (T-1151: Devin, Claude Code, Codex and Muse all write text, run
+    /// a tool, and write the last words after it). A harness's own words in the member's place
+    /// (`synthetic`) are no reply; a note it marks as progress (Codex's `commentary`) is the
+    /// reply all the same, as it is the first words a question gets. Holds no words where the
+    /// member ran a tool before it wrote (a call that says nothing is an item with none),
+    /// where it ran none (its one run is the final answer), or where it wrote nothing.
+    pub(crate) reply: Vec<&'a Item>,
 }
 
 /// The answer to the task in `items`, a member's record after its latest message: what
@@ -639,6 +678,7 @@ pub(crate) fn answers_to_the_task<'a>(
     let mut last = None;
     let mut final_run = Vec::new();
     let mut complete_run = None;
+    let mut first = FirstRun::default();
     for item in items.iter().filter(|item| !item.compaction) {
         match item.role {
             Role::User => {
@@ -661,10 +701,47 @@ pub(crate) fn answers_to_the_task<'a>(
             }
             _ => {}
         }
+        first.see(item, of_the_role);
     }
     (last.is_some() || complete_run.is_some()).then_some(Answers {
         last,
         final_run,
         complete_run,
+        reply: first.reply(),
     })
+}
+
+/// What a member wrote before its first tool call, as the walk over its record meets it
+/// (`Answers::reply`): the assistant's items from its latest message to its first tool call,
+/// and whether a tool call came. A message to the member begins it again, a replacement of the
+/// role (`of_the_role`) none; the harness's own words are none of it.
+#[derive(Default)]
+struct FirstRun<'a> {
+    run: Vec<&'a Item>,
+    over: bool,
+}
+
+impl<'a> FirstRun<'a> {
+    /// The next item of the record, `of_the_role` whether it is of a turn on a replacement.
+    fn see(&mut self, item: &'a Item, of_the_role: bool) {
+        if of_the_role {
+            return;
+        }
+        match item.role {
+            Role::User => *self = Self::default(),
+            Role::Tool => self.over = true,
+            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),
+            _ => {}
+        }
+    }
+
+    /// Its words, where a tool call came after them: with none, the one run is the turn's
+    /// final answer, and it is no reply apart from it.
+    fn reply(self) -> Vec<&'a Item> {
+        if self.over {
+            self.run
+        } else {
+            Vec::new()
+        }
+    }
 }

@@ -37,6 +37,7 @@ mod built_identity;
 mod test_manifest;
 #[cfg(test)]
 mod testing;
+mod tls;
 #[cfg(target_os = "macos")]
 mod update_install;
 mod update_page;
@@ -534,6 +535,9 @@ pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     std::hint::black_box(BUILT_IDENTITY);
+    // The process's one TLS provider, before the plugins, any client or any thread exists: reqwest
+    // panics at the build of a client where the process has none (tls.rs, T-1247).
+    tls::install_ring_as_default();
     let context = tauri::generate_context!();
     // Settled before any thread exists, so the updater and the daemon —
     // which inherits this environment, and passes it to every pane — all see

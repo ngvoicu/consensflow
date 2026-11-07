@@ -17,7 +17,9 @@ pub enum PageOperation {
     ProjectResume,
     ProjectClose,
     ProjectDelete,
-    AgentsList,
+    /// Node's `agents.list`: the harnesses not installed here, which the pickers
+    /// leave out (no saved agents are listed: harness-models).
+    HarnessesMissing,
     StaffLast,
     ChiefSwitch,
     MemberAdd,
@@ -60,7 +62,8 @@ pub enum PageOperation {
     /// One file of a project's specs folder, for the specs viewer, read and
     /// never written.
     SpecsFile,
-    /// Whether a project's specs folder holds a file: the board's Specs button.
+    /// Whether specs are on for a project and whether its specs folder holds a
+    /// file: either shows the board's Specs button.
     SpecsPresent,
     /// An HTML file of a project's specs folder, opened in the browser,
     /// outside ConsensFlow.
@@ -92,18 +95,25 @@ pub enum PageOperation {
     /// compact at, or takes away: every member window of the project is given it
     /// when it next starts.
     ProjectCompaction,
+    /// The models a harness lists and the efforts each takes, as the home keeps them: read
+    /// from the harness at the first ask of the daemon's life, and again at the human's
+    /// Refresh (CHF-03). For the chief's picker and the staff chains' editor.
+    ModelsGet,
+    /// Edit member: a member runs on another harness, model and effort from its next window,
+    /// in the tier the human chose (T-1143).
+    MemberEdit,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 47] = [
+    pub const ALL: [PageOperation; 49] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
         Self::ProjectClose,
         Self::ProjectDelete,
-        Self::AgentsList,
+        Self::HarnessesMissing,
         Self::StaffLast,
         Self::ChiefSwitch,
         Self::MemberAdd,
@@ -145,6 +155,8 @@ impl PageOperation {
         Self::ProjectMeeting,
         Self::ProjectRules,
         Self::ProjectCompaction,
+        Self::ModelsGet,
+        Self::MemberEdit,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -155,7 +167,7 @@ impl PageOperation {
             Self::ProjectResume => "project.resume",
             Self::ProjectClose => "project.close",
             Self::ProjectDelete => "project.delete",
-            Self::AgentsList => "agents.list",
+            Self::HarnessesMissing => "harnesses.missing",
             Self::StaffLast => "staff.last",
             Self::ChiefSwitch => "chief.switch",
             Self::MemberAdd => "member.add",
@@ -197,6 +209,8 @@ impl PageOperation {
             Self::ProjectMeeting => "project.meeting",
             Self::ProjectRules => "project.rules",
             Self::ProjectCompaction => "project.compaction",
+            Self::ModelsGet => "models.get",
+            Self::MemberEdit => "member.edit",
         }
     }
 
@@ -215,7 +229,7 @@ impl PageOperation {
         !matches!(
             self,
             Self::ProjectsList
-                | Self::AgentsList
+                | Self::HarnessesMissing
                 | Self::StaffLast
                 | Self::BoardGet
                 | Self::InboxGet
@@ -231,13 +245,14 @@ impl PageOperation {
                 | Self::HistoryPart
                 | Self::ComputerUseGet
                 | Self::ComputerUseOpen
+                | Self::ModelsGet
         )
     }
 }
 
 /// The first line the daemon prints (`{"url":"http://127.0.0.1:<port>/",
 /// "token":"<48 hex>"}`): where its HTTP front listens and the token the app
-/// opens the human's agents screens with. The url ends in a slash; a
+/// opens the human's harnesses screen with. The url ends in a slash; a
 /// window's `CONSENSFLOW_URL` does not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandleLine {
@@ -259,7 +274,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 47);
+        assert_eq!(named.len(), 49);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -290,7 +305,8 @@ mod tests {
             "project.resume",
             "project.close",
             "project.delete",
-            "agents.list",
+            // Node's `agents.list`, renamed with the saved agents gone (harness-models).
+            "harnesses.missing",
             "staff.last",
             "chief.switch",
             "member.add",
@@ -314,7 +330,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 19] = [
+        const ADDED: [&str; 21] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -334,6 +350,8 @@ mod tests {
             "project.meeting",
             "project.rules",
             "project.compaction",
+            "models.get",
+            "member.edit",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);
@@ -351,7 +369,7 @@ mod tests {
             reads,
             [
                 "projects.list",
-                "agents.list",
+                "harnesses.missing",
                 "staff.last",
                 "board.get",
                 "inbox.get",
@@ -367,6 +385,7 @@ mod tests {
                 "history.part",
                 "computer_use.get",
                 "computer_use.open",
+                "models.get",
             ]
         );
     }

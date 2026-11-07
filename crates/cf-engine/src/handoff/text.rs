@@ -9,7 +9,7 @@ use crate::delivery_text::put_there_by_claude;
 
 /// A harness as the pages name it (`HARNESS_NAMES`): its own word when it has
 /// no name of its own.
-pub(super) fn name_of(harness: &str) -> &str {
+pub(crate) fn name_of(harness: &str) -> &str {
     match harness {
         "claude-code" => "Claude Code",
         "codex" => "Codex",

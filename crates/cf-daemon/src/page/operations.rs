@@ -1,6 +1,6 @@
 //! The table of the page's operations: which function serves which. An
 //! operation is read and begun in its first poll, in the order its frame came:
-//! each arm reads the saved agents and the body, makes its one call on the
+//! each arm reads the body, makes its one call on the
 //! ledger or the engine, and answers; none waits before it makes it.
 
 use cf_proto::page::PageOperation;
@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use super::body::Body;
 use super::{
-    app_specs, board, computer_use, history, messages, projects, sessions, specs, staff, tasks,
-    viewer, wake_ups, Page, Served,
+    app_specs, board, computer_use, history, messages, models, projects, sessions, specs, staff,
+    tasks, viewer, wake_ups, Page, Served,
 };
 
 /// Serves `operation`, asked with `body` (an object the page sent, or `{}`).
@@ -31,7 +31,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::ProjectRules => projects::rules(page, body).await,
         PageOperation::ProjectCompaction => projects::compaction(page, body).await,
         // The agents and the staff.
-        PageOperation::AgentsList => staff::agents(page).await,
+        PageOperation::HarnessesMissing => staff::missing(page).await,
         PageOperation::StaffLast => staff::last(page).await,
         PageOperation::ChiefSwitch => staff::switch_chief(page, body).await,
         PageOperation::MemberAdd => staff::add(page, body).await,
@@ -74,6 +74,9 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         // A project's computer use, for Project settings, and the panes of its grants.
         PageOperation::ComputerUseGet => computer_use::get(page, body).await,
         PageOperation::ComputerUseOpen => computer_use::open(page, body).await,
+        // The models a harness lists, for the chief's picker and the chains' editor.
+        PageOperation::ModelsGet => models::get(page, body).await,
+        PageOperation::MemberEdit => staff::edit(page, body).await,
     };
     served.map_err(|said| said.0)
 }

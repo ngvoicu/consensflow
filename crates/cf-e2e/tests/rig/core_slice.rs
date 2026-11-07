@@ -6,7 +6,7 @@
 //! delivers it into the chief's window, where the chief's own transcript shows
 //! it arrived.
 
-use cf_e2e::rig::{Project, Rig, OPEN};
+use cf_e2e::rig::{chief_body, Project, Rig, OPEN};
 use cf_e2e::{files, Error};
 use regex::Regex;
 use serde_json::{json, Value};
@@ -223,7 +223,10 @@ fn switching_the_chief_opens_a_fresh_window_that_gets_the_handoff_and_reads_what
             .contains("\"text\":\"TERN-7314\""))
     })?;
 
-    let switched = rig.page("chief.switch", json!({ "project": id, "agent": "worker" }))?;
+    let switched = rig.page(
+        "chief.switch",
+        chief_body(&rig, "worker", json!({ "project": id }))?,
+    )?;
     assert_eq!(switched["ok"], true, "{switched}");
     rig.wait_for("a second chief window to be opened", secs(10), || {
         Ok(chiefs().len() == 2)
@@ -274,10 +277,10 @@ fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief
         "schemaVersion": 1,
         "agents": [{ "id": "my-chief", "kind": "claude-code", "model": "fake-chief" }],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    rig.stand_ins(&roster)?;
     let opened = rig.page(
         "project.open",
-        json!({ "directory": rig.workspace(), "agent": "my-chief" }),
+        chief_body(&rig, "my-chief", json!({ "directory": rig.workspace() }))?,
     )?;
     let project = opened["project"]["id"].as_i64().unwrap_or_default();
     let first = rig.open_frame(&format!("p{project}-chief"), OPEN)?;

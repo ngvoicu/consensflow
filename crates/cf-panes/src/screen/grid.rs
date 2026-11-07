@@ -9,6 +9,9 @@
 
 mod edit;
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use super::parser::Action;
 
 /// The most rows and columns the model keeps whatever the pty's size is: a
@@ -152,6 +155,22 @@ impl Grid {
             lines.push(line.trim_end().to_owned());
         }
         lines
+    }
+
+    /// A digest of what the screen shows: its size, and each cell's character and
+    /// whether it was drawn styled (the alternate screen's cells are its own). Two screens that show the same have the same digest; a program that
+    /// draws again what it shows already, or moves its cursor, or hides and shows it,
+    /// does not change it ([`super::Screen::feed`]). The cursor is left out: a harness
+    /// moves it about while it draws a frame and puts it back, and a read of the pty
+    /// that ends inside the frame would take the move for a change.
+    pub(super) fn digest(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        (self.rows, self.cols).hash(&mut hasher);
+        for row in &self.cells {
+            row.cells.hash(&mut hasher);
+            row.styled.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Where the cursor is in [`Grid::lines`]: the line it is on, how many

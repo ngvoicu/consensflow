@@ -11,7 +11,7 @@ fn hidden(text: &str) -> String {
 
 #[test]
 fn every_pattern_of_the_masker_builds() {
-    assert_eq!(RULES.len(), 9);
+    assert_eq!(RULES.len(), 12);
 }
 
 #[test]
@@ -168,4 +168,215 @@ fn each_secret_is_counted_once() {
         "KEY=[masked] then [masked] then https://[masked]@h/"
     );
     assert_eq!(masked.count, 3);
+}
+
+/// Whether any six characters in a row of `value` are in `text`: a part of the value that
+/// the mask let through.
+fn survives(text: &str, value: &str) -> bool {
+    let chars: Vec<char> = value.chars().collect();
+    chars
+        .windows(6)
+        .any(|piece| text.contains(&piece.iter().collect::<String>()))
+}
+
+/// T-823, the review of `a26e0848e` (P1): a base64 value with no digit in it was no token
+/// to the masker, and a row that names nothing, which the note quotes, held it.
+#[test]
+fn a_long_base64_value_is_hidden_whether_or_not_a_digit_is_in_it() {
+    for value in [
+        "YWJj".repeat(12),
+        "QUJD".repeat(12),
+        "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXpBQkNERUZHSElK".to_owned(),
+        format!("{}==", "YWJj".repeat(11)),
+    ] {
+        let masked = mask(&format!("value {value} end"));
+        assert_eq!(masked.text, "value [masked] end", "{value}");
+        assert_eq!(masked.count, 1);
+    }
+    // A base64 run with a `+`, or padded, is one with no digit, whatever its slashes.
+    let with_plus = "abcdefghij+klmnopqrstuvwxyzABCDEFGHIJKLMNOP";
+    assert_eq!(hidden(&format!("x {with_plus} y")), "x [masked] y");
+}
+
+/// What is no base64 stays: a word, a camel-case name, a path, a number.
+#[test]
+fn a_name_a_path_and_a_number_are_not_taken_for_base64() {
+    for text in [
+        "ConsensFlowSupervisorStartupFailedError",
+        "/Users/gabrielvoicu/Projects/ngvoicu/consensflow/crates",
+        "cf_engine_dispatcher_tests_a_very_long_name_that_goes_on",
+        "01234567890123456789012345678901234567890123456789",
+    ] {
+        assert_eq!(hidden(text), text, "{text}");
+    }
+}
+
+/// The spans of every rule are found in the text as it was, and joined, before any is
+/// replaced: a rule that took a piece of a value first left the rest of it to the next rule,
+/// which saw a shorter run (`[masked]+/abcdefghijklmnopqr/AA==`, the review's).
+#[test]
+fn no_part_of_a_value_survives_the_rules_that_overlap_on_it() {
+    let values = [
+        // A digit-bearing run, then a base64 tail with no digit.
+        "Zm9vYmFyMTIzNDU2Nzg5MGFiY2RlZg+/abcdefghijklmnopqr/AA==".to_owned(),
+        // The same, with the tail first.
+        "abcdefghijklmnopqr/AA==+Zm9vYmFyMTIzNDU2Nzg5MGFiY2RlZg".to_owned(),
+        // A long base64url run with its digits in the middle.
+        format!(
+            "{}0123456789{}",
+            "AbCdEfGhIj".repeat(3),
+            "KlMnOpQrSt".repeat(3)
+        ),
+        // Under a label, so the label's rule and the run's overlap.
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY+/abcdefghijklmnopqr/AA==".to_owned(),
+    ];
+    for value in &values {
+        for text in [
+            value.clone(),
+            format!("secret: {value}"),
+            format!("DB_PASSWORD={value} done"),
+            format!("token {value}."),
+        ] {
+            let masked = mask(&text);
+            assert!(!survives(&masked.text, value), "{text} -> {}", masked.text);
+            assert!(masked.count >= 1, "{text}");
+        }
+    }
+    // One secret is one, however many rules found it.
+    assert_eq!(mask(&format!("secret: {}", values[0])).count, 1);
+}
+
+/// A command a screen echoes: curl's user and password are a pair with a colon in it, which
+/// no name says is secret.
+#[test]
+fn the_user_and_password_of_a_commands_dash_u_are_hidden() {
+    for (text, value) in [
+        (
+            "$ curl -u alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        (
+            "curl --user alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        (
+            "curl --user=alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        (
+            "curl --proxy-user alice:swordfish https://example.test/",
+            "swordfish",
+        ),
+        ("curl -ualice:swordfish https://example.test/", "swordfish"),
+        ("curl https://example.test/ -U proxy:swordfish", "swordfish"),
+    ] {
+        let masked = mask(text);
+        assert!(!masked.text.contains(value), "{text}: {}", masked.text);
+        assert_eq!(masked.count, 1, "{text}");
+    }
+    // A flag that is no user's, and a user alone, stay.
+    for text in [
+        "sort -u file.txt",
+        "git push -u origin main",
+        "curl -u alice https://x.test",
+        "ls -U",
+    ] {
+        assert_eq!(hidden(text), text, "{text}");
+    }
+}
+
+/// The review of `860010398` found a 48-letter base64 value of small letters alone survive: no
+/// word is forty letters long, so a run of that length is hidden in any case.
+#[test]
+fn a_long_run_of_small_letters_is_hidden_too() {
+    for run in [
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv".to_owned(),
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz".to_owned(),
+        "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWZnaGlqa2w".to_owned(),
+    ] {
+        let masked = mask(&format!("value {run} end"));
+        assert_eq!(masked.text, "value [masked] end", "{run}");
+        assert_eq!(masked.count, 1);
+    }
+    // Thirty-nine is a long word, and a run of digits is a number.
+    for text in [
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklm",
+        "01234567890123456789012345678901234567890123456789",
+    ] {
+        assert_eq!(hidden(text), text, "{text}");
+    }
+}
+
+/// The beginning of a token of a known kind is enough to withhold a screen (T-1205 round 4):
+/// the re-check read `sk-abcd efgh …` out of the ledger, for the masker needs the body whole.
+#[test]
+fn the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body() {
+    for text in [
+        "sk-abcd",
+        "see sk-abcd efgh ijkl",
+        "pk_live_abcd",
+        "sk_live_abcd",
+        "rk_test_abcd",
+        "ghp_abcd",
+        "gho_abcd",
+        "ghu_abcd",
+        "ghs_abcd",
+        "ghr_abcd",
+        "github_pat_abcd",
+        "glpat-abcd",
+        "xoxb-abcd",
+        "xoxa-abcd",
+        "xoxp-abcd",
+        "xoxr-abcd",
+        "xoxs-abcd",
+        "AKIAABCD",
+        "ASIAABCD",
+        "AIzaabcd",
+        "eyJhbGci",
+        "npm_abcdefghijkl",
+        "hf_abcdefghijkl",
+        "ya29.abcdefghijkl",
+        "SG.abcdefgh",
+        // The prefix with nothing after it, a blank, or the end of the text.
+        "sk-",
+        "token sk- then",
+        "glpat- abcd",
+        // A Basic credential of base64's, as short as four characters.
+        "Basic YTpi",
+        "basic dXNlcjpwYXNz",
+    ] {
+        assert!(begins_a_token(text), "{text}");
+    }
+    // What begins like a kind and is a word or a name.
+    for text in [
+        "sk",
+        // Stripe's other keys are only the live and test ones; the rest are names.
+        "pk_users_id",
+        "pk_id",
+        "rk_orders",
+        "pk-abcd",
+        "rk-abcd",
+        // A word of capitals after Basic is no credential.
+        "Basic HTTP server",
+        "Basic JSON",
+        "task-list",
+        "disk-usage is high",
+        "ask-me anything",
+        "npm_config_cache",
+        "npm_abc",
+        "hf_hub_download",
+        "SG.Assert",
+        "ASIA",
+        "ASIAN",
+        "AKIA",
+        "eyJ",
+        "ya29.short",
+        "Basic setup",
+        "Basic Authentication",
+        "basic",
+        "ghx_abcd",
+        "xoxz-abcd",
+    ] {
+        assert!(!begins_a_token(text), "{text}");
+    }
 }

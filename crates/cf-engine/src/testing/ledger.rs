@@ -101,6 +101,24 @@ impl Context {
             .expect("the inbox")
     }
 
+    /// The chief accepts task `number` if its result is in and it is not decided yet: a
+    /// follow-up (`after`) of a task in that state waits for the acceptance (T-1118), so a
+    /// test that means the follow-up to go to the window now decides the task first.
+    pub fn accept_if_done(&self, project: i64, number: i64) {
+        let done = self
+            .ledger
+            .borrow()
+            .task(project, number)
+            .expect("the ledger read")
+            .is_some_and(|thread| thread.task.state == "done");
+        if done {
+            self.ledger
+                .borrow_mut()
+                .accept_task(project, number, "chief")
+                .expect("the task accepted");
+        }
+    }
+
     /// The chief pauses task `number` (`ledger.pauseTask`).
     pub fn pause_task(&self, project: i64, number: i64) {
         self.ledger

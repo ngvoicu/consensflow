@@ -1,0 +1,163 @@
+# The live kit runs on Windows as on a Mac (T-1079; the alpha.1 release check, T-1069, found four cases
+# that could not): `codex-role` started `ps` and `pgrep`, `stops --case stuck` told a Codex window to run
+# `sh ./script` (PowerShell knows no `sh`), `folder-trust claude` looked for its notes by Windows'
+# verbatim canonical name (`\\?\C:\…`, which the product never writes), and `outside-claude` told Claude
+# to run `python3` (what Windows' `PATH` holds under that name opens the Store). Now the processes are the
+# machine's own table (`ThisMachine`), the stuck workload and the token probe are Node's, a note is found by
+# the name the product writes, the waits are the kit's quiet command; the rig's close lists what it left
+# through the same table, the pacing chief's minute is Node's ticks, and a guard holds every file of the
+# live kit that starts a Unix-only program to a list that says why it is no Windows case's. One plant takes
+# one rule out; a test of it fails. Every name holds `live tools on windows`.
+
+[run]
+lw-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
+lw-trust = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_folder_trust", "--", "tests::a_trust_note"]
+lw-outside = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_outside_claude"]
+lw-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_codex_role"]
+lw-stuck = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "--", "stuck::tests"]
+lw-closing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing"]
+lw-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command"]
+lw-pacing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_pacing"]
+lw-guard = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests::no_live_check_starts"]
+
+[[plant]]
+name = "live tools on windows: a trust note is not found by a drive's folder with the verbatim prefix taken off"
+meant = "a_folder_is_named_as_the_product_writes_it_with_no_verbatim_prefix_of_a_drive_or_a_share"
+runs = ["lw-files"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/files.rs"
+find = '''        Some(rest) if has_drive(rest) => rest.to_owned(),'''
+replace = '''        Some(rest) if has_drive(rest) => canonical.to_owned(),'''
+
+[[plant]]
+name = "live tools on windows: a share's folder keeps its verbatim prefix"
+meant = "a_folder_is_named_as_the_product_writes_it_with_no_verbatim_prefix_of_a_drive_or_a_share"
+runs = ["lw-files"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/files.rs"
+find = '''        return format!(r"\\{share}");'''
+replace = '''        return canonical.to_owned();'''
+
+[[plant]]
+name = "live tools on windows: a trust note is looked for by the system's canonical folder, which no note holds"
+meant = "a_trust_note_is_found_by_the_folder_name_the_product_writes_on_windows_too"
+runs = ["lw-trust"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_folder_trust.rs"
+find = '''    let named = files::plain_name(&canonical(folder).to_string_lossy());'''
+replace = '''    let named = canonical(folder).to_string_lossy().into_owned();'''
+
+[[plant]]
+name = "live tools on windows: the outside-claude workloads are python3 again"
+meant = "no_command_the_case_asks_for_is_one_a_machine_may_lack"
+runs = ["lw-outside"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_outside_claude.rs"
+find = '''    quiet_command(seconds, windows)'''
+replace = '''    format!("python3 -c 'import time; time.sleep({seconds})'")'''
+
+[[plant]]
+name = "live tools on windows: the window's tree is its own process alone"
+meant = "the_window_s_tree_is_what_descends_from_its_process_in_a_windows_table_as_in_ps"
+runs = ["lw-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_codex_role.rs"
+find = '''        .chain(descending_from(all, own))'''
+replace = '''        .chain(Vec::<Running>::new())'''
+
+[[plant]]
+name = "live tools on windows: a word on the command line of a process outside the window's tree is not found"
+meant = "a_word_on_the_command_line_of_the_windows_tree_or_of_any_other_process_is_found"
+runs = ["lw-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_codex_role.rs"
+find = '''        if !holding.is_empty() {'''
+replace = '''        if false && !holding.is_empty() {'''
+
+[[plant]]
+name = "live tools on windows: the board's token on a command line of the machine is not found"
+meant = "the_board_token_on_any_command_line_of_the_machine_is_found"
+runs = ["lw-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_codex_role.rs"
+find = '''    if all.iter().any(|process| process.command.contains(token)) {'''
+replace = '''    if false && all.iter().any(|process| process.command.contains(token)) {'''
+
+[[plant]]
+name = "live tools on windows: the chief is asked for its token with a POSIX command substitution"
+meant = "the_command_that_asks_for_the_token_is_one_the_shell_of_every_machine_runs"
+runs = ["lw-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_codex_role.rs"
+find = '''    "node -e \"console.log('TOKEN_IS_' + (process.env.CONSENSFLOW_TOKEN ? 'SET' : 'UNSET'))\"";'''
+replace = '''    "echo TOKEN_IS_$(test -n \"$CONSENSFLOW_TOKEN\" && echo SET || echo UNSET)";'''
+
+[[plant]]
+name = "live tools on windows: the member is asked to run the stuck script with sh"
+meant = "the_script_ignores_the_signals_a_harness_ends_a_command_with_and_waits"
+runs = ["lw-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''    format!("Run exactly this one shell command, then stop: node ./{SCRIPT}")'''
+replace = '''    format!("Run exactly this one shell command, then stop: sh ./{SCRIPT}")'''
+
+[[plant]]
+name = "live tools on windows: Windows' table lists every process in a group of its pid"
+meant = "windows_table_is_a_listing_with_no_groups_and_what_a_rig_left_is_found_by_its_parents"
+runs = ["lw-closing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''            group: 0,'''
+replace = '''            group: process.identity.pid,'''
+
+[[plant]]
+name = "live tools on windows: the ticking command compares with two equal signs"
+meant = "a_ticking_command_is_node_printing_a_tick_every_few_seconds_and_ending_after_the_last"
+runs = ["lw-command"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = '''        "let n=0;const t=setInterval(()=>{{console.log('tick '+(n+=1));if(n==={ticks})clearInterval(t)}},{every_ms})"'''
+replace = '''        "let n=0;const t=setInterval(()=>{{console.log('tick '+(n+=1));if(n=={ticks})clearInterval(t)}},{every_ms})"'''
+
+[[plant]]
+name = "live tools on windows: the pacing chief's minute is a POSIX loop again"
+meant = "the_chiefs_minute_is_a_command_the_shell_of_every_machine_runs"
+runs = ["lw-pacing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_pacing.rs"
+find = '''        ticking_command(TICKS, TICK_SECONDS)'''
+replace = '''        "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo tick $i; /bin/sleep 5; done".to_owned()'''
+
+[[plant]]
+name = "live tools on windows: a case that gives a harness sh is not found by the guard"
+meant = "no_live_check_starts_a_unix_only_program_or_gives_a_harness_one_unless_it_is_named_as_aware_of_windows"
+runs = ["lw-guard"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_codex_role.rs"
+find = '''const CHIEF: &str = "chief";'''
+replace = '''const CHIEF: &str = "chief";
+#[allow(dead_code)]
+const OLD_WORKLOAD: &str = "sh ./ignore-signals-cf-stops-live.sh";'''
+
+[[plant]]
+name = "live tools on windows: the guard reads no shell loop and no python3 one-liner"
+meant = "no_live_check_starts_a_unix_only_program_or_gives_a_harness_one_unless_it_is_named_as_aware_of_windows"
+runs = ["lw-guard"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/tests.rs"
+find = '''    let posix = crate::pattern::once(&POSIX, r"python3? -c|\bsh \./|/bin/sleep|; do |; done");'''
+replace = '''    let posix = crate::pattern::once(&POSIX, r"NEVER-MATCHES-ANYTHING");'''

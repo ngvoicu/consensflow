@@ -10,10 +10,10 @@ use crate::process::{Output, Unstarted};
 
 #[test]
 fn a_program_is_run_by_the_system_and_answers_what_it_left() {
-    let env = Env::from_process();
+    let env = crate::env_without_the_tests_own();
     let system = System { env: &env };
     let done = system
-        .capture(env!("CARGO"), &[OsString::from("--version")])
+        .capture(crate::nested_cargo::CARGO, &[OsString::from("--version")])
         .unwrap();
     assert_eq!(done.code, 0);
     assert!(done.stdout.starts_with("cargo "), "{done:?}");

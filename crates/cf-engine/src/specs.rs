@@ -2,9 +2,9 @@
 //! on when it says so, or says nothing and the human turned them on for every
 //! project, and they are kept in the folder and planned with the variant the
 //! project names, else the ones the human named for every project, else the
-//! documented ones (`cf_proto::specs`); only its chief is given them, and only
-//! at a launch, which is when a change of the setting applies (a Resume, a
-//! switch).
+//! documented ones (`cf_proto::specs`); only its chief is given them. They are in the
+//! text of a launch (a Resume, a switch), and a chief whose window is open when the
+//! setting changes is told in a note at its next rest (`role_news`).
 //! The harness says where its window finds the Specmint skill of the project's
 //! variant and folder ([`Adapter::specmint`]); that place is named in the chief's role
 //! text ([`ProjectSpecs`]) and given the adapter, which has the skill there,
@@ -39,6 +39,11 @@ pub(crate) struct ChiefSpecs {
 }
 
 impl ChiefSpecs {
+    /// What the project says of them.
+    pub(crate) fn setting(&self) -> &SpecsSetting {
+        &self.setting
+    }
+
     /// What the chief's text says of them.
     pub(crate) fn text(&self) -> ProjectSpecs<'_> {
         ProjectSpecs {
@@ -88,9 +93,31 @@ impl Dispatcher {
         })
     }
 
+    /// What `project` says of specs for `participant` now: none for any member, and
+    /// none for a chief whose project has them off. What the app says (whether, the
+    /// folder and the variant) is read from the app's settings unless the project says off,
+    /// which nothing the app says could change. A running chief is told when this
+    /// changes under it ([`Dispatcher::tell_role_news`]).
+    pub(crate) fn specs_setting(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Option<SpecsSetting> {
+        if participant.role != "chief" {
+            return None;
+        }
+        let says_off = project.specs.as_ref().and_then(|specs| specs.on) == Some(false);
+        let app = if says_off {
+            AppSpecs::default()
+        } else {
+            self.seams.app_settings.app_specs()
+        };
+        project.specs_setting(&app)
+    }
+
     /// The specs `participant`'s launch is given in `project`: none for any
     /// member, and none for a chief whose project has them off. What the app
-    /// says (whether, the folder and the variant) is asked of the roster unless
+    /// says (whether, the folder and the variant) is read from its settings unless
     /// the project says off, which nothing the app says could change.
     pub(crate) fn chief_specs(
         &self,
@@ -98,16 +125,7 @@ impl Dispatcher {
         participant: &ParticipantView,
         adapter: &dyn Adapter,
     ) -> Result<Option<ChiefSpecs>, EngineError> {
-        if participant.role != "chief" {
-            return Ok(None);
-        }
-        let says_off = project.specs.as_ref().and_then(|specs| specs.on) == Some(false);
-        let app = if says_off {
-            AppSpecs::default()
-        } else {
-            self.seams.roster.app_specs()
-        };
-        let Some(setting) = project.specs_setting(&app) else {
+        let Some(setting) = self.specs_setting(project, participant) else {
             return Ok(None);
         };
         let skill = adapter

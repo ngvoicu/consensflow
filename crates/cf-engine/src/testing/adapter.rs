@@ -15,7 +15,7 @@
 //! [`FakeAdapter::observe_holds`], [`FakeAdapter::start_holds`],
 //! [`FakeAdapter::ready_holds`], [`FakeAdapter::deliver_holds`],
 //! [`FakeAdapter::resumable_holds`], [`FakeAdapter::record_holds`],
-//! [`FakeAdapter::cut_holds`]).
+//! [`FakeAdapter::cut_holds`], [`FakeAdapter::last_call_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -23,11 +23,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, Opening, Over, Prepared,
-    Readiness, Skill, Trusts, TurnLeft, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, LaunchId, Opening, Over,
+    Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window, Work,
 };
-use cf_harness::records::{Item, ModelMoved, Monitor, Pending, Quota, Role};
-use cf_proto::panes::Servers;
+use cf_harness::records::{Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
@@ -49,6 +49,9 @@ pub struct FakeAgent {
     pub pending: Pending,
     /// The monitors among those jobs, as the reading says them.
     pub monitors: Vec<Monitor>,
+    /// The commands among those jobs, as the reading says them (Claude Code's reader says
+    /// when each began and whether a time limit moved it into the background).
+    pub commands: Vec<Command>,
     /// The lines of its record torn and passed over, by their places (the reading says so).
     pub lost: Vec<usize>,
     /// Its reading says the record each item is of, as every harness's but
@@ -73,6 +76,10 @@ pub struct FakeAgent {
     pub failed: bool,
     /// Why the turn failed, in the harness's words, where its record says.
     pub failure: Option<String>,
+    /// What kind of failure it was, in the harness's plain words, where its record names one.
+    pub failure_kind: Option<String>,
+    /// The last tool call the record shows, as a command line.
+    pub last_call: Option<Arc<LastCall>>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
     /// The conversations the window was switched to that no hook of its harness greeted
@@ -136,9 +143,15 @@ pub struct FakeAgent {
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
     /// turn), or the record cannot tell (none).
     pub resumable: Option<bool>,
+    /// What its record says the conversation ran on last (`Adapter::last_used`): none,
+    /// as a harness whose record names no model, unless a test says one.
+    pub used: Option<Used>,
     /// Why its record cannot be read now: each look reads none (`Reading::Unknown`),
     /// as when the reader's read of the transcript fails.
     pub unreadable: Option<String>,
+    /// The commands its harness says it keeps running (`Window::kept_commands`): none
+    /// unless a test says, and none where it says the harness could not tell.
+    pub kept_commands: Option<Vec<String>>,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -187,6 +200,17 @@ pub struct FakeAdapter {
     /// How many windows in a row before each of those launches were given up for
     /// not coming up, kept apart for the same reason.
     starts_given_up: RefCell<Vec<u32>>,
+    /// Each `last_used` asked of it, kept apart for the same reason: its session and the
+    /// model the conversation's last launch asked for.
+    asked_used: RefCell<Vec<(String, Option<String>)>>,
+    /// How many times a launch asked the harness's default model.
+    defaults_asked: Cell<usize>,
+    /// The words its harness says a model it does not have in (`Adapter::model_gone`): none,
+    /// as a harness ConsensFlow has not heard say it, unless a test says them.
+    pub gone_words: RefCell<Option<String>>,
+    /// The model its harness starts on where none is named (`Adapter::default_model`):
+    /// left to the harness, unless a test says one, or that there is none.
+    pub default: RefCell<Result<Option<String>, String>>,
     /// The test's items are numbered across its adapters.
     items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
@@ -216,6 +240,9 @@ pub struct FakeAdapter {
     /// How its windows' harness keeps its servers (`adapter.servers`): not known,
     /// as an adapter that says no more.
     pub servers: Cell<Servers>,
+    /// How its windows' harness reads a human's paste (`adapter.silent_paste`, which no
+    /// trace of Node's has): as one that declares nothing.
+    pub silent_paste: Cell<Option<SilentPaste>>,
     /// Whether its windows' harness keeps the instructions a resumed
     /// conversation began with (`adapter.keeps_first_instructions`, which no
     /// trace of Node's has): not, as an adapter that says no more.
@@ -256,6 +283,12 @@ pub struct FakeAdapter {
     /// The folder of each of those asks, in the same order: where the project keeps
     /// its specs.
     pub specmint_folders: RefCell<Vec<String>>,
+    /// The copies of the skill it was asked to put in place for a chief whose window
+    /// was open (`adapter.place_specmint`), in order: the variant, the folder and the
+    /// `SKILL.md` each named.
+    pub specmint_placed: RefCell<Vec<(Variant, String, String)>>,
+    /// Why putting a copy in place fails, while the test says so.
+    pub place_fails: RefCell<Option<String>>,
     /// Asks of whether a conversation can be gone on with that the test holds,
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
@@ -273,6 +306,11 @@ pub struct FakeAdapter {
     /// let go reads the record as it is then. Node's dispatcher asked nothing of the
     /// kind.
     pub cut_holds: Holds,
+    /// Asks of the last tool call a conversation's record shows, with no window open, that the
+    /// test holds, told the conversation as `[session]`: one let go reads the call as it is
+    /// then. Node's dispatcher asked nothing of the kind, and `look` is not held by it, so no
+    /// recorded trace moves (T-823).
+    pub last_call_holds: Holds,
     /// Its windows' record holds a paste in the wrapper Claude Code 2.1.296 puts it
     /// in (`<pasted_content id="…">`), and a launch's first message as it was
     /// given: not, as the fake of Node's suite, which recorded both as given.
@@ -287,6 +325,13 @@ pub struct FakeAdapter {
     /// the message, those lines gone, and the sources as an item of their own after it.
     /// A line is an image's path here when it is an absolute path ending in `.png`.
     pub attaches_images: Cell<bool>,
+    /// With `attaches_images`: its windows' paste handler is Claude Code 2.1.314 to
+    /// 2.1.317's, read in the binary. It takes the paths of the pictures out of the paste
+    /// and drops every blank line of what is left, and only then is the rest of the words
+    /// pasted as any paste is (in the wrapper where `wraps_pastes` says), behind the
+    /// placeholders: `[Image #1]`, a blank line, the wrapper. Off, the lines are taken
+    /// out of the paste as it is recorded, blank lines and wrapper and all.
+    pub drops_blanks: Cell<bool>,
     /// Its windows' record holds nothing of the first message a launch gives them:
     /// each goes before its harness takes it, where the fake of Node's suite recorded
     /// it as it prepared the launch.
@@ -314,6 +359,13 @@ pub struct FakeAdapter {
     /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
     /// suite, where each window began clean.
     pub rereads_failures: Cell<bool>,
+    /// Its windows record what they are given, a launch's first message too, and begin
+    /// no turn on it: the message stays the last item of their record, and the window
+    /// reads at rest (`Some(true)`: Devin and Muse past their first moments) or in flight
+    /// (`Some(false)`: Claude Code, Codex and Pi, whose readers take a record that ends on
+    /// a message of the user's for a turn begun). None: a message that arrives begins a
+    /// turn, as the fake of Node's suite's did (the field bug T-1130).
+    pub never_begins: Cell<Option<bool>>,
 }
 
 impl FakeAdapter {
@@ -351,6 +403,10 @@ impl FakeAdapter {
             first_message_ms: RefCell::new(Vec::new()),
             previous_gone: RefCell::new(Vec::new()),
             starts_given_up: RefCell::new(Vec::new()),
+            asked_used: RefCell::new(Vec::new()),
+            defaults_asked: Cell::new(0),
+            gone_words: RefCell::new(None),
+            default: RefCell::new(Ok(None)),
             items,
             ready: RefCell::new(None),
             box_words: RefCell::new(None),
@@ -365,6 +421,7 @@ impl FakeAdapter {
                 close_after: None,
             }),
             servers: Cell::new(Servers::Unknown),
+            silent_paste: Cell::new(None),
             keeps_first_instructions: Cell::new(false),
             one_account: Cell::new(false),
             ready_while_drawing: Cell::new(false),
@@ -376,14 +433,18 @@ impl FakeAdapter {
             first: Cell::new(FirstMessage::Opened),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
+            specmint_placed: RefCell::new(Vec::new()),
+            place_fails: RefCell::new(None),
             specmint_folders: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
             cleared: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
+            last_call_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
             splits_pastes: Cell::new(false),
             attaches_images: Cell::new(false),
+            drops_blanks: Cell::new(false),
             forgets_first_messages: Cell::new(false),
             resumes_records: Cell::new(false),
             trusts: RefCell::new(None),
@@ -391,6 +452,7 @@ impl FakeAdapter {
             idle_word: Cell::new(true),
             input_box: Cell::new(None),
             rereads_failures: Cell::new(false),
+            never_begins: Cell::new(None),
         })
     }
 
@@ -429,7 +491,25 @@ impl FakeAdapter {
             commentary: false,
             synthetic: false,
             compaction: false,
+            detail: None,
         }
+    }
+
+    /// The items the window of `handle` records of `paste`, which its human sent from the
+    /// window's input box: what `deliver` would make of it in this window, so the words
+    /// as the harness keeps them and, where it attaches images (`attaches_images`), the
+    /// sources as the item after them. Nothing is added to the window's record.
+    pub fn recorded_as_sent(&self, handle: &str, paste: &str) -> Vec<Item> {
+        let earlier: Vec<String> = self
+            .agent(handle)
+            .items
+            .iter()
+            .map(|item| item.text.to_string())
+            .collect();
+        let (words, sources) = self.recorded_text(paste, earlier.iter().map(String::as_str));
+        let mut items = vec![self.item(Role::User, &words)];
+        items.extend(sources.map(|sources| self.item(Role::Custom, &sources)));
+        items
     }
 
     /// Changes the latest window of `handle`: its own, or its newest session's.
@@ -464,6 +544,7 @@ impl FakeAdapter {
             agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
             agent.took_back = false;
             agent.at_prompt = false;
         });
@@ -481,6 +562,7 @@ impl FakeAdapter {
             agent.at_prompt = true;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
         });
     }
 
@@ -502,6 +584,19 @@ impl FakeAdapter {
     ) {
         self.answer_leaving(handle, text, pending);
         self.with(handle, |agent| agent.monitors = monitors);
+    }
+
+    /// The agent answers, and its turn ends with `pending` still running, `commands` among
+    /// it as the reading says them.
+    pub fn answer_leaving_commands(
+        &self,
+        handle: &str,
+        text: &str,
+        pending: Pending,
+        commands: Vec<Command>,
+    ) {
+        self.answer_leaving(handle, text, pending);
+        self.with(handle, |agent| agent.commands = commands);
     }
 
     /// The agent answers, and its turn ends with a background agent still running.
@@ -540,6 +635,7 @@ impl FakeAdapter {
             agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
             agent.took_back = false;
             agent.at_prompt = false;
         });
@@ -562,6 +658,7 @@ impl FakeAdapter {
             agent.over = Over::No;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
             agent.took_back = false;
             agent.at_prompt = false;
         });
@@ -662,7 +759,8 @@ impl FakeAdapter {
         let mut item = self.item(Role::Assistant, "You've hit your weekly limit");
         if let Quota::Exhausted { at: Some(at), .. }
         | Quota::Unavailable { at: Some(at), .. }
-        | Quota::Moved { at: Some(at), .. } = &quota
+        | Quota::Moved { at: Some(at), .. }
+        | Quota::Busy { at: Some(at), .. } = &quota
         {
             item.at = Some(json!(at));
         }
@@ -675,6 +773,7 @@ impl FakeAdapter {
             agent.at_prompt = false;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
         });
     }
 
@@ -754,6 +853,7 @@ impl FakeAdapter {
             agent.settled = true;
             agent.pending = Pending::default();
             agent.monitors.clear();
+            agent.commands.clear();
         });
     }
 
@@ -804,6 +904,30 @@ impl FakeAdapter {
             .map_or(Some(true), |agent| agent.resumable)
     }
 
+    /// What the record of `session` says it ran on last, as the latest window on it is set
+    /// to say; and the model each ask said the conversation's last launch asked for.
+    pub(super) fn used_of(&self, session: &str, asked: Option<&str>) -> Option<Used> {
+        self.asked_used
+            .borrow_mut()
+            .push((session.to_owned(), asked.map(str::to_owned)));
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .and_then(|agent| agent.used.clone())
+    }
+
+    /// Each `last_used` asked, its session and the model the last launch asked for.
+    pub fn asked_used(&self) -> Vec<(String, Option<String>)> {
+        self.asked_used.borrow().clone()
+    }
+
+    /// How many times the harness's default model was asked for.
+    pub fn defaults_asked(&self) -> usize {
+        self.defaults_asked.get()
+    }
+
     /// The lines the record of `session` lost, as its last window's reading had them.
     fn lost_of(&self, session: &str) -> Vec<usize> {
         let agents = self.agents.borrow();
@@ -824,6 +948,16 @@ impl FakeAdapter {
             .rev()
             .find(|agent| agent.native == session)
             .map(|agent| (agent.failed, agent.failure.clone(), agent.quota.clone()))
+    }
+
+    /// The last tool call the record of `session` shows, as the latest window on it set it.
+    pub(super) fn last_call_of(&self, session: &str) -> Option<Arc<LastCall>> {
+        self.agents
+            .borrow()
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .and_then(|agent| agent.last_call.clone())
     }
 
     /// What the record of `session` holds (`adapter.record`): the latest
@@ -849,6 +983,36 @@ impl FakeAdapter {
             )
     }
 
+    /// What this fake's windows record of `paste`, and the sources item that follows it
+    /// where pictures were attached: the paste shaped as `splits_pastes` and `wraps_pastes`
+    /// say, and its pictures taken out of it as `attaches_images` says; with `drops_blanks`
+    /// the pictures and the blank lines first, and the rest shaped.
+    fn recorded_text<'a>(
+        &self,
+        paste: &str,
+        earlier: impl Iterator<Item = &'a str>,
+    ) -> (String, Option<String>) {
+        let shaped = |words: &str| {
+            if self.splits_pastes.get() {
+                in_pieces(words)
+            } else if self.wraps_pastes.get() {
+                format!(
+                    "\n\n<pasted_content id=\"b118\">\n{words}\n</pasted_content id=\"b118\">\n"
+                )
+            } else {
+                words.to_owned()
+            }
+        };
+        if !self.attaches_images.get() {
+            return (shaped(paste), None);
+        }
+        if self.drops_blanks.get() {
+            let (marks, words, sources) = attached_first(paste, earlier);
+            return (format!("{marks}{}", shaped(&words)), sources);
+        }
+        attached(&shaped(paste), earlier)
+    }
+
     /// A delivery into `launch`'s window, as the fake takes it.
     pub(super) fn take(&self, launch: &str, text: &str) -> Admission {
         self.of_launch(launch, |agent| {
@@ -858,31 +1022,21 @@ impl FakeAdapter {
                 };
             }
             if agent.arrive {
-                let recorded = if self.splits_pastes.get() {
-                    in_pieces(text)
-                } else if self.wraps_pastes.get() {
-                    format!(
-                        "\n\n<pasted_content id=\"b118\">\n{text}\n</pasted_content id=\"b118\">\n"
-                    )
-                } else {
-                    text.to_owned()
-                };
-                let (recorded, sources) = if self.attaches_images.get() {
-                    attached(&recorded, agent.items.iter().map(|item| &*item.text))
-                } else {
-                    (recorded, None)
-                };
+                let (recorded, sources) =
+                    self.recorded_text(text, agent.items.iter().map(|item| &*item.text));
                 agent.items.push(self.item(Role::User, &recorded));
                 if let Some(sources) = sources {
                     // The harness's own words, as the reader makes of the companion.
                     agent.items.push(self.item(Role::Custom, &sources));
                 }
-                agent.settled = false;
+                agent.settled = self.never_begins.get().unwrap_or(false);
                 agent.pending = Pending::default();
                 agent.monitors.clear();
+                agent.commands.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
                 agent.failure = None;
+                agent.failure_kind = None;
                 agent.took_back = false;
                 agent.at_prompt = false;
             }
@@ -952,6 +1106,39 @@ fn attached<'a>(paste: &str, earlier: impl Iterator<Item = &'a str>) -> (String,
         format!("{}{}", marks.join(" "), rest.join("\n")),
         Some(sources.join("\n")),
     )
+}
+
+/// What a window whose paste handler is Claude Code 2.1.314 to 2.1.317's makes of `paste`
+/// before the rest of it is pasted (`drops_blanks`): the placeholders (a `[Image #N]` for each
+/// path on a line of its own, a space between, numbered on from those `earlier` items
+/// already hold), the words that are left with every blank line gone, and the sources item.
+/// The paste as it is, and no placeholders, where it names no picture.
+fn attached_first<'a>(
+    paste: &str,
+    earlier: impl Iterator<Item = &'a str>,
+) -> (String, String, Option<String>) {
+    let (images, rest): (Vec<&str>, Vec<&str>) = paste
+        .lines()
+        .partition(|line| line.starts_with('/') && line.ends_with(".png"));
+    if images.is_empty() {
+        return (String::new(), paste.to_owned(), None);
+    }
+    let first = earlier
+        .map(|text| text.matches("[Image #").count())
+        .sum::<usize>()
+        + 1;
+    let marks: Vec<String> = (first..first + images.len())
+        .map(|number| format!("[Image #{number}]"))
+        .collect();
+    let sources: Vec<String> = images
+        .iter()
+        .map(|path| format!("[Image: source: {path}]"))
+        .collect();
+    let words: Vec<&str> = rest
+        .into_iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    (marks.join(" "), words.join("\n"), Some(sources.join("\n")))
 }
 
 /// The adapter as the engine asks it for one harness.
@@ -1025,6 +1212,7 @@ impl Asked {
             settled: true,
             pending: Pending::default(),
             monitors: Vec::new(),
+            commands: Vec::new(),
             lost,
             says_places: fake.says_places.get(),
             waiting: None,
@@ -1037,6 +1225,8 @@ impl Asked {
             held: false,
             failed,
             failure,
+            failure_kind: None,
+            last_call: None,
             shows: None,
             ungreeted: Vec::new(),
             records: HashMap::new(),
@@ -1059,14 +1249,16 @@ impl Asked {
             cannot_tell_a_cut: false,
             opening: None,
             resumable: Some(true),
+            used: None,
             unreadable: None,
+            kept_commands: Some(Vec::new()),
         };
         if let Some(message) = launch
             .message
             .filter(|_| !fake.forgets_first_messages.get())
         {
             agent.items.push(fake.item(Role::User, message));
-            agent.settled = false;
+            agent.settled = fake.never_begins.get().unwrap_or(false);
         }
         fake.agents.borrow_mut().push(agent);
         let handle = launch.handle.to_owned();
@@ -1128,8 +1320,8 @@ impl Adapter for Asked {
             })),
             "instructions": launch.instructions,
         });
-        // Said only where the project chose a size for its Claude members' windows to
-        // compact at, which no trace of Node's has.
+        // Said only where the project chose a size for its members' windows to compact
+        // at, which no trace of Node's has.
         if let Some(size) = launch.compaction {
             asked["compaction"] = json!(size);
         }
@@ -1169,6 +1361,34 @@ impl Adapter for Asked {
     }
 
     /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
+    /// in a trace. Its words name the model as Pi's provider would: the id after a provider's slash,
+    /// which is the whole of an id with none.
+    fn model_gone(&self, words: &str, asked: &str) -> bool {
+        let id = asked.split_once('/').map_or(asked, |(_, id)| id);
+        self.fake
+            .gone_words
+            .borrow()
+            .as_deref()
+            .is_some_and(|gone| words.contains(gone) && words.contains(id))
+    }
+
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
+    /// in a trace.
+    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+        self.fake
+            .defaults_asked
+            .set(self.fake.defaults_asked.get() + 1);
+        let default = self.fake.default.borrow().clone();
+        Box::pin(async move { default })
+    }
+
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
+    /// in a trace.
+    fn last_used<'a>(&'a self, session: &'a str, asked: Option<&'a str>) -> Work<'a, Option<Used>> {
+        Box::pin(async move { self.fake.used_of(session, asked) })
+    }
+
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
     /// in a trace.
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
         let wrapped = self.fake.resumable_holds.wrap(&json!([session]));
@@ -1186,6 +1406,11 @@ impl Adapter for Asked {
 
     fn servers(&self) -> Servers {
         self.fake.servers.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the traces.
+    fn silent_paste(&self) -> Option<SilentPaste> {
+        self.fake.silent_paste.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the
@@ -1244,5 +1469,20 @@ impl Adapter for Asked {
                 variant.skill_name()
             )),
         })
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. What the fake does is write down what it was asked, or fail as the
+    /// test says.
+    fn place_specmint(&self, specs: &Specs<'_>, _id: &LaunchId) -> Result<(), String> {
+        if let Some(cause) = self.fake.place_fails.borrow().clone() {
+            return Err(cause);
+        }
+        self.fake.specmint_placed.borrow_mut().push((
+            specs.variant,
+            specs.folder.to_owned(),
+            specs.skill.path().to_owned(),
+        ));
+        Ok(())
     }
 }

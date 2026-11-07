@@ -393,28 +393,137 @@ fn a_role_told_in_part_whose_text_changed_again_before_it_was_read_is_said_anew_
     context.close();
 }
 
-#[test]
-fn a_role_told_in_part_read_before_its_delivery_was_confirmed_is_not_recorded_by_that_read() {
-    let context = codex();
-    let project = project_of(&context, "codex");
-    let chief = context.id(project.id, "chief");
+/// A release rewrote the chief's text by 17,000 characters, the window is resumed, and the
+/// note that tells the role in part is on its way: pasted, not yet seen by the daemon.
+fn a_long_role_on_its_way(context: &Context, project: i64) -> MessageView {
+    let chief = context.id(project, "chief");
     context
         .roles
         .rewritten
         .replace(format!(" {}", "x".repeat(17_000)));
-    relaunch(&context, project.id);
+    relaunch(context, project);
     context.pass().unwrap();
-    let note = replacements(&context, chief).remove(0);
+    let note = replacements(context, chief).remove(0);
     assert_eq!(context.message(note.id).state, "delivering");
+    note
+}
+
+#[test]
+fn a_role_told_in_part_read_before_its_delivery_was_confirmed_is_kept_and_told_once_it_is_confirmed(
+) {
+    let context = codex();
+    let project = project_of(&context, "codex");
+    let chief = context.id(project.id, "chief");
+    let note = a_long_role_on_its_way(&context, project.id);
+
+    // The window runs `cf inbox read` the moment it has the note, as the note tells it to,
+    // before the daemon has seen the paste arrive.
     assert_eq!(
         read_in_the_inbox(&context, project.id, note.id),
         0,
-        "only a delivered role is read so"
+        "kept, and not received yet: the paste is still the window's to settle"
     );
     assert_eq!(context.message(note.id).state, "delivering");
     assert_eq!(
         recorded(&context, chief).as_deref(),
-        Some("instructions for chief")
+        Some("instructions for chief"),
+        "nothing is told before the paste is proved"
+    );
+
+    // The window's record shows the note: the delivery is confirmed, and the read with it.
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(note.id).state,
+        "read",
+        "it was read: the human is not to be told it was not"
+    );
+    assert!(
+        recorded(&context, chief).is_some_and(|told| told.ends_with('x')),
+        "the role it read is what it was told"
+    );
+
+    // The Resume after says nothing of it, and the human is told nothing.
+    context.codex.answer("chief", "Understood.");
+    context.pass().unwrap();
+    relaunch(&context, project.id);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        replacements(&context, chief).len(),
+        1,
+        "the role is what it read: nothing is said again"
+    );
+    assert!(not_read(&context, project.id).is_empty());
+    context.close();
+}
+
+#[test]
+fn a_role_read_before_its_window_closed_is_told_when_the_next_launch_finds_the_note_in_the_record()
+{
+    let context = codex();
+    let project = project_of(&context, "codex");
+    let chief = context.id(project.id, "chief");
+    let note = a_long_role_on_its_way(&context, project.id);
+    assert_eq!(read_in_the_inbox(&context, project.id, note.id), 0);
+
+    // The window closes before the daemon saw the note arrive, and its record shows the
+    // note only once the window is gone: the paste is given back to the queue.
+    closes_before_its_record_shows_it(&context, project.id);
+    assert_eq!(context.message(note.id).state, "queued");
+    assert!(
+        recorded(&context, chief).is_some_and(|told| !told.ends_with('x')),
+        "as far as the ledger knows, the conversation was not told"
+    );
+
+    // The next launch finds the note in the conversation's own record: it went in, and the
+    // window read it whole before it closed.
+    context.resume_project(project.id).unwrap();
+    assert_eq!(
+        context.message(note.id).state,
+        "read",
+        "the read was kept with the note, which a read does not receive while it waits"
+    );
+    assert!(
+        recorded(&context, chief).is_some_and(|told| told.ends_with('x')),
+        "the role it read is what it was told"
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        replacements(&context, chief).len(),
+        1,
+        "the role is what it read: nothing is said again"
+    );
+    assert!(not_read(&context, project.id).is_empty());
+    context.close();
+}
+
+#[test]
+fn a_chief_window_that_goes_by_itself_after_reading_its_role_note_came_up_and_the_human_is_told_nothing_of_a_launch_that_did_not(
+) {
+    let context = codex();
+    let project = project_of(&context, "codex");
+    let note = a_long_role_on_its_way(&context, project.id);
+    assert_eq!(read_in_the_inbox(&context, project.id, note.id), 0);
+
+    // The window goes on its own as its record shows the note: confirmed as the exit is read.
+    // The host says what its screen showed, as it does of a launch that did not come up.
+    context
+        .host
+        .exits_showing(Some(1), None, Some(&["codex: the session ended"]));
+    context.exit("chief");
+    assert_eq!(context.message(note.id).state, "read");
+    let human = context.id(project.id, "human");
+    let closed: Vec<String> = context
+        .inbox(human)
+        .into_iter()
+        .filter(|message| message.sender.is_none() && message.body.contains("window closed"))
+        .map(|message| message.body)
+        .collect();
+    assert!(
+        closed.is_empty(),
+        "its window came up and read its role: {closed:?}"
     );
     context.close();
 }

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use cf_base::env::Env;
 use cf_base::role_read::role_read_whole;
-use cf_catalog::WorkTier;
 use cf_ledger::{STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
+use cf_proto::agents::WorkTier;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -147,9 +147,31 @@ fn the_most_rules() -> String {
 
 /// [`a_chiefs_role`] with the project's rules for the staff, if it has some.
 fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> String {
+    a_chiefs_role_for(&a_mac(), rows, specs_on, rules)
+}
+
+/// A window's `cf` on a Mac, by the path of the app's.
+fn a_mac() -> CfWord {
+    CfWord::new(
+        "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
+        Shell::Posix,
+    )
+}
+
+/// A window's `cf` on Windows, as PowerShell, which Muse's and Codex's shell there is, runs it.
+fn a_windows() -> CfWord {
+    CfWord::new(
+        r"C:\Users\someone\AppData\Local\ConsensFlow\cli\bin\cf.exe",
+        Shell::PowerShell,
+    )
+}
+
+/// [`a_chiefs_role_with`] for a window whose `cf` is `cf`.
+fn a_chiefs_role_for(cf: &CfWord, rows: usize, specs_on: bool, rules: Option<&str>) -> String {
     let staff: Vec<StaffRow> = (0..rows)
         .map(|at| StaffRow {
             name: format!("member-{at}"),
+            model: "GPT-6.1-Sol · xhigh".to_owned(),
             roles: vec!["worker".to_owned(), "reviewer".to_owned()],
             work_tier: Some(WorkTier::Standard),
         })
@@ -163,10 +185,7 @@ fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> Strin
         &Env::default(),
         "chief",
         &staff,
-        &CfWord::new(
-            "/Applications/ConsensFlow.app/Contents/Resources/bin/cf",
-            Shell::Posix,
-        ),
+        cf,
         specs_on.then_some(&specs),
     )
     .map(|text| with_staff_rules(text, "chief", rules))
@@ -190,9 +209,11 @@ fn printed_by_cf(note: &MessageView) -> String {
 /// it is read.
 #[test]
 fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
+    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 19, the
+    // most a model column for each member leaves room for (harness-models).
     let most = the_most_rules();
-    for rules in [None, Some(most.as_str())] {
-        told_whole_or_told_and_read(&a_chiefs_role_with(25, true, rules));
+    for (rows, rules) in [(25, None), (19, Some(most.as_str()))] {
+        told_whole_or_told_and_read(&a_chiefs_role_with(rows, true, rules));
     }
 }
 
@@ -248,13 +269,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        211,
-        "docs: read to 211 rows with specs on"
+        133,
+        "docs: read to 133 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),
-        240,
-        "docs: read to 240 rows without"
+        152,
+        "docs: read to 152 rows without"
     );
     // With the most rules for the staff the ledger takes.
     let most = the_most_rules();
@@ -272,13 +293,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     };
     assert_eq!(
         rows_with_the_most(true),
-        46,
-        "docs: read to 46 rows with specs on and the most rules"
+        19,
+        "docs: read to 19 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_with_the_most(false),
-        75,
-        "docs: read to 75 rows without specs and the most rules"
+        39,
+        "docs: read to 39 rows without specs and the most rules"
     );
 }
 
@@ -329,6 +350,7 @@ fn said_by(role: Role, text: &str, complete: bool) -> Item {
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     }
 }
 
@@ -518,6 +540,124 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     assert_eq!(answers(&silent), [""]);
 }
 
+/// The words of the reply of `items`: what the member wrote after its message and before its
+/// first tool call, where a tool call followed (`Answers::reply`).
+fn reply(items: &[Item], replacements: &[i64]) -> Vec<String> {
+    answers_to_the_task(items, replacements).map_or_else(Vec::new, |answers| {
+        answers
+            .reply
+            .into_iter()
+            .map(|item| item.text.to_string())
+            // A call that says nothing is an item of the record, with no words.
+            .filter(|text| !text.trim().is_empty())
+            .collect()
+    })
+}
+
+#[test]
+fn what_a_member_writes_before_its_first_tool_call_is_its_reply_and_what_it_writes_between_its_tools_is_not(
+) {
+    // Devin's turn on a tell (T-1151), and Claude Code's, Codex's and Muse's: text, a tool,
+    // another call, a tool, text.
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str, complete| said_by(Role::Assistant, text, complete);
+    let items = [
+        user("Go"),
+        assistant("Stopped", false),
+        said_by(Role::Tool, "No output produced after 10.0 seconds", true),
+        assistant("Reading on", false),
+        said_by(Role::Tool, "Exited with code 0", true),
+        assistant("The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+    assert_eq!(answers(&items), ["The last words"]);
+    // Several items before the first tool are one reply, in order.
+    let items = [
+        user("Go"),
+        assistant("Stopped", false),
+        assistant("and ready", false),
+        said_by(Role::Tool, "out", true),
+        assistant("The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped", "and ready"]);
+}
+
+#[test]
+fn a_turn_with_no_tool_call_or_with_one_before_its_words_has_no_reply() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    // No tool call: the one run is the final answer, and the reply is nothing besides it.
+    assert!(reply(&[user("Go"), assistant("Done")], &[]).is_empty());
+    // A tool call first (an empty call, a result), then words.
+    assert!(reply(
+        &[
+            user("Go"),
+            said_by(Role::Assistant, "", false),
+            said_by(Role::Tool, "out", true),
+            assistant("Done"),
+        ],
+        &[]
+    )
+    .is_empty());
+    // No answer at all.
+    assert!(answers_to_the_task(&[user("Go"), said_by(Role::Tool, "out", true)], &[]).is_none());
+}
+
+#[test]
+fn only_the_turn_after_the_latest_message_has_a_reply() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    let tool = |text: &str| said_by(Role::Tool, text, true);
+    let items = [
+        user("Go"),
+        assistant("Looking at the first"),
+        tool("out"),
+        assistant("First done"),
+        user("And now this"),
+        assistant("Stopped"),
+        tool("out"),
+        assistant("Second done"),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+    // A message to the member that is a role begins a turn of its own: its words are the role's,
+    // and neither end nor begin the reply.
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let items = [
+        user("Go"),
+        assistant("Stopped"),
+        tool("out"),
+        user(&replacement),
+        assistant("Understood."),
+        tool("out"),
+        assistant("The last words"),
+    ];
+    assert_eq!(reply(&items, &[4242]), ["Stopped"]);
+}
+
+#[test]
+fn what_a_harness_wrote_itself_is_no_reply_but_its_progress_marks_are_kept() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    // Claude Code's close of a turn it found cut: no model behind it.
+    let closed = Item {
+        synthetic: true,
+        commentary: true,
+        ..said_by(Role::Assistant, "No response requested.", true)
+    };
+    // Codex marks the text it writes beside a tool call as progress, where its phase says so.
+    let progress = Item {
+        commentary: true,
+        ..said_by(Role::Assistant, "Stopped", false)
+    };
+    let items = [
+        user("Go"),
+        closed,
+        progress,
+        said_by(Role::Tool, "out", true),
+        said_by(Role::Assistant, "The last words", true),
+    ];
+    assert_eq!(reply(&items, &[]), ["Stopped"]);
+}
+
 #[test]
 fn a_message_to_the_member_after_its_answer_leaves_the_turn_unanswered_and_its_last_complete_answer_kept(
 ) {
@@ -683,4 +823,134 @@ fn a_chief_that_comes_up_after_its_greeting_was_told_has_its_failed_starts_clear
     });
     context.dispatcher.came_up(&record);
     assert!(record.window.borrow().relaunch.is_none());
+}
+
+/// The most the staff's rules cost a hook's JSON answer, in what the ledger takes: its bytes
+/// and lines at the most (8,000 in 150), every one a character a JSON string writes in two
+/// bytes (a quote, a backslash, a line break), so 16,000 bytes of answer where the most
+/// UTF-8 rules ([`the_most_rules`]) are 8,000 and a letter is one. T-1246's review found it:
+/// the real worst case of a role's size in a hook is these, not the most bytes.
+fn the_most_escaped_rules() -> String {
+    let lines = STAFF_RULES_MAX_LINES;
+    let each = (STAFF_RULES_MAX_BYTES - (lines - 1)) / lines;
+    let line = "\"\\".repeat(each / 2) + &"\"".repeat(each % 2);
+    let mut rules = vec![line; lines].join("\n");
+    rules += &"\"".repeat(STAFF_RULES_MAX_BYTES - rules.len());
+    assert_eq!(rules.len(), STAFF_RULES_MAX_BYTES);
+    assert_eq!(rules.split('\n').count(), STAFF_RULES_MAX_LINES);
+    assert_eq!(
+        cf_ledger::parse_staff_rules(Some(&Value::from(rules.clone()))).ok(),
+        Some(Some(rules.clone())),
+        "the ledger takes them"
+    );
+    assert_eq!(
+        cf_harness::muse::hook_output(&rules).len() - cf_harness::muse::hook_output("").len(),
+        2 * STAFF_RULES_MAX_BYTES,
+        "every byte two in a hook's answer"
+    );
+    rules
+}
+
+/// What Muse keeps of the blocks of a role that is given in more than one, put together: each
+/// block with the white space at both ends cut off (Muse's cut), then the frame's two lines
+/// taken off. A role of one block is that block, as Muse cuts it.
+fn kept_by_muse(blocks: &[String]) -> String {
+    if let [only] = blocks {
+        return only.trim().to_owned();
+    }
+    blocks
+        .iter()
+        .map(|block| {
+            let block = block.trim();
+            let (head, rest) = block.split_once('\n').expect("a head line");
+            let (inner, tail) = rest.rsplit_once('\n').expect("a tail line");
+            assert!(head.starts_with(cf_harness::muse::MARK), "{head}");
+            assert!(tail.starts_with("<<end of consensflow-role "), "{tail}");
+            inner.to_owned()
+        })
+        .collect()
+}
+
+/// T-1246: Muse takes at most 16,384 bytes of a hook's output, and a Muse window has its role
+/// by hooks alone, so a role is given in parts, a hook each (`cf_harness::muse`), each part's
+/// hook under that limit, and what Muse keeps of the parts, put together, the role to the
+/// byte. A chief's role is longer than one hook says since each command of it named the
+/// window's `cf` in full (T-1049: 17,455 bytes with no staff at all), so no chief's is one
+/// part; a member's is one with the most rules in the most bytes, and two with the most in
+/// JSON: the rules the ledger takes can make 16,000 bytes of answer of 8,000. The most of
+/// parts is the hooks Muse was measured to take at one start, and the case keeps a role at
+/// half of it. These are the numbers: the spare bytes are in the message of each case that
+/// fails, and a role that grows to a part more fails here, so that it is looked at.
+#[test]
+fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_every_part_fits_a_hook(
+) {
+    use cf_harness::muse::{blocks, hook_output, parts, MOST_PARTS, OUTPUT_LIMIT};
+    let (utf8, escaped) = (the_most_rules(), the_most_escaped_rules());
+    let on = |name: &str, role: &str, parts_wanted: usize| {
+        let cut = parts(role);
+        assert_eq!(cut.concat(), role, "{name}: the parts are the role");
+        let framed = blocks(role);
+        let outputs: Vec<usize> = framed
+            .iter()
+            .map(|block| hook_output(block).len())
+            .collect();
+        let spare = outputs.last().map(|last| OUTPUT_LIMIT - last);
+        assert_eq!(
+            framed.len(),
+            parts_wanted,
+            "{name}: {} bytes ({} in one hook) in parts of {outputs:?} bytes of hook output; the last has {spare:?} spare",
+            role.len(),
+            hook_output(role).len()
+        );
+        assert!(
+            framed.len() <= MOST_PARTS / 2,
+            "{name}: past half the hooks Muse takes"
+        );
+        assert!(
+            outputs.iter().all(|&bytes| bytes <= OUTPUT_LIMIT),
+            "{name}: a part past Muse's limit: {outputs:?}"
+        );
+        let has = kept_by_muse(&framed);
+        assert!(
+            has == role || (framed.len() == 1 && has == role.trim()),
+            "{name}: what Muse keeps is not the role"
+        );
+    };
+    for (cf, shape) in [(a_mac(), "a Mac"), (a_windows(), "Windows")] {
+        let chief = |rows, specs, rules: Option<&str>| a_chiefs_role_for(&cf, rows, specs, rules);
+        let member = |role: &str, rules: &str| {
+            role_instructions(&Env::default(), role, &[], &cf, None)
+                .map(|text| with_staff_rules(text, role, Some(rules)))
+                .unwrap()
+        };
+        on(
+            &format!("a chief with no staff on {shape}"),
+            &chief(0, false, None),
+            2,
+        );
+        on(
+            &format!("the largest chief in bytes (25 staff, specs, the most rules) on {shape}"),
+            &chief(25, true, Some(&utf8)),
+            2,
+        );
+        on(
+            &format!(
+                "the largest chief in a hook (25 staff, specs, the most escaped rules) on {shape}"
+            ),
+            &chief(25, true, Some(&escaped)),
+            3,
+        );
+        for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+            on(
+                &format!("the {role} with the most rules on {shape}"),
+                &member(role, &utf8),
+                1,
+            );
+            on(
+                &format!("the {role} with the most escaped rules on {shape}"),
+                &member(role, &escaped),
+                2,
+            );
+        }
+    }
 }

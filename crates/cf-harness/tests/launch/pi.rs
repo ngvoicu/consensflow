@@ -12,6 +12,7 @@
 //! Where Node's test stood in the records of a conversation, a stand-in
 //! `Records` does here. The Specmint skill a chief is given is `specs`'s.
 
+mod dialogs;
 mod specs;
 
 use std::cell::RefCell;
@@ -118,6 +119,8 @@ struct Request {
     folder: &'static str,
     /// The folder the window opens in.
     directory: String,
+    /// The size its project's members compact at, where the project chose one.
+    compaction: Option<u32>,
 }
 
 impl Default for Request {
@@ -130,6 +133,7 @@ impl Default for Request {
             specs: None,
             folder: ".specs",
             directory: "/work/app".to_owned(),
+            compaction: None,
         }
     }
 }
@@ -163,7 +167,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
                 folder: request.folder,
                 skill,
             }),
-        compaction: None,
+        compaction: request.compaction,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };
@@ -585,6 +589,8 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         asking: false,
         failed: false,
         failure: None,
+        failure_kind: None,
+        last_call: None,
         took_back: false,
         model_moved: None,
         model_drift: None,
@@ -592,7 +598,9 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         settlement,
         pending: Default::default(),
         monitors: Vec::new(),
+        commands: Vec::new(),
         lines: Box::default(),
+        beside: Vec::new(),
     }))
 }
 
@@ -608,6 +616,7 @@ fn settled_record(text: &str) -> Arc<Reading> {
         commentary: false,
         synthetic: false,
         compaction: false,
+        detail: None,
     };
     let items = vec![item("1", Role::User), item("2", Role::Assistant)];
     reading(items, Settlement::Settled, None)
@@ -686,6 +695,7 @@ fn reads_each_turn_s_end_from_the_extension_s_settled_marker() {
     );
 }
 
+mod compaction;
 mod failed;
 mod install;
 mod resumed;

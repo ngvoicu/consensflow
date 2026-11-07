@@ -12,8 +12,7 @@
 //! wake-up calls).
 //! What they stand on is [`Page`] and the engine they call ([`Engine`]), a
 //! small trait of what Node's page called on the dispatcher and its five
-//! projections, which the dispatcher is; the saved agents are read from the
-//! file at each use ([`agents`]), and the body is read as JavaScript read it
+//! projections, which the dispatcher is; the body is read as JavaScript read it
 //! ([`body`]).
 //!
 //! How an operation answers is the bridge's: `{ok: true, ...fields}` for the
@@ -30,14 +29,15 @@
 //! contained, whatever poll it panics at, and answers `{ok: false}` with what
 //! it said.
 
-mod agents;
 mod app_specs;
 mod board;
 mod body;
+mod chief;
 mod computer_use;
 mod engine;
 mod history;
 mod messages;
+mod models;
 mod operations;
 mod projects;
 mod sessions;
@@ -67,7 +67,7 @@ use crate::seams::DaemonSpawn;
 
 /// What the page's operations are given: the ledger (borrowed for one call
 /// at a time, never across a wait), the engine, the daemon's environment
-/// (which finds the saved agents and the harnesses), the kick, and what the
+/// (which finds the harnesses and the app's settings), the kick, and what the
 /// specs viewer is given (its opener, and what it remembers).
 pub struct Page {
     pub ledger: Rc<RefCell<Ledger>>,
@@ -78,6 +78,8 @@ pub struct Page {
     pub specs: Specs,
     /// The machine's computer use, and the opener of System Settings panes.
     pub computer_use: ComputerUsePage,
+    /// The models each harness lists, read at the first ask and at the human's Refresh.
+    pub models: Rc<crate::models::ModelLists>,
 }
 
 /// What an operation serves: the fields of its answer, which follow `ok: true`,

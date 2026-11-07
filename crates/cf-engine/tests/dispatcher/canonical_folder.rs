@@ -34,7 +34,7 @@ fn a_window_of_a_project_reached_through_a_link_opens_in_the_real_folder_on_ever
             .open_project(json!({
                 "directory": &*linked,
                 "name": "app",
-                "chief": { "harness": harness, "agent": "apollo" },
+                "chief": { "harness": harness, "model": "apollo" },
             }))
             .unwrap()
             .unwrap();

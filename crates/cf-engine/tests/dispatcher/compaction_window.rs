@@ -1,10 +1,11 @@
-//! The size a project chose for its Claude members' windows to compact at (spec
-//! smaller-contexts, SCX-25): the launch of every member of a Claude project is
-//! given it, whatever the member's role, at its first launch and each time its
-//! conversation is opened again, and the chief's never is. A project that chose
-//! none launches every window as it always did, and a harness other than Claude is
-//! given none. A size changed or taken away reaches the member's next launch. The
-//! test is not held to a Node recording: it is this build's own setting.
+//! The size a project chose for its members' windows to compact at (spec
+//! smaller-contexts, SCX-25, widened by SCX-30): the launch of every member is given
+//! it, whatever the member's role and whatever its harness, at its first launch and
+//! each time its conversation is opened again, and the chief's never is. Each
+//! harness's adapter gives it by its own route (`cf-harness`'s launch tests). A
+//! project that chose none launches every window as it always did. A size changed or
+//! taken away reaches the member's next launch. The test is not held to a Node
+//! recording: it is this build's own setting.
 
 use cf_engine::testing::{Context, Made};
 use cf_ledger::NewTask;
@@ -31,7 +32,7 @@ fn choose(context: &Context, project: i64, size: Option<u32>) {
     context
         .ledger
         .borrow_mut()
-        .set_claude_compaction(project, size)
+        .set_compaction(project, size)
         .unwrap();
 }
 
@@ -47,7 +48,7 @@ fn staffed_on(context: &Context, harness: &str) -> i64 {
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": harness, "agent": "apollo" },
+            "chief": { "harness": harness, "model": "apollo" },
             "staff": staff,
         }))
         .unwrap()
@@ -139,7 +140,7 @@ fn a_project_that_chose_no_size_launches_every_member_as_it_always_did() {
 }
 
 #[test]
-fn only_a_claude_member_is_given_the_size_whatever_the_harness_of_the_other_members() {
+fn every_member_is_given_the_size_whatever_its_harness_and_no_chief_is() {
     for harness in HARNESSES {
         let context = Context::made(Made {
             harnesses: HARNESSES.to_vec(),
@@ -154,11 +155,7 @@ fn only_a_claude_member_is_given_the_size_whatever_the_harness_of_the_other_memb
         context.pass().unwrap();
         for (role, _) in MEMBERS {
             let launch = member_launch(&context, role);
-            if harness == "claude-code" {
-                assert_eq!(launch["compaction"], json!(SIZE), "{harness}: {role}");
-            } else {
-                assert_eq!(launch.get("compaction"), None, "{harness}: {role}");
-            }
+            assert_eq!(launch["compaction"], json!(SIZE), "{harness}: {role}");
         }
         relaunch(&context, project);
         let chief = chief_launches(&context);

@@ -8,9 +8,12 @@
 //!
 //! The protocol is the app's (`crates/cf-panes/src/pane_handlers.rs`); this
 //! adds no rules of its own, only the Windows shim a window's program may be
-//! ([`cf_process::pane_argv`]) and the bound on the wait for an open.
+//! ([`cf_process::pane_argv`]), the bound on the wait for an open, and the bound on the wait
+//! for a paste into a window whose harness declared how it reads one.
 
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use cf_base::env::Env;
@@ -24,6 +27,8 @@ use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::{Role, DEADLINE};
 use cf_proto::panes::{
     Background, CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
+    SilentPaste, TccPrompt, TccUnreadable, SCREEN_QUIET_MS, TAIL_LINES, TCC_PROMPT_EVENT,
+    TCC_UNREADABLE_EVENT,
 };
 use serde_json::{json, Map, Value};
 
@@ -35,11 +40,27 @@ use crate::seams::DaemonSpawn;
 /// `Limits::open_ms` unless the environment cut it).
 pub const OPEN_DEADLINE: Duration = Duration::from_secs(60);
 
+/// The least a paste into a window has to be answered: the bridge's own default for a request.
+/// The pane host holds a delivery's Enter for 2 s at the most in a window whose harness
+/// declared nothing, and a paste is answered once its Enter is written.
+pub const PASTE_DEADLINE: Duration = Duration::from_secs(30);
+
+/// What a paste into a window whose harness declared how it reads one has beyond the most the
+/// pane host holds its Enter for (the declared cap for the paste's length, `SilentPaste::most_ms`):
+/// the time to write the Enter and for the answer to come back. A host that has not answered by
+/// then did not hold the Enter for the window's read, and the daemon stops waiting.
+pub const PASTE_MARGIN: Duration = Duration::from_secs(5);
+
 /// What the engine says to the host of the app, through its bridge.
 pub struct BridgeHost {
     bridge: Bridge,
     env: Env,
     open_deadline: Duration,
+    /// How each pane's harness declared that it reads a paste, by the pane's id and the
+    /// generation it was opened as: said by the engine as the window opened ([`OpenPane`]),
+    /// and what a paste's time to be answered is worked out from. An entry stays until the
+    /// same pane id is opened again.
+    declared: Mutex<HashMap<String, (u64, SilentPaste)>>,
 }
 
 impl BridgeHost {
@@ -51,6 +72,7 @@ impl BridgeHost {
             bridge,
             env,
             open_deadline: OPEN_DEADLINE,
+            declared: Mutex::new(HashMap::new()),
         }
     }
 
@@ -60,13 +82,51 @@ impl BridgeHost {
         self.open_deadline = deadline;
         self
     }
+
+    /// Notes how the harness of `pane` reads a paste, or that it declared nothing.
+    fn declare(&self, pane: &Pane, silent: Option<SilentPaste>) {
+        if let Ok(mut declared) = self.declared.lock() {
+            match silent {
+                Some(silent) => {
+                    declared.insert(pane.id.clone(), (pane.generation, silent));
+                }
+                None => {
+                    declared.remove(&pane.id);
+                }
+            }
+        }
+    }
+
+    /// How long a request has to be answered, where that is more than the bridge's own default:
+    /// a paste into a window whose harness declared how it reads one is held at the pane host
+    /// for that harness's cap for the paste's length, so it has the cap and [`PASTE_MARGIN`],
+    /// and [`PASTE_DEADLINE`] at the least. Any other request, or paste, has the bridge's.
+    fn deadline_of(&self, op: &str, body: &Value) -> Option<Duration> {
+        if op != "pane.write_paste" {
+            return None;
+        }
+        let id = body.get("id")?.as_str()?;
+        let generation = body.get("generation")?.as_u64()?;
+        let silent = {
+            let declared = self.declared.lock().ok()?;
+            let (opened, silent) = declared.get(id)?;
+            (*opened == generation).then_some(*silent)?
+        };
+        let characters = body
+            .get("body")
+            .and_then(Value::as_str)
+            .map_or(0, |text| text.chars().count());
+        let cap = Duration::from_millis(silent.most_ms(characters));
+        Some(cap.saturating_add(PASTE_MARGIN).max(PASTE_DEADLINE))
+    }
 }
 
 impl PaneHost for BridgeHost {
     fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>> {
         // Asked where it is called, as the JavaScript call was: the frame is
         // queued and its wait begins now.
-        let sent = self.bridge.request(op, body, None);
+        let deadline = self.deadline_of(op, &body);
+        let sent = self.bridge.request(op, body, deadline);
         Box::pin(async move { sent.await.map_err(host_error) })
     }
 }
@@ -90,7 +150,7 @@ impl EngineHost for BridgeHost {
         for (name, value) in &open.env {
             env.insert(name.clone(), Value::String(value.clone()));
         }
-        let body = json!({
+        let mut body = json!({
             "id": open.pane.id,
             "generation": open.pane.generation,
             "cwd": open.cwd,
@@ -98,6 +158,12 @@ impl EngineHost for BridgeHost {
             "env": env,
             "dropEnv": open.drop_env,
         });
+        // Said only for a harness that reads a paste silently: every other open is as Node
+        // sent it.
+        if let Some(silent) = open.silent_paste {
+            body["silentPaste"] = json!(silent);
+        }
+        self.declare(&open.pane, open.silent_paste);
         let sent = self
             .bridge
             .request("pane.open", body, Some(self.open_deadline));
@@ -119,13 +185,43 @@ impl EngineHost for BridgeHost {
                 .map_err(host_error)
         })
     }
+
+    fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>> {
+        let sent = self
+            .bridge
+            .request("pane.snapshot", screen_request(pane), None);
+        Box::pin(async move { sent.await.map_err(host_error) })
+    }
+
+    fn alerts(&self) -> Work<'_, Result<Option<usize>, HostError>> {
+        let sent = self.bridge.request("pane.alerts", json!({}), None);
+        Box::pin(async move {
+            sent.await
+                .map(|answer| alerts_on_screen(&answer))
+                .map_err(host_error)
+        })
+    }
 }
 
-/// How long the host says a pane has printed nothing: its `pane.snapshot`'s
-/// `outputQuietMs`, none where the pane has printed nothing (null) or the answer has no
-/// such field.
+/// How many alerts the host says the system has on screen: its `pane.alerts`' `alerts`, none
+/// where it says null or nothing (a host that has no such look refuses it as an unknown op).
+fn alerts_on_screen(answer: &Value) -> Option<usize> {
+    answer
+        .get("alerts")
+        .and_then(Value::as_u64)
+        .and_then(|alerts| usize::try_from(alerts).ok())
+}
+
+/// The `pane.snapshot` of a pane's last lines, for the engine's look at its screen.
+fn screen_request(pane: &Pane) -> Value {
+    json!({ "id": pane.id, "generation": pane.generation, "tail": TAIL_LINES })
+}
+
+/// How long the host says what a pane's screen shows has not changed: its `pane.snapshot`'s
+/// `screenQuietMs`, none where its screen has shown nothing (null) or the answer has no such
+/// field.
 fn quiet_ms(answer: &Value) -> Option<f64> {
-    answer.get("outputQuietMs").and_then(Value::as_f64)
+    answer.get(SCREEN_QUIET_MS).and_then(Value::as_f64)
 }
 
 impl BackgroundWork for BridgeHost {
@@ -313,6 +409,54 @@ pub fn watch_exits(
             Err(panicked) => spawn.errors().caught("a window's exit failed", &panicked),
         }
     })
+}
+
+/// What the host says of the system's privacy dialogs (`pane.tcc`, `pane.tcc_unreadable`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrivacyEvent {
+    /// A dialog is raised in the app's name for a process of a window, or of the app's own.
+    Prompt(TccPrompt),
+    /// The host cannot read the system's log of those dialogs.
+    Unreadable(TccUnreadable),
+}
+
+/// The two subscriptions of [`watch_privacy`], held for as long as the events are wanted.
+pub struct PrivacyWatching {
+    _prompts: Subscription,
+    _unreadable: Subscription,
+}
+
+/// The host's word of a privacy dialog, told to `told` where it is read, as an exit is. A body
+/// that says no service, no process or no program (an older host's, or a test's) is no dialog,
+/// and is not told. A panic in `told` is written down and the reader goes on.
+pub fn watch_privacy(
+    bridge: &Bridge,
+    spawn: Rc<DaemonSpawn>,
+    told: impl Fn(PrivacyEvent) + 'static,
+) -> PrivacyWatching {
+    let told: Rc<dyn Fn(PrivacyEvent)> = Rc::new(told);
+    let (told_prompts, spawn_prompts) = (Rc::clone(&told), Rc::clone(&spawn));
+    PrivacyWatching {
+        _prompts: bridge.on_event(TCC_PROMPT_EVENT, move |body| {
+            if let Ok(prompt) = serde_json::from_value::<TccPrompt>(body.clone()) {
+                tell_privacy(&*told_prompts, &spawn_prompts, PrivacyEvent::Prompt(prompt));
+            }
+        }),
+        _unreadable: bridge.on_event(TCC_UNREADABLE_EVENT, move |body| {
+            if let Ok(unreadable) = serde_json::from_value::<TccUnreadable>(body.clone()) {
+                tell_privacy(&*told, &spawn, PrivacyEvent::Unreadable(unreadable));
+            }
+        }),
+    }
+}
+
+/// `event`, told to `told`; a panic in it is written down, and the reader goes on.
+fn tell_privacy(told: &dyn Fn(PrivacyEvent), spawn: &DaemonSpawn, event: PrivacyEvent) {
+    if let Err(panicked) = contain_now(|| told(event)) {
+        spawn
+            .errors()
+            .caught("a privacy dialog's word failed", &panicked);
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,241 @@
+{
+  "models": [
+    {
+      "id": "claude-fable-5",
+      "provider": "anthropic",
+      "label": "Claude Fable 5",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-fable-5-1",
+      "provider": "anthropic",
+      "label": "Claude Fable 5.1",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "label": "Claude Haiku 4.5 (latest)",
+      "efforts": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "k3",
+      "provider": "kimi-coding",
+      "label": "Kimi K3",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "k3-256k",
+      "provider": "kimi-coding",
+      "label": "Kimi K3-256K",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "kimi-for-coding",
+      "provider": "kimi-coding",
+      "label": "kimi-for-coding",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "muse-spark-1.1",
+      "provider": "meta",
+      "label": "Muse Spark 1.1",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
+    {
+      "id": "muse-spark-1.2",
+      "provider": "meta",
+      "label": "Muse Spark 1.2",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
+    {
+      "id": "muse-spark-1.2-contributor",
+      "provider": "meta",
+      "label": "Muse Spark 1.2 Contributor",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "contributor": true
+    },
+    {
+      "id": "gpt-5",
+      "provider": "openai",
+      "label": "GPT-5",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "gpt-5-mini",
+      "provider": "openai",
+      "label": "GPT-5 Mini",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "gpt-5-nano",
+      "provider": "openai",
+      "label": "GPT-5 Nano",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "gpt-4",
+      "provider": "openai",
+      "label": "GPT-4",
+      "efforts": [
+        "off"
+      ]
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "label": "GPT-5.6 Luna",
+      "efforts": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "provider": "openai-codex",
+      "label": "GPT-5.6 Sol",
+      "efforts": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "provider": "openai-codex",
+      "label": "GPT-5.6 Terra",
+      "efforts": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "anthropic/claude-fable-5",
+      "provider": "openrouter",
+      "label": "Anthropic: Claude Fable 5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "anthropic/claude-fable-5.1",
+      "provider": "openrouter",
+      "label": "Anthropic: Claude Fable 5.1",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "anthropic/claude-haiku-4.5",
+      "provider": "openrouter",
+      "label": "Anthropic: Claude Haiku 4.5",
+      "efforts": [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "~unbiased/pareto-latest",
+      "provider": "openrouter",
+      "label": "Pareto Latest",
+      "efforts": [
+        "off"
+      ]
+    }
+  ],
+  "readAt": 1793000000000,
+  "freshness": {
+    "state": "fresh"
+  },
+  "how": "pi --mode rpc --offline: get_available_models"
+}

@@ -10,12 +10,12 @@ const showingKey = (project, handle) => `${project}:${handle}`
  * What the chief is doing, then what it runs on: the line under its name on
  * its card; out of quota, with the human's way to try it again now.
  */
-function about(lane, board, agent, now, onTryAgain) {
+function about(lane, board, now, onTryAgain) {
   const [state, text] = laneStatus(lane, board, now)
   const status = element('span', 'terminal-status', text)
   status.dataset.state = state
   const line = element('div', 'terminal-about')
-  line.append(status, element('span', 'terminal-meta', identity(lane.participant, agent)))
+  line.append(status, element('span', 'terminal-meta', identity(lane.participant)))
   if (state === 'out') line.append(tryAgain(lane.participant, () => onTryAgain(lane.participant)))
   return line
 }
@@ -23,7 +23,8 @@ function about(lane, board, agent, now, onTryAgain) {
 /**
  * The live windows beside the board: one row of terminals, scrolling
  * sideways, each as tall as the dock (how wide is the page's: the chief's
- * the whole dock beside the board, two-thirds of it with the board folded).
+ * the whole dock beside the board; with the board folded, the whole row
+ * alone and three-quarters of it once another card joins).
  * The chief's comes first, then the sessions' the human asked to see, in the
  * order they came into the dock. A terminal that comes in opens at the right end, scrolled
  * into view and with the keyboard; no terminal already open is resized or
@@ -31,7 +32,7 @@ function about(lane, board, agent, now, onTryAgain) {
  * moving left. The chief's card is always in the dock: the board has a row
  * for the chief only while a task is on it, so its card says what the chief
  * is doing and runs on, and switches it. While the chief's window is down
- * (starting, being switched, its agent gone) its card is there all the
+ * (starting, being switched) its card is there all the
  * same, with no terminal. A session's terminal (a worker's, an advisor's, a
  * reviewer's, a tester's or an image designer's task) stays out of the dock until the
  * human shows it from its lane, and leaves when they hide it, from its lane
@@ -189,8 +190,14 @@ export class TerminalsView {
     return there ? `${this.#gone.name}'s window has closed` : null
   }
 
-  /** The card at `point`, in the page's pixels, whatever is drawn over it: none under a dialog. */
+  /**
+   * The card at `point`, in the page's pixels, whatever is drawn over it: none
+   * under a dialog, and none where a window ended under the file — a card
+   * drawn over that place since is not the window the drop was meant for.
+   */
   #cardAt({ x, y }) {
+    const box = this.#gone?.box
+    if (box && x >= box.left && x < box.right && y >= box.top && y < box.bottom) return null
     return document.elementFromPoint(x, y)?.closest('.terminal-card') ?? null
   }
 
@@ -241,10 +248,12 @@ export class TerminalsView {
       }
       const board = boards.find((board) => board.project.id === entry.project)
       if (board === undefined) continue
-      const lane = board.lanes.find((lane) => lane.participant.handle === entry.handle)
-      if (lane === undefined || lane.pane === null || paneKey(lane.pane) !== entry.key) {
-        this.#retire(entry.key)
-      }
+      // Its lane is the one whose window it is, whatever the lane is called now: a member edited
+      // to another model is renamed, its windows with it, and a window at work goes on (HMD-12).
+      const lane = board.lanes.find(
+        (lane) => lane.pane !== null && paneKey(lane.pane) === entry.key,
+      )
+      if (lane === undefined) this.#retire(entry.key)
     }
   }
 
@@ -257,17 +266,15 @@ export class TerminalsView {
    * others (those that come together, in lane order) and one that leaves
    * closes its gap. The rest stay alive, off screen, with their scrollback:
    * a session's not shown, and another project's. Switching projects loses
-   * nothing. `agents` are the saved agents, which say what the chief runs
-   * on.
+   * nothing.
    */
-  render(board, { focused, agents = [] }) {
+  render(board, { focused }) {
     const project = board?.project.id ?? null
     const ordered = board?.project.state === 'open' ? laneOrder(board.lanes) : []
-    const agentOf = (lane) => agents.find((agent) => agent.name === lane.participant.agent)
     for (const lane of ordered) {
       // A window over for good never comes back, whatever a board says.
       if (lane.pane === null || this.#link.retired(paneKey(lane.pane))) continue
-      const entry = this.#card(lane.pane, { lane, board, agent: agentOf(lane) })
+      const entry = this.#card(lane.pane, { lane, board })
       // The next number puts a card that comes in at the right end; one
       // that leaves gives its number up, and takes a new one if it comes back.
       if (!this.#docked(entry)) entry.arrival = null
@@ -283,7 +290,7 @@ export class TerminalsView {
     const windowless =
       chief === undefined || live.some((entry) => entry.handle === chief.participant.handle)
         ? []
-        : [this.#windowlessCard(chief, board, agentOf(chief))]
+        : [this.#windowlessCard(chief, board)]
     const wanted = [...windowless, ...cards.map((entry) => entry.card)]
     if (wanted.length === 0) {
       this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
@@ -390,8 +397,7 @@ export class TerminalsView {
   /**
    * A pane's card and emulator. Output may arrive before any board has shown
    * the pane (or for a project not shown): its card waits, with no project,
-   * until a board places it: `placed` is its lane, the board, and the saved
-   * agent it runs on. `arrival` is the number it took coming into the dock,
+   * until a board places it: `placed` is its lane and the board. `arrival` is the number it took coming into the dock,
    * null while it is not in it.
    */
   #card(pane, placed = null) {
@@ -419,8 +425,17 @@ export class TerminalsView {
       this.#registry.ensure(pane, host)
     }
     if (placed !== null) {
-      const { lane, board, agent } = placed
-      this.#head(entry, lane, board, agent)
+      const { lane, board } = placed
+      this.#head(entry, lane, board)
+      // A window renamed with its member (HMD-12) is still the one the human showed.
+      const was = entry.handle
+      if (
+        was !== null &&
+        was !== lane.participant.handle &&
+        this.#showing.delete(showingKey(board.project.id, was))
+      ) {
+        this.#showing.add(showingKey(board.project.id, lane.participant.handle))
+      }
       entry.handle = lane.participant.handle
       entry.harness = lane.participant.harness
       entry.project = board.project.id
@@ -430,14 +445,14 @@ export class TerminalsView {
   }
 
   /** The chief's card while its window is down: its head, and no terminal. */
-  #windowlessCard(lane, board, agent) {
+  #windowlessCard(lane, board) {
     if (this.#windowless === null) {
       const card = element('section', 'terminal-card')
       const head = element('header', 'terminal-head')
       card.append(head)
       this.#windowless = { card, head, participant: null }
     }
-    this.#head(this.#windowless, lane, board, agent)
+    this.#head(this.#windowless, lane, board)
     return this.#windowless.card
   }
 
@@ -450,7 +465,7 @@ export class TerminalsView {
    * nothing holds it open; deleting the session is its row's alone. Only an
    * open project's cards are drawn: nothing on a closed one acts.
    */
-  #head(entry, lane, board, agent) {
+  #head(entry, lane, board) {
     const { participant } = lane
     const name = laneName(participant)
     const now = Date.now()
@@ -472,7 +487,7 @@ export class TerminalsView {
           'Switch chief',
           'quiet-button',
           () => this.#onSwitchChief(entry.participant),
-          'Switch the chief to another agent',
+          'Switch the chief to another harness or model',
         ),
         button(
           entry.meeting ? `Stop meeting (${(board.held ?? []).length})` : 'Start meeting',
@@ -484,7 +499,7 @@ export class TerminalsView {
     }
     const tools =
       participant.role === 'chief'
-        ? [chiefTools(), about(lane, board, agent, now, this.#onTryAgain)]
+        ? [chiefTools(), about(lane, board, now, this.#onTryAgain)]
         : [
             element('span', 'terminal-meta', participant.harness ?? ''),
             history,

@@ -57,9 +57,10 @@ const THROUGH: [(&str, Option<&str>); 14] = [
     // It names the folder of the cf under test to a case it runs again, which starts a rig.
     ("crates/cf-e2e/src/rig/nested.rs", Some(RIG)),
     ("crates/cf-e2e/tests/cli/commands.rs", Some(SCRATCH)),
-    ("crates/cf-e2e/tests/cli/roster.rs", Some(SCRATCH)),
     ("crates/cf-e2e/tests/cli/tool_folders.rs", None),
     ("crates/cf-e2e/tests/daemon/core_daemon.rs", None),
+    // Its cf, in a Muse window's shell, asks a listener of the test's for an inbox: no harness.
+    ("crates/cf-e2e/tests/live_muse_posture.rs", None),
     // It names the cf a rig is copied from, and starts it in the rig's environment.
     (
         "crates/cf-e2e/tests/regressions/a_cf_a_build_took_away_left_a_window_none.rs",

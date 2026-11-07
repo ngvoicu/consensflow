@@ -107,6 +107,54 @@ fn muses_session_hook_reads_its_files_from_its_command_line_and_writes_the_sessi
     );
 }
 
+/// T-1246: a hook of Muse's may say 16,384 bytes and a role is longer, so the launch gives
+/// Muse a hook for each block of the role and each names its number on its command line:
+/// the hook of block 1 says the second part, framed, and writes nothing down, and one past
+/// the last says nothing, with the filler; where none is named it is the first.
+#[test]
+fn muses_session_hook_says_the_block_its_command_line_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let role = dir.path().join("SKILL.md");
+    let said = dir.path().join("sessions.jsonl");
+    // 480 lines of 71 bytes: three parts.
+    let text = format!("{}\n", "a".repeat(70)).repeat(480);
+    fs::write(&role, &text).unwrap();
+    let event = r#"{"hook_event_name":"SessionStart","session_id":"01a17bc7-6aab-75a0-bfae-b627eaa5ecd8","source":"startup"}"#;
+    let block = |number: Option<&str>| {
+        let mut words = vec![
+            "hook",
+            "muse-session",
+            role.to_str().unwrap(),
+            said.to_str().unwrap(),
+        ];
+        words.extend(number);
+        let ran = cf(&words, &[], event);
+        assert_eq!(ran.status.code(), Some(0));
+        let said: serde_json::Value = serde_json::from_slice(&ran.stdout).unwrap();
+        said["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let blocks = cf_harness::muse::blocks(&text);
+    assert_eq!(blocks.len(), 3);
+    assert!(
+        blocks[1].starts_with("<<consensflow-role "),
+        "{}",
+        blocks[1]
+    );
+    assert_eq!(block(Some("1")), blocks[1]);
+    assert!(
+        !said.exists(),
+        "only the first block writes the session down"
+    );
+    assert_eq!(block(Some("2")), blocks[2]);
+    assert_eq!(block(Some("3")), cf_harness::muse::FILLER);
+    assert_eq!(block(Some("7")), cf_harness::muse::FILLER);
+    assert_eq!(block(None), blocks[0], "no number named is the first");
+    assert_eq!(fs::read_to_string(&said).unwrap().lines().count(), 1);
+}
+
 #[test]
 fn a_question_hook_with_no_window_says_nothing_and_succeeds() {
     let event =
@@ -124,13 +172,12 @@ fn a_question_hook_with_no_window_says_nothing_and_succeeds() {
 
 #[test]
 fn outside_a_window_an_empty_token_is_none_and_cf_answers_by_itself() {
-    let ran = cf(
-        &["catalog", "--harness", "pi"],
-        &[("CONSENSFLOW_TOKEN", "")],
-        "",
-    );
+    let ran = cf(&["--version"], &[("CONSENSFLOW_TOKEN", "")], "");
     assert_eq!(ran.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&ran.stdout).starts_with("pi:\n"));
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stdout),
+        format!("{}\n", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 const BRIDGE: &str =

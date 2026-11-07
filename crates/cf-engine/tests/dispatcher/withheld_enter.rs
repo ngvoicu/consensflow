@@ -92,7 +92,7 @@ pub(crate) fn note(context: &Context, project: i64, to: &str, body: &str) -> Mes
 /// `pane`, ten seconds on: `during` runs while the window's screen is looked at.
 pub(crate) fn enter_again_with(context: &Context, pane: &str, during: impl FnOnce()) {
     context.advance(11_000);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     let pane: Value = json!(pane);
     let looking = context
         .host
@@ -225,7 +225,7 @@ fn a_box_its_harness_reads_empty_is_pressed_no_key_and_the_words_go_into_it() {
     assert_eq!(enters(&context), 0, "no key that sends");
     // The human emptied the box meanwhile: its harness reads it so.
     context.host.set_snapshot(json!({
-        "outputQuietMs": 5_000,
+        "screenQuietMs": 5_000,
         "bottom": ["────────────────────", "❯", "────────────────────"],
     }));
     context
@@ -338,7 +338,7 @@ fn an_uncertain_hand_over_to_codex_is_never_given_back_by_an_enter_and_arrives_o
         .open_project(json!({
             "directory": "/work/app",
             "name": "app",
-            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
             "staff": [{ "agent": "zeus", "harness": "codex", "role": "worker", "tier": "standard" }],
         }))
         .unwrap()
@@ -508,7 +508,7 @@ fn a_paste_whose_enter_waited_for_the_resume_past_its_arrival_window_goes_once()
     );
     context.host.refuse_kills.set(false);
     context.advance(11_000);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "no key that sends, while closed");
     for _ in 0..4 {

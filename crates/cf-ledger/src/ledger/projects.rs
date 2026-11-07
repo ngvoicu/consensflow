@@ -78,19 +78,20 @@ impl Ledger {
         projects::set_staff_rules(&mut self.store, id, rules)
     }
 
-    /// Chooses the size, in tokens, at which the project's Claude member windows
-    /// compact (100,000 to 1,000,000), or takes the choice away: none is Claude's
-    /// own point. It reaches each window when it next starts.
-    pub fn set_claude_compaction(
+    /// Chooses the size, in tokens, at which the project's member windows compact,
+    /// whatever their harness (100,000 to 1,000,000), or takes the choice away: none is
+    /// each harness's own point. It reaches each window when it next starts.
+    pub fn set_compaction(
         &mut self,
         id: i64,
         window: Option<u32>,
     ) -> Result<ProjectView, LedgerError> {
-        projects::set_claude_compaction(&mut self.store, id, window)
+        projects::set_compaction(&mut self.store, id, window)
     }
 
     /// What the project says of specs: whether they are on, the folder and the
-    /// Specmint variant, all three at once. It applies at the chief's next launch.
+    /// Specmint variant, all three at once. A chief whose window is open is told at its
+    /// next rest, and any other takes it at its next launch.
     pub fn set_specs(&mut self, id: i64, change: &SpecsChange) -> Result<ProjectView, LedgerError> {
         specs::set_specs(&mut self.store, id, change)
     }

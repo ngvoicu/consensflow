@@ -13,26 +13,20 @@ use crate::scan::Kind;
 
 #[rustfmt::skip]
 pub const SITES: &[(&str, &str, Kind, usize)] = &[
-    // The catalog's tables by harness: the efforts each accepts, which of them a model profile is for.
-    ("crates/cf-catalog/src/catalog.rs", "efforts", Kind::Match, 1),
-    ("crates/cf-catalog/src/profile.rs", "Catalog::model_profile", Kind::IdMatch, 1),
-    ("crates/cf-catalog/src/profile.rs", "Catalog::model_profile", Kind::IdEq, 1),
-    ("crates/cf-catalog/src/profile.rs", "Catalog::profile", Kind::IdEq, 2),
-    ("crates/cf-catalog/src/profile.rs", "harness_of_kind", Kind::IdEq, 1),
-    ("crates/cf-catalog/src/roster/add.rs", "Catalog::checked_new", Kind::Eq, 1),
-    ("crates/cf-catalog/src/roster/agent_row.rs", "effort_key", Kind::IdEq, 1),
 
     // The daemon's computer-use seam calls the Claude and Codex implementations directly.
     ("crates/cf-daemon/src/computer_use.rs", "MachineComputerUse::codex", Kind::Adapter, 2),
     ("crates/cf-daemon/src/computer_use.rs", "use cf_harness::claude::computer_use", Kind::Adapter, 1),
 
     // The engine's seam names the Claude and Codex computer-use types, and a page names a harness by its id.
+    // Harness models' (a2-m, T-1190): Devin's exact id for an effort, Pi's thinking, and a harness's label in a handle, written before this list (T-1187, T-1202).
+    ("crates/cf-daemon/src/page/staff.rs", "picked", Kind::Eq, 1),
+    // Harness models' (a2-m, T-1190): Devin's exact id for an effort, Pi's thinking, and a harness's label in a handle, written before this list (T-1187, T-1202).
+    ("crates/cf-engine/src/chief_model.rs", "ChiefRuns::picked", Kind::IdMatch, 1),
     ("crates/cf-engine/src/computer_use.rs", "Dispatcher::tell_computer_use_once", Kind::IdEq, 1),
     ("crates/cf-engine/src/handoff/text.rs", "name_of", Kind::IdMatch, 1),
     ("crates/cf-engine/src/seams.rs", "ComputerUse::claude", Kind::Adapter, 1),
     ("crates/cf-engine/src/seams.rs", "ComputerUse::codex", Kind::Adapter, 1),
-    // Staff rules' (I-2, T-1092): only a Claude member's launch gets the project's compaction size, written before this list (T-1017).
-    ("crates/cf-engine/src/windows.rs", "Dispatcher::plan", Kind::Eq, 1),
 
     // The harnesses' crate, outside its registry: its readers, its admin, its detection and the files a launch leaves.
     // Muse's (D2b, T-996): its version read and compared in `inspect`, 2 of these 3 (T-703, before this list).
@@ -62,6 +56,10 @@ pub const SITES: &[(&str, &str, Kind, usize)] = &[
     ("crates/cf-harness/src/shared/window_args.rs", "window", Kind::Match, 1),
 
     // The identity table: a harness's id and kind. It stays while the table is a `match`.
+    // Harness models' (a2-m, T-1190): Devin's exact id for an effort, Pi's thinking, and a harness's label in a handle, written before this list (T-1187, T-1202).
+    ("crates/cf-ledger/src/handles.rs", "harness_label", Kind::IdMatch, 1),
+    // Harness models' (a2-m, T-1190): Devin's exact id for an effort, Pi's thinking, and a harness's label in a handle, written before this list (T-1187, T-1202).
+    ("crates/cf-ledger/src/saved_agents.rs", "import_saved_agents", Kind::IdEq, 2),
     ("crates/cf-proto/src/agents.rs", "Harness::as_str", Kind::Match, 1),
     ("crates/cf-proto/src/agents.rs", "Harness::kind", Kind::Match, 1),
     // Product boundaries' (I-1, T-1091): each harness's own session variables, written before this list (T-971).

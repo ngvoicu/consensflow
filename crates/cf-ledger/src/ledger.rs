@@ -5,6 +5,7 @@
 
 mod conversations;
 mod messages;
+mod model_lists;
 mod page_reads;
 mod projects;
 mod staff;

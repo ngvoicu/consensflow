@@ -22,7 +22,8 @@ const GIVEN: [&str; 4] = ["queued", "working", "waiting", "paused"];
 /// `GET /api/tasks`: the tasks no lane has (`open`: those waiting for a
 /// member, those paused, called off or failed before any member had them, and
 /// those of a member who left the staff), and each participant's lane with the
-/// tasks on it.
+/// tasks on it, and, for one that runs on a harness, its model and effort as the page
+/// shows them (`runsOn`: `Opus · high`, spec harness-models).
 pub(super) async fn list(
     context: &Context,
     caller: &Caller,
@@ -57,11 +58,19 @@ pub(super) async fn list(
             .iter()
             .map(summary)
             .collect::<Result<Vec<_>, _>>()?;
-        lanes.push(json!({
+        let mut entry = json!({
             "handle": lane.participant.handle,
             "role": lane.participant.role,
             "tasks": tasks,
-        }));
+        });
+        let participant = &lane.participant;
+        // A name that holds the model and effort says them already (HMD-12); the chief's
+        // name is its role, and never does.
+        if participant.harness.is_some() && (participant.role == "chief" || participant.name_apart)
+        {
+            entry["runsOn"] = json!(cf_ledger::handles::runs_on(participant));
+        }
+        lanes.push(entry);
     }
     Ok(Answer::ok(json!({ "open": open, "lanes": lanes })))
 }
@@ -135,6 +144,20 @@ pub(super) async fn create(
     // the nearest.
     if let Some(asked) = &created.asked {
         answer.insert("asked".to_owned(), json!(asked));
+        // And whose tier it went to, so the chief is told which member holds it.
+        let (pool, tier) = (created.task.pool.as_deref(), created.task.tier.as_deref());
+        let held_by: Vec<String> = match pool {
+            Some(pool) => context
+                .ledger
+                .borrow()
+                .members(caller.project.id, pool)?
+                .into_iter()
+                .filter(|member| member.tier.as_deref() == tier)
+                .map(|member| member.handle)
+                .collect(),
+            None => Vec::new(),
+        };
+        answer.insert("heldBy".to_owned(), json!(held_by));
     }
     answer.insert("gated".to_owned(), json!(gated));
     Ok(Answer::created(Value::Object(answer)))

@@ -21,8 +21,8 @@ import { element, redraw } from '../dom.js'
  * Below, the Specmint the build bundles: its version and each variant's name,
  * version, commit and what it is, as the daemon read them from the bundled files
  * (a version or a commit they do not say is unknown); none of it is written here,
- * so a Specmint that is vendored again shows itself. A change reaches a chief when
- * it next starts. The dialog is drawn from what the daemon last answered, and what
+ * so a Specmint that is vendored again shows itself. A change reaches a chief whose
+ * window is open as soon as it is at rest, and any other when it next starts. The dialog is drawn from what the daemon last answered, and what
  * it answers is what every project's Specs section says following the app means.
  */
 export class SpecsSettings {

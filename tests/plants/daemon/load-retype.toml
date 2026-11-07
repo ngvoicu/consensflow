@@ -288,7 +288,7 @@ runs = ["panes-lib-snapshot"]
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
 find = """            if pasted {
-                state.pasted = Some(Instant::now());
+                state.pasted = Some(self.clock.now());
             }"""
 replace = ""
 
@@ -369,8 +369,8 @@ runs = ["engine-unknown-looks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        let Some(thread) = task.filter(|thread| thread.task.state == "working") else {'
-replace = '        let Some(thread) = task.filter(|thread| matches!(thread.task.state.as_str(), "working" | "waiting")) else {'
+find = '        let Some(thread) = task.filter(|thread| thread.task.state == "working" && !waiting) else {'
+replace = '        let Some(thread) = task.filter(|thread| matches!(thread.task.state.as_str(), "working" | "waiting") && !waiting) else {'
 
 [[plant]]
 name = "load retype and turn-end: an arrival confirmed as the window is read once more names no item of the record turn-end finds the answer after"
@@ -463,13 +463,13 @@ runs = ["engine-unknown-looks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '        let receipt = latest.receipt.get("item").and_then(Value::as_str);'
+find = '        let receipt = message.receipt.get("item").and_then(Value::as_str);'
 replace = '        let receipt: Option<&str> = None;'
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                && is_paste_of(&item.text, latest.id, first.as_deref())"
-replace = "                && false && is_paste_of(&item.text, latest.id, first.as_deref())"
+find = "                && is_paste_of(&item.text, message.id, first.as_deref())"
+replace = "                && false && is_paste_of(&item.text, message.id, first.as_deref())"
 
 [[plant]]
 name = "load retype: the rig's look at how its stranger ended waits for the pipe a process it left holds"

@@ -6,6 +6,7 @@
 //! `provisional`'s.
 
 mod background;
+mod drawn;
 mod live;
 mod pasted;
 mod provisional;
@@ -392,8 +393,12 @@ fn a_turn_that_failed_is_settled_and_failed_in_muses_own_words() {
         Some("run ended with Failed: API error 500: upstream")
     );
     assert_eq!(
-        failed.quota, None,
-        "a server's error is no refusal for quota"
+        failed.quota.as_deref(),
+        Some(&Quota::Busy {
+            at: Some("2026-10-26T16:39:33.917Z".to_owned()),
+            because: "run ended with Failed: API error 500: upstream".to_owned(),
+        }),
+        "a server's error is no refusal for quota: a refusal for a moment (T-1112)"
     );
     // An end Muse may add later is a failure with no words: over, not known to have answered.
     let unknown = record_of(&[
@@ -767,4 +772,21 @@ fn a_move_ends_where_the_launch_or_the_human_puts_the_model_back() {
     assert!(record_of(&[metadata("1.4.13"), moved, restored, again])
         .model_moved
         .is_some());
+}
+
+/// Muse opens a window on any model id, and the first turn on one the account does not
+/// have fails at the provider with a 404 (T-727's probe of `muse-gone-9`): the turn's
+/// failure is those words, which is where a chief's gone model is heard (CHF-06), never its
+/// screen (Calliope's P1, T-955). The log is T-705's refused turn, its 402 told as the 404.
+#[test]
+fn a_turn_on_a_model_the_account_lacks_fails_in_the_providers_words() {
+    let refused = "API error 402 [request_id=00000000-0000-4000-8000-000000000093]: Billing verification failed. Billing Issue. To use this API key, your team needs to resolve a billing issue first. To resolve this issue, go here: <URL> (billing_error)";
+    let gone = "API error 404 [request_id=00000000-0000-4000-8000-000000000093]: model `muse-gone-9` does not exist or you lack access (not_found_error)";
+    let log = fixture("billing-spark");
+    assert!(log.contains(refused));
+    let text = log.replace(refused, gone);
+    let record = known(&fresh_reading(&session_of(log), &text)).clone();
+    assert!(record.failed && !record.in_flight);
+    assert_eq!(record.failure.as_deref(), Some(gone));
+    assert!(crate::muse::models::gone(gone, "muse-gone-9"));
 }

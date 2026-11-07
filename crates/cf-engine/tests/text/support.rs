@@ -7,8 +7,8 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use cf_base::refusal::Refusal;
-use cf_catalog::{WorkTier, WORK_TIERS};
 use cf_engine::roles::StaffRow;
+use cf_proto::agents::{WorkTier, WORK_TIERS};
 use cf_proto::ledger::{
     ChiefConversation, ConversationView, HistoryItem, MessageView, ParticipantView, ProjectView,
     TaskView,
@@ -190,15 +190,25 @@ pub fn task_of(row: &Value) -> TaskView {
     )
 }
 
-/// A participant, the way a test says it: a chief on a harness, or none.
-pub fn seat(harness: Option<&str>, agent: Option<&str>) -> ParticipantView {
+/// A participant, the way a test says it: a chief on a harness, or none, and the model
+/// picked for it, or none.
+pub fn seat(harness: Option<&str>, model: Option<&str>) -> ParticipantView {
     ParticipantView {
         id: 2,
         project_id: 1,
         handle: "chief".to_owned(),
         role: "chief".to_owned(),
-        agent: agent.map(str::to_owned),
+        agent: None,
         harness: harness.map(str::to_owned),
+        model: model.map(str::to_owned),
+        effort: None,
+        model_name: None,
+        former_handles: Vec::new(),
+        name_apart: false,
+        needs_edit: false,
+        launched_model: None,
+        gone_model: None,
+        ran_on: None,
         designer: false,
         created_at: "2026-09-19T10:00:01.000Z".to_owned(),
         left_at: None,
@@ -221,6 +231,15 @@ pub fn participant_of(row: &Value) -> ParticipantView {
         role: row["role"].as_str().unwrap().to_owned(),
         agent: text(row, "agent"),
         harness: text(row, "harness"),
+        model: text(row, "model"),
+        effort: text(row, "effort"),
+        model_name: text(row, "modelName"),
+        former_handles: Vec::new(),
+        name_apart: false,
+        needs_edit: false,
+        launched_model: text(row, "launchedModel"),
+        gone_model: None,
+        ran_on: None,
         designer: row["designer"].as_bool().unwrap(),
         created_at: row["createdAt"].as_str().unwrap().to_owned(),
         left_at: text(row, "leftAt"),
@@ -249,7 +268,7 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         description: None,
         meeting: None,
         staff_rules: None,
-        claude_compaction: None,
+        compaction: None,
     }
 }
 
@@ -279,6 +298,7 @@ pub fn conversation<R: AsRef<str>, T: AsRef<str>>(
                 complete: true,
                 at: None,
                 compaction: false,
+                detail: None,
             })
             .collect(),
     }
@@ -315,6 +335,7 @@ pub fn conversation_of(row: &Value) -> ChiefConversation {
                 complete: item["complete"].as_bool().unwrap(),
                 at: text(item, "at"),
                 compaction: false,
+                detail: None,
             })
             .collect(),
     }
@@ -350,6 +371,7 @@ pub fn unknown(_: i64) -> Result<Option<MessageView>, Refusal> {
 pub fn staff_row_of(row: &Value) -> StaffRow {
     StaffRow {
         name: row["name"].as_str().unwrap().to_owned(),
+        model: text(row, "model").unwrap_or_else(|| MODEL_SHOWN.to_owned()),
         roles: texts(row, "roles"),
         work_tier: row
             .get("workTier")
@@ -358,10 +380,14 @@ pub fn staff_row_of(row: &Value) -> StaffRow {
     }
 }
 
-/// A member of the staff, the way a test says it.
+/// What a test's member runs on, as the staff table shows it, where its row says none.
+pub const MODEL_SHOWN: &str = "Opus · high";
+
+/// A member of the staff, the way a test says it, on [`MODEL_SHOWN`].
 pub fn staff_row(name: &str, roles: &[&str], work_tier: WorkTier) -> StaffRow {
     StaffRow {
         name: name.to_owned(),
+        model: MODEL_SHOWN.to_owned(),
         roles: roles.iter().map(|role| (*role).to_owned()).collect(),
         work_tier: Some(work_tier),
     }

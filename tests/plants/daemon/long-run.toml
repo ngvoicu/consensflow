@@ -184,8 +184,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/record.rs"
-find = "                Kind::Removed => queues.remove(&entry.content),"
-replace = "                Kind::Removed => {}"
+find = "                        _ => queues.remove(&entry.content),"
+replace = "                        _ => {}"
 
 [[plant]]
 name = "long run 1: a removal or a popAll names a queued message by its exact words, and one whose envelope has other attributes waits for ever (A1, A5 hidden)"
@@ -608,9 +608,8 @@ runs = ["evals-lib-long-run", "evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/record.rs"
-find = "                Kind::Compaction | Kind::JobStarted(_) | Kind::JobEnded(_) => continue,"
-replace = """                Kind::Compaction => open = true,
-                Kind::JobStarted(_) | Kind::JobEnded(_) => continue,"""
+find = "                Kind::Compaction\n                | Kind::Noted\n"
+replace = "                Kind::Compaction => open = true,\n                Kind::Noted\n"
 
 [[plant]]
 name = "long run 5: a cut note is never held to the record"
@@ -1348,8 +1347,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/disruptions.rs"
-find = "                    .then_some(NO_IDLE_COMPACTION);"
-replace = "                    .then_some(NO_IDLE_COMPACTION).filter(|_| false);"
+find = "(after_compaction && !recompact).then_some(NO_IDLE_COMPACTION),"
+replace = "(after_compaction && !recompact).then_some(NO_IDLE_COMPACTION).filter(|_| false),"
 
 [[plant]]
 name = "long run 10: a disruption played without its shape is kept as played with it"
@@ -1398,8 +1397,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/disruptions.rs"
-find = "            (moment.chief == COMPACTS && moment.chief_idle).then_some(Target::Project)"
-replace = "            (moment.chief_idle).then_some(Target::Project)"
+find = "    moment.chief == COMPACTS && moment.chief_idle\n}"
+replace = "    moment.chief_idle\n}"
 
 [[plant]]
 name = "long run: the app is restarted after the compaction whatever the chief did since, and the Resume reads no idle compaction (A5 unproven)"
@@ -1408,7 +1407,7 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/disruptions.rs"
-find = "            .filter(|_| !strict || !compacted || moment.chief_compacted)"
+find = "            .filter(|_| !strict || !compacted || moment.chief_compacted || can_compact(moment))"
 replace = "            .filter(|_| !strict || !compacted || !moment.chief_compacted || moment.chief_compacted)"
 
 [[plant]]
@@ -2998,8 +2997,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "        .is_some_and(|(_, start, _)| *start == delivery_start(&item.text));"
-replace = "        .is_some_and(|(_, start, _)| *start >= delivery_start(&item.text));"
+find = "            .is_some_and(|(_, start, _)| *start == delivery_start(&item.text))"
+replace = "            .is_some_and(|(_, start, _)| *start >= delivery_start(&item.text))"
 
 [[plant]]
 name = "long run 4: a delivery to another worker ends this worker's turn (Astra's)"
@@ -3474,8 +3473,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "        .find(&text[start..])"
-replace = "        .find(&text[start..]).filter(|_| false)"
+find = "after(start, pattern::once(&TAG, PASTED).find(&text[start..]))"
+replace = "after(start, pattern::once(&TAG, PASTED).find(&text[start..]).filter(|_| false))"
 
 # Round b2 (GPT-6.1-Sol's review of b1): turn-end's known A4 is only the whole final answer with
 # progress besides; and a delivery behind other words is one, as B5 holds every header.
@@ -3677,7 +3676,7 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = '    if item.role != "user" || !opens {'
+find = "    if !is_delivery(item) {"
 replace = '    if item.role != "user" || headers(&item.text).is_empty() {'
 
 # Round b5 (both reviewers of b4): a summary's exemption holds only where one line alone of the

@@ -59,7 +59,6 @@
 //! pseudoconsole does.
 
 use cf_e2e::devin_store::{self, Message};
-use cf_e2e::files;
 use cf_e2e::live::trace::at_ms;
 use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
@@ -109,7 +108,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
             { "id": "worker2", "kind": "claude-code", "model": "fake" },
         ],
     });
-    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))
+    rig.stand_ins(&roster)
 }
 
 /// A rig whose chief is the stand-in Devin, its agent as quick as `first_word` and
@@ -154,7 +153,16 @@ fn a_project(rig: &Rig) -> cf_e2e::Result<(Project<'_>, String)> {
 /// `seconds` and answers the words.
 fn give(rig: &Rig, project: &Project, tier: &str, asked: Asked, seconds: u64) -> Outcome {
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), secs(30))?;
-    let brief = format!("SLEEP {seconds} Reply with exactly: {}", asked.words);
+    // A turn longer than the daemon's arrival window writes a step to its record every few
+    // seconds, as a harness's turn at work does: one that stood with nothing after its brief
+    // that long would be a window that never began it, and paused (T-1130). It answers its
+    // words as they stand.
+    let brief = if seconds > 10 {
+        let steps = seconds.div_ceil(5);
+        format!("PACED {steps} {} {}", seconds / steps, asked.words)
+    } else {
+        format!("SLEEP {seconds} Reply with exactly: {}", asked.words)
+    };
     let given = rig.cf_in_window(&chief, ["task", "add", "--tier", tier, brief.as_str()])?;
     assert_eq!(given.code, Some(0), "{}", given.output());
     Ok(())
