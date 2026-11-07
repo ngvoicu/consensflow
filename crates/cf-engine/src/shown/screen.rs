@@ -79,6 +79,20 @@ pub(super) enum Withheld {
 
 /// Why the rows of `tail` may not be quoted, or none where they may.
 pub(super) fn withheld(tail: &[String]) -> Option<Withheld> {
+    withheld_by(tail, names_a_secret)
+}
+
+/// Why the rows of `tail` may not be quoted by what they show and not by the words they name: the
+/// rule of [`withheld`] with no rule for a name. A word that names a secret (`oauth` in a path,
+/// `OPENAI_API_KEY is not set`) is no secret by itself; the words of a program are looked at for
+/// a value after one, by `mask::names_a_value`, beside this (`quotable`).
+pub(super) fn withheld_by_shape(tail: &[String]) -> Option<Withheld> {
+    withheld_by(tail, |_| false)
+}
+
+/// [`withheld`], with `names_a_secret` the rule for whether a row, or the rows joined, name a
+/// secret.
+fn withheld_by(tail: &[String], names_a_secret: fn(&str) -> bool) -> Option<Withheld> {
     // Every row the host sent is looked at, as drawn: a value that goes on over a row keeps no
     // name on the row it ends on.
     if tail.iter().any(|row| names_a_secret(row)) {

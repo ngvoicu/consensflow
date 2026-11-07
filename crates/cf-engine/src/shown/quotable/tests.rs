@@ -55,7 +55,7 @@ fn five_lines_that_begin_with_a_password_are_screened_before_the_cut() {
 
 #[test]
 fn a_label_far_above_the_last_lines_withholds_them_all() {
-    let lines: Vec<String> = std::iter::once("token: abc".to_owned())
+    let lines: Vec<String> = std::iter::once("token: abc12345".to_owned())
         .chain((1..=20).map(|n| format!("line {n}")))
         .collect();
     assert_eq!(quotable(&pi_said(&lines.join("\n"))), withheld());
@@ -67,26 +67,52 @@ fn a_pretty_printed_error_object_holding_an_api_key_is_withheld() {
     assert_eq!(quotable(&pi_said(object)), withheld());
 }
 
+/// A name that says its value is a password, a secret or a credential withholds the block
+/// whatever the value is, for the masker leaves a short one and a password of short words; a
+/// key's or a token's name, whatever it is joined to, withholds it when the value is one the
+/// masker takes for a key. Both in any case, on the line or the next.
 #[test]
 fn a_credential_word_with_a_value_after_it_withholds_the_block_in_any_case() {
     for words in [
-        "key: abcdefgh ijklmnop",
-        "KEY=abc",
-        "ssh_key = a b",
-        "x-api-key: 1",
-        "token: a b c",
-        "Token=abc",
-        "\"secret\": \"two words\"",
-        "SECRET = 'a b'",
         "password: x y",
-        "Authorization: Basic YWxhZGRpbjpvcGVuc2VzYW1l",
-        "authorization bearer zzzz yyyy",
-        "Bearer abc def",
-        "bearer: abc",
-        "key:\nthe value on the next line",
+        "SECRET = 'a b'",
+        "\"secret\": \"two words\"",
         "the line before\nPassword=hunter two\nthe line after",
+        "DB_PWD=red green blue",
+        "PassWord=\"alpha bravo charlie\"",
+        "passphrase: a b",
+        "credentials = x",
+        "Password:\nthe value on the next line",
+        "key: abcdefgh1 ijklmnop",
+        "KEY=abcdefgh12",
+        "ssh_key = abcdefghijklmnop",
+        "x-api-key: 0123456789",
+        "token: abcdefgh12 b c",
+        "Token=abcdef0123",
+        "Authorization: Basic YWxhZGRpbjpvcGVuc2VzYW1l",
+        "authorization bearer zzzzyyyy1234",
+        "Bearer abcdefgh1234 def",
+        "bearer: abcd1234efgh",
+        "key:\nabcdefgh12",
     ] {
         assert_eq!(quotable(&pi_said(words)), withheld(), "{words}");
+    }
+}
+
+/// `key` and `token` are words too (the masker's own doc: `token: expired`). A short value after
+/// one is a message, as it is in `Invalid key: expected string` and `Unexpected token: }`, and no
+/// key the masker could not hide in a note is one.
+#[test]
+fn a_key_or_a_token_with_a_value_no_key_is_as_short_as_is_a_message_and_is_quoted() {
+    for words in [
+        "key: abcdefgh ijklmnop",
+        "KEY=abc",
+        "token: a b c",
+        "x-api-key: 1",
+        "Bearer abc def",
+        "key:\nthe value on the next line",
+    ] {
+        assert_eq!(quotable(&pi_said(words)), pi_said(words), "{words}");
     }
 }
 
@@ -100,10 +126,18 @@ fn the_screens_rule_holds_for_words_a_credential_is_in_with_no_word_to_say_so() 
         "MIIEvQIBADANBgkq\nhkiG9w0BAQEFAASC",
         // A name the wrap cut in two is whole only at the join of the lines: neither row names a
         // secret alone.
-        "cannot read pass\nword from disk",
-        "the access tok\nen was refused",
+        "request with sk\n-abcdefgh1234 was refused",
+        "cannot read pass\nword: hunter two from disk",
+        "the access tok\nen: abcdefgh1234 was refused",
     ] {
         assert_eq!(quotable(&pi_said(words)), withheld(), "{words}");
+    }
+    // The word alone, cut in two or not, is no credential.
+    for words in [
+        "cannot open pass\nword for storage",
+        "the access tok\nen was refused",
+    ] {
+        assert_eq!(quotable(&pi_said(words)), pi_said(words), "{words}");
     }
 }
 
@@ -142,18 +176,23 @@ fn only_the_last_lines_that_passed_are_quoted_and_a_stack_is_never_quoted() {
 }
 
 /// A frame is never quoted, but it is looked at with the rest (T-1276,
-/// `frame-label-continuation`): a frame whose path names a credential word withholds the block, as
-/// a line of prose that names one does. That is the cost of the rule, and of a frame that is also
-/// the label of the lines below it; a frame that names none is set aside from what is quoted.
+/// `frame-label-continuation`, below): a frame whose path merely names a credential word, as
+/// `token-lib/auth` does, withholds nothing (A4-08: a word is no credential), and is set aside from
+/// what is quoted.
 #[test]
-fn a_stack_frame_that_names_a_credential_word_withholds_the_block_though_it_is_never_quoted() {
-    let said = "Error: Failed to load extension \"/x/e.ts\": boom\n    at load (/x/node_modules/token-lib/auth/index.js:1:1)";
-    assert_eq!(quotable(&pi_said(said)), withheld());
-    let said = "Error: Failed to load extension \"/x/e.ts\": boom\n    at load (/x/node_modules/lib/index.js:1:1)";
-    assert_eq!(
-        quotable(&pi_said(said)),
-        pi_said("Error: Failed to load extension \"/x/e.ts\": boom")
-    );
+fn a_stack_frame_is_never_quoted_and_a_path_that_names_a_credential_word_withholds_nothing() {
+    for path in [
+        "/x/node_modules/token-lib/auth/index.js",
+        "/x/node_modules/lib/index.js",
+    ] {
+        let said =
+            format!("Error: Failed to load extension \"/x/e.ts\": boom\n    at load ({path}:1:1)");
+        assert_eq!(
+            quotable(&pi_said(&said)),
+            pi_said("Error: Failed to load extension \"/x/e.ts\": boom"),
+            "{path}"
+        );
+    }
 }
 
 /// Only a line of the shape of a frame is set aside: prose that begins with `at` is screened,
@@ -161,9 +200,9 @@ fn a_stack_frame_that_names_a_credential_word_withholds_the_block_though_it_is_n
 #[test]
 fn a_line_that_begins_with_at_and_is_no_frame_is_screened_with_the_rest() {
     for words in [
-        "at the end, token:\nabcd efgh",
+        "at the end, token:\nabcdefgh1234",
         "at least one key:\nsk-abcd",
-        "at the top: password\ncorrect horse",
+        "at the top, password:\ncorrect horse",
     ] {
         assert_eq!(quotable(&pi_said(words)), withheld(), "{words}");
     }
@@ -207,14 +246,14 @@ fn the_description_before_the_mark_is_kept_and_what_pi_was_loading_is_named() {
     let reason = format!(
         "pi --mode rpc did not answer within 30 s. Pi loads the packages and extensions it has \
          before it lists, and one of them may be waiting for something (packages \
-         npm:@scope/token-provider@1.2.3; extensions ./oauth.ts){IT_SAID}password: correct\nhorse"
+         npm:@scope/token-provider@1.2.3; extensions ./oauth.ts, ./secret=1.ts){IT_SAID}password: correct\nhorse"
     );
     let told = quotable(&reason);
     assert!(
         told.starts_with(
             "pi --mode rpc did not answer within 30 s. Pi loads the packages and extensions it has \
              before it lists, and one of them may be waiting for something (packages \
-             npm:@scope/token-provider@1.2.3; extensions ./oauth.ts)"
+             npm:@scope/token-provider@1.2.3; extensions ./oauth.ts, ./secret=1.ts)"
         ),
         "{told}"
     );
@@ -282,8 +321,8 @@ fn a_label_in_a_line_of_the_shape_of_a_frame_withholds_the_lines_of_its_value() 
         "at password: correct (native)\nhorse\nbattery\nstaple",
         "    at password: correct (native)\n    horse\n    battery\n    staple\n",
         "Error: boom\nat password: correct (native)\nhorse\nbattery\nstaple",
-        "at token: abcd (a.js:1:2)\nefgh ijkl mnop",
-        "at load (<anonymous>)\nat api_key: red (index 0)\ngreen blue",
+        "at token: abcd1234 (a.js:1:2)\nefgh ijkl mnop",
+        "at load (<anonymous>)\nat api_key: red12345 (index 0)\ngreen blue",
     ] {
         let said = quotable(&pi_said(words));
         assert_eq!(said, withheld(), "{words:?}");
@@ -349,4 +388,117 @@ fn a_name_or_token_cut_in_two_with_a_frame_between_its_halves_is_found_at_the_jo
         let said = quotable(&pi_said(words));
         assert_eq!(said, withheld(), "{words:?}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pi's harmless failure hints (A4-08, the Limits of the decision HMD-13): a word that names a
+// credential is no credential. A block is withheld for a value or a shape, not for a word.
+// ---------------------------------------------------------------------------------------------
+
+/// What alpha.3 withheld though it held no credential, by the decision's own list, and Pi 1.5.0's
+/// own wordings of a login that fails (`dist/core/auth-guidance.js`, `agent-session.js`,
+/// `auth-storage.js`, `model-runtime.js`).
+#[test]
+fn the_failures_of_pi_that_name_a_credential_and_hold_none_are_quoted_as_they_were() {
+    for said in [
+        // The decision's list.
+        "Invalid key: expected string",
+        "OAuth login expired. Run /login",
+        "OPENAI_API_KEY is not set",
+        "Error: Cannot find module 'oauth-helper'\nRequire stack:\n- /home/h/.pi/agent/extensions/provider.ts",
+        "Unexpected token: }",
+        // Pi 1.5.0's own.
+        "No API key found for openrouter.\nUse /login to log into a provider via OAuth or API key. See:\n/x/docs/providers.md\n/x/docs/models.md",
+        "Authentication failed for \"openai-codex\". Credentials may have expired or network is unavailable. Run '/login openai-codex' to re-authenticate.",
+        "Invalid auth.json credential for provider \"openai-codex\"",
+        "Provider is not configured: openrouter",
+        "Failed to load token from /home/h/.pi/agent/auth.json: ENOENT",
+        // A path or a package named for a credential word, and a frame in one.
+        "Error: Failed to load extension \"/home/h/.pi/agent/extensions/oauth-provider.ts\": boom\nHint: Start without extensions using \"pi -ne\".",
+        "Error: Failed to load extension \"/x/node_modules/@scope/token-provider/index.ts\": boom",
+    ] {
+        assert_eq!(quotable(&pi_said(said)), pi_said(said), "{said}");
+    }
+    // A frame is never quoted, whatever its path is called; it is no reason to withhold the rest.
+    let said = "Error: Failed to load extension \"/x/e.ts\": boom\n    at load (/x/node_modules/token-lib/auth/index.js:1:1)";
+    assert_eq!(
+        quotable(&pi_said(said)),
+        pi_said("Error: Failed to load extension \"/x/e.ts\": boom")
+    );
+}
+
+const SETUPS: &str = include_str!("../../../../cf-harness/tests/fixtures/pi-homes/scenarios.json");
+const RECORDED: &str =
+    include_str!("../../../../cf-harness/tests/fixtures/pi-homes/answers-mac.json");
+
+/// The words the recorded Pi 1.5.0 gave for the setup that ended on a failed extension.
+fn recorded_failure() -> String {
+    let all: serde_json::Value = serde_json::from_str(RECORDED).unwrap();
+    all["scenarios"]["extension-fails"]["with"]["stderr"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The recorded setups the live suite reads (`tests/fixtures/pi-homes`): ten of them, each read
+/// with the extensions Pi loads and without. What Pi says when it fails to load one is its words
+/// about what it was loading, and its advice. The names in each setup (its files and its providers)
+/// are what Pi would name, and none of them is a credential: `auth.json`, `models.json`, a package
+/// called `pi-test-provider`, an extension, `provider-cache.json`.
+#[test]
+fn what_pi_names_of_the_recorded_setups_it_fails_in_is_quoted_with_its_advice() {
+    let recorded = recorded_failure();
+    assert!(
+        recorded.contains("Failed to load extension") && recorded.contains("Hint: Start without"),
+        "{recorded}"
+    );
+    // The recorded words themselves.
+    assert_eq!(
+        quotable(&pi_said(recorded.trim())),
+        pi_said(recorded.trim())
+    );
+    let setups: serde_json::Value = serde_json::from_str(SETUPS).unwrap();
+    let answers: serde_json::Value = serde_json::from_str(RECORDED).unwrap();
+    let setups = setups["scenarios"].as_array().unwrap();
+    assert_eq!(setups.len(), 10, "the ten recorded setups");
+    let mut checked = 0;
+    for setup in setups {
+        let name = setup["name"].as_str().unwrap();
+        for read in ["with", "without"] {
+            let answer = &answers["scenarios"][name][read];
+            assert!(!answer.is_null(), "{name} {read}");
+            // The words of a Pi that fails in this setup: each file it holds is what Pi was
+            // loading, and each provider it lists is one that may fail.
+            let mut words: Vec<String> = setup["files"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(|file| {
+                    recorded
+                        .replace("extensions/broken.ts", file)
+                        .trim()
+                        .to_owned()
+                })
+                .collect();
+            if let Some(providers) = answer["providers"].as_object() {
+                words.extend(providers.keys().map(|provider| {
+                    format!(
+                        "Authentication failed for \"{provider}\". Run '/login {provider}' to re-authenticate."
+                    )
+                }));
+            }
+            words.push(format!(
+                "Error: Failed to load extension \"<agent>/{name}\": boom"
+            ));
+            for said in words {
+                assert_eq!(
+                    quotable(&pi_said(&said)),
+                    pi_said(&said),
+                    "{name} ({read}): {said}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked >= 50, "{checked} words looked at");
 }

@@ -542,12 +542,12 @@ fn the_sentence_a_cut_read_put_in_place_of_pis_words_is_returned_and_kept_as_it_
 #[test]
 fn a_credential_word_on_any_line_withholds_the_words_before_it_and_after_it() {
     for words in [
-        "key: abcdefgh ijklmnop\nthe rest",
-        "alpha line\ntoken = a b c\nomega line",
+        "key: abcdefgh12 ijklmnop\nthe rest",
+        "alpha line\ntoken = abcdefgh12 b c\nomega line",
         "\"secret\": \"two words\"\nand more",
-        "one\ntwo\nauthorization bearer zzzz yyyy",
+        "one\ntwo\nauthorization: Bearer zzzzyyyy1234",
         "Password=hunter two\nthree",
-        "key:\nvalue on the next line",
+        "key:\nabcdefgh12\nvalue on the next line",
     ] {
         let (told, _) = failed_with(&format!("{ENDED}{words}"));
         assert!(told.contains(WITHHELD), "{words} was quoted: {told}");
@@ -802,6 +802,23 @@ mod from_pi_to_the_ledger {
                  extensions using \"pi -ne\"."
             )
         );
+    }
+
+    /// A4-08: Pi's failures that name a credential and hold none (alpha.3 withheld each for its
+    /// word) reach the page as Pi said them, with the exit code.
+    #[test]
+    fn what_pi_says_that_only_names_a_credential_is_told_as_it_was_with_its_exit_code() {
+        for said in [
+            "Error: Failed to load extension \"/home/h/.pi/agent/extensions/oauth.ts\": OAuth \
+             login expired. Run /login\nHint: Start without extensions using \"pi -ne\".",
+            "Error: Failed to load extension \"/x/e.ts\": Invalid key: expected string",
+            "Error: Failed to load extension \"/x/e.ts\": OPENAI_API_KEY is not set",
+            "Error: Failed to load extension \"/x/e.ts\": Cannot find module 'oauth-helper'",
+            "SyntaxError: Unexpected token: }",
+        ] {
+            let why = pi_ends_saying(&format!("{said}\n"));
+            assert_eq!(why, format!("{ENDED}{said}"), "{said}");
+        }
     }
 
     /// What `pi update --models` said is Pi's words too: a credential on a line before its last

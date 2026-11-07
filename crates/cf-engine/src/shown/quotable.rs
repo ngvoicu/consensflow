@@ -29,12 +29,19 @@
 //! the names of what Pi was loading are kept. Only a block that passed is cut, to its last
 //! [`QUOTE_LINES`] lines that are no frame within [`QUOTE_CHARS`] characters, and masked.
 //!
-//! What may hold a credential is the screens' own rule on the lines as one text
-//! ([`screen::withheld`]: a secret-like word on any line, a token's beginning, a key's body, a
-//! value in groups, whatever the wrap does to them) and a credential's word with a value after
-//! it, on the same line or the next (`key: abc`, `"secret": "a b"`, `API_KEY=…`, `token:` and
-//! the value below, in any case). The cost is the blocks that name a credential and hold none
-//! (`Invalid key: expected string`): they are left out whole, with the description and the code.
+//! What may hold a credential is what the lines show or hold, not what they name (A4-08).
+//! The lines as one text are looked at for the shapes of the screens' own rule
+//! ([`screen::withheld_by_shape`]: a token's beginning, a key's body, a value in groups, a URL's
+//! user and password a line end splits, whatever the wrap does to them), and for a credential's
+//! name with a value after it ([`names_a_value`], on the same line or the next, in any case):
+//! the name of a password, a secret or a credential with any value, a key's or a token's with a
+//! value the masker takes for one. A word that names a credential and has no value after it
+//! holds none: `OAuth login expired`, `OPENAI_API_KEY is not set`, a path or a package called
+//! `oauth-helper`, a stack frame's `token-lib/auth`. Nor does a message after `key` or `token`,
+//! which are words too (`Invalid key: expected string`, `Unexpected token: }`). Pi's hints, which
+//! provider failed, which extension it was loading and its own advice, are quoted. The cost is
+//! a key or a token as short as a message (`key: abc`), which the masker would not have hidden in
+//! a note either; every longer one is found.
 //! Nothing before the first mark can be a program's, so a forged mark among its words only
 //! makes the block longer.
 
@@ -43,7 +50,7 @@ use std::sync::LazyLock;
 use cf_proto::models::IT_SAID;
 use regex::Regex;
 
-use super::mask::mask;
+use super::mask::{mask, names_a_value};
 use super::screen;
 
 /// What stands in place of the words of a program that may hold a credential.
@@ -53,19 +60,6 @@ pub use cf_proto::models::WORDS_WITHHELD;
 const QUOTE_LINES: usize = 4;
 /// The most characters they take; the rest is cut and says so.
 const QUOTE_CHARS: usize = 600;
-
-/// A credential's word, the delimiter that gives it a value, and the value's first character:
-/// `key: abc`, `"token" = "a b"`, `API_KEY=…`, `Authorization: …`, and a value on the next line.
-/// A name that has the word anywhere in it counts (`ssh_key`, `x-api-key`), and so does one
-/// that has it as a piece of another word (`monkey: 1`): a false alarm costs a block, a miss
-/// a credential.
-#[allow(clippy::expect_used)]
-static NAMED_VALUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)(?:key|token|secret|passw(?:or)?d|authorization|bearer)s?["']?\s*[:=]\s*["']?[^\s"']"#,
-    )
-    .expect("a pattern")
-});
 
 /// A line of a stack, which is never quoted: Node's `at name (file:line:column)`, `at
 /// file:line:column`, `at name (<anonymous>)`, `at name (native)` and `at async Promise.all (index 0)`. A line that begins with
@@ -77,10 +71,19 @@ static FRAME: LazyLock<Regex> = LazyLock::new(|| {
         .expect("a pattern")
 });
 
-/// Whether `lines`, taken as one text, may hold a credential.
+/// Whether `lines`, taken as one text, may hold a credential: they show the shape of a key (a
+/// token's beginning, a key's body, a value in groups, a URL's user and password a line end
+/// splits: [`screen::withheld_by_shape`], whatever the wrap does to them), or a credential's name
+/// has a value after it ([`names_a_value`]), on its line or the next. A word that names a
+/// credential and has none after it does not (`OAuth login expired`, a path with `oauth` in it).
+/// The lines are looked at as they stand, joined by lines, joined with nothing and joined with a
+/// blank: a name the wrap cut in two is whole at the join.
 fn may_hold_a_credential(lines: &[&str]) -> bool {
     let rows: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))
+    screen::withheld_by_shape(&rows).is_some()
+        || [lines.join("\n"), lines.concat(), lines.join(" ")]
+            .iter()
+            .any(|text| names_a_value(text))
 }
 
 /// `reason` as it may be kept and told: masked, and where it carries the words of a program

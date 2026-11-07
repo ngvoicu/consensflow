@@ -509,8 +509,23 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = '    match arm(time, WAIT_MS).bound(answered).await {'
-replace = '    match Some(answered.await) {'
+find = '''        let got = waited
+            .bound(async {
+                answered
+                    .wait_for(Option::is_some)
+                    .await
+                    .ok()
+                    .and_then(|got| got.clone())
+            })
+            .await;'''
+replace = '''        let _ = &waited;
+        let got = Some(
+            answered
+                .wait_for(Option::is_some)
+                .await
+                .ok()
+                .and_then(|got| got.clone()),
+        );'''
 
 [[plant]]
 name = "pi-setups: a stalled read is read beside"
@@ -519,8 +534,10 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = '    if reading.swap(true, Ordering::SeqCst) {'
-replace = '    if reading.swap(true, Ordering::SeqCst) && false {'
+find = '''                Some(going) if going.asked == asked => Turn::Share(going.answer.clone()),
+                Some(going) => Turn::Wait(going.answer.clone()),
+                None => {'''
+replace = '                _ => {'
 
 [[plant]]
 name = "pi-setups: a read that has ended still holds the folder"
@@ -529,8 +546,38 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = '        self.0.store(false, Ordering::SeqCst);'
-replace = '        self.0.store(true, Ordering::SeqCst);'
+find = '        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;'
+replace = '        let _ = &self.0;'
+
+[[plant]]
+name = "pi-setups: an ask that overlaps a read is told the folder was late at once"
+meant = "a_default_model_lookup_that_overlaps_a_listing_is_told_what_the_folder_holds"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '                Some(going) if going.asked == asked => Turn::Share(going.answer.clone()),'
+replace = '                Some(going) if going.asked == asked => return Setup::late(),'
+
+[[plant]]
+name = "pi-setups: an ask for another folder takes the answer of the read in flight"
+meant = "an_ask_for_another_folder_takes_no_answer_that_is_not_its_own"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '                Some(going) => Turn::Wait(going.answer.clone()),'
+replace = '                Some(going) => Turn::Share(going.answer.clone()),'
+
+[[plant]]
+name = "pi-setups: an ask for the same folder reads it again beside the read in flight"
+meant = "two_asks_for_the_folder_that_overlap_take_the_answer_of_the_one_read"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '                Some(going) if going.asked == asked => Turn::Share(going.answer.clone()),'
+replace = '                Some(going) if going.asked == asked && false => Turn::Share(going.answer.clone()),'
 
 [[plant]]
 name = "pi-setups: a folder not read in time is called empty"
@@ -695,11 +742,10 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '''    let rows: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'''
-replace = '''    lines.iter().any(|line| {
-        screen::withheld(&[(*line).to_owned()]).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))
-    })'''
+find = '    screen::withheld_by_shape(&rows).is_some()'
+replace = '''    lines
+        .iter()
+        .any(|line| screen::withheld_by_shape(&[(*line).to_owned()]).is_some())'''
 
 [[plant]]
 name = "pi-setups: a credential word is looked for on a line alone"
@@ -708,8 +754,11 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'
-replace = '    screen::withheld(&rows).is_some() || lines.iter().any(|line| NAMED_VALUE.is_match(line))'
+find = '''
+        || [lines.join("\n"), lines.concat(), lines.join(" ")]
+            .iter()
+            .any(|text| names_a_value(text))'''
+replace = '        || lines.iter().any(|line| names_a_value(line))'
 
 [[plant]]
 name = "pi-setups: the block does not apply the rule of a screen"
@@ -718,8 +767,8 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'
-replace = '    NAMED_VALUE.is_match(&lines.join("\n"))'
+find = '    screen::withheld_by_shape(&rows).is_some()'
+replace = '    false'
 
 [[plant]]
 name = "pi-setups: the block does not look for a credential's word with a value"
@@ -728,18 +777,21 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'
-replace = '    screen::withheld(&rows).is_some()'
+find = '''
+        || [lines.join("\n"), lines.concat(), lines.join(" ")]
+            .iter()
+            .any(|text| names_a_value(text))'''
+replace = ''
 
 [[plant]]
 name = "pi-setups: a credential's word with no value after it withholds the block"
-meant = "the_words_of_pi_that_hold_no_credential_are_quoted_as_they_were"
+meant = "the_failures_of_pi_that_name_a_credential_and_hold_none_are_quoted_as_they_were"
 runs = ["ps-quotable"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/shown/quotable.rs"
-find = '''s?["']?\s*[:=]\s*["']?[^\s"']"#,'''
-replace = '''s?["']?\s*[:=]?\s*["']?[^\s"']"#,'''
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''["']?\s*[:=]\s*["']?[^\s"',;]"#,'''
+replace = '''["']?\s*[:=]?\s*["']?[^\s"',;]"#,'''
 
 [[plant]]
 name = "pi-setups: a withheld block is quoted"
@@ -930,6 +982,79 @@ runs = ["ps-quotable"]
 file = "crates/cf-engine/src/shown/quotable.rs"
 find = '.filter(|line| !FRAME.is_match(line))'
 replace = '.filter(|line| !line.starts_with("at "))'
+
+# A4-08: a word that names a credential is no credential; a value after a name, or a shape, is.
+
+[[plant]]
+name = "pi-setups: a word that names a credential withholds the block"
+meant = "the_failures_of_pi_that_name_a_credential_and_hold_none_are_quoted_as_they_were"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '    screen::withheld_by_shape(&rows).is_some()'
+replace = '    screen::withheld(&rows).is_some()'
+
+[[plant]]
+name = "pi-setups: a path or a package named for a credential withholds the block"
+meant = "what_pi_names_of_the_recorded_setups_it_fails_in_is_quoted_with_its_advice"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '    screen::withheld_by_shape(&rows).is_some()'
+replace = '    rows.iter().any(|row| row.contains("auth")) || screen::withheld_by_shape(&rows).is_some()'
+
+[[plant]]
+name = "pi-setups: a key or a token with a message after it is a credential"
+meant = "a_key_or_a_token_with_a_value_no_key_is_as_short_as_is_a_message_and_is_quoted"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '(?:passw(?:or)?d|pwd|passphrase|secret|credential|authorization|bearer)'
+replace = '(?:passw(?:or)?d|pwd|passphrase|secret|credential|authorization|bearer|key|token)'
+
+[[plant]]
+name = "pi-setups: a password with a short value is left to the masker"
+meant = "a_credential_word_with_a_value_after_it_withholds_the_block_in_any_case"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    SECRET_NAME_WITH_A_VALUE.is_match(text)
+        || RULES'''
+replace = '    RULES'
+
+[[plant]]
+name = "pi-setups: the masker's key and token rules are not asked for a value"
+meant = "a_credential_word_with_a_value_after_it_withholds_the_block_in_any_case"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '.filter(|rule| rule.named)'
+replace = '.filter(|rule| rule.named && false)'
+
+[[plant]]
+name = "pi-setups: a header name with a value after it is left to the masker"
+meant = "a_credential_word_with_a_value_after_it_withholds_the_block_in_any_case"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '(?:passw(?:or)?d|pwd|passphrase|secret|credential|authorization|bearer)'
+replace = '(?:passw(?:or)?d|pwd|passphrase|secret|credential)'
+
+[[plant]]
+name = "pi-setups: a name the wrap cut in two is looked for in the lines apart only"
+meant = "the_screens_rule_holds_for_words_a_credential_is_in_with_no_word_to_say_so"
+runs = ["ps-quotable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '[lines.join("\n"), lines.concat(), lines.join(" ")]'
+replace = '[lines.join("\n")]'
 
 # T-1276: three ways the words of Pi could still leak a credential.
 

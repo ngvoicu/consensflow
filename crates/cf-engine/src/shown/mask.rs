@@ -54,6 +54,9 @@ struct Rule {
     pattern: Regex,
     secret: usize,
     is_secret: fn(&str) -> bool,
+    /// The rule reads a credential's name with a value after it (`Bearer …`, `NAME=value`):
+    /// [`names_a_value`] asks these, and no others.
+    named: bool,
     /// The rule gives way where a URL's user and password hold its match: an address that
     /// begins inside them (`user:name@host`) is the URL's, and its host stays.
     yields_to_url: bool,
@@ -67,6 +70,7 @@ fn rule(pattern: &str, secret: usize, is_secret: fn(&str) -> bool) -> Rule {
         pattern: Regex::new(pattern).expect("a pattern of the masker"),
         secret,
         is_secret,
+        named: false,
         yields_to_url: false,
     }
 }
@@ -124,23 +128,35 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             always,
         ),
         // Authorization: Bearer <token>, Authorization: Basic <credentials>
-        rule(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{8,})", 1, always),
-        rule(
-            r"(?i)\bbasic\s+([A-Za-z0-9._~+/=-]{8,})",
-            1,
-            base64_credentials,
-        ),
+        Rule {
+            named: true,
+            ..rule(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{8,})", 1, always)
+        },
+        Rule {
+            named: true,
+            ..rule(
+                r"(?i)\bbasic\s+([A-Za-z0-9._~+/=-]{8,})",
+                1,
+                base64_credentials,
+            )
+        },
         // NAME=value, NAME: value, "name": "value"
-        rule(
-            r#"(?i)\b[A-Za-z0-9_.-]*(?:passw(?:or)?d|pwd|secret|credential)[A-Za-z0-9_.-]*["']?\s*[:=]\s*["']?([^\s"',;]{6,})"#,
-            1,
-            a_value,
-        ),
-        rule(
-            r#"(?i)\b[A-Za-z0-9_.-]*(?:key|token)[A-Za-z0-9_.-]*["']?\s*[:=]\s*["']?([^\s"',;]{8,})"#,
-            1,
-            a_long_or_numbered_value,
-        ),
+        Rule {
+            named: true,
+            ..rule(
+                r#"(?i)\b[A-Za-z0-9_.-]*(?:passw(?:or)?d|pwd|secret|credential)[A-Za-z0-9_.-]*["']?\s*[:=]\s*["']?([^\s"',;]{6,})"#,
+                1,
+                a_value,
+            )
+        },
+        Rule {
+            named: true,
+            ..rule(
+                r#"(?i)\b[A-Za-z0-9_.-]*(?:key|token)[A-Za-z0-9_.-]*["']?\s*[:=]\s*["']?([^\s"',;]{8,})"#,
+                1,
+                a_long_or_numbered_value,
+            )
+        },
         // Tokens that say what they are by how they begin.
         rule(
             concat!(
@@ -246,6 +262,43 @@ fn is_base64_letters(found: &str) -> bool {
 /// A base64 run that says what it is by its characters: a `+` in it, or `=` at its end.
 fn is_base64_marked(found: &str) -> bool {
     found.contains('+') || found.ends_with('=')
+}
+
+/// A name that says its value is a secret, whatever the name is joined to, the delimiter that
+/// gives it a value, and the first character of the value: the names of the masker's rule for a
+/// password, a secret or a credential, with no length asked of the value, and the two header
+/// names whose value is always one (`Authorization: …`, `bearer: …`).
+#[allow(clippy::expect_used)]
+static SECRET_NAME_WITH_A_VALUE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)\b[A-Za-z0-9_.-]*(?:passw(?:or)?d|pwd|passphrase|secret|credential|authorization|bearer)[A-Za-z0-9_.-]*["']?\s*[:=]\s*["']?[^\s"',;]"#,
+    )
+    .expect("a pattern of the masker")
+});
+
+/// Whether `text` has a credential's name with a value after it, as the masker reads one:
+/// - `Bearer …`, `Basic …`, and `NAME=value`, `name: value`, `"name": "value"` with a key's or a
+///   token's name, the value as long as the masker takes for one (`key: expected string` and
+///   `Unexpected token: }` are messages: `key` and `token` are words too);
+/// - a name that says it is a password, a secret or a credential (`password`, `passwd`, `pwd`,
+///   `passphrase`, `secret`, `credential`, `authorization`, `bearer`, in a longer name or not)
+///   with **any** value after it,
+///   for the masker leaves a short one, and a password of short words (`DB_PWD=red green blue`)
+///   has none it takes.
+///
+/// A name with no value after it is no credential (`OPENAI_API_KEY is not set`, an `oauth.ts`),
+/// and the value may be on the next line (`\s` spans it). The words of a program, which a human
+/// wrote, are withheld whole for this (`quotable`): the masker alone would hide the first word
+/// of a value and leave the rest.
+pub(crate) fn names_a_value(text: &str) -> bool {
+    SECRET_NAME_WITH_A_VALUE.is_match(text)
+        || RULES.iter().filter(|rule| rule.named).any(|rule| {
+            rule.pattern.captures_iter(text).any(|found| {
+                found
+                    .get(rule.secret)
+                    .is_some_and(|secret| (rule.is_secret)(secret.as_str()))
+            })
+        })
 }
 
 /// A text, and how many secrets were hidden in it.

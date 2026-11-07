@@ -380,3 +380,50 @@ fn the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_it
         assert!(!begins_a_token(text), "{text}");
     }
 }
+
+/// A4-08: the words of a program are withheld for a credential's name with a value after it, not
+/// for the name. Which names, and which values, are the masker's own.
+#[test]
+fn a_credentials_name_with_a_value_after_it_is_found_and_a_name_alone_is_not() {
+    for text in [
+        // A name of a password, a secret or a credential: any value, on the line or the next.
+        "password: x",
+        "DB_PWD=red green blue",
+        "\"passphrase\": \"a b\"",
+        "SECRET = 'a b'",
+        "credential:\nthe value below",
+        "x_Credentials=1",
+        "Authorization: abc",
+        "bearer: abc",
+        // A key or a token: a value the masker takes for one.
+        "api_key=abcdefgh12",
+        "\"apiKey\": \"abcdefghijklmnop\"",
+        "token: abcd1234",
+        // A scheme and its credential.
+        "Bearer abcdefgh1234",
+        "Basic YWxhZGRpbjpvcGVuc2VzYW1l",
+    ] {
+        assert!(names_a_value(text), "{text}");
+    }
+    for text in [
+        // A name alone, in a message, a path or a package.
+        "OPENAI_API_KEY is not set",
+        "OAuth login expired. Run /login",
+        "Cannot find module 'oauth-helper'",
+        "/home/h/.pi/agent/auth.json",
+        "Invalid auth.json credential for provider \"openai-codex\"",
+        "Credentials may have expired",
+        "Authorization failed for the account",
+        "No API key found for openrouter.",
+        // `key` and `token` are words too: a message after them is no value.
+        "Invalid key: expected string",
+        "Unexpected token: }",
+        "token: expired",
+        "key not found",
+        // The scheme with nothing after it that is a credential.
+        "Bearer abc",
+        "basic setup",
+    ] {
+        assert!(!names_a_value(text), "{text}");
+    }
+}
