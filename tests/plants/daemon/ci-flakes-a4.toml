@@ -1,0 +1,190 @@
+# The CI flakes of alpha.4's A4-16, part 1 (T-1318), each held by the test written for its cause:
+#
+# - live finish's detach cases: the host looks once a second and a detached job's shell lingers a
+#   third of one, so a look may fall on the shell before the job it starts, or on the shell and
+#   the job, or after: the verdict says an escape in each shape, and the Mac's limit passes in
+#   each (`crates/cf-e2e/tests/live_finish/leaving.rs`, CI run 42425306008). The stand-in's shell
+#   waits before it starts the job where `CF_TEST_DETACH_DELAY_MS` says, so that a case makes the
+#   look fall on the shell alone (`fake_agent/background.rs`);
+# - the stand-in Claude's status line runs a `git` of its own, not the machine's, which on GitHub's
+#   macOS runner is Xcode's shim and takes seconds on a cold cache, longer than the host waits
+#   before it looks again (`fake_agent/status_line.rs`, CI run 39136355690);
+# - an idle daemon's stop is counted in the clock of the timers it waits on, not the machine's
+#   (`crates/cf-daemon/src/stop/tests.rs`, CI runs 40958716065 and 42365070150);
+# - the same count for the daemon's other bounds of a close that waits for nothing: the API's close of
+#   a door and of an idle connection (`api/server/tests.rs`) and the daemon's stop from its input's
+#   end, inside the app's two seconds (`start/tests.rs`);
+# - a rig's close that times out says which of the daemon and the pane host had not left
+#   (`crates/cf-e2e/src/rig/mod.rs`, a resumed Devin case on CI's Windows, run 42419505988).
+#
+# Every name holds `ci flakes a4`, so `cargo xtask plants daemon "ci flakes a4"` runs them all.
+
+[run]
+a4-leaving = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "leaving::tests::"]
+a4-detach-delayed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "stand_in::a_stand_in_that_detaches_its_job_after"]
+a4-pi-delayed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "stand_in::a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_after"]
+a4-background = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "background::"]
+a4-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "status_line::"]
+a4-stop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::"]
+a4-api-close = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::server::tests::closing_"]
+a4-start = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::its_input_ending_stops"]
+a4-rig-close = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "the_failure_of_a_close_that_timed_out"]
+
+[[plant]]
+name = "ci flakes a4: a job that ran on unlisted after the host listed its shell is no escape"
+meant = "a_command_whose_shell_the_host_listed_before_it_ended_and_whose_job_ran_on_apart_escaped_all_the_same"
+runs = ["a4-leaving", "a4-detach-delayed"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            if !unlisted.is_empty() {'''
+replace = '''            if false && !unlisted.is_empty() {'''
+
+[[plant]]
+name = "ci flakes a4: a process the host listed counts as one it never listed"
+meant = "a_command_whose_shell_the_host_listed_before_it_ended_and_whose_job_ran_on_apart_escaped_all_the_same"
+runs = ["a4-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        .filter(|line| {
+            !left
+                .listed
+                .iter()
+                .any(|process| line.starts_with(&format!("{} ", process.pid)))
+        })
+        .cloned()'''
+replace = '''        .filter(|_| true)
+        .cloned()'''
+
+[[plant]]
+name = "ci flakes a4: the shell the host listed alone that started a job in a session of its own is no limit"
+meant = "a_shell_the_host_listed_alone_that_started_a_job_which_ran_on_in_a_session_of_its_own_is_the_limit_too"
+runs = ["a4-leaving", "a4-pi-delayed"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            left.notes.is_empty() && unlisted_but_running(left).len() == left.escaped.len()'''
+replace = '''            false'''
+
+[[plant]]
+name = "ci flakes a4: the shell that nothing listed is gone is a limit whatever the chief was told"
+meant = "a_shell_the_host_listed_alone_that_started_a_job_which_ran_on_in_a_session_of_its_own_is_the_limit_too"
+runs = ["a4-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            left.notes.is_empty() && unlisted_but_running(left).len() == left.escaped.len()'''
+replace = '''            unlisted_but_running(left).len() == left.escaped.len()'''
+
+[[plant]]
+name = "ci flakes a4: the stand-in's shell does not wait before it starts the job"
+meant = "a_shell_that_detaches_its_job_may_wait_before_it_starts_it_and_after"
+runs = ["a4-background"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
+find = '''        milliseconds("CF_TEST_DETACH_DELAY_MS").unwrap_or(0),'''
+replace = '''        milliseconds("CF_TEST_DETACH_DELAY_MS").map_or(0, |_| 0),'''
+
+[[plant]]
+name = "ci flakes a4: the stand-in's status line runs the machine's git"
+meant = "a_run_of_the_script_takes_the_time_of_its_kind_however_long_the_machines_git_takes_to_start"
+runs = ["a4-status-line"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/status_line.rs"
+find = '''\"$(dirname \"$0\")/{GIT}\" -C'''
+replace = '''git -C'''
+
+[[plant]]
+name = "ci flakes a4: the stand-in's own git is not written beside its script"
+meant = "a_run_of_the_script_takes_the_time_of_its_kind_however_long_the_machines_git_takes_to_start"
+runs = ["a4-status-line"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/status_line.rs"
+find = '''        fs::write(&git, GIT_SCRIPT).map_err(|failed| format!("{}: {failed}", git.display()))?;'''
+replace = '''        let _ = GIT_SCRIPT;'''
+
+[[plant]]
+name = "ci flakes a4: a stop of an idle daemon waits out the deadline"
+meant = "a_stop_says_why_and_how_big_the_daemon_is_and_ends_the_log_with_exit_0"
+runs = ["a4-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''            tokio::join!(passes, self.api.close());'''
+replace = '''            tokio::join!(passes, self.api.close(), tokio::time::sleep(DEADLINE));'''
+
+[[plant]]
+name = "ci flakes a4: a stop with a door and an idle connection open waits out the deadline"
+meant = "with_only_doors_and_idle_connections_open_the_stop_is_prompt"
+runs = ["a4-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''            tokio::join!(passes, self.api.close());'''
+replace = '''            tokio::join!(passes, self.api.close(), tokio::time::sleep(DEADLINE));'''
+
+[[plant]]
+name = "ci flakes a4: a close that timed out names the host when it was the daemon"
+meant = "the_failure_of_a_close_that_timed_out_says_which_process_had_not_left"
+runs = ["a4-rig-close"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = '''        (true, false) => "the daemon had not",'''
+replace = '''        (true, false) => "the pane host had not",'''
+
+[[plant]]
+name = "ci flakes a4: a stray process of the machine that holds the command's words makes a pass the limit"
+meant = "a_pass_is_named_for_what_its_summary_tells_and_a_stray_of_the_machine_changes_neither"
+runs = ["a4-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    if (left.listed.is_empty() && !left.escaped.is_empty())
+        || listed_then_left_for_a_session_of_its_own(left)
+    {'''
+replace = '''    if !left.escaped.is_empty() {'''
+
+[[plant]]
+name = "ci flakes a4: the API's close waits after the last connection is gone, the time an idle connection must not cost"
+meant = "closing_ends_a_connection_that_is_idle_at_once"
+runs = ["a4-api-close"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''        let _ = open.wait_for(|connections| *connections == 0).await;'''
+replace = '''        let _ = open.wait_for(|connections| *connections == 0).await;
+        sleep(Duration::from_millis(600)).await;'''
+
+[[plant]]
+name = "ci flakes a4: the API's close of a door waits after the door is answered, longer than it may"
+meant = "closing_answers_a_door_that_waits_at_once_and_lets_the_listener_go"
+runs = ["a4-api-close"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''        let _ = open.wait_for(|connections| *connections == 0).await;'''
+replace = '''        let _ = open.wait_for(|connections| *connections == 0).await;
+        sleep(Duration::from_millis(1_200)).await;'''
+
+[[plant]]
+name = "ci flakes a4: a stop from the input's end takes longer than the app's two seconds allow"
+meant = "its_input_ending_stops_it_within_the_apps_two_seconds_and_ends_its_log_as_the_tests_read_it"
+runs = ["a4-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''            self.api.drop_connections();
+        }
+        self.tail();'''
+replace = '''            self.api.drop_connections();
+        }
+        tokio::time::sleep(Duration::from_millis(1_400)).await;
+        self.tail();'''

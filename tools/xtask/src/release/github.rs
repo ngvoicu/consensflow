@@ -24,6 +24,8 @@
 //! network error within the reads the pace allows: a feed just swapped can
 //! answer 404 for minutes while GitHub's download links catch up.
 
+use std::path::Path;
+
 use cf_publish::version::{named_release, Version};
 use cf_release::ci_passed::{self, GitHub, Refusal};
 use serde_json::Value;
@@ -461,12 +463,18 @@ impl Release<'_> {
     /// tag made: a tag whose run failed is left behind, and a tag is never moved or
     /// pushed again, so its version would be spent.
     ///
+    /// The run is asked for with `notes` as its `notes` input — the file the tag
+    /// will carry, which `gh` reads and sends (`-F notes=@…`): a hand run has no
+    /// tag's message to read, so the trial reads the same notes the tag's run
+    /// will. A run that gets none writes the commits since the previous release,
+    /// cut under the feed's 64 KiB (alpha.2's trial failed on a range past it).
+    ///
     /// A hand run is of a branch's head, not of a commit, and `main` is the only
     /// branch the `release` environment (which holds the signing keys) admits
     /// besides tags: `commit` must be main's head, which the caller has just seen.
     /// A run of another commit would not be the one watched, which is looked for by
     /// the commit. The run, once it ends green.
-    pub(super) fn trial(&mut self, commit: &str) -> Result<u64, Error> {
+    pub(super) fn trial(&mut self, commit: &str, notes: &Path) -> Result<u64, Error> {
         let before = self.newest_run("release.yml", Some(commit), Some("workflow_dispatch"))?;
         let newest_before = self.newest_run("release.yml", None, Some("workflow_dispatch"))?;
         self.gh(&[
@@ -477,10 +485,13 @@ impl Release<'_> {
             REPOSITORY,
             "--ref",
             "main",
+            "-F",
+            &format!("notes=@{}", notes.display()),
         ])?;
         self.say(&format!(
-            "trial: a hand run of release.yml asked for, on main at {}",
-            short(commit)
+            "trial: a hand run of release.yml asked for, on main at {}, with the notes {}",
+            short(commit),
+            notes.display()
         ));
         self.watch(&Watched {
             label: "trial",

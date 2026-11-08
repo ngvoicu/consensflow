@@ -146,6 +146,38 @@ fn a_command_of_the_agents_is_run_by_a_shell_that_waits_for_it_or_detaches_it() 
     assert_eq!(IN_PLACE, "exec \"$0\" \"$@\"");
 }
 
+#[test]
+fn a_shell_that_detaches_its_job_may_wait_before_it_starts_it_and_after() {
+    // Before it starts the job the shell is the only process of the command the host can list,
+    // and after, the host lists the job under it too: the cases that need one or the other say so.
+    assert_eq!(
+        shell_script_after(true, 2500, 300),
+        "unset CF_PANE_PROCESS_OWNER; sleep 2.5; nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep 0.3"
+    );
+    assert_eq!(
+        shell_script_after(true, 0, 2500),
+        "unset CF_PANE_PROCESS_OWNER; nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep 2.5"
+    );
+    assert_eq!(
+        shell_script_after(false, 2500, 2500),
+        "\"$0\" \"$@\"; exit $?"
+    );
+    // The two variables say how long, in milliseconds; a word that is none is not told.
+    let told = |delay: &'static str, linger: &'static str| {
+        shell_script_told_by(true, move |name| match name {
+            "CF_TEST_DETACH_DELAY_MS" => Some(delay.to_owned()),
+            "CF_TEST_DETACH_LINGER_MS" => Some(linger.to_owned()),
+            _ => None,
+        })
+    };
+    assert_eq!(told("2500", "100"), shell_script_after(true, 2500, 100));
+    assert_eq!(told("soon", "late"), shell_script_after(true, 0, 300));
+    assert_eq!(
+        shell_script_told_by(true, |_| None),
+        shell_script_after(true, 0, 300)
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_shell_for_a_session_of_its_own_is_told_the_program_it_becomes() {

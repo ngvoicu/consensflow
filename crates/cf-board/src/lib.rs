@@ -37,6 +37,9 @@ pub enum BoardError {
     /// Answered with a body that lacks what the call reads from it.
     #[error("ConsensFlow's answer to {path} has no {what}")]
     Malformed { path: String, what: &'static str },
+    /// Not sent: this board changes nothing ([`Board::refusing_writes`]), and says why.
+    #[error("{0}")]
+    NoWrites(String),
 }
 
 impl BoardError {
@@ -131,6 +134,8 @@ pub struct Board {
     /// How a command starts in the window this board is: the hints and refusals `cf` prints
     /// start the commands they name with it ([`CfWord::in_text`]).
     cf: CfWord,
+    /// Why this board changes nothing, where it does not ([`Board::refusing_writes`]).
+    no_writes: Option<String>,
 }
 
 impl Board {
@@ -149,6 +154,7 @@ impl Board {
             token: token.to_string(),
             agent,
             cf: CfWord::bare(),
+            no_writes: None,
         }
     }
 
@@ -156,6 +162,16 @@ impl Board {
     #[must_use]
     pub fn with_cf(mut self, cf: CfWord) -> Self {
         self.cf = cf;
+        self
+    }
+
+    /// This board with every write refused, in the words `why`: a request that changes the board
+    /// is not sent and fails with them ([`BoardError::NoWrites`]). Reads are sent as they were.
+    /// A command that runs where no window of the board works says so through it (`cf` run in
+    /// Codex's memories folder: the memory job's, not the window's).
+    #[must_use]
+    pub fn refusing_writes(mut self, why: impl Into<String>) -> Self {
+        self.no_writes = Some(why.into());
         self
     }
 
@@ -183,6 +199,9 @@ impl Board {
 
     /// POST `body` to `path`, as `JSON.stringify` wrote it: compact, keys in order.
     pub fn post(&self, path: &str, body: &Value) -> Result<Answer, BoardError> {
+        if let Some(why) = &self.no_writes {
+            return Err(BoardError::NoWrites(why.clone()));
+        }
         self.send(path, Some(body))
     }
 

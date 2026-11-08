@@ -69,23 +69,18 @@ fn process_after(text: &str, said: &str) -> Option<u32> {
         .ok()
 }
 
+/// A stand-in that detaches its job from its shell, run on the project `plan` opens, held to what
+/// four harnesses' agents did (`nohup … &` in a shell that then ended): nothing proves whose the job
+/// is, so the host leaves it running, and the chief is told nothing. The run fails, honestly, and
+/// says that the window's close did not find it either (the job is in a session of its own, with no
+/// marker), and it ends it.
 #[cfg(unix)]
-#[test]
-fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_run_says_so_and_ends_it(
-) -> Result {
-    // What four harnesses' agents did (`nohup … &` in a shell that then ended): nothing
-    // proves whose the job is, so the host leaves it running, and the chief is told
-    // nothing. The run fails, honestly, and says that the window's close did not find it
-    // either (the job is in a session of its own, with no marker), and it ends it. A look
-    // of the run once a second may have caught the job while its shell still ran, which is
-    // a third of a second: the failure is said as of a command the host listed then, or as
-    // one it never listed.
+fn the_job_escapes_the_ending_and_the_run_says_so_and_ends_it(plan: &Plan) -> Result {
     let log = Log::new("live finish test");
-    let plan = leaving::plan(Who::StandIn);
     let brief = leaving::stand_in_brief(true);
     let finished = leaving::run_asked(
         Who::StandIn,
-        &plan,
+        plan,
         Path::new(FAKE_AGENT),
         &brief,
         leaving::Expect::Ended,
@@ -108,13 +103,37 @@ fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_ru
     // (`??`) and which no pane has, so that the window's close did not find it.
     assert!(text.contains(", terminal ??)"), "{text}");
     // The run ended it: it is not left on the machine for what its seconds are.
-    let job = process_after(&text, said).expect("the line names the job's process");
+    let job = process_after(&text, said)
+        .ok_or_else(|| cf_e2e::Error::Daemon(format!("the line names no job's process: {text}")))?;
     let gone = (0..100).any(|_| {
         std::thread::sleep(std::time::Duration::from_millis(100));
         !cf_e2e::process::is_alive(job)
     });
     assert!(gone, "the job {job} is left running: {text}");
     Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_run_says_so_and_ends_it(
+) -> Result {
+    // A look of the run once a second may catch the job while its shell still runs, which is
+    // a third of a second: the failure is said the same as of a command the host listed then,
+    // or as one it never listed (CI run 42425306008). The case below makes the look fall in it.
+    the_job_escapes_the_ending_and_the_run_says_so_and_ends_it(&leaving::plan(Who::StandIn))
+}
+
+/// The same escape where the host's look falls on the shell before it has started the job, which
+/// it waits 2.5 s to do, so that the host, which looks once a second, lists the shell every time
+/// (its own command line holds the job's words) and nothing else of the command: what it listed
+/// ended with the shell, and the job the shell started then ran on in a session of its own, which
+/// the host never listed (CI run 42425306008).
+#[cfg(unix)]
+#[test]
+fn a_stand_in_that_detaches_its_job_after_the_host_listed_its_shell_alone_escapes_the_ending_too_and_the_run_says_so_and_ends_it(
+) -> Result {
+    let plan = leaving::plan(Who::StandIn).with_var("CF_TEST_DETACH_DELAY_MS", "2500");
+    the_job_escapes_the_ending_and_the_run_says_so_and_ends_it(&plan)
 }
 
 #[cfg(unix)]
@@ -167,6 +186,52 @@ fn a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_into_a_session_of_its_
         "{text}"
     );
     // It ended the job: nothing of the run's is left on the machine for what its seconds are.
+    let job = process_after(&text, "still running: ").expect("the line names the job's process");
+    let gone = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        !cf_e2e::process::is_alive(job)
+    });
+    assert!(gone, "the job {job} is left running: {text}");
+    Ok(())
+}
+
+/// The same limit where the host's look falls on the shell before it has started the job, which
+/// it waits 2.5 s to do: the host lists the shell alone, every time, and the shell has ended when the
+/// run looks again. Nothing it listed is there then, and the job it started ran on in a session of
+/// its own that the close did not find: the limit, as where the look fell later (CI run 42425306008).
+#[cfg(unix)]
+#[test]
+fn a_stand_in_that_plays_pi_on_a_mac_and_detaches_its_job_after_the_host_listed_its_shell_alone_holds_the_case_as_the_known_limit_too(
+) -> Result {
+    let log = Log::new("live finish test");
+    let plan = leaving::plan(Who::StandIn).with_var("CF_TEST_DETACH_DELAY_MS", "2500");
+    let brief = leaving::stand_in_brief(true);
+    let finished = leaving::run_asked(
+        Who::StandIn,
+        &plan,
+        Path::new(FAKE_AGENT),
+        &brief,
+        leaving::Expect::OwnSession,
+        &log,
+    )?;
+    let text = finished.case.text();
+    assert!(
+        finished.case.held(),
+        "{text}\n\nthe first thing wrong: {}",
+        finished.summary
+    );
+    assert!(
+        text.contains("the host listed it before its shell ended"),
+        "the host listed the shell, and the limit took the job as one it listed: {text}"
+    );
+    assert!(
+        text.contains(
+            "ok   the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing: T-1 done "
+        ),
+        "{text}"
+    );
+    assert!(text.contains(", terminal ??)"), "{text}");
+    assert!(!text.contains("FAIL"), "{text}");
     let job = process_after(&text, "still running: ").expect("the line names the job's process");
     let gone = (0..100).any(|_| {
         std::thread::sleep(std::time::Duration::from_millis(100));

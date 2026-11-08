@@ -496,11 +496,14 @@ async fn closing_answers_a_door_that_waits_at_once_and_lets_the_listener_go() {
             tokio::time::sleep(Duration::from_millis(100)).await;
             assert!(!door.is_finished(), "the door waits");
 
-            let started = std::time::Instant::now();
+            // In the clock of the timers the close waits on, not the machine's.
+            tokio::time::pause();
+            let started = tokio::time::Instant::now();
             tokio::time::timeout(Duration::from_secs(5), api.close())
                 .await
                 .expect("it closes");
             assert!(started.elapsed() < Duration::from_secs(1));
+            tokio::time::resume();
             assert!(closing.is_set(), "the doors are told");
             let reply = door.await.unwrap();
             assert_eq!(
@@ -529,11 +532,14 @@ async fn closing_ends_a_connection_that_is_idle_at_once() {
                 .unwrap();
             let mut answered = vec![0; 1024];
             let _ = quiet.read(&mut answered).await.unwrap();
-            let started = std::time::Instant::now();
+            // In the clock of the timers the close waits on, not the machine's.
+            tokio::time::pause();
+            let started = tokio::time::Instant::now();
             tokio::time::timeout(Duration::from_secs(2), api.close())
                 .await
                 .expect("an idle connection does not hold the close");
             assert!(started.elapsed() < Duration::from_millis(500));
+            tokio::time::resume();
             let mut end = [0; 1];
             assert_eq!(idle.read(&mut end).await.unwrap(), 0);
             assert_eq!(quiet.read(&mut end).await.unwrap(), 0);

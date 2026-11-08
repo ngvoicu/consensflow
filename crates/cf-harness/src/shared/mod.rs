@@ -5,6 +5,7 @@ pub(crate) mod child;
 pub(crate) mod compacting;
 pub(crate) mod dialog;
 pub(crate) mod directory;
+pub(crate) mod folders;
 pub(crate) mod input_box;
 pub(crate) mod launch_files;
 pub(crate) mod left_open;

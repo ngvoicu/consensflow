@@ -1,0 +1,82 @@
+[
+ {
+  "id": "codex-actual-0",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-0",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007https://en.wikipedia.org/wik\u001b]8;;\u0007\r\n\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007i/Function_(mathematics)\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ },
+ {
+  "id": "codex-actual-1",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-1",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007https://github.com/ngvoicu/c\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007onsensflow/blob/main/app/src\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007-tauri/src/link.rs#L10-L20\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ },
+ {
+  "id": "codex-actual-2",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-2",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u0007https://example.com/a%28b%29\u001b]8;;\u0007\r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ },
+ {
+  "id": "codex-actual-3",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-3",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007https://en.wikipedia.org/wik\u001b]8;;\u0007\r\n\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007i/Bayes'_theorem\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ }
+]

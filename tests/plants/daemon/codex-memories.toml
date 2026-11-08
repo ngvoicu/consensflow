@@ -1,0 +1,250 @@
+# Codex's memory job put a task on the board as the chief (T-1313; the issue
+# `codex-memories-post-to-the-board-as-the-chief` in consensflow-sme, found on the `sites` board,
+# 2026-10-21). The job is a thread of the window's own Codex server, started after a turn, whose
+# working folder is `$CODEX_HOME/memories` and which is given the window's config: ConsensFlow's
+# role and `CONSENSFLOW_*`, the token among them. Codex has no key that fences it with memories on,
+# so `cf` run with its working folder in the memories folder changes nothing on the board. The
+# registry says which harness has background work and where (`launch::background_work`, Codex's
+# `codex::memories`), `background::refusal` looks the folder up with its links resolved and
+# `shared::folders` compares the names in any form a Mac or a Windows path is written in, the
+# board `cf` is given refuses every write (`cf-board`), and `cf` says why in Codex's words. The
+# class fix, a token the board takes only from the window's own thread, is 3.0.8's.
+#
+# The cases are the regression `a_codex_memory_job_put_a_task_on_the_board_as_the_chief` (the real
+# daemon, pane host and `cf` on the stand-in Codex whose server runs the job), `cf`'s own
+# `memories_tests` (every write verb refused with nothing sent, what reads, the usage and a hook
+# allowed, an inbox read received by no one) and the harness crate's (`background`,
+# `codex::memories`, `shared::folders`). One plant takes one rule out; a test of it fails.
+#
+# Every name holds `codex memories`, so `npm run plants:daemon -- "codex memories"` runs them all.
+
+[run]
+rig-regression-codex-memories = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_memory_job_put_a_task_on_the_board_as_the_chief::"], builds = true }
+cf-lib-memories = ["cargo", "test", "--offline", "-p", "cf", "--lib", "memories_tests::"]
+harness-lib-memories = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "background::", "codex::memories::", "shared::folders::"]
+
+[[plant]]
+name = "codex memories: cf run in the memories folder keeps the board it was given"
+meant = "memories_tests::a_command_that_changes_the_board_is_refused_in_the_memories_folder_in_the_words_and_asks_nothing"
+runs = ["cf-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = "Some(why) => board.refusing_writes(why),"
+replace = "Some(_) => board,"
+
+[[plant]]
+name = "codex memories: the job's task is taken on the rig, cf having kept its board"
+meant = "a_task_codexs_memory_job_adds_from_the_memories_folder_is_refused_and_the_chief_still_adds_its_own"
+runs = ["rig-regression-codex-memories"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = "Some(why) => board.refusing_writes(why),"
+replace = "Some(_) => board,"
+
+[[plant]]
+name = "codex memories: cf looks at no working folder"
+meant = "a_task_codexs_memory_job_adds_from_the_memories_folder_is_refused_and_the_chief_still_adds_its_own"
+runs = ["rig-regression-codex-memories"]
+
+[[plant.edit]]
+file = "crates/cf/src/lib.rs"
+find = "std::env::current_dir().ok().as_deref(),"
+replace = "None,"
+
+[[plant]]
+name = "codex memories: a board that refuses writes sends them"
+meant = "memories_tests::a_command_that_changes_the_board_is_refused_in_the_memories_folder_in_the_words_and_asks_nothing"
+runs = ["cf-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/lib.rs"
+find = '''
+        if let Some(why) = &self.no_writes {
+            return Err(BoardError::NoWrites(why.clone()));
+        }
+        self.send(path, Some(body))'''
+replace = '''
+        if let Some(why) = self.no_writes.as_ref().filter(|_| false) {
+            return Err(BoardError::NoWrites(why.clone()));
+        }
+        self.send(path, Some(body))'''
+
+[[plant]]
+name = "codex memories: a board that refuses writes refuses reads too"
+meant = "memories_tests::what_reads_the_board_the_usage_of_a_command_and_a_hook_are_allowed_in_the_memories_folder"
+runs = ["cf-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-board/src/lib.rs"
+find = '''
+    pub fn get(&self, path: &str) -> Result<Answer, BoardError> {
+        self.send(path, None)'''
+replace = '''
+    pub fn get(&self, path: &str) -> Result<Answer, BoardError> {
+        if let Some(why) = &self.no_writes {
+            return Err(BoardError::NoWrites(why.clone()));
+        }
+        self.send(path, None)'''
+
+[[plant]]
+name = "codex memories: the refusal does not say what ran where"
+meant = "memories_tests::a_command_that_changes_the_board_is_refused_in_the_memories_folder_in_the_words_and_asks_nothing"
+runs = ["cf-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/memories.rs"
+find = '''This command ran in Codex's memories folder: Codex's memory job isn't on the board.'''
+replace = "This command was refused."
+
+[[plant]]
+name = "codex memories: the registry says Codex runs no background work"
+meant = "background::tests::the_words_are_codexs_and_no_other_harness_has_background_work"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/launch.rs"
+find = '''
+        Harness::Codex => Some((
+            crate::codex::memories::memories_folders(env),
+            crate::codex::memories::WORDS,
+        )),
+        Harness::Claude | Harness::Devin | Harness::Pi | Harness::Muse => None,'''
+replace = '''
+        Harness::Codex | Harness::Claude | Harness::Devin | Harness::Pi | Harness::Muse => {
+            let _ = env;
+            None
+        }'''
+
+[[plant]]
+name = "codex memories: every working folder is the memories folder"
+meant = "memories_tests::the_same_commands_are_taken_from_the_project_and_from_where_the_system_gave_no_folder"
+runs = ["cf-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/folders.rs"
+find = "!outer.is_empty() && components(folder, fold).starts_with(&outer)"
+replace = "true"
+
+[[plant]]
+name = "codex memories: only the memories folder itself is inside it"
+meant = "background::tests::the_memories_folder_and_every_folder_below_it_are_inside_it_and_nothing_else_of_codexs_home_is"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/folders.rs"
+find = "components(folder, fold).starts_with(&outer)"
+replace = "components(folder, fold) == outer"
+
+[[plant]]
+name = "codex memories: the working folder's links are not resolved"
+meant = "background::tests::a_link_into_the_memories_folder_is_inside_it_and_so_is_a_folder_below_a_linked_one"
+runs = ["harness-lib-memories"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/background.rs"
+find = "let real = resolved_path(folder);"
+replace = "let real = folder.to_path_buf();"
+
+[[plant]]
+name = "codex memories: the memories folder's links are not resolved"
+meant = "background::tests::a_link_into_the_memories_folder_is_inside_it_and_so_is_a_folder_below_a_linked_one"
+runs = ["harness-lib-memories"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/background.rs"
+find = "inside(&real, &resolved_path(work), fold)"
+replace = "inside(&real, work, fold)"
+
+[[plant]]
+name = "codex memories: a Codex home that is set is not the one looked in"
+meant = "codex::memories::tests::a_codex_home_that_is_set_is_the_only_one_and_its_memories_folder_is_the_job_s"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/paths.rs"
+find = '''if let Some(root) = env.path("CODEX_HOME") {'''
+replace = '''if let Some(root) = env.path("CODEX_HOME_IGNORED") {'''
+
+[[plant]]
+name = "codex memories: an empty Codex home is the folder it names"
+meant = "codex::memories::tests::an_empty_codex_home_is_none_and_the_default_is_of_each_home_the_environment_names"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/paths.rs"
+find = '''if let Some(root) = env.path("CODEX_HOME") {'''
+replace = '''if let Some(root) = env.os("CODEX_HOME").map(std::path::Path::new) {'''
+
+[[plant]]
+name = "codex memories: a user profile apart from HOME is not looked in"
+meant = "background::tests::a_home_and_a_user_profile_that_name_two_folders_both_have_a_memories_folder"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/paths.rs"
+find = '''for name in ["HOME", "USERPROFILE"] {'''
+replace = '''for name in ["HOME"] {'''
+
+[[plant]]
+name = "codex memories: a Windows verbatim path keeps its prefix"
+meant = "shared::folders::tests::a_windows_path_is_inside_in_any_form_it_is_written_in"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/folders.rs"
+find = "        Some(rest) => rest.to_owned(),"
+replace = "        Some(_) => text,"
+
+[[plant]]
+name = "codex memories: a Windows path's slashes are not separators"
+meant = "shared::folders::tests::a_windows_path_is_inside_in_any_form_it_is_written_in"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/folders.rs"
+find = '''without_verbatim_prefix(text.replace('/', "\\"))'''
+replace = "without_verbatim_prefix(text.to_string())"
+
+[[plant]]
+name = "codex memories: Windows folders are told apart by case"
+meant = "shared::folders::tests::a_windows_path_is_inside_in_any_form_it_is_written_in"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/folders.rs"
+find = '''
+        ignore_case: true,
+        windows: true,'''
+replace = '''
+        ignore_case: false,
+        windows: true,'''
+
+[[plant]]
+name = "codex memories: a Mac tells folders apart by case"
+meant = "shared::folders::tests::a_mac_compares_the_names_of_folders_in_any_case_and_a_system_that_does_not_ignore_it_does_not"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/folders.rs"
+find = '''
+        ignore_case: true,
+        windows: false,'''
+replace = '''
+        ignore_case: false,
+        windows: false,'''
+
+[[plant]]
+name = "codex memories: the stand-in's job runs where the window does"
+meant = "a_task_codexs_memory_job_adds_from_the_memories_folder_is_refused_and_the_chief_still_adds_its_own"
+runs = ["rig-regression-codex-memories"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = '''
+            .cwd(&folder)
+'''
+replace = ""

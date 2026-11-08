@@ -19,13 +19,21 @@ pub(super) struct Scripted {
     pub(super) steps: Rc<RefCell<Vec<String>>>,
     /// Told the participant whose activity is read.
     pub(super) reading: Box<dyn Fn(i64)>,
+    /// The state every window says it is in, which a test sets as it goes.
+    pub(super) state: Rc<Cell<&'static str>>,
 }
 
 impl Scripted {
     pub(super) fn new() -> Self {
+        Self::in_state(Rc::new(Cell::new("idle")))
+    }
+
+    /// An engine whose windows are all in the state `state` holds at the time they are asked.
+    pub(super) fn in_state(state: Rc<Cell<&'static str>>) -> Self {
         Self {
             steps: Rc::default(),
             reading: Box::new(|_| {}),
+            state,
         }
     }
 
@@ -61,7 +69,7 @@ impl Engine for Scripted {
 
     fn activity(&self, participant: i64) -> Value {
         (self.reading)(participant);
-        json!({ "state": "idle" })
+        json!({ "state": self.state.get() })
     }
 
     fn holding(&self, _: i64) -> Result<bool, EngineError> {

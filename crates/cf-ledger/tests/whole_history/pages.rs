@@ -51,18 +51,20 @@ pub(super) fn fetched(ledger: &Ledger) -> i32 {
 }
 
 /// The pages each read takes: the newest page with the tools' outputs left out
-/// and shown, a search, the newest item's part, and a message's opening.
+/// and shown, a search, the newest item's part, a message's parties, and where the item that
+/// may still be written stands.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Costs {
     page: i32,
     tools: i32,
     search: i32,
     part: i32,
-    opening: i32,
+    parties: i32,
+    live: i32,
 }
 
 /// What each read of the chief's history in `conversation` of `project` takes,
-/// and message `message`'s opening: each read once first, so that what SQLite
+/// and message `message`'s parties: each read once first, so that what SQLite
 /// reads of its schema to make a statement is not counted.
 fn costs(ledger: &Ledger, project: i64, conversation: i64, message: i64) -> Costs {
     // A read that loaded a field of 32 MiB whole would fail, the value too long.
@@ -105,9 +107,13 @@ fn costs(ledger: &Ledger, project: i64, conversation: i64, message: i64) -> Cost
                 .expect("a part");
             assert_eq!((part.text.as_str(), part.next), ("said two", None));
         }),
-        opening: counted(&|| {
-            let opening = ledger.message_opening(message).expect("read");
-            assert!(opening.expect("there").opening.starts_with("bbbb"));
+        parties: counted(&|| {
+            let parties = ledger.message_parties(message).expect("read");
+            assert!(parties.is_some(), "the message is there");
+        }),
+        live: counted(&|| {
+            let live = ledger.live_item(project, "chief").expect("read");
+            assert_eq!(live.map(|key| key.row), Some(newest), "the newest item");
         }),
     }
 }
@@ -227,7 +233,8 @@ fn alike(short: Costs, long: Costs) {
         ("a page with the tools", short.tools, long.tools),
         ("a search", short.search, long.search),
         ("a part", short.part, long.part),
-        ("an opening", short.opening, long.opening),
+        ("a message's parties", short.parties, long.parties),
+        ("the live item", short.live, long.live),
     ];
     for (what, short, long) in pairs {
         assert!(

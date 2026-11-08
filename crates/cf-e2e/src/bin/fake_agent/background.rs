@@ -551,15 +551,39 @@ const IN_PLACE: &str = "exec \"$0\" \"$@\"";
 ///
 /// The shell lingers 0.3 s after it detaches the job, or as many milliseconds as
 /// `CF_TEST_DETACH_LINGER_MS` says: a case that must see the host list the job while its shell
-/// still ties it to the window (the host looks once a second) sets it longer.
+/// still ties it to the window (the host looks once a second) sets it longer. It starts the job
+/// at once, or after as many milliseconds as `CF_TEST_DETACH_DELAY_MS` says: a case that must
+/// have the host's look fall on the shell before it has started the job (the shell, which holds
+/// the job's words in its own command line, listed alone, and gone when the job runs on) sets it
+/// longer than the host's look.
 #[cfg(any(unix, test))]
 fn shell_script(detached: bool) -> String {
+    shell_script_told_by(detached, cf_e2e::process::own_var)
+}
+
+/// [`shell_script`], the variables read through `var`.
+#[cfg(any(unix, test))]
+fn shell_script_told_by(detached: bool, var: impl Fn(&str) -> Option<String>) -> String {
+    let milliseconds = |name: &str| var(name).and_then(|ms| ms.parse::<u64>().ok());
+    shell_script_after(
+        detached,
+        milliseconds("CF_TEST_DETACH_DELAY_MS").unwrap_or(0),
+        milliseconds("CF_TEST_DETACH_LINGER_MS").unwrap_or(300),
+    )
+}
+
+/// [`shell_script`], the shell waiting `delay` milliseconds before it starts a detached job and
+/// `linger` after.
+#[cfg(any(unix, test))]
+fn shell_script_after(detached: bool, delay: u64, linger: u64) -> String {
     if detached {
-        let linger = cf_e2e::process::own_var("CF_TEST_DETACH_LINGER_MS")
-            .and_then(|ms| ms.parse::<u64>().ok())
-            .unwrap_or(300);
+        let waits = if delay == 0 {
+            String::new()
+        } else {
+            format!(" sleep {};", delay as f64 / 1000.0)
+        };
         format!(
-            "unset CF_PANE_PROCESS_OWNER; nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep {}",
+            "unset CF_PANE_PROCESS_OWNER;{waits} nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep {}",
             linger as f64 / 1000.0
         )
     } else {

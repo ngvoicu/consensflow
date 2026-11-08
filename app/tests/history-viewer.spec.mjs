@@ -172,10 +172,7 @@ function sessionHistory() {
     items: [
       item(7, 0, 'w-1', 'user', `half a thought${DELIVERY}`, {
         kind: 'prompt',
-        delivery: {
-          line: "· m-12: @zeus's result on T-1 (cf task get T-1)",
-          at: 'half a thought'.length,
-        },
+        delivery: { at: 'half a thought'.length },
       }),
       call(7, 1, 'w-2', '$ cargo test', '', { status: 'running' }),
       item(7, 2, 'w-3', 'user', 'Write the lexer'),
@@ -871,7 +868,7 @@ test.describe('the history viewer', () => {
     data.histories.chief.items = [
       item(1, 0, 'x-1', 'user', `${HOSTILE}${DELIVERY}${HOSTILE}`, {
         kind: 'prompt',
-        delivery: { line: HOSTILE, at: HOSTILE.length },
+        delivery: { at: HOSTILE.length },
       }),
       item(1, 1, 'x-2', 'custom', HOSTILE, { kind: 'thinking' }),
       call(1, 2, 'x-3', `$ ${HOSTILE}`, `${HOSTILE}\n`.repeat(9), {
@@ -1103,7 +1100,7 @@ test.describe('the history viewer', () => {
       item(7, 7, 'w-8', 'user', `Typed ${header}Parser done`, {
         kind: 'prompt',
         cut: { from: 0, bytes: 700_000, revision: 1 },
-        delivery: { line: "· m-12: @zeus's result on T-1 (cf task get T-1)", at: 6 },
+        delivery: { at: 6 },
       }),
     )
     data.parts['w-8'] = [`Typed ${header}Parser done`, ', all of it.']

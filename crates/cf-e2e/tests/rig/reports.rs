@@ -126,6 +126,35 @@ fn a_case_whose_close_times_out(home: &mut Option<PathBuf>) -> Outcome {
     Ok(())
 }
 
+/// The failure of a close that timed out says which of the two ran on: "process did not exit"
+/// alone left a CI run's reader with the frames of both (a resumed Devin case on Windows, run
+/// 42419505988). On Unix the daemon is stopped (SIGSTOP), so that it is the one that does not leave.
+#[cfg(unix)]
+#[test]
+fn the_failure_of_a_close_that_timed_out_says_which_process_had_not_left() -> Outcome {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+
+    let rig = crate::rig()?;
+    rig.expect_the_close_to_fail();
+    let daemon = Pid::from_raw(i32::try_from(rig.daemon_pid())?);
+    kill(daemon, Signal::SIGSTOP)?;
+    let failed = rig.close_within(Duration::from_millis(300));
+    // Left stopped, it is the drop's to kill, which also lets it go: a stopped process
+    // cannot take a kill's end before it is continued.
+    let _ = kill(daemon, Signal::SIGCONT);
+    let said = failed
+        .err()
+        .map(|failed| failed.to_string())
+        .unwrap_or_default();
+    assert!(said.starts_with("process did not exit"), "{said}");
+    assert!(
+        said.contains("the daemon had not left 0.3 s after its input ended"),
+        "{said}"
+    );
+    Ok(())
+}
+
 /// A case whose check fails after it shut its rig down to look at what was left
 /// (`shut_down_within` keeps the rig, which is the case's still): it panics.
 fn a_case_whose_check_fails_after_a_shutdown(home: &mut Option<PathBuf>) {
