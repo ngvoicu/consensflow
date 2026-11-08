@@ -1,0 +1,223 @@
+# The CI flakes of alpha.4's A4-16, part 2 (T-1332): tests that raced a real-time bound against a
+# thread's wake-up now wait for the event each means (the decision `a-test-waits-on-an-event-never-on-a-time`
+# of consensflow-sme), and each is held by a plant of the bug it is there for:
+#
+# - a write into a pane whose program reads nothing blocks for good, and neither another pane's
+#   write nor the kill of that pane waits for it (`crates/cf-panes/src/pty.rs`, `blocked_write_…`:
+#   "blocked write unblocked after kill: Timeout" at a load of 15 to 25, T-971);
+# - the API front's tests of a handler, a client that leaves and a close (`crates/cf-daemon/src/api/server/tests.rs`:
+#   "Connection reset by peer" at a load of 48 and more, T-968, T-992) wait for the handler's word that it
+#   has its request, and for its being told;
+# - a request given up ends its connection (`screens/network/tests.rs`, T-1020): given up once the server
+#   has read its head;
+# - the stand-in's agents, absorbed notification and `CLAUDE-HELD` line that the T-678 case rests on
+#   (`crates/cf-e2e/src/bin/fake_agent/`).
+#
+# The reply tests (`…reply_goes_past…`) are held by `paste-enter.toml`'s plants; the approval case by
+# `approval.toml`'s; the T-678 case by `turn-end-min.toml`'s.
+#
+# Every name holds `ci flakes a4b`, so `cargo xtask plants daemon "ci flakes a4b"` runs them all.
+
+[run]
+a4b-blocked-write = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::blocked_write_does_not_stall_other_panes_or_kill"]
+a4b-api-server = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::server::tests::"]
+a4b-network = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::network::tests::a_request_given_up_ends_its_connection"]
+a4b-agents = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "agents::"]
+a4b-steps = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "steps::"]
+
+[[plant]]
+name = "ci flakes a4b: the kill of a pane waits for the write its blocked program left in hand"
+meant = "blocked_write_does_not_stall_other_panes_or_kill"
+platforms = ["macos"]
+runs = ["a4b-blocked-write"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''    if pane.active_writes.load(Ordering::Acquire) == 0 {
+        let result = terminate(&mut pane, grace);'''
+replace = '''    while pane.active_writes.load(Ordering::Acquire) != 0 {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    if pane.active_writes.load(Ordering::Acquire) == 0 {
+        let result = terminate(&mut pane, grace);'''
+
+[[plant]]
+name = "ci flakes a4b: a write to a pane waits for the writes in hand of every pane"
+meant = "blocked_write_does_not_stall_other_panes_or_kill"
+platforms = ["macos"]
+runs = ["a4b-blocked-write"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''        let _active_write = ActiveWrite(active_writes);
+        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
+replace = '''        let _active_write = ActiveWrite(active_writes);
+        static EVERY_PANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _every_pane = EVERY_PANE.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
+
+[[plant]]
+name = "ci flakes a4b: the API's close does not wait for a request in hand"
+meant = "closing_waits_for_a_request_in_hand_and_the_answer_goes_out_first"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '        let _ = open.wait_for(|connections| *connections == 0).await;'
+replace = '        let _ = &open;'
+
+[[plant]]
+name = "ci flakes a4b: the API's close does not tell the doors"
+meant = "closing_answers_a_door_that_waits_at_once_and_lets_the_listener_go"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '        self.server.closing_flag.set();'
+replace = '        let _ = &self.server.closing_flag;'
+
+[[plant]]
+name = "ci flakes a4b: a handler is never told its client left"
+meant = "a_handler_is_told_when_its_client_leaves_and_not_before"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/request.rs"
+find = '''    pub(crate) fn leave(&self) {
+        self.0.set();'''
+replace = '''    pub(crate) fn leave(&self) {
+        let _ = &self.0;'''
+
+[[plant]]
+name = "ci flakes a4b: a handler is told its client left before it did"
+meant = "a_handler_is_told_when_its_client_leaves_and_not_before"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/request.rs"
+find = '''    pub fn has_left(&self) -> bool {
+        self.0.is_set()'''
+replace = '''    pub fn has_left(&self) -> bool {
+        true'''
+
+[[plant]]
+name = "ci flakes a4b: a handler is dropped when its client leaves"
+meant = "a_client_that_leaves_does_not_drop_its_handler"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''        let outcome = contain(async {
+            let request = Request::from_hyper(request)?.consumed_by(consumer);
+            (state.handler)(request).await
+        })
+        .await;'''
+replace = '''        let watching = consumer.clone();
+        let outcome = contain(async {
+            let request = Request::from_hyper(request)?.consumed_by(consumer);
+            tokio::select! {
+                answered = (state.handler)(request) => answered,
+                () = watching.left() => Ok(Answer::ok(serde_json::Value::Null)),
+            }
+        })
+        .await;'''
+
+[[plant]]
+name = "ci flakes a4b: a connection idle past its time is held for good"
+meant = "a_connection_that_waits_for_its_request_longer_than_its_idle_time_is_ended"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '        .header_read_timeout(server.idle)'
+replace = '        .header_read_timeout(Duration::from_secs(3600))'
+
+[[plant]]
+name = "ci flakes a4b: a connection is ended before its idle time"
+meant = "a_connection_that_waits_for_its_request_longer_than_its_idle_time_is_ended"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '        .header_read_timeout(server.idle)'
+replace = '        .header_read_timeout(server.idle / 10)'
+
+[[plant]]
+name = "ci flakes a4b: what will not end is not dropped when the caller says so"
+meant = "what_will_not_end_is_dropped_when_the_caller_says_so_a_body_half_sent_among_it"
+runs = ["a4b-api-server"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '            connection.abort();'
+replace = '            let _ = &connection;'
+
+[[plant]]
+name = "ci flakes a4b: a request given up leaves its connection open"
+meant = "a_request_given_up_ends_its_connection"
+runs = ["a4b-network"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/network.rs"
+find = '''            let response = self
+                .client()?
+                .get(request.url)
+                .send()
+                .await
+                .map_err(|_| FETCH_FAILED.to_owned())?;'''
+replace = '''            let client = self.client()?.clone();
+            let url = request.url.to_owned();
+            let response = tokio::spawn(async move { client.get(url).send().await })
+                .await
+                .map_err(|_| FETCH_FAILED.to_owned())?
+                .map_err(|_| FETCH_FAILED.to_owned())?;'''
+
+[[plant]]
+name = "ci flakes a4b: the stand-in's agents started until something happens end at once"
+meant = "agents_started_until_something_happens_run_until_it_does"
+runs = ["a4b-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/agents.rs"
+find = '            until();'
+replace = '            drop(until);'
+
+[[plant]]
+name = "ci flakes a4b: a notification the stand-in takes into a turn is attached as a prompt"
+meant = "a_notification_taken_into_a_turn_is_queued_attached_and_taken_back_with_no_user_record"
+runs = ["a4b-steps"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/steps.rs"
+find = '                "commandMode": "task-notification",'
+replace = '                "commandMode": "prompt",'
+
+[[plant]]
+name = "ci flakes a4b: the stand-in's agent is launched as a command, not asynchronously"
+meant = "an_agent_launched_is_the_agent_tools_call_whose_result_says_it_runs_asynchronously"
+runs = ["a4b-steps"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/steps.rs"
+find = '            "status": "async_launched",'
+replace = '            "status": "completed",'
+
+[[plant]]
+name = "ci flakes a4b: the stand-in's agent ends with a notification that says no status"
+meant = "an_agents_end_is_a_notification_whose_turn_answers_its_report"
+runs = ["a4b-steps"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/steps.rs"
+find = '<status>completed</status>\n<summary>Agent \"Survey the parser\" completed</summary>'
+replace = '<summary>Agent \"Survey the parser\" completed</summary>'
+
+[[plant]]
+name = "ci flakes a4b: the stand-in's agent-only line leaves the two monitors"
+meant = "a_held_line_leaves_an_agent_and_two_monitors_running_or_the_agent_alone"
+runs = ["a4b-steps"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/steps.rs"
+find = '    let pending = if agent_only {'
+replace = '    let pending = if !agent_only {'

@@ -53,6 +53,15 @@ fn gated(project: &Project) -> cf_e2e::Result<Vec<Value>> {
     Ok(held)
 }
 
+/// The state of the message `id` in the thread of T-1, as the board shows it: none where the
+/// thread holds no such message.
+fn state_in_thread(project: &Project, id: i64) -> cf_e2e::Result<Value> {
+    Ok(project.task(1)?["messages"]
+        .as_array()
+        .and_then(|thread| thread.iter().find(|message| message["id"] == id))
+        .map_or(Value::Null, |message| message["state"].clone()))
+}
+
 /// The one message at the gate, waited for.
 fn the_one_held(rig: &Rig, project: &Project, what: &str) -> cf_e2e::Result<Value> {
     rig.wait_for(what, secs(60), || Ok(gated(project)?.len() == 1))?;
@@ -635,6 +644,13 @@ fn a_declined_answer_leaves_the_question_open_and_the_chief_answers_it_again() -
         [json!("answer"), json!("chief"), json!("JSON")]
     );
     assert_eq!(project.task(1)?["state"], "waiting");
+    // The chief answered the question, but its delivery is the daemon's to settle: it marks a
+    // message delivered when a pass reads the window's record, which can come after the answer
+    // is held (CI's macOS runner, run 42484814940: the question still `delivering`). The case
+    // goes on once it is delivered, so that what it checks after the decline is the decline's.
+    rig.wait_for("the question to be delivered", secs(60), || {
+        Ok(state_in_thread(&project, asked)? == "delivered")
+    })?;
 
     // The human declines it: the question is the chief's to answer still.
     let declined = decline(&rig, &answer["id"])?;
@@ -645,19 +661,13 @@ fn a_declined_answer_leaves_the_question_open_and_the_chief_answers_it_again() -
         "waiting",
         "the task waits for another answer"
     );
-    let thread = project.task(1)?["messages"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let state_of = |id: i64| {
-        thread
-            .iter()
-            .find(|message| message["id"] == id)
-            .map_or(Value::Null, |message| message["state"].clone())
-    };
-    assert_eq!(state_of(asked), "delivered", "the question stands");
     assert_eq!(
-        state_of(answer["id"].as_i64().unwrap_or_default()),
+        state_in_thread(&project, asked)?,
+        "delivered",
+        "the question stands"
+    );
+    assert_eq!(
+        state_in_thread(&project, answer["id"].as_i64().unwrap_or_default())?,
         "cancelled"
     );
     let told = format!(

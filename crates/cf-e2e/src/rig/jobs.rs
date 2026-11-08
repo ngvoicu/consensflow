@@ -9,7 +9,10 @@
 //!   tool that releases a lock does;
 //! - `.finished`: it ran to its end by itself;
 //! - `.monitor-may-end`: written by a case, it lets the monitor that watches the job end
-//!   (a `CLAUDE-MONITOR`'s, [`Job::let_its_monitor_end`]).
+//!   (a `CLAUDE-MONITOR`'s, [`Job::let_its_monitor_end`]);
+//! - `.agent-may-end`: written by a case, it lets the agent a `held` job stands for end
+//!   (a `CLAUDE-HELD`'s, [`Job::let_its_agent_end`]); the `held` job has no process of
+//!   its own: its `.pid` is the window's.
 //!
 //! A job that was killed outright wrote neither of the last two. That is every
 //! job of a window on Windows, which is ended at once with its window and never
@@ -59,6 +62,12 @@ impl Job {
     /// would otherwise race.
     pub fn let_its_monitor_end(&self) -> crate::Result {
         files::write(&self.beside("monitor-may-end"), "")
+    }
+
+    /// Lets the agent a `CLAUDE-HELD` left running end, as the stand-in waits to be let: the
+    /// case has seen what it looked for while the agent ran, which a clock would race.
+    pub fn let_its_agent_end(&self) -> crate::Result {
+        files::write(&self.beside("agent-may-end"), "")
     }
 
     /// Its file of the kind `kind`: `<file>.<kind>`.

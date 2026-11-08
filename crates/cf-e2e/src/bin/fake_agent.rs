@@ -49,7 +49,11 @@
 //! `CF_TEST_REST_MS` set takes that long, once its answer is written, to end its turn
 //! in the record (the stop hooks' summary) and to say it is at rest (its status file
 //! says `busy` until then), so that a case that goes on at the answer, and not at
-//! the rest, is always in the shape a loaded machine made rare. A turn that runs a
+//! the rest, is always in the shape a loaded machine made rare. A window that has started
+//! agents with `CF_TEST_DURATION_MS` set takes that long between the summary and the
+//! `turn_duration` that says how many run, as Claude Code writes the two a moment apart, its
+//! status `busy` through it (T-678: a look that falls between them reads the turn as over
+//! with no agents, and must not take it for the result). A turn that runs a
 //! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
 //! and, as the line says, the command with it or not. A turn that runs a build
 //! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
@@ -1071,6 +1075,11 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
             // the stop hooks: the turn's duration, and how many agents it left
             // running (the count is left out when none).
             if window.agents.used() {
+                // The summary is in the record and the duration that says the agents is not
+                // yet, as Claude Code writes them a moment apart; Claude's status stays `busy`
+                // through the moment (`CF_TEST_DURATION_MS`, so that a case can have a look
+                // fall between the two).
+                wait_as_told("CF_TEST_DURATION_MS");
                 let mut duration = json!({
                     "type": "system",
                     "subtype": "turn_duration",

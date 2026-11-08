@@ -62,6 +62,7 @@ tem-page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "
 tem-rig-monitor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_worker_that_waited_on_its_run_with_monitor_lost_it::"]
 tem-rig-still-going = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_workers_still_going_was_given_as_its_result::"]
 tem-rig-progress = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_that_began_with_the_workers_progress::"]
+tem-rig-held = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_worker_that_ended_its_turn_with_an_agent_and_a_monitor_running_was_given_its_progress_as_its_result::"]
 tem-rig-reopen = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_stuck_working_after_its_window_was_resumed::a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_its_job_and_monitor_running"]
 tem-rig-finish = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief::"]
 tem-rig-still-ran = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_that_still_ran_was_taken_for_ended::"]
@@ -2008,3 +2009,76 @@ runs = ["tem-panes-background"]
 file = "crates/cf-panes/src/background.rs"
 find = '            .filter(|kept| kept.group.is_some())'
 replace = '            .filter(|kept| kept.group.is_some() || kept.group.is_none())'
+
+# --- the field case of T-678 (kluris, T-47): an Agent and a Monitor still running when the turn ends ---
+# One case from the harness's record to the board (`regressions/a_worker_that_ended_its_turn_with_an_agent_and_a_monitor_running_…`),
+# the stand-in's `CLAUDE-HELD`: four steps of progress, a Monitor that ends in the turn, an
+# asynchronous Agent, a Monitor that does not, and a moment between the stop hooks' summary and the
+# `turn_duration` that counts the agent. Its variant leaves the agent alone.
+
+[[plant]]
+name = "turn-end-min rig held: a worker whose turn left an agent and a monitor running has its progress taken for its result"
+meant = "a_worker_whose_turn_ended_with_an_agent_and_a_monitor_running_is_held_for_both_and_its_report_is_the_result"
+runs = ["tem-rig-held"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.total() > 0 {'''
+replace = '''
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.total() > 0 && false {'''
+
+[[plant]]
+name = "turn-end-min rig held: a worker whose turn left an agent alone running has its progress taken for its result"
+meant = "a_worker_whose_turn_ended_with_an_agent_alone_running_is_held_for_it_and_its_report_is_the_result"
+runs = ["tem-rig-held"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.total() > 0 {'''
+replace = '''
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.total() > 0 && false {'''
+
+[[plant]]
+name = "turn-end-min rig held: an agent alone pending holds no task"
+meant = "a_worker_whose_turn_ended_with_an_agent_alone_running_is_held_for_it_and_its_report_is_the_result"
+runs = ["tem-rig-held"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.total() > 0 {'''
+replace = '''
+        let words = with_lost(words_of(&answers.final_run), &participant.handle, lost);
+        if pending.jobs > 0 {'''
+
+[[plant]]
+name = "turn-end-min rig held: the result of a held turn is everything it wrote, its progress first"
+meant = "a_worker_whose_turn_ended_with_an_agent_and_a_monitor_running_is_held_for_both_and_its_report_is_the_result"
+runs = ["tem-rig-held"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '            Role::Tool if !of_the_role => final_run.clear(),'
+replace = ''
+
+[[plant]]
+name = "turn-end-min rig held: a window busy between the stop hooks' summary and the duration is taken for one at rest"
+meant = "a_worker_whose_turn_ended_with_an_agent_and_a_monitor_running_is_held_for_both_and_its_report_is_the_result"
+runs = ["tem-rig-held"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '                    let at_prompt = idle || (agents && working);'
+replace = '                    let at_prompt = idle || working;'

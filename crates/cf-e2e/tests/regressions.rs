@@ -144,6 +144,8 @@ mod a_window_whose_open_missed_its_deadline_worked_on_unseen;
 mod a_window_with_nothing_to_stop_was_closed_and_its_work_ended;
 #[path = "regressions/a_windows_first_message_was_on_its_command_line.rs"]
 mod a_windows_first_message_was_on_its_command_line;
+#[path = "regressions/a_worker_that_ended_its_turn_with_an_agent_and_a_monitor_running_was_given_its_progress_as_its_result.rs"]
+mod a_worker_that_ended_its_turn_with_an_agent_and_a_monitor_running_was_given_its_progress_as_its_result;
 #[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]
 mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
 #[path = "regressions/a_workers_question_in_its_last_words_was_given_as_its_result.rs"]

@@ -916,12 +916,17 @@ mod tests {
 
     /// The terminal's answer over the bridge (`pane.reply`) goes past the human's keys held
     /// after their paste (`pane.typed`), in a window whose harness reads a paste silently
-    /// (T-1048): the reply is answered at once, while the human's paste and Enter still wait.
+    /// (T-1048): the program reads the paste and says so by a file (the human's Enter is held
+    /// behind it), reads the answer, and draws only then. So the reply sent once the program has
+    /// the paste is answered and read before the Enter, or the program never draws and the
+    /// Enter waits for its cap, two minutes: no time of the machine's is in it.
     #[cfg(unix)]
     #[test]
     fn a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
+
+        use crate::testing::{hex, SilentReader, HELD_FOR_MS, LIVENESS};
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
@@ -943,6 +948,10 @@ mod tests {
         let connected = builder
             .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
             .expect("connect bridge");
+        // A read that waits past the liveness bound is a hang: the answers come at once.
+        node_stream
+            .set_read_timeout(Some(LIVENESS))
+            .expect("a read timeout");
         let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
         let mut send = |id: &str, op: &str, body: Value| {
             let mut frame =
@@ -954,7 +963,9 @@ mod tests {
         let answered = |reader: &mut BufReader<UnixStream>| -> String {
             loop {
                 let mut line = String::new();
-                reader.read_line(&mut line).expect("read response");
+                reader
+                    .read_line(&mut line)
+                    .expect("a response within the liveness bound");
                 let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
                 if frame["kind"] == "res" {
                     assert_eq!(frame["body"]["ok"], true, "{frame}");
@@ -962,29 +973,33 @@ mod tests {
                 }
             }
         };
+        let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
+        let program = SilentReader::new("reply-bridge", paste.len());
         send(
             "n-open",
             "pane.open",
             json!({"id":"replied-pane","generation":1,"cwd":"/tmp",
-                   "argv":["/bin/sh","-c","stty raw -echo; printf ready; sleep 30"],
+                   "argv":["/bin/sh","-c",program.script()],
                    "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024,
                    "silentPaste":{"paceUsPerCharacter":0,"drawnAfterMs":0,"quietMs":100,
-                                  "mostMs":1500,"mostUsPerCharacter":0}}),
+                                  "mostMs":HELD_FOR_MS,"mostUsPerCharacter":0}}),
         );
         assert_eq!(answered(&mut reader), "n-open");
         // Once the program reads raw and echoes nothing: an echo of the paste would be the
         // window's draw of it, and let the human's Enter go before the reply is sent.
         let key = PaneKey::new("replied-pane", 1);
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        while !panes
-            .tail(&key, 5)
-            .is_ok_and(|lines| lines.iter().any(|line| line.contains("ready")))
-        {
+        let shows = |words: &str| {
+            panes
+                .tail(&key, 5)
+                .is_ok_and(|lines| lines.iter().any(|line| line.contains(words)))
+        };
+        let deadline = std::time::Instant::now() + LIVENESS;
+        while !shows("ready") {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the program never got ready"
             );
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(5));
         }
         let pane = json!({"id":"replied-pane","generation":1});
         let with = |bytes: &[u8]| {
@@ -992,47 +1007,36 @@ mod tests {
             body["bytes"] = json!(bytes);
             body
         };
-        // The reply goes once the paste is written: each request is handled on a thread of its
-        // own, and a reply sent sooner could be queued ahead of the human's keys under load.
-        let idle_ms = || {
-            panes
-                .list()
-                .expect("list the panes")
-                .into_iter()
-                .find(|pane| pane.id == key.id)
-                .map_or(u64::MAX, |pane| pane.idle_ms)
-        };
-        while idle_ms() < 150 {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        send("n-typed", "pane.typed", with(b"\x1b[200~ab\x1b[201~\r"));
-        while idle_ms() >= 150 {
+        send("n-typed", "pane.typed", with(&[paste, b"\r"].concat()));
+        // The paste is in the program: the human's Enter is held behind it. Each request is
+        // handled on a thread of its own, so a reply sent sooner could be written ahead of the
+        // human's keys, and prove nothing of them.
+        program.wait_pasted();
+        send("n-reply", "pane.reply", with(b"R"));
+        // Neither answer is awaited in an order: a reply queued behind the Enter is answered a
+        // moment after it, and the program's record says which was written first.
+        let mut answers = vec![answered(&mut reader), answered(&mut reader)];
+        answers.sort();
+        assert_eq!(answers, ["n-reply", "n-typed"]);
+
+        let record = format!("drawn{}520d", hex(paste));
+        let deadline = std::time::Instant::now() + LIVENESS;
+        loop {
+            let seen: String = panes
+                .tail(&key, 5)
+                .unwrap_or_default()
+                .concat()
+                .split_whitespace()
+                .collect();
+            if seen.contains(&record) {
+                break;
+            }
             assert!(
                 std::time::Instant::now() < deadline,
-                "the paste was never written"
+                "the program's record is not the paste, the answer and then the Enter: {seen}"
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        send("n-reply", "pane.reply", with(b"R"));
-        // How long the reply took to be answered: held, it waits for the human's Enter, which
-        // waits 1.5 s for a draw that never comes. (Which of the two is answered first says
-        // nothing: a reply queued behind the Enter is answered a moment after it.)
-        let replied = std::time::Instant::now();
-        let mut answers = vec![answered(&mut reader)];
-        let reply_took = loop {
-            if answers.last().is_some_and(|id| id == "n-reply") {
-                break replied.elapsed();
-            }
-            answers.push(answered(&mut reader));
-        };
-        assert!(
-            reply_took < Duration::from_millis(1_000),
-            "{reply_took:?}: the reply waited behind the human's held Enter"
-        );
-        if !answers.iter().any(|id| id == "n-typed") {
-            answers.push(answered(&mut reader));
-        }
-        assert!(answers.iter().any(|id| id == "n-typed"), "{answers:?}");
 
         panes.kill(&key).expect("kill the pane");
         inputs.close_and_drain();

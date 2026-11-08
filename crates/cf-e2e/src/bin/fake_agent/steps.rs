@@ -59,6 +59,16 @@
 //!   tree kill falls back to that there), which leaves what the shell ran running with no
 //!   parent, and then Claude Code's own notice of the expiry, which has no status and wakes
 //!   a turn that answers `Saw <the notice>`.
+//! - A line `CLAUDE-HELD [--agent-only] <words> :: <report>` is the field case of T-678 (kluris,
+//!   2026-10-24): a turn of four steps of progress, then (unless `--agent-only`) a Monitor that
+//!   ends inside the turn (its notification taken into the turn as an attachment, the queue's
+//!   copy `absorbed_mid_turn`), an asynchronous Agent (its call's result says `async_launched`
+//!   and the agent's id), and a Monitor that is still pending; it answers the words and ends,
+//!   its `turn_duration` counting the one agent. Nothing ends by a clock: the agent ends when the
+//!   case writes `<file>.agent-may-end` (`Job::let_its_agent_end`) and the pending monitor when
+//!   it writes `<file>.monitor-may-end`, `<file>` the `held-…` job of the rig's `jobs`. The
+//!   agent's end wakes a turn that answers the report (with `--agent-only`) or says the monitor
+//!   still watches; the monitor's end wakes the one that answers the report.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -96,6 +106,13 @@ pub struct Step {
     pub printed: Option<String>,
     /// The step asks the advisor in the message that answers (`STEPS --advised`).
     pub advised: bool,
+    /// The call launches an asynchronous agent, `id` its id: the Agent tool's call, and a
+    /// result that says it was launched (`toolUseResult.status` `async_launched`).
+    pub agent: Option<String>,
+    /// A notification Claude Code takes into the turn after this step's result, as it does one
+    /// that comes while a turn is under way: queued, taken into the turn as an attachment, and
+    /// the queue's copy taken back (`absorbed_mid_turn`).
+    pub absorbs: Option<String>,
 }
 
 impl Step {
@@ -108,6 +125,8 @@ impl Step {
             watches: None,
             printed: None,
             advised: false,
+            agent: None,
+            absorbs: None,
         }
     }
 
@@ -120,6 +139,8 @@ impl Step {
             watches: None,
             printed: None,
             advised: false,
+            agent: None,
+            absorbs: None,
         }
     }
 
@@ -148,6 +169,8 @@ impl Step {
             watches: None,
             printed: None,
             advised: false,
+            agent: None,
+            absorbs: None,
         }
     }
 
@@ -160,6 +183,26 @@ impl Step {
             watches: None,
             printed: None,
             advised: false,
+            agent: None,
+            absorbs: None,
+        }
+    }
+
+    /// The call that launches an asynchronous agent, `id` its id.
+    pub fn launching(id: &str) -> Self {
+        Self {
+            agent: Some(id.to_owned()),
+            ..Self::saying("Launching an agent to survey it in the background")
+        }
+    }
+
+    /// This step, and after its result a notification that comes while the turn is under way
+    /// and is taken into it.
+    #[must_use]
+    pub fn absorbing(self, notification: String) -> Self {
+        Self {
+            absorbs: Some(notification),
+            ..self
         }
     }
 
@@ -208,6 +251,18 @@ pub fn notification(id: &str, report: &str) -> String {
         "{NOTIFICATION}\n<task-id>{id}</task-id>\n<status>completed</status>\n<summary>Background command \"{id}\" completed (exit code 0)</summary>\n<result>{report}</result>\n</task-notification>"
     )
 }
+
+/// What Claude Code queues when the background agent `id` ends: its task `completed`, with
+/// the stand-in's own `<result>`, what the turn it wakes answers.
+pub fn agent_ended(id: &str, report: &str) -> String {
+    format!(
+        "{NOTIFICATION}\n<task-id>{id}</task-id>\n<tool-use-id>toolu-{id}</tool-use-id>\n<status>completed</status>\n<summary>Agent \"Survey the parser\" completed</summary>\n<result>{report}</result>\n</task-notification>"
+    )
+}
+
+/// What the turn the end of a `CLAUDE-HELD`'s agent wakes answers when a monitor still
+/// watches.
+pub const AGENT_ENDED_MONITOR_WATCHES: &str = "The agent ended; the monitor still watches.";
 
 /// What the turn the end of a watched job wakes answers: the monitor still watches.
 pub const MONITOR_WATCHES: &str = "The run ended; the monitor still watches it.";
@@ -350,6 +405,7 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
     static JOB: OnceLock<Regex> = OnceLock::new();
     static MONITOR: OnceLock<Regex> = OnceLock::new();
     static ENDS: OnceLock<Regex> = OnceLock::new();
+    static HELD: OnceLock<Regex> = OnceLock::new();
     if let Some(report) = report_of(text) {
         return Some(Ok((Vec::new(), Reply::Text(report))));
     }
@@ -410,6 +466,16 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
                 )
             }),
         );
+    }
+    if let Some(held) = pattern::once(
+        &HELD,
+        r"(?m)^CLAUDE-HELD ((?:--agent-only )?)(.+?) :: (.+)$",
+    )
+    .captures(text)
+    {
+        let (agent_only, words, report) =
+            (!held[1].is_empty(), held[2].to_owned(), held[3].to_owned());
+        return Some(hold(window, agent_only, &report).map(|steps| (steps, Reply::Text(words))));
     }
     if let Some(ends) = pattern::once(&ENDS, r"(?m)^CLAUDE-MONITOR-ENDS (\d+) (.+)$").captures(text)
     {
@@ -542,6 +608,88 @@ fn watch_a_job(
     Ok((job, watching))
 }
 
+/// The kind of the file beside a `CLAUDE-HELD`'s job (`<file>.agent-may-end`) whose coming lets
+/// its agent end: the case writes it (`Job::let_its_agent_end` of the rig).
+pub const AGENT_MAY_END: &str = "agent-may-end";
+
+/// How many lines of progress, a message and a tool each, a `CLAUDE-HELD` turn writes first: the
+/// field's turn wrote seven messages in all (T-678).
+const HELD_PROGRESS: u64 = 4;
+
+/// The id the agent of a `CLAUDE-HELD` has, as Claude Code words one.
+const HELD_AGENT: &str = "a7c1e5d90b2f43386";
+
+/// The steps of a `CLAUDE-HELD` turn: its progress, and what it leaves running: an agent and,
+/// unless `agent_only`, two monitors, the first of which ends inside the turn and the second
+/// of which does not. They end by the files the case writes, in `jobs/` (a `held` job of the
+/// rig, with no process of its own), and not by a clock: the agent's end wakes a turn, and the
+/// pending monitor's the one after, as `CLAUDE-MONITOR`'s do.
+fn hold(window: &Window, agent_only: bool, report: &str) -> Result<Vec<Step>, String> {
+    thread::sleep(THINKING);
+    let gates = window.jobs.file("held")?;
+    cf_e2e::files::write_whole(&beside(&gates, "pid"), &format!("{}\n", std::process::id()))
+        .map_err(|failed| format!("{}: {failed}", gates.display()))?;
+    let mut steps: Vec<Step> = (1..=HELD_PROGRESS)
+        .map(|at| Step::progress(at, HELD_PROGRESS))
+        .collect();
+    let pending = if agent_only {
+        None
+    } else {
+        // The monitor that ends inside the turn: its notification is taken into the turn.
+        let finished = window.tasks.begin();
+        window.tasks.ended();
+        steps.push(
+            Step::arming(&finished, MONITOR_MS)
+                .absorbing(monitor_ended(&finished, "Its stream ended.")),
+        );
+        Some(window.tasks.begin())
+    };
+    steps.push(Step::launching(HELD_AGENT));
+    if let Some(id) = &pending {
+        steps.push(Step::arming(id, MONITOR_MS));
+    }
+    let woken = if agent_only {
+        agent_ended(HELD_AGENT, report)
+    } else {
+        agent_ended(HELD_AGENT, AGENT_ENDED_MONITOR_WATCHES)
+    };
+    let (wake, file) = (window.wake.clone(), gates.clone());
+    window.agents.start_until(
+        1,
+        move || until_gate(&file, AGENT_MAY_END),
+        move || {
+            let _ = wake.send(woken);
+        },
+    );
+    if let Some(id) = pending {
+        let (tasks, wake, file) = (window.tasks.clone(), window.wake.clone(), gates);
+        let ended = monitor_ended(&id, report);
+        thread::spawn(move || {
+            until_gate(&file, MONITOR_MAY_END);
+            tasks.ended();
+            let _ = wake.send(ended);
+        });
+    }
+    Ok(steps)
+}
+
+/// `file` with `.kind` after it.
+fn beside(file: &Path, kind: &str) -> PathBuf {
+    let mut name = file.as_os_str().to_owned();
+    name.push(".");
+    name.push(kind);
+    PathBuf::from(name)
+}
+
+/// Waits for the case to write `<file>.<kind>`, or for [`MONITOR_HELD`].
+fn until_gate(file: &Path, kind: &str) {
+    let gate = beside(file, kind);
+    let deadline = Instant::now() + MONITOR_HELD;
+    while !gate.exists() && Instant::now() < deadline {
+        thread::sleep(MONITOR_LOOK);
+    }
+}
+
 /// The command a `CLAUDE-MONITOR-ENDS`'s monitor watches, as its call names it.
 const WATCHED: &str = "exec sleep 611";
 
@@ -573,14 +721,7 @@ fn watch_a_command(window: &Window, seconds: u64) -> Result<String, String> {
 /// Waits for the case to let the monitor that watches the job `file` end, or for
 /// [`MONITOR_HELD`].
 fn until_let_end(file: &Path) {
-    let mut gate = file.as_os_str().to_owned();
-    gate.push(".");
-    gate.push(MONITOR_MAY_END);
-    let gate = PathBuf::from(gate);
-    let deadline = Instant::now() + MONITOR_HELD;
-    while !gate.exists() && Instant::now() < deadline {
-        thread::sleep(MONITOR_LOOK);
-    }
+    until_gate(file, MONITOR_MAY_END);
 }
 
 /// Writes the steps of a turn, in order, as Claude Code does: the assistant's message that
@@ -618,11 +759,26 @@ pub fn write(
                         { "type": "text", "text": step.said },
                         {
                             "type": "tool_use", "id": call,
-                            "name": if step.monitor.is_some() { "Monitor" } else { "Bash" },
-                            "input": step.watches.as_ref().map_or_else(
-                                || json!({}),
-                                |command| json!({ "command": command, "description": "watched" }),
-                            ),
+                            "name": if step.monitor.is_some() {
+                                "Monitor"
+                            } else if step.agent.is_some() {
+                                "Agent"
+                            } else {
+                                "Bash"
+                            },
+                            "input": if step.agent.is_some() {
+                                json!({
+                                    "description": "Survey the parser",
+                                    "prompt": "Read the parser and list its entry points.",
+                                    "subagent_type": "general-purpose",
+                                    "run_in_background": true,
+                                })
+                            } else {
+                                step.watches.as_ref().map_or_else(
+                                    || json!({}),
+                                    |command| json!({ "command": command, "description": "watched" }),
+                                )
+                            },
                         },
                     ],
                     "stop_reason": "tool_use",
@@ -630,6 +786,9 @@ pub fn write(
             }),
         )?;
         records.append(pid, result_of(&call, step))?;
+        if let Some(notification) = &step.absorbs {
+            write_absorbed(records, pid, notification)?;
+        }
     }
     Ok(answering)
 }
@@ -671,6 +830,10 @@ fn ask_the_advisor(
 /// in the background, the monitor's where it armed one, as Claude Code words them.
 fn result_of(call: &str, step: &Step) -> Value {
     let said = match (&step.job, &step.monitor) {
+        _ if step.agent.is_some() => format!(
+            "Async agent launched successfully.\nagentId: {} (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes.",
+            step.agent.as_deref().unwrap_or_default()
+        ),
         (Some(id), _) => format!(
             "Command running in background with ID: {id}. Output is being written to: /tmp/claude/tasks/{id}.output. You will be notified when it completes."
         ),
@@ -697,7 +860,48 @@ fn result_of(call: &str, step: &Step) -> Value {
         record["toolUseResult"] =
             json!({ "taskId": id, "timeoutMs": timeout, "persistent": false });
     }
+    if let Some(id) = &step.agent {
+        record["toolUseResult"] = json!({
+            "isAsync": true,
+            "status": "async_launched",
+            "agentId": id,
+            "description": "Survey the parser",
+            "prompt": "Read the parser and list its entry points.",
+        });
+    }
     record
+}
+
+/// What Claude Code writes of a notification that comes while a turn is under way (2.1.277's
+/// `job-notifications.jsonl`): the message queued, the attachment that takes it into the turn
+/// (`queued_command`, `commandMode` `task-notification`), and the queue's copy taken back
+/// (`absorbed_mid_turn`). No user's record and no turn of its own.
+pub fn write_absorbed(records: &mut Records, pid: u32, text: &str) -> io::Result<()> {
+    records.append(
+        pid,
+        json!({ "type": "queue-operation", "operation": "enqueue", "content": text }),
+    )?;
+    records.append(
+        pid,
+        json!({
+            "type": "attachment",
+            "isSidechain": false,
+            "attachment": {
+                "type": "queued_command",
+                "prompt": text,
+                "commandMode": "task-notification",
+            },
+        }),
+    )?;
+    records.append(
+        pid,
+        json!({
+            "type": "queue-operation",
+            "operation": "remove",
+            "content": text,
+            "reason": "absorbed_mid_turn",
+        }),
+    )
 }
 
 /// What is written of a notification Claude Code takes as the turn it begins: the message
@@ -873,6 +1077,138 @@ mod tests {
             record["toolUseResult"],
             json!({ "taskId": "b2", "timeoutMs": 1_800_000, "persistent": false })
         );
+    }
+
+    #[test]
+    fn an_agent_launched_is_the_agent_tools_call_whose_result_says_it_runs_asynchronously() {
+        let step = Step::launching("a7c1e5d90b2f43386");
+        let record = result_of("toolu-1", &step);
+        assert_eq!(
+            record["toolUseResult"]["status"], "async_launched",
+            "{record}"
+        );
+        assert_eq!(record["toolUseResult"]["isAsync"], true);
+        assert_eq!(record["toolUseResult"]["agentId"], "a7c1e5d90b2f43386");
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
+        write(&mut records, 4242, "sess-1", &[step]).unwrap();
+        let text = std::fs::read_to_string(config.path().join("projects/integration/sess-1.jsonl"))
+            .unwrap();
+        let call: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(call["message"]["content"][1]["name"], "Agent");
+        assert_eq!(
+            call["message"]["content"][1]["input"]["run_in_background"],
+            true
+        );
+    }
+
+    #[test]
+    fn a_notification_taken_into_a_turn_is_queued_attached_and_taken_back_with_no_user_record() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
+        let said = monitor_ended("b1", "Its stream ended.");
+        write(
+            &mut records,
+            4242,
+            "sess-1",
+            &[Step::arming("b1", 1_800_000).absorbing(said.clone())],
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(config.path().join("projects/integration/sess-1.jsonl"))
+            .unwrap();
+        let written: Vec<Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let kinds: Vec<String> = written
+            .iter()
+            .map(|record| {
+                format!(
+                    "{}/{}",
+                    record["type"].as_str().unwrap(),
+                    record["operation"].as_str().unwrap_or_default()
+                )
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "assistant/",
+                "user/",
+                "queue-operation/enqueue",
+                "attachment/",
+                "queue-operation/remove"
+            ]
+        );
+        assert_eq!(written[3]["attachment"]["commandMode"], "task-notification");
+        assert_eq!(written[3]["attachment"]["prompt"], said.as_str());
+        assert_eq!(written[4]["reason"], "absorbed_mid_turn");
+    }
+
+    #[test]
+    fn an_agents_end_is_a_notification_whose_turn_answers_its_report() {
+        let said = agent_ended("a7c1e5d90b2f43386", "The parser has three entry points.");
+        assert!(said.contains("<status>completed</status>"));
+        let (worked, answer) = reply(&said, &window())
+            .expect("a notification")
+            .expect("it is made");
+        assert!(worked.is_empty());
+        assert_eq!(
+            answer,
+            Reply::Text("The parser has three entry points.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_held_line_leaves_an_agent_and_two_monitors_running_or_the_agent_alone() {
+        let home = tempfile::tempdir().unwrap();
+        let mut held = window();
+        held.jobs = Arc::new(Jobs::new(&home.path().join("home"), 1));
+        let (worked, answer) = reply("CLAUDE-HELD The survey runs :: The report", &held)
+            .expect("a held line")
+            .expect("it is made");
+        assert_eq!(answer, Reply::Text("The survey runs".to_owned()));
+        let calls: Vec<(&str, bool)> = worked
+            .iter()
+            .map(|step| {
+                (
+                    if step.agent.is_some() {
+                        "agent"
+                    } else if step.monitor.is_some() {
+                        "monitor"
+                    } else {
+                        "progress"
+                    },
+                    step.absorbs.is_some(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                ("progress", false),
+                ("progress", false),
+                ("progress", false),
+                ("progress", false),
+                ("monitor", true),
+                ("agent", false),
+                ("monitor", false)
+            ]
+        );
+        assert_eq!(held.agents.running(), 1, "the agent runs");
+        assert_eq!(held.tasks.running(), 1, "and the monitor that did not end");
+        // The agent alone leaves no monitor.
+        let alone = window();
+        let alone = Window {
+            jobs: Arc::new(Jobs::new(&home.path().join("home"), 2)),
+            ..alone
+        };
+        let (worked, _) = reply("CLAUDE-HELD --agent-only Words :: Report", &alone)
+            .expect("a held line")
+            .expect("it is made");
+        assert_eq!(worked.len(), 5, "four steps of progress and the agent");
+        assert_eq!(alone.agents.running(), 1);
+        assert_eq!(alone.tasks.running(), 0);
     }
 
     #[test]
