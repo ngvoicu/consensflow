@@ -259,7 +259,7 @@ runs = ["lm-members"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = "        if self.adapters.adapter(harness.kind()).is_none() {"
+find = "        if self.takes_unread || self.adapters.adapter(harness.kind()).is_none() {"
 replace = "        if true {"
 
 [[plant]]
@@ -270,12 +270,12 @@ runs = ["lm-members"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
 find = '''        if listing.models.is_empty() {
-            return self.unread(match &listing.freshness {'''
+            return Err(match &listing.freshness {'''
 replace = '''        if listing.models.is_empty() {
             return Ok(None);
         }
         if false {
-            return self.unread(match &listing.freshness {'''
+            return Err(match &listing.freshness {'''
 
 [[plant]]
 name = "live models: an edit that says it changes nothing is checked"
@@ -339,17 +339,17 @@ replace = '        store.db.execute("DELETE FROM model_list WHERE 0", [])?;'
 
 [[plant]]
 name = "live models: a pick on a harness that cannot be read is taken on its word in every daemon"
-meant = "a_pick_on_a_harness_that_cannot_be_read_is_refused_unless_the_environment_takes_it_on_its_word"
+meant = "a_pick_naming_no_read_is_refused_where_its_harness_cannot_be_read_unless_the_environment_takes_it_on_its_word"
 runs = ["lm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = "        if self.takes_unread {"
+find = "        if self.takes_unread || self.adapters.adapter(harness.kind()).is_none() {"
 replace = "        if true {"
 
 [[plant]]
 name = "live models: the variable of the rigs is not heard"
-meant = "a_pick_on_a_harness_that_cannot_be_read_is_refused_unless_the_environment_takes_it_on_its_word"
+meant = "a_pick_naming_no_read_is_refused_where_its_harness_cannot_be_read_unless_the_environment_takes_it_on_its_word"
 runs = ["lm-daemon"]
 
 [[plant.edit]]
