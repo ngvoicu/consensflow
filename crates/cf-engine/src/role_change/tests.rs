@@ -368,7 +368,7 @@ fn final_answer(items: &[Item], replacements: &[i64]) -> Vec<String> {
     answers_to_the_task(items, replacements).map_or_else(Vec::new, |answers| {
         answers
             .final_run
-            .into_iter()
+            .iter()
             .map(|item| item.text.to_string())
             .collect()
     })
@@ -440,14 +440,16 @@ fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task(
         answers(&[user(&replacement), assistant("Understood.")]),
         Vec::<String>::new()
     );
-    // What it said of the task before the role came is the task's, and is kept.
+    // What it said of the task before the role came is the task's, and is kept, whole: two
+    // items, since a final run with no words would take back the last of them (T-262).
     assert_eq!(
         answers(&[
             assistant("Parser done"),
+            assistant("All tests pass"),
             user(&replacement),
             assistant("Understood.")
         ]),
-        ["Parser done"]
+        ["Parser done", "All tests pass"]
     );
     // And what it says to the next message is the task's again, whoever the message is from.
     assert_eq!(
@@ -540,7 +542,109 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     let silent = [user("Go"), assistant("Looking"), tool("out"), assistant("")];
     let answered = answers_to_the_task(&silent, &[]).expect("a last word");
     assert_eq!(answered.last.map(|last| last.text.as_ref()), Some(""));
-    assert_eq!(answers(&silent), [""]);
+    assert_eq!(answers(&silent), ["Looking"], "never empty (T-262)");
+}
+
+/// The texts of `items`.
+fn texts(items: &[&Item]) -> Vec<String> {
+    items.iter().map(|item| item.text.to_string()).collect()
+}
+
+#[test]
+fn a_turn_with_no_words_after_its_last_tool_call_answers_with_the_last_words_it_wrote_before_it() {
+    // The chief's decision on T-262: a result is never empty. What follows the last tool call
+    // (`after_the_last_tool`) is kept apart, for what decides on it (a tell's note, T-878);
+    // the answer a result and Finish take is the last item with words before it.
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    let step = |text: &str| said_by(Role::Assistant, text, false);
+    let tool = |text: &str| said_by(Role::Tool, text, true);
+    let silent = [user("Go"), step("Looking"), tool("out"), assistant("")];
+    let answered = answers_to_the_task(&silent, &[]).expect("a last word");
+    assert_eq!(texts(&answered.after_the_last_tool), [""]);
+    assert_eq!(texts(&answered.final_run), ["Looking"]);
+    assert_eq!(
+        answered.complete_run.as_deref().map(|run| texts(run)),
+        Some(vec!["Looking".to_owned()]),
+        "Finish takes the same"
+    );
+    // A step that said nothing, or only space, is no words: the last that said some is.
+    let quiet_step = [
+        user("Go"),
+        step("Still reviewing the diff"),
+        tool("a"),
+        step(" \n "),
+        tool("b"),
+        assistant(""),
+    ];
+    let answered = answers_to_the_task(&quiet_step, &[]).unwrap();
+    assert_eq!(texts(&answered.final_run), ["Still reviewing the diff"]);
+    // The harness's own words are none of the member's: Codex's notes (`commentary`), and
+    // Claude Code's close of a cut turn or Pi's step of a run that never began (`synthetic`).
+    let noted = Item {
+        commentary: true,
+        ..step("Checking the counts now.")
+    };
+    let its_own = Item {
+        synthetic: true,
+        ..step("[Request interrupted by user]")
+    };
+    for harness in [noted, its_own] {
+        let items = [
+            user("Go"),
+            step("Read the diff"),
+            tool("a"),
+            harness,
+            tool("b"),
+            assistant(""),
+        ];
+        let answered = answers_to_the_task(&items, &[]).unwrap();
+        assert_eq!(texts(&answered.final_run), ["Read the diff"]);
+    }
+    // Words after the last tool call are the answer, whatever came before.
+    let worded = [user("Go"), step("Looking"), tool("out"), assistant("Done")];
+    let answered = answers_to_the_task(&worded, &[]).unwrap();
+    assert_eq!(texts(&answered.final_run), ["Done"]);
+    // Nothing from before the latest message to the member: a woken turn's own words only.
+    let earlier = [
+        assistant("Looking"),
+        user("Go on"),
+        tool("out"),
+        assistant(" "),
+    ];
+    let answered = answers_to_the_task(&earlier, &[]).unwrap();
+    assert_eq!(texts(&answered.final_run), [" "]);
+    assert_eq!(
+        answered.complete_run.as_deref().map(|run| texts(run)),
+        Some(vec![" ".to_owned()])
+    );
+    // Nor from a turn on a replacement of the role, which is no answer to the task.
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let of_the_role = [
+        user("Go"),
+        step("Parser done"),
+        tool("out"),
+        user(&replacement),
+        assistant("Understood."),
+    ];
+    let answered = answers_to_the_task(&of_the_role, &[4242]).unwrap();
+    assert!(answered.after_the_last_tool.is_empty());
+    assert_eq!(texts(&answered.final_run), ["Parser done"]);
+    // Finish takes the answer as it stood at the last complete item: words written after it,
+    // in a step still at work, are not yet its.
+    let at_work = [
+        user("Go"),
+        step("Looking"),
+        tool("out"),
+        assistant(""),
+        user("<task-notification>b1 completed</task-notification>"),
+        step("Reading the log"),
+    ];
+    let answered = answers_to_the_task(&at_work, &[]).unwrap();
+    assert_eq!(
+        answered.complete_run.as_deref().map(|run| texts(run)),
+        Some(vec!["Looking".to_owned()])
+    );
 }
 
 /// The words of the reply of `items`: what the member wrote after its message and before its

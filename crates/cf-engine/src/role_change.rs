@@ -210,6 +210,7 @@ mod prelude;
 #[cfg(test)]
 mod tests;
 
+use cf_base::js;
 use cf_harness::records::{Item, Role};
 use cf_ledger::{ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
 use serde_json::{json, Value};
@@ -642,12 +643,15 @@ pub(crate) struct Answers<'a> {
     /// final answer, in the items it was written in. What it wrote before is the
     /// progress of its turn, which stays in the transcript, and so is all it wrote
     /// of a turn that ended before, which a job's or an agent's end woke it to go on
-    /// after.
-    pub(crate) final_run: Vec<&'a Item>,
+    /// after. Where it wrote no words after its last tool call, the last item of that turn
+    /// that has some is its final answer, so that a result is never empty (the chief's
+    /// decision on T-262): what decides on the words after the last tool call alone reads
+    /// `after_the_last_tool`. A run so taken says it is ([`Run::last_words`]).
+    pub(crate) final_run: Run<'a>,
     /// The final answer as it stood at the last complete item the member wrote: what
     /// Finish takes where the turn after it is still under way (a call open, a
     /// notification's turn begun). None where it wrote none complete.
-    pub(crate) complete_run: Option<Vec<&'a Item>>,
+    pub(crate) complete_run: Option<Run<'a>>,
     /// What the member wrote after the message it was given and before its first tool call,
     /// in the items it was written in, where a tool call came after it: its reply. A turn
     /// that answers a question puts the answer first, and goes on; the words of that answer
@@ -658,6 +662,52 @@ pub(crate) struct Answers<'a> {
     /// member ran a tool before it wrote (a call that says nothing is an item with none),
     /// where it ran none (its one run is the final answer), or where it wrote nothing.
     pub(crate) reply: Vec<&'a Item>,
+    /// What the member wrote after the last tool call or message it was given, and nothing
+    /// in its place where that holds no words (`final_run` takes the last words before it
+    /// then). A tell's turn that answered with `cf answer` and wrote nothing after it is told
+    /// nothing more (`turn_end::paused`; Calliope's P2 on T-262, T-878).
+    pub(crate) after_the_last_tool: Vec<&'a Item>,
+}
+
+/// A final answer, in the items it was written in (what it derefs to), and whether those are
+/// the last words its turn wrote before its last tool call, which a result takes where the
+/// turn wrote none after it (T-262): a result of them says so above them, so that the chief
+/// can tell the last words the turn had from a report (`turn_end::words_of`; T-1310's review
+/// of T-878, T-1311).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Run<'a> {
+    items: Vec<&'a Item>,
+    pub(crate) last_words: bool,
+}
+
+impl<'a> std::ops::Deref for Run<'a> {
+    type Target = Vec<&'a Item>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
+/// Whether `item` holds words of the member's: some text, and not the harness's own (a
+/// note it marks as its progress, `commentary`, or words it wrote in the member's place,
+/// `synthetic`).
+fn has_words(item: &Item) -> bool {
+    !item.commentary && !item.synthetic && !js::trim(&item.text).is_empty()
+}
+
+/// A final run, or where it has no words of the member's, the last item with some (`said`),
+/// which are its turn's last words.
+fn with_words<'a>(run: &[&'a Item], said: Option<&'a Item>) -> Run<'a> {
+    match said {
+        Some(said) if !run.iter().any(|item| has_words(item)) => Run {
+            items: vec![said],
+            last_words: true,
+        },
+        _ => Run {
+            items: run.to_vec(),
+            last_words: false,
+        },
+    }
 }
 
 /// The answer to the task in `items`, a member's record after its latest message: what
@@ -682,6 +732,9 @@ pub(crate) fn answers_to_the_task<'a>(
     let mut last = None;
     let mut final_run = Vec::new();
     let mut complete_run = None;
+    // The last item with words of the member's since its latest message, for a final run
+    // with none.
+    let mut said = None;
     let mut first = FirstRun::default();
     for item in items.iter().filter(|item| !item.compaction) {
         match item.role {
@@ -694,13 +747,18 @@ pub(crate) fn answers_to_the_task<'a>(
                     final_run.clear();
                     last = None;
                 }
+                // Nor are the words before it any of that answer's.
+                said = said.filter(|_| of_the_role);
             }
             Role::Tool if !of_the_role => final_run.clear(),
             Role::Assistant if !of_the_role => {
                 last = Some(item);
                 final_run.push(item);
+                if has_words(item) {
+                    said = Some(item);
+                }
                 if item.complete {
-                    complete_run = Some(final_run.clone());
+                    complete_run = Some(with_words(&final_run, said));
                 }
             }
             _ => {}
@@ -709,9 +767,10 @@ pub(crate) fn answers_to_the_task<'a>(
     }
     (last.is_some() || complete_run.is_some()).then_some(Answers {
         last,
-        final_run,
+        final_run: with_words(&final_run, said),
         complete_run,
         reply: first.reply(),
+        after_the_last_tool: final_run,
     })
 }
 
