@@ -185,7 +185,7 @@ replace = 'this.terminal.input(shiftEnterFor(this.harness), false)'
 
 [[plant]]
 name = "pane shift enter: the card does not tell the emulator its harness"
-meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+meant = "Shift+Enter in a window, on Windows › is a new line in a codex window, and Enter is still the message sent"
 runs = ["pse-page"]
 
 [[plant.edit]]
@@ -196,7 +196,7 @@ replace = ''
 
 [[plant]]
 name = "pane shift enter: the registry does not hand the harness on"
-meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+meant = "Shift+Enter in a window, on Windows › is a new line in a codex window, and Enter is still the message sent"
 runs = ["pse-page"]
 
 [[plant.edit]]
@@ -207,7 +207,7 @@ replace = ''
 
 [[plant]]
 name = "pane shift enter: the emulator forgets its harness"
-meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+meant = "Shift+Enter in a window, on Windows › is a new line in a codex window, and Enter is still the message sent"
 runs = ["pse-page"]
 
 [[plant.edit]]
