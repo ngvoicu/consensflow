@@ -36,7 +36,8 @@
 //! **any working task**, held or not,
 //! at rest or not: the chief's word overrides what the reader thinks. It takes the last
 //! complete answer the worker wrote after the task's latest message pasted into its window
-//! (`answers_to_the_task`'s `complete_run`), records it once as the result, with a line of
+//! (`answers_to_the_task`'s `complete_run`: where it wrote no words after its last tool
+//! call, the last it wrote before it, T-262), records it once as the result, with a line of
 //! what it knows still runs, and ends nothing. It is refused, with the reason, where there is no such answer, where
 //! the task is neither working nor paused, and where no member's open window works on it;
 //! cancel is the way out then.
@@ -62,6 +63,7 @@ use super::{
     with_lost, words_of,
 };
 use crate::dispatcher::Dispatcher;
+use crate::image_facts::for_task;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
 use crate::runtime::returning;
@@ -258,9 +260,12 @@ impl Dispatcher {
         // result the worker's own turn end records (T-1204).
         let earlier =
             self.earlier_turns(&thread, &participant, items, &replacements, &words_of(&run))?;
-        let words = with_earlier(
-            with_lost(words_of(&run), &participant.handle, lost),
-            &earlier,
+        let words = for_task(
+            &thread.task,
+            with_earlier(
+                with_lost(words_of(&run), &participant.handle, lost),
+                &earlier,
+            ),
         );
         let body = with_leftovers(
             words,

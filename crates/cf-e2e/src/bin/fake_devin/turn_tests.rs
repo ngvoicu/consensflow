@@ -270,7 +270,6 @@ fn a_turn_that_is_answered_is_a_user_and_an_assistant_message_that_ends_it_and_a
     assert_eq!(screen, "working (esc twice to interrupt)\nDONE\n");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_turn_that_leaves_a_command_running_ends_and_the_command_goes_on_reporting_on_the_wire() {
     let mut case = case();
@@ -427,12 +426,10 @@ fn a_turn_that_is_stopped_before_the_agent_says_a_word_is_cancelled_with_no_work
 }
 
 /// Where on `wire` the first record is that `holds`.
-#[cfg(unix)]
 fn first_that(wire: &[Value], holds: impl Fn(&Value) -> bool) -> Option<usize> {
     wire.iter().position(holds)
 }
 
-#[cfg(unix)]
 #[test]
 fn a_turn_that_leaves_a_command_runs_it_once_the_model_has_spoken_and_the_agent_has_thought_and_the_command_reports_after_the_answer(
 ) {

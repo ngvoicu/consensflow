@@ -1,7 +1,9 @@
 //! A worker's result is its final answer: what it wrote after its last tool call or
 //! message in its last turn, and not every line of progress before it (the owner's
 //! decision of 2026-10-15, after the results of T-14 and T-15 began with ten to twenty
-//! lines of it). What it wrote before stays in the transcript. Each harness's reader
+//! lines of it). Where it wrote nothing after its last tool call, the last words it wrote
+//! before it in that turn (the chief's decision on T-262). What it wrote before stays in
+//! the transcript. Each harness's reader
 //! gives the turn's items in the shape its own record has (`cf-harness`'s tests of each
 //! reader hold those shapes), and the engine takes the final answer out of every one of
 //! them; Codex's notes are marked as its commentary and never complete, the others'
@@ -15,6 +17,16 @@ use cf_harness::records::{Item, Role};
 use crate::background::{results, working};
 
 const REPORT: &str = "PASS: no findings in the parser.";
+
+/// The line above a result the never-empty rule took (T-878's review, T-1311): the turn wrote
+/// no words after its last command, and these are the last it wrote, not a report.
+const LAST_WORDS: &str =
+    "Its turn ended with no words after its last command. The last words it wrote:";
+
+/// `words` as a result the never-empty rule took gives them: under [`LAST_WORDS`].
+fn last_words(words: &str) -> String {
+    format!("{LAST_WORDS}\n\n{words}")
+}
 
 /// What a harness wrote on the way, in the shape its record has it.
 #[derive(Clone, Copy)]
@@ -145,16 +157,61 @@ fn what_the_member_wrote_after_its_last_tool_call_is_all_of_the_result_in_the_it
 }
 
 #[test]
-fn a_turn_that_wrote_nothing_after_its_last_tool_call_says_so_and_its_progress_is_not_the_result() {
-    // The member's last step is empty (it ended its turn on a tool's output): the words it
-    // said on the way are progress, and the result says there is none.
+fn a_turn_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words_it_wrote_before_it() {
+    // The member's last step is empty (it ended its turn on a tool's output): the result is
+    // the last words it wrote on the way, so that a result is never empty (the chief's
+    // decision on T-262). The same for every harness's shape of it.
+    assert_eq!(result_of(&REVIEWING, ""), last_words("Now the tests"));
+    assert_eq!(result_of(&REVIEWING, "  \n "), last_words("Now the tests"));
+    // The words of a step that said nothing do not count: the last that said something does.
+    let silent_step = [
+        Wrote::Progress("Still reviewing the diff"),
+        Wrote::Tool,
+        Wrote::Progress(" "),
+        Wrote::Tool,
+    ];
     assert_eq!(
-        result_of(&REVIEWING, ""),
+        result_of(&silent_step, ""),
+        last_words("Still reviewing the diff")
+    );
+    // Codex's notes are its own progress, never its answer.
+    let noted = [
+        Wrote::Progress("Read the diff"),
+        Wrote::Tool,
+        Wrote::Commentary("Checking the counts now."),
+        Wrote::Tool,
+    ];
+    assert_eq!(result_of(&noted, ""), last_words("Read the diff"));
+    // A turn that wrote no words at all says so.
+    assert_eq!(
+        result_of(&[Wrote::Tool, Wrote::Its, Wrote::Tool], ""),
         "(the agent ended its turn without a written answer)"
     );
+}
+
+#[test]
+fn the_words_before_a_woken_turns_last_tool_call_are_its_own_and_none_of_the_turn_before() {
+    // A job's end woke a turn that called a tool and wrote nothing after it: the words of
+    // the turn before the notification are no part of this turn's answer, which has none.
+    let context = Context::new();
+    let tiers = working(&context);
+    let first = context
+        .adapter
+        .item(Role::Assistant, "Still going; I'll report when it ends");
+    let woken = context.adapter.item(
+        Role::User,
+        "<task-notification>b1 completed</task-notification>",
+    );
+    let output = context.adapter.item(Role::Tool, "output of a tool");
+    context.adapter.with("zeus", |agent| {
+        agent.items.extend([first, woken, output]);
+    });
+    context.adapter.answer("zeus", "");
+    context.pass().unwrap();
+
     assert_eq!(
-        result_of(&REVIEWING, "  \n "),
-        "(the agent ended its turn without a written answer)"
+        results(&context, &tiers),
+        ["(the agent ended its turn without a written answer)"]
     );
 }
 
@@ -210,4 +267,131 @@ fn a_turn_that_was_woken_has_the_final_answer_of_its_last_turn_and_none_of_the_t
 
         assert_eq!(results(&context, &tiers), [REPORT]);
     }
+}
+
+#[test]
+fn finish_takes_the_last_words_before_the_last_tool_call_of_a_held_turn_that_wrote_none_after_it() {
+    // A turn that left a job running is held, and Finish is the way out of the wait: it
+    // takes the same answer a result does, the last words before the last tool call where
+    // there are none after it (T-262), and not that there is none.
+    let context = Context::new();
+    let tiers = working(&context);
+    let written = items(&context, &REVIEWING);
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.extend(written));
+    context.adapter.answer_leaving_a_job("zeus", "");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working", "held for its job");
+    context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(tiers.task(1).task.state, "done");
+    let result = results(&context, &tiers).remove(0);
+    assert!(result.starts_with(&last_words("Now the tests")), "{result}");
+}
+
+#[test]
+fn a_question_written_before_the_last_tool_call_with_no_words_after_it_is_a_question_to_the_chief()
+{
+    // A turn that wrote no words after its last tool call ends on the last words it wrote
+    // before it (T-262), and those words are what says whether it ended asking the chief
+    // (T-1119): a question there is put to the chief, and the task waits for the answer.
+    let context = Context::new();
+    let tiers = working(&context);
+    let asked = "Should I continue with the live runs, or stop here?";
+    let written = items(&context, &[Wrote::Progress(asked), Wrote::Tool]);
+    context
+        .adapter
+        .with("zeus", |agent| agent.items.extend(written));
+    context.adapter.answer("zeus", "");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    assert_eq!(results(&context, &tiers), Vec::<String>::new());
+}
+
+#[test]
+fn a_result_of_the_last_words_says_so_and_is_not_taken_for_a_report() {
+    // T-1310's review of T-878: the never-empty rule gave "The existing tests all pass." as
+    // the result of a turn whose earlier words said "DO NOT LAND", with nothing to tell it
+    // from a report. The engine says which it is, in the result the chief is given and the
+    // board shows (one message).
+    let wrote = [
+        Wrote::Progress("DO NOT LAND: data is lost on reconnect."),
+        Wrote::Tool,
+        Wrote::Progress("The existing tests all pass."),
+        Wrote::Tool,
+    ];
+    assert_eq!(
+        result_of(&wrote, ""),
+        last_words("The existing tests all pass.")
+    );
+    // A turn with words after its last command is its report, and nothing is said above it.
+    assert_eq!(result_of(&wrote, REPORT), REPORT);
+}
+
+#[test]
+fn an_api_errors_words_are_never_the_last_words_a_result_takes() {
+    // T-1310's review of T-878 (T-1311), through Claude's own reader: the user's message, Claude
+    // Code's "API Error: 529 overloaded" in the assistant's place, then the turn going on with
+    // no new message (a call that says nothing, its result) and ending with no words. The error
+    // is the harness's, not the agent's: the result has no words of the agent's to give.
+    use cf_base::env::Env;
+    use cf_harness::records::{self, Reading, Settlement};
+    use cf_proto::agents::Harness;
+    use serde_json::json;
+    let home = tempfile::tempdir().unwrap();
+    let folder = home.path().join("projects");
+    std::fs::create_dir_all(&folder).unwrap();
+    let session = |record: serde_json::Value| {
+        let mut record = record;
+        record["sessionId"] = json!("s1");
+        record
+    };
+    let lines = [
+        json!({"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"Go"}}),
+        json!({"type":"assistant","uuid":"a1","parentUuid":"u1","isApiErrorMessage":true,"apiErrorStatus":529,
+            "message":{"id":"m1","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"API Error: 529 overloaded"}],"stop_reason":null}}),
+        json!({"type":"assistant","uuid":"a2","parentUuid":"a1",
+            "message":{"id":"m2","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"true"}}],"stop_reason":"tool_use"}}),
+        json!({"type":"user","uuid":"u2","parentUuid":"a2",
+            "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}),
+        json!({"type":"assistant","uuid":"a3","parentUuid":"u2",
+            "message":{"id":"m3","role":"assistant","content":[{"type":"text","text":""}],"stop_reason":"end_turn"}}),
+        json!({"type":"system","subtype":"stop_hook_summary","uuid":"s2","parentUuid":"a3","preventedContinuation":false}),
+        json!({"type":"system","subtype":"turn_duration","uuid":"d1","parentUuid":"s2","durationMs":5,"messageCount":2}),
+    ];
+    let written: String = lines
+        .into_iter()
+        .map(|line| format!("{}\n", session(line)))
+        .collect();
+    std::fs::write(folder.join("s1.jsonl"), written).unwrap();
+    let env = Env::from_vars([("CLAUDE_CONFIG_DIR", home.path().as_os_str())]);
+    let reading = records::answers(
+        Harness::Claude,
+        "s1",
+        &env,
+        &Default::default(),
+        &records::machine_zone(),
+        0,
+    );
+    let Reading::Known(record) = &*reading else {
+        panic!("a reading: {reading:?}");
+    };
+    assert!(!record.failed, "the turn went on");
+    assert_eq!(record.settlement, Settlement::Settled);
+
+    let context = Context::new();
+    let tiers = working(&context);
+    context.adapter.with("zeus", |agent| {
+        agent.items.extend(record.items.iter().cloned());
+        agent.settled = true;
+    });
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results(&context, &tiers),
+        ["(the agent ended its turn without a written answer)"]
+    );
 }

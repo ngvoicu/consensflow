@@ -182,14 +182,21 @@ session files or type into another window.
 
 Keep this chief role after a new or resumed native session.
 
+The human changes your model with your harness's own switch in this window, and a
+reopen keeps it. Switch the chief, in the app, is for another harness or a fresh
+conversation, on a model from that harness's list.
+
 ## Choose the tier, not the member
 
 Name the tier a task needs: a worker of that tier does the work; an advisor
 of that tier (`--advice`) answers a question and changes no file; a reviewer
 of that tier (`--review`) checks finished work and changes no file; a tester
 of that tier (`--test`) runs the work to check it and changes no product code.
-An image comes from the image designer (`--design`, no tier); its result
-names the file.
+An image comes from the image designer (`--design`, no tier). Give it a precise
+drawing order: the subject and composition, the style, the exact colours and
+size, transparency when needed, each reference file by path and what it is for,
+and the output path. It draws exactly that and does not research or choose. A
+revision goes back to its window with `--after`; its result names the file.
 Each task gets a new window of a member of that role and tier on this
 project's staff; you never pick the member. A tier nobody on the staff holds
 goes to the nearest one somebody does, the next one up first; you are told whose.

@@ -204,7 +204,7 @@ async fn add_member_is_refused_without_a_tier_or_on_what_the_harness_does_not_li
                 ),
                 (
                     json!({ "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "light", "roles": ["designer"] }),
-                    "an image designer draws on Codex: pick one of Codex's models",
+                    "an image designer draws on Codex",
                 ),
                 (
                     json!({ "harness": "claude-code", "effort": "high", "tier": "light" }),
@@ -256,11 +256,94 @@ async fn a_codex_member_runs_the_model_codex_lists_at_its_effort() {
                 refused["error"],
                 "codex runs gpt-6-luna at low, medium, high, xhigh, max, not ultra"
             );
-            let designer = staffing
-                .add(json!({ "harness": "codex", "model": "gpt-6-astra", "effort": "high", "tier": "light", "roles": ["designer"] }))
+        })
+        .await;
+}
+
+/// An image designer draws with Codex's image tool: its window is launched on Codex's own
+/// default model, at no effort, whatever its row holds, and a design task has no tier. So
+/// Add member takes none of them for it (designer P2, T-1280): it is added on Codex alone,
+/// holds no model, and is named by the default it runs on; it is kept in the lowest tier,
+/// which decides nothing; and Edit member has nothing to change in it.
+#[tokio::test]
+async fn an_image_designer_is_added_on_codex_with_no_model_effort_or_tier() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let added = staffing
+                .add(json!({ "harness": "codex", "roles": ["designer"] }))
                 .await;
-            assert_eq!(designer["member"]["handle"], "gpt-6-astra-high", "{designer}");
-            assert_eq!(designer["member"]["designer"], true);
+            assert_eq!(added["ok"], true, "{added}");
+            assert_eq!(added["member"]["handle"], "codex-default", "{added}");
+            assert_eq!(added["member"]["designer"], true);
+            assert_eq!(added["member"]["roles"], json!(["designer"]));
+            assert_eq!(
+                staffing.runs("codex-default"),
+                ("codex".to_owned(), None, None, None),
+                "it runs on Codex's own default"
+            );
+            assert_eq!(
+                staffing.member("codex-default").tier.as_deref(),
+                Some("light")
+            );
+            // A second one is that designer again.
+            let again = staffing
+                .add(json!({ "harness": "codex", "roles": ["designer"] }))
+                .await;
+            assert_eq!(again["member"]["handle"], "codex-default", "{again}");
+            // Another harness does not draw.
+            let refused = staffing
+                .add(json!({ "harness": "claude-code", "roles": ["designer"] }))
+                .await;
+            assert_eq!(
+                refused,
+                json!({ "ok": false, "error": "an image designer draws on Codex" })
+            );
+        })
+        .await;
+}
+
+/// A model, an effort or a tier asked for an image designer is refused, in words: what it is
+/// kept as would not be what it runs on.
+#[tokio::test]
+async fn an_image_designer_asked_for_a_model_an_effort_or_a_tier_is_refused() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            for fields in [
+                json!({ "harness": "codex", "model": "gpt-6.1-sol", "roles": ["designer"] }),
+                json!({ "harness": "codex", "effort": "high", "roles": ["designer"] }),
+                json!({ "harness": "codex", "tier": "light", "roles": ["designer"] }),
+            ] {
+                let answer = staffing.add(fields.clone()).await;
+                assert_eq!(
+                    answer,
+                    json!({ "ok": false, "error": "an image designer draws on Codex's own model: it takes no model, effort or tier" }),
+                    "{fields}"
+                );
+            }
+            let project = staffing.rig.kit.ledger.borrow().project(staffing.project).unwrap();
+            let members = project
+                .unwrap()
+                .participants
+                .into_iter()
+                .filter(|participant| participant.role != "chief" && participant.role != "human")
+                .count();
+            assert_eq!(members, 0, "nobody joined");
+            // And what it holds is nothing to edit.
+            let added = staffing
+                .add(json!({ "harness": "codex", "roles": ["designer"] }))
+                .await;
+            let edited = ask(
+                &staffing.app,
+                "member.edit",
+                json!({ "project": staffing.project, "member": added["member"]["handle"], "harness": "codex" }),
+            )
+            .await;
+            assert_eq!(
+                edited,
+                json!({ "ok": false, "error": "an image designer has nothing to edit: it draws on Codex's own model" })
+            );
         })
         .await;
 }
@@ -360,6 +443,63 @@ async fn a_member_on_a_listed_model_with_a_long_id_is_added_and_starts_a_project
                 .await;
                 assert_eq!(opened["ok"], true, "project.open at {len}: {opened}");
             }
+        })
+        .await;
+}
+
+/// New project starts with an image designer as the page picks one: Codex and the role, no
+/// model, effort, tier or designer flag. The project opens with a designer on Codex's own
+/// model, named by it, in the tier a designer is kept in, and a model, an effort or a tier
+/// asked for it refuses the start in the words Add member uses (designer P2, T-1280).
+#[tokio::test]
+async fn a_project_starts_with_an_image_designer_as_the_page_picks_one() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let opening = |designer: Value| {
+                json!({
+                    "directory": "/work/drawn",
+                    "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high",
+                    "staff": [
+                        { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "standard", "roles": ["worker"] },
+                        designer,
+                    ],
+                })
+            };
+            let opened = ask(
+                &staffing.app,
+                "project.open",
+                opening(json!({ "harness": "codex", "roles": ["designer"] })),
+            )
+            .await;
+            assert_eq!(opened["ok"], true, "{opened}");
+            let project = staffing
+                .rig
+                .kit
+                .ledger
+                .borrow()
+                .project(opened["project"]["id"].as_i64().unwrap())
+                .unwrap()
+                .unwrap();
+            let designer = project
+                .participants
+                .iter()
+                .find(|participant| participant.designer)
+                .expect("the designer");
+            assert_eq!(designer.handle, "codex-default");
+            assert_eq!(designer.roles, ["designer"]);
+            assert_eq!(designer.model, None);
+            assert_eq!(designer.tier.as_deref(), Some("light"));
+            let refused = ask(
+                &staffing.app,
+                "project.open",
+                opening(json!({ "harness": "codex", "model": "gpt-6.1-sol", "tier": "light", "roles": ["designer"] })),
+            )
+            .await;
+            assert_eq!(
+                refused,
+                json!({ "ok": false, "error": "an image designer draws on Codex's own model: it takes no model, effort or tier" })
+            );
         })
         .await;
 }
@@ -502,36 +642,34 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
 }
 
 /// An image designer draws with Codex's image tool and holds no other role, so it is a
-/// member of its own beside a worker on the same model and effort, whichever is added
-/// first: the second is named with its harness in front, and neither is refused.
+/// member of its own beside a worker, whichever is added first; a second designer is that
+/// designer again, and holds no model for a worker on Codex's model to be named like.
 #[tokio::test]
-async fn a_worker_and_an_image_designer_on_one_model_and_effort_are_two_members_in_either_order() {
+async fn a_worker_and_an_image_designer_are_two_members_in_either_order() {
     LocalSet::new()
         .run_until(async {
-            let on = |roles: Value| {
-                json!({ "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "tier": "light", "roles": roles })
-            };
+            let worker = json!({ "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "tier": "light", "roles": ["worker"] });
+            let designer = json!({ "harness": "codex", "roles": ["designer"] });
             // A worker first, then the designer.
             let first = staffing();
-            let worker = first.add(on(json!(["worker"]))).await;
-            assert_eq!(worker["member"]["handle"], "gpt-6-1-sol-high", "{worker}");
-            let designer = first.add(on(json!(["designer"]))).await;
-            assert_eq!(designer["ok"], true, "{designer}");
-            assert_eq!(designer["member"]["handle"], "codex-gpt-6-1-sol-high");
-            assert_eq!(designer["member"]["designer"], true);
+            let added = first.add(worker.clone()).await;
+            assert_eq!(added["member"]["handle"], "gpt-6-1-sol-high", "{added}");
+            let drawn = first.add(designer.clone()).await;
+            assert_eq!(drawn["ok"], true, "{drawn}");
+            assert_eq!(drawn["member"]["handle"], "codex-default");
             assert_eq!(first.member("gpt-6-1-sol-high").roles, ["worker"]);
             assert!(!first.member("gpt-6-1-sol-high").designer);
-            // The designer first, then a worker; a second designer is that designer again.
+            // The designer first, then a worker.
             let staffing = staffing();
-            let designer = staffing.add(on(json!(["designer"]))).await;
-            assert_eq!(designer["member"]["handle"], "gpt-6-1-sol-high", "{designer}");
-            let worker = staffing.add(on(json!(["worker", "reviewer"]))).await;
-            assert_eq!(worker["ok"], true, "{worker}");
-            assert_eq!(worker["member"]["handle"], "codex-gpt-6-1-sol-high");
-            assert_eq!(worker["member"]["designer"], false);
-            let again = staffing.add(on(json!(["designer"]))).await;
-            assert_eq!(again["member"]["handle"], "gpt-6-1-sol-high", "{again}");
-            assert_eq!(staffing.member("gpt-6-1-sol-high").roles, ["designer"]);
+            let drawn = staffing.add(designer.clone()).await;
+            assert_eq!(drawn["member"]["handle"], "codex-default", "{drawn}");
+            let added = staffing.add(worker).await;
+            assert_eq!(added["ok"], true, "{added}");
+            assert_eq!(added["member"]["handle"], "gpt-6-1-sol-high");
+            assert_eq!(added["member"]["designer"], false);
+            let again = staffing.add(designer).await;
+            assert_eq!(again["member"]["handle"], "codex-default", "{again}");
+            assert_eq!(staffing.member("codex-default").roles, ["designer"]);
         })
         .await;
 }

@@ -208,6 +208,7 @@
       <label>Project folder<input name="directory" readonly></label>
       <fieldset class="chief-pick">
         <legend>The chief</legend>
+        <p class="dialog-help" data-help="chief">The chief starts on the harness and model you pick. To change only its model later, switch it in the chief's own window: ConsensFlow follows it, and a reopen keeps it. Switch the chief, on its card, is for another harness or a fresh conversation.</p>
         <label>Harness
           <select name="chiefHarness" required></select>
         </label>
@@ -256,7 +257,7 @@
   <dialog id="switch-chief-dialog" aria-labelledby="switch-chief-title">
     <form class="dialog-form">
       <h2 id="switch-chief-title">Switch the chief</h2>
-      <p class="dialog-help">The chief goes on in a new window on the harness and model you pick: a fresh conversation, whose first message is the handoff, what you and the chiefs before it said and what waits on the board. The staff keeps working. To change only the model, switch it in the chief's own window instead: it keeps its conversation, and ConsensFlow follows it.</p>
+      <p class="dialog-help" data-help="chief">The chief goes on in a new window on the harness and model you pick: a fresh conversation, whose first message is the handoff, what you and the chiefs before it said and what waits on the board. The staff keeps working. To change only the model, switch it in the chief's own window instead: it keeps its conversation, ConsensFlow follows it, and a reopen keeps it.</p>
       <fieldset class="chief-pick">
         <legend>The chief</legend>
         <label>Harness
@@ -414,6 +415,7 @@
           </thead>
           <tbody class="computer-use-grants"></tbody>
         </table>
+        <p class="dialog-help computer-use-mend" hidden></p>
         <p class="dialog-help">These are the Mac's, for every project. A permission you change in System Settings may need ConsensFlow to be quit and opened again.</p>
       </div>
     </fieldset>

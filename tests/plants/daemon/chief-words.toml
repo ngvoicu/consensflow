@@ -1,0 +1,536 @@
+# The words and the designer, 3.0.7 (alpha.4, A4-14): the chief's text says its model is the human's
+# to change in its window, which a reopen keeps, and that Switch the chief is for another harness or a
+# fresh conversation (CHF-22, T-732; skill/core/chief.md, app/ui/index.html's help for New project and
+# Switch chief); the staff table has no column of models, a member being named by its model, and
+# names one only beside a name that holds none (T-1234; crates/cf-engine/src/roles.rs, roles/skill.rs);
+# the image designer draws the chief's precise orders (T-160; skill/core/chief.md and staff.md); a
+# design task's result says each image file it names, its size, type and alpha, read from the header
+# (designer P1, T-1280; crates/cf-engine/src/image_facts.rs, turn_end.rs, turn_end/finish.rs); and the
+# designer's line tells the truth (designer P2): no model, effort or tier is asked of it, it is read as
+# running on Codex's own model, and it has no tier to say (crates/cf-ledger/src/views.rs,
+# crates/cf-daemon/src/page/staff.rs, api/routes/staff.rs, crates/cf/src/board/mod.rs and the page's
+# app/ui/core/dialogs.js and board.js; and the rig's stand-in designer, crates/cf-e2e/src/rig/project.rs). `cargo xtask plants daemon "chief-words:"` runs them.
+
+[run]
+cw-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
+cw-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::"]
+cw-image = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "image_facts::"]
+cw-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "designer_images::"]
+cw-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "designer_view"]
+cw-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members"]
+cw-staff-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::staff"]
+cw-cf = ["cargo", "test", "--offline", "-p", "cf", "--lib", "the_staff_says"]
+cw-rig-body = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::project::"]
+cw-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "image designer"]
+cw-page-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a member's card says its role"]
+cw-page-help = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "say the same of the chief"]
+
+[[plant]]
+name = "chief-words: a table names the model beside every name"
+meant = "names_a_model_only_where_the_member_s_name_does_not"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/skill.rs"
+find = '''        let named = match &member.model {
+            Some(model) => format!("{} ({model})", member.name),
+            None => member.name.clone(),
+        };'''
+replace = '''        let named = format!("{} ({})", member.name, member.model.clone().unwrap_or_default());'''
+
+[[plant]]
+name = "chief-words: a table has a column of models again"
+meant = "shows_one_row_per_member_name_roles_and_work_tier_and_nothing_to_pick_a_member_by"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/skill.rs"
+find = '''        "| Member | Roles | Work tier |".to_owned(),'''
+replace = '''        "| Member | Model | Roles | Work tier |".to_owned(),'''
+
+[[plant]]
+name = "chief-words: every member is read with its model beside its name"
+meant = "a_member_named_by_its_model_is_read_off_the_project_with_no_model_beside_its_name"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''            model: member
+                .name_apart
+                .then(|| cf_ledger::handles::runs_on(member)),'''
+replace = '''            model: Some(cf_ledger::handles::runs_on(member)),'''
+
+[[plant]]
+name = "chief-words: an image designer is read with a tier"
+meant = "an_image_designer_is_read_off_the_project_with_no_tier"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''                .and_then(work_tier)
+                .filter(|_| !member.designer),'''
+replace = '''                .and_then(work_tier),'''
+
+[[plant]]
+name = "chief-words: a member with no tier is told none"
+meant = "says_none_for_an_image_designer_s_tier_and_refuses_any_other_member_with_none"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/skill.rs"
+find = '''            None if member.roles == ["designer"] => "none",'''
+replace = '''            None => "none",'''
+
+[[plant]]
+name = "chief-words: the chief is not told its model is the human's to change"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''The human changes your model with your harness's own switch in this window, and a
+reopen keeps it. '''
+replace = ''''''
+
+[[plant]]
+name = "chief-words: Switch the chief is for a model"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''is for another harness or a fresh
+conversation, on a model from that harness's list.'''
+replace = '''is for another model.'''
+
+[[plant]]
+name = "chief-words: the designer researches and chooses"
+meant = "teach_the_chief_only_the_board_s_commands"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''It draws exactly that and does not research or choose.'''
+replace = '''It draws as it sees fit.'''
+
+[[plant]]
+name = "chief-words: the designer is told to redesign"
+meant = "teach_the_designer_only_the_board_s_commands"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''Do
+not research the project or redesign what was asked.'''
+replace = '''.'''
+
+[[plant]]
+name = "chief-words: the designer guesses at what is missing"
+meant = "teach_the_designer_only_the_board_s_commands"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''`{{cf}} ask "…"` rather than guess, and end your turn;'''
+replace = '''`{{cf}} ask "…"` and end your turn;'''
+
+[[plant]]
+name = "chief-words: a role text names a preset"
+meant = "names_no_agent_to_pick_no_preset_no_nickname_and_no_cf_agent_or_catalog_in_any_text"
+runs = ["cw-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''Keep this chief role after a new or resumed native session.'''
+replace = '''Keep this chief role after a new or resumed native session, as a preset.'''
+
+[[plant]]
+name = "chief-words: the chief's text grows by a paragraph"
+meant = "the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say"
+runs = ["cw-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''Keep this chief role after a new or resumed native session.'''
+replace = '''Keep this chief role after a new or resumed native session. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. Say it again at length. '''
+
+[[plant]]
+name = "chief-words: a picture's width and height are swapped"
+meant = "a_png_with_none_says_so_and_width_is_not_height"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''    let (width, height) = sized(be32(&head[8..]), be32(&head[12..]))?;'''
+replace = '''    let (height, width) = sized(be32(&head[8..]), be32(&head[12..]))?;'''
+
+[[plant]]
+name = "chief-words: alpha is the colour type's alone"
+meant = "a_transparency_chunk_before_the_pixels_is_alpha_in_a_palette_a_grey_and_a_colour_picture"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''                b"tRNS" => {
+                    alpha = true;
+                    break;
+                }'''
+replace = '''                b"tRNS" => break,'''
+
+[[plant]]
+name = "chief-words: a transparency chunk after the pixels counts"
+meant = "a_transparency_chunk_after_the_pixels_is_none_of_the_picture_s"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''                b"IDAT" | b"IEND" => break,'''
+replace = '''                b"IEND" => break,'''
+
+[[plant]]
+name = "chief-words: a JPEG is walked past the bound"
+meant = "a_file_is_read_no_further_than_the_bound"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''    let mut marker = [0_u8; 4];
+    while at < MOST_BYTES {'''
+replace = '''    let mut marker = [0_u8; 4];
+    while at < u64::MAX {'''
+
+[[plant]]
+name = "chief-words: a lossless WebP has no alpha"
+meant = "a_webp_says_its_size_and_whether_it_has_alpha_in_each_of_its_three_forms"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''                bits >> 28 & 1 == 1,'''
+replace = '''                false,'''
+
+[[plant]]
+name = "chief-words: an extended WebP has alpha whatever its flags"
+meant = "a_webp_says_its_size_and_whether_it_has_alpha_in_each_of_its_three_forms"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''                frame[0] & 0x10 != 0,'''
+replace = '''                true,'''
+
+[[plant]]
+name = "chief-words: a result names any number of files"
+meant = "no_more_than_the_most_files_get_a_line"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''                if named.len() == MOST_FILES {'''
+replace = '''                if named.len() == MOST_FILES * 100 {'''
+
+[[plant]]
+name = "chief-words: a file that is gone gets a line"
+meant = "a_file_that_is_gone_or_is_no_image_gets_no_line_and_a_result_naming_none_is_as_it_was"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''            let facts = read(Path::new(&path))?;'''
+replace = '''            let facts = read(Path::new(&path)).unwrap_or(Facts {
+                width: 0,
+                height: 0,
+                kind: Kind::Png,
+                alpha: false,
+            });'''
+
+[[plant]]
+name = "chief-words: a relative path is read"
+meant = "the_files_a_result_names_are_the_absolute_paths_of_images_in_order_each_once"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''(?:^|[\s"'`(\[<:=,])((?:[a-z]:[\\/]|/)'''
+replace = '''(?:^|[\s"'`(\[<:=,])((?:[a-z]:[\\/]|/|)'''
+
+[[plant]]
+name = "chief-words: every task's result is read for images"
+meant = "only_a_design_task_s_result_is_read_for_images"
+runs = ["cw-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''    if task.pool.as_deref() == Some(DESIGNER_POOL) {'''
+replace = '''    if true {'''
+
+[[plant]]
+name = "chief-words: Finish takes the designer's words with no lines"
+meant = "the_result_the_chief_takes_at_its_finish_says_it_too"
+runs = ["cw-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '''        let words = for_task(
+            &thread.task,'''
+replace = '''        let words = for_task(
+            &cf_ledger::TaskView {
+                pool: None,
+                ..thread.task.clone()
+            },'''
+
+[[plant]]
+name = "chief-words: a turn's end takes the designer's words with no lines"
+meant = "a_design_task_s_result_says_the_size_the_type_and_the_alpha_of_each_file_it_names"
+runs = ["cw-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        let words = for_task(&thread.task, with_earlier(words, &earlier));'''
+replace = '''        let words = for_task(
+            &cf_ledger::TaskView {
+                pool: None,
+                ..thread.task.clone()
+            },
+            with_earlier(words, &earlier),
+        );'''
+
+[[plant]]
+name = "chief-words: a designer's row is read with its model"
+meant = "a_designer_that_holds_a_model_is_read_as_running_on_codex_s_default_and_a_worker_is_not"
+runs = ["cw-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = '''    let (model, effort, model_name) = if designer {'''
+replace = '''    let (model, effort, model_name) = if false {'''
+
+[[plant]]
+name = "chief-words: a worker's row is read without its model"
+meant = "a_designer_that_holds_a_model_is_read_as_running_on_codex_s_default_and_a_worker_is_not"
+runs = ["cw-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = '''    let (model, effort, model_name) = if designer {'''
+replace = '''    let (model, effort, model_name) = if true {'''
+
+[[plant]]
+name = "chief-words: a designer is asked nothing of its model, effort and tier, and is given them"
+meant = "an_image_designer_asked_for_a_model_an_effort_or_a_tier_is_refused"
+runs = ["cw-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    if ["model", "effort", "tier"].into_iter().any(given) {'''
+replace = '''    if false {'''
+
+[[plant]]
+name = "chief-words: a designer is edited"
+meant = "an_image_designer_asked_for_a_model_an_effort_or_a_tier_is_refused"
+runs = ["cw-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    if designer {
+        return Err(Said::from(
+            "an image designer has nothing to edit: it draws on Codex's own model",
+        ));
+    }
+'''
+replace = ''''''
+
+[[plant]]
+name = "chief-words: a designer is kept in the top tier"
+meant = "an_image_designer_is_added_on_codex_with_no_model_effort_or_tier"
+runs = ["cw-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''const DESIGNER_TIER: WorkTier = WorkTier::Light;'''
+replace = '''const DESIGNER_TIER: WorkTier = WorkTier::Critical;'''
+
+[[plant]]
+name = "chief-words: a designer is picked a model"
+meant = "an_image_designer_is_added_on_codex_with_no_model_effort_or_tier"
+runs = ["cw-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    Ok(Picked {
+        harness: Harness::Codex,
+        model: None,'''
+replace = '''    Ok(Picked {
+        harness: Harness::Codex,
+        model: Some("gpt-6.1-sol".to_owned()),'''
+
+[[plant]]
+name = "chief-words: the staff route says a designer's tier"
+meant = "an_image_designer_is_said_with_no_tier_because_a_design_task_has_none"
+runs = ["cw-staff-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/staff.rs"
+find = '''                "tier": if member.designer { None } else { member.tier.as_deref() },'''
+replace = '''                "tier": member.tier,'''
+
+[[plant]]
+name = "chief-words: cf staff says a tier that is null"
+meant = "the_staff_says_a_tier_for_a_member_that_has_one_and_none_for_an_image_designer"
+runs = ["cw-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''                    None | Some(Value::Null) => String::new(),'''
+replace = '''                    None => String::new(),'''
+
+[[plant]]
+name = "chief-words: the designer's model, effort and tier controls stay"
+meant = "an image designer is added with no model, effort or tier: Codex is picked for it and the controls are gone"
+runs = ["cw-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    for (const control of this.#modelControls) control.hidden = designer'''
+replace = '''    for (const control of this.#modelControls) control.hidden = false'''
+
+[[plant]]
+name = "chief-words: Codex is not picked for the designer"
+meant = "an image designer is added with no model, effort or tier: Codex is picked for it and the controls are gone"
+runs = ["cw-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      if (designer) this.#picker.choose('codex')'''
+replace = '''      if (false) this.#picker.choose('codex')'''
+
+[[plant]]
+name = "chief-words: the designer's models are read"
+meant = "an image designer is added with no model, effort or tier: Codex is picked for it and the controls are gone"
+runs = ["cw-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#picker.reads = !designer'''
+replace = '''    this.#picker.reads = true'''
+
+[[plant]]
+name = "chief-words: a designer is sent a model"
+meant = "an image designer is added with no model, effort or tier: Codex is picked for it and the controls are gone"
+runs = ["cw-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      return { harness: kind, modelName: null }'''
+replace = '''      return { harness: kind, model: 'gpt-6.1-sol', modelName: null }'''
+
+[[plant]]
+name = "chief-words: the last staff's designer is dropped"
+meant = "New project carries the last staff's image designer as it runs: on Codex's own model, in no tier"
+runs = ["cw-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''          (member.model || member.designer) && !this.#missing.includes(harnessOf(member.harness)),'''
+replace = '''          member.model && !this.#missing.includes(harnessOf(member.harness)),'''
+
+[[plant]]
+name = "chief-words: the last staff's designer is picked with its model"
+meant = "New project carries the last staff's image designer as it runs: on Codex's own model, in no tier"
+runs = ["cw-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''          member.designer
+            ? // An image designer runs on its harness's own model, at no effort and in no tier.
+              { harness: member.harness, role }'''
+replace = '''          false
+            ? // An image designer runs on its harness's own model, at no effort and in no tier.
+              { harness: member.harness, role }'''
+
+[[plant]]
+name = "chief-words: a designer's staff line says its tier"
+meant = "a member's card says its role, tier and harness under a name that holds its model, and what it runs on only under one that does not"
+runs = ["cw-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''  const tier = isDesigner(member) ? null : member.tier'''
+replace = '''  const tier = member.tier'''
+
+[[plant]]
+name = "chief-words: a designer's card says its tier"
+meant = "a member's card says its role, tier and harness under a name that holds its model, and what it runs on only under one that does not"
+runs = ["cw-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''part('tier', participant.designer ? null : participant.tier)'''
+replace = '''part('tier', participant.tier)'''
+
+[[plant]]
+name = "chief-words: a designer has an Edit"
+meant = "a member's card says its role, tier and harness under a name that holds its model, and what it runs on only under one that does not"
+runs = ["cw-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      const edit = member.designer
+        ? null'''
+replace = '''      const edit = false
+        ? null'''
+
+[[plant]]
+name = "chief-words: New project does not say the model is switched in the chief's window"
+meant = "New project and Switch chief say the same of the chief's model: the harness's own switch in the chief's window keeps its conversation and a reopen keeps the model"
+runs = ["cw-page-help"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''ConsensFlow follows it, and a reopen keeps it. Switch the chief, on its card, is for another harness or a fresh conversation.</p>'''
+replace = '''ConsensFlow follows it.</p>'''
+
+[[plant]]
+name = "chief-words: Switch the chief does not say a reopen keeps the model"
+meant = "New project and Switch chief say the same of the chief's model: the harness's own switch in the chief's window keeps its conversation and a reopen keeps the model"
+runs = ["cw-page-help"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''it keeps its conversation, ConsensFlow follows it, and a reopen keeps it.</p>'''
+replace = '''it keeps its conversation, and ConsensFlow follows it.</p>'''
+
+[[plant]]
+name = "chief-words: the rig asks for a designer by its model and tier"
+meant = "an_image_designer_is_asked_for_on_codex_and_its_role_alone"
+runs = ["cw-rig-body"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/project.rs"
+find = '''    if designer {
+        return json!({ "harness": row["kind"], "roles": ["designer"] });'''
+replace = '''    if false {
+        return json!({ "harness": row["kind"], "roles": ["designer"] });'''
+
+[[plant]]
+name = "chief-words: the reader opens a path before it asks what kind of file it is"
+meant = "a_fifo_named_like_a_picture_is_never_opened"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''    if !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let mut file = File::open(path).ok()?;'''
+replace = '''    let mut file = File::open(path).ok()?;'''
+
+[[plant]]
+name = "chief-words: a network path is named"
+meant = "a_path_that_starts_with_two_separators_is_a_network_path_and_is_not_named"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''            if !path.as_str().starts_with("//") && !named.iter().any(|seen| seen == path.as_str()) {'''
+replace = '''            if !named.iter().any(|seen| seen == path.as_str()) {'''

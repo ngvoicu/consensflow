@@ -311,7 +311,7 @@ const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 9] = [
 
 /// The files that spell an installed app's path, and why that touches nothing: each spells it
 /// as data a test reads, never as an app it starts.
-const SPELLING_INSTALLED: [(&str, &str); 7] = [
+const SPELLING_INSTALLED: [(&str, &str); 8] = [
     (
         "tools/xtask/src/updater_smoke/processes/tests.rs",
         "a row of a fake process table: the live app, which the smoke takes for none of its own",
@@ -339,6 +339,10 @@ const SPELLING_INSTALLED: [(&str, &str); 7] = [
     (
         "crates/cf-engine/src/role_change/tests.rs",
         "the cf a role text is written with",
+    ),
+    (
+        "crates/cf-engine/tests/dispatcher/computer_use.rs",
+        "the words of the note that says how to mend a stale Screen Recording entry (T-903): they name the app to add",
     ),
 ];
 

@@ -32,6 +32,8 @@ hd-corpus = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing
 hd-guard = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing::corpus::guard::"]
 hd-claude-identity = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::dialog_identity::"]
 hd-base-dialog = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "testing::base_dialog::"]
+hd-engine-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "dialogs::"]
+hd-claude-cu = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use_prompt::"]
 hd-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_chiefs_idle_prompt_was_read_as_a_dialog::"]
 
 [[plant]]
@@ -151,8 +153,15 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = "        if before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some())"
-replace = "        if false && (before.as_deref() == Some(key.as_str()) || (sign == DialogSign::Open && before.is_some()))"
+find = '''
+        if before.as_deref() == Some(key.as_str())
+            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())
+        {'''
+replace = '''
+        if false
+            && (before.as_deref() == Some(key.as_str())
+                || (sign == DialogSign::Open && dialog.is_none() && before.is_some()))
+        {'''
 
 [[plant]]
 name = "harness dialogs: the window's own question tool is taken for a dialog of its harness"
@@ -291,7 +300,7 @@ replace = "            let Some(decline) = watch.decline.as_ref() else {"
 
 [[plant]]
 name = "harness dialogs: a decline whose look finds the dialog gone presses its key all the same"
-meant = "a_decline_whose_look_finds_another_dialog_where_its_harness_still_says_one_is_open_presses_nothing"
+meant = "a_hooks_ask_whose_choices_changed_under_the_same_words_is_never_pressed_with_the_digit_it_was_told_with"
 runs = ["hd-engine"]
 
 [[plant.edit]]
@@ -372,16 +381,6 @@ runs = ["hd-engine"]
 file = "crates/cf-engine/src/dialogs.rs"
 find = "                .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after));"
 replace = "                .is_none_or(|after| watch.told_at.is_some_and(|told_at| now - told_at >= after) || after > 0);"
-
-[[plant]]
-name = "harness dialogs: a decline is pressed into another dialog that asks the same question"
-meant = "a_hooks_ask_whose_window_shows_another_dialog_at_its_ten_minutes_is_never_pressed"
-runs = ["hd-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dialogs.rs"
-find = "                        && told.detail == identity.detail"
-replace = "                        && !told.detail.is_empty()"
 
 [[plant]]
 name = "harness dialogs: the window a hook's ask was answered No in is never sent on, and its task sits working"
@@ -910,13 +909,13 @@ find = '            [identity.detail.join(" "), identity.question.clone()].join(
 replace = '            identity.question.clone()'
 
 [[plant]]
-name = "harness dialogs: once: a decline is pressed into any read with the dialog's question and choices, whatever it says above them"
-meant = "a_hooks_ask_another_request_replaces_while_its_status_says_one_is_open_is_never_pressed_into"
+name = "harness dialogs: once: a decline is pressed into a read whose choices are not the ones the dialog was told with"
+meant = "a_hooks_ask_whose_choices_changed_under_the_same_words_is_never_pressed_with_the_digit_it_was_told_with"
 runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = '                        && told.detail == identity.detail'
+find = '                        && told.options == identity.options'
 replace = '                        && true'
 
 [[plant]]
@@ -1082,3 +1081,362 @@ replace = '''    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
 
     fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
         input_box::read_empty(Harness::Claude, snapshot)'''
+
+[[plant]]
+name = "harness dialogs: computer use: the Computer Use permission prompt has no decline, and it waits for a key nobody presses"
+meant = "a_computer_use_permission_prompt_the_screen_shows_is_told_then_closed_by_escape_once_and_the_held_tell_goes_in_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '''
+    let lacking = missing(dialog)?;
+    top(dialog)?;
+'''
+replace = '''
+    let lacking = missing(dialog)?;
+    top(dialog)?;
+    if lacking.accessibility || !lacking.accessibility {
+        return None;
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: computer use: Claude's list leaves its Computer Use permission prompt off"
+meant = "its_computer_use_permission_prompt_is_declined_by_escape_alone_in_a_members_window"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+        if let Some(decline) = super::computer_use_prompt::decline(dialog) {
+            return Some(decline);
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "harness dialogs: computer use: the chief's window is declined for as a member's is"
+meant = "a_computer_use_permission_prompt_in_the_chiefs_window_is_told_to_the_human_and_never_closed"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '            .filter(|decline| !(decline.members_only && participant.role == "chief"));'
+replace = '            .filter(|_| true);'
+
+[[plant]]
+name = "harness dialogs: computer use: its decline is for any window, the chief's too"
+meant = "a_computer_use_permission_prompt_in_the_chiefs_window_is_told_to_the_human_and_never_closed"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '        members_only: true,'
+replace = '        members_only: false,'
+
+[[plant]]
+name = "harness dialogs: computer use: what slides above its title tells one prompt from another"
+meant = "a_prompt_whose_conversation_above_it_slides_is_told_once_and_closed_once"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '    if let Some(top) = super::computer_use_prompt::top(dialog) {'
+replace = '    if let Some(top) = super::computer_use_prompt::top(dialog).filter(|_| false) {'
+
+[[plant]]
+name = "harness dialogs: computer use: a dialog with its choices and another title is declined"
+meant = "a_dialog_with_the_prompts_choices_and_another_title_gets_no_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '''
+    let lacking = missing(dialog)?;
+    top(dialog)?;
+'''
+replace = '''
+    let lacking = missing(dialog)?;
+'''
+
+[[plant]]
+name = "harness dialogs: computer use: a prompt with a choice it does not offer is declined"
+meant = "a_prompt_with_a_choice_it_does_not_offer_gets_no_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '''
+        _ => None,
+    }
+}
+
+/// The row of `detail` that is the prompt's title'''
+replace = '''
+        _ if options.contains(&TRY_AGAIN) => Some(Missing {
+            accessibility: false,
+            screen_recording: true,
+        }),
+        _ => None,
+    }
+}
+
+/// The row of `detail` that is the prompt's title'''
+
+[[plant]]
+name = "harness dialogs: computer use: a recorded screen of the prompt above the harness's own prompt is declined"
+meant = "a_recorded_screen_of_the_prompt_shown_above_the_harnesss_own_prompt_gets_no_key"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '''
+    if dialog.prompt_below {
+        return None;
+    }
+    let lacking'''
+replace = '    let lacking'
+
+[[plant]]
+name = "harness dialogs: computer use: its key is a digit, which is one of its two listed choices"
+meant = "a_computer_use_permission_prompt_the_screen_shows_is_told_then_closed_by_escape_once_and_the_held_tell_goes_in_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '        key: vec![ESCAPE],'
+replace = "        key: vec![b'1'],"
+
+[[plant]]
+name = "harness dialogs: computer use: Claude's reader takes the prompt for one that asks only if its footer says so"
+meant = "its_computer_use_permission_prompt_is_read_as_a_dialog_that_waits_whatever_its_footer_says"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+            asks: shown.dialog.asks || super::computer_use_prompt::is_prompt(&shown.dialog),
+'''
+replace = '''
+            asks: shown.dialog.asks,
+'''
+
+[[plant]]
+name = "harness dialogs: computer use: a key with no listed choice is pressed only into a read that lists it, and never is"
+meant = "a_computer_use_permission_prompt_the_screen_shows_is_told_then_closed_by_escape_once_and_the_held_tell_goes_in_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '(!decline.listed || shown.options.contains(&decline.choice))'
+replace = '(shown.options.contains(&decline.choice))'
+
+[[plant]]
+name = "harness dialogs: computer use: the member's line is written about no task, which a member's queue never lets go in"
+meant = "a_computer_use_permission_prompt_the_screen_shows_is_told_then_closed_by_escape_once_and_the_held_tell_goes_in_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '            None => self.paused_task(participant)?,'
+replace = '            None => None,'
+
+[[plant]]
+name = "harness dialogs: computer use: Claude's reader takes a title in a longer row for the prompt's"
+meant = "its_computer_use_permission_prompt_is_not_declined_where_only_its_words_are_quoted"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '    dialog.detail.iter().rposition(|row| row == TITLE)'
+replace = '    dialog.detail.iter().rposition(|row| row.contains(TITLE))'
+
+[[plant]]
+name = "harness dialogs: computer use: the member is told nothing of what ConsensFlow lacks"
+meant = "the_member_is_told_what_consensflow_lacks"
+runs = ["hd-claude-cu"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '        (false, true) => "the Screen Recording permission and has been restarted",'
+replace = '        (false, true) => "the Accessibility permission",'
+
+[[plant]]
+name = "harness dialogs: computer use: the note of a key pressed with no choice listed says a choice was made"
+meant = "a_note_of_a_decline_made_by_a_key_with_no_choice_listed_says_it_is_pressed_not_chosen"
+runs = ["hd-engine-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '    if let Some(decline) = decline.filter(|decline| !decline.listed) {'
+replace = '    if let Some(decline) = decline.filter(|decline| !decline.listed && decline.key.is_empty()) {'
+
+[[plant]]
+name = "harness dialogs: computer use: nobody is told that ConsensFlow pressed Escape in the member's window"
+meant = "a_computer_use_permission_prompt_the_screen_shows_is_told_then_closed_by_escape_once_and_the_held_tell_goes_in_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '''
+                quoted(&decline.choice)
+            ),
+        };
+        self.tell_dialog(project, participant, &body)'''
+replace = '''
+                quoted(&decline.choice)
+            ),
+        };
+        let _ = &body;
+        Ok(())'''
+
+[[plant]]
+name = "harness dialogs: once: a second request under the status of the first is taken for the first, and never told"
+meant = "a_second_hook_ask_under_the_same_open_status_is_told_and_has_its_own_ten_minutes"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())'
+replace = '            || (sign == DialogSign::Open && before.is_some())'
+
+[[plant]]
+name = "harness dialogs: once: a look that reads no words under an open status is another dialog, and a note says so at every redraw"
+meant = "a_look_that_reads_no_words_under_an_open_status_is_the_dialog_told_of"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())'
+replace = '            || false'
+
+[[plant]]
+name = "harness dialogs: once: a title-shaped row of a request is taken for the dialog's title, and the command above it is erased from its identity"
+meant = "a_command_that_prints_a_title_does_not_become_the_command_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: a hook's reason that is a title erases the command above it from the dialog's identity"
+meant = "a_hooks_reason_that_is_a_title_does_not_erase_the_command_above_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: a read from which the command row slid out is the read that has it, whenever a title is left in the request"
+meant = "a_command_row_that_slid_out_of_a_request_with_a_title_in_it_is_another_dialog"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: the real window cuts a request at a title any tool prints, as the first attempt did"
+meant = "its_permission_dialog_keeps_every_row_of_a_request_that_prints_a_title"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: a cut at a title any tool prints is made in the identity of every dialog, whatever the rows say"
+meant = "a_title_a_command_prints_is_a_row_of_the_command_and_cuts_nothing"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: the Computer Use cut asks nothing of the dialog's own choices, and a request that prints its title is cut there"
+meant = "a_request_that_prints_the_computer_use_title_is_never_cut_there"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '''
+pub(crate) fn top(dialog: &Dialog) -> Option<usize> {
+    missing(dialog)?;
+'''
+replace = '''
+pub(crate) fn top(dialog: &Dialog) -> Option<usize> {
+'''
+
+[[plant]]
+name = "harness dialogs: once: a decline is pressed into a read whose rows are cut elsewhere than the ones it was told with"
+meant = "a_hooks_ask_the_screen_rewrapped_to_the_same_words_never_has_the_firsts_no_pressed_into_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '                        && told.detail == identity.detail'
+replace = '                        && true'

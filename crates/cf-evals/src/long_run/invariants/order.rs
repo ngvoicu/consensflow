@@ -68,6 +68,17 @@ const MOVES: [&str; 3] = ["task.state", "task.assigned", "task.released"];
 /// two is in any answer.
 const PROGRESS: usize = 24;
 
+/// What the engine writes above a result of a turn's last words: the turn wrote none after its
+/// last tool call, and the result is the last it wrote before it (`cf-engine`'s
+/// `turn_end::LAST_WORDS`, T-262 and T-1311; held to it by a test of the engine's, as this
+/// crate depends on no crate of the product).
+pub const LAST_WORDS: &str =
+    "Its turn ended with no words after its last command. The last words it wrote:";
+
+/// What the engine's result says of a turn that wrote no words at all (`cf-engine`'s
+/// `turn_end::WITHOUT_ANSWER`).
+const WITHOUT_ANSWER: &str = "(the agent ended its turn without a written answer)";
+
 /// What the log says of a task at the moment a close note of it was written.
 enum Standing {
     /// It had ended and was not at work again: the close came after its ending.
@@ -359,11 +370,11 @@ pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
             continue;
         };
         let (answer, progress) = answer_and_progress(turn, on_codex(look, worker));
-        let answer = plain(&answer);
+        let body = plain(&result.body);
+        let answer = judged(&answer, &body);
         if answer.is_empty() {
             continue;
         }
-        let body = plain(&result.body);
         let held: Vec<&&Item> = progress
             .iter()
             .filter(|line| {
@@ -463,7 +474,7 @@ pub fn unanswered_results(look: &Look, settings: &Settings) -> Vec<Unjudged> {
             Ok(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() && codex => format!(
                 "has no final answer after its last tool call in the copy of @{handle}'s conversation, only Codex's commentary, which it never marks complete"
             ),
-            Ok(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() => format!(
+            Ok(turn) if judged(&answer_and_progress(turn, codex).0, &plain(&result.body)).is_empty() => format!(
                 "says nothing after its last tool call in the copy of @{handle}'s conversation"
             ),
             Ok(_) => continue,
@@ -494,7 +505,10 @@ fn last_turn<'a>(items: &'a [&'a Item]) -> Option<&'a [&'a Item]> {
 /// its last tool call, every item of it, a blank line between (Codex's commentary
 /// left out, whether or not a final answer came: the progress notes it writes there,
 /// which its record never marks complete, where its final answer is); and its
-/// progress, what it said before.
+/// progress, what it said before. Where it said nothing after its last tool call, the
+/// last words it wrote before it, under [`LAST_WORDS`], as the engine gives them (T-262,
+/// T-1311). Not for Codex: the copy does not say which of its words are its commentary,
+/// which the engine never takes, so its turn stays one that cannot be judged.
 fn answer_and_progress<'a>(turn: &'a [&'a Item], codex: bool) -> (String, Vec<&'a Item>) {
     let after = turn
         .iter()
@@ -521,7 +535,30 @@ fn answer_and_progress<'a>(turn: &'a [&'a Item], codex: bool) -> (String, Vec<&'
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
-    (words, progress)
+    let last_words = || {
+        progress
+            .iter()
+            .rev()
+            .map(|item| item.text.trim())
+            .find(|text| !text.is_empty())
+    };
+    match last_words() {
+        Some(said) if words.is_empty() && !codex => (format!("{LAST_WORDS}\n\n{said}"), progress),
+        _ => (words, progress),
+    }
+}
+
+/// The final answer `answer` (squeezed) a result whose words are `body` (squeezed) is held to:
+/// none, which cannot be judged, where it is a turn's last words and the result says the turn
+/// wrote none. The copy does not say which words are the harness's own (an error of the API
+/// Claude Code writes in the assistant's place, T-1311), which the engine never takes, so a
+/// result without words is not taken for one that should have had them.
+fn judged(answer: &str, body: &str) -> String {
+    let answer = plain(answer);
+    if answer.starts_with(&plain(LAST_WORDS)) && body == plain(WITHOUT_ANSWER) {
+        return String::new();
+    }
+    answer
 }
 
 /// A message's row as evidence: its body masked whole, then cut, the run's `names`

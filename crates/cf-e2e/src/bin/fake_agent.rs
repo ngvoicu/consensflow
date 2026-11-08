@@ -927,15 +927,16 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
             },
         }
     };
-    steps::write(records, pid, &window.session, &worked).map_err(failed)?;
+    let mut answering = steps::write(records, pid, &window.session, &worked).map_err(failed)?;
     // A turn that works at a pace writes a step, works a while, and writes the next: an
     // Escape in one of the whiles stops it there.
     let reply = match reply {
         Reply::Worked(steps, gap, answer) => {
             let mut stopped = false;
             for step in &steps {
-                steps::write(records, pid, &window.session, std::slice::from_ref(step))
-                    .map_err(failed)?;
+                answering = steps::write(records, pid, &window.session, std::slice::from_ref(step))
+                    .map_err(failed)?
+                    .or(answering);
                 if window.stop.work(gap) {
                     stopped = true;
                     break;
@@ -949,8 +950,10 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         }
         other => other,
     };
-    // The message id numbers the records so far, this one not yet among them.
-    let id = format!("{}-message-{pid}-{}", window.session, records.ordinal());
+    // The message id numbers the records so far, this one not yet among them, unless the
+    // answer goes on in the message that asked the advisor.
+    let id = answering
+        .unwrap_or_else(|| format!("{}-message-{pid}-{}", window.session, records.ordinal()));
     match reply {
         Reply::Stopped => {
             // The turn takes that long to end once it is stopped.

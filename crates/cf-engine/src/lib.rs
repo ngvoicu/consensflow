@@ -26,6 +26,7 @@ mod dialogs;
 pub mod dispatcher;
 pub mod handoff;
 pub mod host;
+mod image_facts;
 mod in_flight;
 mod never_began;
 mod ownership;

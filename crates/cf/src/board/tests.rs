@@ -1071,3 +1071,22 @@ fn a_flag_of_one_value_given_twice_is_refused() {
         assert!(ran.asked.is_empty(), "{words:?}: {:?}", ran.asked);
     }
 }
+
+/// A design task has no tier, so a member of the image designer's says none of it: its line
+/// is its name or what it runs on, its role and its harness (designer P2, T-1280). The
+/// board says a designer's tier as none (null), and a member with a tier says it.
+#[test]
+fn the_staff_says_a_tier_for_a_member_that_has_one_and_none_for_an_image_designer() {
+    let members = json!({ "members": [
+        { "handle": "claude-opus-5-5-high", "role": "worker", "roles": ["worker"], "tier": "standard",
+          "harnessName": "Claude Code", "nameApart": false, "modelName": "claude-opus-5-5", "effort": "high" },
+        { "handle": "codex-default", "role": "designer", "roles": ["designer"], "tier": null,
+          "harnessName": "Codex", "nameApart": true, "modelName": "Codex default", "effort": null },
+    ] });
+    let ran = cf(&["staff"], vec![reply(200, members)]);
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        "@claude-opus-5-5-high · worker · standard · Claude Code\n@codex-default · Codex default · designer · Codex\n"
+    );
+}

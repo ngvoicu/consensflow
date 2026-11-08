@@ -320,7 +320,7 @@ replace = ""
 
 [[plant]]
 name = "turn end: a turn that wrote nothing after its last tool call has no word to say so"
-meant = "a_turn_that_wrote_nothing_after_its_last_tool_call_says_so_and_its_progress_is_not_the_result"
+meant = "a_turn_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words_it_wrote_before_it"
 runs = ["tep-turn-end-engine-final-answer", "tep-turn-end-engine-lib-turn-end"]
 
 [[plant.edit]]

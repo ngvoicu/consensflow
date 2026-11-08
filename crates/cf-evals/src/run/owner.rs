@@ -16,8 +16,17 @@
 //!   answers to its questions;
 //! - a conversation's follow-ups are typed in turn, each after the chief is done
 //!   with the last ([`Step::Next`]);
-//! - the run is over once nothing has moved for the scenario's quiet time
-//!   ([`Step::Over`]), or when time is up ([`Step::TimeUp`]).
+//! - a project that is quiet while a disruption of the run's schedule is due is given a piece
+//!   of extra work from a short fixed list, so that the disruption's shape can happen
+//!   ([`Step::More`]): a staff with nothing to do is at work for none, and the schedule is
+//!   part of what a run proves. A piece is given only where the budget has the time left to
+//!   finish it, and the list is gone through again while a disruption waits, each piece once
+//!   the one before has been taken up by the staff (a chief that put nothing on the board is
+//!   asked again only after the scenario's quiet time);
+//! - the run is over once nothing has moved for the scenario's quiet time and the schedule
+//!   owes nothing ([`Step::Over`]), or when time is up ([`Step::TimeUp`]): a project that
+//!   goes quiet with a disruption still waiting is not over, and waits for the work it is
+//!   given or for the budget.
 
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
@@ -58,10 +67,37 @@ pub struct Seen {
     pub quiet: Duration,
     /// Whether the chief is at work, or a task is.
     pub busy: bool,
+    /// Whether a task is queued, working or waiting: the staff at work, the chief's own turn
+    /// aside.
+    pub staff_at_work: bool,
     /// Whether the chief's window waits on a dialog of its own harness's.
     pub dialog: bool,
     /// Whether nothing is on the board.
     pub board_empty: bool,
+    /// What the run's schedule of disruptions still asks of the project.
+    pub owed: Owed,
+}
+
+/// What a run's schedule of disruptions still asks of the project at one look: a disruption
+/// that waits for its shape needs the staff at work, so a project that went quiet before the
+/// schedule was played is not over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owed {
+    /// Nothing: every disruption was played, or cannot be, or the run has none.
+    Nothing,
+    /// A disruption waits, and its time has not come.
+    Later,
+    /// A disruption waits, and it is due.
+    Due,
+}
+
+/// A piece of real work the owner may give once more to a project that went quiet before its
+/// schedule was played, and how long the piece takes to be done (it is given only where the
+/// budget has that much left, so that the run does not end with it half done).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Piece {
+    pub say: String,
+    pub takes: Duration,
 }
 
 /// What the owner does next.
@@ -75,6 +111,8 @@ pub enum Step {
     Nudge(String),
     /// Say the next thing of the conversation.
     Next(FollowUp),
+    /// Say this piece of extra work: the project is quiet and a disruption waits for its shape.
+    More(String),
     /// The run is over: nothing has moved for the scenario's quiet time.
     Over,
     /// The run is over: time is up.
@@ -96,6 +134,12 @@ pub struct Owner {
     pub dialogs: i64,
     /// How many follow-up messages it typed.
     pub follow_ups_sent: i64,
+    extra: Vec<Piece>,
+    /// How many pieces of extra work it gave.
+    pub extra_sent: i64,
+    /// Whether the staff were at work since the last piece was given: a chief that took a turn
+    /// on it and put nothing on the board is not handed the same work again at once.
+    worked_since: bool,
 }
 
 impl Owner {
@@ -108,7 +152,27 @@ impl Owner {
             replies: 0,
             dialogs: 0,
             follow_ups_sent: 0,
+            extra: Vec::new(),
+            extra_sent: 0,
+            worked_since: false,
         }
+    }
+
+    /// The owner with `pieces` of extra work to give, in turn and again from the first, to a
+    /// project that goes quiet while a disruption of its schedule waits.
+    #[must_use]
+    pub fn with_extra_work(mut self, pieces: Vec<Piece>) -> Self {
+        self.extra = pieces;
+        self
+    }
+
+    /// The next piece of extra work, if the budget (`timeout`) has the time left, at `elapsed`,
+    /// for it to be done: a run that ended with it half done would break the end (9) for a
+    /// reason of its own. The list is gone through again from its first piece.
+    fn next_piece(&self, elapsed: Duration, timeout: Duration) -> Option<String> {
+        let at = usize::try_from(self.extra_sent).ok()? % self.extra.len().max(1);
+        let piece = self.extra.get(at)?;
+        (timeout.saturating_sub(elapsed) >= piece.takes).then(|| piece.say.clone())
     }
 
     /// The owner's next step. `question` is the chief's open question in its
@@ -121,6 +185,7 @@ impl Owner {
         timeout: Duration,
         question: &mut dyn FnMut() -> Result<Option<OpenQuestion>>,
     ) -> Result<Step> {
+        self.worked_since |= seen.staff_at_work;
         if seen.dialog && self.dialogs < MAX_ANSWERS && seen.quiet > PICKER_AFTER {
             self.dialogs += 1;
             return Ok(Step::Dialog);
@@ -153,7 +218,23 @@ impl Owner {
                 return Ok(Step::Next(next));
             }
         }
-        if self.follow_ups.is_empty() && !seen.busy && seen.quiet > scenario.quiet {
+        if self.follow_ups.is_empty()
+            && seen.owed == Owed::Due
+            && !seen.busy
+            && seen.quiet > FOLLOW_UP_AFTER
+            && (self.worked_since || self.extra_sent == 0 || seen.quiet > scenario.quiet)
+        {
+            if let Some(piece) = self.next_piece(seen.elapsed, timeout) {
+                self.extra_sent += 1;
+                self.worked_since = false;
+                return Ok(Step::More(piece));
+            }
+        }
+        if self.follow_ups.is_empty()
+            && seen.owed == Owed::Nothing
+            && !seen.busy
+            && seen.quiet > scenario.quiet
+        {
             return Ok(Step::Over);
         }
         if seen.elapsed > timeout {
