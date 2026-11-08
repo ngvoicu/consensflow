@@ -2364,7 +2364,7 @@ runs = ["quote-less-base"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/startup.rs"
-find = '''            Some(StartCode::Exit(status)) => format!("{said} (exit code {status})"),'''
+find = '''            Some(StartCode::Exit(status)) => format!("{said} (exit code {})", exit_words(status)),'''
 replace = '''            Some(StartCode::Exit(_)) => said,'''
 
 [[plant]]
@@ -2486,7 +2486,7 @@ runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/lib.rs"
-find = '''    startup.map_or(1, |failure| failure.kind().exit_status())'''
+find = '''    startup.map_or(1, StartKind::exit_status)'''
 replace = '''    startup.map_or(1, |_| 1)'''
 
 [[plant]]
@@ -2496,8 +2496,8 @@ runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/supervisor.rs"
-find = '''            Self::Unrunnable(refusal) => Some(refusal.failure()),'''
-replace = '''            Self::Unrunnable(_) => None,'''
+find = '''            Self::Unrunnable(refusal) => refusal.failure().kind(),'''
+replace = '''            Self::Unrunnable(_) => return None,'''
 
 [[plant]]
 name = "windows close: quote less: a Codex that was not found is no kind of start"
@@ -2506,8 +2506,8 @@ runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/supervisor.rs"
-find = '''            Self::ServerNotStarted { program, cause } | Self::Tui { program, cause } => {'''
-replace = '''            Self::Tui { program, cause } => {'''
+find = '''                not_spawned(Path::new(program), cause).failure().kind()'''
+replace = '''                { let _ = not_spawned(Path::new(program), cause); StartKind::NotStarted }'''
 
 [[plant]]
 name = "windows close: quote less: a Codex window's status of why is read as the screen's"
@@ -2526,8 +2526,8 @@ runs = ["engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        let shown = shown.with_start(start, crate::handoff::name_of(harness));'''
-replace = '''        let shown = shown.with_start(None, crate::handoff::name_of(harness));'''
+find = '''        let shown = shown.with_start(start, who);'''
+replace = '''        let shown = shown.with_start(None, who);'''
 
 [[plant]]
 name = "windows close: quote less: a status of why is read of any harness"
@@ -2720,3 +2720,194 @@ runs = ["quote-less-background-notes"]
 file = "crates/cf-engine/src/background.rs"
 find = '''        Some((program, false)) => Some(program),'''
 replace = '''        Some((program, _)) => Some(program),'''
+
+# T-1328, the third reading of T-1322: every failure of `cf codex-session` before Codex's TUI ran
+# ends the window with the status of its kind, and a status Codex returned in that range is
+# reported as 1, so that ConsensFlow's verdict is never a harness's.
+
+[[plant]]
+name = "windows close: quote less: a server that ended before it was ready is no kind of start"
+meant = "a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_wrote"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            } => StartKind::ServerStopped,'''
+replace = '''            } => StartKind::NotSetUp,'''
+
+[[plant]]
+name = "windows close: quote less: a server that was not ready in time is the kind of one that ended"
+meant = "a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_wrote"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            } => StartKind::ServerSilent,'''
+replace = '''            } => StartKind::ServerStopped,'''
+
+[[plant]]
+name = "windows close: quote less: a window ConsensFlow could not set up is another kind of start"
+meant = "a_flag_that_wants_a_value_and_has_none_is_refused_before_anything_starts"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            | Self::Signals(_) => StartKind::NotSetUp,'''
+replace = '''            | Self::Signals(_) => StartKind::NotStarted,'''
+
+[[plant]]
+name = "windows close: quote less: a socket folder that could not go is a start that failed"
+meant = "only_a_failure_before_the_tui_ran_is_a_status_of_why"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Cleanup { .. } => return None,'''
+replace = '''            Self::Cleanup { .. } => StartKind::NotSetUp,'''
+
+[[plant]]
+name = "windows close: quote less: a runtime that could not start is no kind of start"
+meant = "only_a_failure_before_the_tui_ran_is_a_status_of_why"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/lib.rs"
+find = '''            Some(StartKind::NotSetUp),
+        ),'''
+replace = '''            None,
+        ),'''
+
+[[plant]]
+name = "windows close: quote less: a TUI's status in the range of why is the window's"
+meant = "a_tui_that_ends_with_a_status_of_whys_number_is_reported_as_a_failure_and_no_start_that_failed"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        Ok(reported)'''
+replace = '''        Ok(code)'''
+
+[[plant]]
+name = "windows close: quote less: a window does not say it reported a Codex status as 1"
+meant = "a_tui_that_ends_with_a_status_of_whys_number_is_reported_as_a_failure_and_no_start_that_failed"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        if reported != code {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "windows close: quote less: a harness's status in the range of why is kept"
+meant = "a_status_a_harness_ended_with_is_reported_as_itself_but_for_those_of_the_range_which_are_1"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        1
+    } else {
+        code
+    }'''
+replace = '''    code'''
+
+[[plant]]
+name = "windows close: quote less: a harness's status in the range of why is reported as success"
+meant = "a_status_a_harness_ended_with_is_reported_as_itself_but_for_those_of_the_range_which_are_1"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        1
+    } else {'''
+replace = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        0
+    } else {'''
+
+[[plant]]
+name = "windows close: quote less: every failing status of a harness is reported as 1"
+meant = "a_status_a_harness_ended_with_is_reported_as_itself_but_for_those_of_the_range_which_are_1"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        1
+    } else {'''
+replace = '''    if code != 0 {
+        1
+    } else {'''
+
+[[plant]]
+name = "windows close: quote less: the range of why ends one status late"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_of_consensflows_and_reads_back"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            first + i32::try_from(Self::ALL.len() - 1).unwrap_or(0),'''
+replace = '''            first + i32::try_from(Self::ALL.len()).unwrap_or(0),'''
+
+[[plant]]
+name = "windows close: quote less: a session that did not get its harness ready has no advice"
+meant = "a_session_that_did_not_get_the_harness_ready_says_so_in_consensflows_words_and_the_exit_as_windows_writes_it"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            StartKind::NotSetUp | StartKind::ServerStopped | StartKind::ServerSilent => {
+                "its cause is in ConsensFlow's log".to_owned()
+            }'''
+replace = '''            StartKind::NotSetUp | StartKind::ServerStopped | StartKind::ServerSilent => {
+                return None
+            }'''
+
+[[plant]]
+name = "windows close: quote less: a Windows status is said in decimal"
+meant = "a_session_that_did_not_get_the_harness_ready_says_so_in_consensflows_words_and_the_exit_as_windows_writes_it"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if status < 0 {
+        format!('''
+replace = '''    if status < -(1 << 40) {
+        format!('''
+
+[[plant]]
+name = "windows close: quote less: the log of a window that never ran its harness is not written"
+meant = "the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if let Some(failure) = start {
+            self.seams.log.warn(&format!('''
+replace = '''        if let Some(failure) = start.filter(|_| false) {
+            self.seams.log.warn(&format!('''
+
+[[plant]]
+name = "windows close: quote less: the log of a window that never ran its harness holds the screen unmasked"
+meant = "the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            Some(tail) => Quote::of(tail, Keep::Last).map_or_else(
+                || "its screen was empty".to_owned(),
+                |quote| quote.after("its screen ended with"),
+            ),'''
+replace = '''            Some(tail) => format!("its screen ended with: \"{}\"", tail.join(BETWEEN)),'''
+
+[[plant]]
+name = "windows close: quote less: the log of a window that never ran its harness holds nothing of the screen"
+meant = "the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            None => "the host sent no screen".to_owned(),
+            Some(tail) => Quote::of(tail, Keep::Last).map_or_else('''
+replace = '''            None => "the host sent no screen".to_owned(),
+            Some(_) => Quote::of(&[], Keep::Last).map_or_else('''

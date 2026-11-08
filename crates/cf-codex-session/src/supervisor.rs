@@ -43,8 +43,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_base::file::error_code;
-use cf_base::startup::{harness_exit, StartFailure, StartKind, StartRefusal};
+use cf_base::startup::{harness_exit, StartKind, StartRefusal};
 use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{not_spawned, runnable, start_owned, Ending, Owned};
 use cf_proto::codex::agent_types::{agent_type, AgentType, AGENT_TYPES};
@@ -128,52 +127,43 @@ impl SessionError {
     /// The kind of failure, where this is a window that did not get Codex ready: the window's
     /// program then ends with the status of that kind (`cf_base::startup::StartKind::exit_status`),
     /// so that the engine reads from how the window ended, and not from its screen, that Codex never
-    /// ran, and a note says the kind, the code where there is one and what to do, and no word of the
-    /// program's, the server's or a path (T-1328, the second and third readings of T-1322). The full
-    /// cause is on the window's own screen, and ConsensFlow's log has what the screen showed.
+    /// ran, and a note says the kind and what to do, and no word of the program's, the server's or
+    /// a path (T-1328, the second and third readings of T-1322). A window's exit is one byte on a
+    /// Mac: the kind is all it carries, and the cause is on the window's own screen, of which
+    /// ConsensFlow's log keeps what the engine saw.
     ///
-    /// Every failure before Codex's TUI ran is one; the failure to remove the window's socket
-    /// folder is not (it comes after the window did its work, and the TUI's status stands for it).
-    pub(crate) fn startup(&self) -> Option<StartFailure> {
+    /// Every failure before Codex's TUI ran is one (each variant is decided here, none by a
+    /// wildcard); the failure to remove the window's socket folder is not (it comes after the
+    /// window did its work, and the TUI's status stands for it).
+    pub(crate) fn startup(&self) -> Option<StartKind> {
         Some(match self {
-            Self::Unrunnable(refusal) => refusal.failure(),
+            Self::Unrunnable(refusal) => refusal.failure().kind(),
             Self::ServerNotStarted { program, cause } | Self::Tui { program, cause } => {
-                not_spawned(Path::new(program), cause).failure()
+                not_spawned(Path::new(program), cause).failure().kind()
             }
             Self::Server {
                 how: ServerEnd::Ended,
                 ..
-            } => StartFailure::of(StartKind::ServerStopped),
+            } => StartKind::ServerStopped,
             Self::Server {
                 how: ServerEnd::Silent,
                 ..
-            } => StartFailure::of(StartKind::ServerSilent),
-            Self::Role { cause, .. } | Self::Children { cause, .. } | Self::Signals(cause) => {
-                set_up(Some(cause))
-            }
-            Self::Broker(StartError::Listen { cause, .. }) => set_up(Some(cause)),
+            } => StartKind::ServerSilent,
             Self::NoProgram
             | Self::Bridge(_)
             | Self::Arguments(_)
+            | Self::Role { .. }
             | Self::NoRole { .. }
             | Self::NoRoleFile
+            | Self::Children { .. }
             | Self::NoChildren { .. }
             | Self::NoChildrenFile
             | Self::NoAgentType(_)
             | Self::Endpoint(_)
-            | Self::Broker(_) => set_up(None),
+            | Self::Broker(_)
+            | Self::Signals(_) => StartKind::NotSetUp,
             Self::Cleanup { .. } => return None,
         })
-    }
-}
-
-/// A window ConsensFlow could not set up, the system's name for what went wrong where an I/O
-/// error says it.
-pub(crate) fn set_up(cause: Option<&io::Error>) -> StartFailure {
-    let failure = StartFailure::of(StartKind::NotSetUp);
-    match cause.map(error_code) {
-        Some(code) if code != "UNKNOWN" => failure.with_errno(code),
-        _ => failure,
     }
 }
 

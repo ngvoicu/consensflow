@@ -322,9 +322,13 @@ runs = ["failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
 find = '''
+        let lines: Vec<String> = lines
+            .iter()
             .filter(|line| line.chars().any(char::is_alphanumeric))
 '''
 replace = '''
+        let lines: Vec<String> = lines
+            .iter()
             .filter(|line| !line.trim().is_empty())
 '''
 

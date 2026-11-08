@@ -1457,6 +1457,59 @@ fn a_codex_window_that_did_not_get_codex_ready_says_why_from_how_it_ended_and_qu
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The note says only the kind of a start that failed, so what the window showed is in the log
+/// for whoever must find out why: masked, as every quote is, and whole of a screen that names a
+/// secret-like word (the log is the person's own file).
+#[test]
+fn the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note() {
+    let rows = [
+        "ConsensFlow could not open Codex: Codex server could not start:",
+        "/opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory",
+        "token sk-abcdefghijklmnopqrstuvwxyz0123456789",
+    ];
+    let status = u32::try_from(StartKind::ServerStopped.exit_status()).unwrap();
+    let context = with_codex();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+            "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project")
+        .id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.expect("its session");
+    context.host.exits_showing(Some(status), None, Some(&rows));
+    context.exit(&session);
+    let logged: Vec<String> = context
+        .log
+        .warnings
+        .borrow()
+        .iter()
+        .filter(|line| line.contains("never ran Codex"))
+        .cloned()
+        .collect();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    let line = &logged[0];
+    assert!(
+        line.contains("'s window never ran Codex: Codex's server stopped before it was ready; its cause is in ConsensFlow's log; its screen ended with: \""),
+        "{line}"
+    );
+    assert!(
+        line.contains("/opt/hunter22/codex: line 2"),
+        "the cause is in the log: {line}"
+    );
+    assert!(
+        line.contains("(1 key- or token-like string masked)") && !line.contains("sk-abcdefghijkl"),
+        "masked as every quote is: {line}"
+    );
+    context.close();
+}
+
 /// A Codex window a signal ended is not one that could not start Codex, whatever code the host
 /// also named: the status of why is read only where no signal ended the program.
 #[test]

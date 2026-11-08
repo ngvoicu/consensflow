@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use cf_base::startup::StartKind;
+use cf_base::startup::{StartFailure, StartKind};
 use sha2::{Digest, Sha256};
 
 use super::*;
@@ -115,15 +115,11 @@ impl Home {
     }
 }
 
-/// That `failed` is a window ConsensFlow could not set up (`errno` the system's name for what went
-/// wrong where an I/O error says it), and that the window ends with the status of that: a note says
-/// no more of it (the third reading of T-1322: every failure before Codex's TUI ran has a status).
-fn not_set_up(failed: &SessionError, errno: Option<&'static str>) {
-    let mut expected = StartFailure::of(StartKind::NotSetUp);
-    if let Some(code) = errno {
-        expected = expected.with_errno(code);
-    }
-    assert_eq!(failed.startup(), Some(expected), "{failed}");
+/// That `failed` is a window ConsensFlow could not set up, and that the window ends with the status
+/// of that: a note says no more of it (the third reading of T-1322: every failure before Codex's TUI
+/// ran has a status).
+fn not_set_up(failed: &SessionError) {
+    assert_eq!(failed.startup(), Some(StartKind::NotSetUp), "{failed}");
     assert_eq!(
         crate::fail(&failed.to_string(), failed.startup()),
         StartKind::NotSetUp.exit_status(),
@@ -317,10 +313,7 @@ fn a_program_that_is_not_there_is_said_by_its_path_and_the_systems_words() {
         )
     );
     // What a note says of it: the kind and the code, and no file (T-1328).
-    assert_eq!(
-        failed.startup(),
-        Some(StartFailure::of(StartKind::NotFound).with_errno("ENOENT"))
-    );
+    assert_eq!(failed.startup(), Some(StartKind::NotFound));
     assert!(home.left_behind().is_empty());
 }
 
@@ -346,7 +339,7 @@ fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_
     assert!(matches!(failed, SessionError::Unrunnable(_)), "{failed:?}");
     // The window ends with the status of why, so that the engine reads from how it ended that
     // Codex never ran, and a note says so without quoting the screen that names the shim (T-1328).
-    assert_eq!(failed.startup(), Some(StartFailure::of(StartKind::NoNode)));
+    assert_eq!(failed.startup(), Some(StartKind::NoNode));
     let said = failed.to_string();
     assert!(said.starts_with(&shim.display().to_string()), "{said}");
     assert!(
@@ -376,7 +369,7 @@ fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other
         (StartKind::ServerStopped, 79),
         (StartKind::ServerSilent, 80),
     ] {
-        assert_eq!(crate::fail("boom", Some(StartFailure::of(kind))), status);
+        assert_eq!(crate::fail("boom", Some(kind)), status);
     }
     assert_eq!(crate::fail("boom", None), 1);
     // The server's own words, once it ran, are no kind: how it went is (the third reading of T-1322).
@@ -386,7 +379,7 @@ fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other
             how: ServerEnd::Ended,
         }
         .startup(),
-        Some(StartFailure::of(StartKind::ServerStopped))
+        Some(StartKind::ServerStopped)
     );
 }
 
@@ -401,13 +394,13 @@ fn a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_w
         (
             "echo '/opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory' >&2\nexit 127",
             Duration::from_secs(5),
-            StartFailure::of(StartKind::ServerStopped),
+            StartKind::ServerStopped,
             79,
         ),
         (
             "echo 'still loading, key: abc' >&2\nexec sleep 60",
             Duration::from_secs(2),
-            StartFailure::of(StartKind::ServerSilent),
+            StartKind::ServerSilent,
             80,
         ),
     ] {
@@ -416,7 +409,7 @@ fn a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_w
         let failed = home.supervise(codex, &[], startup).unwrap_err();
         assert_eq!(failed.startup(), Some(kind), "{failed}");
         assert_eq!(crate::fail(&failed.to_string(), failed.startup()), status);
-        let note = kind.words("Codex");
+        let note = StartFailure::of(kind).words("Codex");
         for word in ["hunter22", "/opt", "key: abc", "loading"] {
             assert!(!note.contains(word), "{word} is in {note}");
         }
@@ -465,6 +458,27 @@ fn a_tui_that_ends_with_a_status_of_whys_number_is_reported_as_a_failure_and_no_
     }
 }
 
+/// T-1328, the third reading: how a supervisor ended says the window's status, and only a failure
+/// before the TUI ran is a status of why. A socket folder that could not be removed comes after the
+/// window did its work, and ends it with 1, as it did; a runtime that could not start did not get
+/// Codex ready, and says the system's name for why.
+#[test]
+fn only_a_failure_before_the_tui_ran_is_a_status_of_why() {
+    let cleanup = SessionError::Cleanup {
+        path: PathBuf::from("/tmp/cf-socket"),
+        cause: io::Error::from(io::ErrorKind::PermissionDenied),
+    };
+    assert_eq!(cleanup.startup(), None);
+    assert_eq!(crate::status_of(Ok(Err(cleanup))), 1);
+    assert_eq!(crate::status_of(Ok(Ok(7))), 7);
+    assert_eq!(crate::status_of(Ok(Ok(0))), 0);
+    let runtime = io::Error::from_raw_os_error(13);
+    assert_eq!(
+        crate::status_of(Err(runtime)),
+        StartKind::NotSetUp.exit_status()
+    );
+}
+
 #[test]
 fn a_bridge_that_is_missing_or_not_what_a_broker_needs_is_refused_before_anything_starts() {
     for bridge in [
@@ -486,7 +500,7 @@ fn a_bridge_that_is_missing_or_not_what_a_broker_needs_is_refused_before_anythin
             "Invalid Codex broker configuration",
             "{bridge:?}"
         );
-        not_set_up(&failed, None);
+        not_set_up(&failed);
         assert!(!started.exists(), "Codex started under {bridge:?}");
         assert!(
             !home.dir.path().join("tmp").exists(),
@@ -508,7 +522,7 @@ fn a_flag_that_wants_a_value_and_has_none_is_refused_before_anything_starts() {
             .supervise(&codex, &["resume", given], Duration::from_secs(5))
             .unwrap_err();
         assert_eq!(failed.to_string(), said);
-        not_set_up(&failed, None);
+        not_set_up(&failed);
     }
     assert!(!started.exists());
 }
@@ -529,9 +543,7 @@ fn a_role_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refused_befo
                 || failed.starts_with(&format!("could not read its role from {file}: ")),
             "{failed}"
         );
-        // A role that cannot be read says the system's name for why, and one that holds nothing none.
-        let unread = failed.starts_with("could not read");
-        not_set_up(&error, unread.then_some("ENOENT"));
+        not_set_up(&error);
         assert!(!started.exists(), "Codex started without its role");
         assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
     }
@@ -556,7 +568,7 @@ fn a_role_variable_set_to_nothing_is_refused_before_anything_starts() {
         .unwrap()
         .unwrap_err();
     assert_eq!(failed.to_string(), "CF_CODEX_ROLE_FILE names no file");
-    not_set_up(&failed, None);
+    not_set_up(&failed);
     assert!(!started.exists(), "Codex started without its role");
 }
 
@@ -571,7 +583,7 @@ fn no_program_named_is_said() {
         .unwrap()
         .unwrap_err();
     assert_eq!(failed.to_string(), "no Codex program was named");
-    not_set_up(&failed, None);
+    not_set_up(&failed);
 }
 
 /// Codex as one script for both its programs: the server runs `server_first`,
@@ -945,11 +957,7 @@ fn a_sub_agents_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refuse
         .unwrap_err();
         assert!(failed.to_string().starts_with(&said), "{failed}");
         // Whatever it was, it is a window ConsensFlow could not set up; an unreadable file says why.
-        assert_eq!(
-            failed.startup().map(|failure| failure.kind()),
-            Some(StartKind::NotSetUp),
-            "{failed}"
-        );
+        assert_eq!(failed.startup(), Some(StartKind::NotSetUp), "{failed}");
         assert!(!started.exists(), "Codex started without it");
         assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
     }

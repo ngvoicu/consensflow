@@ -20,7 +20,7 @@ use std::future::Future;
 use std::io::{self, Write};
 
 use cf_base::env::Env;
-use cf_base::startup::StartFailure;
+use cf_base::startup::StartKind;
 use tokio::task::LocalSet;
 
 /// Runs a Codex window: `args` are the Codex program and the arguments it is
@@ -31,12 +31,18 @@ use tokio::task::LocalSet;
 /// ([`fail`], T-1328): every failure before the TUI ran has one, so that the engine reads the
 /// status, and never the screen, of a window that did not get Codex ready.
 pub fn run(env: &Env, args: &[OsString]) -> i32 {
-    match block_on_local(supervisor::supervise(env, args)) {
+    status_of(block_on_local(supervisor::supervise(env, args)))
+}
+
+/// The status a window ends with, of how its supervisor ended: the TUI's, or the status of why
+/// where it was a failure before the TUI ran (a runtime that could not start among them).
+fn status_of(ended: io::Result<Result<i32, supervisor::SessionError>>) -> i32 {
+    match ended {
         Ok(Ok(code)) => code,
         Ok(Err(cause)) => fail(&cause.to_string(), cause.startup()),
         Err(cause) => fail(
             &format!("could not start its runtime: {cause}"),
-            Some(supervisor::set_up(Some(&cause))),
+            Some(StartKind::NotSetUp),
         ),
     }
 }
@@ -60,7 +66,7 @@ fn block_on_local<F: Future>(future: F) -> io::Result<F::Output> {
 /// Says why Codex could not be opened, on standard error, in the person's own words (the file
 /// that was tried is named), and ends the window with the status of the kind of failure where it
 /// is one of a start (`StartKind::exit_status`), else 1.
-fn fail(reason: &str, startup: Option<StartFailure>) -> i32 {
+fn fail(reason: &str, startup: Option<StartKind>) -> i32 {
     let _ = writeln!(io::stderr(), "ConsensFlow could not open Codex: {reason}");
-    startup.map_or(1, |failure| failure.kind().exit_status())
+    startup.map_or(1, StartKind::exit_status)
 }
