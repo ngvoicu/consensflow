@@ -319,7 +319,7 @@ replace = '        if answers(&answer) || true {'
 
 [[plant]]
 name = 'listing: ledger: a stale listing is kept fresh'
-meant = "a_harness_s_listing_is_kept_whole_and_a_failed_read_keeps_the_one_before_stale"
+meant = "a_harness_s_listing_is_kept_whole_and_a_failed_read_replaces_it_with_no_list"
 runs = ["ch-ledger"]
 
 [[plant.edit]]
