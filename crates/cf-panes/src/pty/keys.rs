@@ -419,6 +419,83 @@ mod conpty {
         (hex, seen)
     }
 
+    /// How many bytes the console host reads from a pane's input at once: the size of the
+    /// buffer of its input thread (`VtInputThread`, 4,096), so that a write which reaches past
+    /// it is read in two.
+    const CONSOLE_READ: usize = 4096;
+
+    /// A program that says READY, prints each key it reads that is not an `x` as
+    /// `KEY<n>=[<key>|<character>|<modifiers>]#` (`n` counting every key read), and says DONE
+    /// once no key has come for three seconds.
+    fn quiet_key_reader() -> Vec<String> {
+        powershell(
+            "Write-Output 'READY'; $n = 0; $last = Get-Date; \
+             while (((Get-Date) - $last).TotalSeconds -lt 3) { \
+               if ([Console]::KeyAvailable) { $k = [Console]::ReadKey($true); $n++; $last = Get-Date; \
+                 if ($k.KeyChar -ne 'x') { Write-Output (\"KEY{0}=[{1}|{2}|{3}]#\" -f $n, $k.Key, [int]$k.KeyChar, [int]$k.Modifiers) } } \
+               else { Start-Sleep -Milliseconds 20 } }; \
+             Write-Output 'DONE'",
+        )
+    }
+
+    /// The keys, other than the `x`s, that a program which reads key events reads when `filler`
+    /// `x`s and then `key` are written to its pane in one write (as the pane host writes a
+    /// human's keys behind a paste that has not been read yet).
+    fn keys_behind(filler: usize, key: &[u8]) -> (Vec<(String, u32, u32)>, String) {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let (pane, output) = open(&table, &quiet_key_reader(), &HashMap::new(), 1 << 20);
+        read_until(&table, &pane, &output, "READY");
+        let mut bytes = vec![b'x'; filler];
+        bytes.extend_from_slice(key);
+        table.write(&pane, &bytes).expect("write the keys");
+        let seen = read_until(&table, &pane, &output, "DONE");
+        table.kill(&pane).expect("close the pane");
+        let keys = keys_read(&seen)
+            .into_iter()
+            .map(|read| (read.key, read.character, read.modifiers))
+            .collect();
+        (keys, seen)
+    }
+
+    /// What the page writes for a new line must never reach a window as a lone Escape (T-1336):
+    /// an Escape is the key that stops a harness's turn. The console host reads its input
+    /// `CONSOLE_READ` bytes at a time and takes an Escape that ends a read for the Escape key,
+    /// whatever follows in the next (it holds one only after it has read a key written in
+    /// win32-input-mode, which holds every lone Escape the engine presses for good:
+    /// `after_one_key_in_win32_input_mode_the_console_host_holds_the_lone_escapes_the_engine_presses`).
+    /// So an `ESC CR` that begins at the last byte of a read is the Escape key, then Enter.
+    #[test]
+    fn an_escape_led_key_that_begins_where_the_console_hosts_read_ends_is_a_lone_escape() {
+        let (split, seen) = keys_behind(CONSOLE_READ - 1, b"\x1b\r");
+        assert_eq!(
+            split,
+            [("Escape".to_owned(), 27, 0), ("Enter".to_owned(), 13, 0)],
+            "ESC CR written at the end of a read; its screen: {seen:?}"
+        );
+        let (whole, seen) = keys_behind(CONSOLE_READ - 100, b"\x1b\r");
+        assert_eq!(
+            whole,
+            [("Enter".to_owned(), 13, 1)],
+            "ESC CR written inside a read; its screen: {seen:?}"
+        );
+    }
+
+    /// A line feed is one byte, which no read can split: it is the same key, Enter with Control,
+    /// wherever it falls.
+    #[test]
+    fn a_line_feed_is_the_same_key_wherever_the_console_hosts_read_ends() {
+        for filler in [CONSOLE_READ - 1, CONSOLE_READ - 100, 0] {
+            let (keys, seen) = keys_behind(filler, b"\n");
+            assert_eq!(
+                keys,
+                [("Enter".to_owned(), 10, 4)],
+                "a line feed after {filler} bytes; its screen: {seen:?}"
+            );
+        }
+    }
+
     /// What the console host makes of the bytes the page writes for Shift+Enter (T-1330), for the
     /// harnesses that read the console's key events (Codex, Devin and Muse, through crossterm,
     /// which reads the Enter key with the modifiers the console says): ESC CR is the Enter key
