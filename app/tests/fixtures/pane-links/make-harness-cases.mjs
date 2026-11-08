@@ -12,7 +12,7 @@
  *   writes OSC 8, sliced out of the installed binary's JavaScript when this runs (nothing of it is
  *   kept here). Plain: `Cb(address, words, {supportsHyperlinks: false})`. With ConsensFlow's
  *   `FORCE_HYPERLINK=1` in the environment: `Cb(address, words)`, which asks `Tb()` itself.
- * - Codex: `codex-cases.json` (8 cases), recorded by the review of T-1291 from the isolated
+ * - Codex: `codex-cases.json` (8 cases), recorded by the review of T-1314 from the isolated
  *   compilation of `osc8_hyperlink`, `web_destination` and `sanitized_destination` of
  *   openai/codex `rust-v0.167.0` (`codex-rs/tui/src/terminal_hyperlinks.rs`); Codex sends OSC 8 for
  *   an `http` or `https` address whatever the terminal, so it has nothing to switch.

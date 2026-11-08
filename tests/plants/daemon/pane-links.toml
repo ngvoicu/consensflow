@@ -37,8 +37,9 @@
 # A plant that falls through to the system's opener runs a harmless stand-in in its place: the
 # plant of the fail-closed rule says "opens" with `|_| Ok(())`, for a plant that really opened
 # a page would do on the machine of whoever runs it what the rule is there to stop (T-1291's first
-# run opened `file:///etc/passwd` on the Mac). The plant that sends Windows back to Explorer is
-# harmless for the same reason: `update_page::open` opens nothing in a test build.
+# run opened `file:///etc/passwd` on the Mac). Explorer cannot be planted back for the same reason
+# (the only Explorer left in the app is `update_page::open_with`, which starts a program): the
+# plants of the Windows route say a page opened and ask the shell nothing instead.
 #
 # One plant takes one rule out; a test of it fails. The page's run the browser's, the app's the tests
 # of the link module on this system; the xterm they stand on is the tracked `app/ui/vendor`, so no
@@ -248,7 +249,7 @@ replace = '''    let mut command = Command::new("/bin/sh");
 # --- Windows: the shell opens the page, and says if it could not (T-1307) ---
 
 [[plant]]
-name = "pane links: Windows opens a page through Explorer again"
+name = "pane links: Windows says a page opened and asks the shell nothing"
 meant = "on_windows_the_system_opener_is_shellexecute_with_the_address_as_the_file"
 runs = ["pl-app"]
 platforms = ["windows"]
@@ -257,7 +258,7 @@ platforms = ["windows"]
 file = "app/src-tauri/src/link.rs"
 find = """        shell::open(address)
 """
-replace = """        crate::update_page::open(address)
+replace = """        Ok(())
 """
 
 [[plant]]
