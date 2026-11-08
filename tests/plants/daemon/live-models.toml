@@ -181,8 +181,8 @@ find = "                if *began > arrived {"
 replace = "                if false {"
 
 [[plant]]
-name = "live models: a Refresh takes the answer of the read in flight"
-meant = "two_reads_of_one_harness_are_one_after_the_other"
+name = "live models: a Refresh takes the answer of a read begun after it came"
+meant = "a_refresh_that_waited_behind_a_read_begun_after_it_came_still_reads_and_fetches_for_itself"
 runs = ["lm-daemon"]
 
 [[plant.edit]]
@@ -361,7 +361,7 @@ replace = "    for (const kind of kinds.slice(0, 1)) this.get(harnessOf(kind))"
 
 [[plant]]
 name = "live models: the chief's picker and the members' read each harness apart"
-meant = "New project reads every installed harness's models as it opens, all at once, and each select says it is reading until its answer comes (A4-28)"
+meant = "a Refresh in one picker updates every picker that shows the harness, and a submission names the read each was shown (A4-28, review 5)"
 runs = ["lm-page"]
 
 [[plant.edit]]
@@ -502,5 +502,5 @@ runs = ["lm-homes"]
 file = "crates/cf-harness/src/pi/models/tests/homes.rs"
 find = "    (Env::from_vars(vars), pi)"
 replace = '''    let _ = vars;
-    (base.with_var("PATH", &joined.to_string_lossy()), pi)'''
+    (base, pi)'''
 

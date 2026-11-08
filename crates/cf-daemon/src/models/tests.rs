@@ -447,6 +447,48 @@ fn asks_already_waiting_when_a_read_begins_share_it() {
     );
 }
 
+/// A Refresh reads for itself, however the reads of its harness were queued: one that waited
+/// behind a read which began after it came is not given that read, which fetches nothing.
+#[test]
+fn a_refresh_that_waited_behind_a_read_begun_after_it_came_still_reads_and_fetches_for_itself() {
+    let home = home(&["devin"]);
+    let gate = Rc::new(Notify::new());
+    let devin = Rc::new(Listing {
+        answers: RefCell::new(
+            [
+                Ok(models(&["swe-2"], 1_000)),
+                Ok(models(&["swe-3"], 2_000)),
+                Ok(models(&["swe-4"], 3_000)),
+            ]
+            .into(),
+        ),
+        gate: Some(Rc::clone(&gate)),
+        ..Listing::default()
+    });
+    let lists = lists(&home, ByKind(vec![("devin", Rc::clone(&devin))]));
+    let mut context = Context::from_waker(Waker::noop());
+    let mut first = pin!(lists.get(Harness::Devin, false));
+    let mut waiting = pin!(lists.get(Harness::Devin, false));
+    let mut refresh = pin!(lists.get(Harness::Devin, true));
+    assert!(first.as_mut().poll(&mut context).is_pending());
+    assert!(waiting.as_mut().poll(&mut context).is_pending());
+    assert!(refresh.as_mut().poll(&mut context).is_pending());
+    gate.notify_one();
+    assert!(first.as_mut().poll(&mut context).is_ready());
+    // The ask before the Refresh begins the second read, which began after the Refresh came.
+    assert!(waiting.as_mut().poll(&mut context).is_pending());
+    gate.notify_one();
+    assert!(waiting.as_mut().poll(&mut context).is_ready());
+    // The Refresh does not take it: it reads, and fetches, for itself.
+    assert!(refresh.as_mut().poll(&mut context).is_pending());
+    gate.notify_one();
+    let Poll::Ready(refreshed) = refresh.as_mut().poll(&mut context) else {
+        panic!("the Refresh did not finish");
+    };
+    assert_eq!(refreshed.unwrap().models[0].id, "swe-4");
+    assert_eq!(*devin.asked.borrow(), [false, false, true]);
+}
+
 /// A Refresh of Pi is slow (its update, then its read: the page waits on it up to its bridge's
 /// 30 s), and another harness's read does not wait for it: each harness has its own turn (the
 /// review T-1270, F8: a Claude listing timed out behind a Pi Refresh).
