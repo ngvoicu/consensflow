@@ -1,63 +1,43 @@
-//! What the home keeps of each harness's models (CHF-03): its last listing, when and how
-//! it was read, and why it is stale where it is; kept across a reopen, one row a harness.
+//! What older builds kept of each harness's models (CHF-03; the table is migration 0027's): a
+//! list is read when it is asked for now (A4-28), so nothing writes or reads these rows, and the
+//! daemon forgets what an older build left as it starts.
 
 #![allow(clippy::unwrap_used)]
 
 use cf_ledger::{open_ledger, Options};
-use cf_proto::models::{Freshness, ModelChoice, ModelListing};
+use rusqlite::Connection;
 
-fn listing(ids: &[&str]) -> ModelListing {
-    ModelListing::read(
-        ids.iter().map(|id| ModelChoice::new(*id, *id)).collect(),
-        10,
-        "devin models list --format json",
-    )
+fn rows(file: &std::path::Path) -> i64 {
+    Connection::open(file)
+        .unwrap()
+        .query_row("SELECT count(*) FROM model_list", [], |row| row.get(0))
+        .unwrap()
 }
 
 #[test]
-fn a_harness_s_listing_is_kept_whole_and_a_failed_read_replaces_it_with_no_list() {
+fn forgetting_the_kept_listings_takes_every_row_an_older_build_left() {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("consensflow.db");
-    let mut ledger = open_ledger(&file, Options::default()).unwrap();
-    assert_eq!(ledger.model_listing("devin").unwrap(), None, "never tried");
-
-    let read = listing(&["swe-2", "adaptive"]);
-    ledger.keep_model_listing("devin", &read).unwrap();
-    assert_eq!(ledger.model_listing("devin").unwrap(), Some(read.clone()));
-
-    let failed = ModelListing::failed("Not logged in");
-    ledger.keep_model_listing("devin", &failed).unwrap();
+    let ledger = open_ledger(&file, Options::default()).unwrap();
     ledger.close().unwrap();
+    let db = Connection::open(&file).unwrap();
+    for harness in ["claude", "devin", "pi"] {
+        db.execute(
+            "INSERT INTO model_list (harness, models, read_at, how, stale_why) \
+             VALUES (?, '[]', 10, 'an older build', 'Not logged in')",
+            [harness],
+        )
+        .unwrap();
+    }
+    drop(db);
+    assert_eq!(rows(&file), 3);
 
     let mut ledger = open_ledger(&file, Options::default()).unwrap();
-    let after = ledger.model_listing("devin").unwrap().unwrap();
-    assert!(
-        after.models.is_empty(),
-        "the list read before is not kept in its place"
-    );
-    assert_eq!(after.read_at, None);
     assert_eq!(
-        after.freshness,
-        Freshness::Stale {
-            why: "Not logged in".to_owned()
-        }
+        rows(&file),
+        3,
+        "opening the ledger forgets nothing: migrations read these rows"
     );
-    assert_eq!(
-        ledger.model_listing("claude").unwrap(),
-        None,
-        "one row a harness"
-    );
-
-    ledger.keep_model_listing("claude", &read).unwrap();
     ledger.forget_model_listings().unwrap();
-    assert_eq!(ledger.model_listing("devin").unwrap(), None, "forgotten");
-    assert_eq!(ledger.model_listing("claude").unwrap(), None, "every row");
-}
-
-#[test]
-fn a_listing_that_names_no_harness_is_refused() {
-    let folder = tempfile::tempdir().unwrap();
-    let mut ledger =
-        open_ledger(&folder.path().join("consensflow.db"), Options::default()).unwrap();
-    assert!(ledger.keep_model_listing("", &listing(&["a"])).is_err());
+    assert_eq!(rows(&file), 0, "every row of every harness");
 }

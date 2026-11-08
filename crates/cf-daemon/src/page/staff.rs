@@ -41,7 +41,7 @@ pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, 
         Some(_) => return Err(Said::from("when is now or turn")),
     };
     let note = body.get("note") == Some(&Value::Bool(true));
-    let target = chief_asked(page, body, true)?;
+    let target = chief_asked(page, body, true).await?;
     let project = page
         .engine
         .switch_chief(body.whole("project")?, target, when, note)
@@ -57,7 +57,7 @@ pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, 
 /// worker on the same model is a member beside it, whichever came first.
 pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
-    let member = picked_member(page, body, true)?;
+    let member = picked_member(page, body, true).await?;
     let on_it = active_member(page, project, |member_now| {
         member_now.harness.as_deref() == Some(member.harness.as_str())
             && member_now.model == member.model
@@ -97,12 +97,40 @@ pub(super) async fn edit(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             "an image designer has nothing to edit: it draws on Codex's own model",
         ));
     }
-    let picked = picked(page, body, designer, true)?;
+    // An edit that leaves the model and effort as they are saves the member's own choice, already
+    // resolved when it was made (Devin's `swe-2-high`, not `swe-2` and `high`): the page says so
+    // with `unchanged`, as it can where its harness's list could not be read, and no list is
+    // asked for what is not changed.
+    let picked = if body.get("unchanged") == Some(&Value::Bool(true)) {
+        kept_choice(body, &found)?
+    } else {
+        picked(page, body, designer, true).await?
+    };
     let edited = page
         .ledger
         .borrow_mut()
         .edit_member(project, &handle, &picked.edit())?;
     one("member", edited)
+}
+
+/// What the member `found` runs on now, kept as it is, with the tier `body` names: an edit that
+/// changes neither its model nor its effort.
+fn kept_choice(body: Body<'_>, found: &ParticipantView) -> Result<Picked, Said> {
+    let kind = body.text("harness");
+    if found.harness.as_deref() != Some(kind.as_ref()) {
+        return Err(Said::from(
+            "an edit that leaves the model unchanged keeps the member's own harness",
+        ));
+    }
+    let harness = Harness::from_kind(&kind)
+        .ok_or_else(|| Said(format!("{kind} is no harness ConsensFlow runs")))?;
+    Ok(Picked {
+        harness,
+        model: found.model.clone(),
+        effort: found.effort.clone(),
+        model_name: found.model_name.clone(),
+        tier: tier_of(body.get("tier"))?,
+    })
 }
 
 /// What `member` runs on, as Edit member changes it.
@@ -138,10 +166,14 @@ fn active_member(
 /// (a worker where it names none), and what it runs on ([`picked`]); `adapter` where the
 /// page asks the engine whether it opens windows of the harness (Add member: New project's
 /// engine says so as it opens the project).
-pub(super) fn picked_member(page: &Page, body: Body<'_>, adapter: bool) -> Result<NewMember, Said> {
+pub(super) async fn picked_member(
+    page: &Page,
+    body: Body<'_>,
+    adapter: bool,
+) -> Result<NewMember, Said> {
     let roles = parse_roles(Some(body.get("roles").unwrap_or(&json!(["worker"]))))?;
     let designer = roles.contains(&"designer");
-    let picked = picked(page, body, designer, adapter)?;
+    let picked = picked(page, body, designer, adapter).await?;
     Ok(NewMember {
         harness: picked.harness.kind().to_owned(),
         model: picked.model,
@@ -198,7 +230,12 @@ pub(super) fn tier_of(value: Option<&Value>) -> Result<WorkTier, Said> {
 /// chief's model is), named as the listing names it; and a tier, which the human must
 /// pick. Devin's effort is part of the id it lists for it (`model_uid`): the member's model
 /// is that id, never the model and the effort joined, and its effort is said beside it.
-fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<Picked, Said> {
+async fn picked(
+    page: &Page,
+    body: Body<'_>,
+    designer: bool,
+    adapter: bool,
+) -> Result<Picked, Said> {
     let kind = body.text("harness").into_owned();
     let harness = Harness::from_kind(&kind)
         .ok_or_else(|| Said(format!("{kind} is no harness ConsensFlow runs")))?;
@@ -217,7 +254,7 @@ fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<
     };
     let effort = effort_of(body)?;
     let tier = tier_of(body.get("tier"))?;
-    let resolved = resolve(page, harness, &kind, model, effort)?;
+    let resolved = resolve(page, harness, &kind, model, effort, read_of(body)?).await?;
     Ok(Picked {
         harness,
         model: Some(resolved.model),
@@ -272,27 +309,43 @@ pub(super) struct Resolved {
     pub(super) model_name: Option<String>,
 }
 
+/// The read a submission was made from (`read`, the id `models.get` answered with): none where
+/// the body names none.
+pub(super) fn read_of(body: Body<'_>) -> Result<Option<u64>, Said> {
+    match body.get("read") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(read)) => read
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| Said::from("read is the number models.get answered with")),
+        Some(_) => Err(Said::from("read is the number models.get answered with")),
+    }
+}
+
 /// `model` at `effort` on `harness` (`kind`, as the body said it), checked as Add member,
-/// Edit member, New project and Switch chief all check it: a model id the ledger takes; where
-/// the home keeps the harness's listing, one it lists and runs, at one of the efforts it
-/// lists for it (none where it lists none), named as the listing names it, and held as the
-/// launch passes it (Devin's effort is part of the id it lists for it, `model_uid`). A harness
-/// never read is taken at its word, as it was asked.
-pub(super) fn resolve(
+/// Edit member, New project and Switch chief all check it: a model id the ledger takes; one the
+/// list the picker showed (the read `read` names) lists and runs, at one of the efforts it
+/// lists for it (none where it lists none), named as that list names it, and held as the
+/// launch passes it (Devin's effort is part of the id it lists for it, `model_uid`). Where the
+/// daemon keeps no such read, or it failed, the harness is read again and the pick is checked
+/// against that read; where that cannot be read either, nothing is accepted unchecked.
+pub(super) async fn resolve(
     page: &Page,
     harness: Harness,
     kind: &str,
     model: &str,
     effort: Option<&str>,
+    read: Option<u64>,
 ) -> Result<Resolved, Said> {
     cf_ledger::model::require_model_id(model)?;
-    let kept = page
-        .ledger
-        .borrow()
-        .model_listing(harness.as_str())
-        .map_err(|failed| failed.to_string())?
-        .filter(|listing| !listing.models.is_empty());
-    let Some(listing) = kept else {
+    let checked = page.models.checked(harness, read).await.map_err(|why| {
+        Said(format!(
+            "{kind}'s models could not be read, so {model} cannot be checked: {why}"
+        ))
+    })?;
+    // A harness ConsensFlow has no adapter to list the models of has no list to check against:
+    // its model is taken at the human's word.
+    let Some(listing) = checked else {
         return Ok(Resolved {
             model: model.to_owned(),
             effort: effort.map(str::to_owned),

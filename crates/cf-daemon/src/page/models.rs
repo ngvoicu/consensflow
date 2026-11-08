@@ -19,11 +19,14 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let name = body.text("harness");
     let harness = Harness::from_name(&name).ok_or_else(|| format!("{name:?} is no harness"))?;
     let refresh = body.get("refresh") == Some(&Value::Bool(true));
-    let listing = page.models.get(&page.ledger, harness, refresh).await?;
+    let read = page.models.read(harness, refresh).await?;
+    let listing = read.listing;
     let default = listing.default_model().map(ModelChoice::model);
     merged(json!({
         "harness": harness.as_str(),
         "listing": listing,
+        // What a submission made from this list names, to be checked against it.
+        "read": read.id,
         "default": default,
         "contributorWarning": CONTRIBUTOR_WARNING,
         "switchHelp": page.models.switch_help(harness),
