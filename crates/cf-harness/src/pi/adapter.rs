@@ -46,6 +46,17 @@ use crate::shared::{compacting, specmint, window_args};
 /// Why a window that has not named its conversation waits.
 const HOLD: &str = "Pi has not said yet which conversation its window shows";
 
+/// What a window's Pi is told of its pane, for its launch alone: that it draws OSC 8 hyperlinks
+/// (T-1315). The pane is xterm.js, which does, but Pi (1.5.0) knows only the terminals it lists
+/// (`detectCapabilities`, `pi-tui/dist/terminal-image.js`) and `ConsensFlow` is none, so it printed
+/// a link as `words (address)` text, laid out in rows of its own and written with CR/LF, which
+/// cuts a long address where its width ends. `PI_HYPERLINKS=1` is the switch of that check; with it
+/// a link is its words as a hyperlink to the whole address, on every row they are drawn on. An
+/// environment variable of the launch, so the owner's Pi settings are never written; the terminal
+/// capabilities a setting of the owner's names (`getTerminalCapabilityOverrides`) are read after
+/// it and win where the owner set one.
+const HYPERLINKS: (&str, &str) = ("PI_HYPERLINKS", "1");
+
 /// Pi, as the engine launches its windows.
 pub struct PiAdapter {
     env: Env,
@@ -181,6 +192,7 @@ impl Adapter for PiAdapter {
                     .env
                     .into_iter()
                     .chain(compaction_size(launch.compaction))
+                    .chain([(HYPERLINKS.0.to_owned(), HYPERLINKS.1.to_owned())])
                     .collect(),
                 drop_env: invocation
                     .drop_env

@@ -107,6 +107,17 @@ use crate::shared::{compacting, pane, specmint, window_args};
 /// meanwhile (`dialogs`).
 const QUIET: [(&str, &str); 1] = [("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1")];
 
+/// What a window's Claude Code is told of its pane, for its launch alone: that it draws OSC 8
+/// hyperlinks (T-1315). The pane is xterm.js, which does, but Claude Code (2.1.319) asks its
+/// terminal's name and `ConsensFlow` is none it knows, so it printed a link as `words (address)`
+/// text, which the pane can only guess the end of when the address is long enough to be wrapped
+/// over rows. `FORCE_HYPERLINK` is the switch of its check (`Tb`), read before any detection; with
+/// it a markdown link is its words as a hyperlink to the whole address, on every row they are
+/// drawn on. An environment variable of the launch, so the owner's own settings and
+/// `~/.claude.json` are never written; `lf()?.hyperlinks`, a setting of the owner's, is read
+/// before it and wins where the owner set one.
+const HYPERLINKS: [(&str, &str); 1] = [("FORCE_HYPERLINK", "1")];
+
 /// The questions of Claude Code's offers to install a plugin (2.1.317): of an LSP plugin, for a
 /// file of an extension a marketplace has one for, and of a plugin a command's output hints at.
 const OFFERS_CLOSING: [&str; 2] = [LSP_OFFER, "Would you like to install it?"];
@@ -326,6 +337,7 @@ impl Adapter for ClaudeAdapter {
                 argv,
                 env: QUIET
                     .iter()
+                    .chain(&HYPERLINKS)
                     .map(|&(name, value)| (name.to_owned(), value.to_owned()))
                     .collect(),
                 drop_env: invocation

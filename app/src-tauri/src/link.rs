@@ -15,9 +15,10 @@
 use serde_json::{json, Value};
 use url::Url;
 
-// Windows' opener; its arguments and its answers are tested everywhere.
+// Windows' opener, which the update's download page uses too; its arguments and its answers are
+// tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
-mod shell;
+pub(crate) mod shell;
 
 /// The most characters an address may have, counted as characters and not bytes.
 const MAX_CHARS: usize = 2048;
@@ -448,6 +449,9 @@ mod tests {
     #[test]
     fn on_windows_the_system_opener_is_shellexecute_with_the_address_as_the_file() {
         let address = "https://example.com/?x=1,/root,C:/Windows/";
+        let _turn = shell::TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         ASKED_OF_THE_SHELL.lock().expect("the record").clear();
         *shell::TEST_SHELL.lock().expect("the stand-in") = Some(shell_starts_it);
         let started = open_with(system_open, address);

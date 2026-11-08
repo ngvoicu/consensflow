@@ -3797,6 +3797,283 @@ for (const [system, agent, key, other] of [
   })
 }
 
+// What the harnesses print for a link, replayed (T-1314's review, T-1315). The cases are the output
+// of Pi's, Claude Code's and Codex's own formatting code, with hyperlinks off (the plain `words
+// (address)` each falls back to) and on (what ConsensFlow's launch asks of Pi and Claude Code), at
+// the widths a pane has; `app/tests/fixtures/pane-links/make-harness-cases.mjs` says how each was
+// made. Each case is held to one of two things: a click on the address opens exactly the address the
+// program meant, or it is no link and opens nothing. Never a shortened one. A plain address a
+// program broke over rows of its own (Pi writes its rows with CR/LF, so xterm does not mark them
+// wrapped) may go on in the next row, and then it is no link; an OSC 8 hyperlink carries its address
+// whole on every row it is drawn on.
+const HARNESS_CASES = JSON.parse(
+  readFileSync(new URL('./fixtures/pane-links/harness-cases.json', import.meta.url), 'utf8'),
+)
+
+const ESC = String.fromCharCode(27)
+const BEL = String.fromCharCode(7)
+/** An OSC 8 sequence's end: BEL, or ESC and a backslash. */
+const OSC_END = `(?:${BEL}|${ESC}\\\\)`
+const SGR = new RegExp(`${ESC}\\[[0-9;]*m`, 'g')
+const OSC_8 = new RegExp(`${ESC}\\]8;;[^${BEL}${ESC}]*${OSC_END}`, 'g')
+const HYPERLINK = new RegExp(
+  `${ESC}\\]8;;([^${BEL}${ESC}]*)${OSC_END}(.*?)${ESC}\\]8;;${OSC_END}`,
+  'g',
+)
+
+/** The printable columns of `raw`, a row as a program wrote it: escape sequences taken out. */
+const printable = (raw) => raw.replace(SGR, '').replace(OSC_8, '')
+
+/**
+ * The columns a click should land on for `raw`'s row: the middle of each OSC 8 hyperlink to
+ * `destination` it draws, the start of a plain `https://`, and the first word of the row (a row
+ * the address went on in, which is no link where the address was cut).
+ */
+function pointsOf(raw, destination) {
+  const points = new Map()
+  for (const span of raw.matchAll(HYPERLINK)) {
+    const before = printable(raw.slice(0, span.index))
+    const words = printable(span[2])
+    if (span[1] === destination && words.length > 0) {
+      points.set(before.length + Math.floor(words.length / 2), 'hyperlink')
+    }
+  }
+  const text = printable(raw)
+  const plain = text.search(/https?:\/\//i)
+  if (plain >= 0) points.set(plain + 4, 'address')
+  const first = text.search(/\S/)
+  if (first >= 0 && !points.has(first + 1)) points.set(first + 1, 'word')
+  return points
+}
+
+/**
+ * Prints `printed` in a terminal of `width` columns of the page's own emulator, and answers the
+ * place of each column asked for on each row: a program's rows, laid out as it laid them.
+ */
+const replaying = (page, printed, width) =>
+  page.evaluate(
+    async ([printed, width]) => {
+      const { XtermEmulator } = await import('/term.js')
+      window.replay?.dispose()
+      const host = document.getElementById('replay-host')
+      host.innerHTML = ''
+      window.replayOpened = []
+      window.replay = new XtermEmulator(host, { onLink: (url) => window.replayOpened.push(url) })
+      window.replay.resizeObserver.disconnect()
+      clearTimeout(window.replay.settling)
+      window.replay.terminal.resize(width, 24)
+      await new Promise((done) => window.replay.terminal.write(printed, done))
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+      const box = host.querySelector('.xterm-screen').getBoundingClientRect()
+      return { left: box.left, top: box.top, cell: box.width / width, row: box.height / 24 }
+    },
+    [printed, width],
+  )
+
+/** A blank page of the app's own origin for the replays below: the page's emulator on a host of its own. */
+async function replayPage(page) {
+  await page.route(`${ui.origin}/replay`, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/vendor/xterm.css"><body style="margin:0"><div id="replay-host"></div></body>',
+    }),
+  )
+  await page.goto(`${ui.origin}/replay`)
+}
+
+/**
+ * Clicks, with Cmd held, the cell at `column` of `row` (both from 0) of the replay `place` came
+ * from, and answers what the page asked the app to open and what the pointer's title said.
+ */
+async function clickingCell(page, place, row, column) {
+  const at = {
+    x: place.left + (column + 0.5) * place.cell,
+    y: place.top + (row + 0.5) * place.row,
+  }
+  await page.mouse.move(1390, 790)
+  await page.mouse.move(at.x, at.y)
+  await page.waitForTimeout(40)
+  const title = await page.evaluate(() => window.replay.terminal.element.title)
+  await clickWith(page, at, ['Meta'])
+  const opened = await page.evaluate(() => window.replayOpened.splice(0))
+  return { opened, title }
+}
+
+for (const [group, harness, mode] of [
+  ['Pi with hyperlinks off', 'pi', 'plain'],
+  ['Pi asked for hyperlinks (PI_HYPERLINKS=1)', 'pi', 'osc8'],
+  ['Claude Code with hyperlinks off', 'claude-code', 'plain'],
+  ['Claude Code asked for hyperlinks (FORCE_HYPERLINK=1)', 'claude-code', 'osc8'],
+  ['Codex', 'codex', 'osc8'],
+]) {
+  test.describe(`pane links: what ${group} prints`, () => {
+    test.use({ userAgent: MAC_AGENT, viewport: { width: 1400, height: 800 } })
+    test.describe.configure({ timeout: 120_000 })
+
+    test('opens the exact address on a click, or is no link: never a shortened one', async ({
+      page,
+    }) => {
+      await replayPage(page)
+      const cases = HARNESS_CASES.filter((c) => c.harness === harness && c.mode === mode)
+      expect(cases.length, `${group} has cases`).toBeGreaterThan(0)
+      const wrong = []
+      for (const c of cases) {
+        const place = await replaying(page, c.printed, c.width)
+        const rows = c.printed.split('\r\n')
+        for (const [index, raw] of rows.entries()) {
+          for (const [column, kind] of pointsOf(raw, c.destination)) {
+            const { opened, title } = await clickingCell(page, place, index, column)
+            const saw = `${c.id} row ${index} ${kind}`
+            const wanted = c.expect === 'exact' && kind !== 'word' ? [c.destination] : null
+            if (opened.some((url) => url !== c.destination)) {
+              wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
+            } else if (title !== '' && title !== `Cmd+click to open ${c.destination}`) {
+              wrong.push(`${saw}: title ${title}`)
+            } else if (c.expect === 'none' && (opened.length > 0 || title !== '')) {
+              wrong.push(`${saw}: a link where ${c.destination} was cut`)
+            } else if (wanted && JSON.stringify(opened) !== JSON.stringify(wanted)) {
+              wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
+            }
+          }
+        }
+      }
+      expect(wrong, `${cases.length} cases of ${group}`).toEqual([])
+    })
+  })
+}
+
+// Where a row's end may have cut an address, and where the pattern's own rules end one (T-1315). A
+// plain address is a link when the row it ends in did not cut it, and no link when it may have been:
+// no link is better than one that opens a shortened address. Each case is the rows a program wrote
+// (CR/LF between them, so xterm does not mark one a continuation) and the clicks: on a row (from
+// 0) at the words given, expecting the address it must open, or `null` for no link.
+const ADDRESS = 'https://example.com/path'
+/** A row of `width` columns on which `address` ends `slack` columns short of the last one. */
+const endingShort = (width, slack, address = ADDRESS) =>
+  `${'x'.repeat(width - slack - address.length - 1)} ${address}${' '.repeat(slack)}`
+const CUT = [
+  {
+    name: 'an address that runs to the last column, whatever row follows it',
+    width: 40,
+    printed: [endingShort(40, 0), 'the rest of it', '', endingShort(40, 0)],
+    clicks: [
+      [0, ADDRESS, null],
+      [3, ADDRESS, null],
+    ],
+  },
+  {
+    name: 'an address that ends within the margin a program keeps, and one that ends short of it',
+    width: 40,
+    printed: [endingShort(40, 1), endingShort(40, 2), endingShort(40, 3), endingShort(40, 12)],
+    clicks: [
+      [0, ADDRESS, null],
+      [1, ADDRESS, null],
+      [2, ADDRESS, ADDRESS],
+      [3, ADDRESS, ADDRESS],
+    ],
+  },
+  {
+    name: 'an address that ends a short row is a link, whatever row follows, so lines of addresses are',
+    width: 40,
+    printed: [
+      `Sources: ${ADDRESS}`,
+      'https://example.com/second',
+      'https://example.com/third',
+      'text of its own',
+    ],
+    clicks: [
+      [0, ADDRESS, ADDRESS],
+      [1, 'second', 'https://example.com/second'],
+      [2, 'third', 'https://example.com/third'],
+    ],
+  },
+  {
+    name: 'an address its brackets or quotes close, at the edge, is whole',
+    width: 40,
+    printed: [
+      `${'x'.repeat(40 - ADDRESS.length - 3)} (${ADDRESS})`,
+      `${'x'.repeat(40 - ADDRESS.length - 3)} "${ADDRESS}"`,
+    ],
+    clicks: [
+      [0, ADDRESS, ADDRESS],
+      [1, ADDRESS, ADDRESS],
+    ],
+  },
+  {
+    name: 'an address that ends in the last column of a row xterm wrapped is a link',
+    width: 20,
+    printed: ['https://example.com/ and more'],
+    clicks: [[0, 5, 'https://example.com/']],
+  },
+  {
+    name: 'an address xterm wrapped itself is read over the rows it wrapped',
+    width: 20,
+    printed: [`${ADDRESS}${'a'.repeat(30)}`],
+    clicks: [
+      [0, 5, `${ADDRESS}${'a'.repeat(30)}`],
+      [1, 5, `${ADDRESS}${'a'.repeat(30)}`],
+      [2, 5, `${ADDRESS}${'a'.repeat(30)}`],
+    ],
+  },
+  {
+    name: 'an apostrophe inside an address is part of it, and those of a quotation round one are not',
+    width: 100,
+    printed: [
+      "https://en.wikipedia.org/wiki/Bayes'_theorem",
+      "'https://example.com/a'",
+      "['https://a.example/x','https://b.example/y']",
+      "'https://example.com/it's' and more",
+      "It's at https://example.com/o'brien/x, honest",
+    ],
+    clicks: [
+      [0, 'wiki', "https://en.wikipedia.org/wiki/Bayes'_theorem"],
+      [1, 'example', 'https://example.com/a'],
+      [2, 'a.example', 'https://a.example/x'],
+      [2, 'b.example', 'https://b.example/y'],
+      [3, 'example', 'https://example.com/it'],
+      [4, 'brien', "https://example.com/o'brien/x"],
+    ],
+  },
+  {
+    name: 'a mark a pair of brackets closes right after is the address’s, and a sentence’s is not',
+    width: 100,
+    printed: [
+      'Source (https://en.wikipedia.org/wiki/Yahoo!)',
+      'wow https://en.wikipedia.org/wiki/Yahoo!',
+      '(see https://example.com/a.)',
+    ],
+    clicks: [
+      [0, 'wikipedia', 'https://en.wikipedia.org/wiki/Yahoo!'],
+      [1, 'wikipedia', 'https://en.wikipedia.org/wiki/Yahoo'],
+      [2, 'example', 'https://example.com/a'],
+    ],
+  },
+]
+for (const { name, width, printed, clicks } of CUT) {
+  test.describe('pane links: where a row’s end cuts an address', () => {
+    test.use({ userAgent: MAC_AGENT, viewport: { width: 1400, height: 800 } })
+
+    test(name, async ({ page }) => {
+      await replayPage(page)
+      const place = await replaying(page, `${printed.join('\r\n')}\r\n`, width)
+      for (const [row, words, address] of clicks) {
+        // `words` is where on the row to click: the column, or words on it.
+        const column =
+          typeof words === 'number'
+            ? words
+            : printed[row].indexOf(words) + Math.min(3, words.length - 1)
+        const { opened, title } = await clickingCell(page, place, row, column)
+        const said = `row ${row} at ${words} of ${JSON.stringify(printed[row] ?? '(wrapped)')}`
+        expect({ said, opened, title }).toEqual({
+          said,
+          opened: address === null ? [] : [address],
+          title: address === null ? '' : `Cmd+click to open ${address}`,
+        })
+      }
+    })
+  })
+}
+
 test('the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief', async ({
   page,
 }) => {

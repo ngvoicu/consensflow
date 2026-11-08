@@ -1,5 +1,5 @@
-import { WEB_ADDRESS } from './link-pattern.js'
-import { FitAddon, Terminal, WebLinksAddon } from './vendor/xterm.js'
+import { FitAddon, Terminal } from './vendor/xterm.js'
+import { webLinks } from './web-links.js'
 
 /**
  * How long a terminal's new size must hold before the terminal and the
@@ -72,10 +72,11 @@ export class XtermEmulator {
     })
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)
-    // The addon opens a click with `activate`, and takes the `hover` and `leave` of its options.
-    // What it reads as an address is `WEB_ADDRESS`'s, not its own pattern, which cut an address
-    // short at a parenthesis or a caret (T-1307).
-    this.terminal.loadAddon(new WebLinksAddon(link.activate, { ...link, urlRegex: WEB_ADDRESS }))
+    // The plain addresses of a pane: the web-links addon's link reader with the app's pattern (its
+    // own cut an address short at a parenthesis or a caret, T-1307) and rules (a plain address
+    // that may be cut by its row's end is no link, T-1315). They open a click with `activate`, and
+    // take the `hover` and `leave` of the link above.
+    this.terminal.registerLinkProvider(webLinks(this.terminal, link))
     this.terminal.open(host)
     this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
     this.humanDataPending = 0

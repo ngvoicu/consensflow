@@ -22,7 +22,17 @@
 #   `app/ui/link-pattern.js` (parentheses, brackets and braces in pairs, commas, carets, any letters
 #   of the scheme, an IPv6 host), without the marks a sentence puts around it, and not as the
 #   addon's own pattern cut it at a parenthesis; a test build opens no page unless the test stands
-#   an opener in, and never reaches the system's own.
+#   an opener in, and never reaches the system's own;
+# - and what the second review found (T-1314, mended in T-1315): a link opens the address the
+#   program meant or is no link at all. Claude Code and Pi are told, by their launch's environment
+#   and no file of the owner's, that the pane draws OSC 8 hyperlinks (`FORCE_HYPERLINK=1`,
+#   `PI_HYPERLINKS=1`), so a link is its words with the whole address behind them on every row it
+#   is drawn on; a plain address that its row's end may have cut (it runs to the last column or
+#   ends the text within the margin of it, and xterm did not mark the next row a continuation) is
+#   no link; an apostrophe is part of an address, but one that opens it is the quotation mark that
+#   the next apostrophe closes; the marks a pair of brackets or quotes closes right after an
+#   address are its own; and the update's download page opens on Windows as a link does, through
+#   `ShellExecuteW`, with the shell's answer read and a COM start that was refused said.
 #
 # A plant that falls through to the system's opener runs a harmless stand-in in its place: the
 # plant of the fail-closed rule says "opens" with `|_| Ok(())`, for a plant that really opened
@@ -38,6 +48,8 @@
 pl-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pane links"]
 pl-app = ["cargo", "xtask", "app", "test", "link::"]
 pl-pattern = ["node", "--test", "tests/web-address.test.mjs"]
+pl-update = ["cargo", "xtask", "app", "test", "update_page::"]
+pl-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch"]
 
 # --- the page: when a click opens a link ---
 
@@ -80,7 +92,7 @@ runs = ["pl-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "    this.terminal.loadAddon(new WebLinksAddon(link.activate, { ...link, urlRegex: WEB_ADDRESS }))\n"
+find = "    this.terminal.registerLinkProvider(webLinks(this.terminal, link))\n"
 replace = ""
 
 [[plant]]
@@ -299,8 +311,8 @@ runs = ["pl-app"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/link/shell.rs"
-find = "    result_of(execute(&call_for(address)))"
-replace = """    execute(&call_for(address));
+find = "    result_of(execute(&call_for(address))?)"
+replace = """    execute(&call_for(address))?;
     Ok(())"""
 
 # --- a test build never reaches the system's opener ---
@@ -318,14 +330,14 @@ replace = """            None => open_with(|_| Ok(()), address),"""
 # --- the page: a plain address is read whole ---
 
 [[plant]]
-name = "pane links: the addon reads addresses with its own pattern"
+name = "pane links: the addon's own pattern reads the addresses"
 meant = "pane links on a Mac › Cmd+click opens the whole address of a plain link, and not the marks a sentence puts around it"
 runs = ["pl-page"]
 
 [[plant.edit]]
-file = "app/ui/term.js"
-find = "{ ...link, urlRegex: WEB_ADDRESS }"
-replace = "link"
+file = "app/ui/web-links.js"
+find = 'LinkComputer.computeLink(y, WEB_ADDRESS, terminal, activate)'
+replace = '''LinkComputer.computeLink(y, /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/, terminal, activate)'''
 
 [[plant]]
 name = "pane links: a pair of parentheses is not part of an address"
@@ -355,8 +367,8 @@ runs = ["pl-pattern", "pl-page"]
 
 [[plant.edit]]
 file = "app/ui/link-pattern.js"
-find = "const AFTER = '.,:;!?*~^|'"
-replace = "const AFTER = ',:;!?*~^|'"
+find = "export const SENTENCE_MARKS = '.,:;!?*~^|'"
+replace = "export const SENTENCE_MARKS = ',:;!?*~^|'"
 
 [[plant]]
 name = "pane links: a comma or a caret ends an address"
@@ -365,8 +377,8 @@ runs = ["pl-pattern", "pl-page"]
 
 [[plant.edit]]
 file = "app/ui/link-pattern.js"
-find = "const QUOTES = '\"\\'`"
-replace = "const QUOTES = ',^\"\\'`"
+find = "const QUOTES = '\"`"
+replace = "const QUOTES = ',^\"`"
 
 [[plant]]
 name = "pane links: the letters of the scheme must be lower case"
@@ -375,10 +387,10 @@ runs = ["pl-pattern", "pl-page"]
 
 [[plant.edit]]
 file = "app/ui/link-pattern.js"
-find = """  'i',
-)"""
-replace = """  '',
-)"""
+find = """    'i',
+  )"""
+replace = """    '',
+  )"""
 
 [[plant]]
 name = "pane links: a pair of brackets holds no pair"
@@ -389,3 +401,219 @@ runs = ["pl-pattern", "pl-page"]
 file = "app/ui/link-pattern.js"
 find = "const DEPTH = 3"
 replace = "const DEPTH = 1"
+
+# --- what the second review found (T-1314, T-1315): the harnesses are asked for hyperlinks ---
+
+[[plant]]
+name = "pane links: Claude Code's launch does not say the pane draws hyperlinks"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''                    .chain(&HYPERLINKS)
+'''
+replace = ""
+
+[[plant]]
+name = "pane links: Claude Code's launch asks for hyperlinks with a zero"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''const HYPERLINKS: [(&str, &str); 1] = [("FORCE_HYPERLINK", "1")];'''
+replace = '''const HYPERLINKS: [(&str, &str); 1] = [("FORCE_HYPERLINK", "0")];'''
+
+[[plant]]
+name = "pane links: Pi's launch does not say the pane draws hyperlinks"
+meant = "launches_pi_with_its_extension_a_session_name_of_ours_and_no_task_or_role_text_on_its_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''                    .chain([(HYPERLINKS.0.to_owned(), HYPERLINKS.1.to_owned())])
+'''
+replace = ""
+
+[[plant]]
+name = "pane links: Pi's launch asks for hyperlinks with a zero"
+meant = "launches_pi_with_its_extension_a_session_name_of_ours_and_no_task_or_role_text_on_its_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''const HYPERLINKS: (&str, &str) = ("PI_HYPERLINKS", "1");'''
+replace = '''const HYPERLINKS: (&str, &str) = ("PI_HYPERLINKS", "0");'''
+
+# --- the page: an apostrophe is part of an address ---
+
+[[plant]]
+name = "pane links: an apostrophe ends an address"
+meant = "https://en.wikipedia.org/wiki/Bayes'_theorem is found whole"
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = "  const inner = apostrophe ? QUOTES : `${QUOTES}'`"
+replace = "  const inner = `${QUOTES}'`"
+
+[[plant]]
+name = "pane links: an address may end with an apostrophe"
+meant = '''"https://example.com/a'" holds ["https://example.com/a"]'''
+runs = ["pl-pattern", "pl-page"]
+
+[[plant.edit]]
+file = "app/ui/link-pattern.js"
+find = '''const ending = `[^\\s${QUOTES}'<>'''
+replace = '''const ending = `[^\\s${QUOTES}<>'''
+
+[[plant]]
+name = "pane links: the apostrophe that opens a quotation is part of the address in it"
+meant = "pane links: where a row’s end cuts an address › an apostrophe inside an address is part of it, and those of a quotation round one are not"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = '''      const opened = (link) => link.text.includes("'") && before(terminal, link.range, cell) === "'"'''
+replace = '''      const opened = () => false'''
+
+# --- the page: a plain address that its row's end may have cut is no link ---
+
+[[plant]]
+name = "pane links: an address that runs to the last column is a link"
+meant = "pane links: where a row’s end cuts an address › an address that runs to the last column, whatever row follows it"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = "  if (after >= cols) return true\n"
+replace = "  if (after >= cols) return false\n"
+
+[[plant]]
+name = "pane links: an address that ends within the program's margin is a link"
+meant = "pane links: where a row’s end cuts an address › an address that ends within the margin a program keeps, and one that ends short of it"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = "  return cols - after <= EDGE_MARGIN\n"
+replace = "  return false\n"
+
+[[plant]]
+name = "pane links: a row xterm marked wrapped is cut at its end too"
+meant = "pane links: where a row’s end cuts an address › an address that ends in the last column of a row xterm wrapped is a link"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = "  if (!line || next?.isWrapped) return false\n"
+replace = "  if (!line) return false\n"
+
+[[plant]]
+name = "pane links: an address that ends in the last column is taken for one that ends in the next row"
+meant = "pane links: what Pi with hyperlinks off prints › opens the exact address on a click, or is no link: never a shortened one"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = "  return x === 0 ? { x: terminal.cols, y: y - 1 } : { x, y }\n"
+replace = "  return { x, y }\n"
+
+[[plant]]
+name = "pane links: an address its pair closed is cut by its row like any other"
+meant = "pane links: where a row’s end cuts an address › an address its brackets or quotes close, at the edge, is whole"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = "      if (marks === '') return { link, closed: true }\n"
+replace = "      if (marks === '') return { link, closed: false }\n"
+
+[[plant]]
+name = "pane links: the marks a pair closes right after an address are a sentence's"
+meant = "pane links: where a row’s end cuts an address › a mark a pair of brackets closes right after is the address’s, and a sentence’s is not"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = "    if (chars.length !== 1 || !SENTENCE_MARKS.includes(chars)) break\n"
+replace = "    break\n"
+
+[[plant]]
+name = "pane links: a plain address that a row may have cut is a link"
+meant = "pane links: what Pi with hyperlinks off prints › opens the exact address on a click, or is no link: never a shortened one"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/web-links.js"
+find = '''        .filter(
+          ({ link, closed }) => closed || !mayBeCut(terminal, endOf(terminal, link.range), cell),
+        )
+'''
+replace = ""
+
+# --- Windows: the download page is opened as a link is, and COM's refusal is said (T-1315) ---
+
+[[plant]]
+name = "pane links: the download page is not opened through the shell"
+meant = "on_windows_the_download_page_opens_through_the_shell_and_its_answer_is_read"
+runs = ["pl-update"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = "        crate::link::shell::open(page)\n"
+replace = "        Ok(())\n"
+
+[[plant]]
+name = "pane links: a test build opens the download page"
+meant = "a_test_build_opens_no_download_page"
+runs = ["pl-update"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''        Err(format!("a test build opens no page: {page}"))
+'''
+replace = "        Ok(())\n"
+
+[[plant]]
+name = "pane links: a COM start that changed mode is an error"
+meant = "a_com_start_that_succeeded_is_ended_one_that_changed_mode_is_not_and_any_other_is_said"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "        RPC_E_CHANGED_MODE => Ok(false),\n"
+replace = ""
+
+[[plant]]
+name = "pane links: a refused COM start is gone on without"
+meant = "a_com_start_that_succeeded_is_ended_one_that_changed_mode_is_not_and_any_other_is_said"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "        started if started >= 0 => Ok(true),\n"
+replace = "        _ => Ok(true),\n"
+
+[[plant]]
+name = "pane links: a COM start is ended whether or not it was ours"
+meant = "the_shell_is_asked_between_com_s_start_and_its_end_and_a_refused_start_asks_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    if ours {\n        end();\n    }\n"
+replace = "    end();\n"
+
+[[plant]]
+name = "pane links: the shell is asked on a thread COM refused"
+meant = "the_shell_is_asked_between_com_s_start_and_its_end_and_a_refused_start_asks_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    let ours = com_started(start())?;\n"
+replace = "    let ours = com_started(start()).unwrap_or(false);\n"

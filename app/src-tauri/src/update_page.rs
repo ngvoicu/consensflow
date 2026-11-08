@@ -88,23 +88,32 @@ pub fn page_of(version: &str) -> String {
     format!("https://github.com/ngvoicu/consensflow/releases/tag/v{version}")
 }
 
-/// Opens `page` in the browser. A test build opens nothing: a page opened is a page in the browser
-/// of the machine the test runs on, and a test of the opener starts its own (`open_with`).
+/// Opens `page` in the browser, and says if it could not.
+///
+/// On Windows it is `ShellExecuteW`, as a link a program printed in a pane is (`link::shell`):
+/// `explorer.exe` read its command line for its own fields (commas and equals signs, a `/root`),
+/// answered 1 whether or not a page opened, and its answer was dropped (the review of T-1307,
+/// T-1314). A test build opens nothing: a page opened is a page in the browser of the machine
+/// the test runs on, so on Windows the shell is a stand-in the test supplies (`link::shell`
+/// panics where there is none), and elsewhere the opener is `open_with`'s, which a test of the
+/// opener starts itself.
 pub fn open(page: &str) -> Result<(), String> {
-    #[cfg(test)]
+    #[cfg(windows)]
+    {
+        crate::link::shell::open(page)
+    }
+    #[cfg(all(not(windows), test))]
     {
         Err(format!("a test build opens no page: {page}"))
     }
-    #[cfg(not(test))]
+    #[cfg(all(not(windows), not(test)))]
     open_system(page)
 }
 
 /// Opens `page` with the system's opener.
-#[cfg(not(test))]
+#[cfg(all(not(windows), not(test)))]
 fn open_system(page: &str) -> Result<(), String> {
-    let opener = if cfg!(windows) {
-        "explorer.exe"
-    } else if cfg!(target_os = "macos") {
+    let opener = if cfg!(target_os = "macos") {
         "/usr/bin/open"
     } else {
         "xdg-open"
@@ -112,9 +121,8 @@ fn open_system(page: &str) -> Result<(), String> {
     open_with(Path::new(opener), page)
 }
 
-/// Opens `page` with `opener`. Explorer answers 1 even when the page
-/// opened: only a start that failed is a failure.
-#[cfg_attr(test, allow(dead_code))]
+/// Opens `page` with `opener`, given the page as its one argument.
+#[cfg_attr(any(test, windows), allow(dead_code))]
 pub(crate) fn open_with(opener: &Path, page: &str) -> Result<(), String> {
     let mut command = Command::new(opener);
     // Started while the app's other threads open sockets and pipes.
@@ -209,6 +217,72 @@ mod tests {
                 "{version}"
             );
         }
+    }
+
+    /// A test build reaches no opener of the machine (T-1315, the review of T-1314): with nothing
+    /// standing in for it the download page opens nothing and says so.
+    #[cfg(not(windows))]
+    #[test]
+    fn a_test_build_opens_no_download_page() {
+        assert_eq!(
+            open("https://github.com/ngvoicu/consensflow/releases/tag/v3.0.7"),
+            Err(
+                "a test build opens no page: https://github.com/ngvoicu/consensflow/releases/tag/v3.0.7"
+                    .to_owned()
+            )
+        );
+    }
+
+    /// What the stand-in shell was asked by the download page, the file of each call.
+    #[cfg(windows)]
+    static ASKED_OF_THE_SHELL: std::sync::Mutex<Vec<Vec<u16>>> = std::sync::Mutex::new(Vec::new());
+
+    #[cfg(windows)]
+    fn shell_starts_it(call: &crate::link::shell::Call) -> isize {
+        ASKED_OF_THE_SHELL
+            .lock()
+            .expect("the record")
+            .push(call.file.clone());
+        42
+    }
+
+    #[cfg(windows)]
+    fn shell_finds_no_program(_: &crate::link::shell::Call) -> isize {
+        31
+    }
+
+    /// On Windows the download page opens as a link in a pane does, through `ShellExecuteW` with
+    /// the page as the file, and the shell's answer is the opener's (Explorer answered 1 either
+    /// way and its answer was dropped). The call is the test build's stand-in.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_download_page_opens_through_the_shell_and_its_answer_is_read() {
+        use crate::link::shell;
+
+        let _turn = shell::TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let page = page_of("3.0.7");
+        ASKED_OF_THE_SHELL.lock().expect("the record").clear();
+        *shell::TEST_SHELL.lock().expect("the stand-in") = Some(shell_starts_it);
+        let started = open(&page);
+        *shell::TEST_SHELL.lock().expect("the stand-in") = Some(shell_finds_no_program);
+        let refused = open(&page);
+        *shell::TEST_SHELL.lock().expect("the stand-in") = None;
+        assert_eq!(started, Ok(()));
+        assert_eq!(
+            *ASKED_OF_THE_SHELL.lock().expect("the record"),
+            [shell::wide(&page)],
+            "the shell was asked once, for the page"
+        );
+        assert_eq!(
+            refused,
+            Err(
+                "Windows could not open the address: no program is set to open web addresses \
+                 (ShellExecute answered 31)"
+                    .to_owned()
+            )
+        );
     }
 
     /// The page is opened while the app's other threads open sockets and pipes: here a
