@@ -501,6 +501,6 @@ runs = ["lm-homes"]
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models/tests/homes.rs"
 find = "    (Env::from_vars(vars), pi)"
-replace = '''    let _ = vars;
+replace = '''    drop(vars);
     (base, pi)'''
 
