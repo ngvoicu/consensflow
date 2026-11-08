@@ -142,42 +142,58 @@ fn eventually<T>(work: impl Future<Output = T>) -> T {
     }
 }
 
+/// A model list is read when it is asked for, whenever that is (A4-28, T-1321): the page
+/// opens a dialog and asks, and what the harness offers at that moment is what it is shown.
 #[test]
-fn a_harness_is_read_at_the_first_ask_of_a_daemon_s_life_then_kept_and_read_again_at_refresh() {
+fn every_ask_reads_the_harness_and_the_refresh_fetches() {
     let home = home(&["devin"]);
-    let devin = Listing::answering([Ok(models(&["swe-2"], 1_000)), Ok(models(&["swe-3"], 2_000))]);
+    let devin = Listing::answering([
+        Ok(models(&["swe-2"], 1_000)),
+        Ok(models(&["swe-3"], 2_000)),
+        Ok(models(&["swe-4"], 3_000)),
+    ]);
     let lists = lists(&home, ByKind(vec![("devin", Rc::clone(&devin))]));
 
     let first = done(lists.get(&home.ledger, Harness::Devin, false)).unwrap();
     assert_eq!(first.models[0].id, "swe-2");
     assert_eq!((first.read_at, first.is_stale()), (Some(1_000), false));
     let again = done(lists.get(&home.ledger, Harness::Devin, false)).unwrap();
-    assert_eq!(again, first, "kept: no second read in this daemon's life");
-    assert_eq!(*devin.asked.borrow(), [false]);
+    assert_eq!(
+        again.models[0].id, "swe-3",
+        "what the harness lists now, not the first read"
+    );
+    assert_eq!(*devin.asked.borrow(), [false, false]);
 
     let refreshed = done(lists.get(&home.ledger, Harness::Devin, true)).unwrap();
-    assert_eq!(refreshed.models[0].id, "swe-3");
-    assert_eq!(refreshed.read_at, Some(2_000));
-    assert_eq!(*devin.asked.borrow(), [false, true], "the Refresh fetches");
+    assert_eq!(refreshed.models[0].id, "swe-4");
+    assert_eq!(refreshed.read_at, Some(3_000));
+    assert_eq!(
+        *devin.asked.borrow(),
+        [false, false, true],
+        "the Refresh fetches"
+    );
     assert_eq!(
         home.ledger.borrow().model_listing("devin").unwrap(),
-        Some(refreshed)
+        Some(refreshed),
+        "the record of the last read, which a submission is checked against"
     );
 }
 
+/// A read that fails lists no model and says why: the list read before is not put in its
+/// place, stale or not. What the form already holds stays the page's to show.
 #[test]
-fn a_new_daemon_reads_again_at_its_first_ask_and_a_failure_keeps_the_listing_before_stale() {
+fn a_failed_read_lists_no_model_and_says_why_not_the_list_before() {
     let home = home(&["devin"]);
-    let devin = Listing::answering([Ok(models(&["swe-2"], 1_000))]);
-    done(lists(&home, ByKind(vec![("devin", devin)])).get(&home.ledger, Harness::Devin, false))
-        .unwrap();
+    let devin = Listing::answering([
+        Ok(models(&["swe-2"], 1_000)),
+        Err("Not logged in".to_owned()),
+    ]);
+    let lists = lists(&home, ByKind(vec![("devin", Rc::clone(&devin))]));
+    done(lists.get(&home.ledger, Harness::Devin, false)).unwrap();
 
-    let restarted = Listing::answering([Err("Not logged in".to_owned())]);
-    let after = lists(&home, ByKind(vec![("devin", Rc::clone(&restarted))]));
-    let list = done(after.get(&home.ledger, Harness::Devin, false)).unwrap();
-    assert_eq!(*restarted.asked.borrow(), [false]);
-    assert_eq!(list.models[0].id, "swe-2", "the list read before");
-    assert_eq!(list.read_at, Some(1_000));
+    let list = done(lists.get(&home.ledger, Harness::Devin, false)).unwrap();
+    assert!(list.models.is_empty(), "no old list in its place: {list:?}");
+    assert_eq!(list.read_at, None);
     assert_eq!(
         list.freshness,
         Freshness::Stale {
@@ -185,6 +201,11 @@ fn a_new_daemon_reads_again_at_its_first_ask_and_a_failure_keeps_the_listing_bef
         }
     );
     assert_eq!(list.default_model(), None);
+    assert_eq!(
+        home.ledger.borrow().model_listing("devin").unwrap(),
+        Some(list),
+        "the record of the last read is the failed one: a submission is taken at its harness's word"
+    );
 }
 
 #[test]
@@ -274,15 +295,15 @@ fn an_ask_that_waited_for_the_read_before_it_is_answered_from_what_that_read_kep
 }
 
 /// A Refresh of Pi is slow (its update, then its read: the page waits on it up to its bridge's
-/// 30 s), and what the home keeps of another harness is answered at once (the review T-1270,
-/// F8: a cached Claude listing timed out behind a Pi Refresh).
+/// 30 s), and another harness's read does not wait for it: each harness has its own turn (the
+/// review T-1270, F8: a Claude listing timed out behind a Pi Refresh).
 #[test]
-fn a_cached_list_is_answered_at_once_while_another_harness_is_being_refreshed() {
+fn a_harness_is_read_while_another_harness_is_being_refreshed() {
     let home = home(&["claude", "pi"]);
     let gate = Rc::new(Notify::new());
-    let claude = Listing::answering([Ok(models(&["opus"], 1_000))]);
+    let claude = Listing::answering([Ok(models(&["opus"], 1_000)), Ok(models(&["opus-2"], 2_000))]);
     let pi = Rc::new(Listing {
-        answers: RefCell::new([Ok(models(&["a/b"], 1_000)), Ok(models(&["a/c"], 2_000))].into()),
+        answers: RefCell::new([Ok(models(&["a/b"], 1_000))].into()),
         refresh_gate: Some(Rc::clone(&gate)),
         ..Listing::default()
     });
@@ -293,39 +314,28 @@ fn a_cached_list_is_answered_at_once_while_another_harness_is_being_refreshed() 
             ("pi", Rc::clone(&pi)),
         ]),
     );
-    done(lists.get(&home.ledger, Harness::Claude, false)).unwrap();
-    done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
 
     let mut context = Context::from_waker(Waker::noop());
     let mut refresh = pin!(lists.get(&home.ledger, Harness::Pi, true));
     assert!(refresh.as_mut().poll(&mut context).is_pending());
-    assert_eq!(
-        *pi.asked.borrow(),
-        [false, true],
-        "Pi's Refresh is in flight"
-    );
+    assert_eq!(*pi.asked.borrow(), [true], "Pi's Refresh is in flight");
 
     let mut claude_asked = pin!(lists.get(&home.ledger, Harness::Claude, false));
-    let Poll::Ready(kept) = claude_asked.as_mut().poll(&mut context) else {
-        panic!("a Claude list the home kept waited behind a Pi Refresh");
+    let Poll::Ready(read) = claude_asked.as_mut().poll(&mut context) else {
+        panic!("a Claude read waited behind a Pi Refresh");
     };
-    assert_eq!(kept.unwrap().models[0].id, "opus");
-    let mut pi_asked = pin!(lists.get(&home.ledger, Harness::Pi, false));
-    let Poll::Ready(kept) = pi_asked.as_mut().poll(&mut context) else {
-        panic!("a Pi list the home kept waited behind its own Refresh");
+    assert_eq!(read.unwrap().models[0].id, "opus");
+    let mut again = pin!(lists.get(&home.ledger, Harness::Claude, false));
+    let Poll::Ready(read) = again.as_mut().poll(&mut context) else {
+        panic!("a second Claude read waited behind a Pi Refresh");
     };
-    assert_eq!(
-        kept.unwrap().models[0].id,
-        "a/b",
-        "what was kept before the Refresh"
-    );
-    assert_eq!(*claude.asked.borrow(), [false], "nothing was read again");
+    assert_eq!(read.unwrap().models[0].id, "opus-2", "read again, not kept");
 
     gate.notify_one();
     let Poll::Ready(refreshed) = refresh.as_mut().poll(&mut context) else {
         panic!("the Refresh did not finish once Pi answered");
     };
-    assert_eq!(refreshed.unwrap().models[0].id, "a/c");
+    assert_eq!(refreshed.unwrap().models[0].id, "a/b");
 }
 
 /// A harness this daemon has not read yet is read while another's Refresh runs: each harness
@@ -589,27 +599,6 @@ fn a_stale_listing_a_harness_answers_is_kept_without_the_credential_in_its_reaso
     assert_eq!(kept, listing, "what the page reads is what was returned");
 }
 
-/// A listing an older build kept (a reason with a credential in it, as nothing hid it then) is
-/// told without it: what the ledger holds is not what the page is shown.
-#[test]
-fn a_listing_kept_by_an_older_build_is_told_without_the_credential_in_its_reason() {
-    let home = home(&["pi"]);
-    let pi = Listing::answering([Ok(models(&["a/b"], 1_000))]);
-    let lists = lists(&home, ByKind(vec![("pi", pi)]));
-    done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
-    let older = models(&["a/b"], 1_000).stale(format!("failed: Authorization: Bearer {BEARER}"));
-    home.ledger
-        .borrow_mut()
-        .keep_model_listing("pi", &older)
-        .unwrap();
-    let told = done(lists.get(&home.ledger, Harness::Pi, false)).unwrap();
-    let Freshness::Stale { why } = &told.freshness else {
-        panic!("{told:?}");
-    };
-    // A reason with no words of Pi's in it is ConsensFlow's, masked as a note masks it.
-    assert!(!why.contains(BEARER) && why.contains("[masked]"), "{why}");
-}
-
 /// The real Pi adapter, over a Pi folder and a Pi that is scripted, kept by the daemon's
 /// lists into a ledger: what the page reads of why Pi listed no model, from end to end
 /// (the three the review T-1270 named: a token in a git package's URL, one in an
@@ -638,6 +627,20 @@ mod from_pi_to_the_ledger {
         child: (&[&str], Ends, Option<(&str, i32)>),
         update: Option<Result<String, cf_process::Failed>>,
         refresh: bool,
+    ) -> ModelListing {
+        pi_listing_with(files, vars, child, update, refresh, false)
+    }
+
+    /// As [`pi_listing`]; where `clocked`, the clock is fired as the read waits on it: a Pi that
+    /// lists models is asked again for a while (the page's read waits for its providers), which
+    /// a read that finds none is not.
+    fn pi_listing_with(
+        files: &[(&str, &str)],
+        vars: &[(&str, &str)],
+        child: (&[&str], Ends, Option<(&str, i32)>),
+        update: Option<Result<String, cf_process::Failed>>,
+        refresh: bool,
+        clocked: bool,
     ) -> ModelListing {
         let home = home(&["pi"]);
         let agent = home._folder.path().join("agent");
@@ -669,7 +672,21 @@ mod from_pi_to_the_ledger {
         let services = fakes.services(&env, home._folder.path());
         let adapter: Rc<dyn Adapter> = Rc::new(PiAdapter::new(&services));
         let lists = ModelLists::new(Rc::new(RealPi(adapter)), env);
-        let listing = eventually(lists.get(&home.ledger, Harness::Pi, refresh)).unwrap();
+        let read = lists.get(&home.ledger, Harness::Pi, refresh);
+        let listing = if clocked {
+            let mut read = pin!(read);
+            loop {
+                if let Poll::Ready(value) =
+                    read.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+                {
+                    break value;
+                }
+                assert!(fakes.time.fire_next(i64::MAX), "the read waits on nothing");
+            }
+        } else {
+            eventually(read)
+        }
+        .unwrap();
         let kept = home.ledger.borrow().model_listing("pi").unwrap().unwrap();
         assert_eq!(kept, listing, "the page reads what the daemon told");
         listing
@@ -816,11 +833,12 @@ mod from_pi_to_the_ledger {
             stdout: String::new(),
         };
         let listed = r#"{"type":"response","id":"models","success":true,"data":{"models":[{"provider":"a","id":"b","name":"b"}]}}"#;
-        let listing = pi_listing(
+        let listing = pi_listing_with(
             &[],
             &[],
             (&[listed], Ends::Asked, None),
             Some(Err(failed)),
+            true,
             true,
         );
         assert_eq!(listing.models.len(), 1, "the list Pi keeps");

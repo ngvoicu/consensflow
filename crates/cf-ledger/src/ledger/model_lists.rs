@@ -6,7 +6,7 @@ use super::Ledger;
 use crate::{model_lists, LedgerError};
 
 impl Ledger {
-    /// The model listing kept for `harness` (`claude`), if a read was ever tried.
+    /// The model listing kept of the last read of `harness` (`claude`), if one was tried.
     pub fn model_listing(&self, harness: &str) -> Result<Option<ModelListing>, LedgerError> {
         model_lists::model_listing(&self.store, harness)
     }
@@ -18,5 +18,10 @@ impl Ledger {
         listing: &ModelListing,
     ) -> Result<(), LedgerError> {
         model_lists::keep_model_listing(&mut self.store, harness, listing)
+    }
+
+    /// Forgets every kept listing, as a daemon does when it starts.
+    pub fn forget_model_listings(&mut self) -> Result<(), LedgerError> {
+        model_lists::forget_model_listings(&mut self.store)
     }
 }

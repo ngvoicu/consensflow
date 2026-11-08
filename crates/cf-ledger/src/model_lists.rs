@@ -1,7 +1,9 @@
-//! What each harness lists of its models, kept in the home (CHF-03): one row a harness,
+//! What each harness listed at its last read, kept in the home (CHF-03): one row a harness,
 //! its [`ModelListing`] written as a whole each time a list is read or a read fails
-//! ([`ModelListing::after`]), read back for the pickers. No event is logged: a listing is
-//! no change to any project.
+//! ([`ModelListing::failed`]). It is the record a submission is checked against, and nothing
+//! the page is shown: a list is read when it is asked for, and the daemon forgets the rows
+//! when it starts ([`forget_model_listings`]). No event is logged: a listing is no change to
+//! any project.
 
 use cf_proto::models::{Freshness, ModelChoice, ModelListing};
 use rusqlite::{params, OptionalExtension};
@@ -77,6 +79,15 @@ pub(crate) fn keep_model_listing(
                stale_why = ?5",
             params![harness, models, listing.read_at, listing.how, stale_why],
         )?;
+        Ok(())
+    })
+}
+
+/// Forgets every kept listing: what a harness listed in an earlier life of the daemon is no
+/// record of what it lists now.
+pub(crate) fn forget_model_listings(store: &mut Store) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute("DELETE FROM model_list", [])?;
         Ok(())
     })
 }

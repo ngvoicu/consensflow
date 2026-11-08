@@ -2,11 +2,11 @@
 //! harness, a model of it and an effort it lists for that model, `{harness, model, effort}`,
 //! never a saved agent. The harness is the word the
 //! ledger and the board say it in (`claude-code`), one ConsensFlow has an adapter for and
-//! that is installed here; the model is one the harness lists, where the home keeps its
-//! listing ([`crate::models::ModelLists`]): the picker read it to offer it. Nothing is
-//! read from a harness here: a home that keeps no listing of it yet takes the model on
-//! the harness's word at the launch, where a model it does not have starts the chief on
-//! its default (CHF-06).
+//! that is installed here; the model is one the harness lists, where the home keeps the
+//! last read of it ([`crate::models::ModelLists`]): the picker read it to offer it. Nothing is
+//! read from a harness here: a home that keeps no listing of it (none read since the daemon
+//! started, or the read failed) takes the model on the harness's word at the launch, where a
+//! model it does not have starts the chief on its default (CHF-06).
 
 use cf_engine::{require_chief_model, SwitchTo};
 use cf_harness::detect::missing_harnesses;

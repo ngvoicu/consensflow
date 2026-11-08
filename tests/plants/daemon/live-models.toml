@@ -1,0 +1,225 @@
+# A model list is read when it is asked for (A4-28, T-1321; Gabriel, 2026-11-08: "for all
+# ConsensFlow should show the list it grabs when I open a new project modal or project settings
+# modal"): the page's dialogs start a read of every installed harness as they open, side by side,
+# each select says it is reading until its answer comes, and a read that fails lists no model and
+# says why (the list read before is never put in its place: a member's own model stays in
+# its form). The daemon reads the harness at each ask, one harness at a time, and takes the
+# ask that waited for the read in flight into that read (crates/cf-daemon/src/models.rs); it
+# forgets the lists an earlier life kept as it starts (crates/cf-daemon/src/start.rs,
+# crates/cf-ledger/src/model_lists.rs). The page's read of Pi is the list Pi shows its human, who
+# opens `/model` seconds after Pi started: the read asks again until the list has stood
+# still, a window's launch does not (crates/cf-harness/src/pi/models.rs). Every name holds
+# `live models:`: `npm run plants:daemon -- "live models:"` runs them.
+
+[run]
+lm-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::models::tests::live"]
+lm-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "models::tests::"]
+lm-start = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::restart::a_start_forgets"]
+lm-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "model_lists"]
+lm-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "models::"]
+lm-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "A4-28"]
+
+# --- Pi: the list a window shows, not the list Pi has in its first moment ---
+
+[[plant]]
+name = "live models: the page's read of Pi does not wait for its providers"
+meant = "the_page_s_read_lists_what_a_package_adds_after_pi_starts"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = "            super::models::Settle::WaitForProviders,"
+replace = "            super::models::Settle::No,"
+
+[[plant]]
+name = "live models: a list that changed does not start the wait over"
+meant = "a_list_that_stands_still_ends_the_wait_and_one_that_changes_starts_it_again"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "            still = 0;"
+replace = "            still += 0;"
+
+[[plant]]
+name = "live models: the wait has no cap"
+meant = "a_list_that_never_stops_changing_is_given_up_on_at_the_cap"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    while still < SETTLE_MS && waited < allowed {"
+replace = "    while still < SETTLE_MS {"
+
+[[plant]]
+name = "live models: a wait that fails fails the read"
+meant = "a_pi_that_ends_after_its_first_answer_is_still_read"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '''        let Some(Ok(next)) = arm(time, ASK_MS).bound(asked).await else {
+            break;
+        };'''
+replace = '''        let Some(Ok(next)) = arm(time, ASK_MS).bound(asked).await else {
+            return json!({ "type": "response", "success": false, "error": "the wait failed" });
+        };'''
+
+[[plant]]
+name = "live models: the list a launch's default model is taken from waits for providers"
+meant = "the_read_that_picks_a_launch_s_default_model_does_not_wait"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    let listing = listed(env, processes, time, false, Settle::No).await?;"
+replace = "    let listing = listed(env, processes, time, false, Settle::WaitForProviders).await?;"
+
+[[plant]]
+name = "live models: the wait takes the whole cap from a read that began slowly"
+meant = "the_wait_leaves_a_read_what_it_needs_of_its_bound"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "    SETTLE_CAP_MS.min(BOUND_MS.saturating_sub(spent).saturating_sub(KEEP_MS))"
+replace = "    SETTLE_CAP_MS"
+
+[[plant]]
+name = "live models: an answer that lists no model is waited on"
+meant = "only_an_answer_that_lists_models_is_waited_on"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '''        && listed_in(first)
+            .as_array()
+            .is_some_and(|models| !models.is_empty())'''
+replace = '''        && listed_in(first).as_array().is_some()'''
+
+# --- the daemon: each ask reads the harness; a failed read lists nothing ---
+
+[[plant]]
+name = "live models: an ask is answered from a read that ended before it was made"
+meant = "every_ask_reads_the_harness_and_the_refresh_fetches"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "                if *ended > asked_after {"
+replace = "                if *ended >= asked_after {"
+
+[[plant]]
+name = "live models: a Refresh takes the answer of the read in flight"
+meant = "two_reads_of_one_harness_are_one_after_the_other"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "        if !refresh {"
+replace = "        if true {"
+
+[[plant]]
+name = "live models: an ask that waited for the read in flight reads again"
+meant = "an_ask_that_waited_for_the_read_before_it_is_answered_from_what_that_read_kept"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "                if *ended > asked_after {"
+replace = "                if false {"
+
+[[plant]]
+name = "live models: a failed read keeps the list read before, stale"
+meant = "a_failed_read_lists_no_model_and_says_why_not_the_list_before"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "                .unwrap_or_else(ModelListing::failed),"
+replace = '''                .unwrap_or_else(|why| {
+                    let before = self.ended.borrow().get(&harness).map(|(_, old)| old.clone());
+                    before.map_or_else(|| ModelListing::failed(why.clone()), |old| old.stale(why))
+                }),'''
+
+[[plant]]
+name = "live models: a failed read lists no model and does not say why"
+meant = "a_failed_read_lists_no_model_and_says_why"
+runs = ["lm-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = "        .stale(why)"
+replace = "        .stale(why.into()).stale(String::new())"
+
+[[plant]]
+name = "live models: a daemon starts remembering the lists an earlier life read"
+meant = "a_start_forgets_the_model_lists_an_earlier_daemon_kept"
+runs = ["lm-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "    ledger.borrow_mut().forget_model_listings()?;"
+replace = "    let _ = &ledger;"
+
+[[plant]]
+name = "live models: the ledger forgets no list"
+meant = "a_harness_s_listing_is_kept_whole_and_a_failed_read_replaces_it_with_no_list"
+runs = ["lm-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model_lists.rs"
+find = '        store.db.execute("DELETE FROM model_list", [])?;'
+replace = '        store.db.execute("DELETE FROM model_list WHERE 0", [])?;'
+
+# --- the page: every installed harness is read as a dialog opens ---
+
+[[plant]]
+name = "live models: a dialog reads a harness only when it is picked"
+meant = "New project reads every installed harness's models as it opens"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    this.#lists.start(installed.map(([kind]) => kind))"
+replace = "    void installed"
+
+[[plant]]
+name = "live models: a dialog reads the first harness only"
+meant = "Project settings reads every installed harness's models as it opens"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    for (const kind of kinds) this.get(harnessOf(kind))"
+replace = "    for (const kind of kinds.slice(0, 1)) this.get(harnessOf(kind))"
+
+[[plant]]
+name = "live models: the chief's picker and the members' read each harness apart"
+meant = "New project reads every installed harness's models as it opens"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    this.#member = new MemberPicker(this.#form, lists, () => {})"
+replace = "    this.#member = new MemberPicker(this.#form, new ModelLists(page.daemon), () => {})"
+
+[[plant]]
+name = "live models: a member's form loses its model where its harness's models cannot be read"
+meant = "Edit member keeps the member's own model, effort and tier where its harness's models cannot be read"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (!current) {"
+replace = "    if (true) {"
+
+[[plant]]
+name = "live models: a member's form loses its effort where its harness's models cannot be read"
+meant = "Edit member keeps the member's own model, effort and tier where its harness's models cannot be read"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    const effort = found?.effort ?? (this.#picker.keeping ? current?.effort : null)"
+replace = "    const effort = found?.effort"

@@ -15,37 +15,43 @@ fn listing(ids: &[&str]) -> ModelListing {
 }
 
 #[test]
-fn a_harness_s_listing_is_kept_whole_and_a_failed_read_keeps_the_one_before_stale() {
+fn a_harness_s_listing_is_kept_whole_and_a_failed_read_replaces_it_with_no_list() {
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("consensflow.db");
     let mut ledger = open_ledger(&file, Options::default()).unwrap();
     assert_eq!(ledger.model_listing("devin").unwrap(), None, "never tried");
 
-    let read = ModelListing::after(None, Ok(listing(&["swe-2", "adaptive"])));
+    let read = listing(&["swe-2", "adaptive"]);
     ledger.keep_model_listing("devin", &read).unwrap();
     assert_eq!(ledger.model_listing("devin").unwrap(), Some(read.clone()));
 
-    let kept = ledger.model_listing("devin").unwrap();
-    let failed = ModelListing::after(kept, Err("Not logged in".to_owned()));
+    let failed = ModelListing::failed("Not logged in");
     ledger.keep_model_listing("devin", &failed).unwrap();
     ledger.close().unwrap();
 
-    let ledger = open_ledger(&file, Options::default()).unwrap();
+    let mut ledger = open_ledger(&file, Options::default()).unwrap();
     let after = ledger.model_listing("devin").unwrap().unwrap();
-    assert_eq!(after.models, read.models, "the listing read before, kept");
-    assert_eq!(after.read_at, Some(10));
+    assert!(
+        after.models.is_empty(),
+        "the list read before is not kept in its place"
+    );
+    assert_eq!(after.read_at, None);
     assert_eq!(
         after.freshness,
         Freshness::Stale {
             why: "Not logged in".to_owned()
         }
     );
-    assert_eq!(after.how, "devin models list --format json");
     assert_eq!(
         ledger.model_listing("claude").unwrap(),
         None,
         "one row a harness"
     );
+
+    ledger.keep_model_listing("claude", &read).unwrap();
+    ledger.forget_model_listings().unwrap();
+    assert_eq!(ledger.model_listing("devin").unwrap(), None, "forgotten");
+    assert_eq!(ledger.model_listing("claude").unwrap(), None, "every row");
 }
 
 #[test]

@@ -75,6 +75,7 @@ impl Adapter for PiAdapter {
             &*self.processes,
             &*self.time,
             fetch,
+            super::models::Settle::WaitForProviders,
         ))
     }
 

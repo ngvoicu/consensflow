@@ -178,7 +178,7 @@ fn listing_of(home: &Home) -> Result<Vec<String>, String> {
     let env = Env::from_vars(vars);
     let processes = RecordedPi::new(&home.name);
     let time = ManualTime::new(0);
-    let listed = eventually(Box::pin(listed(&env, &processes, &time, false)));
+    let listed = eventually(Box::pin(listed(&env, &processes, &time, false, Settle::No)));
     assert_eq!(
         contents(&agent),
         before,
@@ -372,7 +372,12 @@ fn recorded_homes_answer_as_the_installed_pi_does() {
             let mut program = program(pi.clone(), &env);
             program.cwd = Some(folder.path().to_path_buf());
             program.args.extend(extra.map(str::to_owned));
-            let read = block_on(read(&processes, &SystemTime, program));
+            let read = block_on(read(
+                &processes,
+                &SystemTime,
+                program,
+                Settle::WaitForProviders,
+            ));
             let kept = &recorded(&home.name)[way];
             let at = format!("{} {way}", home.name);
             match (read, kept["exit"].is_null()) {
@@ -544,7 +549,13 @@ fn the_app_reads_a_copy_of_the_human_s_pi_folder_as_a_window_would_start() {
     let before = digests(&copy);
     let processes = SystemProcesses::new(env.clone());
     let started = std::time::Instant::now();
-    let listed = block_on(listed(&env, &processes, &SystemTime, false));
+    let listed = block_on(listed(
+        &env,
+        &processes,
+        &SystemTime,
+        false,
+        Settle::WaitForProviders,
+    ));
     let took = started.elapsed();
     let after = digests(&copy);
     let changed: Vec<&String> = before
@@ -591,7 +602,13 @@ fn a_refresh_of_the_installed_pi_on_a_copy_is_its_update_and_one_read() {
     let before = digests(&copy);
     let processes = SystemProcesses::new(env.clone());
     let started = std::time::Instant::now();
-    let listed = block_on(listed(&env, &processes, &SystemTime, true));
+    let listed = block_on(listed(
+        &env,
+        &processes,
+        &SystemTime,
+        true,
+        Settle::WaitForProviders,
+    ));
     let took = started.elapsed();
     let after = digests(&copy);
     let changed: Vec<&String> = before

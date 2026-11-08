@@ -3615,8 +3615,9 @@ test("Refresh beside the chief's model reads the picked harness's models again, 
       .getByRole('button', { name: 'Refresh models' })
       .click()
     await expect(models.locator('option')).toHaveText(['Pick a model', 'swe-2', 'swe-3'])
+    // Every installed harness was read as the dialog opened, and Devin once more at Refresh.
     expect(await calls(page, 'models.get')).toEqual([
-      { harness: 'devin' },
+      ...['claude', 'codex', 'pi', 'devin', 'muse'].map((harness) => ({ harness })),
       { harness: 'devin', refresh: true },
     ])
     await page.evaluate(() => {
@@ -3833,27 +3834,142 @@ test('takes a member off the staff once the human confirms', async ({ page }) =>
   await expect(page.locator('#status')).toHaveText('@zeus left the staff.')
 })
 
-test("Add member reads a harness's models once while the dialog is open, says it reads them, and reads them again at Refresh or at the next opening", async ({
+const HARNESSES = ['claude', 'codex', 'devin', 'muse', 'pi']
+const harnessesAsked = async (page) =>
+  (await calls(page, 'models.get')).map((body) => body.harness).sort()
+
+test("New project reads every installed harness's models as it opens, all at once, and each select says it is reading until its answer comes (A4-28)", async ({
   page,
 }) => {
   await open(page)
+  // Every read takes a while, so that a read asked after another's answer shows.
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 1500
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  // All five are asked before any answers: no harness waits for another, and none waits for
+  // the human to pick it.
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  expect(await answers(page, 'models.get')).toBe(0)
+  const models = dialog.locator('[name="chiefModel"]')
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Pi' })
+  await expect(models.locator('option')).toHaveText(["Reading Pi's models…"])
+  await expect(models).toBeDisabled()
+  await expect(models).toBeEnabled()
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['meta/muse-spark', false],
+    ['meta/muse-spark-1.3-contributor', false],
+  ])
+  // The pick used the read made as the dialog opened: nothing was asked twice.
+  expect(await harnessesAsked(page)).toEqual(HARNESSES)
+})
+
+test("Project settings reads every installed harness's models as it opens, all at once, whether the staff runs on it or not (A4-28)", async ({
+  page,
+}) => {
+  await open(page)
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 1500
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  expect(await answers(page, 'models.get')).toBe(0)
+  const models = dialog.locator('[name="memberModel"]')
+  await dialog.locator('[name="memberHarness"]').selectOption({ label: 'Devin' })
+  await expect(models.locator('option')).toHaveText(["Reading Devin's models…"])
+  await expect(models).toBeEnabled()
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['swe-2', false],
+  ])
+  expect(await harnessesAsked(page)).toEqual(HARNESSES)
+})
+
+test("Edit member keeps the member's own model, effort and tier where its harness's models cannot be read, so the form loses nothing (A4-28)", async ({
+  page,
+}) => {
+  for (const [why, arrange] of [
+    [
+      'the daemon refuses the read',
+      (data) => {
+        data.modelsRefusal = { claude: 'claude answered nothing' }
+      },
+    ],
+    [
+      'the harness lists no model',
+      (data) => {
+        data.models.claude.listing = {
+          models: [],
+          readAt: null,
+          freshness: { state: 'stale', why: 'claude is not logged in' },
+          how: '',
+        }
+      },
+    ],
+  ]) {
+    const data = model()
+    arrange(data)
+    await open(page, data)
+    await page.getByRole('button', { name: 'Project settings' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Project settings' })
+    const add = dialog.locator('.staff-add')
+    await dialog.getByRole('button', { name: 'Edit @zeus' }).click()
+    await expect(add.locator('legend'), why).toHaveText('Edit @zeus')
+    const models = add.locator('[name="memberModel"]')
+    // Its harness's list is not there, and the member's model stands where the list would be.
+    await expect(models, why).toHaveValue('claude-sonnet-5')
+    await expect(models.locator('option'), why).toHaveText(['claude-sonnet-5'])
+    await expect(add.locator('[name="memberEffort"]'), why).toHaveValue('high')
+    await expect(add.locator('[name="memberTier"]'), why).toHaveValue('standard')
+    await expect(add.locator('.member-help'), why).toContainText(/could not be read|lists no model/)
+    // Saved as it is: the daemon takes a harness it cannot read at its word.
+    await dialog.getByRole('button', { name: 'Save member' }).click()
+    await expect
+      .poll(() => calls(page, 'member.edit'), why)
+      .toEqual([
+        {
+          project: 1,
+          member: 'zeus',
+          harness: 'claude-code',
+          model: 'claude-sonnet-5',
+          effort: 'high',
+          tier: 'standard',
+        },
+      ])
+    await page.evaluate(() => {
+      window.__calls.length = 0
+    })
+  }
+})
+
+test('Add member shows what a harness listed when the dialog opened, says it reads while that read runs, and reads again at Refresh or at the next opening', async ({
+  page,
+}) => {
+  await open(page)
+  // A read takes a moment, so that one is on its way when its harness is picked.
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 800
+  })
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const harness = dialog.locator('[name="memberHarness"]')
   const models = dialog.locator('[name="memberModel"]')
   const reads = async () =>
     (await calls(page, 'models.get')).filter((body) => body.harness === 'devin')
-  // The staff's harnesses are read as the dialog opens, for the marks of gone models.
-  await expect.poll(() => calls(page, 'models.get')).toContainEqual({ harness: 'claude' })
-  // A read the daemon holds, of a harness nobody on the staff runs: the model select says it
-  // is reading.
-  await hold(page, 'models.get')
+  // Every installed harness is read as the dialog opens (A4-28), the staff's and the others'.
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  // Devin's read is on its way: the model select says it is reading, and fills when it comes.
   await harness.selectOption({ label: 'Devin' })
   await expect(models.locator('option')).toHaveText(["Reading Devin's models…"])
   await expect(models).toBeDisabled()
-  await letGo(page, 'models.get')
   await expect(models).toBeEnabled()
-  // Another harness and back: Devin's read is the one already made.
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 0
+  })
+  // Another harness and back: Devin's read is the one made as the dialog opened.
   await harness.selectOption({ label: 'Pi' })
   await expect(models).toBeEnabled()
   await harness.selectOption({ label: 'Devin' })
@@ -3864,9 +3980,10 @@ test("Add member reads a harness's models once while the dialog is open, says it
   await dialog.getByRole('button', { name: 'Refresh models' }).click()
   await expect.poll(reads).toEqual([{ harness: 'devin' }, { harness: 'devin', refresh: true }])
   await expect(models).toHaveValue('swe-2')
-  // The next opening reads it afresh at its first ask.
+  // The next opening reads it afresh, as it opens.
   await dialog.getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect.poll(async () => (await reads()).length).toBe(3)
   await harness.selectOption({ label: 'Devin' })
   await expect(models).toBeEnabled()
   expect(await reads()).toHaveLength(3)
