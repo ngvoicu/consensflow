@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_base::startup::{harness_exit, StartKind, StartRefusal};
+use cf_base::startup::{harness_exit, StartKind, StartRefusal, SOCKET_FOLDER_LEFT};
 use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{not_spawned, runnable, start_owned, Ending, Owned};
 use cf_proto::codex::agent_types::{agent_type, AgentType, AGENT_TYPES};
@@ -68,15 +68,51 @@ const GRACE: Duration = Duration::from_millis(1500);
 /// How long a failed server's last words are waited for.
 const LAST_WORDS: Duration = Duration::from_millis(200);
 
-/// How Codex's app-server went when it did not come up. Its status and what it wrote are on the
-/// window's screen: a window's exit has one byte on a Mac, which carries the kind of failure and no
-/// more (`cf_base::startup::StartKind::exit_status`).
+/// How Codex's app-server went when it did not come up. What it wrote is on the window's screen,
+/// and so is how it ended: a window's exit has one byte on a Mac, which carries the kind of failure
+/// and no more (`cf_base::startup::StartKind::exit_status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ServerEnd {
-    /// It ended.
-    Ended,
+    /// It ended, in the way [`Exit`] says.
+    Ended(Exit),
     /// It was not ready in the time it had.
     Silent,
+}
+
+impl ServerEnd {
+    /// How the server went, in a few words after "could not start": the number it ended with or the
+    /// signal that ended it, and no path.
+    fn words(self) -> String {
+        match self {
+            Self::Ended(Exit::Status(code)) => format!(" (it ended with status {code})"),
+            Self::Ended(Exit::Signal(signal)) => format!(" (it was ended by signal {signal})"),
+            Self::Ended(Exit::Unknown) | Self::Silent => String::new(),
+        }
+    }
+}
+
+/// How a program ended: the status it returned, or the signal that ended it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Exit {
+    Status(u32),
+    #[cfg_attr(not(unix), allow(dead_code, reason = "only Unix has signals"))]
+    Signal(i32),
+    /// The system said neither.
+    Unknown,
+}
+
+impl Exit {
+    fn of(status: ExitStatus) -> Self {
+        if let Some(code) = status.code() {
+            // A Windows status is a `u32` that `i32` carries as it is (`0xC0000005`).
+            return Self::Status(u32::from_ne_bytes(code.to_ne_bytes()));
+        }
+        #[cfg(unix)]
+        if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+            return Self::Signal(signal);
+        }
+        Self::Unknown
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -104,8 +140,8 @@ pub(crate) enum SessionError {
     #[error(transparent)]
     Endpoint(#[from] EndpointError),
     /// The app-server ended, or was not ready in time: what it wrote to its error stream, and how it
-    /// went.
-    #[error("Codex server could not start: {said}")]
+    /// went (the number it ended with, which the window's terminal shows and the note does not).
+    #[error("Codex server could not start{}: {said}", .how.words())]
     Server { said: String, how: ServerEnd },
     /// The system would not start Codex's server.
     #[error("Codex server could not start: {program}: {cause}")]
@@ -119,8 +155,6 @@ pub(crate) enum SessionError {
     Tui { program: String, cause: io::Error },
     #[error("could not watch for the signals that close a window: {0}")]
     Signals(io::Error),
-    #[error("could not remove the Codex socket folder {}: {cause}", path.display())]
-    Cleanup { path: PathBuf, cause: io::Error },
 }
 
 impl SessionError {
@@ -133,16 +167,16 @@ impl SessionError {
     /// ConsensFlow's log keeps what the engine saw.
     ///
     /// Every failure before Codex's TUI ran is one (each variant is decided here, none by a
-    /// wildcard); the failure to remove the window's socket folder is not (it comes after the
-    /// window did its work, and the TUI's status stands for it).
-    pub(crate) fn startup(&self) -> Option<StartKind> {
-        Some(match self {
+    /// wildcard). The failure to remove the window's socket folder is none and no `SessionError`
+    /// (T-1337): it comes after the window did its work, so it can win over no failure (`finish`).
+    pub(crate) fn startup(&self) -> StartKind {
+        match self {
             Self::Unrunnable(refusal) => refusal.failure().kind(),
             Self::ServerNotStarted { program, cause } | Self::Tui { program, cause } => {
                 not_spawned(Path::new(program), cause).failure().kind()
             }
             Self::Server {
-                how: ServerEnd::Ended,
+                how: ServerEnd::Ended(_),
                 ..
             } => StartKind::ServerStopped,
             Self::Server {
@@ -162,8 +196,7 @@ impl SessionError {
             | Self::Endpoint(_)
             | Self::Broker(_)
             | Self::Signals(_) => StartKind::NotSetUp,
-            Self::Cleanup { .. } => return None,
-        })
+        }
     }
 }
 
@@ -214,7 +247,9 @@ impl Setup {
 /// Runs the window: `args` are the Codex program and its arguments. The
 /// result is the window's exit code, the TUI's (`cf_base::startup::harness_exit`: one of the
 /// statuses this program ends with for a start that failed is never a status of Codex's);
-/// everything is ended and removed by then.
+/// everything is ended and removed by then, and a socket folder that could not be removed is said
+/// on the terminal without its path and written to ConsensFlow's log, and changes nothing of the
+/// result.
 pub(crate) async fn supervise(env: &Env, args: &[OsString]) -> Result<i32, SessionError> {
     supervise_with(env, args, Setup::standard()).await
 }
@@ -241,11 +276,10 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
     };
     let mut session = Session::default();
     let outcome = session.run(&plan).await;
-    // A folder that could not be removed is the window's last word, as it
-    // was when JavaScript's `finally` threw.
-    let finished = session.finish(&plan).await;
+    // What is left is ended and removed whatever came of the run, and what comes of that never
+    // replaces how the run went: the first failure wins (T-1337).
+    session.finish(&plan).await;
     session.say_what_ran_in_no_job(setup.say);
-    finished?;
     outcome
 }
 
@@ -417,17 +451,15 @@ impl Session {
             let ended = self
                 .backend
                 .as_mut()
-                .is_some_and(|backend| matches!(backend.try_wait(), Ok(Some(_))));
-            if ended || Instant::now() > deadline {
+                .and_then(|backend| backend.try_wait().ok().flatten());
+            if ended.is_some() || Instant::now() > deadline {
                 // What a program that ended wrote last may still be in the pipe.
                 let _ = tokio::time::timeout(LAST_WORDS, drain).await;
                 return Err(SessionError::Server {
                     said: tail.borrow().text().to_string(),
-                    how: if ended {
-                        ServerEnd::Ended
-                    } else {
-                        ServerEnd::Silent
-                    },
+                    how: ended.map_or(ServerEnd::Silent, |status| {
+                        ServerEnd::Ended(Exit::of(status))
+                    }),
                 });
             }
             tokio::select! {
@@ -499,8 +531,11 @@ impl Session {
     }
 
     /// Ends what is left: both processes asked to end, the broker closed, the
-    /// app-server made to end if it has not within a moment, the socket's folder removed.
-    async fn finish(&mut self, plan: &Plan<'_>) -> Result<(), SessionError> {
+    /// app-server made to end if it has not within a moment, the socket's folder removed. A folder
+    /// that cannot be removed is no failure of the window (it did its work, or failed before), and
+    /// its path can hold a credential: the window says on its terminal that it is left, without the
+    /// path or the cause, and ConsensFlow's log has both (T-1337).
+    async fn finish(&mut self, plan: &Plan<'_>) {
         self.stop();
         if let Some(broker) = self.broker.take() {
             broker.close().await;
@@ -514,12 +549,18 @@ impl Session {
             }
         }
         if let Some(directory) = plan.endpoint.directory() {
-            remove_folder(directory).map_err(|cause| SessionError::Cleanup {
-                path: directory.to_path_buf(),
-                cause,
-            })?;
+            if let Err(cause) = remove_folder(directory) {
+                crate::log::warn(
+                    plan.env,
+                    &format!(
+                        "cf codex-session could not remove the Codex socket folder {}",
+                        directory.display()
+                    ),
+                    &cause.to_string(),
+                );
+                self.notes.push(SOCKET_FOLDER_LEFT.to_owned());
+            }
         }
-        Ok(())
     }
 }
 

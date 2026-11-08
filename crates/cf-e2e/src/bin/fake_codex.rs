@@ -187,6 +187,13 @@ fn server(args: &[String]) -> ExitCode {
         );
         return ExitCode::from(127);
     }
+    if how == "fail-locked" {
+        // The server fails as `fail` does, and leaves the window a socket folder it cannot remove
+        // (T-1337): the cleanup of a window whose start failed.
+        lock_the_socket_folder(args);
+        let _ = writeln!(std::io::stderr(), "not logged in");
+        return ExitCode::FAILURE;
+    }
     if how == "deaf" {
         deaf();
     }
@@ -206,6 +213,23 @@ fn server(args: &[String]) -> ExitCode {
         None => on_loopback(option(args, "--ws-token-sha256"), behavior, &agent),
     }
 }
+
+/// Leaves a file in the folder of the socket the server was told to listen on, and takes the
+/// folder's write permission, so that what is in it cannot be removed afterwards. Windows listens
+/// on loopback and has no folder.
+#[cfg(unix)]
+fn lock_the_socket_folder(args: &[String]) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let socket = option(args, "--listen").and_then(|listen| listen.strip_prefix("unix://"));
+    if let Some(folder) = socket.and_then(|socket| std::path::Path::new(socket).parent()) {
+        let _ = std::fs::write(folder.join("left"), "");
+        let _ = std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o500));
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_the_socket_folder(_: &[String]) {}
 
 /// The server takes neither SIGTERM nor SIGHUP from here on: they are blocked before
 /// any thread of its starts, so every thread has them blocked, and they wait unseen.

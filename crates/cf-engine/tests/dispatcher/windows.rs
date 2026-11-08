@@ -1409,13 +1409,13 @@ fn note_of_a_codex_worker_that_ended(status: u32, rows: &[&str]) -> String {
 
 /// T-1328, the third reading of T-1322: Codex's server that ended before it was ready wrote its
 /// reason, a path of the person's, on its error stream, and `cf codex-session` printed it on the
-/// window's screen, `ConsensFlow could not open Codex: Codex server could not start: …`, and ended
+/// window's screen, `ConsensFlow could not open Codex: Codex server could not start (…): …`, and ended
 /// with 1: a screen the note quoted, `hunter22` and all, at every width. Every way the supervisor
 /// did not get Codex ready now ends the window with a status of its own, which the engine reads: the
 /// note says what failed and where to look, and quotes nothing of the screen.
 #[test]
 fn a_codex_window_that_did_not_get_codex_ready_says_why_from_how_it_ended_and_quotes_no_screen() {
-    let words = "ConsensFlow could not open Codex: Codex server could not start: /opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory";
+    let words = "ConsensFlow could not open Codex: Codex server could not start (it ended with status 127): /opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory";
     let mut failed = Vec::new();
     for (kind, said) in [
         (
@@ -1463,7 +1463,7 @@ fn a_codex_window_that_did_not_get_codex_ready_says_why_from_how_it_ended_and_qu
 #[test]
 fn the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note() {
     let rows = [
-        "ConsensFlow could not open Codex: Codex server could not start:",
+        "ConsensFlow could not open Codex: Codex server could not start (it ended with status 127):",
         "/opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory",
         "token sk-abcdefghijklmnopqrstuvwxyz0123456789",
     ];
@@ -1508,6 +1508,39 @@ fn the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_n
         "masked as every quote is: {line}"
     );
     context.close();
+}
+
+/// T-1337, the fourth reading of T-1322: a window that ran and could not remove its socket folder
+/// said `ConsensFlow could not open Codex: could not remove the Codex socket folder /opt/hunter22/…`
+/// on its screen, and the note quoted it at every width. The window now says only that the folder is
+/// left (`SOCKET_FOLDER_LEFT`, no path, no cause: ConsensFlow's log has both), and the note quotes
+/// those words whole, whatever the width, beside the status of the TUI. A guard: the words are no
+/// shape the screen checks withhold.
+#[test]
+fn a_codex_window_that_left_its_socket_folder_says_so_in_the_note_with_no_path_at_every_width() {
+    let mut failed = Vec::new();
+    for columns in [80, 120, 160] {
+        let screen = hard_wrapped(cf_base::startup::SOCKET_FOLDER_LEFT, columns);
+        let rows: Vec<&str> = screen.iter().map(String::as_str).collect();
+        let note = note_of_a_codex_worker_that_ended(7, &rows);
+        if !note.contains("(exit code 7); its screen ended with:") {
+            failed.push(format!("{columns} columns, not quoted: {note}"));
+        }
+        // The rows are joined with " / ": a word the terminal cut in two is whole without them.
+        if !note
+            .replace(" / ", "")
+            .replace(' ', "")
+            .contains(&cf_base::startup::SOCKET_FOLDER_LEFT.replace(' ', ""))
+        {
+            failed.push(format!("{columns} columns, not whole: {note}"));
+        }
+        for word in ["hunter22", "/opt", "codex-", "Permission denied"] {
+            if note.contains(word) {
+                failed.push(format!("{columns} columns: `{word}` is in {note}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// A Codex window a signal ended is not one that could not start Codex, whatever code the host

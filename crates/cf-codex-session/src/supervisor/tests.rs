@@ -50,8 +50,19 @@ impl Home {
     /// A home with `bridge`, and a role's file: one holding the text of `Ok`, or one
     /// named `Err` and not written.
     fn made(bridge: Option<&str>, role: Option<Result<&str, &str>>) -> Self {
+        Self::built("cf-sup-", bridge, role)
+    }
+
+    /// A home whose path holds `word`, as the review's input does (`/opt/hunter22`): a path can name
+    /// a credential, and the socket folder is in it.
+    fn in_a_path_with(word: &str) -> Self {
+        Self::built(&format!("cf-{word}-"), Some(BRIDGE), None)
+    }
+
+    /// [`Home::made`], in a folder named from `prefix`.
+    fn built(prefix: &str, bridge: Option<&str>, role: Option<Result<&str, &str>>) -> Self {
         let dir = tempfile::Builder::new()
-            .prefix("cf-sup-")
+            .prefix(prefix)
             .tempdir_in("/tmp")
             .unwrap();
         let mut vars = vec![
@@ -119,7 +130,7 @@ impl Home {
 /// of that: a note says no more of it (the third reading of T-1322: every failure before Codex's TUI
 /// ran has a status).
 fn not_set_up(failed: &SessionError) {
-    assert_eq!(failed.startup(), Some(StartKind::NotSetUp), "{failed}");
+    assert_eq!(failed.startup(), StartKind::NotSetUp, "{failed}");
     assert_eq!(
         crate::fail(&failed.to_string(), failed.startup()),
         StartKind::NotSetUp.exit_status(),
@@ -156,7 +167,7 @@ fn says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_
         .unwrap_err();
     assert_eq!(
         failed.to_string(),
-        "Codex server could not start: not logged in\n"
+        "Codex server could not start (it ended with status 1): not logged in\n"
     );
     assert!(home.left_behind().is_empty(), "{:?}", home.left_behind());
     // The server was given the backend's arguments and where to listen, and
@@ -290,7 +301,7 @@ fn a_server_that_could_not_start_in_a_window_that_gave_it_no_job_is_said_all_the
         .unwrap_err();
     assert_eq!(
         failed.to_string(),
-        "Codex server could not start: not logged in\n"
+        "Codex server could not start (it ended with status 1): not logged in\n"
     );
     assert_eq!(
         SAID.with(|said| said.take()),
@@ -313,7 +324,7 @@ fn a_program_that_is_not_there_is_said_by_its_path_and_the_systems_words() {
         )
     );
     // What a note says of it: the kind and the code, and no file (T-1328).
-    assert_eq!(failed.startup(), Some(StartKind::NotFound));
+    assert_eq!(failed.startup(), StartKind::NotFound);
     assert!(home.left_behind().is_empty());
 }
 
@@ -339,7 +350,7 @@ fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_
     assert!(matches!(failed, SessionError::Unrunnable(_)), "{failed:?}");
     // The window ends with the status of why, so that the engine reads from how it ended that
     // Codex never ran, and a note says so without quoting the screen that names the shim (T-1328).
-    assert_eq!(failed.startup(), Some(StartKind::NoNode));
+    assert_eq!(failed.startup(), StartKind::NoNode);
     let said = failed.to_string();
     assert!(said.starts_with(&shim.display().to_string()), "{said}");
     assert!(
@@ -352,10 +363,10 @@ fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_
 
 /// T-1328: Codex's window is ConsensFlow's own program, `cf codex-session`. When it could not start
 /// Codex it ends with a status of its own for each kind of why (70 to 80, ConsensFlow's own: a Codex
-/// that itself ends with one of them is reported as 1), and 1 for the one failure that comes after the
-/// window ran; the engine reads the status, and quotes no word of the screen.
+/// that itself ends with one of them is reported as 1); the engine reads the status, and quotes no
+/// word of the screen.
 #[test]
-fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other_failure_with_1() {
+fn a_window_that_could_not_start_codex_ends_with_the_status_of_why() {
     for (kind, status) in [
         (StartKind::NotFound, 70),
         (StartKind::NotAllowed, 71),
@@ -369,17 +380,16 @@ fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other
         (StartKind::ServerStopped, 79),
         (StartKind::ServerSilent, 80),
     ] {
-        assert_eq!(crate::fail("boom", Some(kind)), status);
+        assert_eq!(crate::fail("boom", kind), status);
     }
-    assert_eq!(crate::fail("boom", None), 1);
     // The server's own words, once it ran, are no kind: how it went is (the third reading of T-1322).
     assert_eq!(
         SessionError::Server {
             said: "it said no".to_owned(),
-            how: ServerEnd::Ended,
+            how: ServerEnd::Ended(Exit::Status(1)),
         }
         .startup(),
-        Some(StartKind::ServerStopped)
+        StartKind::ServerStopped
     );
 }
 
@@ -407,7 +417,7 @@ fn a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_w
         let home = Home::new();
         let codex = home.codex(body);
         let failed = home.supervise(codex, &[], startup).unwrap_err();
-        assert_eq!(failed.startup(), Some(kind), "{failed}");
+        assert_eq!(failed.startup(), kind, "{failed}");
         assert_eq!(crate::fail(&failed.to_string(), failed.startup()), status);
         let note = StartFailure::of(kind).words("Codex");
         for word in ["hunter22", "/opt", "key: abc", "loading"] {
@@ -459,17 +469,12 @@ fn a_tui_that_ends_with_a_status_of_whys_number_is_reported_as_a_failure_and_no_
 }
 
 /// T-1328, the third reading: how a supervisor ended says the window's status, and only a failure
-/// before the TUI ran is a status of why. A socket folder that could not be removed comes after the
-/// window did its work, and ends it with 1, as it did; a runtime that could not start did not get
-/// Codex ready, and says the system's name for why.
+/// before the TUI ran is a status of why. A socket folder that could not be removed is none of
+/// them, and no failure of the supervisor at all (T-1337: it is said and written down, and changes
+/// nothing of how the window ended); a runtime that could not start did not get Codex ready, and says
+/// the system's name for why.
 #[test]
 fn only_a_failure_before_the_tui_ran_is_a_status_of_why() {
-    let cleanup = SessionError::Cleanup {
-        path: PathBuf::from("/tmp/cf-socket"),
-        cause: io::Error::from(io::ErrorKind::PermissionDenied),
-    };
-    assert_eq!(cleanup.startup(), None);
-    assert_eq!(crate::status_of(Ok(Err(cleanup))), 1);
     assert_eq!(crate::status_of(Ok(Ok(7))), 7);
     assert_eq!(crate::status_of(Ok(Ok(0))), 0);
     let runtime = io::Error::from_raw_os_error(13);
@@ -803,7 +808,7 @@ fn the_servers_standard_error_is_read_for_as_long_as_it_runs_not_only_until_it_i
             .expect("the server ended: it was not left blocked on a full pipe");
         assert!(status.unwrap().success());
         drain.await.unwrap();
-        session.finish(&plan).await.unwrap();
+        session.finish(&plan).await;
         let text = tail.borrow().text().to_string();
         text
     })
@@ -957,8 +962,197 @@ fn a_sub_agents_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refuse
         .unwrap_err();
         assert!(failed.to_string().starts_with(&said), "{failed}");
         // Whatever it was, it is a window ConsensFlow could not set up; an unreadable file says why.
-        assert_eq!(failed.startup(), Some(StartKind::NotSetUp), "{failed}");
+        assert_eq!(failed.startup(), StartKind::NotSetUp, "{failed}");
         assert!(!started.exists(), "Codex started without it");
         assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
+    }
+}
+
+// T-1337, the fourth reading of T-1322: the first failure of a window wins. A socket folder that
+// cannot be removed is the window's last word only where nothing failed before, and it names no
+// path on the window's terminal: the path, which can hold a credential, and the system's cause
+// are in ConsensFlow's log.
+
+/// What a window says on its terminal of a socket folder it could not remove.
+const FOLDER_LEFT: &str = "ConsensFlow: the Codex socket folder could not be removed; its path and the cause are in ConsensFlow's log";
+
+/// The shell of a Codex program that leaves a file in the folder it is told to listen in and takes
+/// the folder's write permission, as a failing stand-in can: the folder cannot then be removed
+/// (`EACCES`), whatever the window does.
+const LOCK_THE_SOCKET_FOLDER: &str = r#"for arg in "$@"; do case "$arg" in unix://*) folder="${arg#unix://}"; folder="${folder%/native.sock}" ;; esac; done
+if [ -n "$folder" ]; then touch "$folder/left"; chmod 500 "$folder"; fi"#;
+
+/// Gives a home's socket folders their write permission back when a test ends, so that the home
+/// can be removed whatever the test found.
+struct Unlocked<'a>(&'a Home);
+
+impl Drop for Unlocked<'_> {
+    fn drop(&mut self) {
+        if let Ok(folders) = fs::read_dir(self.0.dir.path().join("tmp")) {
+            for folder in folders.flatten() {
+                let _ = fs::set_permissions(folder.path(), fs::Permissions::from_mode(0o700));
+            }
+        }
+    }
+}
+
+/// What the window's program wrote to ConsensFlow's log, `daemon.log` in its home.
+fn the_log_of(home: &Home) -> String {
+    fs::read_to_string(home.dir.path().join("daemon.log")).unwrap_or_default()
+}
+
+/// That `text` holds nothing of the home's path, and no word of the credential it was named with.
+fn names_no_path(text: &str, home: &Home) {
+    for word in [
+        "hunter22",
+        home.dir.path().to_str().unwrap(),
+        "codex-",
+        "native.sock",
+        "Permission denied",
+        "os error",
+    ] {
+        assert!(!text.contains(word), "`{word}` is in: {text}");
+    }
+}
+
+/// T-1337: Codex's server that ended (or stayed silent) before it was ready, and a socket folder
+/// that cannot be removed after it (`EACCES`), under a home with a credential's name in its path.
+/// The cleanup's error won over the server's: the window ended with 1, which the engine reads as
+/// Codex's own, and its note quoted `could not remove the Codex socket folder /opt/hunter22/tmp/…:
+/// Permission denied (os error 13)` at every width. The first failure wins: the window ends with the
+/// status of why the server was not ready, and says no path. `body` is the server's script.
+fn a_server_not_ready_and_a_folder_left(
+    body: &str,
+    startup: Duration,
+    kind: StartKind,
+    status: i32,
+) {
+    let home = Home::in_a_path_with("hunter22");
+    let _unlocked = Unlocked(&home);
+    let codex = home.codex(&format!("{LOCK_THE_SOCKET_FOLDER}\n{body}"));
+    let setup = Setup {
+        startup,
+        say: said_to_the_test,
+        ..Setup::standard()
+    };
+    let failed = crate::block_on_local(supervise_with(&home.env, &[codex.into_os_string()], setup))
+        .unwrap()
+        .unwrap_err();
+    let said = SAID.with(|said| said.take());
+    let left = home.left_behind();
+    assert_eq!(left.len(), 1, "the folder could not be removed: {left:?}");
+    assert_eq!(failed.startup(), kind, "{failed}");
+    let words = failed.to_string();
+    names_no_path(&words, &home);
+    assert_eq!(crate::status_of(Ok(Err(failed))), status);
+    // The window may say that the folder is left; it says not where, nor why.
+    assert_eq!(said, [FOLDER_LEFT], "{kind:?}");
+    names_no_path(&said.concat(), &home);
+    // The path and the system's cause are in ConsensFlow's log.
+    let folder = home.dir.path().join("tmp").join(&left[0]);
+    let log = the_log_of(&home);
+    assert!(
+        log.contains(&format!(
+            "could not remove the Codex socket folder {}",
+            folder.display()
+        )) && log.contains("Permission denied (os error 13)"),
+        "{kind:?}: {log}"
+    );
+}
+
+#[test]
+fn a_server_that_ended_before_it_was_ready_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path(
+) {
+    a_server_not_ready_and_a_folder_left(
+        "echo 'it said no' >&2\nexit 127",
+        Duration::from_secs(5),
+        StartKind::ServerStopped,
+        79,
+    );
+}
+
+#[test]
+fn a_server_that_was_not_ready_in_time_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_80_and_no_path(
+) {
+    a_server_not_ready_and_a_folder_left(
+        "exec sleep 60",
+        Duration::from_secs(2),
+        StartKind::ServerSilent,
+        80,
+    );
+}
+
+/// T-1337: a window that ran, whose TUI ended with `tui`, and a socket folder that cannot be
+/// removed. The window ends with the TUI's status, as it did its work, and not with a failure of
+/// opening Codex: it said `ConsensFlow could not open Codex: could not remove the Codex socket folder
+/// <path>: …`, a path of the person's, and ended with 1.
+#[test]
+fn a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path(
+) {
+    for tui in [0, 7] {
+        let home = Home::in_a_path_with("hunter22");
+        let _unlocked = Unlocked(&home);
+        let folder = home.dir.path().join("tmp").join("codex-bH4xQp");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("left"), "").unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o500)).unwrap();
+        let (ended, said) = crate::block_on_local(async {
+            let codex = FakeCodex::start(Behaviour::Ready).await;
+            let program = codex_on_loopback_ending_with(&home, codex.address.port(), "", tui);
+            let setup = Setup {
+                startup: Duration::from_secs(10),
+                endpoint: |env| {
+                    let home = cf_base::home::config_root(env).unwrap();
+                    Endpoint::loopback_with_folder(home.join("tmp").join("codex-bH4xQp"))
+                },
+                say: said_to_the_test,
+                ..Setup::standard()
+            };
+            let ended = supervise_with(&home.env, &[program.into_os_string()], setup).await;
+            (ended, SAID.with(|said| said.take()))
+        })
+        .unwrap();
+        assert_eq!(home.left_behind(), ["codex-bH4xQp"], "the folder is left");
+        let code = ended.unwrap_or_else(|failed| panic!("{tui}: the window failed: {failed}"));
+        assert_eq!(code, tui, "the TUI's status is the window's");
+        assert_eq!(said, [FOLDER_LEFT], "{tui}");
+        names_no_path(&said.concat(), &home);
+        let log = the_log_of(&home);
+        assert!(
+            log.contains(&format!(
+                "could not remove the Codex socket folder {}",
+                folder.display()
+            )) && log.contains("Permission denied (os error 13)"),
+            "{tui}: {log}"
+        );
+    }
+}
+
+/// T-1337: the status Codex's server ended with was discarded: a server that exits 127 (a wrapper
+/// whose program is gone) showed no 127 anywhere, and the engine sees only the kind. The window
+/// shows it, as a number and no path, on its terminal.
+#[test]
+fn a_server_that_ended_before_it_was_ready_shows_the_status_or_the_signal_it_ended_with() {
+    for (body, shown) in [
+        (
+            "exit 127",
+            "Codex server could not start (it ended with status 127): ",
+        ),
+        (
+            "echo 'not logged in' >&2\nexit 3",
+            "Codex server could not start (it ended with status 3): not logged in\n",
+        ),
+        (
+            "kill -9 $$",
+            "Codex server could not start (it was ended by signal 9): ",
+        ),
+    ] {
+        let home = Home::new();
+        let codex = home.codex(body);
+        let failed = home
+            .supervise(codex, &[], Duration::from_secs(5))
+            .unwrap_err();
+        assert_eq!(failed.to_string(), shown, "{body}");
+        assert_eq!(failed.startup(), StartKind::ServerStopped);
     }
 }

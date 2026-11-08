@@ -11,6 +11,7 @@
 mod arguments;
 mod broker;
 mod endpoint;
+mod log;
 mod questions;
 mod supervisor;
 mod tail;
@@ -29,7 +30,8 @@ use tokio::task::LocalSet;
 /// this program keeps for a start that failed, which is reported as 1), 0 when a signal ended it,
 /// and when Codex could not be opened the reason on standard error and a status that says why
 /// ([`fail`], T-1328): every failure before the TUI ran has one, so that the engine reads the
-/// status, and never the screen, of a window that did not get Codex ready.
+/// status, and never the screen, of a window that did not get Codex ready. A failure after it, the
+/// removal of the window's socket folder, changes neither the status nor what is said of it (T-1337).
 pub fn run(env: &Env, args: &[OsString]) -> i32 {
     status_of(block_on_local(supervisor::supervise(env, args)))
 }
@@ -42,7 +44,7 @@ fn status_of(ended: io::Result<Result<i32, supervisor::SessionError>>) -> i32 {
         Ok(Err(cause)) => fail(&cause.to_string(), cause.startup()),
         Err(cause) => fail(
             &format!("could not start its runtime: {cause}"),
-            Some(StartKind::NotSetUp),
+            StartKind::NotSetUp,
         ),
     }
 }
@@ -64,9 +66,9 @@ fn block_on_local<F: Future>(future: F) -> io::Result<F::Output> {
 }
 
 /// Says why Codex could not be opened, on standard error, in the person's own words (the file
-/// that was tried is named), and ends the window with the status of the kind of failure where it
-/// is one of a start (`StartKind::exit_status`), else 1.
-fn fail(reason: &str, startup: Option<StartKind>) -> i32 {
+/// that was tried is named), and ends the window with the status of the kind of failure
+/// (`StartKind::exit_status`).
+fn fail(reason: &str, startup: StartKind) -> i32 {
     let _ = writeln!(io::stderr(), "ConsensFlow could not open Codex: {reason}");
-    startup.map_or(1, StartKind::exit_status)
+    startup.exit_status()
 }

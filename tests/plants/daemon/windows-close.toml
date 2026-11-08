@@ -2481,13 +2481,14 @@ replace = '''        StartFailure::of(StartKind::NotFound).with_errno("ENOENT").
 
 [[plant]]
 name = "windows close: quote less: a Codex window that could not start Codex ends with 1"
-meant = "a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other_failure_with_1"
+meant = "a_window_that_could_not_start_codex_ends_with_the_status_of_why"
 runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/lib.rs"
-find = '''    startup.map_or(1, StartKind::exit_status)'''
-replace = '''    startup.map_or(1, |_| 1)'''
+find = '''    startup.exit_status()'''
+replace = '''    let _ = startup;
+    1'''
 
 [[plant]]
 name = "windows close: quote less: a Codex shim with no Node is no kind of start"
@@ -2757,13 +2758,22 @@ replace = '''            | Self::Signals(_) => StartKind::NotStarted,'''
 
 [[plant]]
 name = "windows close: quote less: a socket folder that could not go is a start that failed"
-meant = "only_a_failure_before_the_tui_ran_is_a_status_of_why"
+meant = "a_server_that_ended_before_it_was_ready_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path"
 runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/supervisor.rs"
-find = '''            Self::Cleanup { .. } => return None,'''
-replace = '''            Self::Cleanup { .. } => StartKind::NotSetUp,'''
+find = '''    session.say_what_ran_in_no_job(setup.say);
+    outcome
+}'''
+replace = '''    session.say_what_ran_in_no_job(setup.say);
+    if session.notes.iter().any(|note| note == SOCKET_FOLDER_LEFT) {
+        return Err(SessionError::Signals(io::Error::from(
+            io::ErrorKind::PermissionDenied,
+        )));
+    }
+    outcome
+}'''
 
 [[plant]]
 name = "windows close: quote less: a runtime that could not start is no kind of start"
@@ -2772,9 +2782,9 @@ runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/lib.rs"
-find = '''            Some(StartKind::NotSetUp),
+find = '''            StartKind::NotSetUp,
         ),'''
-replace = '''            None,
+replace = '''            StartKind::Failed,
         ),'''
 
 [[plant]]
@@ -2911,3 +2921,145 @@ find = '''            None => "the host sent no screen".to_owned(),
             Some(tail) => Quote::of(tail, Keep::Last).map_or_else('''
 replace = '''            None => "the host sent no screen".to_owned(),
             Some(_) => Quote::of(&[], Keep::Last).map_or_else('''
+
+# T-1337, the fourth reading of T-1322: the first failure of a window wins. A socket folder that
+# cannot be removed (`EACCES`) comes after the window did its work and replaces no outcome of it
+# (the server that was not ready keeps its kind, a window that ran keeps the TUI's status); the
+# window says on its terminal that the folder is left, with no path and no cause, and ConsensFlow's
+# log has both. The status the server ended with is on the terminal as a number.
+
+[[plant]]
+name = "windows close: quote less: a socket folder that could not go replaces the status of a window that ran"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''    session.say_what_ran_in_no_job(setup.say);
+    outcome
+}'''
+replace = '''    session.say_what_ran_in_no_job(setup.say);
+    if session.notes.iter().any(|note| note == SOCKET_FOLDER_LEFT) && outcome.is_ok() {
+        return Ok(1);
+    }
+    outcome
+}'''
+
+[[plant]]
+name = "windows close: quote less: the window names the socket folder it could not remove"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                self.notes.push(SOCKET_FOLDER_LEFT.to_owned());'''
+replace = '''                self.notes
+                    .push(format!("{SOCKET_FOLDER_LEFT} ({})", directory.display()));'''
+
+[[plant]]
+name = "windows close: quote less: the window names the system's cause of a socket folder it could not remove"
+meant = "a_server_that_ended_before_it_was_ready_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                self.notes.push(SOCKET_FOLDER_LEFT.to_owned());'''
+replace = '''                self.notes.push(format!("{SOCKET_FOLDER_LEFT}: {cause}"));'''
+
+[[plant]]
+name = "windows close: quote less: the window says nothing of a socket folder it could not remove"
+meant = "a_server_that_was_not_ready_in_time_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_80_and_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                self.notes.push(SOCKET_FOLDER_LEFT.to_owned());'''
+replace = '''                let _ = SOCKET_FOLDER_LEFT;'''
+
+[[plant]]
+name = "windows close: quote less: the log is not written for a socket folder that could not go"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/log.rs"
+find = '''    let Some(home) = config_root(env) else {'''
+replace = '''    let Some(home) = config_root(env).filter(|_| false) else {'''
+
+[[plant]]
+name = "windows close: quote less: the log has a socket folder's path and not the system's cause"
+meant = "a_server_that_ended_before_it_was_ready_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                    &cause.to_string(),
+                );'''
+replace = '''                    "",
+                );'''
+
+[[plant]]
+name = "windows close: quote less: the log has no path of the socket folder it could not remove"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                        "cf codex-session could not remove the Codex socket folder {}",
+                        directory.display()'''
+replace = '''                        "cf codex-session could not remove the Codex socket folder {}",
+                        "(a folder)"'''
+
+[[plant]]
+name = "windows close: quote less: the status a server ended with is dropped as it is read"
+meant = "a_server_that_ended_before_it_was_ready_shows_the_status_or_the_signal_it_ended_with"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                        ServerEnd::Ended(Exit::of(status))'''
+replace = '''                        ServerEnd::Ended({
+                            let _ = status;
+                            Exit::Unknown
+                        })'''
+
+[[plant]]
+name = "windows close: quote less: the window does not say the status its server ended with"
+meant = "a_server_that_ended_before_it_was_ready_shows_the_status_or_the_signal_it_ended_with"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Ended(Exit::Status(code)) => format!(" (it ended with status {code})"),'''
+replace = '''            Self::Ended(Exit::Status(_)) => String::new(),'''
+
+[[plant]]
+name = "windows close: quote less: a signal that ended the server is said as a status"
+meant = "a_server_that_ended_before_it_was_ready_shows_the_status_or_the_signal_it_ended_with"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Ended(Exit::Signal(signal)) => format!(" (it was ended by signal {signal})"),'''
+replace = '''            Self::Ended(Exit::Signal(signal)) => format!(" (it ended with status {signal})"),'''
+
+[[plant]]
+name = "windows close: quote less: a server that was not ready in time is said to have ended with a status"
+meant = "a_server_that_does_not_come_up_in_time_is_ended_and_said_with_what_it_wrote"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Ended(Exit::Unknown) | Self::Silent => String::new(),'''
+replace = '''            Self::Ended(Exit::Unknown) => String::new(),
+            Self::Silent => " (it ended with status 0)".to_owned(),'''
+
+[[plant]]
+name = "windows close: quote less: the words of a socket folder left name a path"
+meant = "a_codex_window_that_left_its_socket_folder_says_so_in_the_note_with_no_path_at_every_width"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''ConsensFlow: the Codex socket folder could not be removed; its path and the cause are in ConsensFlow's log'''
+replace = '''ConsensFlow: the Codex socket folder /opt/hunter22/tmp could not be removed; its path and the cause are in ConsensFlow's log'''

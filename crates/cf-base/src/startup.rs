@@ -216,6 +216,11 @@ impl StartKind {
     }
 }
 
+/// What a window's program of ConsensFlow's says on its terminal of the socket folder it could not
+/// remove once the window ended (T-1337): that it could not, and where to read why. Never the folder,
+/// whose path is under the configuration home and can name a credential, nor the system's error.
+pub const SOCKET_FOLDER_LEFT: &str = "ConsensFlow: the Codex socket folder could not be removed; its path and the cause are in ConsensFlow's log";
+
 /// The status a window's program of ConsensFlow's ends with when the harness it ran ended with
 /// `code`: `code`, but for one of the statuses that program ends with for a start that failed
 /// ([`StartKind::exit_status`]), which is 1, a plain failure, so that those are never a harness's.
