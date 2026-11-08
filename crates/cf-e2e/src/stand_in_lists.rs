@@ -209,7 +209,10 @@ mod tests {
             ids(&codex),
             ["fake", "fake-2", "fake-chief", "gpt-6-astra", "zed"]
         );
-        let astra = codex.iter().find(|model| model.id == "gpt-6-astra").unwrap();
+        let astra = codex
+            .iter()
+            .find(|model| model.id == "gpt-6-astra")
+            .unwrap();
         assert_eq!(astra.efforts, ["low", "medium", "high"]);
         assert!(
             of_roster("devin", Some(&roster))

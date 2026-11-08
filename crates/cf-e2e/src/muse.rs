@@ -1010,10 +1010,14 @@ mod tests {
 
     #[test]
     fn the_echo_muse_answers_the_daemons_read_of_the_models_and_nothing_else() {
-        let reply = |line: &str| serve_reply(line).map(|text| serde_json::from_str::<serde_json::Value>(&text).unwrap());
-        let initialized = reply(r#"{"id":1,"jsonrpc":"2.0","method":"initialize","params":{}}"#).unwrap();
+        let reply = |line: &str| {
+            serve_reply(line).map(|text| serde_json::from_str::<serde_json::Value>(&text).unwrap())
+        };
+        let initialized =
+            reply(r#"{"id":1,"jsonrpc":"2.0","method":"initialize","params":{}}"#).unwrap();
         assert_eq!(initialized["id"], 1);
-        let listed = reply(r#"{"id":2,"jsonrpc":"2.0","method":"model/list","params":{}}"#).unwrap();
+        let listed =
+            reply(r#"{"id":2,"jsonrpc":"2.0","method":"model/list","params":{}}"#).unwrap();
         assert_eq!(listed["id"], 2);
         assert_eq!(listed["result"], echo_list());
         assert_eq!(listed["result"]["source"], "providerCatalog");
@@ -1029,7 +1033,10 @@ mod tests {
     fn the_script_of_the_mac_answers_as_the_program_of_windows_does() {
         use std::io::Write as _;
         use std::process::{Command, Stdio};
-        let script = format!("set -- serve --provider meta --no-session-log\n{}\n", serve_list_script());
+        let script = format!(
+            "set -- serve --provider meta --no-session-log\n{}\n",
+            serve_list_script()
+        );
         let mut bash = Command::new("/bin/bash")
             .args(["-c", &script])
             .stdin(Stdio::piped())
@@ -1053,7 +1060,10 @@ mod tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         assert_eq!(lines.len(), 2, "{lines:?}");
-        assert_eq!((lines[0]["id"].clone(), lines[1]["id"].clone()), (json!(1), json!(2)));
+        assert_eq!(
+            (lines[0]["id"].clone(), lines[1]["id"].clone()),
+            (json!(1), json!(2))
+        );
         assert_eq!(lines[1]["result"], echo_list());
     }
 

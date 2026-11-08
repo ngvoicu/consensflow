@@ -1035,3 +1035,86 @@ async fn a_read_that_is_no_token_is_refused() {
         })
         .await;
 }
+
+/// Devin's `swe-2` at `high` is launched as the exact id it lists, `swe-2-high`, on every path a
+/// pick takes and whatever read id it names: the read its picker was shown, an id the daemon
+/// never made (another daemon's, FOREIGN_READ), the read of a harness that failed, and none
+/// (T-1329, C: the reviewer's four states). No variable makes a daemon take the pair verbatim.
+#[tokio::test]
+async fn swe_2_at_high_is_checked_and_launched_as_swe_2_high_on_every_pick_path_and_read_state() {
+    LocalSet::new()
+        .run_until(async {
+            for state in ["known", "unknown", "failed", "none"] {
+                let s = staffing();
+                if state == "failed" {
+                    s.lists_of("devin").fail("Not logged in");
+                }
+                let read = match state {
+                    "known" | "failed" => s.reads("devin").await["read"].clone(),
+                    "unknown" => json!(FOREIGN_READ),
+                    _ => Value::Null,
+                };
+                s.lists_of("devin").set(recorded("devin"));
+                let choice = json!({
+                    "harness": "devin", "model": "swe-2", "effort": "high",
+                    "tier": "standard", "read": read,
+                });
+                // Add member.
+                let added = s.add(choice.clone()).await;
+                assert_eq!(added["ok"], true, "{state}: {added}");
+                let handle = added["member"]["handle"].as_str().unwrap().to_owned();
+                assert_eq!(s.runs(&handle).1.as_deref(), Some("swe-2-high"), "{state}");
+                // Edit member and Project settings: the same pick, changed in its tier.
+                let mut edit = choice.clone();
+                edit["project"] = json!(s.project);
+                edit["member"] = json!(handle);
+                edit["tier"] = json!("light");
+                let edited = ask(&s.app, "member.edit", edit).await;
+                assert_eq!(edited["ok"], true, "{state}: {edited}");
+                let edited_handle = edited["member"]["handle"].as_str().unwrap().to_owned();
+                assert_eq!(
+                    s.runs(&edited_handle).1.as_deref(),
+                    Some("swe-2-high"),
+                    "{state}"
+                );
+                // New project: the chief and a staff member.
+                let mut member = choice.clone();
+                member["roles"] = json!(["worker"]);
+                let mut opening = choice.clone();
+                opening["directory"] = json!(format!("/work/four-states-{state}"));
+                opening["staff"] = json!([member]);
+                let opened = ask(&s.app, "project.open", opening).await;
+                assert_eq!(opened["ok"], true, "{state}: {opened}");
+                let project = opened["project"]["id"].as_i64().unwrap();
+                assert_eq!(s.chief_of(project).model.as_deref(), Some("swe-2-high"));
+                let staff = s
+                    .rig
+                    .kit
+                    .ledger
+                    .borrow()
+                    .project(project)
+                    .unwrap()
+                    .unwrap()
+                    .participants;
+                assert!(
+                    staff
+                        .iter()
+                        .any(|p| p.role == "worker" && p.model.as_deref() == Some("swe-2-high")),
+                    "{state}"
+                );
+                // Switch chief.
+                let mut switch = choice.clone();
+                switch["project"] = json!(s.project);
+                switch["when"] = json!("now");
+                let target = crate::page::chief::chief_asked(
+                    &s.rig.page,
+                    crate::page::body::Body::new(&switch),
+                    true,
+                )
+                .await
+                .unwrap();
+                assert_eq!(target.model, "swe-2-high", "{state}");
+            }
+        })
+        .await;
+}

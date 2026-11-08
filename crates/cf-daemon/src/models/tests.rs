@@ -356,7 +356,11 @@ fn a_restarted_daemons_count_of_reads_reaching_an_old_dialogs_id_does_not_make_i
         checked.models[0].id, "swe-2",
         "not checked against the unrelated read the new daemon made first"
     );
-    assert_eq!(after.asked.borrow().len(), 2, "a read was made for the pick");
+    assert_eq!(
+        after.asked.borrow().len(),
+        2,
+        "a read was made for the pick"
+    );
     assert_ne!(
         shown.id, other.id,
         "the second daemon's first read has an id of its own"

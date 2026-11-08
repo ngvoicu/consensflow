@@ -454,8 +454,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/lists.rs"
-find = '    args.iter().take(2).any(|arg| arg == "-p")'
-replace = '    args.iter().take(2).any(|arg| arg == "--never")'
+find = '    let models = stand_in_lists::listed("claude-code", Path::new(&home));'
+replace = '    let models: Vec<stand_in_lists::Listed> = Vec::new();'
 
 [[plant]]
 name = "live models: the rig seats a model its stand-ins do not list"

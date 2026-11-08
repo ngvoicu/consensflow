@@ -107,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stand_in_for_a_window_is_the_script_on_posix_and_the_shim_of_the_agent_on_windows() {
+    fn a_stand_in_for_a_window_is_a_script_that_runs_the_agent_on_posix_and_its_shim_on_windows() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("not").join("yet");
         let agent = Path::new("/bin/fake-agent");
@@ -116,7 +116,8 @@ mod tests {
         let wanted = if cfg!(windows) {
             window_shim(agent).into_bytes()
         } else {
-            SCRIPT.to_vec()
+            // The agent answers the daemon's read of the models, which no window runs (A4-28).
+            b"#!/bin/sh\nexec '/bin/fake-agent' \"$@\"\n".to_vec()
         };
         assert_eq!(fs::read(&path).unwrap(), wanted);
     }

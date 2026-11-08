@@ -288,9 +288,17 @@ fn checks_a_model_against_what_the_stand_in_lists_as_any_daemon_does() -> Outcom
     assert_eq!(listed["ok"], true, "{listed}");
     let ids: Vec<&str> = listed["listing"]["models"]
         .as_array()
-        .map(|models| models.iter().filter_map(|model| model["id"].as_str()).collect())
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model["id"].as_str())
+                .collect()
+        })
         .unwrap_or_default();
-    assert!(ids.contains(&"fake") && ids.contains(&"mybuilder"), "{listed}");
+    assert!(
+        ids.contains(&"fake") && ids.contains(&"mybuilder"),
+        "{listed}"
+    );
     let read = listed["read"].as_str().unwrap_or_default().to_owned();
     // A model nobody lists is refused, whether it names a read, names none, or names one the
     // daemon never made.

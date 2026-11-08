@@ -393,7 +393,8 @@ async function open(page, data = model()) {
         const refused = data.modelsRefusal?.[harness]
         if (refused !== undefined) return { ok: false, error: refused }
         const { listing, switchHelp = null } = data.models[harness]
-        const read = window.__reads.length + 1
+        // A token of the daemon's life, as the daemon names a read: a text, never a number.
+        const read = `0123456789abcdef.${window.__reads.length + 1}`
         window.__reads.push({ harness, read })
         return answer({
           harness,
@@ -4583,7 +4584,7 @@ test('a Refresh in one picker updates every picker that shows the harness, and a
   await expect(chiefModels.locator('option')).toHaveText(['Pick a model', 'new-current'])
   await expect(memberModels.locator('option')).toHaveText(['Pick a model', 'new-current'])
   const [shown, refreshed] = await reads()
-  expect(refreshed.read).toBeGreaterThan(shown.read)
+  expect(refreshed.read).not.toBe(shown.read)
   // A pick made from the refreshed list names the refreshed read.
   await chiefModels.selectOption('new-current')
   await dialog.getByRole('button', { name: 'Start project' }).click()
@@ -4792,7 +4793,7 @@ test("a Devin member's edit after a failed Refresh and a Refresh that came keeps
   const edits = await calls(page, 'member.edit', { reads: true })
   expect(edits[1].unchanged).toBeUndefined()
   expect(edits[1]).toMatchObject({ model: 'swe-2', effort: 'low' })
-  expect(typeof edits[1].read).toBe('number')
+  expect(edits[1].read).toBe(await page.evaluate(() => window.__reads.at(-1).read))
 })
 
 test('Add member shows what a harness listed when the dialog opened, says it reads while that read runs, and reads again at Refresh or at the next opening', async ({
