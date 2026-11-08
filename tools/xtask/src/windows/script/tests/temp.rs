@@ -95,6 +95,15 @@ fn the_sweep_takes_the_test_families_a_day_old_and_ends_with_them_and_never_fail
         after.contains("Clear-TestTemp -Temp ([IO.Path]::GetTempPath()) -Processes $running -Now (Get-Date) -Cap 3000\n"),
         "{after}"
     );
+    // Only the Temp under the user's profile: a case of the tests of this program is given a profile
+    // of its own, and the Temp of the person running them is none of its.
+    let guard = after
+        .find("GetTempPath().StartsWith($env:USERPROFILE.TrimEnd('\\') + '\\', [StringComparison]::OrdinalIgnoreCase)")
+        .expect("only the Temp under the profile is swept");
+    assert!(
+        guard < after.find("Clear-TestTemp -Temp").unwrap(),
+        "{after}"
+    );
     assert!(
         text.find("Remove-Item -Force -ErrorAction SilentlyContinue } catch {}")
             .unwrap()

@@ -559,7 +559,8 @@ pub fn sweep_script() -> String {
 ///
 /// A folder is taken only when it is a day old ([`TEMP_KEPT_DAYS`]) and no program runs from it
 /// or has its path on its command line; where the programs cannot be listed nothing is taken.
-/// Windows refuses to remove a folder with a file open in it, which is the last word. At most
+/// Windows refuses to remove a folder with a file open in it, which is the last word. Only a Temp
+/// that is under the user's profile is swept. At most
 /// [`TEMP_SWEPT_AT_MOST`] go in a sweep. What cannot be taken is said and never ends the run.
 fn temp_sweep() -> String {
     fill(
@@ -1073,10 +1074,14 @@ function Clear-TestTemp {
 }
 # temp: end
 $swept = $null
-try {
-  $running = try { @(Get-CimInstance Win32_Process -ErrorAction Stop) } catch { $null }
-  $swept = Clear-TestTemp -Temp ([IO.Path]::GetTempPath()) -Processes $running -Now (Get-Date) -Cap «most»
-} catch { Write-Output "The test folders in Temp could not be looked at: $($_.Exception.Message)" }
+# Only the Temp that is under the user's profile, which is the user's own (the tests of this
+# program give a case a profile of its own, and must not sweep the Temp of the person running them).
+if ([IO.Path]::GetTempPath().StartsWith($env:USERPROFILE.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+  try {
+    $running = try { @(Get-CimInstance Win32_Process -ErrorAction Stop) } catch { $null }
+    $swept = Clear-TestTemp -Temp ([IO.Path]::GetTempPath()) -Processes $running -Now (Get-Date) -Cap «most»
+  } catch { Write-Output "The test folders in Temp could not be looked at: $($_.Exception.Message)" }
+}
 if ($swept -and $swept.Skipped) { Write-Output '== temp: the programs of this machine could not be listed, so no test folder of the user''s Temp was taken away' }
 elseif ($swept -and ($swept.Removed -or $swept.Held -or $swept.Failed.Count -or $swept.Left)) {
   Write-Output "== temp: $($swept.Removed) test folders a day old or more taken away from the user's Temp, $($swept.Held) kept (a program runs from them), $($swept.Failed.Count) that Windows would not remove, $($swept.Left) left for the next run"

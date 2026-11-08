@@ -2559,3 +2559,13 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = "pub const TEMP_SWEPT_AT_MOST: u32 = 3000;"
 replace = "pub const TEMP_SWEPT_AT_MOST: u32 = 300000;"
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes a Temp that is not under the profile"
+meant = "the_sweep_takes_the_test_families_a_day_old_and_ends_with_them_and_never_fails_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ([IO.Path]::GetTempPath().StartsWith($env:USERPROFILE.TrimEnd('\\') + '\\', [StringComparison]::OrdinalIgnoreCase)) {"
+replace = "if ($true) {"
