@@ -580,6 +580,218 @@ mod conpty {
     }
 }
 
+/// What a human's Shift+Enter becomes when the window's input is nearly full (T-1336), through
+/// a real pty: the bytes the page writes for it are `sends.mac` of the fixture the page tests hold the
+/// page to (`app/tests/fixtures/pane-keys/newline-cases.json`).
+///
+/// A program takes a lone Escape for "stop". A pty's input queue holds a limited number of bytes
+/// (a Mac's, 1,024, less what the line discipline keeps), and a write that reaches past it is taken
+/// in two parts, the second when the reader has read: so an `ESC CR` whose Escape is the last byte
+/// the queue takes is read as an Escape, and the Enter in the next read, whatever the reader's own
+/// buffer (a window that is slow to read, behind a long paste, in the shape the review T-1336 found
+/// with Codex's own reader: a 1,009-character bracketed paste, a reader that waits, Shift+Enter).
+#[cfg(all(test, unix))]
+mod boundary {
+    use std::collections::HashMap;
+    use std::io::Read;
+    use std::path::Path;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
+
+    const FIXTURE: &str =
+        include_str!("../../../../app/tests/fixtures/pane-keys/newline-cases.json");
+
+    fn size() -> PtySize {
+        PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        }
+    }
+
+    /// What the page writes for Shift+Enter on a Mac, by harness: the fixture's `sends.mac`.
+    fn sent_on_a_mac() -> Vec<(String, Vec<u8>)> {
+        let fixture: serde_json::Value =
+            serde_json::from_str(FIXTURE).expect("the fixture is JSON");
+        let harnesses = fixture["harnesses"].as_object().expect("the harnesses");
+        assert!(
+            harnesses.len() >= 5,
+            "every harness: {:?}",
+            harnesses.keys()
+        );
+        harnesses
+            .iter()
+            .map(|(name, each)| {
+                let bytes = each["sends"]["mac"]
+                    .as_array()
+                    .expect("what is sent on a Mac")
+                    .iter()
+                    .map(|byte| u8::try_from(byte.as_u64().expect("a byte")).expect("a byte"))
+                    .collect();
+                (name.clone(), bytes)
+            })
+            .collect()
+    }
+
+    /// The program's output until it has printed `word`, read in a thread so that a program that
+    /// never does fails the test, not holds it.
+    fn spawn_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let mut buffer = [0_u8; 4096];
+            while let Ok(count) = reader.read(&mut buffer) {
+                if count == 0 || sender.send(buffer[..count].to_vec()).is_err() {
+                    return;
+                }
+            }
+        });
+        receiver
+    }
+
+    /// How many bytes this system's pty takes into its input queue of a program that reads none
+    /// of them: bytes are written one at a time to a pty whose program does not read, with the
+    /// master set not to block, until it refuses one.
+    fn queue_limit() -> usize {
+        let pair = native_pty_system().openpty(size()).expect("a pty");
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", "stty raw -echo; printf ready; sleep 5"]);
+        let mut child = pair.slave.spawn_command(command).expect("the program");
+        drop(pair.slave);
+        let output = spawn_reader(pair.master.try_clone_reader().expect("the pty's output"));
+        let mut seen = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !String::from_utf8_lossy(&seen).contains("ready") {
+            let left = deadline.saturating_duration_since(Instant::now());
+            seen.extend(output.recv_timeout(left).expect("the program says ready"));
+        }
+        let fd = pair.master.as_raw_fd().expect("the master's descriptor");
+        // SAFETY: `fd` is the open master of this pty, which lives to the end of the function.
+        let taken = unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            let mut taken = 0_usize;
+            while taken < (1 << 20) && libc::write(fd, b"x".as_ptr().cast(), 1) == 1 {
+                taken += 1;
+            }
+            taken
+        };
+        child.kill().expect("end the program");
+        child.wait().expect("the program ended");
+        assert!(taken > 16, "the pty took only {taken} bytes");
+        taken
+    }
+
+    /// What a program that reads its raw terminal in blocks, after it has waited a second, reads of
+    /// `filler` bytes and then `key` written to its pane in one write by the pane host: each read
+    /// as the bytes it was.
+    fn reads_of(filler: usize, key: &[u8]) -> Vec<Vec<u8>> {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let script = "stty raw -echo; printf ready; sleep 1; i=0; \
+            while [ $i -lt 8 ]; do dd bs=4096 count=1 2>/dev/null | od -An -v -tx1 | tr -d ' \\n'; echo; i=$((i+1)); done";
+        let OpenedPane { key: pane, reader } = table
+            .open(
+                Path::new("/tmp"),
+                &["/bin/sh".to_owned(), "-c".to_owned(), script.to_owned()],
+                &HashMap::new(),
+                size(),
+            )
+            .expect("the program");
+        let output = spawn_reader(reader);
+        let mut seen = String::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !seen.contains("ready") {
+            let left = deadline.saturating_duration_since(Instant::now());
+            seen.push_str(&String::from_utf8_lossy(
+                &output.recv_timeout(left).expect("the program says ready"),
+            ));
+        }
+        let mut bytes = vec![b'x'; filler];
+        bytes.extend_from_slice(key);
+        // The write is one call, as the pane host's is; where the queue is full it waits for the
+        // program's first read, a second on.
+        table.write(&pane, &bytes).expect("write the keys");
+        let total = bytes.len();
+        let mut reads: Vec<Vec<u8>> = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while reads.iter().map(Vec::len).sum::<usize>() < total {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let Ok(chunk) = output.recv_timeout(left) else {
+                break;
+            };
+            seen.push_str(&String::from_utf8_lossy(&chunk));
+            reads = seen
+                .split("ready")
+                .nth(1)
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(|line| {
+                    (0..line.len() / 2)
+                        .map(|at| u8::from_str_radix(&line[at * 2..at * 2 + 2], 16).unwrap_or(0))
+                        .collect()
+                })
+                .collect();
+        }
+        table.kill(&pane).expect("close the pane");
+        reads
+    }
+
+    /// The reads, each as how many bytes it was and the last two.
+    fn shown(reads: &[Vec<u8>]) -> String {
+        reads
+            .iter()
+            .map(|read| {
+                format!(
+                    "{} bytes ending {:02x?}",
+                    read.len(),
+                    &read[read.len().saturating_sub(2)..]
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", then ")
+    }
+
+    /// The premise, measured on this system: an `ESC CR` that begins at the last byte the queue
+    /// takes is read as an Escape, and the Enter in the next read. If this fails, a read no longer
+    /// splits a key and the test below proves nothing.
+    #[test]
+    fn an_escape_led_key_at_the_end_of_a_full_queue_is_read_as_a_lone_escape() {
+        let limit = queue_limit();
+        let reads = reads_of(limit - 1, b"\x1b\r");
+        assert!(
+            reads.iter().any(|read| read.last() == Some(&0x1b)),
+            "with {} bytes waiting, ESC CR was read as {}",
+            limit - 1,
+            shown(&reads)
+        );
+        let whole = reads_of(0, b"\x1b\r");
+        assert_eq!(whole, [vec![0x1b, 0x0d]], "with nothing waiting");
+    }
+
+    /// What the page writes for Shift+Enter is never read as a lone Escape, in any harness, wherever
+    /// the queue's end falls: no read ends in an Escape.
+    #[test]
+    fn shift_enter_is_never_read_as_a_lone_escape_behind_a_full_queue() {
+        let limit = queue_limit();
+        for (harness, key) in sent_on_a_mac() {
+            for waiting in [limit - 1, limit - 2, limit - key.len().max(1)] {
+                let reads = reads_of(waiting, &key);
+                assert!(
+                    reads.iter().all(|read| read.last() != Some(&0x1b)),
+                    "{harness}: {key:?} written behind {waiting} bytes was read as {}",
+                    shown(&reads)
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

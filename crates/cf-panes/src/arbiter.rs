@@ -1064,9 +1064,15 @@ fn typed_keys(keys: &mut Keys, bytes: &[u8]) {
             _ => keyed = true,
         }
         match rest[0] {
-            b'\r' | b'\n' => {
+            b'\r' => {
                 classes.with("enter");
                 unsent = 0;
+            }
+            // A line feed is Ctrl+J: a new line of the draft in every harness (the page writes
+            // Shift+Enter as one, T-1336), where Enter, a carriage return, sends it.
+            b'\n' => {
+                classes.with("text");
+                unsent += 1;
             }
             0x03 => {
                 classes.with("control");
@@ -1805,6 +1811,58 @@ mod tests {
         );
     }
 
+    /// A Shift+Enter is part of the draft, not a send (T-1336). The page writes it as a line feed
+    /// (Ctrl+J), the new line every harness takes on a Mac and Claude Code and Pi take on Windows,
+    /// whichever byte carries it: a line feed counts as a character of the draft, so a message
+    /// that waits for the person's draft to be sent is still held after one, where it was let
+    /// go in over the draft when the line feed counted as an Enter (the count went to nothing).
+    #[test]
+    fn a_new_line_in_the_draft_is_part_of_the_draft_and_a_delivery_stays_held() {
+        let key = PaneKey::new("shift-enter", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        let unsent = || arbiter.snapshot(&key).expect("snapshot").unsent;
+        let kinds = || {
+            arbiter
+                .snapshot(&key)
+                .expect("snapshot")
+                .human_writes
+                .last()
+                .map(|write| write.classes.clone())
+                .expect("a write of the human's")
+        };
+
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"first line")
+            .expect("type the first line");
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\n")
+            .expect("Shift+Enter");
+        assert_eq!(kinds(), ["text"], "a new line is typed text, no Enter");
+        assert!(unsent(), "the draft is still there");
+        assert!(matches!(
+            arbiter.write_paste_via(writer.as_ref(), &key, b"result", None),
+            Err(ArbiterError::Unsent)
+        ));
+
+        // A line feed alone is a draft too: nothing to hold a delivery before it, a line break to hold it after.
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, &[0x7f; 11])
+            .expect("erase it all, the line break too");
+        assert!(!unsent(), "erased to nothing, it holds nothing");
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\n")
+            .expect("Shift+Enter in an empty box");
+        assert!(unsent(), "a line break is in the box");
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\r")
+            .expect("send it");
+        arbiter
+            .write_paste_via(writer.as_ref(), &key, b"result", None)
+            .expect("a paste goes in once the draft is sent");
+    }
+
     /// What keys leave unsent, as near as keys tell.
     #[test]
     fn unsent_counts_what_the_keys_leave_in_the_input() {
@@ -1816,6 +1874,11 @@ mod tests {
             "never below nothing"
         );
         assert_eq!(super::unsent_after(5, b"\r"), 0, "Enter sends it");
+        assert_eq!(
+            super::unsent_after(5, b"\n"),
+            6,
+            "a line feed (Ctrl+J, Shift+Enter's new line) is a character of the draft, no send"
+        );
         assert_eq!(super::unsent_after(5, b"\x03"), 0, "Ctrl+C clears the line");
         assert_eq!(super::unsent_after(5, b"\x15"), 0, "and Ctrl+U");
         assert_eq!(

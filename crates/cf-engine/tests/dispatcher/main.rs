@@ -79,6 +79,7 @@ mod interrupts;
 mod lanes;
 mod launch_stops;
 mod launch_wait;
+mod launched_harness;
 mod looks;
 mod looks_finished;
 mod lost_lines;

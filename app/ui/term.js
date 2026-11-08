@@ -21,26 +21,35 @@ const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
  */
 const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
 
+/** A Windows page: its console host turns what a window is written into key events first. */
+const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
+
 /**
- * What a window is sent for Shift+Enter (T-1330). xterm.js 6 has neither the kitty keyboard
+ * What a window is sent for Shift+Enter (T-1330, T-1336). xterm.js 6 has neither the kitty keyboard
  * protocol nor modifyOtherKeys, and sends the plain Enter's CR for Shift+Enter, so a message was
- * sent where the human asked for a new line, in every harness. A window is not asked what it
- * takes; the page sends the new-line key its harness lists, as the bytes a terminal writes for it:
+ * sent where the human asked for a new line, in every harness. A window is not asked what it takes;
+ * the page sends the new-line key its harness lists, as the bytes a terminal writes for it.
  *
- * - **Alt+Enter, ESC CR,** for Claude Code, Codex, Devin and Muse Code: each lists it as a new line
- *   (Claude Code's own `/terminal-setup` writes it for Shift+Enter in VS Code). It is the one that
- *   also reaches the three that read the console's key events on Windows as a key they bind: the
- *   console host makes ESC CR the Enter key with Alt, a line feed the Enter key with Control, which
- *   they bind to nothing, and `CSI 13;2u` seven keys of typed text (`cf-panes` `pty/keys.rs`).
- * - **Ctrl+J, a line feed,** for Pi: its Alt+Enter queues a follow-up message, which sends it (on
- *   Windows too, where the follow-up is Ctrl+Q and Pi reads ESC CR as no key of its own), and it
- *   reads a line feed as Ctrl+J, a new line, with or without a keyboard protocol; its console is
- *   one of virtual-terminal input, which hands it the line feed whole.
+ * **A pane's key never starts with Escape.** A program takes a lone Escape for "stop", and a read
+ * that ends between the two bytes of a write reads the Escape alone: a pty whose input queue is
+ * nearly full (a window behind a long paste, slow to read: on a Mac, Codex read `ESC CR` as Escape
+ * and Enter), the console host's 4,096-byte read on Windows. Only a single byte cannot be split.
  *
- * Both are what xterm already sends for the keys they are: Alt+Enter and Ctrl+J stay the human's.
- * A window whose harness the board has not said yet is sent ESC CR.
+ * - **Ctrl+J, a line feed,** on a Mac, in every harness: each lists it as a new line (Claude Code's
+ *   `chat:newline`, Codex's and Muse's keymaps, Devin's `ctrl-j`, Pi's `tui.input.newLine`), and
+ *   a program in raw mode reads it as the key it is. On Windows it is Pi's and Claude Code's too: they
+ *   set the console's virtual-terminal input, which hands it on whole.
+ * - **Alt+Enter, ESC CR,** to Codex, Devin and Muse on Windows, **until the human decides**
+ *   (T-1336): they read the console's key events, which make a line feed the Enter key with
+ *   Control, bound to nothing, and the kitty protocol's `CSI 13;2u` seven characters (Codex alone
+ *   rebuilds them), so no single byte is their new line there. ESC CR is, and a console host read
+ *   that ends after the Escape reads it alone (`cf-panes` `pty/keys.rs` measured it).
+ *
+ * Alt+Enter and Ctrl+J typed by the human stay xterm's. A window whose harness the board has not
+ * said yet is sent a line feed, the one key no harness takes for a send.
  */
-export const shiftEnterFor = (harness) => (harness === 'pi' ? '\n' : '\x1b\r')
+export const shiftEnterFor = (harness) =>
+  WINDOWS && (harness === 'codex' || harness === 'devin' || harness === 'muse') ? '\x1b\r' : '\n'
 
 /** Whether `event` is Shift+Enter alone, typed (not an input method choosing a candidate). */
 const isShiftEnter = (event) =>
