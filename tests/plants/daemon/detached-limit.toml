@@ -128,8 +128,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''        Ok(()) if !left.escaped.is_empty() => case.check('''
-replace = '''        Ok(()) if false => case.check('''
+find = '''    if (left.listed.is_empty() && !left.escaped.is_empty())
+        || listed_then_left_for_a_session_of_its_own(left)
+    {'''
+replace = '''    if false {'''
 
 # What the run ends, and what it says it cannot.
 
