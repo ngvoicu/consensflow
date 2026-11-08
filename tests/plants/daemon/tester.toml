@@ -208,12 +208,10 @@ file = "skill/core/chief.md"
 find = '''
 of that tier (`--review`) checks finished work and changes no file; a tester
 of that tier (`--test`) runs the work to check it and changes no product code.
-An image comes from the image designer (`--design`, no tier); its result
-names the file.'''
+An image comes from the image designer (`--design`, no tier). Give it a precise'''
 replace = '''
 of that tier (`--review`) checks finished work and changes no file. An image
-comes from the image designer (`--design`, no tier); its result names the
-file.'''
+comes from the image designer (`--design`, no tier). Give it a precise'''
 
 [[plant]]
 name = "tester: the chief is not told a tester checks work by running it, where it is told reviews are asked for"
