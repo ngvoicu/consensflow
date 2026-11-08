@@ -572,6 +572,7 @@ mod on_windows {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test finds the SystemRoot it was started with.
     fn a_path_whose_names_need_no_alias_is_answered_that_windows_keeps_none_for_it() {
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
         let notepad = format!(r"{root}\System32\notepad.exe");

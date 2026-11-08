@@ -129,6 +129,7 @@ pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
 
 /// The signed update the feed offers this platform, checked, for the app to
 /// download and install.
+#[allow(clippy::disallowed_methods)] // Reads the packaged smoke's CONSENSFLOW_SELFTEST_UPDATER_* variables: older than cf_base::env::Env.
 async fn check_in_app<R: Runtime>(
     app: &AppHandle<R>,
     snapshot: &UpdateSnapshot,
@@ -418,6 +419,7 @@ fn relaunch_once(
 /// Starts the executable of the bundle at `app` (its Info.plist names it) with `args`, this
 /// process's environment and input, and nothing of its but the standard streams.
 #[cfg(target_os = "macos")]
+#[allow(clippy::disallowed_methods)] // The app starts the installed update itself, holding only its streams: older than cf-process's rule.
 fn relaunch(
     app: &Path,
     args: impl IntoIterator<Item = std::ffi::OsString>,
@@ -445,6 +447,7 @@ fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
         .join("app")
 }
 
+#[allow(clippy::disallowed_methods)] // Finds ConsensFlow's home (CONSENSFLOW_HOME) itself, as the daemon does.
 pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     let directory = preferences_directory(
         &app.path().home_dir()?,
@@ -1211,6 +1214,7 @@ mod tests {
     /// process, so the test runs in one of its own, its binary run again.
     #[cfg(target_os = "macos")]
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
     fn the_app_restarts_with_every_descriptor_close_on_exec() {
         const SWEPT: &str = "CONSENSFLOW_TEST_RESTART_SWEPT";
         if std::env::var_os(SWEPT).is_some() {
@@ -1255,6 +1259,7 @@ mod tests {
     /// test's binary run again, given a home and an input of the test's.
     #[cfg(target_os = "macos")]
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
     fn an_installed_update_starts_with_this_apps_environment_input_and_arguments() {
         const BUNDLE: &str = "CONSENSFLOW_TEST_RELAUNCH_BUNDLE";
         if let Some(bundle) = std::env::var_os(BUNDLE) {

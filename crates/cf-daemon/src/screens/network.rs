@@ -32,6 +32,7 @@ use crate::start::VERSION;
 pub struct HttpsFeed {
     /// Built when the first feed is asked, which most runs never do: reading the
     /// platform's trust is no cost of the daemon's start.
+    #[allow(clippy::disallowed_types)] // The one client, which `client` below built.
     client: OnceCell<Result<reqwest::Client, String>>,
 }
 
@@ -41,6 +42,7 @@ impl HttpsFeed {
         Self::default()
     }
 
+    #[allow(clippy::disallowed_types)] // Hands out the client held above, builds none.
     fn client(&self) -> Result<&reqwest::Client, String> {
         self.client
             .get_or_init(client)
@@ -52,6 +54,12 @@ impl HttpsFeed {
 /// The client the feeds are asked with: no redirect followed, no proxy
 /// (Node's `fetch` read none), HTTP/1.1, and ConsensFlow named as the one
 /// asking, as undici named `node`.
+///
+/// This is the daemon's one approved constructor of an HTTPS client (clippy.toml, T-1253): the
+/// workspace's reqwest builds on no provider of its own, so the client is handed a rustls config
+/// on ring, the one provider of the build. Any other client built in this crate is refused by
+/// clippy, and a change here keeps its provider in the config it hands over.
+#[allow(clippy::disallowed_methods, clippy::disallowed_types)] // The approved constructor.
 fn client() -> Result<reqwest::Client, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let verifier = Verifier::new(Arc::clone(&provider)).map_err(|failed| failed.to_string())?;
@@ -107,5 +115,7 @@ impl Answer for Reply {
     }
 }
 
+#[cfg(test)]
+mod rules;
 #[cfg(test)]
 mod tests;

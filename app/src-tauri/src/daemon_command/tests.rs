@@ -120,6 +120,7 @@ fn login_shell(home: &Path, body: &str) -> PathBuf {
 /// part of the PATH.
 #[cfg(unix)]
 #[test]
+#[allow(clippy::disallowed_methods)] // The test compares with the PATH it was started with.
 fn the_login_path_is_read_past_what_login_files_print() {
     let home = tempfile::tempdir().expect("home");
     let shell = login_shell(
@@ -447,6 +448,7 @@ fn given_of(command: &Command, name: &str) -> Option<String> {
 /// to say.
 #[cfg(unix)]
 #[test]
+#[allow(clippy::disallowed_methods)] // The test compares with the PATH it was started with.
 fn a_login_shell_slower_than_five_seconds_still_gives_its_path() {
     let home = tempfile::tempdir().expect("home");
     let shell = login_shell(home.path(), "/bin/sleep 6; exec /bin/sh -c \"$2\"");
@@ -520,6 +522,7 @@ fn the_log_says_how_long_the_login_shell_had_and_the_path_the_daemon_runs_on() {
 /// the shell has gone; what the shell printed is read all the same.
 #[cfg(unix)]
 #[test]
+#[allow(clippy::disallowed_methods)] // The test compares with the PATH it was started with.
 fn a_login_path_is_read_while_a_started_process_holds_the_output() {
     let home = tempfile::tempdir().expect("home");
     // The process outlives the read by far, so a loaded machine's slow start is
@@ -732,6 +735,7 @@ fn the_shells_place_depth_last_command_and_terminal_are_not_taken() {
 /// asked.
 #[cfg(unix)]
 #[test]
+#[allow(clippy::disallowed_methods)] // The test compares with the PATH it was started with.
 fn an_interactive_rc_that_hangs_falls_back_to_the_login_path_within_its_time() {
     let home = tempfile::tempdir().expect("home");
     let shell = shell_with_rc(home.path(), "exec /bin/sleep 30");
@@ -839,6 +843,7 @@ fn of_a_printed_environment_no_harness_sessions_variable_is_taken() {
 /// its Path and SystemRoot come back as they are, within the time.
 #[cfg(windows)]
 #[test]
+#[allow(clippy::disallowed_methods)] // The test compares with the SystemRoot it was started with.
 fn windows_powershell_says_its_environment_in_utf8_between_the_markers() {
     let env = Env::from_process();
     let started = Instant::now();
@@ -1047,6 +1052,7 @@ fn slow_login_files_leave_the_interactive_question_its_whole_limit() {
 /// The app's quit ends every shell the lookup asks, when it asks two at once.
 #[cfg(unix)]
 #[test]
+#[allow(clippy::disallowed_methods)] // The test starts the shells it ends.
 fn ending_a_lookup_ends_both_shells_it_asks_at_once() {
     let lookup = LoginLookup::default();
     let mut first = Command::new("/bin/sleep");
@@ -1079,6 +1085,7 @@ fn ending_a_lookup_ends_both_shells_it_asks_at_once() {
 /// restarts. Only the board's four go: the home a run chose is not a window's. The environment
 /// is the process's, so the test runs in a child, its own binary again.
 #[test]
+#[allow(clippy::disallowed_methods)] // The test is its own child, given an environment and reading it back.
 fn an_app_started_from_a_window_of_a_board_gives_nothing_of_that_board_to_what_it_starts() {
     use cf_base::env::WINDOW_VARIABLES;
 
