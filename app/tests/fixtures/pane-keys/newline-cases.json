@@ -1,0 +1,522 @@
+{
+  "candidates": [
+    {
+      "id": "cr",
+      "key": "Enter",
+      "bytes": [
+        13
+      ]
+    },
+    {
+      "id": "lf",
+      "key": "Ctrl+J",
+      "bytes": [
+        10
+      ]
+    },
+    {
+      "id": "esc-cr",
+      "key": "Alt+Enter",
+      "bytes": [
+        27,
+        13
+      ]
+    },
+    {
+      "id": "csi-u",
+      "key": "Shift+Enter (CSI u)",
+      "bytes": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ]
+    },
+    {
+      "id": "modify-other-keys",
+      "key": "Shift+Enter (modifyOtherKeys)",
+      "bytes": [
+        27,
+        91,
+        50,
+        55,
+        59,
+        50,
+        59,
+        49,
+        51,
+        126
+      ]
+    }
+  ],
+  "windowsReadings": {
+    "keyEvents": {
+      "cr": "Enter, char 13, no modifier",
+      "lf": "Enter, char 10, Control",
+      "esc-cr": "Enter, char 13, Alt",
+      "csi-u": "seven keys: ESC [ 1 3 ; 2 u, as typed characters",
+      "modify-other-keys": "no key"
+    },
+    "virtualTerminalInput": {
+      "cr": "\\r",
+      "lf": "\\n",
+      "esc-cr": "ESC \\r",
+      "csi-u": "ESC [ 1 3 ; 2 u",
+      "modify-other-keys": "ESC [ 2 7 ; 2 ; 1 3 ~"
+    }
+  },
+  "harnesses": {
+    "claude-code": {
+      "version": "2.1.319",
+      "evidence": "read",
+      "source": "Mr (key reader) and the text input's Return handler in the binary's JavaScript; default keybinding ctrl+j: chat:newline",
+      "cases": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "newline"
+        }
+      ]
+    },
+    "codex": {
+      "version": "0.167.0",
+      "evidence": "read",
+      "source": "codex-rs/tui/src/keymap.rs (editor insert_newline), textarea.rs c0_line_feed test; crossterm event/sys/unix/parse.rs",
+      "cases": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "nothing"
+        }
+      ],
+      "windows": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "nothing"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "types"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "nothing"
+        }
+      ]
+    },
+    "pi": {
+      "version": "1.5.0",
+      "evidence": "replayed",
+      "source": "@earendil-works/pi-tui keys.js matchesKey against TUI_KEYBINDINGS' defaults",
+      "cases": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "follow-up"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "newline"
+        }
+      ]
+    },
+    "devin": {
+      "version": "3000.12.28",
+      "evidence": "read",
+      "source": "docs.devin.ai/cli/reference/keyboard-shortcuts (editor.insert_newline: shift-enter, alt-enter, ctrl-j); crossterm",
+      "cases": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "nothing"
+        }
+      ],
+      "windows": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "nothing"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "types"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "nothing"
+        }
+      ]
+    },
+    "muse": {
+      "version": "1.4.14",
+      "evidence": "read",
+      "source": "the binary's composer keymap (newline: shift+enter ctrl+j ctrl+m alt+enter); crossterm",
+      "cases": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "nothing"
+        }
+      ],
+      "windows": [
+        {
+          "id": "cr",
+          "bytes": [
+            13
+          ],
+          "does": "submit"
+        },
+        {
+          "id": "lf",
+          "bytes": [
+            10
+          ],
+          "does": "nothing"
+        },
+        {
+          "id": "esc-cr",
+          "bytes": [
+            27,
+            13
+          ],
+          "does": "newline"
+        },
+        {
+          "id": "csi-u",
+          "bytes": [
+            27,
+            91,
+            49,
+            51,
+            59,
+            50,
+            117
+          ],
+          "does": "types"
+        },
+        {
+          "id": "modify-other-keys",
+          "bytes": [
+            27,
+            91,
+            50,
+            55,
+            59,
+            50,
+            59,
+            49,
+            51,
+            126
+          ],
+          "does": "nothing"
+        }
+      ]
+    }
+  }
+}

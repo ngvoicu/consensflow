@@ -461,6 +461,7 @@ export class TerminalsView {
       }
       entry.handle = lane.participant.handle
       entry.harness = lane.participant.harness
+      this.#registry.setHarness(pane, entry.harness)
       entry.project = board.project.id
       entry.session = lane.participant.member !== null
     }

@@ -22,6 +22,36 @@ const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
 const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
 
 /**
+ * What a window is sent for Shift+Enter (T-1330). xterm.js 6 has neither the kitty keyboard
+ * protocol nor modifyOtherKeys, and sends the plain Enter's CR for Shift+Enter, so a message was
+ * sent where the human asked for a new line, in every harness. A window is not asked what it
+ * takes; the page sends the new-line key its harness lists, as the bytes a terminal writes for it:
+ *
+ * - **Alt+Enter, ESC CR,** for Claude Code, Codex, Devin and Muse Code: each lists it as a new line
+ *   (Claude Code's own `/terminal-setup` writes it for Shift+Enter in VS Code). It is the one that
+ *   also reaches the three that read the console's key events on Windows as a key they bind: the
+ *   console host makes ESC CR the Enter key with Alt, a line feed the Enter key with Control, which
+ *   they bind to nothing, and `CSI 13;2u` seven keys of typed text (`cf-panes` `pty/keys.rs`).
+ * - **Ctrl+J, a line feed,** for Pi: its Alt+Enter queues a follow-up message, which sends it (on
+ *   Windows too, where the follow-up is Ctrl+Q and Pi reads ESC CR as no key of its own), and it
+ *   reads a line feed as Ctrl+J, a new line, with or without a keyboard protocol; its console is
+ *   one of virtual-terminal input, which hands it the line feed whole.
+ *
+ * Both are what xterm already sends for the keys they are: Alt+Enter and Ctrl+J stay the human's.
+ * A window whose harness the board has not said yet is sent ESC CR.
+ */
+export const shiftEnterFor = (harness) => (harness === 'pi' ? '\n' : '\x1b\r')
+
+/** Whether `event` is Shift+Enter alone, typed (not an input method choosing a candidate). */
+const isShiftEnter = (event) =>
+  event.key === 'Enter' &&
+  event.shiftKey &&
+  !event.ctrlKey &&
+  !event.altKey &&
+  !event.metaKey &&
+  !event.isComposing
+
+/**
  * The letter a key types for a shortcut: its own on a Latin layout, else the
  * one its place on the keyboard has (Ctrl+C on a Cyrillic layout is still
  * the C key).
@@ -43,6 +73,8 @@ const shortcutLetter = (event) =>
 export class XtermEmulator {
   constructor(host, { onReply = () => {}, onResize = () => {}, onLink = () => {} } = {}) {
     this.host = host
+    /** The harness the window runs, once the board says so (`setHarness`): what Shift+Enter is sent as. */
+    this.harness = null
     // A link is an OSC 8 hyperlink: words with the address hidden behind them, which xterm reads
     // itself and hands to `linkHandler`. A web address a program prints as text is no link, in
     // any form: from the screen alone it cannot be told whole, as a program that lays its text
@@ -110,14 +142,23 @@ export class XtermEmulator {
   }
 
   /**
-   * Whether xterm sends `event` to the program, and not when it copies.
-   * Where Ctrl+C is the program's interrupt (Windows, Linux), Ctrl+C copies
+   * Whether xterm sends `event` to the program, and not when it copies; and what Shift+Enter
+   * is sent as, which xterm cannot say. Where Ctrl+C is the program's interrupt (Windows, Linux), Ctrl+C copies
    * the text selected instead, as Windows Terminal does, and the selection
    * goes, so the next one interrupts; Ctrl+Shift+C copies on every system.
    * The copy is the page's own, which xterm fills with the selection, as it
    * does for Cmd+C on a Mac.
    */
   #programKey(event) {
+    if (isShiftEnter(event)) {
+      // Typed as a key press the window hears (the human's), once, on the key going down; the
+      // press xterm would make of the rest of it (the keypress after the keydown) is none.
+      if (event.type === 'keydown') {
+        event.preventDefault()
+        this.terminal.input(shiftEnterFor(this.harness))
+      }
+      return false
+    }
     if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true
     if (shortcutLetter(event) !== 'c') return true
     if (!event.shiftKey && (MAC || !this.terminal.hasSelection())) return true
@@ -127,6 +168,11 @@ export class XtermEmulator {
       this.terminal.clearSelection()
     }
     return false
+  }
+
+  /** The harness the window runs (`claude-code`, `codex`, `pi`, `devin`, `muse`), or null where the board has not said. */
+  setHarness(harness) {
+    this.harness = harness ?? null
   }
 
   /** Resolve only after xterm's parser has committed these bytes. */
@@ -232,6 +278,12 @@ export class EmulatorRegistry {
 
   get(pane) {
     return this.emulators.get(paneKey(pane))?.emulator ?? null
+  }
+
+  /** The harness the window of `pane` runs, as the board says it: the emulator keeps it for its keys. */
+  setHarness(pane, harness) {
+    const emulator = this.get(pane)
+    if (typeof emulator?.setHarness === 'function') emulator.setHarness(harness)
   }
 
   retire(key) {

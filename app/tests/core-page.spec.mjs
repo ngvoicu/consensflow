@@ -3432,6 +3432,209 @@ test.describe('on Windows', () => {
   })
 })
 
+// The user agents the page tells its system by (a Mac's Cmd and Ctrl, Windows' Ctrl).
+const MAC_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+const WINDOWS_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
+
+// Shift+Enter in a window (T-1330). xterm.js 6 has no kitty keyboard protocol and no modifyOtherKeys,
+// and sends the plain Enter's byte for Shift+Enter, so a message was sent where the human asked for
+// a new line, in every harness. `fixtures/pane-keys/newline-cases.json` holds what each harness's
+// input box does with each byte string a pane might write (`make-newline-cases.mjs` says how each
+// was found: Pi's replayed from its own key matcher, the others read from their source and
+// documentation). These presses are made in a real xterm and held to what that does with the bytes
+// the page sent.
+const NEWLINE_CASES = JSON.parse(
+  readFileSync(new URL('./fixtures/pane-keys/newline-cases.json', import.meta.url), 'utf8'),
+)
+
+/** What `harness`'s input box does with the `bytes` a window was sent, on `platform`. */
+function inputBoxDoes(harness, platform, bytes) {
+  const table = NEWLINE_CASES.harnesses[harness][platform] ?? NEWLINE_CASES.harnesses[harness].cases
+  const known = table.find((each) => each.bytes.join() === bytes.join())
+  return known ? known.does : `unknown bytes ${JSON.stringify(bytes)}`
+}
+
+/**
+ * The bytes a real xterm in the chief's window sent when `press` was done there, the chief
+ * running `harness`; nothing else is typed first.
+ */
+async function sentByPress(page, harness, press) {
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+    harness
+  await open(page, { ...data, realTerminals: true })
+  const input = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+  await input.focus()
+  await press(input)
+  let bytes = []
+  await expect
+    .poll(async () => {
+      bytes = await page.evaluate(() =>
+        window.__calls
+          .filter(([command]) => command === 'pane_input_enqueue')
+          .flatMap(([, args]) => args.bytes),
+      )
+      return bytes.length
+    })
+    .toBeGreaterThan(0)
+  // Anything else the press sent comes in the same turn of the page: give it one more.
+  await page.waitForTimeout(100)
+  return page.evaluate(() =>
+    window.__calls
+      .filter(([command]) => command === 'pane_input_enqueue')
+      .flatMap(([, args]) => args.bytes),
+  )
+}
+
+for (const [platform, agent] of [
+  ['unix', MAC_AGENT],
+  ['windows', WINDOWS_AGENT],
+]) {
+  test.describe(`Shift+Enter in a window, ${platform === 'unix' ? 'on a Mac' : 'on Windows'}`, () => {
+    test.use({ userAgent: agent })
+
+    for (const harness of Object.keys(NEWLINE_CASES.harnesses)) {
+      test(`is a new line in a ${harness} window, and Enter is still the message sent`, async ({
+        page,
+      }) => {
+        const shifted = await sentByPress(page, harness, (input) => input.press('Shift+Enter'))
+        expect(
+          inputBoxDoes(harness, platform, shifted),
+          `${harness} was sent ${JSON.stringify(shifted)} for Shift+Enter`,
+        ).toBe('newline')
+      })
+    }
+
+    test('Enter alone is still the message sent, in every harness', async ({ page }) => {
+      for (const harness of Object.keys(NEWLINE_CASES.harnesses)) {
+        const plain = await sentByPress(page, harness, (input) => input.press('Enter'))
+        expect(inputBoxDoes(harness, platform, plain), `${harness} Enter`).toBe('submit')
+      }
+    })
+  })
+}
+
+test.describe('The keys around Shift+Enter in a window', () => {
+  /**
+   * The bytes of the chief's window's input after `act` (the page's), sorted by what carried
+   * them, the chief running `harness`.
+   */
+  const heard = async (page, act, harness = 'claude-code') => {
+    const data = model()
+    data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+      harness
+    await open(page, { ...data, realTerminals: true })
+    const input = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+    await input.focus()
+    await act(input)
+    await page.waitForTimeout(150)
+    return page.evaluate(() => {
+      const sent = (command) =>
+        window.__calls
+          .filter(([name]) => name === command)
+          .map(([, args]) => String.fromCharCode(...args.bytes))
+      return { typed: sent('pane_input_enqueue'), replies: sent('pane_reply_enqueue') }
+    })
+  }
+
+  test("Alt+Enter and Ctrl+J are xterm's: Pi's Alt+Enter queues a follow-up, so it stays ESC CR", async ({
+    page,
+  }) => {
+    const { typed } = await heard(page, async (input) => {
+      await input.press('Alt+Enter')
+      await input.press('Control+j')
+    })
+    expect(typed).toEqual(['\x1b\r', '\n'])
+  })
+
+  // Shift+Enter is the key alone: with another modifier held it is a key of the program's own,
+  // which xterm sends as it does (Pi is asked for, where Shift+Enter is a line feed).
+  for (const [keys, sent] of [
+    ['Shift+Alt+Enter', '\x1b\r'],
+    ['Shift+Control+Enter', '\r'],
+    ['Shift+Meta+Enter', '\r'],
+  ]) {
+    test(`${keys} is not Shift+Enter`, async ({ page }) => {
+      const { typed } = await heard(page, (input) => input.press(keys), 'pi')
+      expect(typed).toEqual([sent])
+    })
+  }
+
+  // The premise of the page's choice, measured in a real xterm 6.0.0: it answers a program's
+  // device-attributes query and nothing of the keyboard protocols (the kitty query `CSI ? u`, and
+  // the request for modifyOtherKeys `CSI > 4 ; 2 m` that Pi makes when it gets no kitty answer),
+  // so Pi runs without extended keys and reads a line feed, and no sequence of a protocol, as
+  // Shift+Enter. If a newer xterm answers the kitty query, a program that asks for the protocol is
+  // owed all its keys in it, and this fails.
+  test('xterm answers no keyboard-protocol query: a Pi that asked is sent Ctrl+J all the same', async ({
+    page,
+  }) => {
+    const { typed, replies } = await heard(
+      page,
+      async (input) => {
+        await page.evaluate(
+          (bytes) => window.__output.onmessage({ id: 'p1-chief', generation: 5, seq: 1, bytes }),
+          [...new TextEncoder().encode('\x1b[>7u\x1b[?u\x1b[>4;2m\x1b[c')],
+        )
+        await expect
+          .poll(() =>
+            page.evaluate(() => window.__calls.filter(([n]) => n === 'pane_reply_enqueue').length),
+          )
+          .toBeGreaterThan(0)
+        await input.focus()
+        await input.press('Shift+Enter')
+      },
+      'pi',
+    )
+    expect(replies).toEqual(['\x1b[?1;2c'])
+    expect(typed).toEqual(['\n'])
+  })
+
+  test('an input method choosing a candidate with Shift+Enter is not a new line', async ({
+    page,
+  }) => {
+    const { typed } = await heard(
+      page,
+      (input) =>
+        input.evaluate((field) =>
+          field.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'Enter',
+              shiftKey: true,
+              isComposing: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        ),
+      'pi',
+    )
+    expect(typed).not.toContain('\n')
+  })
+
+  test('Shift+Enter is typed once, as the human typed it, and no Enter comes after it', async ({
+    page,
+  }) => {
+    let prevented = null
+    const { typed, replies } = await heard(page, async (input) => {
+      // The key is the page's: nothing is left for the textarea to do with it (an Enter there
+      // would be a line break typed into xterm's own field). This listens after xterm's own.
+      await input.evaluate((field) => {
+        field.addEventListener('keydown', (event) => {
+          window.__keydownPrevented = event.defaultPrevented
+        })
+      })
+      await input.press('Shift+Enter')
+      prevented = await page.evaluate(() => window.__keydownPrevented)
+    })
+    expect(typed).toEqual(['\x1b\r'])
+    expect(replies).toEqual([])
+    expect(prevented).toBe(true)
+  })
+})
+
 test("New project and Switch chief say the same of the chief's model: the harness's own switch in the chief's window keeps its conversation and a reopen keeps the model", async ({
   page,
 }) => {
@@ -3456,17 +3659,14 @@ test("New project and Switch chief say the same of the chief's model: the harnes
   }
 })
 
-// Links in a pane (T-1291): an address a program prints is a link, a plain URL and an OSC 8
-// hyperlink (words with the address hidden behind them) alike. It is underlined and titled with
-// what opens it as the pointer comes onto it, and it opens in the human's browser, through the
-// app's `open_link`, only for a click with the system's key held (Cmd on a Mac, Ctrl on Windows,
-// as VS Code's terminal does), so a click into a pane to type never opens one. What the page asks
-// of the app is the address exactly as the program printed it; what may open is the app's to say
+// Links in a pane (T-1291): only an OSC 8 hyperlink (words with the address hidden behind them) is
+// a link; a web address a program prints as text is none, in any form (T-1323). A link is
+// underlined and titled with what opens it as the pointer comes onto it, and it opens in the
+// human's browser, through the app's `open_link`, only for a click with the system's key held
+// (Cmd on a Mac, Ctrl on Windows, as VS Code's terminal does), so a click into a pane to type
+// never opens one. What the page asks of the app is the address exactly as the program printed it;
+// what may open is the app's to say
 // (`link.rs`), so an address a program hides behind words that is no web page reaches nothing.
-const MAC_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-const WINDOWS_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
 const CHIEF_TERMINAL = '#stage .terminal-card[data-handle="chief"] .xterm'
 
 /** An OSC 8 hyperlink as a program prints it: `words`, with `uri` behind them. */
@@ -3812,10 +4012,11 @@ for (const [system, agent, key, other] of [
 // (address)` each falls back to) and on (what ConsensFlow's launch asks of Pi and Claude Code), at
 // the widths a pane has; `app/tests/fixtures/pane-links/make-harness-cases.mjs` says how each was
 // made. Each case is held to one of two things: a click on the address opens exactly the address the
-// program meant, or it is no link and opens nothing. Never a shortened one. A plain address a
-// program broke over rows of its own (Pi writes its rows with CR/LF, so xterm does not mark them
-// wrapped) may go on in the next row, and then it is no link; an OSC 8 hyperlink carries its address
-// whole on every row it is drawn on.
+// program meant (an OSC 8 hyperlink), or it is no link and opens nothing (a plain address, however
+// the program laid it out). Never a shortened one. A program that lays its text out in rows of its
+// own (Pi writes its rows with CR/LF, so xterm does not mark them wrapped) cuts a plain address
+// with nothing on the screen to say so, which is why none is a link; an OSC 8 hyperlink carries its
+// address whole on every row it is drawn on.
 const HARNESS_CASES = JSON.parse(
   readFileSync(new URL('./fixtures/pane-links/harness-cases.json', import.meta.url), 'utf8'),
 )

@@ -354,17 +354,8 @@ mod conpty {
     /// code, and the character's code unit (8212).
     const EM_DASH_AS_A_KEY: &[u8] = b"\x1b[0;0;8212;1;0;1_\x1b[0;0;8212;0;0;1_";
 
-    /// What the page might write for a Shift+Enter, and what it writes today (T-1330).
-    const SHIFT_ENTER_CANDIDATES: [(&str, &[u8]); 5] = [
-        ("CR (today)", b"\r"),
-        ("LF", b"\n"),
-        ("ESC CR", b"\x1b\r"),
-        ("CSI 13;2u", b"\x1b[13;2u"),
-        ("CSI 27;2;13~", b"\x1b[27;2;13~"),
-    ];
-
-    /// The keys a program that reads key events reads of `bytes`, written to its pane at
-    /// once: up to `most` of them, read until none more comes for [`SETTLE`].
+    /// The keys a program that reads key events reads of `bytes`, written to its pane at once:
+    /// up to `most` of them, read until none more comes for [`SETTLE`].
     fn keys_of(bytes: &[u8], most: usize) -> (Vec<KeyRead>, String) {
         let _pty_guard = serial_pty_test();
         of_the_shipped_host();
@@ -392,10 +383,11 @@ mod conpty {
             .find(|candidate| candidate.is_file())
     }
 
-    /// The chunks a Node program that reads its terminal raw (as Claude Code and Pi do, which
-    /// set the console's virtual-terminal input) is given of `bytes`, each as the escaped text
-    /// of its characters.
-    fn node_reads(node: &std::path::Path, bytes: &[u8]) -> (Vec<String>, String) {
+    /// What a Node program that reads its terminal raw (as Claude Code and Pi do, which set the
+    /// console's virtual-terminal input) is given of `bytes`, written to its pane at once: every
+    /// chunk it was handed, as hexadecimal, joined, and what the pane showed.
+    fn node_reads(bytes: &[u8]) -> (String, String) {
+        let node = node().expect("a node.exe on the PATH, which the app's own Windows tests need");
         let _pty_guard = serial_pty_test();
         of_the_shipped_host();
         let table = Arc::new(PaneTable::new());
@@ -403,7 +395,7 @@ mod conpty {
             node.to_string_lossy().into_owned(),
             "-e".to_owned(),
             "process.stdin.setRawMode(true); console.log('READY'); \
-             process.stdin.on('data', (d) => console.log('DATA=[' + JSON.stringify(d.toString('latin1')) + ']#'))"
+             process.stdin.on('data', (d) => console.log('HEX=[' + d.toString('hex') + ']#'))"
                 .to_owned(),
         ];
         let (key, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
@@ -417,35 +409,71 @@ mod conpty {
             }
         }
         table.kill(&key).expect("close the pane");
-        let chunks = seen
-            .match_indices("DATA=[")
+        let hex = seen
+            .match_indices("HEX=[")
             .filter_map(|(at, _)| {
-                let rest = &seen[at + "DATA=[".len()..];
+                let rest = &seen[at + "HEX=[".len()..];
                 Some(rest.split_once("]#")?.0.to_owned())
             })
-            .collect();
-        (chunks, seen)
+            .collect::<String>();
+        (hex, seen)
     }
 
-    /// Records, on the machine the test runs on, what each Shift+Enter candidate becomes in a
-    /// pane of the shipped console host: for a program that reads key events (Codex, Devin and
-    /// Muse, through crossterm) and for a Node program in virtual-terminal input (Claude Code
-    /// and Pi). Run: `cargo test -p cf-panes --lib shift_enter_candidates -- --ignored --nocapture`.
+    /// What the console host makes of the bytes the page writes for Shift+Enter (T-1330), for the
+    /// harnesses that read the console's key events (Codex, Devin and Muse, through crossterm,
+    /// which reads the Enter key with the modifiers the console says): ESC CR is the Enter key
+    /// with Alt, the new line each lists; a line feed is the Enter key with Control, which none
+    /// lists (their new-line keys are Shift+Enter, Alt+Enter and Ctrl+J), so the page does not
+    /// write it for them; and a plain Enter, the message sent, is the Enter key alone.
     #[test]
-    #[ignore = "a recording: it prints, it asserts nothing"]
-    fn shift_enter_candidates_are_recorded() {
-        for (name, bytes) in SHIFT_ENTER_CANDIDATES {
-            let (keys, seen) = keys_of(bytes, 8);
-            println!("KEYS {name:>14}: {keys:?} (screen {seen:?})");
+    fn the_new_line_key_the_page_writes_reaches_a_key_reader_as_enter_with_alt() {
+        let key_of = |character: u32, modifiers: u32| KeyRead {
+            number: 1,
+            key: "Enter".to_owned(),
+            character,
+            modifiers,
+        };
+        for (what, bytes, wanted) in [
+            ("ESC CR (Alt+Enter)", &b"\x1b\r"[..], key_of(13, 1)),
+            ("a line feed (Ctrl+J)", &b"\n"[..], key_of(10, 4)),
+            ("a plain Enter", &b"\r"[..], key_of(13, 0)),
+        ] {
+            let (keys, seen) = keys_of(bytes, 1);
+            assert_eq!(keys, [wanted], "{what}; its screen: {seen:?}");
         }
-        match node() {
-            Some(node) => {
-                for (name, bytes) in SHIFT_ENTER_CANDIDATES {
-                    let (chunks, seen) = node_reads(&node, bytes);
-                    println!("NODE {name:>14}: {chunks:?} (screen {seen:?})");
-                }
-            }
-            None => println!("NODE: no node.exe on the PATH"),
+    }
+
+    /// Why the page never writes the kitty protocol's Shift+Enter (`CSI 13;2u`) on Windows: the
+    /// console host knows no such sequence, and a program that reads key events is given its
+    /// seven characters as keys of typed text, into the message. If this fails, the host reads it,
+    /// and it is worth a look whether it is the one key for every harness.
+    #[test]
+    fn a_csi_u_shift_enter_reaches_a_key_reader_as_seven_typed_characters() {
+        let (keys, seen) = keys_of(b"\x1b[13;2u", 8);
+        let characters: Vec<u32> = keys.iter().map(|read| read.character).collect();
+        assert_eq!(
+            characters,
+            [27, 91, 49, 51, 59, 50, 117],
+            "its screen: {seen:?}"
+        );
+        assert!(
+            keys.iter().all(|read| read.modifiers == 0),
+            "its keys: {keys:?}"
+        );
+    }
+
+    /// What reaches the harnesses that set the console's virtual-terminal input (Claude Code and
+    /// Pi: Node, in raw mode) of the new-line bytes: all of them, whole. A line feed is Pi's new
+    /// line (its Alt+Enter, ESC CR, queues a follow-up); ESC CR is Claude Code's.
+    #[test]
+    fn the_new_line_bytes_reach_a_node_program_in_virtual_terminal_input_whole() {
+        for (what, bytes, wanted) in [
+            ("a line feed", &b"\n"[..], "0a"),
+            ("ESC CR", &b"\x1b\r"[..], "1b0d"),
+            ("a plain Enter", &b"\r"[..], "0d"),
+        ] {
+            let (hex, seen) = node_reads(bytes);
+            assert_eq!(hex, wanted, "{what}; its screen: {seen:?}");
         }
     }
 
