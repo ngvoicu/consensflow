@@ -4,7 +4,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use super::macho;
-use super::tools::{args, Tools};
+use super::name;
+use super::tools::{args, fail, Tools};
 use crate::cli::Failure;
 
 /// Who signs.
@@ -43,6 +44,10 @@ pub(super) fn codesign(
     tools.run("codesign", words).map(drop)
 }
 
+/// The release's bundle identifier: the app's own `PRODUCTION_IDENTIFIER`, which `sign_app`
+/// holds the bundle to.
+pub(super) const RELEASE_IDENTIFIER: &str = "dev.ngvoicu.consensflow";
+
 /// What a key of the app's `Info.plist` says.
 pub(super) fn plist(tools: &Tools, app: &Path, key: &str) -> Result<String, Failure> {
     let file = app.join("Contents").join("Info.plist");
@@ -70,7 +75,9 @@ pub(super) const USAGE: [&str; 2] = [
 ];
 
 /// Signs `app` from the inside out: the Mach-Os it carries, then the bundle,
-/// whose seal covers them. All run under the hardened runtime. Its code carries no
+/// whose seal covers them. A bundle that is not the release's (it was built with the
+/// configuration every build starts from, which names another identifier) is refused
+/// before anything is signed. All run under the hardened runtime. Its code carries no
 /// entitlement: nothing in the app makes executable memory of its own (the
 /// WebView's engine runs in the system's process), which the bundled Node's V8
 /// did and was given the JIT entitlements for. The bundle carries `entitlements`
@@ -84,6 +91,13 @@ pub(super) fn sign_app(
     entitlements: &Path,
 ) -> Result<(), Failure> {
     let id = plist(tools, app, "CFBundleIdentifier")?;
+    if id != RELEASE_IDENTIFIER {
+        return Err(fail(format!(
+            "{} is {id}, not {RELEASE_IDENTIFIER}: the release builds with \
+             --config src-tauri/tauri.release.conf.json",
+            name(app)
+        )));
+    }
     let executable = plist(tools, app, "CFBundleExecutable")?;
     let main = app.join("Contents").join("MacOS").join(executable);
     for path in macho::mach_os(app)?

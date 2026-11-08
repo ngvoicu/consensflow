@@ -4911,7 +4911,7 @@ test("New project: computer use is read for the folder picked, shown while the c
     {
       block: 'permissions',
       heading: 'Permissions in System Settings',
-      lines: [KEPT],
+      lines: [MEND, KEPT],
       columns: ['Permission', 'ConsensFlow'],
       rows: [
         [ACCESSIBILITY, 'allowed', OPEN],
@@ -7955,6 +7955,18 @@ const computerUseGaps = (dialog) =>
       )
   })
 
+/**
+ * What Project settings and ConsensFlow's note say when a permission reads missing and
+ * ConsensFlow is on in the list all the same (T-903): macOS keeps a grant for one copy of
+ * the app, and the copy that was allowed may not be the installed one.
+ */
+const MEND =
+  'If ConsensFlow is already on in that list, macOS may hold the grant for another copy of the app, so remove it with − and add /Applications/ConsensFlow.app with +.'
+
+/** The words of ConsensFlow's own note of a missing permission, as the engine writes them. */
+const noteAbout = (names) =>
+  `Claude Code's computer use is on for this project, but ConsensFlow can't control the screen until you allow it ${names} in System Settings → Privacy & Security. ${MEND}`
+
 const CLAUDE_OFF =
   'Turn it on in a Claude Code window of this project: /mcp → computer-use → Enable.'
 const CLAUDE_ON = "It works through ConsensFlow's permissions, below."
@@ -8036,7 +8048,7 @@ test('Project settings: computer use says where Claude Code turns it on, and eac
     {
       block: 'permissions',
       heading: 'Permissions in System Settings',
-      lines: [KEPT],
+      lines: [MEND, KEPT],
       columns: ['Permission', 'ConsensFlow'],
       rows: [
         [ACCESSIBILITY, 'allowed', OPEN],
@@ -8130,6 +8142,7 @@ test("Project settings: a ConsensFlow started from another app says the permissi
       heading: 'Permissions in System Settings',
       lines: [
         "This ConsensFlow was started from com.apple.Terminal, so these are that app's permissions, not ConsensFlow's.",
+        MEND,
         KEPT,
       ],
       columns: ['Permission', 'ConsensFlow'],
@@ -8152,7 +8165,7 @@ test("a member's note with the words of ConsensFlow's computer-use note gets no 
     sender: 'chief',
     recipient: 'human',
     taskNumber: null,
-    body: "Claude Code's computer use is on for this project, but ConsensFlow can't control the screen until you allow it Accessibility in System Settings → Privacy & Security.",
+    body: noteAbout('Accessibility'),
     questions: null,
     createdAt: at(1),
   })
@@ -8171,10 +8184,12 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
   const data = model()
   allOn(data, 'codex')
   // Run from a terminal, ConsensFlow's permissions are that app's: said where they are shown, and
-  // nowhere else, so not for Codex, whose block has none of ConsensFlow's.
+  // nowhere else, so not for Codex, whose block has none of ConsensFlow's. One of them is not
+  // allowed, and the words on mending an entry (T-903) name ConsensFlow.app: they are not said
+  // under a column that is another app's.
   data.computerUse = {
     grantsOf: 'com.apple.Terminal',
-    permissions: { accessibility: true, screenRecording: true },
+    permissions: { accessibility: true, screenRecording: false },
   }
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
@@ -8259,7 +8274,7 @@ test('Project settings: a project with Claude Code and Codex members shows both 
     {
       block: 'permissions',
       heading: 'Permissions in System Settings',
-      lines: [KEPT],
+      lines: [MEND, KEPT],
       columns: ['Permission', 'ConsensFlow', 'Codex Computer Use'],
       rows: [
         [ACCESSIBILITY, 'not allowed', 'unknown', OPEN],
@@ -8436,7 +8451,7 @@ test("a note that ConsensFlow lacks computer use's permissions opens the System 
     sender: null,
     recipient: 'human',
     taskNumber: null,
-    body: "Claude Code's computer use is on for this project, but ConsensFlow can't control the screen until you allow it Accessibility and Screen & System Audio Recording in System Settings → Privacy & Security.",
+    body: noteAbout('Accessibility and Screen & System Audio Recording'),
     questions: null,
     createdAt: at(1),
   })
@@ -8455,6 +8470,57 @@ test("a note that ConsensFlow lacks computer use's permissions opens the System 
   // Any other note has no such button.
   const other = page.locator('li[data-message]:not([data-message="17"])')
   await expect(other.getByRole('button', { name: /Open System Settings/ })).toHaveCount(0)
+})
+
+test('a note of computer use that names one permission opens that pane alone, whatever else it says', async ({
+  page,
+}) => {
+  const data = model()
+  data.inbox[1].push({
+    id: 19,
+    kind: 'note',
+    state: 'queued',
+    sender: null,
+    recipient: 'human',
+    taskNumber: null,
+    body: noteAbout('Accessibility'),
+    questions: null,
+    createdAt: at(1),
+  })
+  await open(page, data)
+  const note = page
+    .getByRole('region', { name: 'For you' })
+    .getByRole('list', { name: 'Notes for you' })
+    .locator('li[data-message="19"]')
+  await expect(note).toContainText(MEND)
+  await expect(note.getByRole('button', { name: /Open System Settings/ })).toHaveCount(1)
+  await expect(
+    note.getByRole('button', { name: 'Open System Settings for Accessibility' }),
+  ).toBeVisible()
+  // The permissions a note names are the ones it says to allow, not any name after them.
+  await page.evaluate(
+    (body) => {
+      window.__model.inbox[1].push({
+        id: 20,
+        kind: 'note',
+        state: 'queued',
+        sender: null,
+        recipient: 'human',
+        taskNumber: null,
+        body,
+        questions: null,
+        createdAt: 1,
+      })
+      window.__listeners.get('state-changed')()
+    },
+    `${noteAbout('Accessibility')} Screen & System Audio Recording has a list of its own.`,
+  )
+  const later = page
+    .getByRole('region', { name: 'For you' })
+    .getByRole('list', { name: 'Notes for you' })
+    .locator('li[data-message="20"]')
+  await expect(later).toBeVisible()
+  await expect(later.getByRole('button', { name: /Open System Settings/ })).toHaveCount(1)
 })
 
 test('Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way', async ({

@@ -6,7 +6,8 @@
   "scripts": {
     "bundle:ui": "node scripts/bundle-ui.mjs",
     "prepare-sidecar": "cargo xtask stage",
-    "prepare:app": "npm run bundle:ui && npm run prepare-sidecar",
+    "check-identity": "cargo xtask build-identity",
+    "prepare:app": "npm run check-identity && npm run bundle:ui && npm run prepare-sidecar",
     "smoke:windows": "node scripts/windows-smoke.mjs",
     "smoke:windows:desktop": "node scripts/windows-smoke-desktop.mjs",
     "portable": "cargo xtask portable pack",

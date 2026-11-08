@@ -1,0 +1,221 @@
+# Plants in the rule that the release's bundle identifier, dev.ngvoicu.consensflow, is built by
+# GitHub's release workflows and by nothing else (T-903): the configuration every build starts
+# from names another, the release's is a file by itself that only the two workflows name, the
+# first step of `prepare:app` refuses it anywhere but on GitHub's runner, and `cf-release
+# sign-mac` refuses a bundle that is not the release's. `tools/xtask/tests/release_identity.rs`,
+# the step's own tests, `scripts.rs` and the signing's tests must catch each.
+
+[run]
+# The rule: the configurations, the workflows, and the step as a process.
+xtask-test-identity = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "release_identity"]
+# The step's own reading of the file, the platform's file and the override.
+xtask-lib-identity = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "--", "identity::tests::"]
+# The scripts and hooks that run the step first.
+xtask-test-scripts = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "scripts"]
+# The signing's refusal of a bundle that is not the release's.
+sign-mac-identity = ["cargo", "test", "--offline", "-p", "cf-release", "--lib", "sign_mac::tests::identity"]
+
+[[plant]]
+name = "identity: the configuration every build starts from carries the release's identifier"
+meant = "the_configuration_every_build_starts_from_is_not_the_releases"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = '"identifier": "dev.ngvoicu.consensflow.local",'
+replace = '"identifier": "dev.ngvoicu.consensflow",'
+
+[[plant]]
+name = "identity: the release configuration gives another identifier"
+meant = "the_release_configuration_gives_the_identifier_and_nothing_else"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.release.conf.json"
+find = '"identifier": "dev.ngvoicu.consensflow"'
+replace = '"identifier": "dev.ngvoicu.consensflow.local"'
+
+[[plant]]
+name = "identity: the release configuration says more than the identifier"
+meant = "the_release_configuration_gives_the_identifier_and_nothing_else"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.release.conf.json"
+find = '''  "identifier": "dev.ngvoicu.consensflow"
+'''
+replace = '''  "identifier": "dev.ngvoicu.consensflow",
+  "version": "9.9.9"
+'''
+
+[[plant]]
+name = "identity: the Candidate is built with the release's identifier"
+meant = "no_other_configuration_names_the_release_identifier"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.candidate.conf.json"
+find = '"identifier": "dev.ngvoicu.consensflow.candidate",'
+replace = '"identifier": "dev.ngvoicu.consensflow",'
+
+[[plant]]
+name = "identity: the Candidate builder is given the release configuration"
+meant = "only_the_release_workflows_name_the_release_configuration"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/candidate.rs"
+find = '''self.app.join("src-tauri").join("tauri.candidate.conf.json")'''
+replace = '''self.app.join("src-tauri").join("tauri.release.conf.json")'''
+
+[[plant]]
+name = "identity: the release workflow builds the app with the configuration every build starts from"
+meant = "every_workflow_that_builds_the_app_builds_it_with_the_release_configuration"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = "- run: npm --prefix app run build -- --config src-tauri/tauri.release.conf.json"
+replace = "- run: npm --prefix app run build"
+
+[[plant]]
+name = "identity: the Windows workflow builds the app with the configuration every build starts from"
+meant = "every_workflow_that_builds_the_app_builds_it_with_the_release_configuration"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = ".github/workflows/windows-build.yml"
+find = "- run: npm --prefix app run build -- --config src-tauri/tauri.release.conf.json"
+replace = "- run: npm --prefix app run build"
+
+[[plant]]
+name = "identity: the step lets the release's identifier through anywhere"
+meant = "a_build_that_would_carry_the_release_identifier_is_refused_off_github"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = "if identifier == RELEASE && !on_githubs_runner(env) {"
+replace = "if identifier == RELEASE && !on_githubs_runner(env) && false {"
+
+[[plant]]
+name = "identity: one of the two variables of GitHub's runner is enough"
+meant = "a_build_that_would_carry_the_release_identifier_is_refused_off_github"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = '''    env.text("GITHUB_ACTIONS") == Some("true")
+        && env.text("RUNNER_ENVIRONMENT") == Some("github-hosted")'''
+replace = '''    env.text("GITHUB_ACTIONS") == Some("true")
+        || env.text("RUNNER_ENVIRONMENT") == Some("github-hosted")'''
+
+[[plant]]
+name = "identity: a self-hosted runner counts as GitHub's"
+meant = "a_build_that_would_carry_the_release_identifier_is_refused_off_github"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = '''env.text("RUNNER_ENVIRONMENT") == Some("github-hosted")'''
+replace = '''env.text("RUNNER_ENVIRONMENT").is_some()'''
+
+[[plant]]
+name = "identity: the step does not read the build's --config"
+meant = "a_build_that_would_carry_the_release_identifier_is_refused_off_github"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = "if let Some(text) = env.text(OVERRIDE) {"
+replace = "if let Some(text) = env.text(OVERRIDE).filter(|_| false) {"
+
+[[plant]]
+name = "identity: an override that gives no name is let through"
+meant = "an_override_that_cannot_be_read_is_refused"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = '''        Some(_) => Err(Refusal::Unreadable(format!(
+            "{name} gives an identifier that is not a name"
+        ))),'''
+replace = '''        Some(_) => Ok(None),'''
+
+[[plant]]
+name = "identity: the platform's configuration is not read"
+meant = "the_override_is_merged_over_the_file_and_the_platforms_file_between"
+runs = ["xtask-lib-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = "    if file.is_file() {"
+replace = "    if file.is_file() && false {"
+
+[[plant]]
+name = "identity: an override that says nothing of the identifier takes the file's away"
+meant = "the_override_is_merged_over_the_file_and_the_platforms_file_between"
+runs = ["xtask-lib-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = '''        if let Some(identifier) = identifier_in(&merged, OVERRIDE)? {
+            found = (identifier, Source::Override);
+        }'''
+replace = '''        found = (
+            identifier_in(&merged, OVERRIDE)?.unwrap_or_default(),
+            Source::Override,
+        );'''
+
+[[plant]]
+name = "identity: the refusal does not say where the identifier came from"
+meant = "an_override_that_gives_the_release_identifier_is_refused_off_github"
+runs = ["xtask-lib-identity"]
+
+[[plant.edit]]
+file = "tools/xtask/src/identity.rs"
+find = '''            Self::Override => write!(out, "{OVERRIDE}, the build's --config"),'''
+replace = '''            Self::Override => write!(out, "the build"),'''
+
+[[plant]]
+name = "identity: prepare:app stages the app before it checks what it is called"
+meant = "the_app_package_stages_and_packs_through_cargo_xtask_and_leaves_building_to_tauri"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "app/package.json"
+find = '"prepare:app": "npm run check-identity && npm run bundle:ui && npm run prepare-sidecar",'
+replace = '"prepare:app": "npm run bundle:ui && npm run prepare-sidecar",'
+
+[[plant]]
+name = "identity: the release configuration says build, and replaces the hooks of Tauri"
+meant = "the_candidate_release_and_windows_configurations_are_merged_over_it_without_a_word_of_build"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.release.conf.json"
+find = '''  "identifier": "dev.ngvoicu.consensflow"
+'''
+replace = '''  "identifier": "dev.ngvoicu.consensflow",
+  "build": { "beforeBuildCommand": "" }
+'''
+
+[[plant]]
+name = "sign-mac: a bundle built with another identifier is signed"
+meant = "a_bundle_built_with_another_identifier_is_refused_before_anything_is_signed"
+runs = ["sign-mac-identity"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/sign_mac/signing.rs"
+find = "    if id != RELEASE_IDENTIFIER {"
+replace = "    if id != RELEASE_IDENTIFIER && false {"
+
+[[plant]]
+name = "sign-mac: the identifier it holds the bundle to is not the release configuration's"
+meant = "the_identifier_it_holds_the_bundle_to_is_the_release_configurations"
+runs = ["sign-mac-identity"]
+
+[[plant.edit]]
+file = "tools/cf-release/src/sign_mac/signing.rs"
+find = 'pub(super) const RELEASE_IDENTIFIER: &str = "dev.ngvoicu.consensflow";'
+replace = 'pub(super) const RELEASE_IDENTIFIER: &str = "dev.ngvoicu.consensflow.local";'
