@@ -337,6 +337,26 @@ file = "crates/cf-ledger/src/model_lists.rs"
 find = '        store.db.execute("DELETE FROM model_list", [])?;'
 replace = '        store.db.execute("DELETE FROM model_list WHERE 0", [])?;'
 
+[[plant]]
+name = "live models: a pick on a harness that cannot be read is taken on its word in every daemon"
+meant = "a_pick_on_a_harness_that_cannot_be_read_is_refused_unless_the_environment_takes_it_on_its_word"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "        if self.takes_unread {"
+replace = "        if true {"
+
+[[plant]]
+name = "live models: the variable of the rigs is not heard"
+meant = "a_pick_on_a_harness_that_cannot_be_read_is_refused_unless_the_environment_takes_it_on_its_word"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "            takes_unread: unread_models_are_taken(&env),"
+replace = "            takes_unread: false,"
+
 # --- the page: every installed harness is read as a dialog opens, one read per harness ---
 
 [[plant]]
