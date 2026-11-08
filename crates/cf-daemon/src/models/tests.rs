@@ -151,25 +151,35 @@ fn done<T>(work: impl Future<Output = T>) -> T {
 }
 
 /// `work`, done, for a read of the real Pi adapter, which waits on the clock for Pi's providers
-/// and, where Pi lists none, on a thread of its own that reads Pi's folder: polled until it is
-/// done; the clock is fired only where nothing real moved for a while, so that a wait on it
-/// never cuts the folder's read short.
+/// (a poll every quarter of a second, an ask's bound of five seconds) and, where Pi lists none, on a
+/// thread of its own that reads Pi's folder under a two-second wait: polled until it is done. The
+/// clock is fired for the quarter-second polls at once, and for any other wait only after a second
+/// of real time in which nothing moved, so that a wait on the clock never cuts the folder's read
+/// short, however loaded the machine is (a macOS runner was: 25 ms was too little).
 fn eventually_clocked<T>(
     work: impl Future<Output = T>,
     time: &cf_harness::testing::ManualTime,
 ) -> T {
+    use cf_harness::seams::Time as _;
     let mut work = pin!(work);
     let began = std::time::Instant::now();
+    let mut poll = || work.as_mut().poll(&mut Context::from_waker(Waker::noop()));
     loop {
-        for _ in 0..25 {
-            if let Poll::Ready(value) = work.as_mut().poll(&mut Context::from_waker(Waker::noop()))
-            {
+        if let Poll::Ready(value) = poll() {
+            return value;
+        }
+        if time.fire_next(time.wall_ms() + 300) {
+            continue;
+        }
+        let quiet = std::time::Instant::now();
+        while quiet.elapsed() < std::time::Duration::from_secs(1) {
+            if let Poll::Ready(value) = poll() {
                 return value;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert!(
-            began.elapsed() < std::time::Duration::from_secs(20) && time.fire_next(i64::MAX),
+            began.elapsed() < std::time::Duration::from_secs(60) && time.fire_next(i64::MAX),
             "the read waits on nothing"
         );
     }
@@ -855,6 +865,11 @@ mod from_pi_to_the_ledger {
     /// environment, starts as `child` says (the lines it writes, and what it says on its error
     /// stream and the code it exits with), and the human's Refresh (`refresh`) has `pi update
     /// --models` answer `update`: the listing the daemon told, which is the one it kept.
+    /// Pi's folder is read by one thread at a time in a process (a read that finds another's
+    /// in flight is told the folder was not read in time, which is right for a daemon and wrong
+    /// for tests that run side by side): the cases of this module take turns at it.
+    static ONE_FOLDER_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn pi_listing(
         files: &[(&str, &str)],
         vars: &[(&str, &str)],
@@ -862,6 +877,9 @@ mod from_pi_to_the_ledger {
         update: Option<Result<String, cf_process::Failed>>,
         refresh: bool,
     ) -> ModelListing {
+        let _turn = ONE_FOLDER_AT_A_TIME
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let home = home(&["pi"]);
         let agent = home._folder.path().join("agent");
         std::fs::create_dir_all(&agent).unwrap();
