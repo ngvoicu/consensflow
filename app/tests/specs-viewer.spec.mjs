@@ -1465,6 +1465,7 @@ test.describe('a hostile spec', () => {
 
   test('diagram makes no request leave the page while Mermaid lays it out, whatever it asks', async ({
     page,
+    browserName,
   }) => {
     refusing = true
     // Every address a diagram names is the trap's: what reaches it left the page.
@@ -1522,8 +1523,12 @@ test.describe('a hostile spec', () => {
     // trap received nothing.
     expect(await evil.left()).toEqual([])
     expect(trap.received).toEqual([])
-    // The policy refused what only it stops, and was never reached by the rest.
-    for (const name of ['state.png', 'escaped.png', 'block.svg', 'brace.png']) {
+    // The policy refused what only it stops, and was never reached by the rest. block.svg is a
+    // paint server in another file: Chromium asks for it and the policy refuses (its console says
+    // so), WebKit draws a paint server from the page alone and never asks, so there is nothing
+    // for the policy to refuse and nothing in its console. That nothing left is held above, in both.
+    const paintServer = browserName === 'webkit' ? [] : ['block.svg']
+    for (const name of ['state.png', 'escaped.png', 'brace.png', ...paintServer]) {
       expect(
         refused.some((said) => said.includes(at(name))),
         `the policy refused ${name}`,

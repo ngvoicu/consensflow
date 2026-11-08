@@ -1,6 +1,7 @@
 import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
+import { focusWhatIsClicked } from './click-focus.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
 import { listenForFileDrops } from './file-drop.js'
 import { HistoryViewer } from './history-viewer.js'
@@ -19,6 +20,8 @@ import { TerminalsView } from './terminals.js'
  * `daemon_request`, and it redraws when the daemon says something changed. It
  * keeps nothing of its own but what is on screen.
  */
+
+focusWhatIsClicked()
 
 const tauri = window.__TAURI__ ?? {}
 const invoke = tauri.core?.invoke
