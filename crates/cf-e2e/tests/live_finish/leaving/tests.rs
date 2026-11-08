@@ -288,6 +288,93 @@ fn what_a_task_that_was_not_done_left_running_is_a_problem_too() {
     );
 }
 
+const ENDED: &str =
+    "the command was ended by the window's close after the result, and the chief told";
+const LIMIT: &str = "the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing";
+
+/// A run that passed is said to have shown what its summary tells. A process of the machine that
+/// holds the command's words and is none of the run's (another tree's run of the stand-in beside
+/// this one; the loop of a worker who runs the suite twice) is found among `escaped` and changes
+/// nothing of an ordinary run, in its name as in its verdict.
+#[test]
+fn a_pass_is_named_for_what_its_summary_tells_and_a_stray_of_the_machine_changes_neither() {
+    let ordinary = good();
+    assert_eq!(passed_as(&ordinary), ENDED);
+    let mut with_a_stray = good();
+    with_a_stray.escaped = vec![standing("99998 1 99997 ?? sleep 4711").unwrap()];
+    with_a_stray.after_close = Some(with_a_stray.escaped.clone());
+    assert_eq!(judge(&with_a_stray, Expect::Ended), Ok(()));
+    assert!(
+        summary(&with_a_stray, &judge(&with_a_stray, Expect::Ended))
+            .contains("was ended by the window's close"),
+        "{}",
+        summary(&with_a_stray, &judge(&with_a_stray, Expect::Ended))
+    );
+    assert_eq!(passed_as(&with_a_stray), ENDED);
+    // The limit, in either shape it takes: the host never listed the job, or listed the shell alone.
+    let limit = in_a_session_of_its_own();
+    assert_eq!(passed_as(&limit), LIMIT);
+    let mut shell_alone = in_a_session_of_its_own();
+    shell_alone.listed = vec![proc(
+        99997,
+        "/bin/sh -c nohup fake-agent --background-job 4711",
+    )];
+    assert_eq!(passed_as(&shell_alone), LIMIT);
+}
+
+#[test]
+fn a_command_whose_shell_the_host_listed_before_it_ended_and_whose_job_ran_on_apart_escaped_all_the_same(
+) {
+    // The host looks once a second, and the shell a detached job leaves lingers a third of one: a
+    // look may or may not fall in it (CI run 42425306008, `checks (macos-latest)`). Where it did,
+    // the host listed a process (the shell, which holds the job's words) and the shell ended, so
+    // that nothing listed was still there; the job it detached ran on in a session of its own,
+    // which the host never listed and the close did not find. That is the escape, and the verdict
+    // says it as it does where no look fell in the shell.
+    let mut left = good();
+    left.listed = vec![proc(
+        4241,
+        "/bin/sh -c unset CF_PANE_PROCESS_OWNER; nohup \"$0\" \"$@\" & sleep 0.3 fake-agent --background-job 4711",
+    )];
+    left.notes.clear();
+    left.escaped = vec![
+        "4242 fake-agent --background-job 4711 (parent 1, group 4242, terminal ??)".to_owned(),
+    ];
+    left.after_close = Some(left.escaped.clone());
+    let problems = judge(&left, Expect::Ended).unwrap_err();
+    assert!(
+        problems.iter().any(
+            |problem| problem.starts_with("the command escaped the ending")
+                && problem.contains("4242 fake-agent --background-job 4711")
+                && problem
+                    .contains("it still runs after the window closed, which found nothing of it")
+        ),
+        "{problems:#?}"
+    );
+    // The chief was told nothing of the work the window closed with, which is true as well.
+    assert!(
+        problems
+            .contains(&"the chief was told nothing of the work the window closed with".to_owned()),
+        "{problems:#?}"
+    );
+    // A process the host listed that still ran is said once, as it was: not again as an escape.
+    let mut left = good();
+    left.notes.clear();
+    left.listed = vec![proc(4242, "sleep 4711")];
+    left.alive = vec![4242];
+    left.escaped = vec!["4242 sleep 4711 (parent 1, group 4242, terminal ??)".to_owned()];
+    left.after_close = Some(left.escaped.clone());
+    let problems = judge(&left, Expect::Ended).unwrap_err();
+    assert!(
+        problems
+            .iter()
+            .all(|problem| !problem.starts_with("the command escaped the ending")),
+        "{problems:#?}"
+    );
+    // And a listed command the close ended, with nothing left on the machine, is no escape.
+    assert_eq!(judge(&good(), Expect::Ended), Ok(()));
+}
+
 #[test]
 fn a_command_that_ran_on_is_said_to_have_been_found_by_the_close_or_not_and_only_where_it_ran_on() {
     let mut left = good();
@@ -496,6 +583,44 @@ fn a_command_that_escaped_into_a_session_of_its_own_fails_the_case_as_it_was_and
         summary(&left, &judge(&left, Expect::OwnSession)),
         "T-1 done after 20.0 s; the agent detached the command into a session of its own, the known limit on a Mac: the host never listed it, the window's close left it running and the chief was told nothing; still running: 99998 sleep 4711 (parent 1, group 99997, terminal ??); the run ends what it can prove its own"
     );
+}
+
+/// The host's look fell on the shell before it had started the job (the shell lists with the job's
+/// words in its own command line, and ends a moment after it starts the job): nothing it listed is
+/// there when the run looks again, and the job it started ran on in a session of its own that the
+/// host never listed and the close did not find (CI run 42425306008 held Pi's and Devin's limit
+/// to the shape of a look that fell later). It is the same limit, and the chief told nothing false.
+#[test]
+fn a_shell_the_host_listed_alone_that_started_a_job_which_ran_on_in_a_session_of_its_own_is_the_limit_too(
+) {
+    let mut left = in_a_session_of_its_own();
+    left.listed = vec![proc(
+        99997,
+        "/bin/sh -c nohup fake-agent --background-job 4711",
+    )];
+    assert_eq!(judge(&left, Expect::OwnSession), Ok(()));
+    assert!(
+        judge(&left, Expect::Ended).is_err(),
+        "only where the limit is expected"
+    );
+    assert!(
+        summary(&left, &judge(&left, Expect::OwnSession))
+            .contains("the host listed it before its shell ended"),
+        "{}",
+        summary(&left, &judge(&left, Expect::OwnSession))
+    );
+    // A job the host listed that is said to be gone and runs on is no such job.
+    let mut left = in_a_session_of_its_own();
+    left.listed = vec![proc(99998, "sleep 4711")];
+    assert!(judge(&left, Expect::OwnSession).is_err());
+    // An ordinary run (its command listed, ended by the close, the chief told) is held to that
+    // whatever else of the machine holds the command's words and is in a session of its own: the
+    // run of another tree, which the run cannot tell from its own, passes nothing and fails nothing.
+    let mut left = good();
+    left.escaped = vec![standing("99998 1 99997 ?? sleep 4711").unwrap()];
+    left.after_close = Some(left.escaped.clone());
+    assert_eq!(judge(&left, Expect::OwnSession), Ok(()));
+    assert_eq!(judge(&left, Expect::Ended), Ok(()));
 }
 
 /// The host's look fell while the job's shell still tied it to the window: it listed the job,

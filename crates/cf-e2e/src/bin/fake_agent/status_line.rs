@@ -33,6 +33,13 @@ use crate::background::Jobs;
 /// Code's is, and the stand-in's is in its own folder.
 const SCRIPT: &str = "statusline-command.sh";
 
+/// The `git` the script runs, in the folder beside it: the branch at once, as the machine's `git`
+/// answers where it is a program of its own and not a shim that starts one.
+const GIT: &str = "git";
+
+/// What the stand-in's `git` is: a program that shows the branch and ends.
+const GIT_SCRIPT: &str = "#!/bin/sh\necho main\n";
+
 /// What the rig calls the runs of the command, among the jobs of a window.
 const LABEL: &str = "statusline";
 
@@ -82,21 +89,39 @@ impl StatusLine {
     /// busy for the time the rest of what it shows takes, in tenths of a second, which
     /// it gives up when the program that ran it has gone: a helper does not outlive the
     /// harness, and a window that closes does not wait for one.
+    ///
+    /// It runs the `git` beside it ([`GIT`]), not the machine's: GitHub's macOS runner has Xcode's
+    /// shim for `/usr/bin/git`, which on a cold cache runs `xcodebuild -sdk … -find git` and takes
+    /// seconds, so that a run of four tenths of a second outlasted the host's second look, 2 s
+    /// on, and was told as work its window left running (CI run 39136355690).
     fn script(self) -> String {
         format!(
             "#!/bin/bash\n\
-             git -C \"$PWD\" --no-optional-locks branch --show-current 2>/dev/null\n\
+             \"$(dirname \"$0\")/{GIT}\" -C \"$PWD\" --no-optional-locks branch --show-current 2>/dev/null\n\
              for _ in $(seq {}); do\n  kill -0 \"$PPID\" 2>/dev/null || exit 0\n  /bin/sleep 0.1\ndone\n",
             self.tenths()
         )
     }
 
+    /// The user's script and the `git` it runs written in `config`: the script's path.
+    fn install(self, config: &Path) -> Result<std::path::PathBuf, String> {
+        let (script, git) = (config.join(SCRIPT), config.join(GIT));
+        fs::write(&script, self.script())
+            .map_err(|failed| format!("{}: {failed}", script.display()))?;
+        fs::write(&git, GIT_SCRIPT).map_err(|failed| format!("{}: {failed}", git.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&git, fs::Permissions::from_mode(0o755))
+                .map_err(|failed| format!("{}: {failed}", git.display()))?;
+        }
+        Ok(script)
+    }
+
     /// The window runs its status line from now on, the script written in `config`, on a
     /// thread of its own; a run is noted among the jobs of the window.
     pub fn go(self, config: &Path, jobs: &Arc<Jobs>) -> Result<(), String> {
-        let script = config.join(SCRIPT);
-        fs::write(&script, self.script())
-            .map_err(|failed| format!("{}: {failed}", script.display()))?;
+        let script = self.install(config)?;
         let jobs = Arc::clone(jobs);
         thread::spawn(move || loop {
             if let Err(failed) = self.run(&script, &jobs) {
@@ -151,7 +176,7 @@ mod tests {
     fn the_script_shows_the_branch_as_the_owners_does_and_goes_on_for_the_time_of_its_kind() {
         let own = StatusLine::InAGroupOfItsOwn.script();
         assert!(
-            own.contains("git -C \"$PWD\" --no-optional-locks branch --show-current"),
+            own.contains("/git\" -C \"$PWD\" --no-optional-locks branch --show-current"),
             "{own}"
         );
         assert!(own.contains("for _ in $(seq 4); do"), "{own}");
@@ -166,5 +191,46 @@ mod tests {
         // of the second is not.
         assert!(StatusLine::InAGroupOfItsOwn.tenths() * 4 <= 20);
         assert!(StatusLine::InTheWindowsGroup.tenths() > 20);
+    }
+
+    /// A run of the script takes the time of its kind whatever the machine's `git` takes to
+    /// start. GitHub's macOS runner has Xcode's shim for it, which on a cold cache takes seconds
+    /// (the first `git` of a runner ran `xcodebuild -sdk … -find git`, and the status line was
+    /// told as work its window left running, CI run 39136355690): here the machine's `git` is
+    /// first on the PATH and takes three.
+    #[cfg(unix)]
+    #[test]
+    fn a_run_of_the_script_takes_the_time_of_its_kind_however_long_the_machines_git_takes_to_start()
+    {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
+
+        let machine = tempfile::tempdir().unwrap();
+        let slow = machine.path().join("git");
+        fs::write(&slow, "#!/bin/sh\n/bin/sleep 3\necho machine\n").unwrap();
+        fs::set_permissions(&slow, fs::Permissions::from_mode(0o755)).unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
+        let started = Instant::now();
+        let ran = Run::new("/bin/bash")
+            .arg(&script)
+            .cwd(config.path())
+            .var(
+                "PATH",
+                format!("{}:/usr/bin:/bin", machine.path().display()),
+            )
+            .closed_input()
+            .run()
+            .unwrap();
+        let took = started.elapsed();
+        assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+        // It shows the branch of the folder, as the owner's does.
+        assert_eq!(ran.stdout.trim(), "main");
+        // Four tenths of a second and the turns of its loop, and well under the host's second
+        // look, 2 s on, which a run still there at is the turn's work.
+        assert!(
+            took < Duration::from_millis(1500),
+            "the machine's git took the run: {took:?}"
+        );
     }
 }

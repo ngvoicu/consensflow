@@ -73,6 +73,18 @@ const REQUEST: Duration = Duration::from_secs(10);
 /// How long the daemon and the pane host each have to end once their input has.
 const EXIT: Duration = Duration::from_secs(5);
 
+/// Which of the two the rig ended did not leave within `exit` of its input's end: the failure
+/// of a close says it, as "process did not exit" alone says not which (CI run 42419505988, a
+/// resumed Devin case on Windows: the frames of both were told, and no word of which one ran on).
+fn still_running(daemon: bool, host: bool, exit: Duration) -> String {
+    let who = match (daemon, host) {
+        (true, true) => "neither the daemon nor the pane host had",
+        (true, false) => "the daemon had not",
+        _ => "the pane host had not",
+    };
+    format!("{who} left {} s after its input ended", exit.as_secs_f64())
+}
+
 /// How long a process a window started has to be gone once the pane host is. Windows takes
 /// longer to take an ended process out of its table on a busy runner, where every case of the
 /// live matrix found one left at 3 s (CI runs 41787972093 and 41792519144, T-1226).
@@ -902,7 +914,8 @@ impl Rig {
         let (daemon, host) = (self.daemon.wait(exit)?, self.host.wait(exit)?);
         if daemon.is_none() || host.is_none() {
             return Err(Error::Timeout(format!(
-                "process did not exit{}",
+                "process did not exit ({}){}",
+                still_running(daemon.is_none(), host.is_none(), exit),
                 self.what_they_said()
             )));
         }

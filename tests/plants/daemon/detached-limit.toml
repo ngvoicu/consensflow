@@ -128,8 +128,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''        Ok(()) if !left.escaped.is_empty() => case.check('''
-replace = '''        Ok(()) if false => case.check('''
+find = '''    if (left.listed.is_empty() && !left.escaped.is_empty())
+        || listed_then_left_for_a_session_of_its_own(left)
+    {'''
+replace = '''    if false {'''
 
 # What the run ends, and what it says it cannot.
 
@@ -385,11 +387,10 @@ runs = ["dl-leaving"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''    !left.alive.is_empty()
-        && in_a_session_of_its_own(left)
-        && left.alive'''
-replace = '''    !left.alive.is_empty()
-        && left.alive'''
+find = '''    in_a_session_of_its_own(left)
+        && if left.alive.is_empty() {'''
+replace = '''    true
+        && if left.alive.is_empty() {'''
 
 [[plant]]
 name = "detached limit: one listed job in a session of its own lets another pass"
@@ -398,8 +399,8 @@ runs = ["dl-leaving"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''        && left.alive.iter().all(|pid| {'''
-replace = '''        && left.alive.iter().any(|pid| {'''
+find = '''            left.alive.iter().all(|pid| {'''
+replace = '''            left.alive.iter().any(|pid| {'''
 
 [[plant]]
 name = "detached limit: a listed job gone unsaid passes as the limit"
@@ -408,7 +409,5 @@ runs = ["dl-leaving"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''    !left.alive.is_empty()
-        && in_a_session_of_its_own(left)'''
-replace = '''    true
-        && in_a_session_of_its_own(left)'''
+find = '''            left.notes.is_empty() && unlisted_but_running(left).len() == left.escaped.len()'''
+replace = '''            left.notes.is_empty()'''
