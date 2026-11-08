@@ -301,6 +301,14 @@ fn a_page_of_deliveries_holds_as_many_items_as_its_room_allows() {
         .items
         .iter()
         .all(|item| item.id == "1-2" || item.delivery.is_some()));
+    // Nor are many short ones: each is a few hundred bytes of the room, none a reading's cost.
+    let rows: Vec<HistoryRow> = (0..300)
+        .rev()
+        .map(|seq| row(1, seq, "user", header))
+        .collect();
+    let many = page(&read(rows, None), HistoryFrom::Newest);
+    assert_eq!(many.items.len(), 300);
+    assert!(many.items.iter().all(|item| item.delivery.is_some()));
     // Nor is a long page of them: it ends where its room does, and not before.
     let body = format!(
         "[ConsensFlow m-5 · T-1 · result from @zeus]\n{}",
@@ -415,6 +423,15 @@ fn passes_over_an_assistant_s_message_with_no_words_and_goes_on_from_past_it() {
     // Where the newest is not being written, nothing of it is shown.
     let ended = page_with(&read(rows.clone(), None), HistoryFrom::Newest, None);
     assert_eq!(ids(&ended), ["1-1", "1-3"]);
+    // A part of a longer text is never passed over, blank as it may be: the words come after it.
+    let mut part = row(1, 6, "assistant", "\n\n");
+    part.cut = Some(TextCut {
+        from: 0,
+        bytes: 900_000,
+        revision: 1,
+    });
+    let long = page_with(&read(vec![part], None), HistoryFrom::Newest, None);
+    assert_eq!(ids(&long), ["1-6"]);
     // A page that only passed over messages goes on from where its read did, and the page
     // after it from the place it began at.
     let resume = Some(rows[4].key);

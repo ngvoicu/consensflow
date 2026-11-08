@@ -102,6 +102,8 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
             let elsewhere = project(&rig, "elsewhere");
             let here = note(&rig, harbour, "human", "chief", "Look at the docs");
             let zeus_s = note(&rig, harbour, "human", "zeus", "Zeus's own plans");
+            // A message the chief sent, which its window shows the header of: its own.
+            let sent = note(&rig, harbour, "chief", "zeus", "Take the lexer");
             // Another project's chief's own note: a sender of the same handle, not this one.
             let theirs = note(&rig, elsewhere, "chief", "human", "Not yours");
             let chief = chief_of(&rig, harbour);
@@ -127,6 +129,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 summary,
                 item("u-4", "user", &format!("[ConsensFlow m-{theirs} · note]\nx")),
                 item("u-5", "user", &quoted),
+                item("u-6", "user", &format!("[ConsensFlow m-{sent} · note from @chief]\nTake the lexer")),
             ];
             rig.kit
                 .ledger
@@ -202,6 +205,12 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                                 "text": format!("[ConsensFlow m-{theirs} · note]\nx"),
                             },
                             { "conversation": first.id, "row": row("u-5"), "id": "u-5", "role": "user", "complete": true, "at": at, "text": quoted },
+                            // A message the chief sent is its own.
+                            {
+                                "conversation": first.id, "row": row("u-6"), "id": "u-6", "role": "user", "complete": true, "at": at,
+                                "text": format!("[ConsensFlow m-{sent} · note from @chief]\nTake the lexer"),
+                                "delivery": { "at": 0 },
+                            },
                             // The conversation after the switch, in the same stream.
                             { "conversation": second.id, "row": row("m-1"), "id": "m-1", "role": "assistant", "text": "Taken over", "complete": true, "at": at },
                         ],

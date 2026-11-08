@@ -218,16 +218,9 @@ fn shown(row: &HistoryRow, owns: Owns<'_>) -> Result<ShownItem, Refusal> {
 }
 
 /// Whether `row` is an assistant's message with no words to show: not a part of a longer
-/// text, and drawn as words (a reader that said it is another kind of item says so).
+/// text, whose first part may be blank and whose words come after it.
 fn said_nothing(row: &HistoryRow) -> bool {
-    let item = &row.item;
-    item.role == "assistant"
-        && item.text.trim().is_empty()
-        && row.cut.is_none()
-        && item
-            .detail
-            .as_ref()
-            .is_none_or(|detail| detail.kind == "text")
+    row.item.role == "assistant" && row.item.text.trim().is_empty() && row.cut.is_none()
 }
 
 /// `text` as a page shows a text that is no item's own: [`SHOWN_FIELD`]
