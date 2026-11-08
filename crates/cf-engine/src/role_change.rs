@@ -642,12 +642,12 @@ pub(crate) struct Answers<'a> {
     /// after. Where it wrote no words after its last tool call, the last item of that turn
     /// that has some is its final answer, so that a result is never empty (the chief's
     /// decision on T-262): what decides on the words after the last tool call alone reads
-    /// `after_the_last_tool`.
-    pub(crate) final_run: Vec<&'a Item>,
+    /// `after_the_last_tool`. A run so taken says it is ([`Run::last_words`]).
+    pub(crate) final_run: Run<'a>,
     /// The final answer as it stood at the last complete item the member wrote: what
     /// Finish takes where the turn after it is still under way (a call open, a
     /// notification's turn begun). None where it wrote none complete.
-    pub(crate) complete_run: Option<Vec<&'a Item>>,
+    pub(crate) complete_run: Option<Run<'a>>,
     /// What the member wrote after the message it was given and before its first tool call,
     /// in the items it was written in, where a tool call came after it: its reply. A turn
     /// that answers a question puts the answer first, and goes on; the words of that answer
@@ -665,6 +665,25 @@ pub(crate) struct Answers<'a> {
     pub(crate) after_the_last_tool: Vec<&'a Item>,
 }
 
+/// A final answer, in the items it was written in (what it derefs to), and whether those are
+/// the last words its turn wrote before its last tool call, which a result takes where the
+/// turn wrote none after it (T-262): a result of them says so above them, so that the chief
+/// can tell the last words the turn had from a report (`turn_end::words_of`; T-1310's review
+/// of T-878, T-1311).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Run<'a> {
+    items: Vec<&'a Item>,
+    pub(crate) last_words: bool,
+}
+
+impl<'a> std::ops::Deref for Run<'a> {
+    type Target = Vec<&'a Item>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
 /// Whether `item` holds words of the member's: some text, and not the harness's own (a
 /// note it marks as its progress, `commentary`, or words it wrote in the member's place,
 /// `synthetic`).
@@ -672,11 +691,18 @@ fn has_words(item: &Item) -> bool {
     !item.commentary && !item.synthetic && !js::trim(&item.text).is_empty()
 }
 
-/// A final run, or where it has no words of the member's, the last item with some (`said`).
-fn with_words<'a>(run: &[&'a Item], said: Option<&'a Item>) -> Vec<&'a Item> {
+/// A final run, or where it has no words of the member's, the last item with some (`said`),
+/// which are its turn's last words.
+fn with_words<'a>(run: &[&'a Item], said: Option<&'a Item>) -> Run<'a> {
     match said {
-        Some(said) if !run.iter().any(|item| has_words(item)) => vec![said],
-        _ => run.to_vec(),
+        Some(said) if !run.iter().any(|item| has_words(item)) => Run {
+            items: vec![said],
+            last_words: true,
+        },
+        _ => Run {
+            items: run.to_vec(),
+            last_words: false,
+        },
     }
 }
 

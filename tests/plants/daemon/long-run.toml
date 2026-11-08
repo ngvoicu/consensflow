@@ -566,8 +566,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "            Ok(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() => format!("
-replace = "            Ok(turn) if turn.is_empty() && plain(&answer_and_progress(turn, codex).0).is_empty() => format!("
+find = "            Ok(turn) if judged(&answer_and_progress(turn, codex).0, &plain(&result.body)).is_empty() => format!("
+replace = "            Ok(turn) if turn.is_empty() && judged(&answer_and_progress(turn, codex).0, &plain(&result.body)).is_empty() => format!("
 
 [[plant]]
 name = "long run 4: what a look cannot judge of a result's turn is never said, and a run passes on turns it never saw"

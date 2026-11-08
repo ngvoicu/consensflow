@@ -365,7 +365,7 @@ fn final_answer(items: &[Item], replacements: &[i64]) -> Vec<String> {
     answers_to_the_task(items, replacements).map_or_else(Vec::new, |answers| {
         answers
             .final_run
-            .into_iter()
+            .iter()
             .map(|item| item.text.to_string())
             .collect()
     })
@@ -561,7 +561,7 @@ fn a_turn_with_no_words_after_its_last_tool_call_answers_with_the_last_words_it_
     assert_eq!(texts(&answered.after_the_last_tool), [""]);
     assert_eq!(texts(&answered.final_run), ["Looking"]);
     assert_eq!(
-        answered.complete_run.as_deref().map(texts),
+        answered.complete_run.as_deref().map(|run| texts(run)),
         Some(vec!["Looking".to_owned()]),
         "Finish takes the same"
     );
@@ -612,7 +612,7 @@ fn a_turn_with_no_words_after_its_last_tool_call_answers_with_the_last_words_it_
     let answered = answers_to_the_task(&earlier, &[]).unwrap();
     assert_eq!(texts(&answered.final_run), [" "]);
     assert_eq!(
-        answered.complete_run.as_deref().map(texts),
+        answered.complete_run.as_deref().map(|run| texts(run)),
         Some(vec![" ".to_owned()])
     );
     // Nor from a turn on a replacement of the role, which is no answer to the task.
@@ -639,7 +639,7 @@ fn a_turn_with_no_words_after_its_last_tool_call_answers_with_the_last_words_it_
     ];
     let answered = answers_to_the_task(&at_work, &[]).unwrap();
     assert_eq!(
-        answered.complete_run.as_deref().map(texts),
+        answered.complete_run.as_deref().map(|run| texts(run)),
         Some(vec!["Looking".to_owned()])
     );
 }

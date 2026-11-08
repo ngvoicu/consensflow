@@ -12,6 +12,12 @@
 # - Strict: a tell's note reads the words after the last tool call alone
 #   (`Answers::after_the_last_tool`, `turn_end/paused.rs`; Calliope's P2 on T-262, T-878).
 #
+# - T-1311, T-1310's review of T-878: a result of the last words says so above them
+#   (`turn_end::LAST_WORDS`, `role_change::Run`); Claude Code's errors of the API, which it writes
+#   in the assistant's place, are the harness's own words (`synthetic`), which no result takes
+#   (`claude/record/items.rs`, `replay.rs`); the long run's oracle judges the result the engine
+#   gives (`crates/cf-evals/src/long_run/invariants/order.rs`).
+#
 # The rig's cases build the native `cf` from the sources as planted, so their plants say `builds`.
 # Every name holds `result-text`, so `cargo xtask plants daemon result-text` runs them all.
 
@@ -20,6 +26,9 @@ rt-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude:
 rt-role-change-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change"]
 rt-engine-final = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "final_answer::"]
 rt-engine-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_answers::"]
+rt-reader-refusals = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::refusals"]
+rt-turn-end-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end::"]
+rt-oracle = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "long_run", "order::"]
 rt-rig-progress = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_that_began_with_the_workers_progress::"], builds = true }
 
 [[plant]]
@@ -63,8 +72,8 @@ runs = ["rt-engine-final"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '        Some(said) if !run.iter().any(|item| has_words(item)) => vec![said],'
-replace = '        Some(said) if run.is_empty() => vec![said],'
+find = '        Some(said) if !run.iter().any(|item| has_words(item)) => Run {'
+replace = '        Some(said) if run.is_empty() => Run {'
 
 [[plant]]
 name = "result-text rig: a worker that wrote nothing after its last tool call gives no words"
@@ -115,7 +124,7 @@ runs = ["rt-engine-final"]
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
 find = '                    complete_run = Some(with_words(&final_run, said));'
-replace = '                    complete_run = Some(final_run.clone());'
+replace = '                    complete_run = Some(with_words(&final_run, None));'
 
 [[plant]]
 name = "result-text: a tell answered with words then cf answer and no words after it is told the words"
@@ -126,3 +135,83 @@ runs = ["rt-engine-paused"]
 file = "crates/cf-engine/src/turn_end/paused.rs"
 find = '        let words = words_of(&answers.after_the_last_tool);'
 replace = '        let words = words_of(&answers.final_run);'
+
+[[plant]]
+name = "result-text: a result of the last words says nothing of what they are"
+meant = "a_result_of_the_last_words_says_so_and_is_not_taken_for_a_report"
+runs = ["rt-engine-final"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '    } else if final_run.last_words() {'
+replace = '    } else if false && final_run.last_words() {'
+
+[[plant]]
+name = "result-text: a run of the last words is not marked as one"
+meant = "the_last_words_a_result_takes_say_so_above_them_and_no_other_words_do"
+runs = ["rt-turn-end-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '            last_words: true,'
+replace = '            last_words: false,'
+
+[[plant]]
+name = "result-text reader: an error of the API's is the model's words"
+meant = "the_words_of_an_api_error_are_the_harnesss_own_until_the_model_says_something_in_its_message"
+runs = ["rt-reader-refusals"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            self.items.said(item, record.refused);'
+replace = '            self.items.said(item, false);'
+
+[[plant]]
+name = "result-text: an error of the API's is the last words a result takes"
+meant = "an_api_errors_words_are_never_the_last_words_a_result_takes"
+runs = ["rt-engine-final"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '            (Words::None | Words::Refusal, true) => Words::Refusal,'
+replace = '            (Words::None | Words::Refusal, true) => Words::Model,'
+
+[[plant]]
+name = "result-text reader: a message of the model's words with an error in it stays the harness's"
+meant = "the_words_of_an_api_error_are_the_harnesss_own_until_the_model_says_something_in_its_message"
+runs = ["rt-reader-refusals"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '            entry.item.synthetic = false;'
+replace = ''
+
+[[plant]]
+name = "result-text oracle: a result of the last words cannot be judged"
+meant = "a_result_of_its_turns_last_words_is_judged_as_the_engine_gives_it"
+runs = ["rt-oracle"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = '        Some(said) if words.is_empty() && !codex =>'
+replace = '        Some(said) if false && words.is_empty() && !codex =>'
+
+[[plant]]
+name = "result-text oracle: a result that says its turn wrote no words is held to the harness's own"
+meant = "a_result_that_is_not_its_turns_last_words_breaks_the_fourth"
+runs = ["rt-oracle"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = '    if answer.starts_with(&plain(LAST_WORDS)) && body == plain(WITHOUT_ANSWER) {'
+replace = '    if false && answer.starts_with(&plain(LAST_WORDS)) && body == plain(WITHOUT_ANSWER) {'
+
+[[plant]]
+name = "result-text oracle: Codex's commentary is taken for its last words"
+meant = "a_codex_turn_with_no_final_answer_stays_one_that_cannot_be_judged"
+runs = ["rt-oracle"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = '        Some(said) if words.is_empty() && !codex =>'
+replace = '        Some(said) if words.is_empty() =>'

@@ -52,6 +52,21 @@ struct Entry {
     /// The place of the record it began in, which no later record moves.
     began: usize,
     fragments: Fragments,
+    /// What its words are, as the records that said something of it say ([`Words`]).
+    words: Words,
+}
+
+/// Whose words an assistant's message holds, by the records that said something of it.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Words {
+    /// None yet.
+    #[default]
+    None,
+    /// An error of the API's alone, which Claude Code writes in the assistant's place
+    /// (`isApiErrorMessage`): the harness's own.
+    Refusal,
+    /// The model's, whatever else it holds.
+    Model,
 }
 
 /// An item only the history shows, the place of the record that said it, and where it
@@ -290,6 +305,26 @@ impl Items {
         item.synthetic = true;
     }
 
+    /// A record that said something of the message at `place`, an error of the API's
+    /// (`refused`) or the model's words: a message of errors alone is the harness's own words
+    /// (`synthetic`), which no answer takes the place of the agent's words with (T-1310's
+    /// review of T-878, T-1311). It is no progress note (`commentary`): a reading says that,
+    /// and Node's held these words as the message's. Words of the model's in the same message,
+    /// before or after the error, make it the model's again.
+    pub(super) fn said(&mut self, place: usize, refused: bool) {
+        let entry = &mut self.list[place];
+        entry.words = match (entry.words, refused) {
+            (Words::None | Words::Refusal, true) => Words::Refusal,
+            _ => Words::Model,
+        };
+        if refused && entry.words == Words::Refusal {
+            entry.item.synthetic = true;
+        } else if entry.words == Words::Model && !entry.item.commentary {
+            // Claude Code's close of a cut turn is its own whatever follows (`synthetic`).
+            entry.item.synthetic = false;
+        }
+    }
+
     /// The message `id` holds a tool's result: what it writes next is after it.
     pub(super) fn after_a_tool(&mut self, id: &Arc<str>) {
         self.after_a_tool.insert(Arc::clone(id));
@@ -388,6 +423,7 @@ impl Entry {
             seq,
             began: seq,
             fragments: Fragments::default(),
+            words: Words::None,
         }
     }
 }

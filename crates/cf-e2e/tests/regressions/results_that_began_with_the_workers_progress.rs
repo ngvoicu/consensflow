@@ -123,7 +123,8 @@ fn a_worker_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words_it_
     // The chief's decision on T-262: a result is never empty.
     let (result, transcript) = result_and_transcript("STEPS 3 --quiet")?;
     assert_eq!(
-        result["body"], "Step 3 of 3",
+        result["body"],
+        "Its turn ended with no words after its last command. The last words it wrote:\n\nStep 3 of 3",
         "the last words before its last tool call"
     );
     assert!(transcript.contains("Step 1 of 3"));

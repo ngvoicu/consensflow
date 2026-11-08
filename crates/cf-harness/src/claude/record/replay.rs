@@ -187,6 +187,9 @@ impl Transcript {
             self.items.synthetic(item);
         }
         self.items.fragment(item, Arc::clone(&uuid), &record.text);
+        if !record.text.is_empty() {
+            self.items.said(item, record.refused);
+        }
         for thinking in &record.thinking {
             self.items.thinking(&uuid, thinking, at, seq);
         }
