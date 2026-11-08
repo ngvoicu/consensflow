@@ -84,10 +84,26 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''        if let Some(specs) = &request.specs {
             keep_specs(store, id, specs)?;
         }
+        // The setting's own writes, which join this one, so each is checked as it is when
+        // the human says it right after, and logged the same.
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_compaction(store, id, Some(size))?;
+        }
         known_project(store, id)
     })
 }'''
-replace = '''        known_project(store, id)
+replace = '''        // The setting's own writes, which join this one, so each is checked as it is when
+        // the human says it right after, and logged the same.
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_compaction(store, id, Some(size))?;
+        }
+        known_project(store, id)
     })
     .and_then(|made| {
         if let Some(specs) = &request.specs {
@@ -120,11 +136,27 @@ find = '''        if let Some(wake_up) = wake_up {
         if let Some(specs) = &request.specs {
             keep_specs(store, id, specs)?;
         }
+        // The setting's own writes, which join this one, so each is checked as it is when
+        // the human says it right after, and logged the same.
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_compaction(store, id, Some(size))?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''        if let Some(specs) = &request.specs {
             keep_specs(store, id, specs)?;
+        }
+        // The setting's own writes, which join this one, so each is checked as it is when
+        // the human says it right after, and logged the same.
+        if let Some(rules) = &request.staff_rules {
+            set_staff_rules(store, id, Some(rules))?;
+        }
+        if let Some(size) = request.compaction {
+            set_compaction(store, id, Some(size))?;
         }
         known_project(store, id)
     })
@@ -146,9 +178,9 @@ file = "crates/cf-ledger/src/projects.rs"
 find = '''        if let Some(specs) = &request.specs {
             keep_specs(store, id, specs)?;
         }
-        known_project(store, id)'''
+'''
 replace = '''        keep_specs(store, id, &request.specs.clone().unwrap_or_default())?;
-        known_project(store, id)'''
+'''
 
 [[plant]]
 name = "project settings: the project is logged as made after its settings"
@@ -238,8 +270,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs"] {'
-replace = '    for key in ["gate", "wakeUp"] {'
+find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
+replace = '    for key in ["gate", "wakeUp", "rules", "compaction"] {'
 
 # --- the page's `project.open` ---
 
@@ -260,8 +292,8 @@ runs = ["daemon-opening-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs"] {'
-replace = '    for key in ["gate", "specs"] {'
+find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
+replace = '    for key in ["gate", "specs", "rules", "compaction"] {'
 
 [[plant]]
 name = "project settings: New project starts the calls with other words than the ledger's default"
@@ -287,7 +319,7 @@ replace = "const UNSET = { on: false, every: 2, unit: 'hours', text: DEFAULT_WAK
 
 [[plant]]
 name = "project settings: the board's button is still called Staff"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings-named"]
 
 [[plant.edit]]
@@ -297,7 +329,7 @@ replace = '<button class="quiet-button" id="project-settings-button" type="butto
 
 [[plant]]
 name = "project settings: the dialog is still titled Project staff"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings"]
 
 [[plant.edit]]
@@ -307,7 +339,7 @@ replace = '<h2 id="project-settings-title">Project staff</h2>'
 
 [[plant]]
 name = "project settings: the approval section is not called Human approval"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings"]
 
 [[plant.edit]]
@@ -319,7 +351,7 @@ replace = '''    <fieldset class="project-section">
 
 [[plant]]
 name = "project settings: the sections come before the staff"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction for Claude members, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings"]
 
 [[plant.edit]]
@@ -334,13 +366,15 @@ replace = '''      <h2 id="project-settings-title">Project settings</h2>
 file = "app/ui/index.html"
 find = '''      </fieldset>
       <div data-project-sections></div>
-      <!-- Computer use (core/computer-use.js)'''
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Close</button>'''
 replace = '''      </fieldset>
-      <!-- Computer use (core/computer-use.js)'''
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Close</button>'''
 
 [[plant]]
 name = "project settings: New project has its sections before its staff"
-meant = "New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["page-new-project"]
 
 [[plant.edit]]
@@ -382,7 +416,7 @@ replace = '''        await page.daemon('wakeup.set', { project: page.board().pro
 
 [[plant]]
 name = "project settings: New project's copy of the sections is not Project settings'"
-meant = "New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["page-new-project"]
 
 [[plant.edit]]
@@ -432,7 +466,7 @@ replace = ""
 
 [[plant]]
 name = "project settings: New project sends the sections as they opened, whatever they say"
-meant = "New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["page-new-project"]
 
 [[plant.edit]]

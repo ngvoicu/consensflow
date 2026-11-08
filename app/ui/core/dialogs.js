@@ -1,9 +1,7 @@
 import { button, element, redraw } from '../dom.js'
-import { HARNESS_NAMES, isMember, modelShown } from './board.js'
-import { ClaudeCompaction } from './claude-compaction.js'
-import { ComputerUseSection } from './computer-use.js'
-import { ProjectSections } from './project-sections.js'
-import { StaffRules } from './staff-rules.js'
+import { HARNESS_NAMES, harnessLabel, isMember, modelShown, nameApart } from './board.js'
+import { harnessesOf } from './computer-use.js'
+import { holdEnter, ProjectSections } from './project-sections.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -40,11 +38,19 @@ const byRoleAndTier = (a, b) =>
   rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
   a.name.localeCompare(b.name)
 /**
- * "Opus · claude · high · standard": what a member runs on and the tier a task finds
- * it by, the effort where it has one.
+ * What a staff table says under a member's name: its tier and its harness, and what it runs on
+ * (its model's id and its effort) only where its name does not say it (HMD-12); a pick of New
+ * project has no name made yet, and says its harness, its effort and its tier.
  */
-const runsLabel = (member) =>
-  [modelShown(member), member.harness && harnessOf(member.harness), member.effort, member.tier]
+const runsLabel = (member, named = true) =>
+  (named
+    ? [
+        ...(nameApart(member) ? [modelShown(member), member.effort] : []),
+        member.tier,
+        member.harness && harnessLabel(member),
+      ]
+    : [member.harness && harnessLabel(member), member.effort, member.tier]
+  )
     .filter(Boolean)
     .join(' · ')
 
@@ -78,7 +84,7 @@ function whoCell(name, runs) {
 function goneCell(name, model, runs, harness) {
   const cell = element('td')
   const meta = element('span', 'member-meta')
-  meta.append(element('mark', 'model-gone', model), runs.slice(model.length))
+  meta.append(element('mark', 'model-gone', model), ` · ${runs}`)
   cell.append(
     element('span', 'member-name', name),
     element('br'),
@@ -310,10 +316,9 @@ class ModelPicker {
     ask.disabled = true
     const options = answer.listing.models.map((model) => {
       const id = modelOf(model)
-      const option = new Option(
-        model.contributor ? `${model.label} · Contributor` : model.label,
-        id,
-      )
+      // The id, exactly as the harness takes it: a contributor model's says so itself
+      // (`-contributor`), and the warning stands under the select once it is picked.
+      const option = new Option(id, id)
       // A model its harness lists and will not run is no pick, nor one taken off.
       option.disabled = model.disabled || this.#takenOff(kind, id)
       return option
@@ -426,7 +431,7 @@ class ChiefPicker {
     const model = this.#picker.model()
     if (this.#picker.kind !== '' && model !== undefined) {
       if (model.efforts.length === 0 || this.#effort.value !== '') return true
-      this.#say(`Pick the effort ${HARNESS_NAMES[this.#picker.kind]} runs ${model.label} at.`)
+      this.#say(`Pick the effort ${HARNESS_NAMES[this.#picker.kind]} runs ${modelOf(model)} at.`)
       return false
     }
     // A harness whose models could not be read says why already.
@@ -574,7 +579,7 @@ class MemberPicker {
     if (kind === '') return say('Pick a harness for the member.')
     if (model === undefined) return this.#picker.open ? say("Pick the member's model.") : null
     if (model.efforts.length > 0 && this.#effort.value === '') {
-      return say(`Pick the effort ${HARNESS_NAMES[kind]} runs ${model.label} at.`)
+      return say(`Pick the effort ${HARNESS_NAMES[kind]} runs ${modelOf(model)} at.`)
     }
     if (this.#tier.value === '') {
       return say("Pick the member's tier: the work the chief gives it, from critical to light.")
@@ -585,7 +590,7 @@ class MemberPicker {
       model: modelOf(model),
       effort: this.#effort.value === '' ? null : this.#effort.value,
       tier: this.#tier.value,
-      modelName: model.label,
+      modelName: modelOf(model),
     }
   }
 
@@ -669,16 +674,27 @@ export class NewProjectDialog {
   constructor(dialog, page) {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
+    // Start is the button's: Enter in no field of the dialog starts the project.
+    holdEnter(this.#form)
     this.#staff = dialog.querySelector('#new-project-staff')
     this.#refusal = dialog.querySelector('.dialog-refusal')
     this.#sections = new ProjectSections(
       dialog.querySelector('[data-project-sections]'),
       null,
       page.specs,
+      {
+        daemon: page.daemon,
+        act: page.act,
+        report: page.report,
+        // Before there is a project, the folder picked is what computer use is read for.
+        scope: () => (dialog.open ? { directory: this.#form.elements.directory.value } : null),
+      },
     )
     this.#page = page
     this.#chief = new ChiefPicker(this.#form, page.daemon)
     this.#member = new MemberPicker(this.#form, new ModelLists(page.daemon), () => {})
+    // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
+    this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
     this.#form.elements.memberAdd.addEventListener('click', () => {
       const picked = this.#member.values()
       if (picked === null) return
@@ -706,19 +722,31 @@ export class NewProjectDialog {
 
   /** Opens on `directory`; with no harness installed here it refuses, and says where to get one. */
   async open(directory) {
-    const [{ missing = [] }, { staff }] = await Promise.all([
+    const [{ missing = [] }, { staff }, , screen] = await Promise.all([
       this.#page.daemon('harnesses.missing'),
       this.#page.daemon('staff.last'),
       this.#page.readSpecs(),
+      this.#sections.computerUse.read({ directory }),
     ])
     this.#missing = missing
+    this.#sections.computerUse.show(screen)
     this.#chief.fill(missing)
     this.#member.reset(missing)
     this.#pickLast(staff)
     this.#sections.reset()
     this.#say('')
     this.#form.elements.directory.value = directory
+    this.#drawComputerUse()
     this.#dialog.showModal()
+  }
+
+  /** Computer use, drawn for the harnesses of the chief picked and of the members picked. */
+  #drawComputerUse() {
+    const kinds = [
+      this.#form.elements.chiefHarness.value,
+      ...this.#picked.map((pick) => pick.harness),
+    ]
+    this.#sections.computerUse.draw(new Set(kinds.filter(Boolean)))
   }
 
   /** What is said above the buttons: the daemon's refusal of the start, until the next try or the next opening. */
@@ -737,9 +765,15 @@ export class NewProjectDialog {
    */
   async #start() {
     if (this.#starting || !this.#chief.picked()) return
+    // A section holding what no project can start with says so, as its Save does in Project settings.
+    const blocked = this.#sections.blocked()
+    if (blocked !== null) {
+      this.#say(blocked)
+      return
+    }
     this.#starting = true
     const form = this.#form
-    const { gate, wakeUp, specs } = this.#sections.values()
+    const { gate, wakeUp, specs, rules, compaction } = this.#sections.values()
     const body = {
       directory: form.elements.directory.value,
       ...this.#chief.values(),
@@ -748,6 +782,8 @@ export class NewProjectDialog {
     }
     if (wakeUp !== null) body.wakeUp = wakeUp
     if (specs !== null) body.specs = specs
+    if (rules !== null) body.rules = rules
+    if (compaction !== null) body.compaction = compaction
     this.#say('')
     let refused = null
     try {
@@ -782,7 +818,9 @@ export class NewProjectDialog {
       .flatMap((member) =>
         member.roles.map((role) => ({
           harness: member.harness,
-          model: member.model,
+          // The model as its harness's list names it (`modelName`): what the daemon takes for
+          // a pick. Devin's `model` is the launch id for the effort, which no list holds.
+          model: member.modelName || member.model,
           effort: member.effort,
           tier: member.tier,
           modelName: member.modelName,
@@ -814,7 +852,7 @@ export class NewProjectDialog {
           },
           `Remove ${ROLE_LABEL[pick.role]} ${pick.name}`,
         )
-        const row = staffRow(whoCell(pick.name, runsLabel(pick)), pick.role, remove)
+        const row = staffRow(whoCell(pick.name, runsLabel(pick, false)), pick.role, remove)
         row.dataset.model = pick.model ?? ''
         return row
       })
@@ -822,6 +860,7 @@ export class NewProjectDialog {
       rows.push(nobodyRow('Nobody yet: pick a role, a harness, a model and a tier, then Add.'))
     }
     this.#staff.replaceChildren(...rows)
+    this.#drawComputerUse()
   }
 
   /** The picked rows as the daemon takes a staff: each member once, with its roles. */
@@ -899,8 +938,8 @@ export class SwitchChiefDialog {
 /**
  * Project settings: the project's staff (who the chief may hand work to, drawn
  * from the project's board, and drawn again in place while open, so it stays
- * current), the rules for the staff (`StaffRules`), the size its Claude members'
- * windows compact at (`ClaudeCompaction`), and the sections New project has too
+ * current), the rules for the staff (`StaffRules`), the size its members' windows
+ * compact at, whatever their harness (`Compaction`), and the sections New project has too
  * (`ProjectSections`): human approval, wake-up calls and specs. Each saves as it
  * always did: the staff as it is added to or removed from, the approval as it is
  * ticked, the rules, the compaction, the calls and the specs by their own Save.
@@ -922,7 +961,7 @@ export class ProjectSettingsDialog {
   #specs
   /** The rules for the staff, shown as the board has them and saved as a whole. */
   #rules
-  /** The size the Claude members' windows compact at, shown as the board has it. */
+  /** The size the members' windows compact at, whatever their harness, shown as the board has it. */
   #compaction
   /** Computer use: a part for each of the project's harnesses that has one. */
   #computerUse
@@ -971,31 +1010,19 @@ export class ProjectSettingsDialog {
         chiefRunning: () => this.#chiefRunning(),
       },
       page.specs,
+      {
+        daemon: page.daemon,
+        act: page.act,
+        report: page.report,
+        scope: () => (dialog.open ? { project: this.#project } : null),
+      },
     )
     this.#gate = sections.gate
     this.#wakeUp = sections.wakeUp
     this.#specs = sections.specs
-    this.#rules = new StaffRules(dialog.querySelector('.staff-rules'), {
-      project: () => (dialog.open ? this.#project : null),
-      daemon: page.daemon,
-      act: page.act,
-      note: page.note,
-      report: page.report,
-      chiefRunning: () => this.#chiefRunning(),
-    })
-    this.#compaction = new ClaudeCompaction(dialog.querySelector('.claude-compaction'), {
-      project: () => (dialog.open ? this.#project : null),
-      daemon: page.daemon,
-      act: page.act,
-      note: page.note,
-      report: page.report,
-    })
-    this.#computerUse = new ComputerUseSection(dialog.querySelector('.computer-use'), {
-      daemon: page.daemon,
-      act: page.act,
-      report: page.report,
-      project: () => (dialog.open ? this.#project : null),
-    })
+    this.#rules = sections.rules
+    this.#compaction = sections.compaction
+    this.#computerUse = sections.computerUse
     // What the dialog changes is its project's, whichever board the page shows now.
     this.#gate.addEventListener('change', () => {
       const project = this.#project
@@ -1027,8 +1054,17 @@ export class ProjectSettingsDialog {
       void page.act(async () => {
         try {
           if (editing !== null) {
-            await page.daemon('member.edit', { project, member: editing, ...picked })
-            page.note(`@${editing} runs ${modelName} from its next window.`)
+            const { member } = await page.daemon('member.edit', {
+              project,
+              member: editing,
+              ...picked,
+            })
+            // The name holds the model (HMD-12): a member edited to another one is renamed.
+            page.note(
+              member.handle === editing
+                ? `@${editing} runs ${modelName} from its next window.`
+                : `@${editing} is @${member.handle} now, and runs ${modelName} from its next window.`,
+            )
             this.#member.reset(this.#missing)
             return
           }
@@ -1078,7 +1114,7 @@ export class ProjectSettingsDialog {
     const [calls, , computerUse] = await Promise.all([
       this.#wakeUp.read(project),
       this.#page.readSpecs(),
-      this.#computerUse.read(project),
+      this.#computerUse.read({ project }),
     ])
     const board = this.#page.board()
     if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {
@@ -1175,7 +1211,7 @@ export class ProjectSettingsDialog {
     redraw(this.#members, rows)
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
-    this.#computerUse.draw(board)
+    this.#computerUse.draw(harnessesOf(board))
   }
 
   /** A member as the project's board has it now, which a Remove kept across redraws acts on. */

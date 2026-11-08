@@ -71,6 +71,8 @@ pub fn request(name: &str, directory: &str) -> NewProject {
         gate: false,
         wake_up: None,
         specs: None,
+        staff_rules: None,
+        compaction: None,
     }
 }
 

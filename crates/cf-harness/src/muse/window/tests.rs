@@ -585,3 +585,26 @@ fn a_muse_chief_at_rest_after_a_numbered_echo_shows_no_dialog() {
     let window = home.window(None);
     reads_nothing(&window, "at rest", MUSE_NUMBERED_ECHO_AT_REST);
 }
+
+/// Muse's card of a peer's admission counts down ("expires in …", read from its binary's strings
+/// only: no screen of it was recorded), and its window takes nothing out of a dialog until one is
+/// (T-1273, T-1277): a time is a word of the request.
+#[test]
+fn a_muse_window_takes_nothing_out_of_a_dialog_that_counts_down() {
+    use crate::contract::Dialog;
+    let home = Home::new();
+    let window = home.window(None);
+    let card = |left: &str| Dialog {
+        question: "Let this peer's messages in?".to_owned(),
+        detail: vec![format!("peer admission \u{b7} expires in {left}")],
+        options: vec!["Yes".to_owned(), "No".to_owned()],
+        asks: true,
+        prompt_below: false,
+        closes_after_s: None,
+    };
+    assert_eq!(window.dialog_identity(&card("4m 12s")), card("4m 12s"));
+    assert_ne!(
+        window.dialog_identity(&card("4m 12s")),
+        window.dialog_identity(&card("3m 12s"))
+    );
+}

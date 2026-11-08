@@ -1,0 +1,98 @@
+{
+ "scenarios": [
+  {
+   "name": "oauth-login",
+   "says": "a built-in provider's OAuth login in auth.json",
+   "env": {},
+   "files": {
+    "auth.json": "{\n  \"openai-codex\": {\n    \"type\": \"oauth\",\n    \"access\": \"test-access\",\n    \"refresh\": \"test-refresh\",\n    \"expires\": 4102444800000\n  }\n}\n"
+   }
+  },
+  {
+   "name": "api-key-login",
+   "says": "an API key in auth.json",
+   "env": {},
+   "files": {
+    "auth.json": "{\n  \"openrouter\": {\n    \"type\": \"api_key\",\n    \"key\": \"sk-test-not-a-key\"\n  }\n}\n"
+   }
+  },
+  {
+   "name": "env-key",
+   "says": "a provider key in the environment",
+   "env": {
+    "OPENROUTER_API_KEY": "sk-test-not-a-key"
+   },
+   "files": {
+    "settings.json": "{}\n"
+   }
+  },
+  {
+   "name": "custom-provider",
+   "says": "a custom provider in models.json",
+   "env": {},
+   "files": {
+    "models.json": "{\n  \"providers\": {\n    \"mylocal\": {\n      \"baseUrl\": \"http://127.0.0.1:9/v1\",\n      \"api\": \"openai-completions\",\n      \"apiKey\": \"none\",\n      \"models\": [\n        {\n          \"id\": \"my-model-1\"\n        },\n        {\n          \"id\": \"my-model-2\"\n        }\n      ]\n    }\n  }\n}\n"
+   }
+  },
+  {
+   "name": "package-provider",
+   "says": "a provider from an installed Pi package, listed from its own cache",
+   "env": {},
+   "files": {
+    "settings.json": "{\n  \"packages\": [\n    \"npm:pi-test-provider\"\n  ]\n}\n",
+    "npm/node_modules/pi-test-provider/package.json": "{\n  \"name\": \"pi-test-provider\",\n  \"version\": \"1.0.0\",\n  \"keywords\": [\n    \"pi-package\"\n  ],\n  \"pi\": {\n    \"extensions\": [\n      \"./index.ts\"\n    ]\n  }\n}\n",
+    "npm/node_modules/pi-test-provider/index.ts": "import { readFileSync } from \"node:fs\";\nimport { join } from \"node:path\";\n\nexport default async function (pi: any) {\n  let models: any[] | undefined;\n  try {\n    models = JSON.parse(readFileSync(join(process.env.PI_CODING_AGENT_DIR ?? \"\", \"provider-cache.json\"), \"utf8\")).models;\n  } catch {}\n  if (!models) {\n    try {\n      const answer = await fetch(\"http://127.0.0.1:9/models\", { signal: AbortSignal.timeout(3000) });\n      models = (await answer.json()).models;\n    } catch {\n      return;\n    }\n  }\n  pi.registerProvider(\"pkgprov\", {\n    baseUrl: \"http://127.0.0.1:9/v1\", apiKey: \"none\", api: \"openai-completions\", models,\n  });\n}\n",
+    "provider-cache.json": "{\n  \"models\": [\n    {\n      \"id\": \"pkg-model-1\",\n      \"name\": \"Pkg 1\",\n      \"reasoning\": false,\n      \"input\": [\n        \"text\"\n      ],\n      \"cost\": {\n        \"input\": 0,\n        \"output\": 0,\n        \"cacheRead\": 0,\n        \"cacheWrite\": 0\n      },\n      \"contextWindow\": 8000,\n      \"maxTokens\": 1000\n    },\n    {\n      \"id\": \"pkg-model-2\",\n      \"name\": \"Pkg 2\",\n      \"reasoning\": false,\n      \"input\": [\n        \"text\"\n      ],\n      \"cost\": {\n        \"input\": 0,\n        \"output\": 0,\n        \"cacheRead\": 0,\n        \"cacheWrite\": 0\n      },\n      \"contextWindow\": 8000,\n      \"maxTokens\": 1000\n    }\n  ]\n}\n"
+   }
+  },
+  {
+   "name": "extension-provider",
+   "says": "a provider from an extension in the agent folder's extensions",
+   "env": {},
+   "files": {
+    "extensions/provider.ts": "export default function (pi: any) {\n  pi.registerProvider(\"extprov\", {\n    baseUrl: \"http://127.0.0.1:9/v1\", apiKey: \"none\", api: \"openai-completions\",\n    models: [{ id: \"ext-model-1\", name: \"Ext 1\", reasoning: false, input: [\"text\"],\n      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8000, maxTokens: 1000 }],\n  });\n}\n"
+   }
+  },
+  {
+   "name": "several",
+   "says": "a login, a custom provider, a package and an extension at once",
+   "env": {},
+   "files": {
+    "settings.json": "{\n  \"packages\": [\n    \"npm:pi-test-provider\"\n  ]\n}\n",
+    "npm/node_modules/pi-test-provider/package.json": "{\n  \"name\": \"pi-test-provider\",\n  \"version\": \"1.0.0\",\n  \"keywords\": [\n    \"pi-package\"\n  ],\n  \"pi\": {\n    \"extensions\": [\n      \"./index.ts\"\n    ]\n  }\n}\n",
+    "npm/node_modules/pi-test-provider/index.ts": "import { readFileSync } from \"node:fs\";\nimport { join } from \"node:path\";\n\nexport default async function (pi: any) {\n  let models: any[] | undefined;\n  try {\n    models = JSON.parse(readFileSync(join(process.env.PI_CODING_AGENT_DIR ?? \"\", \"provider-cache.json\"), \"utf8\")).models;\n  } catch {}\n  if (!models) {\n    try {\n      const answer = await fetch(\"http://127.0.0.1:9/models\", { signal: AbortSignal.timeout(3000) });\n      models = (await answer.json()).models;\n    } catch {\n      return;\n    }\n  }\n  pi.registerProvider(\"pkgprov\", {\n    baseUrl: \"http://127.0.0.1:9/v1\", apiKey: \"none\", api: \"openai-completions\", models,\n  });\n}\n",
+    "provider-cache.json": "{\n  \"models\": [\n    {\n      \"id\": \"pkg-model-1\",\n      \"name\": \"Pkg 1\",\n      \"reasoning\": false,\n      \"input\": [\n        \"text\"\n      ],\n      \"cost\": {\n        \"input\": 0,\n        \"output\": 0,\n        \"cacheRead\": 0,\n        \"cacheWrite\": 0\n      },\n      \"contextWindow\": 8000,\n      \"maxTokens\": 1000\n    },\n    {\n      \"id\": \"pkg-model-2\",\n      \"name\": \"Pkg 2\",\n      \"reasoning\": false,\n      \"input\": [\n        \"text\"\n      ],\n      \"cost\": {\n        \"input\": 0,\n        \"output\": 0,\n        \"cacheRead\": 0,\n        \"cacheWrite\": 0\n      },\n      \"contextWindow\": 8000,\n      \"maxTokens\": 1000\n    }\n  ]\n}\n",
+    "auth.json": "{\n  \"openai-codex\": {\n    \"type\": \"oauth\",\n    \"access\": \"test-access\",\n    \"refresh\": \"test-refresh\",\n    \"expires\": 4102444800000\n  }\n}\n",
+    "models.json": "{\n  \"providers\": {\n    \"mylocal\": {\n      \"baseUrl\": \"http://127.0.0.1:9/v1\",\n      \"api\": \"openai-completions\",\n      \"apiKey\": \"none\",\n      \"models\": [\n        {\n          \"id\": \"my-model-1\"\n        },\n        {\n          \"id\": \"my-model-2\"\n        }\n      ]\n    }\n  }\n}\n",
+    "extensions/provider.ts": "export default function (pi: any) {\n  pi.registerProvider(\"extprov\", {\n    baseUrl: \"http://127.0.0.1:9/v1\", apiKey: \"none\", api: \"openai-completions\",\n    models: [{ id: \"ext-model-1\", name: \"Ext 1\", reasoning: false, input: [\"text\"],\n      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8000, maxTokens: 1000 }],\n  });\n}\n"
+   }
+  },
+  {
+   "name": "nothing",
+   "says": "no provider of any kind",
+   "env": {},
+   "files": {
+    "settings.json": "{}\n"
+   }
+  },
+  {
+   "name": "package-without-models",
+   "says": "a provider package whose models cannot be had: no cache, and its server is down",
+   "env": {},
+   "files": {
+    "settings.json": "{\n  \"packages\": [\n    \"npm:pi-test-provider\"\n  ]\n}\n",
+    "npm/node_modules/pi-test-provider/package.json": "{\n  \"name\": \"pi-test-provider\",\n  \"version\": \"1.0.0\",\n  \"keywords\": [\n    \"pi-package\"\n  ],\n  \"pi\": {\n    \"extensions\": [\n      \"./index.ts\"\n    ]\n  }\n}\n",
+    "npm/node_modules/pi-test-provider/index.ts": "import { readFileSync } from \"node:fs\";\nimport { join } from \"node:path\";\n\nexport default async function (pi: any) {\n  let models: any[] | undefined;\n  try {\n    models = JSON.parse(readFileSync(join(process.env.PI_CODING_AGENT_DIR ?? \"\", \"provider-cache.json\"), \"utf8\")).models;\n  } catch {}\n  if (!models) {\n    try {\n      const answer = await fetch(\"http://127.0.0.1:9/models\", { signal: AbortSignal.timeout(3000) });\n      models = (await answer.json()).models;\n    } catch {\n      return;\n    }\n  }\n  pi.registerProvider(\"pkgprov\", {\n    baseUrl: \"http://127.0.0.1:9/v1\", apiKey: \"none\", api: \"openai-completions\", models,\n  });\n}\n"
+   }
+  },
+  {
+   "name": "extension-fails",
+   "says": "a login beside an extension that fails to load",
+   "env": {},
+   "files": {
+    "auth.json": "{\n  \"openai-codex\": {\n    \"type\": \"oauth\",\n    \"access\": \"test-access\",\n    \"refresh\": \"test-refresh\",\n    \"expires\": 4102444800000\n  }\n}\n",
+    "extensions/broken.ts": "export default function (pi: any) {\n  throw new Error(\"this extension fails to load\");\n}\n"
+   }
+  }
+ ]
+}

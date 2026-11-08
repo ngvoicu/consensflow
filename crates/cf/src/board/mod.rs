@@ -473,12 +473,22 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
         all => all
             .iter()
             .map(|member| {
+                // A name that holds the model and effort says no more of them: the member's
+                // roles, its tier and its harness follow it. One whose name holds none (a
+                // designer on its harness's default, a member that needs an edit) says what
+                // it runs on.
+                let apart = member.get("nameApart").and_then(Value::as_bool) == Some(true);
+                let runs = if apart {
+                    format!(" · {}", runs_on(member))
+                } else {
+                    String::new()
+                };
                 format!(
-                    "@{} · {} · {} · {}",
+                    "@{}{runs} · {} · {} · {}",
                     js::text(member.get("handle")),
-                    runs_on(member),
                     js::join(list(member.get("roles")), "+"),
-                    js::text(member.get("tier"))
+                    js::text(member.get("tier")),
+                    js::text(member.get("harnessName"))
                 )
             })
             .collect::<Vec<_>>()
@@ -487,19 +497,15 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
     Ok(Said::new(members, text))
 }
 
-/// What a member of `cf staff` runs on (spec harness-models): its model as its harness's
-/// list names it and its effort (`Opus · high`), then its harness and the model's id as the
-/// harness takes it (`(Claude Code, claude-opus-5-5)`), or its harness's default model.
+/// What a member of `cf staff` runs on where its name does not say it (spec harness-models,
+/// HMD-12): its model as its harness's list names it, its id, and its effort
+/// (`gpt-6-astra · high`), or its harness's default model, or that it needs an edit.
 fn runs_on(member: &Value) -> String {
     let mut shown = js::text(member.get("modelName")).into_owned();
     if let Some(effort) = member.get("effort").and_then(Value::as_str) {
         shown = format!("{shown} · {effort}");
     }
-    let id = member
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("its default model");
-    format!("{shown} ({}, {id})", js::text(member.get("harnessName")))
+    shown
 }
 
 fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {

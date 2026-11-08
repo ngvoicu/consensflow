@@ -11,7 +11,12 @@
 //! alone while it is open answers it at once with the choice of that number, as Claude Code's
 //! lists take a digit; how it was answered is written down (`offer-answers`, in its config
 //! folder: the digit, or `timeout` where nothing answered it), which Claude Code itself writes
-//! nowhere for "No, not now" (T-1192).
+//! nowhere for "No, not now" (T-1192). With a word `TURN-ENDS` after the offer's seconds
+//! (`LSP-OFFER 30 TURN-ENDS`) the turn ends under the open offer once a file `turn-ends` is in
+//! its config folder (the case writes it when the chief was told), as the live window's did on
+//! 2026-11-06 (T-1261): its status turns to `waiting` ("dialog open"), the spinner under the
+//! offer goes, and the line that closes a turn is drawn above it, so that the pane host's tail,
+//! the last twelve lines with a letter or a digit in them, slides down a line.
 //!
 //! A message with a line `HOOK-ASK <seconds>` makes the window ask, as its turn works, what
 //! Claude Code asks where a plugin's PreToolUse hook answers "ask" for a call (the screen of a
@@ -24,6 +29,15 @@
 //! prompt as its turn works ("How is Claude doing this session? (optional)", a digit a
 //! choice), unless its environment says `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`, as Claude Code
 //! draws none then; a survey drawn is written down (`surveys`, in its config folder).
+//!
+//! A message with a line `PERMISSION-ASK <seconds>` makes the window ask, as its turn works, what
+//! Claude Code 2.1.319 asks of a command it cannot allow by itself, a dangerous `rm`: the command,
+//! the rule's words, and under them the line that counts down to the block of the request ("⚠
+//! Claude Code will automatically block this request in 0:12, to avoid holding up an unattended
+//! session"), redrawn each second, with the window's status `waiting`. At the end of the clock
+//! Claude Code blocks the request by itself, as on the owner's board on 2026-11-06 (T-1268): the
+//! status goes back to `busy` while the screen still shows the prompt for some seconds more, and
+//! then the window goes back to its prompt. Nothing typed into it answers it.
 
 use std::fs::OpenOptions;
 use std::io::{self, Write};
@@ -42,9 +56,10 @@ const OFFER: &str = "LSP-OFFER ";
 const SURVEY: &str = "SURVEY";
 
 /// The files in the window's config folder of the surveys drawn and of how each offer was
-/// answered.
+/// answered, and the one a case writes there to end the turn under an open offer.
 pub const SURVEYS: &str = "surveys";
 pub const ANSWERS: &str = "offer-answers";
+pub const TURN_ENDS: &str = "turn-ends";
 
 /// Whether an offer is open, and the digit typed into it: 0 for none yet.
 static OPEN: AtomicBool = AtomicBool::new(false);
@@ -72,6 +87,10 @@ const DIALOG: [&str; 18] = [
     "",
     "\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 21 tokens)",
 ];
+
+/// What the offer's screen is once the turn under it ended: the line that closes a turn, then the
+/// offer without its spinner, as the live window drew it (2026-11-06, T-1261).
+const TURN_ENDED: &str = "\u{273b} Baked for 9s \u{b7} done 8:21 AM \u{b7} 1 shell still running";
 
 /// The session survey, as Claude Code draws it under its prompt.
 const SURVEY_LINES: &str =
@@ -107,6 +126,54 @@ const HOOK_ASK: [&str; 18] = [
 /// The word of a line that asks for a hook's ask.
 const HOOK: &str = "HOOK-ASK ";
 
+/// The word of a line that asks for a permission prompt with a countdown.
+const PERMISSION: &str = "PERMISSION-ASK ";
+
+/// How long after the status goes back to `busy` the prompt still shows on the screen, as it did
+/// on the owner's board, more than a look (5 s) of the engine's.
+const BLOCKED_LINGERS: Duration = Duration::from_secs(7);
+
+/// How long the permission prompt asks where the message asks for it: the seconds of its clock.
+pub fn permission_ask_in(text: &str) -> Option<Duration> {
+    seconds_after(text, PERMISSION)
+}
+
+/// The screen of the permission prompt of a dangerous `rm`, `left` seconds before Claude Code
+/// blocks it by itself, as the owner's board showed it (the paths are placeholders).
+fn permission_screen(left: u64) -> String {
+    let clock = format!("{}:{:02}", left / 60, left % 60);
+    format!(
+        "\x1b[2J\x1b[H Bash command\r\n   $T/tree/app/tests/shots/make.mjs $T/scratch/ && ls $T/scratch\r\n   Dangerous rm operation on possibly-empty variable path: \"$S/$l\" in `rm \"$S/$l\"`\r\n \u{26a0} Claude Code will automatically block this request in {clock}, to avoid holding up an unattended session\r\n\r\n Do you want to proceed?\r\n \u{276f} 1. Yes\r\n   2. No\r\n"
+    )
+}
+
+/// The permission prompt, its clock counting down `open`: the screen is redrawn each second and the
+/// window's status says it waits on a permission prompt; at the end of the clock Claude Code
+/// blocks the request by itself, the status goes back to `busy` and the prompt stays on the screen
+/// a few seconds more ([`BLOCKED_LINGERS`]).
+pub fn permission_ask(records: &Records, pid: u32, open: Duration) -> io::Result<()> {
+    records.waiting(pid, "permission prompt")?;
+    ANSWER.store(0, Ordering::SeqCst);
+    OPEN.store(true, Ordering::SeqCst);
+    for left in (0..=open.as_secs()).rev() {
+        say(&permission_screen(left))?;
+        sleep(Duration::from_secs(1));
+    }
+    records.status(pid, "busy")?;
+    sleep(BLOCKED_LINGERS);
+    OPEN.store(false, Ordering::SeqCst);
+    // A digit typed into it while it was open (nothing should: it is no dialog of the list of
+    // safe declines) is written down, or that nothing answered it.
+    let answer = match ANSWER.swap(0, Ordering::SeqCst) {
+        0 => "blocked".to_owned(),
+        digit => char::from(digit).to_string(),
+    };
+    if let Some(config) = own_var("CLAUDE_CONFIG_DIR") {
+        note(Path::new(&config), ANSWERS, &format!("permission:{answer}"))?;
+    }
+    say(PROMPT)
+}
+
 /// How long the hook's ask stays where the message asks for it: its seconds.
 pub fn hook_ask_in(text: &str) -> Option<Duration> {
     seconds_after(text, HOOK)
@@ -115,6 +182,15 @@ pub fn hook_ask_in(text: &str) -> Option<Duration> {
 /// How long the offer stays where the message asks for it: its seconds.
 pub fn offer_in(text: &str) -> Option<Duration> {
     seconds_after(text, OFFER)
+}
+
+/// Whether the turn ends under the offer, where the message's line of it says `TURN-ENDS`.
+pub fn turn_ends_in(text: &str) -> bool {
+    text.lines().any(|line| {
+        line.trim()
+            .strip_prefix(OFFER)
+            .is_some_and(|rest| rest.split_whitespace().any(|word| word == "TURN-ENDS"))
+    })
 }
 
 /// The seconds a line of `text` says after `word`.
@@ -144,8 +220,25 @@ fn note(config: &Path, name: &str, line: &str) -> io::Result<()> {
 
 /// The offer, open `open`: the screen shows it while the turn is at work; then it closes by
 /// itself and the turn goes on.
-pub fn offer(open: Duration) -> io::Result<()> {
-    open_for(&DIALOG, "", open).map(|_| ())
+pub fn offer(records: &Records, pid: u32, open: Duration, turn_ends: bool) -> io::Result<()> {
+    let mut ended = false;
+    open_for(&DIALOG, "", open, |_| {
+        let told_to_end = own_var("CLAUDE_CONFIG_DIR")
+            .is_some_and(|config| Path::new(&config).join(TURN_ENDS).exists());
+        if turn_ends && told_to_end && !ended {
+            ended = true;
+            records.waiting(pid, "dialog open")?;
+            // The offer's lines without the spinner (and the blank line above it), under the
+            // line that closes a turn.
+            let kept = &DIALOG[..DIALOG.len() - 2];
+            say(&format!(
+                "\x1b[2J\x1b[H{TURN_ENDED}\r\n{}\r\n",
+                kept.join("\r\n")
+            ))?;
+        }
+        Ok(())
+    })?;
+    records.status(pid, "busy")
 }
 
 /// The ask of a plugin's PreToolUse hook, open `open`: the screen shows it as Claude Code
@@ -155,14 +248,19 @@ pub fn offer(open: Duration) -> io::Result<()> {
 /// answered "No" (`2`), which ends the turn in Claude Code: the model is told to stop and wait.
 pub fn hook_ask(records: &Records, pid: u32, open: Duration) -> io::Result<bool> {
     records.waiting(pid, "permission prompt")?;
-    let answer = open_for(&HOOK_ASK, "hook:", open)?;
+    let answer = open_for(&HOOK_ASK, "hook:", open, |_| Ok(()))?;
     records.status(pid, "busy")?;
     Ok(answer == Some(b'2'))
 }
 
 /// The dialog `lines`, open `open` or until a digit answers it, its answer written down after
-/// `tag`.
-fn open_for(lines: &[&str], tag: &str, open: Duration) -> io::Result<Option<u8>> {
+/// `tag`; `tick` is called at each step of the wait with how long it has been.
+fn open_for(
+    lines: &[&str],
+    tag: &str,
+    open: Duration,
+    mut tick: impl FnMut(Duration) -> io::Result<()>,
+) -> io::Result<Option<u8>> {
     ANSWER.store(0, Ordering::SeqCst);
     OPEN.store(true, Ordering::SeqCst);
     say(&format!("{}\r\n", lines.join("\r\n")))?;
@@ -171,6 +269,7 @@ fn open_for(lines: &[&str], tag: &str, open: Duration) -> io::Result<Option<u8>>
     while waited < open && ANSWER.load(Ordering::SeqCst) == 0 {
         sleep(step);
         waited += step;
+        tick(waited)?;
     }
     OPEN.store(false, Ordering::SeqCst);
     let digit = ANSWER.swap(0, Ordering::SeqCst);
@@ -227,6 +326,18 @@ mod tests {
             Some(Duration::from_secs(3))
         );
         assert_eq!(offer_in("LSP-OFFER soon"), None);
+        assert_eq!(
+            permission_ask_in("PERMISSION-ASK 14 Reply with exactly: OK"),
+            Some(Duration::from_secs(14))
+        );
+        assert_eq!(permission_ask_in("HOOK-ASK 14"), None);
+        assert!(permission_screen(117).contains("block this request in 1:57, to avoid"));
+        assert!(permission_screen(3).contains("block this request in 0:03, to avoid"));
+        assert!(turn_ends_in(
+            "LSP-OFFER 30 TURN-ENDS Reply with exactly: OK"
+        ));
+        assert!(!turn_ends_in("LSP-OFFER 30 Reply with exactly: OK"));
+        assert!(!turn_ends_in("TURN-ENDS"));
         assert_eq!(offer_in("Reply with exactly: OK"), None);
         assert!(survey_in("SURVEY Reply with exactly: OK"));
         assert!(!survey_in("Reply with exactly: OK"));

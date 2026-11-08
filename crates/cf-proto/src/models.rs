@@ -117,6 +117,24 @@ pub struct ModelListing {
     pub how: String,
 }
 
+/// What a harness's failure says between its own description and the words of a program it
+/// started (`pi --mode rpc ended before it answered (exit 1); it said:` and a line to a line
+/// of what the program wrote): **everything after the first of these is the program's words,
+/// and ConsensFlow's own words never come after it.** The words of a program can carry what it
+/// was given (an extension's error that echoes a header, a package's URL), so whoever keeps or
+/// tells a failure screens that block whole before it cuts it (`cf_engine::quotable`); the
+/// first mark is where it begins, so that nothing a program writes, a forged mark among it,
+/// can make its own words pass for ConsensFlow's. Only a read of Pi, a program that loads
+/// code of the human's, carries one.
+pub const IT_SAID: &str = "; it said:\n";
+
+/// What stands after [`IT_SAID`] in place of the words of a program that may hold a credential:
+/// the words are not quoted, and this is told instead. `cf_engine::quotable` puts it there for
+/// words it screened and withheld; a read that kept only the end of what the program said (its
+/// error stream is kept to its last bytes) puts it there itself, for the front it lost may have
+/// held the label of a value that is in what is left.
+pub const WORDS_WITHHELD: &str = "(Pi's words withheld: they may hold a credential)";
+
 /// Whether a listing is the account's own as of when it was read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "camelCase")]

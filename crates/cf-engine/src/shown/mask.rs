@@ -210,6 +210,16 @@ pub(crate) fn has_url_credentials(text: &str) -> bool {
     URL_CREDENTIALS.is_match(text)
 }
 
+/// Where the user and password of each `scheme://user:password@` in `text` begin and end, as
+/// byte offsets.
+pub(crate) fn url_credential_spans(text: &str) -> Vec<(usize, usize)> {
+    URL_CREDENTIALS
+        .captures_iter(text)
+        .filter_map(|found| found.get(1))
+        .map(|userinfo| (userinfo.start(), userinfo.end()))
+        .collect()
+}
+
 /// Whether `text` shows the beginning of a token of a kind with a known prefix (`sk-`, `ghp_`,
 /// `AKIA…`, a JWT's `eyJ…`) or of a `Basic` credential, whatever follows it.
 pub(crate) fn begins_a_token(text: &str) -> bool {

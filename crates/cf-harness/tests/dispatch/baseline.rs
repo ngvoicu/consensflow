@@ -27,8 +27,6 @@ pub const SITES: &[(&str, &str, Kind, usize)] = &[
     ("crates/cf-engine/src/handoff/text.rs", "name_of", Kind::IdMatch, 1),
     ("crates/cf-engine/src/seams.rs", "ComputerUse::claude", Kind::Adapter, 1),
     ("crates/cf-engine/src/seams.rs", "ComputerUse::codex", Kind::Adapter, 1),
-    // Staff rules' (I-2, T-1092): only a Claude member's launch gets the project's compaction size, written before this list (T-1017).
-    ("crates/cf-engine/src/windows.rs", "Dispatcher::plan", Kind::Eq, 1),
 
     // The harnesses' crate, outside its registry: its readers, its admin, its detection and the files a launch leaves.
     // Muse's (D2b, T-996): its version read and compared in `inspect`, 2 of these 3 (T-703, before this list).

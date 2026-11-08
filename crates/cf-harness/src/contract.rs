@@ -318,10 +318,11 @@ pub struct Launch<'a> {
     /// The specs a chief plans with, when its project has them on: only a
     /// chief's launch is given any, and with none the launch is as it always was.
     pub specs: Option<Specs<'a>>,
-    /// The size, in tokens, the project chose for its Claude members' windows to
-    /// compact at (Claude Code's `autoCompactWindow`, which fires a little before
-    /// the window fills): only a member's launch is given one, and with none the
-    /// launch is as it always was. Claude's adapter is the only one that reads it.
+    /// The size, in tokens, the project chose for its members' windows to compact at,
+    /// whatever their harness: only a member's launch is given one, and with none the
+    /// launch is as it always was. Each adapter gives it its harness by its own route
+    /// (Claude's `autoCompactWindow`, Codex's `model_auto_compact_token_limit`, Devin's
+    /// thresholds, Pi's extension, Muse's context limit up to its real window).
     pub compaction: Option<u32>,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
@@ -637,6 +638,18 @@ pub trait Window {
             prompt_below: self.shows_prompt(&shown.below),
             ..shown.dialog
         })
+    }
+    /// `dialog` (as [`Window::dialog`] read it off a screen) as this harness's window tells it
+    /// from another read of the screen: the engine holds two reads to one dialog, and a decline to
+    /// the dialog it was meant for, by plain equality of what this returns (`cf_engine::dialogs`).
+    /// The default is the dialog as it was read, every word of it: a figure, a time, a line of a
+    /// dialog is part of what it asks, and another is another dialog (T-1273). A window says
+    /// otherwise only of what its harness draws of its own and redraws while the dialog stays, by
+    /// that exact shape and in its place, and of where a dialog of its harness's begins (Claude
+    /// Code's countdown to the block of a request, and its offer to install an LSP plugin from its
+    /// title down, T-1277). A note still quotes the read as it was, never this.
+    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
+        dialog.clone()
     }
     /// The decline ConsensFlow makes of `dialog`, where it is on the harness's list of safe
     /// declines: none for any other (the default), which is never pressed.
