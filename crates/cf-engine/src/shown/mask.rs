@@ -36,10 +36,6 @@
 //! made of where the token ends. Four characters of the body, `_` and `-` among them, or up to
 //! three and then a blank or the end, count (`sk-abc defg …`, `sk-_ab cd`, `sk-ant-…`).
 //!
-//! **The cause of a failed start** is quoted with the files its producer marked replaced, and not
-//! quoted where it names one no one marked ([`launch_cause`]): the words of a program that could
-//! not be run say what to do about it, and not the file that was tried.
-//!
 //! **The spans of every rule are found in the text as it was**, joined where they overlap
 //! or touch, and replaced once (T-823): no part of a value is left to a rule that comes
 //! after the one that took the first part of it.
@@ -287,49 +283,6 @@ fn is_base64_letters(found: &str) -> bool {
 /// A base64 run that says what it is by its characters: a `+` in it, or `=` at its end.
 fn is_base64_marked(found: &str) -> bool {
     found.contains('+') || found.ends_with('=')
-}
-
-/// What a file is replaced with in the cause of a failed start ([`launch_cause`]).
-pub const PATH: &str = "[path]";
-
-/// What stands in place of the cause of a failed start that names a file no one marked.
-pub const CAUSE_WITHHELD: &str = "its cause named a file, so it is not quoted";
-
-/// Whether a word of free text names a file: a `/` or a `\\` in it (a path, a URL), or a folder
-/// an environment variable names (`%LOCALAPPDATA%`).
-#[allow(clippy::expect_used)]
-static NAMES_A_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[/\\]|%[A-Za-z_][A-Za-z0-9_]*%").expect("a pattern of the masker")
-});
-
-/// The cause of a failed start as a note may quote it (a program the host or an adapter could not
-/// run): the files the code that built the words **marked**
-/// (`cf_base::startup::a_path_in_words`) replaced by [`PATH`], exactly, and the rest kept (the
-/// error code, the advice); and [`CAUSE_WITHHELD`] where the words are free text with a file in
-/// it that no one marked, or marks that do not close. A path cannot be told from the words
-/// round it: `C:\tools\pi hunter22.cmd` is one file, and the end of it is the producer's to say,
-/// never a guess (the joint review T-1322, blocker 4: a word-by-word replacement left
-/// `hunter22.cmd`).
-pub(crate) fn launch_cause(cause: &str) -> String {
-    use cf_base::startup::{PATH_CLOSES, PATH_OPENS};
-    let mut said = String::with_capacity(cause.len());
-    let mut rest = cause;
-    while let Some(open) = rest.find(PATH_OPENS) {
-        said.push_str(&rest[..open]);
-        let after = &rest[open + PATH_OPENS.len_utf8()..];
-        match after.find(PATH_CLOSES) {
-            Some(close) if !after[..close].contains(PATH_OPENS) => {
-                said.push_str(PATH);
-                rest = &after[close + PATH_CLOSES.len_utf8()..];
-            }
-            _ => return CAUSE_WITHHELD.to_owned(),
-        }
-    }
-    said.push_str(rest);
-    if said.contains(PATH_CLOSES) || NAMES_A_FILE.is_match(&said) {
-        return CAUSE_WITHHELD.to_owned();
-    }
-    said
 }
 
 /// A text, and how many secrets were hidden in it.

@@ -48,7 +48,7 @@ mod testing;
 pub use alive::alive;
 pub use began::began_after;
 pub use capture::{capture, capture_whole, CaptureFailed, Captured, LEFT_RUNNING};
-pub use child::{spawn, Child, Ender, Streams, SAID_KEPT};
+pub use child::{not_spawned, spawn, Child, Ender, Streams, SAID_KEPT};
 pub use cmd_word::cmd_word;
 pub use descriptors::{close_all_on_exec, hold_only_the_streams};
 pub use execute::{execute, Failed, Limits};

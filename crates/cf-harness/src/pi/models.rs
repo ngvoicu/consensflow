@@ -20,15 +20,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cf_base::env::Env;
+use cf_base::startup::{StartFailure, StartKind};
 use cf_proto::agents::Harness;
 use cf_proto::models::{ModelChoice, ModelListing, IT_SAID, WORDS_WITHHELD};
 use serde_json::{json, Value};
 
 use super::setup::inspect;
+use crate::contract::NoDefault;
 use crate::detect::executable;
 use crate::seams::processes::{Limits, Processes, Program, Streams};
 use crate::seams::Time;
-use crate::shared::one_shot::{ask, conversation_as, BOUND_MS};
+use crate::shared::one_shot::{ask, conversation_as, Said, BOUND_MS};
 
 /// How the list is read, as the human could run it.
 pub(crate) const HOW: &str = "pi --mode rpc --offline: get_available_models";
@@ -139,7 +141,7 @@ pub(crate) async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
-) -> Result<ModelListing, String> {
+) -> Result<ModelListing, Said> {
     let at = time.wall_ms();
     let env = program.env.clone();
     let asked = json!({ "id": "models", "type": "get_available_models" });
@@ -164,8 +166,13 @@ pub(crate) async fn read(
     };
     match parse(&answer, at) {
         Ok(listing) => Ok(listing),
-        Err(Unlisted::Said(why)) => Err(why),
-        Err(Unlisted::NoModel) => Err(inspect(time, &env).await.unlisted()),
+        // Pi started, and said no: its words are Pi's, for the page; a note says only that
+        // it ended with an error.
+        Err(Unlisted::Said(why)) => Err(Said {
+            words: why,
+            failure: Some(StartFailure::of(StartKind::Failed)),
+        }),
+        Err(Unlisted::NoModel) => Err(Said::from(inspect(time, &env).await.unlisted())),
     }
 }
 
@@ -173,13 +180,14 @@ pub(crate) async fn read(
 /// extensions of its folder, by name, for one of them may be what it waited for. That is
 /// ConsensFlow's description, so it stands before [`IT_SAID`], where Pi's own words, which
 /// come last, begin.
-async fn waiting_on(failed: String, time: &dyn Time, env: &Env) -> String {
-    let (head, said) = match failed.split_once(IT_SAID) {
+async fn waiting_on(failed: Said, time: &dyn Time, env: &Env) -> Said {
+    let Said { words, failure } = failed;
+    let (head, said) = match words.split_once(IT_SAID) {
         Some((head, said)) => (head, Some(said)),
-        None => (failed.as_str(), None),
+        None => (words.as_str(), None),
     };
     if !head.contains("did not answer within") {
-        return failed;
+        return Said { words, failure };
     }
     let loading = inspect(time, env)
         .await
@@ -189,10 +197,11 @@ async fn waiting_on(failed: String, time: &dyn Time, env: &Env) -> String {
         "{head}. Pi loads the packages and extensions it has before it lists, and one of \
          them may be waiting for something{loading}"
     );
-    match said {
+    let words = match said {
         Some(said) => format!("{head}{IT_SAID}{said}"),
         None => head,
-    }
+    };
+    Said { words, failure }
 }
 
 /// The most of what a failed `pi update --models` said that is handed on, as a read of Pi
@@ -231,8 +240,11 @@ pub(crate) async fn listed(
     processes: &dyn Processes,
     time: &dyn Time,
     fetch: bool,
-) -> Result<ModelListing, String> {
-    let executable = PathBuf::from(executable(Harness::Pi, env)?);
+) -> Result<ModelListing, Said> {
+    let executable = PathBuf::from(executable(Harness::Pi, env).map_err(|words| Said {
+        words,
+        failure: Some(StartFailure::of(StartKind::NotFound)),
+    })?);
     let mut fetched = Ok(());
     if fetch {
         let update = Program {
@@ -286,7 +298,7 @@ pub(crate) async fn default_model(
     env: &Env,
     processes: &dyn Processes,
     time: &dyn Time,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, NoDefault> {
     let settings = super::paths::agent_dir(env)
         .ok()
         .and_then(|dir| std::fs::read_to_string(cf_base::path::join(&[&dir, "settings.json"])).ok())
@@ -299,11 +311,17 @@ pub(crate) async fn default_model(
     if let Some(named) = named.filter(|named| !cf_proto::models::is_contributor(named)) {
         return Ok(Some(named));
     }
-    let listing = listed(env, processes, time, false).await?;
+    // What a read that failed said is Pi's, for the page: the chief's note says the kind of
+    // failure and its code (T-1328).
+    let listing = listed(env, processes, time, false)
+        .await
+        .map_err(|said| NoDefault::Unread(said.failure))?;
     listing
         .default_model()
         .map(|model| Some(model.model()))
-        .ok_or_else(|| "Pi offers no model that is not a contributor model".to_owned())
+        .ok_or(NoDefault::NoneOffered(
+            "Pi offers no model that is not a contributor model",
+        ))
 }
 
 #[cfg(test)]

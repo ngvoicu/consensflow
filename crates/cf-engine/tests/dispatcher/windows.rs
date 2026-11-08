@@ -8,6 +8,7 @@ use std::rc::Rc;
 use cf_engine::testing::Context;
 use serde_json::{json, Value};
 
+use crate::chiefs::with_codex;
 use crate::fixtures::{assert_match, native_of, Tiers};
 use crate::traces::held_to;
 
@@ -1204,7 +1205,7 @@ fn fails_the_task_when_the_worker_window_cannot_open() {
     assert_eq!(task.task.state, "failed");
     assert_match(
         task.messages[0].reason.as_deref().unwrap(),
-        "refused by the test",
+        "the window did not open: the host would not open it",
     );
     held_to(
         context.close(),
@@ -1287,7 +1288,7 @@ fn fails_the_first_message_at_once_when_the_harness_cannot_take_it_after_the_win
     assert_eq!(task.task.state, "failed");
     assert_match(
         task.messages[0].reason.as_deref().unwrap(),
-        "the server never answered",
+        "the window could not take its first message \\(its cause is in ConsensFlow's log\\)",
     );
     assert_eq!(
         context.host.killed().last().unwrap().id,
@@ -1298,4 +1299,125 @@ fn fails_the_first_message_at_once_when_the_harness_cannot_take_it_after_the_win
         SUITES,
         "fails the first message at once when the harness cannot take it after the window opens",
     );
+}
+
+/// What `cf codex-session` writes on its terminal when it could not open Codex because the npm
+/// shim has no Node to run on (`ConsensFlow could not open Codex: …`, the person's own words).
+fn codex_could_not_open(shim: &str) -> String {
+    format!(
+        "ConsensFlow could not open Codex: {shim} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node visible to ConsensFlow, or install the harness's own build instead of the npm one."
+    )
+}
+
+/// `text` as a terminal of `columns` columns draws it: hard wrapped, a row of its own each.
+fn hard_wrapped(text: &str, columns: usize) -> Vec<String> {
+    text.chars()
+        .collect::<Vec<_>>()
+        .chunks(columns)
+        .map(|row| row.iter().collect())
+        .collect()
+}
+
+/// T-1328, the second reading of T-1322: a Codex window whose program (`cf codex-session`) could not
+/// open Codex names the shim it tried on its screen, and a screen note quoted it at every width,
+/// `hunter22` and all. The window ends with the status of why (72, no Node), which the engine reads:
+/// the harness never ran, and the note says what failed and what to do, from the status, and quotes
+/// nothing of the screen. A Codex window that ends with any other status, or another harness's with
+/// this one, is quoted as before.
+#[test]
+fn a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quotes_no_screen() {
+    let shim = r"C:\tools\hunter22\codex.cmd";
+    let words = codex_could_not_open(shim);
+    let said = "Node.js was not found for Codex; make the harness's Node visible to ConsensFlow, or install the harness's own build instead of the npm one";
+    let mut failed = Vec::new();
+    for columns in [80, 120, 160] {
+        let screen = hard_wrapped(&words, columns);
+        let rows: Vec<&str> = screen.iter().map(String::as_str).collect();
+        let context = with_codex();
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+                "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+            }))
+            .unwrap()
+            .expect("the project")
+            .id;
+        context.pool_task(project, "worker", "Write the parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let session = context.task(project, 1).task.assignee.expect("its session");
+        context.host.exits_showing(Some(72), None, Some(&rows));
+        context.exit(&session);
+        let note = context
+            .task(project, 1)
+            .messages
+            .iter()
+            .find(|message| message.kind == "note")
+            .map(|message| message.body.clone())
+            .unwrap_or_default();
+        if !note.contains(&format!("(exit code 72); {said}")) {
+            failed.push(format!("{columns} columns, not said: {note}"));
+        }
+        for word in [
+            "hunter22",
+            "tools",
+            "codex.cmd",
+            "ConsensFlow could not open",
+        ] {
+            if note.contains(word) {
+                failed.push(format!("{columns} columns: `{word}` is in {note}"));
+            }
+        }
+        context.close();
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The same status from a window of any other harness is that harness's own: its screen is quoted
+/// as it is, and a Codex window's other statuses are Codex's own.
+#[test]
+fn a_status_of_why_is_read_only_of_a_codex_window() {
+    for (harness, code) in [
+        ("claude-code", 72),
+        ("codex", 1),
+        ("codex", 69),
+        ("codex", 78),
+    ] {
+        let context = with_codex();
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+                "staff": [{ "agent": "diana", "harness": harness, "roles": ["worker"], "tier": "standard" }],
+            }))
+            .unwrap()
+            .expect("the project")
+            .id;
+        context.pool_task(project, "worker", "Write the parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let session = context.task(project, 1).task.assignee.expect("its session");
+        context
+            .host
+            .exits_showing(Some(code), None, Some(&["Running the workspace tests"]));
+        context.exit(&session);
+        let note = context
+            .task(project, 1)
+            .messages
+            .iter()
+            .find(|message| message.kind == "note")
+            .map(|message| message.body.clone())
+            .unwrap_or_default();
+        assert!(
+            note.contains(&format!(
+                "(exit code {code}); its screen ended with: \"Running the workspace tests\""
+            )),
+            "{harness} {code}: {note}"
+        );
+        assert!(!note.contains("Node.js was not found"), "{note}");
+        context.close();
+    }
 }

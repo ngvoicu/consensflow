@@ -824,6 +824,9 @@ impl Dispatcher {
             || delivering
                 .as_ref()
                 .is_some_and(|delivering| delivering.launch);
+        // A Codex window whose program could not start Codex ended with a status that says so:
+        // its note says that, and not what its screen showed (`Shown::with_start`).
+        let shown = shown.with_start(participant.harness.as_deref());
         let closed = format!("@{}'s window closed", participant.handle);
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)

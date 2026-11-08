@@ -30,8 +30,8 @@ use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
-    Readiness, Records, Skill, Specs, Used, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed, Pane, PaneHost,
+    Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
@@ -70,12 +70,11 @@ impl PiAdapter {
 
 impl Adapter for PiAdapter {
     fn models(&self, fetch: bool) -> Work<'_, Result<ModelListing, String>> {
-        Box::pin(super::models::listed(
-            &self.env,
-            &*self.processes,
-            &*self.time,
-            fetch,
-        ))
+        Box::pin(async move {
+            super::models::listed(&self.env, &*self.processes, &*self.time, fetch)
+                .await
+                .map_err(String::from)
+        })
     }
 
     /// What its record says the conversation ran on last (CHF-05): read from its end,
@@ -97,7 +96,7 @@ impl Adapter for PiAdapter {
         super::models::gone(words, asked)
     }
 
-    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         Box::pin(super::models::default_model(
             &self.env,
             &*self.processes,

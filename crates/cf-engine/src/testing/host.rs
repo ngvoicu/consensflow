@@ -10,6 +10,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
+use cf_base::startup::StartRefusal;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft};
 use serde_json::{json, Map, Value};
@@ -35,6 +36,9 @@ pub struct FakeHost {
     /// The words the next refused open is refused with, instead of "refused by the test": what
     /// a host says of a program it could not start (its path, for one).
     pub refused_with: RefCell<Option<String>>,
+    /// The open is refused as a program that cannot be run as it is: the person's words and
+    /// the kind of failure (`Opened::Unrunnable`), the next time `refuse` is set.
+    pub unrunnable_with: RefCell<Option<StartRefusal>>,
     /// The next open is not answered by its deadline: its window opens all the same,
     /// as a loaded host's does after the daemon stopped waiting.
     pub unanswered: Cell<bool>,
@@ -326,6 +330,11 @@ impl FakeHost {
     ) -> Result<Opened, HostError> {
         if self.refuse.replace(false) {
             next_turn().await;
+            if let Some(refusal) = self.unrunnable_with.borrow_mut().take() {
+                self.recorder
+                    .answered(at, json!({ "ok": false, "error": refusal.words() }));
+                return Ok(Opened::Unrunnable(refusal));
+            }
             let error = self
                 .refused_with
                 .borrow_mut()

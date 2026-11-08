@@ -43,8 +43,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
+use cf_base::startup::{StartFailure, StartRefusal};
 use cf_board::door::{board_of, DOOR_WAIT};
-use cf_process::{runnable, start_owned, Ending, Owned};
+use cf_process::{not_spawned, runnable, start_owned, Ending, Owned};
 use cf_proto::codex::agent_types::{agent_type, AgentType, AGENT_TYPES};
 use cf_proto::codex::{
     Bridge, InvalidBridge, BRIDGE_VARIABLE, ROLE_VARIABLE, SUBAGENT_TYPES_VARIABLE,
@@ -93,9 +94,12 @@ pub(crate) enum SessionError {
     Endpoint(#[from] EndpointError),
     #[error("Codex server could not start: {0}")]
     Server(String),
+    /// The system would not start Codex's server.
+    #[error("Codex server could not start: {program}: {cause}")]
+    ServerNotStarted { program: String, cause: io::Error },
     /// Codex is an npm shim and no Node is to be found to run it on.
     #[error("{0}")]
-    Unrunnable(String),
+    Unrunnable(StartRefusal),
     #[error(transparent)]
     Broker(#[from] StartError),
     #[error("{program}: {cause}")]
@@ -104,6 +108,23 @@ pub(crate) enum SessionError {
     Signals(io::Error),
     #[error("could not remove the Codex socket folder {}: {cause}", path.display())]
     Cleanup { path: PathBuf, cause: io::Error },
+}
+
+impl SessionError {
+    /// The kind of failure, where this is the harness that could not be started: the window's
+    /// program then ends with the status of that kind (`cf_base::startup::StartKind::exit_status`),
+    /// so that the engine reads from how the window ended, and not from its screen, that the
+    /// harness never ran, and a note says the kind and no word of the program's path (T-1328).
+    /// None for any other failure, which the screen tells.
+    pub(crate) fn startup(&self) -> Option<StartFailure> {
+        match self {
+            Self::Unrunnable(refusal) => Some(refusal.failure()),
+            Self::ServerNotStarted { program, cause } | Self::Tui { program, cause } => {
+                Some(not_spawned(Path::new(program), cause).failure())
+            }
+            _ => None,
+        }
+    }
 }
 
 /// What one window is run with.
@@ -308,14 +329,13 @@ impl Session {
         }
         args.push("app-server".into());
         args.extend(plan.endpoint.listen().iter().cloned());
-        let (mut command, program) = command(plan, &args)
-            .map_err(|failed| SessionError::Unrunnable(cf_base::startup::unmarked(&failed)))?;
+        let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         let mut backend = start_owned(&mut command)
-            .map_err(|cause| SessionError::Server(format!("{program}: {cause}")))?;
+            .map_err(|cause| SessionError::ServerNotStarted { program, cause })?;
         let stderr = backend.take_stderr();
         self.note_if_in_no_job("Codex's server", (plan.refusal)(&backend));
         self.backend = Some(backend);
@@ -383,8 +403,7 @@ impl Session {
             "CF_CODEX_TUI_TOKEN".into(),
         ];
         args.extend(plan.split.tui.iter().cloned());
-        let (mut command, program) = command(plan, &args)
-            .map_err(|failed| SessionError::Unrunnable(cf_base::startup::unmarked(&failed)))?;
+        let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
         command
             .env("CF_CODEX_TUI_TOKEN", &plan.bridge.token)
             .stdin(Stdio::inherit())
@@ -468,7 +487,7 @@ fn remove_folder(folder: &Path) -> io::Result<()> {
 /// sub-agents' (the app-server is told the file itself); and a program
 /// still running when its handle is dropped is killed, not orphaned (and everything it started
 /// with it, on Windows).
-fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), String> {
+fn command(plan: &Plan<'_>, args: &[OsString]) -> Result<(Command, String), StartRefusal> {
     let run = runnable(plan.executable, args, plan.env)?;
     let program = run.program.display().to_string();
     let mut command = Command::from(run.command());

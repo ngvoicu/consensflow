@@ -20,18 +20,19 @@ use std::future::Future;
 use std::io::{self, Write};
 
 use cf_base::env::Env;
+use cf_base::startup::StartFailure;
 use tokio::task::LocalSet;
 
 /// Runs a Codex window: `args` are the Codex program and the arguments it is
 /// run with, `env` the window's environment, which names its broker
 /// (`CF_CODEX_SESSION_BRIDGE`). Returns the exit code: the TUI's, 0 when a
-/// signal ended it, 1 with the reason on standard error when Codex could not
-/// be opened.
+/// signal ended it, and when Codex could not be opened the reason on standard error and a
+/// status that says why where the harness never ran ([`fail`], T-1328), else 1.
 pub fn run(env: &Env, args: &[OsString]) -> i32 {
     match block_on_local(supervisor::supervise(env, args)) {
         Ok(Ok(code)) => code,
-        Ok(Err(cause)) => fail(&cause.to_string()),
-        Err(cause) => fail(&format!("could not start its runtime: {cause}")),
+        Ok(Err(cause)) => fail(&cause.to_string(), cause.startup()),
+        Err(cause) => fail(&format!("could not start its runtime: {cause}"), None),
     }
 }
 
@@ -51,8 +52,10 @@ fn block_on_local<F: Future>(future: F) -> io::Result<F::Output> {
     Ok(output)
 }
 
-/// Says why Codex could not be opened, on standard error.
-fn fail(reason: &str) -> i32 {
+/// Says why Codex could not be opened, on standard error, in the person's own words (the file
+/// that was tried is named), and ends the window with the status of the kind of failure where it
+/// is one of a start (`StartKind::exit_status`), else 1.
+fn fail(reason: &str, startup: Option<StartFailure>) -> i32 {
     let _ = writeln!(io::stderr(), "ConsensFlow could not open Codex: {reason}");
-    1
+    startup.map_or(1, |failure| failure.kind().exit_status())
 }

@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use cf_base::startup::StartFailure;
 use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
 use cf_proto::panes::{HumanInput, Servers, SilentPaste};
@@ -108,8 +109,9 @@ pub trait Adapter {
     /// itself has it, and never a contributor model (CHF-06, MUS-15): a chief whose model
     /// is gone starts on it. `Ok(Some(model))` names it on the launch; `Ok(None)` leaves it
     /// to the harness, whose own default is no contributor model; `Err(why)` where no such
-    /// model can be had. A harness ConsensFlow cannot say more of is left to choose.
-    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+    /// model can be had, in the terms of [`NoDefault`]: never a program's words. A harness
+    /// ConsensFlow cannot say more of is left to choose.
+    fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         Box::pin(async { Ok(None) })
     }
 
@@ -1076,6 +1078,18 @@ impl Observed {
     pub fn agents_pending(&self) -> bool {
         self.pending().agents > 0
     }
+}
+
+/// Why a harness has no default model to start a chief on, as the note to the human says it
+/// (T-1328). Nothing a program said is in it: a read that failed carries the kind of failure and
+/// its code (`cf_base::startup`), and a list that offers none is ConsensFlow's own fixed words.
+/// The full words stay on the page, where the person reads them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoDefault {
+    /// The harness offers no model that is allowed; the words are fixed in ConsensFlow's source.
+    NoneOffered(&'static str),
+    /// Its program could not be started or read, for the reason of the kind where there is one.
+    Unread(Option<StartFailure>),
 }
 
 /// A window that waits on something its own dialog holds, and why where its

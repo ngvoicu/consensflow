@@ -153,10 +153,10 @@ fn a_default_model_lookup_that_overlaps_a_listing_is_told_what_the_folder_holds(
         )
     }));
     let (listing, default) = (listing.unwrap_err(), default.unwrap_err());
-    for (what, why) in [("listing", &listing), ("default", &default)] {
-        assert!(why.contains("no provider is set up"), "{what}: {why}");
-        assert!(!why.contains(LATE), "{what}: {why}");
-    }
+    assert!(listing.contains("no provider is set up"), "{listing}");
+    assert!(!listing.contains(LATE), "{listing}");
+    // The chief's note says only that the list could not be read; the page tells why (T-1328).
+    assert_eq!(default, crate::contract::NoDefault::Unread(None));
     assert_eq!(setup::reads(), 1, "the one read answered both");
 }
 

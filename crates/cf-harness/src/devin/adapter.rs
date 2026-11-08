@@ -69,8 +69,8 @@ use super::paths;
 use super::wire::selected_session;
 use super::wire_log::{Said, WireLog};
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, LaunchId, Observed, Over,
-    Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
+    Adapter, Admission, FirstMessage, Held, Input, Interrupt, Launch, LaunchId, NoDefault,
+    Observed, Over, Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
     STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
@@ -308,7 +308,7 @@ impl Adapter for DevinAdapter {
         super::models::gone(words, asked)
     }
 
-    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         let env = &self.services.env;
         Box::pin(async move { super::models::default_model(env) })
     }

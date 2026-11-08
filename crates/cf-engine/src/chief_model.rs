@@ -15,7 +15,7 @@
 
 use std::rc::Rc;
 
-use cf_harness::contract::{Adapter, Agent, Used};
+use cf_harness::contract::{Adapter, Agent, NoDefault, Used};
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 
 use crate::deliveries::Delivering;
@@ -247,9 +247,9 @@ impl Dispatcher {
         // A default that is the very model found gone is no other to start on: the chief is
         // held, and told so (Calliope's P2b, T-994).
         let started = match adapter.default_model().await {
-            Ok(Some(model)) if model == gone => {
-                Err("its default is the model that is gone".to_owned())
-            }
+            Ok(Some(model)) if model == gone => Err(NoDefault::NoneOffered(
+                "its default is the model that is gone",
+            )),
             started => started,
         };
         let body = match &started {
@@ -260,13 +260,16 @@ impl Dispatcher {
                 "The chief's model, {gone}, is no longer available in {harness}: the chief starts on {harness}'s own default model instead. Switch the chief to pick another."
             ),
             // What the harness said (a Pi read that failed quotes Pi's error stream) can carry
-            // a credential it was given: the words of the program are screened whole before
-            // they are cut or a note (`quotable`), and the note is one paragraph.
+            // a credential it was given, and so can the path of its program: the note says the
+            // kind of failure and its code, and no word of a program's (`NoDefault`, T-1328).
+            // The full words stay on the page, where the person reads them.
             Err(why) => format!(
                 "The chief's model, {gone}, is no longer available in {harness}, and ConsensFlow found no other to start it on ({}): switch the chief to another model.",
-                crate::shown::quotable(why)
-                    .replacen(cf_proto::models::IT_SAID, "; it said: ", 1)
-                    .replace('\n', " / ")
+                match why {
+                    NoDefault::NoneOffered(words) => (*words).to_owned(),
+                    NoDefault::Unread(Some(failure)) => failure.words(harness),
+                    NoDefault::Unread(None) => format!("{harness}'s model list could not be read"),
+                }
             ),
         };
         self.seams.ledger.borrow_mut().note(

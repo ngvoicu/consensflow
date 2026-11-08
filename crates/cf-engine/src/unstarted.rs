@@ -24,11 +24,14 @@ use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 use crate::at_work::OnWork;
 use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
+use crate::handoff::name_of;
 use crate::record::Record;
 use crate::role_change::Prelude;
 use crate::runtime::returning;
 use crate::seams::EngineError;
+use crate::shown::mask::mask;
 use crate::shown::Shown;
+use crate::startup::{Stage, Startup, Why};
 
 /// A launch whose window did not come up in the time it had, about to be given
 /// up: its pane, the message the launch fails with where it has one, why its
@@ -97,6 +100,27 @@ impl Dispatcher {
         };
         let owed = record.delivery.borrow_mut().prelude.take();
         (shown, owed)
+    }
+
+    /// The words of a launch that failed to start, as a note says them (`startup`): the stage
+    /// and the kind of failure, and nothing the adapter, the host or a program said. What they
+    /// said goes to ConsensFlow's log alone, masked as every quote is (T-1328).
+    pub(crate) fn startup_words(
+        &self,
+        participant: &ParticipantView,
+        startup: Startup,
+        said: &str,
+    ) -> String {
+        let who = name_of(participant.harness.as_deref().unwrap_or_default());
+        let words = startup.words(who);
+        if !said.is_empty() {
+            self.seams.log.warn(&format!(
+                "@{}: {words}; it was told: {}",
+                participant.handle,
+                mask(said).text
+            ));
+        }
+        words
     }
 
     /// `because`, with what the window showed said after it, for the failure
@@ -245,11 +269,19 @@ impl Dispatcher {
         // A member's message that the role went ahead of is no record's: it was given back.
         let settles = record.delivery.borrow_mut().delivering.take().is_some();
         record.window.borrow_mut().starts_given_up += 1;
-        let because = if first {
-            format!("the window could not take its first message: {error}")
-        } else {
-            format!("the window never came up: {error}")
-        };
+        // What the harness said of it is its own: the log has it, and a note says the stage.
+        let because = self.startup_words(
+            participant,
+            Startup::new(
+                if first {
+                    Stage::FirstMessage
+                } else {
+                    Stage::Up
+                },
+                Why::Unsaid,
+            ),
+            &error,
+        );
         let say = || {
             if settles || !first {
                 self.unstarted_because(record, &because, &shown)

@@ -129,7 +129,8 @@ impl Processes for RecordedPi {
         &self,
         program: Program,
         streams: Streams,
-    ) -> Result<Box<dyn crate::seams::processes::Child>, String> {
+    ) -> Result<Box<dyn crate::seams::processes::Child>, crate::seams::processes::StartRefusal>
+    {
         let answer = self.answer(&program).clone();
         let script = if answer["exit"].is_null() {
             let line = json!({ "type": "response", "id": "models", "success": true,
@@ -185,7 +186,9 @@ fn listing_of(home: &Home) -> Result<Vec<String>, String> {
         "{}: a read writes nothing",
         home.name
     );
-    listed.map(|listing| listing.models.iter().map(ModelChoice::model).collect())
+    listed
+        .map(|listing| listing.models.iter().map(ModelChoice::model).collect())
+        .map_err(String::from)
 }
 
 fn providers(models: &[String]) -> Vec<String> {

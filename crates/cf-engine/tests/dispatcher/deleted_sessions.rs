@@ -161,7 +161,7 @@ fn fails_a_deleted_sessions_follow_up_as_any_launch_fails_when_its_harness_has_l
     assert_eq!(tiers.task(2).task.state, "failed");
     assert_match(
         tiers.notes("chief").last().unwrap(),
-        r"^T-2 failed: the launch failed: no conversation found with that id\. Reopen it with",
+        r"^T-2 failed: the launch failed \(its cause is in ConsensFlow's log\)\. Reopen it with",
     );
     tiers.open_body("Now the lexer");
     context.pass().unwrap();
@@ -213,7 +213,7 @@ fn tells_the_human_why_a_sessions_window_they_opened_did_not_start() {
         .unwrap();
     assert_eq!(
         tiers.notes("human"),
-        ["@zeus-amber-pine could not start: the window did not open: refused by the test."]
+        ["@zeus-amber-pine could not start: the window did not open: the host would not open it."]
     );
     held_to(
         context.close(),

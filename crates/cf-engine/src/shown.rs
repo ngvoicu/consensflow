@@ -49,9 +49,10 @@
 //! to that window, is named by the ledger's row of it (its id, what it was, whom it was from, its
 //! task), and any other turn by when it began (`resume`). Two readings (T-1322) found a secret
 //! in a quote of the opening by one shape after another. **A process that may be a window's** is
-//! named by a program of that list or by its number. **The cause of a failed start** has the files its producer marked
-//! replaced, and is not quoted where it names one no one marked (`mask::launch_cause`). **A
-//! window's own session id** on its screen is not a value in groups
+//! named by a program of that list or by its number. **The cause of a failed start** is no quote at all (T-1328): a note
+//! carries the kind of failure and its code, typed by the producer (`cf_base::startup`, the
+//! engine's `startup`), and no word of a program's, a host's or an adapter's; the full words stay
+//! on the person's own screen. **A window's own session id** on its screen is not a value in groups
 //! ([`Shown::with_own_session`]), and no other check is given a text without it.
 //!
 //! **How the program ended** is said as the host said it: its signal where it sent one, and a
@@ -78,6 +79,7 @@ mod tests;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use cf_base::startup::{StartFailure, StartKind};
 use cf_harness::records::LastCall;
 use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft, SnapshotTail};
@@ -131,6 +133,9 @@ pub struct Shown {
     /// The session of the conversation the window ran in, as ConsensFlow has it
     /// ([`Shown::with_own_session`]).
     own_session: Option<String>,
+    /// Why the window's harness never ran, where the window's program (`cf codex-session`)
+    /// ended with the status that says so ([`Shown::with_start`]).
+    start: Option<StartFailure>,
 }
 
 impl Shown {
@@ -147,6 +152,7 @@ impl Shown {
             part: Part::Unknown,
             last_call: None,
             own_session: None,
+            start: None,
         }
     }
 
@@ -295,6 +301,11 @@ impl Shown {
         if let Some(call) = &self.last_call {
             said.push_str(&call::words(call));
         }
+        // A harness that never ran has no screen worth quoting: it holds the file that was tried.
+        if let Some(failure) = self.start {
+            said.push_str(&format!("; {}", failure.words("Codex")));
+            return said;
+        }
         let Some(tail) = &self.tail else {
             return said;
         };
@@ -336,6 +347,23 @@ impl Shown {
     /// id on the screen still withholds it ([`screen`]).
     pub(crate) fn with_own_session(mut self, session: Option<String>) -> Self {
         self.own_session = session;
+        self
+    }
+
+    /// This exit read for the harness the window ran: a Codex window is `cf codex-session`,
+    /// ConsensFlow's own program, which ends with a status of its own when it could not start
+    /// Codex (`StartKind::exit_status`). Then the window never reached the harness, and its
+    /// note says the kind of failure from the status, not what its screen showed: the screen
+    /// holds the file that was tried (T-1328; the second reading of T-1322 found
+    /// `C:\tools\hunter22\codex.cmd` quoted from it at every width). A status in that range
+    /// from any other harness is that harness's own.
+    pub(crate) fn with_start(mut self, harness: Option<&str>) -> Self {
+        if harness == Some("codex") && self.signal.is_none() {
+            self.start = self
+                .code
+                .and_then(|code| StartKind::of_exit_status(i64::from(code)))
+                .map(StartFailure::of);
+        }
         self
     }
 

@@ -90,12 +90,11 @@ impl StandIn {
 
     /// The read, for a Pi that needs no clock.
     pub fn read(&self, fetch: bool) -> Result<ModelListing, String> {
-        eventually(Box::pin(listed(
-            &self.env,
-            &*self.processes,
-            &*self.time,
-            fetch,
-        )))
+        eventually(Box::pin(async {
+            listed(&self.env, &*self.processes, &*self.time, fetch)
+                .await
+                .map_err(String::from)
+        }))
     }
 
     /// The read, begun, for a Pi that waits on the clock.
@@ -106,10 +105,11 @@ impl StandIn {
             Rc::clone(&self.time),
         );
         let mut driver = Driver::default();
-        driver.begin(
-            0,
-            async move { listed(&env, &*processes, &*time, fetch).await },
-        );
+        driver.begin(0, async move {
+            listed(&env, &*processes, &*time, fetch)
+                .await
+                .map_err(String::from)
+        });
         driver
     }
 }

@@ -6,7 +6,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::contract::Work;
-use crate::seams::processes::{Child, Ending, Failed, Limits, Processes, Program, Streams};
+use crate::seams::processes::{
+    Child, Ending, Failed, Limits, Processes, Program, StartRefusal, Streams,
+};
 use crate::testing::ScriptedProcesses;
 
 /// Scripted programs that keep a record of how their children were started
@@ -23,7 +25,7 @@ impl Processes for Watching {
         self.scripted.run(program, limits)
     }
 
-    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, StartRefusal> {
         self.spawned.borrow_mut().push((program.clone(), streams));
         let child = self.scripted.spawn(program, streams)?;
         Ok(Box::new(Watched {

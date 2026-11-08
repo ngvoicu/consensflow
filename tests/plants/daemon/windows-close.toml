@@ -84,6 +84,14 @@ engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown
 quote-less-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "background::"]
 quote-less-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
 quote-less-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_cut_note"]
+quote-less-engine-startup = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "startup::"]
+quote-less-codex-session = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "supervisor::"]
+quote-less-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests::"]
+quote-less-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::a_program_the_system_cannot_start"]
+quote-less-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::a_program_the_system_cannot_start"]
+quote-less-errno = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::errno::"]
+quote-less-child = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "child::"]
+quote-less-no-adapter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "no_adapter::"]
 quote-less-opening = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::tests::"]
 quote-less-ledger-turn = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "continuations::"]
 quote-less-parity = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::tests::the_harness_reads"]
@@ -2059,26 +2067,6 @@ find = '''    "ssh", "sftp", "scp"'''
 replace = '''    "ssx", "sftp", "scp"'''
 
 [[plant]]
-name = "windows close: quote less: the cause of an adapter that could not prepare a window is told with its path"
-meant = "a_launch_that_failed_with_a_typed_path_says_its_cause_with_the_path_replaced"
-runs = ["quote-less-chief-not-up"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = '''launch_cause(&cause.to_string())'''
-replace = '''cause.to_string()'''
-
-[[plant]]
-name = "windows close: quote less: the cause of a window the host refused is told with its path"
-meant = "a_launch_that_failed_with_a_typed_path_says_its_cause_with_the_path_replaced"
-runs = ["quote-less-chief-not-up"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = '''launch_cause(error)'''
-replace = '''error.to_owned()'''
-
-[[plant]]
 name = "windows close: quote less: authenticating names no secret"
 meant = "authenticating_is_named_whatever_its_ending_and_an_author_is_not"
 runs = ["engine-shown"]
@@ -2277,6 +2265,345 @@ replace = '''        rest = next;
     }'''
 
 [[plant]]
+name = "windows close: quote less: a launch's cause is quoted in the note"
+meant = "a_launch_that_failed_with_words_of_an_adapter_or_a_host_quotes_no_word_of_them"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''        let words = startup.words(who);'''
+replace = '''        let words = format!("{}: {said}", startup.words(who));'''
+
+[[plant]]
+name = "windows close: quote less: a launch's cause is told when the engine has none to type"
+meant = "a_launch_that_failed_with_words_of_an_adapter_or_a_host_quotes_no_word_of_them"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/startup.rs"
+find = '''            Why::Unsaid => format!("{stage} (its cause is in ConsensFlow's log)"),'''
+replace = '''            Why::Unsaid => format!("{stage}: the harness said no"),'''
+
+[[plant]]
+name = "windows close: quote less: the host's words are taken for a refusal it typed"
+meant = "a_launch_that_failed_with_words_of_an_adapter_or_a_host_quotes_no_word_of_them"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    (Why::HostRefused, &error),'''
+replace = '''                    (Why::Program(StartFailure::of(StartKind::NotStarted)), &error),'''
+
+[[plant]]
+name = "windows close: quote less: a window refused as a program that cannot be run loses its kind"
+meant = "a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and_no_path"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    (Why::Program(refusal.failure()), refusal.words()),'''
+replace = '''                    (Why::HostRefused, refusal.words()),'''
+
+[[plant]]
+name = "windows close: quote less: a window refused as a program that cannot be run loses its advice"
+meant = "a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and_no_path"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/startup.rs"
+find = '''            Why::Program(failure) => format!("{stage}: {}", failure.words(who)),'''
+replace = '''            Why::Program(failure) => format!("{stage}: {}", failure.what(who)),'''
+
+[[plant]]
+name = "windows close: quote less: a window refused as a program that cannot be run says the file"
+meant = "a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and_no_path"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''        let words = startup.words(who);'''
+replace = '''        let words = format!("{} ({said})", startup.words(who));'''
+
+[[plant]]
+name = "windows close: quote less: a harness ConsensFlow cannot open is not named"
+meant = "fails_what_was_given_to_a_member_on_it_by_name_and_its_requester_hears_why"
+runs = ["quote-less-no-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    Why::NoAdapter'''
+replace = '''                    Why::Unsaid'''
+
+[[plant]]
+name = "windows close: quote less: a failure is said without its advice"
+meant = "a_failure_is_said_by_its_kind_and_its_code_and_its_advice_and_nothing_else"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''        match self.advice(who) {
+            Some(advice) => format!("{}; {advice}", self.what(who)),
+            None => self.what(who),
+        }'''
+replace = '''        self.what(who)'''
+
+[[plant]]
+name = "windows close: quote less: a failure is said without its code"
+meant = "a_failure_is_said_by_its_kind_and_its_code_and_its_advice_and_nothing_else"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            Some(StartCode::Errno(name)) => format!("{said} ({name})"),'''
+replace = '''            Some(StartCode::Errno(_)) => said,'''
+
+[[plant]]
+name = "windows close: quote less: a failure is said without its exit status"
+meant = "a_failure_is_said_by_its_kind_and_its_code_and_its_advice_and_nothing_else"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            Some(StartCode::Exit(status)) => format!("{said} (exit code {status})"),'''
+replace = '''            Some(StartCode::Exit(_)) => said,'''
+
+[[plant]]
+name = "windows close: quote less: a system's name for a failed start is no kind"
+meant = "the_systems_name_for_a_failed_start_says_a_kind_and_a_code_but_for_unknown"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            b"ENOENT" => StartKind::NotFound,'''
+replace = '''            b"ENOENT" => StartKind::NotStarted,'''
+
+[[plant]]
+name = "windows close: quote less: unknown is a code a note names"
+meant = "the_systems_name_for_a_failed_start_says_a_kind_and_a_code_but_for_unknown"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            b"UNKNOWN" => failure,'''
+replace = '''            b"UNKNOWN" => failure.with_errno("UNKNOWN"),'''
+
+[[plant]]
+name = "windows close: quote less: two kinds end a window with one status"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_no_harness_uses_and_reads_back"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''        i32::try_from(START_STATUS_BASE).unwrap_or(70) + i32::try_from(at).unwrap_or(0)'''
+replace = '''        i32::try_from(START_STATUS_BASE).unwrap_or(70) + i32::try_from(at.min(1)).unwrap_or(0)'''
+
+[[plant]]
+name = "windows close: quote less: a status above the range reads as a kind"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_no_harness_uses_and_reads_back"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''        Self::ALL.get(at).copied()'''
+replace = '''        Self::ALL.get(at % Self::ALL.len()).copied()'''
+
+[[plant]]
+name = "windows close: quote less: a name read back from text is any word"
+meant = "a_name_read_back_from_text_is_one_of_the_tables_and_no_other_word"
+runs = ["quote-less-errno"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/errno.rs"
+find = '''        .find(|code| *code == name)
+}'''
+replace = '''        .find(|code| name.starts_with(*code))
+}'''
+
+[[plant]]
+name = "windows close: quote less: a script that is no npm shim is refused as another kind"
+meant = "the_refusals_of_a_start_are_typed_and_their_words_name_the_file_for_the_person_alone"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''        StartFailure::of(StartKind::NotAnNpmShim),
+        format!("{executable} is not an npm shim'''
+replace = '''        StartFailure::of(StartKind::NotStarted),
+        format!("{executable} is not an npm shim'''
+
+[[plant]]
+name = "windows close: quote less: Pi's shim with no Node is refused as an npm shim's"
+meant = "the_refusals_of_a_start_are_typed_and_their_words_name_the_file_for_the_person_alone"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''            StartFailure::of(StartKind::NoNodeForPi),'''
+replace = '''            StartFailure::of(StartKind::NoNode),'''
+
+[[plant]]
+name = "windows close: quote less: an npm shim with no Node is refused as Pi's"
+meant = "the_refusals_of_a_start_are_typed_and_their_words_name_the_file_for_the_person_alone"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''        StartFailure::of(StartKind::NoNode),
+        format!(
+            "{shim} is an npm shim'''
+replace = '''        StartFailure::of(StartKind::NoNodeForPi),
+        format!(
+            "{shim} is an npm shim'''
+
+[[plant]]
+name = "windows close: quote less: a program the system could not start loses its code"
+meant = "a_program_that_is_not_there_says_spawn_and_enoent"
+runs = ["quote-less-child"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '''        StartFailure::of_errno(code),'''
+replace = '''        StartFailure::of(StartKind::NotStarted),'''
+
+[[plant]]
+name = "windows close: quote less: a program the system could not start is told with its file"
+meant = "a_program_that_is_not_there_says_spawn_and_enoent"
+runs = ["quote-less-child"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '''        StartFailure::of_errno(code),'''
+replace = '''        StartFailure::of(StartKind::NotFound).with_errno("ENOENT").with_exit(0),'''
+
+[[plant]]
+name = "windows close: quote less: a Codex window that could not start Codex ends with 1"
+meant = "a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other_failure_with_1"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/lib.rs"
+find = '''    startup.map_or(1, |failure| failure.kind().exit_status())'''
+replace = '''    startup.map_or(1, |_| 1)'''
+
+[[plant]]
+name = "windows close: quote less: a Codex shim with no Node is no kind of start"
+meant = "a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_do"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Unrunnable(refusal) => Some(refusal.failure()),'''
+replace = '''            Self::Unrunnable(_) => None,'''
+
+[[plant]]
+name = "windows close: quote less: a Codex that was not found is no kind of start"
+meant = "a_program_that_is_not_there_is_said_by_its_path_and_the_systems_words"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::ServerNotStarted { program, cause } | Self::Tui { program, cause } => {'''
+replace = '''            Self::Tui { program, cause } => {'''
+
+[[plant]]
+name = "windows close: quote less: a Codex window's status of why is read as the screen's"
+meant = "a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quotes_no_screen"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        if let Some(failure) = self.start {'''
+replace = '''        if let Some(failure) = self.start.filter(|_| false) {'''
+
+[[plant]]
+name = "windows close: quote less: a window's status of why is not read"
+meant = "a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quotes_no_screen"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let shown = shown.with_start(participant.harness.as_deref());'''
+replace = '''        let shown = shown;'''
+
+[[plant]]
+name = "windows close: quote less: a status of why is read of any harness"
+meant = "a_status_of_why_is_read_only_of_a_codex_window"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        if harness == Some("codex") && self.signal.is_none() {'''
+replace = '''        if harness.is_some() && self.signal.is_none() {'''
+
+[[plant]]
+name = "windows close: quote less: a status of why is read of a window a signal ended"
+meant = "a_status_of_why_is_read_only_of_a_codex_window"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        if harness == Some("codex") && self.signal.is_none() {'''
+replace = '''        if harness == Some("codex") {'''
+
+[[plant]]
+name = "windows close: quote less: the daemon takes a word of the host's for a code"
+meant = "an_open_s_answer_is_read_as_the_dispatcher_read_it"
+runs = ["quote-less-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''        .and_then(cf_base::file::known_code);'''
+replace = '''        .and_then(|code| Some(Box::leak(code.to_owned().into_boxed_str()) as &'static str));'''
+
+[[plant]]
+name = "windows close: quote less: the daemon ignores the code the host named"
+meant = "an_open_s_answer_is_read_as_the_dispatcher_read_it"
+runs = ["quote-less-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''        .and_then(cf_base::file::known_code);'''
+replace = '''        .and_then(|_| None);'''
+
+[[plant]]
+name = "windows close: quote less: a program that cannot open in a window is refused as the host's words"
+meant = "a_program_that_cannot_open_in_a_window_fails_the_open_with_the_sentence_and_sends_nothing"
+runs = ["quote-less-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''            Err(refusal) => return Box::pin(async move { Ok(Opened::Unrunnable(refusal)) }),'''
+replace = '''            Err(refusal) => {
+                return Box::pin(async move {
+                    Ok(Opened::Refused {
+                        error: refusal.to_string(),
+                    })
+                })
+            }'''
+
+[[plant]]
+name = "windows close: quote less: the pane host does not name why a program did not start"
+meant = "a_program_the_system_cannot_start_names_why_by_its_code"
+runs = ["quote-less-pty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''                code: error
+                    .downcast_ref::<std::io::Error>()
+                    .map(cf_base::file::error_code),'''
+replace = '''                code: None,'''
+
+[[plant]]
+name = "windows close: quote less: the pane host answers a failed open with the code of why in its words alone"
+meant = "a_program_the_system_cannot_start_answers_with_its_code"
+runs = ["quote-less-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''            Err(error) if error.code().is_some() => {'''
+replace = '''            Err(error) if false && error.code().is_some() => {'''
+
+[[plant]]
 name = "windows close: quote less: the words of Pi that were withheld point nowhere"
 meant = "a_hint_that_only_names_a_credential_is_withheld_with_a_pointer_to_where_to_read_it"
 runs = ["engine-shown"]
@@ -2368,147 +2695,6 @@ runs = ["engine-shown"]
 file = "crates/cf-engine/src/shown/quotable.rs"
 find = '''screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)'''
 replace = '''screen::withheld(&rows, None).is_some()'''
-
-[[plant]]
-name = "windows close: quote less: a file no one marked is quoted"
-meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''    if said.contains(PATH_CLOSES) || NAMES_A_FILE.is_match(&said) {'''
-replace = '''    if said.contains(PATH_CLOSES) {'''
-
-[[plant]]
-name = "windows close: quote less: a closing mark with no opening one is quoted"
-meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''    if said.contains(PATH_CLOSES) || NAMES_A_FILE.is_match(&said) {'''
-replace = '''    if NAMES_A_FILE.is_match(&said) {'''
-
-[[plant]]
-name = "windows close: quote less: a mark inside another is a file"
-meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''            Some(close) if !after[..close].contains(PATH_OPENS) => {'''
-replace = '''            Some(close) => {'''
-
-[[plant]]
-name = "windows close: quote less: a mark that does not close is a file"
-meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''            _ => return CAUSE_WITHHELD.to_owned(),'''
-replace = '''            _ => {
-                said.push_str(rest);
-                return said;
-            }'''
-
-[[plant]]
-name = "windows close: quote less: a marked file is quoted"
-meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''                said.push_str(PATH);'''
-replace = '''                said.push_str(&after[..close]);'''
-
-[[plant]]
-name = "windows close: quote less: a folder an environment variable names is no file"
-meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''Regex::new(r"[/\\]|%[A-Za-z_][A-Za-z0-9_]*%")'''
-replace = '''Regex::new(r"[/\\]")'''
-
-[[plant]]
-name = "windows close: quote less: a marked path is told with its blanks"
-meant = "a_launch_that_failed_with_a_typed_path_says_its_cause_with_the_path_replaced"
-runs = ["quote-less-chief-not-up"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''                said.push_str(PATH);'''
-replace = '''                said.push_str(&format!("{PATH} {}", after[..close].split(' ').last().unwrap_or("")));'''
-
-[[plant]]
-name = "windows close: quote less: a script that is no npm shim is refused with its path unmarked"
-meant = "the_refusals_of_a_start_mark_the_files_they_name"
-runs = ["quote-less-process"]
-
-[[plant.edit]]
-file = "crates/cf-process/src/runnable.rs"
-find = '''        a_path_in_words(executable)
-    )'''
-replace = '''        executable
-    )'''
-
-[[plant]]
-name = "windows close: quote less: an npm shim with no Node is refused with its path unmarked"
-meant = "the_refusals_of_a_start_mark_the_files_they_name"
-runs = ["quote-less-process"]
-
-[[plant.edit]]
-file = "crates/cf-process/src/runnable.rs"
-find = '''        a_path_in_words(shim)
-    )'''
-replace = '''        shim.display()
-    )'''
-
-[[plant]]
-name = "windows close: quote less: Pi's shim with no Node is refused with its path unmarked"
-meant = "the_refusals_of_a_start_mark_the_files_they_name"
-runs = ["quote-less-process"]
-
-[[plant.edit]]
-file = "crates/cf-process/src/runnable.rs"
-find = '''            a_path_in_words(shim),
-'''
-replace = '''            shim.display(),
-'''
-
-[[plant]]
-name = "windows close: quote less: Pi's installer's folder is named unmarked"
-meant = "the_refusals_of_a_start_mark_the_files_they_name"
-runs = ["quote-less-process"]
-
-[[plant.edit]]
-file = "crates/cf-process/src/runnable.rs"
-find = '''            a_path_in_words(r"%LOCALAPPDATA%\pi-node\current")
-'''
-replace = '''            r"%LOCALAPPDATA%\pi-node\current"
-'''
-
-[[plant]]
-name = "windows close: quote less: a path is marked by nothing"
-meant = "a_path_is_marked_whole_with_its_blanks_and_a_marker_among_its_characters_is_none"
-runs = ["quote-less-base"]
-
-[[plant.edit]]
-file = "crates/cf-base/src/startup.rs"
-find = '''    format!("{PATH_OPENS}{text}{PATH_CLOSES}")'''
-replace = '''    text'''
-
-[[plant]]
-name = "windows close: quote less: a marker among a path's characters stays"
-meant = "a_path_is_marked_whole_with_its_blanks_and_a_marker_among_its_characters_is_none"
-runs = ["quote-less-base"]
-
-[[plant.edit]]
-file = "crates/cf-base/src/startup.rs"
-find = '''            if c == PATH_OPENS || c == PATH_CLOSES {'''
-replace = '''            if false {'''
 
 [[plant]]
 name = "windows close: quote less: a process that may be the window's is named by its program, whatever it is"

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
+use cf_base::startup::StartKind;
 use sha2::{Digest, Sha256};
 
 use super::*;
@@ -299,6 +300,11 @@ fn a_program_that_is_not_there_is_said_by_its_path_and_the_systems_words() {
             missing.display()
         )
     );
+    // What a note says of it: the kind and the code, and no file (T-1328).
+    assert_eq!(
+        failed.startup(),
+        Some(StartFailure::of(StartKind::NotFound).with_errno("ENOENT"))
+    );
     assert!(home.left_behind().is_empty());
 }
 
@@ -322,6 +328,9 @@ fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_
         .supervise(&shim, &[], Duration::from_secs(5))
         .unwrap_err();
     assert!(matches!(failed, SessionError::Unrunnable(_)), "{failed:?}");
+    // The window ends with the status of why, so that the engine reads from how it ended that
+    // Codex never ran, and a note says so without quoting the screen that names the shim (T-1328).
+    assert_eq!(failed.startup(), Some(StartFailure::of(StartKind::NoNode)));
     let said = failed.to_string();
     assert!(said.starts_with(&shim.display().to_string()), "{said}");
     assert!(
@@ -330,6 +339,29 @@ fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_
         "{said}"
     );
     assert!(home.left_behind().is_empty());
+}
+
+/// T-1328: Codex's window is ConsensFlow's own program, `cf codex-session`. When it could not start
+/// Codex it ends with a status of its own for each kind of why (70 to 77, which no harness uses),
+/// and 1 for any other failure; the engine reads the status, and quotes no word of the screen.
+#[test]
+fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other_failure_with_1() {
+    for (kind, status) in [
+        (StartKind::NotFound, 70),
+        (StartKind::NotAllowed, 71),
+        (StartKind::NoNode, 72),
+        (StartKind::NoNodeForPi, 73),
+        (StartKind::NotAnNpmShim, 74),
+        (StartKind::NotStarted, 75),
+    ] {
+        assert_eq!(crate::fail("boom", Some(StartFailure::of(kind))), status);
+    }
+    assert_eq!(crate::fail("boom", None), 1);
+    // The server's own words, once it ran, are the screen's: no kind.
+    assert_eq!(
+        SessionError::Server("it said no".to_owned()).startup(),
+        None
+    );
 }
 
 #[test]

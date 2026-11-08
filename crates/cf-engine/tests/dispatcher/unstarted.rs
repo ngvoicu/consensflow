@@ -337,14 +337,18 @@ fn a_window_that_never_says_which_session_it_opened_fails_with_what_its_screen_w
 
     assert_eq!(context.task(project.id, 1).task.state, "failed");
     let because = format!(
-        "the window could not take its first message: Devin never said which session it opened \
-         (its wire log stayed empty); its screen ended with: \"{QUOTED}\""
+        "the window could not take its first message (its cause is in ConsensFlow's log); \
+         its screen ended with: \"{QUOTED}\""
     );
     let told = told(&context, project.id);
     assert_eq!(told.to_chief, [failure_of_t1(&because)]);
+    // What Devin said is in the log, masked, in a line of its own: a note has the stage alone.
     assert_eq!(
         told.logged,
-        [format!("the launch of p1-{ZEUS} failed: {because}")]
+        [
+            "@zeus: the window could not take its first message (its cause is in ConsensFlow's log); it was told: Devin never said which session it opened (its wire log stayed empty)".to_owned(),
+            format!("the launch of p1-{ZEUS} failed: {because}")
+        ]
     );
 }
 

@@ -1813,9 +1813,9 @@ fn a_chief_opened_again_at_rest_whose_window_never_comes_up_is_closed_the_human_
     assert_eq!(context.project(project).state, "open", "the staff works on");
     assert_eq!(
         to_human(&context, project),
-        [format!(
-            "The chief could not start: the window never came up: {NEVER_NAMED}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
-        )]
+        [
+            "The chief could not start: the window never came up (its cause is in ConsensFlow's log). What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
+        ]
     );
 
     // The worker finishes: its result waits for the chief, not spent on no window.
@@ -2310,9 +2310,10 @@ fn a_member_opened_again_at_rest_whose_window_never_comes_up_is_closed_and_said(
     );
     let told = to_human(&context, project.id);
     assert!(
-        told.contains(&format!(
-            "@zeus could not start: the window never came up: {NEVER_NAMED}."
-        )),
+        told.contains(
+            &"@zeus could not start: the window never came up (its cause is in ConsensFlow's log)."
+                .to_owned()
+        ),
         "{told:?}"
     );
     assert_ne!(
@@ -2567,7 +2568,7 @@ fn told_before_a_reopen_that_failed(
     after.resume_project(project).unwrap();
     assert_eq!(tiers.task(1).task.state, "working", "with no window");
     assert!(to_human(context, project).contains(&format!(
-        "@{session} could not start: the launch failed: no harness."
+        "@{session} could not start: the launch failed (its cause is in ConsensFlow's log)."
     )));
     assert_eq!(context.message(note.id).state, "queued");
     *context.adapter.prepare.borrow_mut() = None;
@@ -2602,7 +2603,8 @@ fn a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message
         context.host.killed().contains(&window),
         "its window is closed, not left starting"
     );
-    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    let why = "the window could not take its first message (its cause is in ConsensFlow's log)"
+        .to_owned();
     let kept = context.message(note.id);
     assert_eq!(
         (kept.state.as_str(), kept.reason.as_deref()),
@@ -2685,7 +2687,8 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
 
     assert!(context.timers.fire_next(), "the kill's wait ends");
     context.settle();
-    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    let why = "the window could not take its first message (its cause is in ConsensFlow's log)"
+        .to_owned();
     let failed = context.message(note.id);
     assert_eq!(
         (failed.state.as_str(), failed.reason.as_deref()),
@@ -2743,7 +2746,8 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
     context.host.refuse_kills.set(true);
     after.pass().unwrap();
 
-    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    let why = "the window could not take its first message (its cause is in ConsensFlow's log)"
+        .to_owned();
     assert_eq!(context.message(note.id).state, "failed");
     assert_eq!(tiers.task(1).task.state, "failed");
     let kept_words = format!("m-{}", note.id);
@@ -2821,7 +2825,7 @@ fn a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_no
     assert!(given(&context, &session)
         .iter()
         .all(|words| !words.contains("Use the grammar in the docs")));
-    let why = format!("the window never came up: {NEVER_NAMED}");
+    let why = "the window never came up (its cause is in ConsensFlow's log)".to_owned();
     assert_eq!(
         waiting.reason.as_deref(),
         Some(format!("kept for T-1's resume: {why}").as_str())
@@ -2928,7 +2932,8 @@ fn a_resume_whose_window_never_comes_up_pauses_its_task_again_and_the_note_it_ca
         resumed.body
     );
 
-    let why = format!("the window could not take its first message: {NEVER_NAMED}");
+    let why = "the window could not take its first message (its cause is in ConsensFlow's log)"
+        .to_owned();
     assert_eq!(tiers.task(1).task.state, "paused", "never failed");
     assert_eq!(context.message(resumed.id).state, "failed");
     let kept = context.message(note.id);
@@ -3088,7 +3093,7 @@ fn a_close_that_fails_after_its_kill_was_waited_for_in_vain_is_written_down() {
     assert!(context.timers.fire_next(), "the kill's wait ends");
     context.settle();
     assert!(to_human(&context, project).contains(&format!(
-        "@{session} could not start: the window never came up: {NEVER_NAMED}."
+        "@{session} could not start: the window never came up (its cause is in ConsensFlow's log)."
     )));
     assert_eq!(tiers.task(1).task.state, "working", "no exit has paused it");
     assert!(context.log.failures.borrow().is_empty());

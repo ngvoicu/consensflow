@@ -28,6 +28,7 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         part: Part::Unknown,
         last_call: None,
         own_session: None,
+        start: None,
     }
 }
 

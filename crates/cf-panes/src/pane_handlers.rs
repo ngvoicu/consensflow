@@ -135,16 +135,22 @@ pub fn register_pane_handlers(
             pixel_width: 0,
             pixel_height: 0,
         };
-        let streamed = open_panes
-            .open_streamed_at(
-                key,
-                &request.cwd,
-                &request.argv,
-                PaneEnvironment::new(&request.env, &request.drop_env),
-                size,
-                request.backlog_bytes,
-            )
-            .map_err(|error| error.to_string())?;
+        let streamed = match open_panes.open_streamed_at(
+            key,
+            &request.cwd,
+            &request.argv,
+            PaneEnvironment::new(&request.env, &request.drop_env),
+            size,
+            request.backlog_bytes,
+        ) {
+            Ok(streamed) => streamed,
+            // The system would not start the program, and named why: the answer says so beside
+            // its words, as a name of libuv's table and nothing else of anyone's.
+            Err(error) if error.code().is_some() => {
+                return Ok(json!({"ok":false,"error":error.to_string(),"code":error.code()}));
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         let printed = match open_arbiter
             .register_with(&streamed.key, request.silent_paste)
             .map_err(|error| error.to_string())
@@ -1193,6 +1199,71 @@ repaint 80 '> Ask anything'; repaint 1200 '> Tsk anything'"#;
             "the pane kept its input"
         );
         assert!(matches!(arbiter.snapshot(&key), Err(ArbiterError::Stale)));
+
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// T-1328: a program the system will not start is answered with the system's name for why,
+    /// beside the host's words (which name the program), so that the daemon can say the kind of
+    /// failure in a note and no word of the file; any other refusal names none.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_the_system_cannot_start_answers_with_its_code() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            Arc::clone(&arbiter),
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut ask = |argv: Value| -> Value {
+            number += 1;
+            let id = format!("n-open-{number}");
+            let mut frame = serde_json::to_vec(&json!({
+                "v":1,"id":id,"kind":"req","op":"pane.open",
+                "body":{"id":format!("p-{number}"),"generation":1,"cwd":"/tmp","argv":argv,
+                        "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024},
+            }))
+            .expect("serialize the open");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("ask for the open");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read a frame");
+                let frame: Value = serde_json::from_str(line.trim()).expect("frame JSON");
+                if frame["kind"] == "res" && frame["id"] == id.as_str() {
+                    return frame["body"].clone();
+                }
+            }
+        };
+
+        let missing = ask(json!(["/nonexistent/hunter22 program"]));
+        assert_eq!(missing["ok"], false, "{missing}");
+        assert_eq!(missing["code"], "ENOENT", "{missing}");
+        assert!(missing["error"].is_string(), "{missing}");
+        // A refusal the system did not make names no code.
+        let relative = ask(json!(["program"]));
+        assert_eq!(relative["ok"], false, "{relative}");
+        assert!(relative.get("code").is_none(), "{relative}");
 
         inputs.close_and_drain();
         drop(reader);
