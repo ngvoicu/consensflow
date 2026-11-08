@@ -82,12 +82,7 @@ fn nothing_but_the_detail_of_the_dialog_is_touched() {
     assert_eq!(made.asks, raw.asks);
     assert_eq!(made.prompt_below, raw.prompt_below);
     assert_eq!(made.closes_after_s, raw.closes_after_s);
-    // Of the rows above the question only the title is gone (T-1300): this one has a title, and
-    // no row of the conversation above it.
-    assert_eq!(made.detail.len(), raw.detail.len() - 1);
-    // The rows under the title are the request's and are kept (the warning's time aside).
-    let kept = raw.detail.len() - 1;
-    assert_eq!(made.detail[..kept - 1], raw.detail[1..kept]);
+    assert_eq!(made.detail.len(), raw.detail.len());
 }
 
 #[test]
@@ -136,7 +131,7 @@ fn a_time_in_the_request_is_part_of_it_whatever_words_come_before_it() {
     let five = id("printf 'retry in 5s'", &[blocks("1:57")]);
     let ten = id("printf 'retry in 10s'", &[blocks("1:57")]);
     assert_ne!(five, ten);
-    assert_eq!(five.detail[0], "printf 'retry in 5s'");
+    assert_eq!(five.detail[1], "printf 'retry in 5s'");
     // Not even a time written as the countdown writes it.
     assert_ne!(
         id("printf 'retry in 1:30'", &[blocks("1:57")]),
@@ -147,12 +142,12 @@ fn a_time_in_the_request_is_part_of_it_whatever_words_come_before_it() {
         "echo \"Claude Code will automatically block this request in 1:57, to avoid it\"",
         &[blocks("1:57")],
     );
-    assert!(said.detail[0].contains("in 1:57"), "{said:?}");
+    assert!(said.detail[1].contains("in 1:57"), "{said:?}");
     let glyph = id(
         &format!("echo \"{GLYPH} Claude Code will automatically block this request in 1:57\""),
         &[blocks("1:57")],
     );
-    assert!(glyph.detail[0].contains("in 1:57"), "{glyph:?}");
+    assert!(glyph.detail[1].contains("in 1:57"), "{glyph:?}");
     // The words of the warning with no glyph before them are not Claude Code's line either.
     let bare = |left: &str| {
         id(
@@ -252,12 +247,7 @@ fn a_time_that_is_not_all_of_one_the_warning_draws_is_left_as_it_was() {
         "",
     ] {
         let raw = read(&rm_prompt(COMMAND, &[blocks(left)]));
-        // Its title is the one thing cut (T-1300); the time stays as it was.
-        let titled = Dialog {
-            detail: raw.detail[1..].to_vec(),
-            ..raw.clone()
-        };
-        assert_eq!(identity(&raw), titled, "{left:?}");
+        assert_eq!(identity(&raw), raw, "{left:?}");
     }
 }
 
@@ -359,12 +349,7 @@ fn the_live_permission_prompt_with_its_wrapped_warning_is_one_dialog_at_every_ti
         first.detail.last().map(String::as_str),
         Some("\u{26a0} Claude Code will automatically block this request in #, to avoid holding up an unattended session")
     );
-    // And the tool's row that waits and the title are gone: the request is what is left (T-1300).
-    assert_eq!(first.detail.len(), read(&lines_at("1:59")).detail.len() - 3);
-    assert_eq!(
-        first.detail.first().map(String::as_str),
-        Some("Remove the specified file")
-    );
+    assert_eq!(first.detail.len(), read(&lines_at("1:59")).detail.len() - 1);
     // The request is its own: another command is another dialog.
     let other: Vec<String> = CLAUDE_RM_PROMPT_LIVE
         .iter()
@@ -515,33 +500,105 @@ fn the_native_warning_is_one_line_whichever_way_the_screen_wrapped_it() {
     );
 }
 
-// ----- The title of a permission dialog and what is above it (T-1300) -----
+// ----- No row is cut on words alone (T-1300, after T-1316's review) -----
+//
+// A first attempt cut every row up to a title Claude Code draws, found in the first four rows. The
+// reader drops the frame of a row, a blank row and a rule, so a title is a row of words, and a
+// command that prints one, or a hook's reason that is one, is a title as far as the words go: the
+// cut erased the command above it and two different commands were one identity.
 
-use crate::testing::screens::CLAUDE_RM_PROMPT_LIVE;
+/// A hook's ask of a command, the rows as the tail shows them: the command's rows, the hook's
+/// header and `reason` rows, its source and the configuration hint Claude Code appends, the
+/// question and its choices.
+fn hook_ask(command: &[&str], reason: &[&str]) -> Vec<String> {
+    let mut lines: Vec<String> = command
+        .iter()
+        .map(|row| format!("\u{2502} {row}"))
+        .collect();
+    lines.push("\u{2502} Hook tool.check requires confirmation for this command:".to_owned());
+    lines.extend(reason.iter().map(|row| format!("\u{2502} {row}")));
+    lines.extend(owned(&[
+        "\u{2502} [plugin:review-shell]",
+        "plugin hooks.json to update hooks",
+        "Do you want to proceed?",
+        "\u{276f} 1. Yes",
+        "  2. No",
+        "Esc to cancel \u{b7} Tab to amend",
+    ]));
+    lines
+}
 
-/// The live prompt of a dangerous `rm` (the pane host's tail, twelve rows) with its first
-/// `slid` rows gone, as they go when rows below it change.
-fn live_slid(slid: usize) -> Dialog {
-    identity(&read(&owned(CLAUDE_RM_PROMPT_LIVE)[slid..]))
+const TITLES_CLAUDE_DRAWS: [&str; 12] = [
+    "Bash command",
+    "Run command",
+    "PowerShell command",
+    "Edit file",
+    "Create file",
+    "Overwrite file",
+    "Read file",
+    "Fetch",
+    "Use this skill?",
+    "Tool use",
+    "Bash command (unsandboxed)",
+    "Computer Use needs macOS permissions",
+];
+
+#[test]
+fn a_title_a_command_prints_is_a_row_of_the_command_and_cuts_nothing() {
+    for title in TITLES_CLAUDE_DRAWS {
+        let screen = |path: &str| {
+            hook_ask(
+                &[
+                    &format!("rm -rf -- {path}"),
+                    "printf '%s\\n' '",
+                    title,
+                    "cleanup finished'",
+                ],
+                &["Review this shell command."],
+            )
+        };
+        let (one, other) = (
+            read(&screen("$T/review-one")),
+            read(&screen("$T/review-two")),
+        );
+        assert_eq!(identity(&one), one, "{title}: nothing is cut");
+        assert_ne!(identity(&one), identity(&other), "{title}");
+    }
 }
 
 #[test]
-fn a_permission_dialogs_title_and_the_row_of_the_tool_that_waits_are_not_its_request() {
-    let whole = live_slid(0);
-    // The tool's row and the title slid out of the tail: the request is what it was.
-    assert_eq!(live_slid(1), whole, "the tool's row gone");
-    assert_eq!(live_slid(2), whole, "and the title");
-    assert_eq!(
-        whole.detail.first().map(String::as_str),
-        Some("Remove the specified file")
-    );
-    // The request's own rows are never cut: the description gone is another read.
-    assert_ne!(live_slid(3), whole, "the description gone");
+fn a_title_a_hooks_reason_is_cuts_nothing_and_claude_codes_own_formatter_draws_it_so() {
+    // 2.1.319's formatter for a hook's reason "Bash command\n" gives these rows
+    // (the offline render of the formatter in the review of T-1316): the header, the reason's line, the source.
+    for title in TITLES_CLAUDE_DRAWS {
+        let screen = |path: &str| hook_ask(&[&format!("rm -rf -- {path}")], &[title]);
+        let (one, other) = (
+            read(&screen("$T/review-one")),
+            read(&screen("$T/review-two")),
+        );
+        assert_eq!(identity(&one), one, "{title}: nothing is cut");
+        assert_ne!(identity(&one), identity(&other), "{title}");
+    }
 }
 
 #[test]
-fn the_pair_of_the_field_is_one_dialog() {
-    // T-1306's window, 2026-11-07 (m-7776 at 1:57, m-7780 at 0:05): the words of the two notices.
+fn a_command_row_that_slid_out_is_another_read_whatever_title_is_left_in_the_request() {
+    for title in TITLES_CLAUDE_DRAWS {
+        let whole = hook_ask(&["rm -rf -- $T/review-one"], &[title]);
+        let slid = whole[1..].to_vec();
+        assert_ne!(
+            identity(&read(&whole)),
+            identity(&read(&slid)),
+            "{title}: the read without the command is another dialog"
+        );
+    }
+}
+
+#[test]
+fn the_field_pair_is_two_identities_the_cost_of_never_merging_on_words() {
+    // T-1306's window (m-7776 at 1:57, m-7780 at 0:05): the tail slid two rows. Nothing in what the
+    // engine reads says the rows that went were the conversation's, so the second read is another
+    // dialog and an extra notice is told.
     let request = [
         " Delete the sparse bundle by its literal path",
         " rm -rf /Volumes/Data/consensflow-builds.sparsebundle; echo \"rm finished rc=$?\"",
@@ -560,73 +617,34 @@ fn the_pair_of_the_field_is_one_dialog() {
     first.extend(below("1:57"));
     let mut second = owned(&request);
     second.extend(below("0:05"));
-    assert_ne!(
-        read(&first),
-        read(&second),
-        "as they were read, they differ"
-    );
-    assert_eq!(identity(&read(&first)), identity(&read(&second)));
+    let (first, second) = (read(&first), read(&second));
+    assert_ne!(identity(&first), identity(&second));
+    // The countdown alone is still blanked: the same read a countdown later is the same dialog.
+    let mut later = owned(&["  \u{23bf} \u{a0}Waiting\u{2026}", " Bash command"]);
+    later.extend(owned(&request));
+    later.extend(below("0:05"));
+    assert_eq!(identity(&first), identity(&read(&later)));
+    // And what is kept is every row of the read but the time.
+    assert_eq!(identity(&first).detail.len(), first.detail.len());
 }
 
 #[test]
-fn the_title_under_the_tools_row_is_cut_whatever_it_says() {
-    let screen = |title: &str, waiting: bool| {
-        let mut lines = owned(&["  \u{23bf} \u{a0}Waiting\u{2026}"]);
-        if !waiting {
-            lines.clear();
-        }
-        lines.push(format!(" {title}"));
-        lines.extend(rm_prompt(COMMAND, &[blocks("1:57")]).into_iter().skip(1));
-        lines
+fn a_request_that_prints_the_computer_use_title_is_cut_nowhere() {
+    // The Computer Use prompt's cut needs its own choices, which a request's words cannot supply
+    // (they are read from the cursor rows): a Yes/No dialog with that title among its rows keeps all.
+    let screen = |path: &str| {
+        hook_ask(
+            &[
+                &format!("rm -rf -- {path}"),
+                "Computer Use needs macOS permissions",
+            ],
+            &["Review this shell command."],
+        )
     };
-    let bare = identity(&read(&rm_prompt(COMMAND, &[blocks("1:57")])[1..]));
-    assert_eq!(
-        identity(&read(&screen("mcp__server__tool", true))),
-        bare,
-        "an unknown title under the tool's row"
+    let (one, other) = (
+        read(&screen("$T/review-one")),
+        read(&screen("$T/review-two")),
     );
-    // Not under it, a title nobody knows is a row of the request.
-    assert_ne!(identity(&read(&screen("mcp__server__tool", false))), bare);
-}
-
-#[test]
-fn the_titles_claude_code_draws_are_cut_and_only_in_the_first_rows() {
-    for title in [
-        "Bash command",
-        "Run command",
-        "PowerShell command",
-        "Edit file",
-        "Create file",
-        "Overwrite file",
-        "Read file",
-        "Fetch",
-        "Use this skill?",
-        "Tool use",
-        "Bash command (unsandboxed)",
-        "Bash command (runs on the build box)",
-    ] {
-        let mut with = rm_prompt(COMMAND, &[blocks("1:57")]);
-        with[0] = format!(" {title}");
-        let mut without = rm_prompt(COMMAND, &[blocks("1:57")]);
-        without.remove(0);
-        assert_eq!(identity(&read(&with)), identity(&read(&without)), "{title}");
-    }
-    // A title's words far down are the request's own: nothing above them is cut.
-    let mut quoted = owned(&[
-        " first row",
-        " second row",
-        " third row",
-        " fourth row",
-        " Bash command",
-    ]);
-    quoted.extend(rm_prompt(COMMAND, &[blocks("1:57")]).into_iter().skip(1));
-    let kept = identity(&read(&quoted));
-    assert_eq!(kept.detail.first().map(String::as_str), Some("first row"));
-}
-
-#[test]
-fn two_requests_under_the_same_title_are_two_dialogs() {
-    let one = identity(&read(&rm_prompt("rm -rf /a/one", &[blocks("1:57")])));
-    let other = identity(&read(&rm_prompt("rm -rf /a/other", &[blocks("1:57")])));
-    assert_ne!(one, other);
+    assert_eq!(identity(&one), one);
+    assert_ne!(identity(&one), identity(&other));
 }

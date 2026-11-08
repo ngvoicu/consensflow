@@ -3,7 +3,7 @@
 //! holds two reads to one dialog by plain equality of what this returns, and presses a decline
 //! only into a read whose identity equals the one that was told of.
 //!
-//! Four things are taken out of the words, and nothing else:
+//! Three things are taken out of the words, and nothing else:
 //!
 //! - **The time in its warning line.** A permission prompt, a hook's ask, a classifier's ask draws
 //!   under the request's words a line that says when Claude Code will block the request by
@@ -36,19 +36,23 @@
 //!   quoted the model's last words above the tool line), and a decline is pressed only into the
 //!   dialog that was told of.
 //!
-//! - **The title of a permission dialog, and what is drawn above it** (T-1300). The request's own
-//!   words begin under the dialog's title ("Bash command", "Edit file", "Fetch", …), and the rows
-//!   above the title are the conversation's: in the field (T-1306's window, 2026-11-07, m-7776 and
-//!   m-7780) the prompt of a dangerous `rm` was told twice, because the first read began at the row
-//!   of the tool that waits (`⎿  Waiting…`), then the title, then the request, and the second, a
-//!   countdown later, at the request: the pane host's tail is twelve rows, and it slid two rows as
-//!   rows below the question changed. So a title that Claude Code is known to draw, found in the
-//!   first rows of what the dialog says, is cut off with every row above it; and where the tool's
-//!   row that waits is the first or the second row, the row under it is the title, whatever it
-//!   says (a title Claude Code draws from a tool's own name). The request itself, its description,
-//!   its command, the hook's or the rule's reason and the warning, is never cut: a read whose
-//!   command row slid out is still another dialog (T-1282), and two requests that differ under
-//!   their title are two.
+//! **No row is cut on words alone** (T-1300, after T-1316's review of a first attempt). The field's
+//! pair (T-1306's window, 2026-11-07, m-7776 at 1:57 and m-7780 at 0:05) was one prompt of a dangerous
+//! `rm` told twice: the pane host's tail is twelve rows, and it slid two as rows below the question
+//! changed, so the first read began at the row of the tool that waits (`⎿  Waiting…`) and the
+//! title, and the second at the request. A first attempt cut every row up to a title Claude Code
+//! draws ("Bash command", …) in the first four rows. It was wrong: the engine reads the tail with
+//! its blank rows and its rules dropped and the frame of each row taken off (`shared::dialog`), so
+//! a title is a row of words, and a command that prints "Bash command", or a hook's reason that is
+//! "Bash command\n" (which Claude Code 2.1.319's own formatter draws as a bare title row), is a
+//! title as far as the words go. The cut erased the command above it, two `rm` of different paths
+//! became one identity, the second was never told and the first's pending "No" was pressed into
+//! it. A row is cut only where the boundary is read from something a request's words cannot be:
+//! the warning's place among the last rows above the question, and the choices of the Computer Use
+//! prompt, which are read from the cursor rows and not from what the dialog says, and which has no
+//! request of its own. Otherwise every row is kept, and a prompt whose tail slid is told again: an
+//! extra notice is safe, a merged identity is not. The route to the pair is a boundary read from the
+//! raw rows (the blank row and the rule the tail drops), not from their words.
 //!
 //! Claude Code's other dialogs have no known top, and their words are compared as they were read.
 //! The note that tells a dialog still quotes the read as it was, the time in it.
@@ -59,64 +63,6 @@ use super::adapter::LSP_OFFER;
 
 /// The title that begins the offer to install an LSP plugin, as it is drawn.
 const LSP_TITLE: &str = "LSP plugin recommendation";
-
-/// The titles Claude Code 2.1.319 draws on its permission dialogs, as the binary spells them
-/// (the shared frame is given the tool's own: "Bash command", or "Run command" where the dialog is
-/// fitted, "PowerShell command", "Edit file", "Create file", "Overwrite file", "Read file",
-/// "Fetch", "Use this skill?", "Tool use" for a tool with no title of its own), and the form of
-/// the Bash dialog's where its command runs elsewhere: "Bash command (runs on …)" or "(unsandboxed)".
-const TITLES: [&str; 9] = [
-    "Bash command",
-    "Run command",
-    "PowerShell command",
-    "Edit file",
-    "Create file",
-    "Overwrite file",
-    "Read file",
-    "Fetch",
-    "Use this skill?",
-];
-
-/// The title of a dialog whose tool has none of its own.
-const TOOL_USE: &str = "Tool use";
-
-/// How many of the first rows of what a dialog says may hold its title: the rows above it are the
-/// conversation's, the tool's row that waits among them, and a title any lower is a line of the
-/// request's own.
-const TITLE_WITHIN: usize = 4;
-
-/// Whether `row` is a title Claude Code draws on a permission dialog.
-fn is_title(row: &str) -> bool {
-    TITLES.contains(&row)
-        || row == TOOL_USE
-        || (row.starts_with("Bash command (") && row.ends_with(')'))
-}
-
-/// Whether `row` is the row of the tool that waits for the dialog, drawn right above its title:
-/// `⎿  Waiting…`, the glyph of a tool's result.
-fn is_waiting(row: &str) -> bool {
-    row.starts_with('\u{23bf}') && row.contains("Waiting")
-}
-
-/// How many of the first rows of `detail` are the title of the dialog and what is above it: the
-/// rows up to a known title within the first [`TITLE_WITHIN`], else those up to the row under the
-/// tool's row that waits where that is the first or the second. None where neither is found, or
-/// where nothing would be left under the title.
-fn above_request(detail: &[String]) -> Option<usize> {
-    let title = detail
-        .iter()
-        .take(TITLE_WITHIN)
-        .position(|row| is_title(row))
-        .map(|at| at + 1)
-        .or_else(|| {
-            detail
-                .iter()
-                .take(2)
-                .position(|row| is_waiting(row))
-                .map(|at| at + 2)
-        })?;
-    (title < detail.len()).then_some(title)
-}
 
 /// The words a warning line begins with, as Claude Code 2.1.319 draws them: its warning sign
 /// (U+26A0, no selector) and a space, then the sentence up to the time left, which follows after a
@@ -187,11 +133,6 @@ pub(crate) fn identity(dialog: &Dialog) -> Dialog {
     // own (T-1300): what the tail shows above it is the conversation's, and it slides.
     if let Some(top) = super::computer_use_prompt::top(dialog) {
         detail.drain(..top.min(detail.len()));
-    } else if dialog.question != LSP_OFFER {
-        // A permission dialog's request begins under its title (T-1300).
-        if let Some(above) = above_request(&detail) {
-            detail.drain(..above);
-        }
     }
     Dialog {
         detail,

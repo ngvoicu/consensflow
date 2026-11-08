@@ -644,12 +644,38 @@ fn its_computer_use_permission_prompt_is_declined_when_the_pane_host_sends_its_t
     assert!(plan.window.safe_decline(&dialog).is_some(), "{dialog:?}");
 }
 
-// ----- A countdown prompt whose rows above its request slid (T-1300) -----
+// ----- No row of a request is cut on words alone (T-1300, after T-1316's review) -----
+
+fn rows(lines: &[&str]) -> Vec<String> {
+    lines.iter().map(|line| (*line).to_owned()).collect()
+}
+
+/// A hook's ask of a command, framed as the field's were: `command` rows, the hook's header, its
+/// `reason` rows, its source, the configuration hint, the question, its choices.
+fn hook_ask_of(command: &[&str], reason: &[&str]) -> Vec<String> {
+    let mut screen: Vec<String> = command
+        .iter()
+        .map(|row| format!("\u{2502} {row}"))
+        .collect();
+    screen.push("\u{2502} Hook tool.check requires confirmation for this command:".to_owned());
+    screen.extend(reason.iter().map(|row| format!("\u{2502} {row}")));
+    screen.extend(rows(&[
+        "\u{2502} [plugin:review-shell]",
+        "plugin hooks.json to update hooks",
+        "Do you want to proceed?",
+        "\u{276f} 1. Yes",
+        "  2. No",
+        "Esc to cancel \u{b7} Tab to amend",
+    ]));
+    screen
+}
 
 #[test]
-fn its_permission_prompt_of_the_field_is_one_dialog_at_1_57_and_at_0_05() {
+fn its_permission_prompt_of_the_field_is_two_identities_at_1_57_and_at_0_05() {
     // T-1306's window, 2026-11-07: the prompt of a dangerous `rm` of a mounted drive's path, told
-    // twice (m-7776, m-7780) because the second read began at the request, two rows lower.
+    // twice (m-7776, m-7780) because the second read began at the request, two rows lower. Nothing
+    // the engine reads says those rows were the conversation's, so it stays two (the chief,
+    // 2026-11-08: an extra notice is safe, a merged identity is not).
     let home = Home::new();
     let plan = prepare(&home.adapter(), &Request::default()).unwrap();
     let screen = |clock: &str, slid: usize| -> Vec<String> {
@@ -670,16 +696,90 @@ fn its_permission_prompt_of_the_field_is_one_dialog_at_1_57_and_at_0_05() {
         .collect()
     };
     let first = plan.window.dialog(&screen("1:57", 0)).expect("the prompt");
-    let second = plan.window.dialog(&screen("0:05", 2)).expect("the prompt");
-    assert_ne!(first.detail, second.detail, "as they were read");
+    let ticked = plan.window.dialog(&screen("0:05", 0)).expect("the prompt");
+    let slid = plan.window.dialog(&screen("0:05", 2)).expect("the prompt");
     assert_eq!(
         plan.window.dialog_identity(&first),
-        plan.window.dialog_identity(&second)
+        plan.window.dialog_identity(&ticked),
+        "the countdown alone is blanked"
     );
-    // The command row slid out too: another read, told as another dialog (T-1282).
-    let third = plan.window.dialog(&screen("0:05", 3)).expect("the prompt");
     assert_ne!(
         plan.window.dialog_identity(&first),
-        plan.window.dialog_identity(&third)
+        plan.window.dialog_identity(&slid)
     );
+}
+
+#[test]
+fn its_permission_dialog_keeps_every_row_of_a_request_that_prints_a_title() {
+    // T-1316, adapter-probes.rs:8, :18 and :26, through the real window: a command that prints
+    // "Bash command", a hook's reason that is that title, the command row slid out of the tail.
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let window = &plan.window;
+    let identity = |lines: &[String]| {
+        let dialog = window.dialog(lines).expect("the dialog");
+        let made = window.dialog_identity(&dialog);
+        assert_eq!(made.detail, dialog.detail, "no row of the request is cut");
+        made
+    };
+    // A hook's reason that is a title.
+    let reason = |path: &str| hook_ask_of(&[&format!("rm -rf -- {path}")], &["Bash command"]);
+    assert_ne!(
+        identity(&reason("$T/review-one")),
+        identity(&reason("$T/review-two"))
+    );
+    // The command row slid out, the title left in the reason.
+    let whole = reason("$T/review-one");
+    assert_ne!(identity(&whole), identity(&whole[1..]));
+    // A multi-line command that prints the title, in a twelve-row tail that begins under the dialog's
+    // own title (what the tail keeps of the field's layout).
+    let command = |path: &str| {
+        let mut screen = rows(&[
+            "  \u{23bf} Waiting\u{2026}",
+            " Bash command",
+            " Clean up and print a report",
+        ]);
+        screen.extend(hook_ask_of(
+            &[
+                &format!("rm -rf -- {path}"),
+                "printf '%s\\n' '",
+                "Bash command",
+                "cleanup finished'",
+            ],
+            &["Review this shell command."],
+        ));
+        screen[screen.len() - 12..].to_vec()
+    };
+    let (one, two) = (command("$T/review-one"), command("$T/review-two"));
+    assert!(window.dialog(&one).unwrap().detail[0].contains("rm -rf"));
+    assert_ne!(identity(&one), identity(&two));
+    // Every title Claude Code draws, as a row of the command or of the reason.
+    for title in [
+        "Bash command",
+        "Run command",
+        "PowerShell command",
+        "Edit file",
+        "Create file",
+        "Overwrite file",
+        "Read file",
+        "Fetch",
+        "Use this skill?",
+        "Tool use",
+        "Bash command (unsandboxed)",
+        "Computer Use needs macOS permissions",
+    ] {
+        let as_command =
+            |path: &str| hook_ask_of(&[&format!("rm -rf -- {path}"), title], &["Why."]);
+        let as_reason = |path: &str| hook_ask_of(&[&format!("rm -rf -- {path}")], &[title]);
+        assert_ne!(
+            identity(&as_command("$T/review-one")),
+            identity(&as_command("$T/review-two")),
+            "{title}"
+        );
+        assert_ne!(
+            identity(&as_reason("$T/review-one")),
+            identity(&as_reason("$T/review-two")),
+            "{title}"
+        );
+    }
 }

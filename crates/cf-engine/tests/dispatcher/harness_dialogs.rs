@@ -1584,15 +1584,19 @@ fn a_prompt_with_a_choice_it_does_not_offer_gets_no_key() {
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
 }
 
-// ----- A countdown prompt is told once though the rows above it slide (T-1300) -----
+// ----- No row of a request is cut on words alone (T-1300, after T-1316's review) -----
 //
 // T-1306's window, 2026-11-07 about 23:4x, Claude Code 2.1.319 on 3.0.7-alpha.3: Claude Code's
 // prompt of a dangerous `rm` of a mounted drive's path was told to the chief twice, m-7776 at 1:57
 // and m-7780 at 0:05. The first read began at `⎿  Waiting…`, the row of the tool that waits, then
-// the dialog's title and its description; the second began at the description. The tail is twelve
-// rows, and the rows above the dialog's request slid out of it as rows below changed. The words of
-// the two notices are the field's; the rows between them, the dialog's own layout, are those of the
-// live recorded prompt of a dangerous `rm` (`CLAUDE_RM_PROMPT_LIVE`).
+// the dialog's title and its description; the second began at the description: the tail is twelve
+// rows, and the rows above the request slid out of it as rows below changed. A first attempt cut
+// every row up to a title Claude Code draws, in the first four rows; T-1316 showed that a command
+// that prints "Bash command", or a hook's reason that is "Bash command", is a title as far as the
+// words go, and that the cut then erased the command above it: two commands became one identity,
+// the second was never told, and the first's pending "No" was pressed into it. The words of the
+// two notices below are the field's; the rows between them, the dialog's own layout, are those of
+// the live recorded prompt of a dangerous `rm` (`CLAUDE_RM_PROMPT_LIVE`).
 
 /// The prompt as the first notice read it, over the tool that waits (its row is drawn with a
 /// no-break space after the glyph), its title and its request, `clock` left to block it.
@@ -1628,66 +1632,186 @@ fn mounted_drive_prompt_slid(clock: &str) -> Vec<String> {
 }
 
 #[test]
-fn a_countdown_prompt_whose_rows_above_its_request_slid_between_two_looks_is_told_once() {
-    // The field's shape: its status says a dialog is open at the first look, and says nothing at the
-    // second (the last seconds, as the prompt is blocked by Claude Code itself).
+fn the_field_pair_is_told_twice_never_merged_and_the_countdown_alone_does_not_tell_it_again() {
+    // The accepted cost (the chief, 2026-11-08): nothing the engine reads says the two rows that
+    // slid out were the conversation's and not the request's, so the second read is another dialog
+    // and an extra notice is told. The countdown ticking under each read is still blanked.
+    for open_all_along in [true, false] {
+        let context = Context::new();
+        let tiers = at_work(&context, &mounted_drive_prompt("1:57"));
+        if open_all_along {
+            dialog_is_open(&context);
+        }
+        until_told(&context, &tiers);
+        assert_eq!(told_counts(&context, &tiers), (1, 1));
+        let told = of_dialogs(&tiers.notes("chief"));
+        assert!(told[0].contains("\u{23bf}"), "{}", told[0]);
+        counting_down(
+            &context,
+            116,
+            60,
+            |left| mounted_drive_prompt(&clock(left)),
+            |_| {},
+        );
+        assert_eq!(told_counts(&context, &tiers), (1, 1), "ticking alone: once");
+        // The status stops saying a dialog is open for the last seconds, as the field's did.
+        context.adapter.with("zeus", |agent| agent.waiting = None);
+        counting_down(
+            &context,
+            59,
+            3,
+            |left| mounted_drive_prompt_slid(&clock(left)),
+            |_| {},
+        );
+        assert_eq!(
+            told_counts(&context, &tiers),
+            (2, 2),
+            "the slid read is another dialog, told once; open all along: {open_all_along}"
+        );
+        assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    }
+}
+
+/// A hook's ask whose command is `command` (a row each), its reason `reason` (a row each), as the
+/// tail shows it: the rows of the command and of the reason are framed, as the field's were.
+fn hook_ask_rows(command: &[&str], reason: &[&str]) -> Vec<String> {
+    let mut screen: Vec<String> = command
+        .iter()
+        .map(|row| format!("\u{2502} {row}"))
+        .collect();
+    screen.push("\u{2502} Hook tool.check requires confirmation for this command:".to_owned());
+    screen.extend(reason.iter().map(|row| format!("\u{2502} {row}")));
+    screen.extend(
+        [
+            "\u{2502} [plugin:review-shell]",
+            "plugin hooks.json to update hooks",
+            "Do you want to proceed?",
+            "\u{276f} 1. Yes",
+            "  2. No",
+            "Esc to cancel \u{b7} Tab to amend",
+        ]
+        .map(str::to_owned),
+    );
+    screen
+}
+
+/// B takes A's place under one open status after 595 s of A's ten minutes, and five seconds on:
+/// B is told, and nothing is pressed into it; the "No" is pressed once, at B's own ten minutes.
+fn b_replaces_a_late_and_is_told_and_never_pressed_before_its_own_deadline(
+    a: &[String],
+    b: &[String],
+) {
     let context = Context::new();
-    let tiers = at_work(&context, &mounted_drive_prompt("1:57"));
+    let tiers = at_work(&context, a);
     dialog_is_open(&context);
     until_told(&context, &tiers);
     assert_eq!(told_counts(&context, &tiers), (1, 1));
+    passes(&context, 1, 595_000);
+    context.host.set_snapshot(json!({ "tail": b }));
+    passes(&context, 1, 5_000);
+    assert_eq!(
+        keys_to(&context, &tiers),
+        Vec::<serde_json::Value>::new(),
+        "the first's No was pressed into a request that was never told"
+    );
+    assert_eq!(told_counts(&context, &tiers), (2, 2), "B is told");
     let told = of_dialogs(&tiers.notes("chief"));
-    assert!(told[0].contains("\u{23bf}"), "{}", told[0]);
-    context.adapter.with("zeus", |agent| agent.waiting = None);
+    assert_ne!(told[0], told[1]);
+    // B's own ten minutes: nothing before them, "No" once at them.
+    passes(&context, 5, 60_000);
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    passes(&context, 6, 60_000);
+    assert_eq!(
+        keys_to(&context, &tiers),
+        [json!(b"2")],
+        "\"No\", once, into B"
+    );
+    passes(&context, 12, 60_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")], "never twice");
+}
+
+#[test]
+fn a_command_that_prints_a_title_does_not_become_the_command_after_it() {
+    // T-1316, probes.rs:32: two multi-line commands that print the report line "Bash command".
+    let screen = |path: &str| {
+        hook_ask_rows(
+            &[
+                &format!("rm -rf -- {path}"),
+                "printf '%s\\n' '",
+                "Bash command",
+                "cleanup finished'",
+            ],
+            &["Review this shell command."],
+        )
+    };
+    b_replaces_a_late_and_is_told_and_never_pressed_before_its_own_deadline(
+        &screen("$T/review-one"),
+        &screen("$T/review-two"),
+    );
+}
+
+#[test]
+fn a_hooks_reason_that_is_a_title_does_not_erase_the_command_above_it() {
+    // T-1316, probes.rs:17: the reason "Bash command\n", which 2.1.319's own formatter draws as a
+    // bare title row (the offline render of the formatter in the review of T-1316).
+    let screen = |path: &str| hook_ask_rows(&[&format!("rm -rf -- {path}")], &["Bash command"]);
+    b_replaces_a_late_and_is_told_and_never_pressed_before_its_own_deadline(
+        &screen("$T/review-one"),
+        &screen("$T/review-two"),
+    );
+}
+
+#[test]
+fn a_command_row_that_slid_out_of_a_request_with_a_title_in_it_is_another_dialog() {
+    // T-1316, adapter-probes.rs:18: the read from which the command row slid out is not the read
+    // that has it, whatever the rows left say.
+    let whole = hook_ask_rows(&["rm -rf -- $T/review-one"], &["Bash command"]);
+    let slid = whole[1..].to_vec();
+    b_replaces_a_late_and_is_told_and_never_pressed_before_its_own_deadline(&whole, &slid);
+}
+
+#[test]
+fn a_request_that_prints_the_computer_use_title_is_never_cut_there() {
+    // The Computer Use prompt's own cut needs its own choices, read from the cursor rows, which a
+    // request's words cannot supply: a Yes/No dialog that prints its title keeps every row.
+    let screen = |path: &str| {
+        hook_ask_rows(
+            &[
+                &format!("rm -rf -- {path}"),
+                "Computer Use needs macOS permissions",
+            ],
+            &["Review this shell command."],
+        )
+    };
+    b_replaces_a_late_and_is_told_and_never_pressed_before_its_own_deadline(
+        &screen("$T/review-one"),
+        &screen("$T/review-two"),
+    );
+}
+
+#[test]
+fn a_title_shaped_row_in_a_request_keeps_two_requests_apart_on_the_screen_path_too() {
+    // Where its harness says nothing (no `Open` status), the same two requests are two dialogs.
+    let screen = |path: &str| {
+        hook_ask_rows(
+            &[&format!("rm -rf -- {path}"), "Bash command", "done"],
+            &["Review this shell command."],
+        )
+    };
+    let context = Context::new();
+    let tiers = at_work(&context, &screen("$T/review-one"));
+    until_told(&context, &tiers);
+    assert_eq!(told_counts(&context, &tiers), (1, 1));
     context
         .host
-        .set_snapshot(json!({ "tail": mounted_drive_prompt_slid("0:05") }));
+        .set_snapshot(json!({ "tail": screen("$T/review-two") }));
     passes(&context, 12, 1_000);
-    assert_eq!(told_counts(&context, &tiers), (1, 1));
+    assert_eq!(told_counts(&context, &tiers), (2, 2));
     assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
 }
 
 #[test]
-fn a_countdown_prompt_only_its_screen_shows_is_told_once_though_its_title_and_the_row_above_it_slid(
-) {
-    let context = Context::new();
-    let tiers = at_work(&context, &mounted_drive_prompt("1:57"));
-    until_told(&context, &tiers);
-    for (left, screen) in [
-        (60, mounted_drive_prompt("1:00")),
-        // One row slid: the title is the first row.
-        (30, mounted_drive_prompt("0:30").split_off(1)),
-        (5, mounted_drive_prompt_slid("0:05")),
-    ] {
-        let _ = left;
-        context.host.set_snapshot(json!({ "tail": screen }));
-        passes(&context, 6, 1_000);
-    }
-    assert_eq!(told_counts(&context, &tiers), (1, 1));
-}
-
-#[test]
-fn a_prompt_whose_title_is_not_one_claude_code_is_known_to_draw_is_told_once_while_its_tool_waits()
-{
-    // The row of the tool that waits sits directly above the dialog's title, whatever the title says.
-    let with_title = |screen: Vec<String>| -> Vec<String> {
-        screen
-            .into_iter()
-            .map(|row| row.replace(" Bash command", " Frobnicate the sparse bundle"))
-            .collect()
-    };
-    let context = Context::new();
-    let tiers = at_work(&context, &with_title(mounted_drive_prompt("1:57")));
-    until_told(&context, &tiers);
-    context
-        .host
-        .set_snapshot(json!({ "tail": mounted_drive_prompt_slid("0:05") }));
-    passes(&context, 12, 1_000);
-    assert_eq!(told_counts(&context, &tiers), (1, 1));
-}
-
-#[test]
-fn two_requests_that_differ_after_the_title_are_two_prompts_though_the_title_is_not_in_either() {
+fn two_requests_whose_tails_slid_alike_but_differ_in_the_command_are_two_prompts() {
     let context = Context::new();
     let tiers = at_work(&context, &mounted_drive_prompt_slid("1:57"));
     until_told(&context, &tiers);
@@ -1698,6 +1822,32 @@ fn two_requests_that_differ_after_the_title_are_two_prompts_though_the_title_is_
     context.host.set_snapshot(json!({ "tail": other }));
     passes(&context, 12, 1_000);
     assert_eq!(told_counts(&context, &tiers), (2, 2));
+}
+
+#[test]
+fn a_hooks_ask_the_screen_rewrapped_to_the_same_words_never_has_the_firsts_no_pressed_into_it() {
+    // The notice's key flattens the rows of what a dialog says; the decline's comparison keeps
+    // them (T-1316): a read with the same words in other rows is not told again, and it is not
+    // the dialog the "No" was owed to either. The first, shown again, is declined, once.
+    let first = hook_ask_rows(&["rm -rf $T/a", "$T/b"], &["Review this shell command."]);
+    let rewrapped = hook_ask_rows(&["rm -rf", "$T/a $T/b"], &["Review this shell command."]);
+    let context = Context::new();
+    let tiers = at_work(&context, &first);
+    dialog_is_open(&context);
+    until_told(&context, &tiers);
+    passes(&context, 9, 60_000);
+    context.host.set_snapshot(json!({ "tail": rewrapped }));
+    passes(&context, 4, 60_000);
+    assert_eq!(
+        told_counts(&context, &tiers),
+        (1, 1),
+        "the same words: one notice"
+    );
+    assert_eq!(keys_to(&context, &tiers), Vec::<serde_json::Value>::new());
+    assert_eq!(answered(&tiers), Vec::<String>::new());
+    context.host.set_snapshot(json!({ "tail": first }));
+    passes(&context, 2, 5_000);
+    assert_eq!(keys_to(&context, &tiers), [json!(b"2")]);
 }
 
 // ----- A second dialog under one open status is told (T-1300) -----

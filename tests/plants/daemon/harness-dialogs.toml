@@ -1292,50 +1292,6 @@ replace = '''
         Ok(())'''
 
 [[plant]]
-name = "harness dialogs: once: the title of a permission dialog and the rows above it are part of its identity, and a countdown prompt is told again when they slide"
-meant = "a_countdown_prompt_only_its_screen_shows_is_told_once_though_its_title_and_the_row_above_it_slid"
-runs = ["hd-engine"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '        .position(|row| is_title(row))'
-replace = '        .position(|_| false)'
-
-[[plant]]
-name = "harness dialogs: once: a title Claude Code draws from a tool's own name is part of the identity under the row of the tool that waits"
-meant = "a_prompt_whose_title_is_not_one_claude_code_is_known_to_draw_is_told_once_while_its_tool_waits"
-runs = ["hd-engine"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '                .position(|row| is_waiting(row))'
-replace = '                .position(|_| false)'
-
-[[plant]]
-name = "harness dialogs: once: the identity of a permission dialog is cut under its title too, and the description is not part of the request"
-meant = "a_permission_dialogs_title_and_the_row_of_the_tool_that_waits_are_not_its_request"
-runs = ["hd-claude-identity"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '''
-        .map(|at| at + 1)
-        .or_else'''
-replace = '''
-        .map(|at| at + 2)
-        .or_else'''
-
-[[plant]]
-name = "harness dialogs: once: a title's words in the request, any row down, cut the rows above them"
-meant = "the_titles_claude_code_draws_are_cut_and_only_in_the_first_rows"
-runs = ["hd-claude-identity"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '        .take(TITLE_WITHIN)'
-replace = '        .take(usize::MAX)'
-
-[[plant]]
 name = "harness dialogs: once: a second request under the status of the first is taken for the first, and never told"
 meant = "a_second_hook_ask_under_the_same_open_status_is_told_and_has_its_own_ten_minutes"
 runs = ["hd-engine"]
@@ -1354,3 +1310,133 @@ runs = ["hd-engine"]
 file = "crates/cf-engine/src/dialogs.rs"
 find = '            || (sign == DialogSign::Open && dialog.is_none() && before.is_some())'
 replace = '            || false'
+
+[[plant]]
+name = "harness dialogs: once: a title-shaped row of a request is taken for the dialog's title, and the command above it is erased from its identity"
+meant = "a_command_that_prints_a_title_does_not_become_the_command_after_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: a hook's reason that is a title erases the command above it from the dialog's identity"
+meant = "a_hooks_reason_that_is_a_title_does_not_erase_the_command_above_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: a read from which the command row slid out is the read that has it, whenever a title is left in the request"
+meant = "a_command_row_that_slid_out_of_a_request_with_a_title_in_it_is_another_dialog"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: the real window cuts a request at a title any tool prints, as the first attempt did"
+meant = "its_permission_dialog_keeps_every_row_of_a_request_that_prints_a_title"
+runs = ["hd-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: a cut at a title any tool prints is made in the identity of every dialog, whatever the rows say"
+meant = "a_title_a_command_prints_is_a_row_of_the_command_and_cuts_nothing"
+runs = ["hd-claude-identity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+'''
+replace = '''
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
+    }
+    if let Some(at) = detail.iter().take(4).position(|row| row == "Bash command") {
+        detail.drain(..=at);
+    }
+'''
+
+[[plant]]
+name = "harness dialogs: once: the Computer Use cut asks nothing of the dialog's own choices, and a request that prints its title is cut there"
+meant = "a_request_that_prints_the_computer_use_title_is_never_cut_there"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/computer_use_prompt.rs"
+find = '''
+pub(crate) fn top(dialog: &Dialog) -> Option<usize> {
+    missing(dialog)?;
+'''
+replace = '''
+pub(crate) fn top(dialog: &Dialog) -> Option<usize> {
+'''
+
+[[plant]]
+name = "harness dialogs: once: a decline is pressed into a read whose rows are cut elsewhere than the ones it was told with"
+meant = "a_hooks_ask_the_screen_rewrapped_to_the_same_words_never_has_the_firsts_no_pressed_into_it"
+runs = ["hd-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '                        && told.detail == identity.detail'
+replace = '                        && true'
