@@ -991,8 +991,8 @@ runs = ["chm-muse-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/models.rs"
-find = '        return Err(why.clone());'
-replace = '        let _ = why;'
+find = '        return Err(NoDefault::Unread(None));'
+replace = '        let _ = ();'
 
 [[plant]]
 name = "chief: Muse with no model but contributor ones is left to its own default"
@@ -1001,7 +1001,9 @@ runs = ["chm-muse-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/models.rs"
-find = '        .ok_or_else(|| "Muse Code offers no model that is not a contributor model".to_owned())'
+find = '''        .ok_or(NoDefault::NoneOffered(
+            "Muse Code offers no model that is not a contributor model",
+        ))'''
 replace = '        .map_or(Ok(None), Ok)'
 
 [[plant]]
@@ -1277,8 +1279,8 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_model.rs"
-find = "            Ok(Some(model)) if model == gone => {"
-replace = "            Ok(Some(model)) if model == gone && model.is_empty() => {"
+find = "            Ok(Some(model)) if model == gone => Err(NoDefault::NoneOffered("
+replace = "            Ok(Some(model)) if model == gone && model.is_empty() => Err(NoDefault::NoneOffered("
 
 [[plant]]
 name = "gone: the exit's screen is read with ConsensFlow's own pastes on it"

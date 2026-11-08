@@ -2291,8 +2291,8 @@ runs = ["quote-less-chief-not-up"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''                    (Why::HostRefused, &error),'''
-replace = '''                    (Why::Program(StartFailure::of(StartKind::NotStarted)), &error),'''
+find = '''                    Opened::Refused { error } => (Why::HostRefused, error.as_str()),'''
+replace = '''                    Opened::Refused { error } => (Why::Program(StartFailure::of(StartKind::NotStarted)), error.as_str()),'''
 
 [[plant]]
 name = "windows close: quote less: a window refused as a program that cannot be run loses its kind"
@@ -2301,8 +2301,8 @@ runs = ["quote-less-chief-not-up"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''                    (Why::Program(refusal.failure()), refusal.words()),'''
-replace = '''                    (Why::HostRefused, refusal.words()),'''
+find = '''                        (Why::Program(refusal.failure()), refusal.words())'''
+replace = '''                        (Why::HostRefused, refusal.words())'''
 
 [[plant]]
 name = "windows close: quote less: a window refused as a program that cannot be run loses its advice"
@@ -2438,8 +2438,12 @@ runs = ["quote-less-process"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
-find = '''            StartFailure::of(StartKind::NoNodeForPi),'''
-replace = '''            StartFailure::of(StartKind::NoNode),'''
+find = '''            StartFailure::of(StartKind::NoNodeForPi),
+            format!(
+                "{shim} runs on Node'''
+replace = '''            StartFailure::of(StartKind::NoNode),
+            format!(
+                "{shim} runs on Node'''
 
 [[plant]]
 name = "windows close: quote less: an npm shim with no Node is refused as Pi's"
@@ -2588,8 +2592,9 @@ runs = ["quote-less-pty"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''                code: error
-                    .downcast_ref::<std::io::Error>()
+find = '''                code: std::fs::metadata(program_path)
+                    .err()
+                    .as_ref()
                     .map(cf_base::file::error_code),'''
 replace = '''                code: None,'''
 

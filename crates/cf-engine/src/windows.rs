@@ -875,10 +875,20 @@ impl Dispatcher {
             .and_then(|opening| opening.exited);
         let pid = match opened {
             Ok(Opened::Open { pid }) => pid,
-            Ok(Opened::Refused { error }) => {
+            // The host would not open it, in words of its own that no note carries; or the
+            // window's program cannot be run as it is (an npm shim with no Node to run on), and
+            // the person's own screen has the words, a note the kind of failure.
+            Ok(refused @ (Opened::Refused { .. } | Opened::Unrunnable(_))) => {
                 if let Some(id) = resumed_on.filter(|_| proven) {
                     self.seams.ledger.borrow_mut().set_program_gone(id, true)?;
                 }
+                let (why, said) = match &refused {
+                    Opened::Unrunnable(refusal) => {
+                        (Why::Program(refusal.failure()), refusal.words())
+                    }
+                    Opened::Refused { error } => (Why::HostRefused, error.as_str()),
+                    _ => (Why::HostRefused, ""),
+                };
                 return self.not_opened(
                     record,
                     project,
@@ -886,23 +896,7 @@ impl Dispatcher {
                     failing,
                     &token,
                     &launch_id,
-                    (Why::HostRefused, &error),
-                );
-            }
-            // The window's program cannot be run as it is (an npm shim with no Node to run on):
-            // the person's own screen has the words, and a note the kind of failure.
-            Ok(Opened::Unrunnable(refusal)) => {
-                if let Some(id) = resumed_on.filter(|_| proven) {
-                    self.seams.ledger.borrow_mut().set_program_gone(id, true)?;
-                }
-                return self.not_opened(
-                    record,
-                    project,
-                    participant,
-                    failing,
-                    &token,
-                    &launch_id,
-                    (Why::Program(refusal.failure()), refusal.words()),
+                    (why, said),
                 );
             }
             // The host goes on with an open it did not answer in time: the window's
