@@ -447,6 +447,13 @@ name = "session viewer: a page reads the end of an item's text through a blob re
 meant = "a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_two_parts_does"
 runs = ["viewer-ledger-history"]
 
+# The crate no longer reads a message's opening through SQLite's blob reads, so it does not ask
+# for rusqlite's `blob` feature (T-1215); the plant asks for it itself.
+[[plant.edit]]
+file = "crates/cf-ledger/Cargo.toml"
+find = "rusqlite.workspace = true"
+replace = 'rusqlite = { workspace = true, features = ["blob"] }'
+
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
 find = '''        let first = self.part_bytes(&met, 0)?;
