@@ -834,7 +834,18 @@ impl Dispatcher {
                 .adapter(harness)
                 .and_then(|adapter| adapter.never_ran(status))
         });
-        let shown = shown.with_start(start, crate::handoff::name_of(harness));
+        let who = crate::handoff::name_of(harness);
+        // The note says the kind and nothing the window showed; what it showed is in the log,
+        // masked, for whoever must find out why (T-1328).
+        if let Some(failure) = start {
+            self.seams.log.warn(&format!(
+                "@{}'s window never ran {who}: {}; {}",
+                participant.handle,
+                failure.words(who),
+                shown.in_the_log()
+            ));
+        }
+        let shown = shown.with_start(start, who);
         let closed = format!("@{}'s window closed", participant.handle);
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)
@@ -933,7 +944,7 @@ impl Dispatcher {
                 opened.is_some_and(|opened| self.now() - opened <= self.seams.limits.launch_ms);
             if project.state == "open" && !own && !up && at_its_launch && shown.ended_failing() {
                 let said = shown.clone().without_pastes(&pasted);
-                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))? {
+                if let Some(gone) = self.gone_model(&participant, &said.evidence())? {
                     self.reopen_without(&record, gone);
                     return Ok(());
                 }

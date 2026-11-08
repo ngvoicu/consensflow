@@ -23,6 +23,7 @@ use crate::dispatcher::Dispatcher;
 use crate::handoff::name_of;
 use crate::record::Record;
 use crate::seams::EngineError;
+use crate::shown::Evidence;
 use crate::windows::Relaunch;
 
 /// The model, and the effort or thinking, a chief's launch asks its harness for; none of
@@ -180,11 +181,14 @@ impl Dispatcher {
     /// where the launch asked for none. `words` are the record's own of a failed turn, or the
     /// screen of a launch that ended with a code of failure before it came up, never a
     /// screen else: a chief's screen may show anything (it grepped for the words), and only
-    /// a refusal at launch has no record to say it in (Calliope's P1, T-955).
+    /// a refusal at launch has no record to say it in (Calliope's P1, T-955). They are
+    /// [`Evidence`], what the window showed and not the text made for a note: that one is
+    /// withheld, masked and cut for what it is told to, and says ConsensFlow's own words of how a
+    /// window ended (T-1328, the third reading of T-1322).
     pub(crate) fn gone_model(
         &self,
         chief: &ParticipantView,
-        words: &str,
+        words: &Evidence,
     ) -> Result<Option<String>, EngineError> {
         let now = self.known_project(chief.project_id)?;
         let Some(asked) = now
@@ -199,7 +203,7 @@ impl Dispatcher {
         let Some(adapter) = self.seams.adapters.adapter(harness) else {
             return Ok(None);
         };
-        Ok(adapter.model_gone(words, &asked).then_some(asked))
+        Ok(adapter.model_gone(words.as_str(), &asked).then_some(asked))
     }
 
     /// The chief opens again at once, its model `gone`: its next launch starts on its

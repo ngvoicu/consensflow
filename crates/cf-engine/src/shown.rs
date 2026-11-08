@@ -253,6 +253,33 @@ impl Shown {
         self.tail.as_deref().unwrap_or_default()
     }
 
+    /// What the screen showed, for the engine to classify why the window ended: the last
+    /// lines of it with a word in them, as the host sent them with their blanks made one, and
+    /// nothing done to them ([`Evidence`]). Empty where the host sent no screen.
+    pub(crate) fn evidence(&self) -> Evidence {
+        let lines: Vec<String> = self
+            .lines()
+            .iter()
+            .filter(|line| line.chars().any(char::is_alphanumeric))
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect();
+        let from = lines.len().saturating_sub(QUOTE_LINES);
+        Evidence(lines[from..].join("\n"))
+    }
+
+    /// What the screen showed, for ConsensFlow's log alone (masked, as every quote is, and not
+    /// withheld: the log is the person's own file): where a note says only why a window never
+    /// ran its harness, this keeps what it showed.
+    pub(crate) fn in_the_log(&self) -> String {
+        match &self.tail {
+            None => "the host sent no screen".to_owned(),
+            Some(tail) => Quote::of(tail, Keep::Last).map_or_else(
+                || "its screen was empty".to_owned(),
+                |quote| quote.after("its screen ended with"),
+            ),
+        }
+    }
+
     /// Whether the host said anything of the window.
     /// Whether the window's program is gone, as far as the host said: yes where
     /// it said how the window ended and named no program it could not end, no
@@ -411,6 +438,29 @@ impl Shown {
             }
             (Part::Unknown, _) => said,
         })
+    }
+}
+
+/// What a window showed or a harness's record said, as the engine's own classifiers read it to
+/// decide something about the window's end (a model its harness no longer has, [`Dispatcher::gone_model`]):
+/// the lines as they were, never masked, withheld, cut or reworded. **The text made for a note
+/// ([`Shown::after`], [`after_words`]) is never read for a decision** (T-1328, the third reading of
+/// T-1322): it holds less than the window showed (a screen that names a secret is left out whole, a
+/// quote is cut and masked), and says things that are ConsensFlow's (the kind of a start that
+/// failed), so a classifier that read it lost a retired model with a footer that counted tokens,
+/// and with a status the note had replaced. A classifier takes this, which only a window's own
+/// words make: no `String` made for a note is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Evidence(String);
+
+impl Evidence {
+    /// The words a harness's record gave of a failure: its own, which no note was made of.
+    pub(crate) fn of_record(words: &str) -> Self {
+        Self(words.to_owned())
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
     }
 }
 

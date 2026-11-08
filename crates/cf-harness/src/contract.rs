@@ -117,10 +117,12 @@ pub trait Adapter {
 
     /// What a window's program says by how it ended, where the harness's window is a program of
     /// ConsensFlow's that stands in for the harness's own (Codex's `cf codex-session`) and ends
-    /// with a status of its own when it could not start the harness
-    /// (`StartKind::exit_status`): then the harness never ran, and a note says the kind of
-    /// failure and quotes no screen, which holds the file that was tried (T-1328). None for
-    /// any other status, and for every harness whose window is the harness itself.
+    /// with a status of its own when it could not get the harness ready
+    /// (`StartKind::exit_status`; it reports a status the harness itself returned in that range as
+    /// 1, `harness_exit`): then the harness never ran, and a note says the kind of failure and
+    /// quotes no screen, which holds the file that was tried (T-1328). None for any other status,
+    /// and for every harness whose window is the harness itself. **A verdict for a note alone**:
+    /// what recovery reads is the window's own evidence (`Shown::evidence`), whatever this says.
     fn never_ran(&self, _status: u32) -> Option<StartFailure> {
         None
     }

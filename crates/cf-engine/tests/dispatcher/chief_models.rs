@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use cf_base::startup::{StartFailure, StartKind};
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Made};
 use cf_engine::SwitchWhen;
 use cf_harness::contract::{NoDefault, Used};
 use serde_json::{json, Value};
@@ -940,4 +940,125 @@ fn a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief() {
         "queued",
         "what waited went in"
     );
+}
+
+/// A Codex chief launched on `retired`, whose window ends as it opens with `status` and `rows` on
+/// its screen, within the launch's budget and before it took a message, on a harness whose default
+/// is `gpt-5.6-luna`. Where the chief goes on: the project's id.
+fn codex_chief_refused_its_model(status: u32, rows: &[&str]) -> (Context, i64) {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    *context.codex.gone_words.borrow_mut() = Some("model is not supported".to_owned());
+    *context.codex.default.borrow_mut() = Ok(Some("gpt-5.6-luna".to_owned()));
+    context.host.exits_showing(Some(status), None, Some(rows));
+    *context.host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "codex", "model": "retired" },
+            "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
+        }))
+        .unwrap()
+        .unwrap()
+        .id;
+    context.host.exits_showing(None, None, None);
+    (context, project)
+}
+
+/// That the chief was opened again at once on the harness's default, its model gone.
+fn recovered_on_the_default(context: &Context, project: i64, said: &str) {
+    assert_eq!(
+        context.project(project).state,
+        "open",
+        "{said}: nothing closed"
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let launches = context.codex.prepared();
+    assert_eq!(launches.len(), 2, "{said}: {launches:?}");
+    assert_eq!(launches[0]["agent"], agent("retired", None), "{said}");
+    assert_eq!(launches[1]["agent"], agent("gpt-5.6-luna", None), "{said}");
+    let chief = chief_of(context, project);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("gpt-5.6-luna"), Some("retired")),
+        "{said}"
+    );
+}
+
+/// T-1328, the third reading of T-1322: a window ConsensFlow's own program ended with one of the
+/// statuses it uses for a start that failed (70 to 80) had its words replaced by the typed note,
+/// and the engine read that note, not the screen, for a model the harness no longer has: the
+/// chief was not opened again on the default. Recovery reads what the window showed, whatever
+/// status it ended with and whatever the note says of it.
+#[test]
+fn a_retired_model_is_recovered_whatever_status_the_codex_window_ended_with() {
+    let words = "The 'retired' model is not supported when using Codex with a ChatGPT account";
+    for status in (70..=80).chain([1, 2, 69, 81, 127, 255]) {
+        let (context, project) = codex_chief_refused_its_model(status, &[words]);
+        recovered_on_the_default(&context, project, &format!("status {status}"));
+    }
+}
+
+/// The same recovery on a screen that also names a secret-like word (a footer that counts
+/// tokens): the note quotes none of such a screen, and recovery is not the note's.
+#[test]
+fn a_retired_model_is_recovered_though_its_screen_also_names_a_secret_like_word() {
+    let rows = [
+        "The 'retired' model is not supported when using Codex with a ChatGPT account",
+        "Token usage: 0",
+    ];
+    for status in [1, 70] {
+        let (context, project) = codex_chief_refused_its_model(status, &rows);
+        recovered_on_the_default(
+            &context,
+            project,
+            &format!("status {status}, a screen naming a token"),
+        );
+    }
+}
+
+/// A window that showed nothing of a gone model has no evidence of one, whatever its note says: a
+/// Codex chief whose window ended with a status of why (a start that failed, the note names its
+/// kind) and whose screen the host did not send (or was empty) is not opened again on the default.
+/// Recovery is the window's own words; a note is made after them, and is no evidence of its own.
+#[test]
+fn a_chief_whose_window_showed_nothing_of_a_gone_model_is_not_recovered_whatever_the_note_says() {
+    for rows in [None, Some(&[][..]), Some(&["Codex is starting"][..])] {
+        let context = Context::made(Made {
+            codex: true,
+            ..Made::default()
+        });
+        *context.codex.gone_words.borrow_mut() = Some("model is not supported".to_owned());
+        *context.codex.default.borrow_mut() = Ok(Some("gpt-5.6-luna".to_owned()));
+        context.host.exits_showing(Some(72), None, rows);
+        *context.host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "codex", "model": "retired" },
+                "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
+            }))
+            .unwrap()
+            .unwrap()
+            .id;
+        context.host.exits_showing(None, None, None);
+        context.pass().unwrap();
+        let chief = chief_of(&context, project);
+        assert_eq!(
+            (chief.model.as_deref(), chief.gone_model.as_deref()),
+            (Some("retired"), None),
+            "{rows:?}: the model is kept"
+        );
+        assert_eq!(context.project(project).state, "suspended", "{rows:?}");
+        assert_eq!(
+            context.codex.prepared().len(),
+            1,
+            "{rows:?}: not opened again"
+        );
+    }
 }
