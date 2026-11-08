@@ -28,6 +28,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The daemon's read of the models Muse lists is answered here, and noted nowhere.
+    if stand_in.lists_models(&words) {
+        return match cf_e2e::muse::serve_list() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => ExitCode::FAILURE,
+        };
+    }
     if let Err(failed) = stand_in.note(&words) {
         let _ = writeln!(
             io::stderr(),

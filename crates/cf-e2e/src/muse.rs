@@ -223,6 +223,12 @@ impl StandIn {
         })
     }
 
+    /// Whether `words` are the daemon's read of the models (`muse serve`) on an echo run, which
+    /// the stand-in answers itself ([`serve_list`]); a live run reads the real Muse's.
+    pub fn lists_models(&self, words: &[String]) -> bool {
+        matches!(self.run, Run::Echo { .. }) && words.first().map(String::as_str) == Some("serve")
+    }
+
     /// Writes down the command line `words`, as the Mac's stand-in writes it.
     pub fn note(&self, words: &[String]) -> std::io::Result<()> {
         use std::io::Write as _;
@@ -327,6 +333,73 @@ fn write_windows(
     files::write(&StandIn::file_of(&pinned), stand_in.to_json().to_string())
 }
 
+/// The models the rig's echo Muse lists when the daemon reads them as a dialog opens (A4-28,
+/// T-1329). Muse's own list is its account's, fetched with a login the rig's home has not: a
+/// fresh Muse lists none (`source: bundledCatalog`, `models: []`, 0.4 s measured on Muse
+/// 1.4.14), and the daemon refuses a pick on a harness that lists none. The stand-in lists the
+/// model the rig's cases seat, as the other stand-ins list theirs.
+pub fn echo_list() -> Value {
+    json!({
+        "providerId": "meta",
+        "profileId": "stand-in",
+        "source": "providerCatalog",
+        "models": [{
+            "modelId": "muse-spark-1.3",
+            "displayLabel": "Muse Spark 1.3",
+            "variants": ["minimal", "low", "medium", "high"],
+        }],
+    })
+}
+
+/// The reply of the rig's echo Muse to one line of `muse serve` (JSON-RPC over stdio, the
+/// daemon's read of the models): `initialize` and `model/list` are answered, a notification
+/// and anything else are not.
+pub fn serve_reply(line: &str) -> Option<String> {
+    let request: Value = serde_json::from_str(line).ok()?;
+    let id = request.get("id")?.clone();
+    let result = match request.get("method")?.as_str()? {
+        "initialize" => json!({ "serverInfo": { "name": "muse", "version": "stand-in" } }),
+        "model/list" => echo_list(),
+        _ => return None,
+    };
+    Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string())
+}
+
+/// `muse serve` as the rig's echo Muse runs it, which a list is read from: each request of the
+/// standard input answered ([`serve_reply`]) until the input ends.
+pub fn serve_list() -> std::io::Result<()> {
+    use std::io::{BufRead as _, Write as _};
+    let mut out = std::io::stdout().lock();
+    for line in std::io::stdin().lock().lines() {
+        if let Some(reply) = serve_reply(&line?) {
+            writeln!(out, "{reply}")?;
+            out.flush()?;
+        }
+    }
+    Ok(())
+}
+
+/// The part of the rig's Muse script that answers the daemon's read of the models
+/// ([`echo_list`]): `muse serve` is the host a list is read from, and no window. Before the
+/// command line is written down, so that no case that counts the windows' command lines counts
+/// a read.
+fn serve_list_script() -> String {
+    format!(
+        r#"if [ "$1" = serve ]; then
+  models='{models}'
+  while IFS= read -r line; do
+    id=${{line#*\"id\":}}; id=${{id%%[,\}}]*}}
+    case "$line" in
+      *'"method":"initialize"'*) printf '{{"id":%s,"jsonrpc":"2.0","result":{{"serverInfo":{{"name":"muse","version":"stand-in"}}}}}}\n' "$id" ;;
+      *'"method":"model/list"'*) printf '{{"id":%s,"jsonrpc":"2.0","result":%s}}\n' "$id" "$models" ;;
+    esac
+  done
+  exit 0
+fi"#,
+        models = echo_list()
+    )
+}
+
 /// Writes the rig's Muse in `dir`: its launcher, the version line, and the binary that
 /// runs `install`'s on echo, each turn `delay_ms` long, writing each command line it
 /// is given to `argv` (its words split by a unit separator, each line ended by a record
@@ -354,6 +427,7 @@ pub fn write_stand_in(
     let script = format!(
         r#"#!/bin/bash
 # The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
+{serve}
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
 export XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
 printf '%s %s\n' $$ $$ >> '{pids}'
@@ -367,6 +441,7 @@ done
 {repaint}
 exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" "${{words[@]}}"
 "#,
+        serve = serve_list_script(),
         argv = argv.display(),
         pids = pids_beside(argv).display(),
         rig = rig_home.display(),
@@ -929,8 +1004,58 @@ mod tests {
     #[cfg(unix)]
     use super::installed_on;
     use super::{allowance_left, question_tools, used_percent, Run, StandIn};
+    use super::{echo_list, serve_list_script, serve_reply};
     #[cfg(unix)]
     use crate::files;
+
+    #[test]
+    fn the_echo_muse_answers_the_daemons_read_of_the_models_and_nothing_else() {
+        let reply = |line: &str| serve_reply(line).map(|text| serde_json::from_str::<serde_json::Value>(&text).unwrap());
+        let initialized = reply(r#"{"id":1,"jsonrpc":"2.0","method":"initialize","params":{}}"#).unwrap();
+        assert_eq!(initialized["id"], 1);
+        let listed = reply(r#"{"id":2,"jsonrpc":"2.0","method":"model/list","params":{}}"#).unwrap();
+        assert_eq!(listed["id"], 2);
+        assert_eq!(listed["result"], echo_list());
+        assert_eq!(listed["result"]["source"], "providerCatalog");
+        assert_eq!(listed["result"]["models"][0]["modelId"], "muse-spark-1.3");
+        assert!(reply(r#"{"jsonrpc":"2.0","method":"initialized"}"#).is_none());
+        assert!(reply("not json").is_none());
+    }
+
+    /// The Mac's script answers the same lines the same way, whatever order the keys come in.
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::disallowed_methods)] // A test runs the script it wrote, with bash.
+    fn the_script_of_the_mac_answers_as_the_program_of_windows_does() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+        let script = format!("set -- serve --provider meta --no-session-log\n{}\n", serve_list_script());
+        let mut bash = Command::new("/bin/bash")
+            .args(["-c", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let requests = [
+            r#"{"id":1,"jsonrpc":"2.0","method":"initialize","params":{"clientInfo":{"name":"consensflow"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"initialized"}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"model/list","params":{}}"#,
+        ];
+        let mut stdin = bash.stdin.take().unwrap();
+        for line in requests {
+            writeln!(stdin, "{line}").unwrap();
+        }
+        drop(stdin);
+        let out = bash.wait_with_output().unwrap();
+        let lines: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!((lines[0]["id"].clone(), lines[1]["id"].clone()), (json!(1), json!(2)));
+        assert_eq!(lines[1]["result"], echo_list());
+    }
 
     /// A Muse install in `bin`: its launcher, the version line, and the binary it names.
     #[cfg(unix)]

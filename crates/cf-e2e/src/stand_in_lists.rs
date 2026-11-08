@@ -18,6 +18,10 @@ use serde_json::{json, Value};
 /// The models the roster of a rig seats its stand-ins on.
 pub const STAND_IN_MODELS: [&str; 3] = ["fake", "fake-2", "fake-chief"];
 
+/// The stand-in Codex's model the cases name without writing it in the roster: `maia`, GPT-6
+/// Astra at `medium` (`rig::project::stand_in`). Codex lists it at the efforts a case may pick.
+pub const CODEX_ASTRA: &str = "gpt-6-astra";
+
 /// The file of the roster, in the rig's folder beside the home.
 pub const ROSTER: &str = "stand-ins.json";
 
@@ -49,6 +53,12 @@ pub fn of_roster(kind: &str, roster: Option<&Value>) -> Vec<Listed> {
             efforts: Vec::new(),
         })
         .collect();
+    if kind == "codex" {
+        models.push(Listed {
+            id: CODEX_ASTRA.to_owned(),
+            efforts: ["low", "medium", "high"].map(str::to_owned).to_vec(),
+        });
+    }
     let rows = roster
         .and_then(|roster| roster.get("agents"))
         .and_then(Value::as_array)
@@ -174,6 +184,11 @@ mod tests {
             ids(&of_roster("claude-code", None)),
             ["fake", "fake-2", "fake-chief"]
         );
+        // Codex also lists the model of `maia`, whom cases name without writing her down.
+        assert_eq!(
+            ids(&of_roster("codex", None)),
+            ["fake", "fake-2", "fake-chief", "gpt-6-astra"]
+        );
     }
 
     #[test]
@@ -195,7 +210,7 @@ mod tests {
             ["fake", "fake-2", "fake-chief", "gpt-6-astra", "zed"]
         );
         let astra = codex.iter().find(|model| model.id == "gpt-6-astra").unwrap();
-        assert_eq!(astra.efforts, ["medium"]);
+        assert_eq!(astra.efforts, ["low", "medium", "high"]);
         assert!(
             of_roster("devin", Some(&roster))
                 .iter()

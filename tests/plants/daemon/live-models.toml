@@ -26,7 +26,13 @@ lm-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::t
 lm-start = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::restart::a_start_forgets"]
 lm-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "model_lists"]
 lm-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "models::"]
-lm-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "A4-28"]
+lm-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "A4-28|T-1329"]
+# The rig's stand-ins answer the daemon's reads of the models, so the daemon checks what the rig seats
+# as it checks anything (T-1329, C).
+lm-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "core_daemon::"]
+lm-rig-lists = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "stand_in_lists::"]
+lm-rig-muse = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse::tests::the_"]
+lm-rig-devin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-devin", "args::tests::the_daemons_read"]
 
 # --- Pi: the list a window shows, confirmed or stale ---
 
@@ -259,7 +265,7 @@ runs = ["lm-members"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = "        if self.takes_unread || self.adapters.adapter(harness.kind()).is_none() {"
+find = "        if self.adapters.adapter(harness.kind()).is_none() {"
 replace = "        if true {"
 
 [[plant]]
@@ -339,23 +345,157 @@ replace = '        store.db.execute("DELETE FROM model_list WHERE 0", [])?;'
 
 [[plant]]
 name = "live models: a pick on a harness that cannot be read is taken on its word in every daemon"
-meant = "a_pick_naming_no_read_is_refused_where_its_harness_cannot_be_read_unless_the_environment_takes_it_on_its_word"
+meant = "a_pick_naming_no_read_is_refused_where_its_harness_cannot_be_read"
 runs = ["lm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = "        if self.takes_unread || self.adapters.adapter(harness.kind()).is_none() {"
+find = "        if self.adapters.adapter(harness.kind()).is_none() {"
 replace = "        if true {"
 
+# --- no variable has a daemon take a pick on its harness's word (T-1329, C) ---
+
 [[plant]]
-name = "live models: the variable of the rigs is not heard"
-meant = "a_pick_naming_no_read_is_refused_where_its_harness_cannot_be_read_unless_the_environment_takes_it_on_its_word"
+name = "live models: a variable has a daemon take a pick unread"
+meant = "no_variable_has_a_daemon_take_a_pick_on_its_harnesss_word"
 runs = ["lm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = "            takes_unread: unread_models_are_taken(&env),"
-replace = "            takes_unread: false,"
+find = "        if self.adapters.adapter(harness.kind()).is_none() {"
+replace = '''        if self.env.text("CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN").is_some()
+            || self.adapters.adapter(harness.kind()).is_none()
+        {'''
+
+[[plant]]
+name = "live models: a token the daemon never made is a read of a harness taken on its word"
+meant = "a_read_id_of_an_earlier_daemon_is_unknown_to_a_restarted_daemon_that_has_read_nothing"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "        let listing = self.get(harness, false).await?;"
+replace = '''        if read.is_some() {
+            return Ok(None);
+        }
+        let listing = self.get(harness, false).await?;'''
+
+# --- a read id is a token of its daemon's life (T-1329, A) ---
+
+[[plant]]
+name = "live models: every daemon's read ids carry the same nonce"
+meant = "a_restarted_daemons_count_of_reads_reaching_an_old_dialogs_id_does_not_make_it_that_read"
+runs = ["lm-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "            nonce: nonce(),"
+replace = "            nonce: String::new(),"
+
+[[plant]]
+name = "live models: a read is looked up by its count alone"
+meant = "a_restarted_daemons_count_of_reads_reaching_an_old_dialogs_id_does_not_make_it_that_read"
+runs = ["lm-daemon", "lm-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = "            .find(|read| read.id == id)"
+replace = "            .find(|read| read.id.rsplit('.').next() == id.rsplit('.').next())"
+
+[[plant]]
+name = "live models: a read token is any number the page sends"
+meant = "a_read_that_is_no_token_is_refused"
+runs = ["lm-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '        Some(_) => Err(Said::from("read is the token models.get answered with")),'
+replace = "        Some(_) => Ok(None),"
+
+# --- an unchanged Devin edit stays unchanged after a Refresh that failed (T-1329, B) ---
+
+[[plant]]
+name = "live models: an edit is unchanged only as the form drew it"
+meant = "a Devin member's edit that changes nothing says so after a Refresh that failed, with the launch id it stores (T-1329, B)"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "launchIdOf(model, values.effort) === stored.model &&"
+replace = "false &&"
+
+[[plant]]
+name = "live models: a changed effort is unchanged by the launch id alone"
+meant = "Add member, New project and Edit member name the read their list was shown from, and an edit that changes nothing says so (A4-28, review 5)"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "values.effort === (stored.effort ?? null)"
+replace = "true"
+
+[[plant]]
+name = "live models: a Refresh that comes leaves a launch id unpicked"
+meant = "a Devin member's edit after a failed Refresh and a Refresh that came keeps its model picked, says nothing changed, and sends what the human changes (T-1329, B)"
+runs = ["lm-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      if (found) pick = modelOf(found.model)"
+replace = "      if (found) pick = wanted"
+
+# --- the rig's stand-ins answer the daemon's reads of their models (T-1329, C) ---
+
+[[plant]]
+name = "live models: the stand-in Claude answers no read of its models"
+meant = "checks_a_model_against_what_the_stand_in_lists_as_any_daemon_does"
+runs = ["lm-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/lists.rs"
+find = '    args.iter().take(2).any(|arg| arg == "-p")'
+replace = '    args.iter().take(2).any(|arg| arg == "--never")'
+
+[[plant]]
+name = "live models: the rig seats a model its stand-ins do not list"
+meant = "a_member_on_the_stand_ins_model_runs_on_the_name_of_its_agent_and_a_real_model_on_itself"
+runs = ["lm-rig-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/stand_in_lists.rs"
+find = "        for id in model.into_iter().chain(named) {"
+replace = "        for id in model {"
+
+[[plant]]
+name = "live models: a stand-in lists the models of every harness's roster"
+meant = "a_member_on_the_stand_ins_model_runs_on_the_name_of_its_agent_and_a_real_model_on_itself"
+runs = ["lm-rig-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/stand_in_lists.rs"
+find = '        .filter(|row| row["kind"] == kind && row["designer"] != true);'
+replace = '        .filter(|row| row["designer"] != true);'
+
+[[plant]]
+name = "live models: the echo Muse lists no model"
+meant = "the_echo_muse_answers_the_daemons_read_of_the_models_and_nothing_else"
+runs = ["lm-rig-muse"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '        "model/list" => echo_list(),'
+replace = '        "model/list" => json!({ "models": [] }),'
+
+[[plant]]
+name = "live models: the stand-in Devin answers no read of its models"
+meant = "the_daemons_read_of_the_models_is_answered_with_no_window"
+runs = ["lm-rig-devin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/args.rs"
+find = '    if args == ["models", "list", "--format", "json"] {'
+replace = '    if args == ["models", "list", "--never"] {'
 
 # --- the page: every installed harness is read as a dialog opens, one read per harness ---
 
