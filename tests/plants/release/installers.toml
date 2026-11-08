@@ -1987,6 +1987,30 @@ file = "install/install.ps1"
 find = '''            if ($pidOf -gt [int]::MaxValue) {'''
 replace = '''            if ($false) {'''
 
+# What the tests read of a case's TEMP leaves out the files PowerShell writes there and removes itself
+# (`__PSScriptPolicyTest_*.ps1`, CI run 42055791085, T-1244/T-1333): every case has one planted in its TEMP.
+[[plant]]
+name = "installers: the install.ps1 tests read PowerShell's own file in TEMP as the installer's"
+meant = "this run's folder carries its pid, and one killed hard leaves it for the next run to take away"
+runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tests/install-ps1.test.mjs"
+find = "const inTemp = (folder) => readdirSync(folder).filter((name) => !POWERSHELL_OWN.test(name))"
+replace = "const inTemp = (folder) => readdirSync(folder)"
+
+[[plant]]
+name = "installers: the install.ps1 tests read PowerShell's own file in TEMP as the installer's (macOS)"
+meant = "Linux and macOS are refused in plain words"
+runs = [["node", "--test", "--test-name-pattern", "plain words", "tests/install-ps1.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "tests/install-ps1.test.mjs"
+find = "const inTemp = (folder) => readdirSync(folder).filter((name) => !POWERSHELL_OWN.test(name))"
+replace = "const inTemp = (folder) => readdirSync(folder)"
+
 # The test copies of install.sh attach the DMG without hdiutil's checksum pass (T-1161),
 # by a replacement of the script's own attach line: a script whose line is other words
 # fails every copy, so the copies never attach some other way than the script.
