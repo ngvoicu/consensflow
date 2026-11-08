@@ -36,7 +36,7 @@ pub const COMMANDS: &[Command] = &[
     Command {
         words: &["eval", "long"],
         about: "Run the long run: a real project worked for hours by a chief and a staff of every harness, disrupted on a schedule, ConsensFlow held to nine invariants the whole time (it spends real quota for hours, and is no part of check)",
-        usage: "[--chief HARNESS] [--staff HARNESS,...] [--models HARNESS=M+M,...] [--model M] [--effort LEVEL] [--staff-effort LEVEL] [--hours N] [--every-min N] [--look-sec N] [--idle-min N] [--dialog-min N] [--quiet-min N] [--wake-min N] [--switch-to HARNESS] [--quiet] [--pause] [--kill] [--switch] [--compact] [--restart] [--devin-cut] [--suspend] [--ask real|stand-in] [--reports DIR]",
+        usage: "[--chief HARNESS] [--staff HARNESS,...] [--models HARNESS=M+M,...] [--model M] [--effort LEVEL] [--staff-effort LEVEL] [--hours N] [--every-min N] [--look-sec N] [--idle-min N] [--dialog-min N] [--quiet-min N] [--wake-min N] [--switch-to HARNESS] [--quiet] [--pause] [--kill] [--switch] [--compact] [--restart] [--devin-cut] [--suspend] [--ask real|stand-in|stand-in-fast] [--reports DIR]",
         run: Run::Native(long),
     },
     Command {

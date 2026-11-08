@@ -18,9 +18,9 @@ use cf_base::env::Env;
 use crate::context::{self, Context};
 use crate::process;
 use crate::{
-    app, bench, candidate, check, ci_times, clippy_windows, departures, evals, live, plants,
-    portable, release, scrub_muse_session, scrub_transcript, sidecar, smoke, specmint, suites,
-    unreachable_pub, windows,
+    app, bench, candidate, check, ci_times, clippy_windows, departures, evals, identity, live,
+    plants, portable, release, scrub_muse_session, scrub_transcript, sidecar, smoke, specmint,
+    suites, unreachable_pub, windows,
 };
 
 /// A command of xtask.
@@ -85,6 +85,7 @@ pub enum Failure {
 pub fn commands() -> Vec<&'static Command> {
     [
         sidecar::COMMANDS,
+        identity::COMMANDS,
         portable::COMMANDS,
         app::COMMANDS,
         clippy_windows::COMMANDS,

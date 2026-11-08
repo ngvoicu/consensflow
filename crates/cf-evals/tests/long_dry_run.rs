@@ -122,6 +122,16 @@ fn write_harnesses(bin: &Path, held: Option<u64>) {
 /// `<folder>/reports`, on a home of its own in `folder` whose harnesses are the stand-ins,
 /// each Claude window's answers held as `held` says ([`write_harnesses`]).
 fn long_run(folder: &Path, words: &[&str], held: Option<u64>) -> cf_e2e::process::Ran {
+    long_run_asking(folder, "stand-in", words, held)
+}
+
+/// [`long_run`] with the owner's words of `ask` (`stand-in`, or `stand-in-fast`).
+fn long_run_asking(
+    folder: &Path,
+    ask: &str,
+    words: &[&str],
+    held: Option<u64>,
+) -> cf_e2e::process::Ran {
     let (home, bin, reports) = (
         folder.join("home"),
         folder.join("bin"),
@@ -142,7 +152,7 @@ fn long_run(folder: &Path, words: &[&str], held: Option<u64>) -> cf_e2e::process
     .unwrap();
 
     let ran = Run::new(env!("CARGO_BIN_EXE_cf-evals"))
-        .args(["long", "--ask", "stand-in"])
+        .args(["long", "--ask", ask])
         .args(words)
         .arg("--reports")
         .arg(&reports)
@@ -524,4 +534,207 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
             assert!(!ran.stdout.contains(line), "{line} said: {ran}");
         }
     }
+}
+
+/// The 2-hour run on Windows of 2026-11-05 in short: the project is done in a few minutes (the
+/// stand-in's seconds cut, `--ask stand-in-fast`), long before the schedule of seven
+/// disruptions, an interval of a minute and a half apart, has played them. The run was over, and
+/// the chief switch, the Devin cut and the suspension never played. Now the project, once quiet,
+/// is given a piece of extra work from the scenario's short list each time a disruption is due
+/// and waits, so that its shape can happen; the run is over once the schedule is played, and
+/// the report keeps the project, the time and the disruptions apart.
+///
+/// ```text
+/// cargo test -p cf-evals --test long_dry_run -- --ignored --nocapture ends_before
+/// ```
+#[test]
+#[ignore = "plays a whole long run against the stand-ins, its project done early: about fifteen minutes, and nothing spent"]
+fn a_project_that_ends_before_its_schedule_is_given_extra_work_until_every_disruption_is_played() {
+    let (folder, _made) = kept_if_asked(tempfile::tempdir().unwrap());
+    let reports = folder.join("reports");
+    let ran = long_run_asking(
+        &folder,
+        "stand-in-fast",
+        &[
+            "--chief",
+            "claude",
+            "--staff",
+            "claude,devin",
+            "--model",
+            "fake-chief",
+            "--models",
+            "claude=fake+fake,devin=fake+fake",
+            "--switch-to",
+            "claude",
+            "--hours",
+            "0.5",
+            "--every-min",
+            "1.5",
+            "--look-sec",
+            "3",
+            "--quiet-min",
+            "1.5",
+            "--wake-min",
+            "5",
+            "--settle-sec",
+            "5",
+        ],
+        None,
+    );
+    let kept = kept_in(&reports);
+    assert_eq!(kept.len(), 2, "{ran}\n{kept:?}");
+    let report: Value = serde_json::from_str(&std::fs::read_to_string(&kept[0]).unwrap()).unwrap();
+    let verdict = report["verdict"].as_str().unwrap();
+    assert!(
+        verdict == "PASS" || verdict.starts_with("PASS with "),
+        "{verdict}: {report}\n{ran}"
+    );
+    assert_eq!(ran.code, Some(0), "{ran}");
+    assert_eq!(report["ask"], "stand-in-fast");
+    assert_eq!(report["error"], Value::Null, "{report}");
+    // Every disruption was played, as the standard dry run plays them, though the project was
+    // done long before.
+    let played: Vec<&str> = report["disruptions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|one| one["state"].as_str().unwrap())
+        .collect();
+    assert_eq!(played, ["played"; 7], "{report}");
+    // The run ended because the project was done and its schedule played, within its budget.
+    assert_eq!(report["ending"], "the project is done", "{report}");
+    for (at, number) in [(8, 9), (9, 10)] {
+        let invariant = &report["invariants"][at];
+        assert_eq!(
+            (&invariant["number"], &invariant["held"]),
+            (&Value::from(number), &Value::Bool(true)),
+            "{report}"
+        );
+    }
+    // The owner gave work for it: at least one piece, each said in the timeline with the
+    // disruption it was for, and counted apart from the conversation's follow-ups.
+    let timeline = report["timeline"].as_array().unwrap();
+    let extra: Vec<&str> = timeline
+        .iter()
+        .filter(|moment| moment["kind"] == "owner")
+        .filter_map(|moment| moment["text"].as_str())
+        .filter(|text| text.starts_with("the owner's extra work, for "))
+        .collect();
+    assert!(!extra.is_empty(), "{report}");
+    // And the report says the project, the time and the disruptions apart.
+    let coverage = &report["coverage"];
+    assert_eq!(coverage["project"]["ended"], true, "{coverage}");
+    assert_eq!(coverage["disruptions"]["planned"], 7, "{coverage}");
+    assert_eq!(coverage["disruptions"]["played"], 7, "{coverage}");
+    assert_eq!(coverage["disruptions"]["notPlayed"], 0, "{coverage}");
+    assert_eq!(coverage["extraWork"]["given"], extra.len(), "{coverage}");
+    assert!(coverage["elapsed"]["seconds"].as_u64().unwrap() < 30 * 60);
+}
+
+/// The same project with a budget of six minutes, which the work (about five minutes) leaves
+/// no room in for a piece of extra work (it takes four): the schedule finds no shape before
+/// the time is up, and the run fails and says which disruptions it did not play and why they
+/// found none: what each needed, and what the looks after it was due found of the staff. The
+/// report keeps the project, the time and the disruptions apart.
+///
+/// ```text
+/// cargo test -p cf-evals --test long_dry_run -- --ignored --nocapture finds_no_shape
+/// ```
+#[test]
+#[ignore = "plays a short long run against the stand-ins, its budget spent: about seven minutes, and nothing spent"]
+fn a_schedule_that_finds_no_shape_before_the_budget_is_spent_fails_and_names_each_disruption() {
+    let (folder, _made) = kept_if_asked(tempfile::tempdir().unwrap());
+    let reports = folder.join("reports");
+    let ran = long_run_asking(
+        &folder,
+        "stand-in-fast",
+        &[
+            "--chief",
+            "claude",
+            "--staff",
+            "claude,devin",
+            "--model",
+            "fake-chief",
+            "--models",
+            "claude=fake+fake,devin=fake+fake",
+            "--switch-to",
+            "claude",
+            "--hours",
+            "0.1",
+            "--every-min",
+            "1.5",
+            "--look-sec",
+            "3",
+            "--quiet-min",
+            "1.5",
+            "--wake-min",
+            "5",
+            "--settle-sec",
+            "5",
+        ],
+        None,
+    );
+    assert_eq!(ran.code, Some(1), "{ran}");
+    let kept = kept_in(&reports);
+    let json = kept
+        .iter()
+        .find(|file| file.extension().is_some_and(|ext| ext == "json"))
+        .unwrap_or_else(|| panic!("no report: {kept:?}\n{ran}"));
+    let report: Value = serde_json::from_str(&std::fs::read_to_string(json).unwrap()).unwrap();
+    assert_eq!(report["verdict"], "FAIL", "{report}");
+    assert_eq!(report["ending"], "time ran out", "{report}");
+    let unplayed: Vec<&Value> = report["disruptions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|one| one["state"] == "not played")
+        .collect();
+    assert!(!unplayed.is_empty(), "{report}");
+    for one in &unplayed {
+        let said = one["said"].as_str().unwrap();
+        assert!(
+            said.starts_with(
+                "time ran out before its moment came, and the owner gave no extra work: it needs "
+            ),
+            "{said}"
+        );
+        assert!(
+            said.contains(" after its time, +")
+                || said.contains(", had not come")
+                || said.contains("it waited behind "),
+            "{said}"
+        );
+    }
+    // Each is a line of the report's why, and of the console: by name.
+    let why: Vec<&str> = report["why"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    for one in &unplayed {
+        let flag = one["disruption"].as_str().unwrap();
+        assert!(
+            why.iter()
+                .any(|line| line.starts_with(&format!("{flag} was not played: time ran out"))),
+            "{flag}: {why:?}"
+        );
+        assert!(
+            ran.stdout
+                .contains(&format!("  why: {flag} was not played")),
+            "{flag}: {ran}"
+        );
+    }
+    // No piece of extra work was given: none fit the budget. The three are told apart.
+    assert_eq!(report["coverage"]["extraWork"]["given"], 0, "{report}");
+    assert_eq!(report["coverage"]["elapsed"]["budgetSeconds"], 360);
+    assert_eq!(
+        report["coverage"]["disruptions"]["notPlayed"],
+        unplayed.len(),
+        "{report}"
+    );
+    assert!(
+        ran.stdout.contains("  coverage: project "),
+        "the console says the coverage: {ran}"
+    );
 }

@@ -9,6 +9,7 @@ use rustls::crypto::CryptoProvider;
 const INSTALLS: &str = "CONSENSFLOW_TEST_TLS_INSTALLS";
 
 #[test]
+#[allow(clippy::disallowed_methods, clippy::disallowed_types)] // Its own child by a CONSENSFLOW_TEST_* variable, which builds a bare client to show what the install gives one.
 fn the_app_installs_ring_once_for_its_whole_process() {
     if std::env::var_os(INSTALLS).is_some() {
         assert!(
@@ -37,6 +38,7 @@ fn the_app_installs_ring_once_for_its_whole_process() {
 
 /// What the plugin does before its own client, done first: the app's install leaves it be.
 #[test]
+#[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
 fn a_provider_installed_before_the_apps_is_left_as_it_is() {
     const FIRST: &str = "CONSENSFLOW_TEST_TLS_FIRST";
     if std::env::var_os(FIRST).is_some() {

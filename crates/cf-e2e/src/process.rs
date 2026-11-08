@@ -144,6 +144,36 @@ pub fn as_a_shell_finds(name: &str) -> std::path::PathBuf {
     first_on_path(name, &path, &extensions).unwrap_or_else(|| name.into())
 }
 
+/// Git Bash, where Claude Code looks for it: the file `CLAUDE_CODE_GIT_BASH_PATH` names,
+/// then the `bin\bash.exe` of the Git whose `git.exe` is on the PATH (`…\Git\cmd` or
+/// `…\Git\bin`), then Git's own install folder. The shell Claude Code runs an agent's commands
+/// in on Windows, and Devin too (its commands answer `/usr/bin/bash: line 1: …` on zeewin,
+/// `devin-shell-on-windows-does-not-find-cf`): a stand-in that runs a command for its agent
+/// runs it so, for the host proves the work of a turn by a shell that started it, and `cmd.exe`
+/// is none (`cf-panes`' `background::work`).
+#[cfg(windows)]
+pub fn git_bash() -> Option<PathBuf> {
+    git_bash_in(
+        own_var("CLAUDE_CODE_GIT_BASH_PATH").as_deref(),
+        &own_var("PATH").unwrap_or_default(),
+    )
+}
+
+/// [`git_bash`], with the file `named` and the `path` it looks in.
+#[cfg(windows)]
+fn git_bash_in(named: Option<&str>, path: &str) -> Option<PathBuf> {
+    if let Some(named) = named.map(PathBuf::from) {
+        if named.is_file() {
+            return Some(named);
+        }
+    }
+    std::env::split_paths(path)
+        .filter(|folder| folder.join("git.exe").is_file())
+        .filter_map(|folder| folder.parent().map(|git| git.join("bin").join("bash.exe")))
+        .chain([PathBuf::from(r"C:\Program Files\Git\bin\bash.exe")])
+        .find(|bash| bash.is_file())
+}
+
 /// What a program is given to read.
 #[derive(Debug, Clone)]
 enum Input {

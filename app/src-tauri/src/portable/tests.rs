@@ -464,6 +464,7 @@ struct Running(std::process::Child);
 
 #[cfg(windows)]
 impl Running {
+    #[allow(clippy::disallowed_methods)] // The test finds the command interpreter (ComSpec) it was started with.
     fn start(at: &Path) -> Self {
         use std::os::windows::process::CommandExt;
         use std::process::Stdio;

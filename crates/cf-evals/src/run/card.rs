@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use super::chief::{Chief, IDLE, READY};
 use super::floor::Floor;
 use super::login;
-use super::owner::{Owner, Seen, Step, KEY_PAUSE, QUESTION_PAUSE};
+use super::owner::{Owed, Owner, Seen, Step, KEY_PAUSE, QUESTION_PAUSE};
 use super::report::{file_name, keep, Card, Refused, Said};
 use super::workspace;
 use super::{start, Plan};
@@ -213,8 +213,15 @@ fn conduct(
                         Some("queued" | "working" | "waiting")
                     )
                 }),
+            staff_at_work: tasks.iter().any(|task| {
+                matches!(
+                    task["state"].as_str(),
+                    Some("queued" | "working" | "waiting")
+                )
+            }),
             dialog: state == Some("waiting"),
             board_empty: tasks.is_empty(),
+            owed: Owed::Nothing,
         };
         let step = owner.step(scenario, &seen, options.timeout, &mut || {
             chief_open_question(&file)
@@ -252,7 +259,7 @@ fn conduct(
                 switch(plan, rig, &chief, project, floor, scene)?;
                 last_change = Instant::now();
             }
-            Step::Next(FollowUp::Say(next)) => {
+            Step::Next(FollowUp::Say(next)) | Step::More(next) => {
                 floor.note(format!(
                     "the owner's next message ({}): {}",
                     owner.follow_ups_sent,

@@ -867,6 +867,26 @@ replace = '''const WORK: [&str; 4] = [
 ];'''
 
 [[plant]]
+name = "live matrix: the stand-in Devin's command on Windows runs under cmd.exe and the close says nothing of it (T-1218)"
+meant = "devin_worker_field_devin_command_left"
+platforms = ["windows"]
+runs = ["matrix-devin-command-left"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/command.rs"
+find = '''    let shell = Run::new(cf_e2e::process::git_bash().ok_or_else(|| {
+        "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
+            .to_owned()
+    })?)
+    .args(["-c", &format!("{command}; true")]);'''
+replace = '''    let shell = Run::new("cmd").args([
+        "/d".to_owned(),
+        "/c".to_owned(),
+        format!("ping -n {} 127.0.0.1 > nul", seconds + 1),
+    ]);'''
+
+[[plant]]
 name = "live matrix: field fix out: a resumed Devin worker is given the note that its turn was cut without /bypass (B1)"
 meant = "devin_worker_field_devin_resumed_writes"
 runs = ["matrix-devin-resumed-writes"]

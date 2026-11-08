@@ -117,25 +117,26 @@ pub fn seat_fields() -> Vec<Scenario> {
                 "A",
                 "task add --tier standard :: BACKGROUND 600 Reply with exactly: LEFT_IT",
                 // The board settles once the result is in, which can be before the window's close
-                // says what it ended: on Unix the run waits for that note too (T-1190), and its
-                // deadline makes a note that never comes a red of the check below.
+                // says what it ended: the run waits for that note too (T-1190), and its deadline
+                // makes a note that never comes a red of the check below.
                 |snapshot, bindings| answered(snapshot, bindings, "A", 0)
                     && crate::matrix::run::settled(snapshot)
-                    && (cfg!(windows) || snapshot.chief_inbox.iter().any(|message| {
+                    && snapshot.chief_inbox.iter().any(|message| {
                         message["body"].as_str().is_some_and(|body| body.contains("which its close ended"))
-                    }))
+                    })
             )],
             A,
             |judged| {
                 vec![
                     oracle::state(judged, "A", 0, &["done"]),
                     result_is(judged, "A", "LEFT_IT"),
-                    // On Windows no message says what the close ended: the brain's issue
-                    // `a-devin-windows-close-on-windows-tells-nothing-of-the-command-it-ended` (T-1207).
+                    // The stand-in's command runs in a shell on both systems (Git Bash on Windows, as
+                    // Devin's commands do): a command under `cmd.exe` is no turn's work to the host, and
+                    // the close ended it unsaid (T-1207, T-1218).
                     Check::new(
                         "A",
-                        "the chief was told what its window's close ended (Unix; Windows: see the brain's issue)",
-                        cfg!(windows) || chief_messages_with(judged, "which its close ended").len() == 1,
+                        "the chief was told what its window's close ended",
+                        chief_messages_with(judged, "which its close ended").len() == 1,
                         crate::live::cut(&chief_messages_with(judged, "which its close ended").join(" | "), 200),
                     ),
                 ]

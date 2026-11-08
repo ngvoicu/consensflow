@@ -1022,6 +1022,7 @@ mod tests {
     /// to grow without end.
     #[cfg(windows)]
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test points CONSENSFLOW_HOME at a folder of its own, and puts it back.
     fn the_daemons_errors_go_to_an_app_log_kept_like_the_others() {
         let home = tempfile::tempdir().expect("home");
         let log = home.path().join("app").join("app.log");
