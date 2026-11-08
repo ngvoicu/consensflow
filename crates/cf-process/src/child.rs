@@ -669,17 +669,18 @@ mod tests {
     }
 
     /// What a note says of a program the system would not start: the kind and the code, and no
-    /// file (T-1328: `spawn pi hunter22.cmd ENOENT` lost the code with the path).
+    /// file (T-1328: `spawn pi hunter22 ENOENT` lost the code with the path; a `.cmd` of that
+    /// name starts on Windows, through cmd.exe, so the name has no extension).
     #[test]
     fn a_start_the_system_refused_says_the_kind_and_the_code_a_note_says_and_not_the_file() {
         let run = Run {
-            program: PathBuf::from("/nonexistent/pi hunter22.cmd"),
+            program: PathBuf::from("/nonexistent/pi hunter22"),
             args: Vec::new(),
             verbatim: false,
         };
         let failed = block_on(async { spawn(&run, None, &system_env(), Streams::Quiet).err() })
             .expect("the program was not there");
-        assert_eq!(failed.words(), "spawn /nonexistent/pi hunter22.cmd ENOENT");
+        assert_eq!(failed.words(), "spawn /nonexistent/pi hunter22 ENOENT");
         assert_eq!(
             failed.failure(),
             StartFailure::of(StartKind::NotFound).with_errno("ENOENT")
