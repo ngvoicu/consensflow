@@ -34,9 +34,30 @@ pub fn a_path_in_words(path: impl AsRef<Path>) -> String {
     format!("{PATH_OPENS}{text}{PATH_CLOSES}")
 }
 
+/// `words` as a person reads them, the marks of the files taken off and the files kept
+/// (`‹C:\tools\pi.cmd›` is `C:\tools\pi.cmd`): for a terminal or a page, where the path is
+/// the person's own and the words say what to do about it. A note on the board, which others read,
+/// replaces the marked files instead.
+pub fn unmarked(words: &str) -> String {
+    words
+        .chars()
+        .filter(|c| *c != PATH_OPENS && *c != PATH_CLOSES)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_marks_come_off_a_person_s_words_and_the_files_stay() {
+        let words = format!(
+            "{} is no shim",
+            a_path_in_words(r"C:\tools\pi hunter22.cmd")
+        );
+        assert_eq!(unmarked(&words), r"C:\tools\pi hunter22.cmd is no shim");
+        assert_eq!(unmarked("no marks"), "no marks");
+    }
 
     #[test]
     fn a_path_is_marked_whole_with_its_blanks_and_a_marker_among_its_characters_is_none() {

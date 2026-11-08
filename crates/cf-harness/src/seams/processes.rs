@@ -124,7 +124,11 @@ impl SystemProcesses {
     fn start(&self, program: &Program) -> Result<(cf_process::Run, Env), String> {
         let env = with_required(&program.env, &self.this);
         let args: Vec<OsString> = program.args.iter().map(OsString::from).collect();
-        Ok((runnable(&program.executable, &args, &env)?, env))
+        // A page and a ledger show this to the person, whose own path it is: the marks that a note
+        // on the board replaces the file by come off.
+        let run = runnable(&program.executable, &args, &env)
+            .map_err(|failed| cf_base::startup::unmarked(&failed))?;
+        Ok((run, env))
     }
 }
 

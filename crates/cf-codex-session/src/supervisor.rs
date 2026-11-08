@@ -308,7 +308,8 @@ impl Session {
         }
         args.push("app-server".into());
         args.extend(plan.endpoint.listen().iter().cloned());
-        let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
+        let (mut command, program) = command(plan, &args)
+            .map_err(|failed| SessionError::Unrunnable(cf_base::startup::unmarked(&failed)))?;
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -382,7 +383,8 @@ impl Session {
             "CF_CODEX_TUI_TOKEN".into(),
         ];
         args.extend(plan.split.tui.iter().cloned());
-        let (mut command, program) = command(plan, &args).map_err(SessionError::Unrunnable)?;
+        let (mut command, program) = command(plan, &args)
+            .map_err(|failed| SessionError::Unrunnable(cf_base::startup::unmarked(&failed)))?;
         command
             .env("CF_CODEX_TUI_TOKEN", &plan.bridge.token)
             .stdin(Stdio::inherit())
