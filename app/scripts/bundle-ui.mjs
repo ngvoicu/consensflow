@@ -20,7 +20,7 @@ await build({
   platform: 'browser',
   stdin: {
     contents:
-      "export { Terminal } from '@xterm/xterm'; export { FitAddon } from '@xterm/addon-fit'; export { LinkComputer } from '@xterm/addon-web-links/src/WebLinkProvider.ts';",
+      "export { Terminal } from '@xterm/xterm'; export { FitAddon } from '@xterm/addon-fit';",
     resolveDir: APP,
     sourcefile: 'xterm-entry.js',
   },
@@ -49,4 +49,4 @@ await build({
   target: ['safari15'],
 })
 
-process.stdout.write('ui: xterm 6, addon-fit, addon-web-links (its link reader) and mermaid 11 bundled locally\n')
+process.stdout.write('ui: xterm 6, addon-fit and mermaid 11 bundled locally\n')

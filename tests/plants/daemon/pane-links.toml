@@ -1,8 +1,14 @@
 # A link in a pane opens in the human's browser (T-1291, Gabriel, 2026-11-07: "yes turn on the links"):
-# the addresses a program prints in a window (a plain `http://` or `https://` one, or an OSC 8
-# hyperlink, words with the address behind them) are links in every pane, and the rules stand, each
-# held by a test:
+# an OSC 8 hyperlink, words with the address behind them, is a link in every pane, and the rules
+# stand, each held by a test:
 #
+# - **only an OSC 8 hyperlink is a link** (the third review, T-1323, after the first two mended a
+#   reader of plain addresses twice): an address a program prints as text is no link in any form,
+#   whole or not, with no underline and no click. From the screen alone it cannot be told whole:
+#   Pi lays its text out in rows of its own and writes them with CR/LF, which cut an address inside
+#   a table cell well short of the pane's edge, and no rule that reads the text can be sure of the
+#   layout. A program that wants a link makes it an OSC 8 hyperlink, which carries its address
+#   whole on every row it is drawn on;
 # - the pointer on a link underlines it and says in the terminal's title what opens it and where it
 #   goes, the address too (words can hide any); the title goes when the pointer does;
 # - a click opens it only with the system's key held (Cmd on a Mac, Ctrl on Windows, as VS Code's
@@ -15,24 +21,18 @@
 #   of it), and hands the system's opener the address as the parser writes it, as one argument and
 #   no shell between (`app/src-tauri/src/link.rs`, the update's download page opened the same way);
 #   a refusal is said in the status line;
-# - and what the review of T-1291 found (T-1301, mended in T-1307): on Windows the system's opener
-#   is `ShellExecuteW` with the verb `open`, the address as the file and no parameters (Explorer
-#   read a comma and an equals sign of a checked address as its own arguments), its answer is read
-#   and 32 or less is a refusal the status line shows; a plain address is read whole by
-#   `app/ui/link-pattern.js` (parentheses, brackets and braces in pairs, commas, carets, any letters
-#   of the scheme, an IPv6 host), without the marks a sentence puts around it, and not as the
-#   addon's own pattern cut it at a parenthesis; a test build opens no page unless the test stands
-#   an opener in, and never reaches the system's own;
-# - and what the second review found (T-1314, mended in T-1315): a link opens the address the
-#   program meant or is no link at all. Claude Code and Pi are told, by their launch's environment
-#   and no file of the owner's, that the pane draws OSC 8 hyperlinks (`FORCE_HYPERLINK=1`,
-#   `PI_HYPERLINKS=1`), so a link is its words with the whole address behind them on every row it
-#   is drawn on; a plain address that its row's end may have cut (it runs to the last column or
-#   ends the text within the margin of it, and xterm did not mark the next row a continuation) is
-#   no link; an apostrophe is part of an address, but one that opens it is the quotation mark that
-#   the next apostrophe closes; the marks a pair of brackets or quotes closes right after an
-#   address are its own; and the update's download page opens on Windows as a link does, through
-#   `ShellExecuteW`, with the shell's answer read and a COM start that was refused said.
+# - on Windows the system's opener is `ShellExecuteW` with the verb `open`, the address as the file
+#   and no parameters (Explorer read a comma and an equals sign of a checked address as its own
+#   arguments; the review of T-1291, T-1301), its answer is read and 32 or less is a refusal the
+#   status line shows, a refused COM start is said, and the update's download page opens the same
+#   way (T-1315); a test build opens no page unless the test stands an opener in, and never reaches
+#   the system's own;
+# - a Pi launch tells Pi the pane draws OSC 8 (`PI_HYPERLINKS=1`), so its links are hyperlinks; a
+#   Claude Code launch tells it nothing (`FORCE_HYPERLINK=1` made the commands its window runs write
+#   OSC 8 into their output, T-1323), and its links are text, which is no link;
+# - the page replays what Pi, Claude Code and Codex print (`app/tests/fixtures/pane-links/`, 89
+#   cases): an OSC 8 hyperlink opens exactly its address, from any row it is drawn on, and an
+#   address in text opens nothing.
 #
 # A plant that falls through to the system's opener runs a harmless stand-in in its place: the
 # plant of the fail-closed rule says "opens" with `|_| Ok(())`, for a plant that really opened
@@ -42,13 +42,12 @@
 # plants of the Windows route say a page opened and ask the shell nothing instead.
 #
 # One plant takes one rule out; a test of it fails. The page's run the browser's, the app's the tests
-# of the link module on this system; the xterm they stand on is the tracked `app/ui/vendor`, so no
-# plant bundles it. Every name holds `pane links`, so `npm run plants:daemon -- "pane links"` runs them all.
+# of the link module on this system, and the launch's the launch tests of cf-harness; the xterm they
+# stand on is the tracked `app/ui/vendor`, so no plant bundles it. Every name holds `pane links`, so `npm run plants:daemon -- "pane links"` runs them all.
 
 [run]
 pl-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pane links"]
 pl-app = ["cargo", "xtask", "app", "test", "link::"]
-pl-pattern = ["node", "--test", "tests/web-address.test.mjs"]
 pl-update = ["cargo", "xtask", "app", "test", "update_page::"]
 pl-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch"]
 
@@ -87,16 +86,6 @@ replace = "(MAC ? event.metaKey : event.ctrlKey)"
 # --- the page: what is a link, and what it says ---
 
 [[plant]]
-name = "pane links: a plain URL is no link"
-meant = "pane links on a Mac › a plain URL is underlined and titled as the pointer comes on it, and Cmd+click opens exactly that address"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/term.js"
-find = "    this.terminal.registerLinkProvider(webLinks(this.terminal, link))\n"
-replace = ""
-
-[[plant]]
 name = "pane links: an OSC 8 hyperlink is left to xterm's own handler"
 meant = "pane links on a Mac › an OSC 8 hyperlink shows its address in the title where its words hide it, and Cmd+click opens exactly that address"
 runs = ["pl-page"]
@@ -128,7 +117,7 @@ replace = "title = `${LINK_KEY}+click to open`"
 
 [[plant]]
 name = "pane links: the title stays after the pointer has left a link"
-meant = "pane links on a Mac › a plain URL is underlined and titled as the pointer comes on it, and Cmd+click opens exactly that address"
+meant = "pane links on a Mac › an OSC 8 hyperlink shows its address in the title where its words hide it, and Cmd+click opens exactly that address"
 runs = ["pl-page"]
 
 [[plant.edit]]
@@ -328,103 +317,7 @@ file = "app/src-tauri/src/link.rs"
 find = """            None => Err("a test build opens no page unless the test stands an opener in".into()),"""
 replace = """            None => open_with(|_| Ok(()), address),"""
 
-# --- the page: a plain address is read whole ---
-
-[[plant]]
-name = "pane links: the addon's own pattern reads the addresses"
-meant = "pane links on a Mac › Cmd+click opens the whole address of a plain link, and not the marks a sentence puts around it"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = 'LinkComputer.computeLink(y, WEB_ADDRESS, terminal, activate)'
-replace = '''LinkComputer.computeLink(y, /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/, terminal, activate)'''
-
-[[plant]]
-name = "pane links: a pair of parentheses is not part of an address"
-meant = "https://en.wikipedia.org/wiki/Function_(mathematics) is found whole"
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = """  ['\\\\(', '\\\\)'],
-"""
-replace = ""
-
-[[plant]]
-name = "pane links: a closing parenthesis alone is part of an address"
-meant = '"(https://example.com/a)" holds ["https://example.com/a"]'
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = "const BRACKETS = '()\\\\[\\\\]{}'"
-replace = "const BRACKETS = '(\\\\[\\\\]{}'"
-
-[[plant]]
-name = "pane links: the full stop of a sentence is part of the address before it"
-meant = '"See https://example.com/a." holds ["https://example.com/a"]'
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = "export const SENTENCE_MARKS = '.,:;!?*~^|'"
-replace = "export const SENTENCE_MARKS = ',:;!?*~^|'"
-
-[[plant]]
-name = "pane links: a comma or a caret ends an address"
-meant = "https://example.com/a,b^c is found whole"
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = "const QUOTES = '\"`"
-replace = "const QUOTES = ',^\"`"
-
-[[plant]]
-name = "pane links: the letters of the scheme must be lower case"
-meant = "hTtPs://example.com/a is found whole"
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = """    'i',
-  )"""
-replace = """    '',
-  )"""
-
-[[plant]]
-name = "pane links: a pair of brackets holds no pair"
-meant = "https://en.wikipedia.org/wiki/Foo_(bar_(baz)) is found whole"
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = "const DEPTH = 3"
-replace = "const DEPTH = 1"
-
-# --- what the second review found (T-1314, T-1315): the harnesses are asked for hyperlinks ---
-
-[[plant]]
-name = "pane links: Claude Code's launch does not say the pane draws hyperlinks"
-meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
-runs = ["pl-launch"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''                    .chain(&HYPERLINKS)
-'''
-replace = ""
-
-[[plant]]
-name = "pane links: Claude Code's launch asks for hyperlinks with a zero"
-meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
-runs = ["pl-launch"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''const HYPERLINKS: [(&str, &str); 1] = [("FORCE_HYPERLINK", "1")];'''
-replace = '''const HYPERLINKS: [(&str, &str); 1] = [("FORCE_HYPERLINK", "0")];'''
+# --- a Pi launch asks Pi for hyperlinks (T-1315) ---
 
 [[plant]]
 name = "pane links: Pi's launch does not say the pane draws hyperlinks"
@@ -446,115 +339,6 @@ runs = ["pl-launch"]
 file = "crates/cf-harness/src/pi/adapter.rs"
 find = '''const HYPERLINKS: (&str, &str) = ("PI_HYPERLINKS", "1");'''
 replace = '''const HYPERLINKS: (&str, &str) = ("PI_HYPERLINKS", "0");'''
-
-# --- the page: an apostrophe is part of an address ---
-
-[[plant]]
-name = "pane links: an apostrophe ends an address"
-meant = "https://en.wikipedia.org/wiki/Bayes'_theorem is found whole"
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = "  const inner = apostrophe ? QUOTES : `${QUOTES}'`"
-replace = "  const inner = `${QUOTES}'`"
-
-[[plant]]
-name = "pane links: an address may end with an apostrophe"
-meant = '''"https://example.com/a'" holds ["https://example.com/a"]'''
-runs = ["pl-pattern", "pl-page"]
-
-[[plant.edit]]
-file = "app/ui/link-pattern.js"
-find = '''const ending = `[^\\s${QUOTES}'<>'''
-replace = '''const ending = `[^\\s${QUOTES}<>'''
-
-[[plant]]
-name = "pane links: the apostrophe that opens a quotation is part of the address in it"
-meant = "pane links: where a row’s end cuts an address › an apostrophe inside an address is part of it, and those of a quotation round one are not"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = '''      const opened = (link) => link.text.includes("'") && before(terminal, link.range, cell) === "'"'''
-replace = '''      const opened = () => false'''
-
-# --- the page: a plain address that its row's end may have cut is no link ---
-
-[[plant]]
-name = "pane links: an address that runs to the last column is a link"
-meant = "pane links: where a row’s end cuts an address › an address that runs to the last column, whatever row follows it"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = "  if (after >= cols) return true\n"
-replace = "  if (after >= cols) return false\n"
-
-[[plant]]
-name = "pane links: an address that ends within the program's margin is a link"
-meant = "pane links: where a row’s end cuts an address › an address that ends within the margin a program keeps, and one that ends short of it"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = "  return cols - after <= EDGE_MARGIN\n"
-replace = "  return false\n"
-
-[[plant]]
-name = "pane links: a row xterm marked wrapped is cut at its end too"
-meant = "pane links: where a row’s end cuts an address › an address that ends in the last column of a row xterm wrapped is a link"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = "  if (!line || next?.isWrapped) return false\n"
-replace = "  if (!line) return false\n"
-
-[[plant]]
-name = "pane links: an address that ends in the last column is taken for one that ends in the next row"
-meant = "pane links: what Pi with hyperlinks off prints › opens the exact address on a click, or is no link: never a shortened one"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = "  return x === 0 ? { x: terminal.cols, y: y - 1 } : { x, y }\n"
-replace = "  return { x, y }\n"
-
-[[plant]]
-name = "pane links: an address its pair closed is cut by its row like any other"
-meant = "pane links: where a row’s end cuts an address › an address its brackets or quotes close, at the edge, is whole"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = "      if (marks === '') return { link, closed: true }\n"
-replace = "      if (marks === '') return { link, closed: false }\n"
-
-[[plant]]
-name = "pane links: the marks a pair closes right after an address are a sentence's"
-meant = "pane links: where a row’s end cuts an address › a mark a pair of brackets closes right after is the address’s, and a sentence’s is not"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = "    if (chars.length !== 1 || !SENTENCE_MARKS.includes(chars)) break\n"
-replace = "    break\n"
-
-[[plant]]
-name = "pane links: a plain address that a row may have cut is a link"
-meant = "pane links: what Pi with hyperlinks off prints › opens the exact address on a click, or is no link: never a shortened one"
-runs = ["pl-page"]
-
-[[plant.edit]]
-file = "app/ui/web-links.js"
-find = '''        .filter(
-          ({ link, closed }) => closed || !mayBeCut(terminal, endOf(terminal, link.range), cell),
-        )
-'''
-replace = ""
-
-# --- Windows: the download page is opened as a link is, and COM's refusal is said (T-1315) ---
 
 [[plant]]
 name = "pane links: the download page is not opened through the shell"
@@ -618,3 +402,49 @@ runs = ["pl-app"]
 file = "app/src-tauri/src/link/shell.rs"
 find = "    let ours = com_started(start())?;\n"
 replace = "    let ours = com_started(start()).unwrap_or(false);\n"
+
+# --- the third review (T-1323): only an OSC 8 hyperlink is a link ---
+
+[[plant]]
+name = "pane links: a plain address is a link again"
+meant = "pane links on a Mac › a plain URL is no link: no underline, no title, and Cmd+click opens nothing"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.open(host)\n"
+replace = '''    this.terminal.registerLinkProvider({
+      provideLinks: (y, done) => {
+        const text = this.terminal.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+        const found = /https?:\/\/\S+/i.exec(text)
+        done(
+          found
+            ? [
+                {
+                  range: {
+                    start: { x: found.index + 1, y },
+                    end: { x: found.index + found[0].length, y },
+                  },
+                  text: found[0],
+                  ...link,
+                },
+              ]
+            : undefined,
+        )
+      },
+    })
+    this.terminal.open(host)
+'''
+
+[[plant]]
+name = "pane links: Claude Code's launch forces hyperlinks on the commands it runs"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''const QUIET: [(&str, &str); 1] = [("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1")];'''
+replace = '''const QUIET: [(&str, &str); 2] = [
+    ("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1"),
+    ("FORCE_HYPERLINK", "1"),
+];'''

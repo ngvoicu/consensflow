@@ -3540,41 +3540,34 @@ for (const [system, agent, key, other] of [
   test.describe(`pane links on ${system}`, () => {
     test.use({ userAgent: agent })
 
-    test(`a plain URL is underlined and titled as the pointer comes on it, and ${named}+click opens exactly that address`, async ({
+    // Only an OSC 8 hyperlink is a link (the third review, T-1323): a plain address cannot be told
+    // whole from the screen, as a program that lays out its text in rows of its own writes it cut.
+    test(`a plain URL is no link: no underline, no title, and ${named}+click opens nothing`, async ({
       page,
     }) => {
-      const url = 'https://example.com/docs/a?x=1&y=%20z#frag'
-      await printing(page, `Sources: ${url}\r\n`, url)
-      const place = await placeOf(page, url)
-      expect(await decorationAt(page, place), 'underlined before the pointer comes').toBe(
-        'none solid',
-      )
+      const plain = 'https://example.com/docs/a?x=1&y=%20z#frag'
+      const web = 'https://example.org/linked'
+      await printing(page, `Sources: ${plain}\r\n${hyperlink(web, 'Linked')}\r\n`, 'Linked')
+      const place = await placeOf(page, plain)
       await page.mouse.move(place.x, place.y)
-      await expect.poll(() => decorationAt(page, place)).toBe('underline solid')
-      await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute(
-        'title',
-        `${named}+click to open ${url}`,
-      )
-      await expect(page.locator(`${CHIEF_TERMINAL} .xterm-screen`)).toHaveClass(
+      await afterFrames(page)
+      expect(await decorationAt(page, place), 'underlined under the pointer').toBe('none solid')
+      await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
+      await expect(page.locator(`${CHIEF_TERMINAL} .xterm-screen`)).not.toHaveClass(
         /xterm-cursor-pointer/,
       )
-      const box = await page.locator(`${CHIEF_TERMINAL} .xterm-rows`).boundingBox()
-      await page.mouse.move(box.x + 2, place.y)
-      await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
-      await afterFrames(page)
-      expect(await decorationAt(page, place), 'underlined after the pointer left').toBe(
-        'none solid',
-      )
       await clickWith(page, place, [key])
-      await expect.poll(() => linksOpened(page)).toEqual([url])
+      // The click above was heard before this one is: the hyperlink is the only that opens.
+      await clickWith(page, await placeOf(page, 'Linked'), [key])
+      await expect.poll(() => linksOpened(page)).toEqual([web])
     })
 
     test(`a click without ${named} opens nothing, nor does the other system's key, nor another button`, async ({
       page,
     }) => {
       const url = 'https://example.com/docs'
-      await printing(page, `${url}\r\n`, url)
-      const place = await placeOf(page, url)
+      await printing(page, `${hyperlink(url, 'Docs')}\r\n`, 'Docs')
+      const place = await placeOf(page, 'Docs')
       await clickWith(page, place)
       await clickWith(page, place, [other])
       await clickWith(page, place, ['Shift'])
@@ -3597,6 +3590,17 @@ for (const [system, agent, key, other] of [
       await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute(
         'title',
         `${named}+click to open ${url}`,
+      )
+      await expect(page.locator(`${CHIEF_TERMINAL} .xterm-screen`)).toHaveClass(
+        /xterm-cursor-pointer/,
+      )
+      // The title and the underline go when the pointer does.
+      const beside = await placeOf(page, 'more')
+      await page.mouse.move(beside.x, beside.y)
+      await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
+      await afterFrames(page)
+      expect(await decorationAt(page, place), 'underlined after the pointer left').toBe(
+        'underline dashed',
       )
       await clickWith(page, place)
       await clickWith(page, place, [other])
@@ -3653,11 +3657,11 @@ for (const [system, agent, key, other] of [
       await expect.poll(() => linksOpened(page)).toEqual([web])
     })
 
-    test(`${named}+click opens a URL a program wrapped over rows from any of them, whole`, async ({
+    test(`${named}+click opens an OSC 8 hyperlink whose words xterm wrapped over rows from any of them, whole`, async ({
       page,
     }) => {
       const url = `https://example.com/${'long-segment/'.repeat(30)}end?x=1&y=2`
-      await printing(page, `${url}\r\n`, 'long-segment')
+      await printing(page, `${hyperlink(url, url)}\r\n`, 'long-segment')
       const first = await placeOf(page, null, 0)
       const second = await placeOf(page, null, 1)
       expect(second.y).toBeGreaterThan(first.y)
@@ -3673,8 +3677,8 @@ for (const [system, agent, key, other] of [
     }) => {
       const url = 'https://example.com/taken'
       // The program asks to be told of the mouse (any button, SGR), as a full-screen program does.
-      await printing(page, `\u001b[?1000h\u001b[?1006h${url}\r\n`, url)
-      const place = await placeOf(page, url)
+      await printing(page, `\u001b[?1000h\u001b[?1006h${hyperlink(url, 'Taken')}\r\n`, 'Taken')
+      const place = await placeOf(page, 'Taken')
       await page.mouse.move(place.x, place.y)
       await expect.poll(() => decorationAt(page, place)).toBe('underline solid')
       await clickWith(page, place)
@@ -3682,80 +3686,43 @@ for (const [system, agent, key, other] of [
       await expect.poll(() => linksOpened(page)).toEqual([url])
     })
 
-    // What the review of T-1291 found (T-1301): the addon's own pattern stopped a plain address at
-    // a parenthesis or a caret, so a Wikipedia page opened as its first half. Each of these is
-    // printed as a program prints it, and the address the page asks the app to open is the whole
-    // of it, but for what a sentence puts after it.
-    test(`${named}+click opens the whole address of a plain link, and not the marks a sentence puts around it`, async ({
+    // Every way a program prints an address as text: none of it is a link, the address whole or not.
+    test('a plain address in any form is no link, with the system key held or not', async ({
       page,
     }) => {
-      const cases = [
-        // [as printed, the address that opens, the mark after it that is no part of it]
-        ['https://example.com/a', 'https://example.com/a', null],
-        ['HTTPS://example.com/a', 'HTTPS://example.com/a', null],
-        ['hTtPs://example.com/a', 'hTtPs://example.com/a', null],
-        ['https://xn--bcher-kva.example/a', 'https://xn--bcher-kva.example/a', null],
-        ['https://[2001:db8::1]/a', 'https://[2001:db8::1]/a', null],
-        ['http://[::1]', 'http://[::1]', null],
-        ['http://a@b/a', 'http://a@b/a', null],
-        ['https://example.com/a,b^c', 'https://example.com/a,b^c', null],
-        [
-          'https://example.com/?x=1,/root,C:/Windows/',
-          'https://example.com/?x=1,/root,C:/Windows/',
-          null,
-        ],
-        ['https://example.com/%00%0A%0D', 'https://example.com/%00%0A%0D', null],
-        [
-          'https://en.wikipedia.org/wiki/Function_(mathematics)',
-          'https://en.wikipedia.org/wiki/Function_(mathematics)',
-          null,
-        ],
-        [
-          'https://en.wikipedia.org/wiki/Foo_(bar_(baz))',
-          'https://en.wikipedia.org/wiki/Foo_(bar_(baz))',
-          null,
-        ],
-        ['https://example.com/?a[]=1&a[]=2', 'https://example.com/?a[]=1&a[]=2', null],
-        ['See https://example.com/a.', 'https://example.com/a', '.'],
-        ['https://example.com/a, then', 'https://example.com/a', ','],
-        ['(https://example.com/a)', 'https://example.com/a', ')'],
-        [
-          '(https://en.wikipedia.org/wiki/Function_(mathematics)).',
-          'https://en.wikipedia.org/wiki/Function_(mathematics)',
-          ')',
-        ],
-        ['[docs](https://example.com/a?b=1&c=2)', 'https://example.com/a?b=1&c=2', ')'],
-        ['"https://example.com/a"', 'https://example.com/a', '"'],
+      const forms = [
+        'https://example.com/a',
+        'HTTPS://example.com/a',
+        'https://en.wikipedia.org/wiki/Function_(mathematics)',
+        "https://en.wikipedia.org/wiki/Bayes'_theorem",
+        'https://example.com/a,b^c',
+        'See https://example.com/a.',
+        '(https://example.com/a)',
+        'Source (https://en.wikipedia.org/wiki/Yahoo!)',
+        '[docs](https://example.com/a?b=1&c=2)',
+        '"https://example.com/a"',
+        'https://[2001:db8::1]/a',
       ]
-      await printing(page, `${cases.map(([printed]) => printed).join('\r\n')}\r\n`, cases.at(-1)[0])
-      const opened = []
-      for (const [row, [printed, address, mark]] of cases.entries()) {
-        const place = await placeInRow(page, row, address)
+      const web = 'https://example.org/linked'
+      await printing(page, `${forms.join('\r\n')}\r\n${hyperlink(web, 'Linked')}\r\n`, 'Linked')
+      for (const [row, printed] of forms.entries()) {
+        // The cell the address begins in, found by the twelve characters from its scheme.
+        const start = printed.search(/https?:\/\//i)
+        const place = await placeInRow(page, row, printed.slice(start, start + 12))
         await page.mouse.move(place.x, place.y)
-        await expect(page.locator(CHIEF_TERMINAL), printed).toHaveAttribute(
-          'title',
-          `${named}+click to open ${address}`,
-        )
-        if (mark !== null) {
-          // The mark after the address is outside it: the pointer there is on no link.
-          const outside = await placeInRow(page, row, address, true)
-          await page.mouse.move(outside.x, outside.y)
-          await expect(page.locator(CHIEF_TERMINAL), `${printed}: ${mark}`).not.toHaveAttribute(
-            'title',
-            /.*/,
-          )
-        }
+        await afterFrames(page)
+        await expect(page.locator(CHIEF_TERMINAL), printed).not.toHaveAttribute('title', /.*/)
+        expect(await decorationAt(page, place), printed).toBe('none solid')
         await clickWith(page, place, [key])
-        opened.push(address)
-        await expect.poll(() => linksOpened(page), printed).toEqual(opened)
       }
+      await clickWith(page, await placeOf(page, 'Linked'), [key])
+      await expect.poll(() => linksOpened(page)).toEqual([web])
     })
 
-    test('a plain address with a host in letters of its own language or without its slashes is text, and its OSC 8 form opens whole', async ({
+    test('an address with a host in letters of its own language or without its slashes is a link as an OSC 8 hyperlink and text is none', async ({
       page,
     }) => {
-      // The addon reads the host it parsed (punycode) against the one printed; those two forms
-      // are not links as plain text, and the program that wants one makes it an OSC 8 link.
+      // As text neither is a link, as no plain address is; as an OSC 8 hyperlink each opens whole.
       const idn = 'https://bücher.example/a'
       const bare = 'http:example.com/a'
       await printing(
@@ -3779,14 +3746,14 @@ for (const [system, agent, key, other] of [
     test('a refusal of the app shows in the status line, and the link goes on working', async ({
       page,
     }) => {
-      await printing(page, 'https://example.com/a\r\n', 'https://example.com/a')
+      await printing(page, `${hyperlink('https://example.com/a', 'Docs')}\r\n`, 'Docs')
       await page.evaluate(() => {
         window.__linkRefused = {
           ok: false,
           error: 'The address is longer than 2048 characters',
         }
       })
-      const place = await placeOf(page, 'https://example.com/a')
+      const place = await placeOf(page, 'Docs')
       await clickWith(page, place, [key])
       await expect(page.locator('#status')).toContainText(
         'The link did not open: The address is longer than 2048 characters',
@@ -3826,8 +3793,8 @@ const printable = (raw) => raw.replace(SGR, '').replace(OSC_8, '')
 
 /**
  * The columns a click should land on for `raw`'s row: the middle of each OSC 8 hyperlink to
- * `destination` it draws, the start of a plain `https://`, and the first word of the row (a row
- * the address went on in, which is no link where the address was cut).
+ * `destination` it draws, the start of a plain `https://`, the first word of the row and its
+ * longest (a row the address went on in, which is no link where the address was cut).
  */
 function pointsOf(raw, destination) {
   const points = new Map()
@@ -3843,6 +3810,15 @@ function pointsOf(raw, destination) {
   if (plain >= 0) points.set(plain + 4, 'address')
   const first = text.search(/\S/)
   if (first >= 0 && !points.has(first + 1)) points.set(first + 1, 'word')
+  // The longest run of text on the row too: where the rest of a cut address lands.
+  let longest = null
+  for (const run of text.matchAll(/\S+/g)) {
+    if (longest === null || run[0].length > longest[0].length) longest = run
+  }
+  if (longest !== null) {
+    const middle = longest.index + Math.floor(longest[0].length / 2)
+    if (!points.has(middle)) points.set(middle, 'word')
+  }
   return points
 }
 
@@ -3900,13 +3876,13 @@ async function clickingCell(page, place, row, column) {
 }
 
 for (const [group, harness, mode] of [
-  ['Pi with hyperlinks off', 'pi', 'plain'],
-  ['Pi asked for hyperlinks (PI_HYPERLINKS=1)', 'pi', 'osc8'],
-  ['Claude Code with hyperlinks off', 'claude-code', 'plain'],
-  ['Claude Code asked for hyperlinks (FORCE_HYPERLINK=1)', 'claude-code', 'osc8'],
-  ['Codex', 'codex', 'osc8'],
+  ['Pi prints as text', 'pi', 'plain'],
+  ['Pi prints as OSC 8 hyperlinks (PI_HYPERLINKS=1)', 'pi', 'osc8'],
+  ['Claude Code prints as text', 'claude-code', 'plain'],
+  ['Claude Code is told to print OSC 8 hyperlinks (not by a launch)', 'claude-code', 'osc8'],
+  ['Codex prints as OSC 8 hyperlinks', 'codex', 'osc8'],
 ]) {
-  test.describe(`pane links: what ${group} prints`, () => {
+  test.describe(`pane links: what ${group}`, () => {
     test.use({ userAgent: MAC_AGENT, viewport: { width: 1400, height: 800 } })
     test.describe.configure({ timeout: 120_000 })
 
@@ -3938,138 +3914,6 @@ for (const [group, harness, mode] of [
         }
       }
       expect(wrong, `${cases.length} cases of ${group}`).toEqual([])
-    })
-  })
-}
-
-// Where a row's end may have cut an address, and where the pattern's own rules end one (T-1315). A
-// plain address is a link when the row it ends in did not cut it, and no link when it may have been:
-// no link is better than one that opens a shortened address. Each case is the rows a program wrote
-// (CR/LF between them, so xterm does not mark one a continuation) and the clicks: on a row (from
-// 0) at the words given, expecting the address it must open, or `null` for no link.
-const ADDRESS = 'https://example.com/path'
-/** A row of `width` columns on which `address` ends `slack` columns short of the last one. */
-const endingShort = (width, slack, address = ADDRESS) =>
-  `${'x'.repeat(width - slack - address.length - 1)} ${address}${' '.repeat(slack)}`
-const CUT = [
-  {
-    name: 'an address that runs to the last column, whatever row follows it',
-    width: 40,
-    printed: [endingShort(40, 0), 'the rest of it', '', endingShort(40, 0)],
-    clicks: [
-      [0, ADDRESS, null],
-      [3, ADDRESS, null],
-    ],
-  },
-  {
-    name: 'an address that ends within the margin a program keeps, and one that ends short of it',
-    width: 40,
-    printed: [endingShort(40, 1), endingShort(40, 2), endingShort(40, 3), endingShort(40, 12)],
-    clicks: [
-      [0, ADDRESS, null],
-      [1, ADDRESS, null],
-      [2, ADDRESS, ADDRESS],
-      [3, ADDRESS, ADDRESS],
-    ],
-  },
-  {
-    name: 'an address that ends a short row is a link, whatever row follows, so lines of addresses are',
-    width: 40,
-    printed: [
-      `Sources: ${ADDRESS}`,
-      'https://example.com/second',
-      'https://example.com/third',
-      'text of its own',
-    ],
-    clicks: [
-      [0, ADDRESS, ADDRESS],
-      [1, 'second', 'https://example.com/second'],
-      [2, 'third', 'https://example.com/third'],
-    ],
-  },
-  {
-    name: 'an address its brackets or quotes close, at the edge, is whole',
-    width: 40,
-    printed: [
-      `${'x'.repeat(40 - ADDRESS.length - 3)} (${ADDRESS})`,
-      `${'x'.repeat(40 - ADDRESS.length - 3)} "${ADDRESS}"`,
-    ],
-    clicks: [
-      [0, ADDRESS, ADDRESS],
-      [1, ADDRESS, ADDRESS],
-    ],
-  },
-  {
-    name: 'an address that ends in the last column of a row xterm wrapped is a link',
-    width: 20,
-    printed: ['https://example.com/ and more'],
-    clicks: [[0, 5, 'https://example.com/']],
-  },
-  {
-    name: 'an address xterm wrapped itself is read over the rows it wrapped',
-    width: 20,
-    printed: [`${ADDRESS}${'a'.repeat(30)}`],
-    clicks: [
-      [0, 5, `${ADDRESS}${'a'.repeat(30)}`],
-      [1, 5, `${ADDRESS}${'a'.repeat(30)}`],
-      [2, 5, `${ADDRESS}${'a'.repeat(30)}`],
-    ],
-  },
-  {
-    name: 'an apostrophe inside an address is part of it, and those of a quotation round one are not',
-    width: 100,
-    printed: [
-      "https://en.wikipedia.org/wiki/Bayes'_theorem",
-      "'https://example.com/a'",
-      "['https://a.example/x','https://b.example/y']",
-      "'https://example.com/it's' and more",
-      "It's at https://example.com/o'brien/x, honest",
-    ],
-    clicks: [
-      [0, 'wiki', "https://en.wikipedia.org/wiki/Bayes'_theorem"],
-      [1, 'example', 'https://example.com/a'],
-      [2, 'a.example', 'https://a.example/x'],
-      [2, 'b.example', 'https://b.example/y'],
-      [3, 'example', 'https://example.com/it'],
-      [4, 'brien', "https://example.com/o'brien/x"],
-    ],
-  },
-  {
-    name: 'a mark a pair of brackets closes right after is the address’s, and a sentence’s is not',
-    width: 100,
-    printed: [
-      'Source (https://en.wikipedia.org/wiki/Yahoo!)',
-      'wow https://en.wikipedia.org/wiki/Yahoo!',
-      '(see https://example.com/a.)',
-    ],
-    clicks: [
-      [0, 'wikipedia', 'https://en.wikipedia.org/wiki/Yahoo!'],
-      [1, 'wikipedia', 'https://en.wikipedia.org/wiki/Yahoo'],
-      [2, 'example', 'https://example.com/a'],
-    ],
-  },
-]
-for (const { name, width, printed, clicks } of CUT) {
-  test.describe('pane links: where a row’s end cuts an address', () => {
-    test.use({ userAgent: MAC_AGENT, viewport: { width: 1400, height: 800 } })
-
-    test(name, async ({ page }) => {
-      await replayPage(page)
-      const place = await replaying(page, `${printed.join('\r\n')}\r\n`, width)
-      for (const [row, words, address] of clicks) {
-        // `words` is where on the row to click: the column, or words on it.
-        const column =
-          typeof words === 'number'
-            ? words
-            : printed[row].indexOf(words) + Math.min(3, words.length - 1)
-        const { opened, title } = await clickingCell(page, place, row, column)
-        const said = `row ${row} at ${words} of ${JSON.stringify(printed[row] ?? '(wrapped)')}`
-        expect({ said, opened, title }).toEqual({
-          said,
-          opened: address === null ? [] : [address],
-          title: address === null ? '' : `Cmd+click to open ${address}`,
-        })
-      }
     })
   })
 }

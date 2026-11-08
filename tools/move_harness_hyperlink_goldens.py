@@ -1,13 +1,14 @@
-"""Moves cf-harness's launch goldens to the hyperlink switch each Claude Code and Pi launch carries (T-1315).
+"""Moves cf-harness's launch goldens to the hyperlink switch each Pi launch carries (T-1315).
 
-The pane is xterm.js and draws OSC 8 hyperlinks, but Claude Code (2.1.319) and Pi (1.5.0) know
-only the terminals they list and printed a link as `words (address)` text, which the pane cannot
-read to its end when the program wrote the address over rows of its own. A launch now tells each:
-Claude Code `FORCE_HYPERLINK=1`, Pi `PI_HYPERLINKS=1`, as the last variable of its environment
-(`claude/adapter.rs`, `pi/adapter.rs`). Node had neither. Every prepared launch of those two
-harnesses in the recording gets its pair; a launch that holds it already is left as it is, so the
-move can be run again after a merge brings unmoved rows. Codex, Devin and Muse have no such switch
-and are not moved.
+The pane is xterm.js and draws OSC 8 hyperlinks, but Pi (1.5.0) knows only the terminals it lists
+and printed a link as `words (address)` text, which a program that lays its rows out itself and
+writes them with CR/LF cuts where its width ends. A Pi launch now tells it `PI_HYPERLINKS=1`, the
+last variable of its environment (`pi/adapter.rs`). Node had none. Every prepared launch of Pi in
+the recording gets its pair; a launch that holds it already is left as it is, so the move can be
+run again after a merge brings unmoved rows. Claude Code is not moved: `FORCE_HYPERLINK=1` was
+tried for it and taken out again (T-1323: `supports-hyperlinks` answers it before it asks for a
+terminal, so the commands the window runs wrote OSC 8 into their output). Codex, Devin and Muse
+have no such switch.
 
     python3 -I tools/move_harness_hyperlink_goldens.py <scenarios.<platform>.json>...
 """
@@ -15,7 +16,7 @@ and are not moved.
 import json
 import sys
 
-SWITCH = {"claude-code": ["FORCE_HYPERLINK", "1"], "pi": ["PI_HYPERLINKS", "1"]}
+SWITCH = {"pi": ["PI_HYPERLINKS", "1"]}
 
 
 def move(node, pair):

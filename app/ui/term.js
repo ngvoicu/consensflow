@@ -1,5 +1,4 @@
 import { FitAddon, Terminal } from './vendor/xterm.js'
-import { webLinks } from './web-links.js'
 
 /**
  * How long a terminal's new size must hold before the terminal and the
@@ -44,11 +43,15 @@ const shortcutLetter = (event) =>
 export class XtermEmulator {
   constructor(host, { onReply = () => {}, onResize = () => {}, onLink = () => {} } = {}) {
     this.host = host
-    // A link is what a program prints as a web address (the addon below) or hides behind words
-    // (OSC 8, which xterm reads itself and hands to `linkHandler`). The pointer on one underlines
-    // it and says in the terminal's title what opens it and where it goes, the address too, for
-    // words can hide any. Only a web page is a link: xterm drops an OSC 8 address of another
-    // scheme (`file:`, `javascript:`, an app's own) before this is asked, as it does by default;
+    // A link is an OSC 8 hyperlink: words with the address hidden behind them, which xterm reads
+    // itself and hands to `linkHandler`. A web address a program prints as text is no link, in
+    // any form: from the screen alone it cannot be told whole, as a program that lays its text
+    // out in rows of its own writes one cut (three reviews, T-1301, T-1314, T-1323), so there is
+    // no reader for it; a program that wants one makes it an OSC 8 hyperlink and carries the
+    // address whole on every row it draws. The pointer on a link underlines it and says in the
+    // terminal's title what opens it and where it goes, the address too, for words can hide any.
+    // Only a web page is a link: xterm drops an OSC 8 address of another scheme (`file:`,
+    // `javascript:`, an app's own) before this is asked, as it does by default;
     // `allowNonHttpProtocols` says so here, and the app refuses what is not http or https again.
     const link = {
       activate: (event, uri) => {
@@ -72,11 +75,6 @@ export class XtermEmulator {
     })
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)
-    // The plain addresses of a pane: the web-links addon's link reader with the app's pattern (its
-    // own cut an address short at a parenthesis or a caret, T-1307) and rules (a plain address
-    // that may be cut by its row's end is no link, T-1315). They open a click with `activate`, and
-    // take the `hover` and `leave` of the link above.
-    this.terminal.registerLinkProvider(webLinks(this.terminal, link))
     this.terminal.open(host)
     this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
     this.humanDataPending = 0

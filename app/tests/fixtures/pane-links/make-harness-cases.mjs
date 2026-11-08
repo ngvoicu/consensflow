@@ -2,25 +2,33 @@
 /**
  * Regenerates `harness-cases.json`: what Pi, Claude Code and Codex print for a link, replayed
  * offline from the harnesses' own formatting code (T-1314's review, T-1315). No harness starts, no
- * model runs and no provider is called:
+ * model runs and no provider is called. **Only an OSC 8 hyperlink is a link in a pane**: a plain
+ * address, however a program laid it out, is no link (three reviews found a layout that cut one),
+ * so a case holds one of two things: the destination opens exactly (OSC 8) or nothing does.
  *
  * - Pi 1.5.0: `Markdown.render` of the installed `@earendil-works/pi-tui`, with an ANSI-only theme,
  *   `PI_HYPERLINKS` set to 0 (the plain `words (address)` fallback) or 1 (what ConsensFlow's launch
- *   sets: the words as an OSC 8 hyperlink, once a row), at 48, 80 and 120 columns. Pi pads each row
- *   with spaces to the width and writes the rows joined by CR/LF, so xterm marks none of them wrapped.
+ *   sets: the words as an OSC 8 hyperlink, once on every row they are drawn on), at 48, 80 and 120
+ *   columns, and in a Markdown table (the third review's case: Pi wraps a cell and writes the rows
+ *   with CR/LF; inline code is plain text even with hyperlinks on). Pi pads each row with spaces to
+ *   the width, so xterm marks none of them wrapped.
  * - Claude Code 2.1.319: its `Cb` link formatter and the `h3e`/`Tb` checks that decide whether it
  *   writes OSC 8, sliced out of the installed binary's JavaScript when this runs (nothing of it is
- *   kept here). Plain: `Cb(address, words, {supportsHyperlinks: false})`. With ConsensFlow's
- *   `FORCE_HYPERLINK=1` in the environment: `Cb(address, words)`, which asks `Tb()` itself.
+ *   kept here). Plain, what a launch of ConsensFlow's gets: `Cb(address, words, {supportsHyperlinks:
+ *   false})`. Written as OSC 8: `Cb(address, words)` under `FORCE_HYPERLINK=1`, which a launch does
+ *   **not** set (the variable reaches the commands the window runs, and `supports-hyperlinks`
+ *   answers it before it asks for a terminal): these cases show the format a client that tells
+ *   Claude Code's renderer alone would get, and hold the page to it.
  * - Codex: `codex-cases.json` (8 cases), recorded by the review of T-1314 from the isolated
  *   compilation of `osc8_hyperlink`, `web_destination` and `sanitized_destination` of
  *   openai/codex `rust-v0.167.0` (`codex-rs/tui/src/terminal_hyperlinks.rs`); Codex sends OSC 8 for
  *   an `http` or `https` address whatever the terminal, so it has nothing to switch.
  *
  * A case is `{id, harness, mode, width, printed, destination, expect}`: `printed` is what the
- * program wrote into the pane, `destination` the address the program meant, and `expect` what a
- * click on the address must do: `"exact"` opens `destination` and nothing else, `"none"` is no
- * link and opens nothing. Never a shortened address.
+ * program wrote into the pane, `destination` the address the program meant, `mode` how the
+ * program carries it (`"osc8"`, or `"plain"`: text) and `expect` what a click on it must do:
+ * `"exact"` opens `destination` and nothing else (OSC 8 only), `"none"` is no link and opens
+ * nothing. Never a shortened address.
  *
  * Run: `node app/tests/fixtures/pane-links/make-harness-cases.mjs` (Pi and Claude Code installed).
  */
@@ -84,15 +92,13 @@ function execNode(script, env) {
 }
 
 /**
- * What a click on the address must do. An OSC 8 hyperlink carries its destination whole, row by
- * row: `"exact"`. A plain address is exact where one row holds all of it, and where the program
- * broke it over rows with CR/LF (which xterm does not mark wrapped) nothing says the next row
- * continues it, so it is `"none"`: no link is better than a wrong one.
+ * What a click on the address must do. An OSC 8 hyperlink carries its destination whole, on every
+ * row it is drawn on: `"exact"`. A plain address is `"none"` however it is laid out: the pane
+ * cannot tell from the screen where a program broke an address, and no link is better than a
+ * wrong one.
  */
-function expected(mode, rows, destination) {
-  if (mode === 'osc8') return 'exact'
-  const plain = rows.map((row) => row.replace(/\u001b\[[0-9;]*m/g, ''))
-  return plain.some((row) => row.includes(destination)) ? 'exact' : 'none'
+function expected(mode) {
+  return mode === 'osc8' ? 'exact' : 'none'
 }
 
 const cases = []
@@ -158,7 +164,27 @@ for (const [name, destination, width] of [
   }
 }
 
-function piCase(id, mode, width, rows, destination) {
+// The third review's case (T-1323): an address in a Markdown table, at the width of a pane and with
+// Pi's one-column margin. Pi wraps the cell and writes the table's rows with CR/LF, so an address
+// is cut inside a row that ends well short of the pane's edge, and the continuation is indented by
+// the table's border. Inline code is plain text even with hyperlinks on; a bare address and a
+// linked label are OSC 8 when they are on.
+for (const width of [48, 80, 120]) {
+  for (const on of [false, true]) {
+    for (const [kind, destination, cell] of [
+      ['code-table', GITHUB, `\`${GITHUB}\``],
+      ['bare-table', GITHUB, GITHUB],
+      ['label-table', GITHUB, `[Source](${GITHUB})`],
+      ['label-table-wiki', WIKI, `[Source](${WIKI})`],
+    ]) {
+      const rows = piRows(`| URL | Note |\n|---|---|\n| ${cell} | example |`, width, 1, on)
+      const carried = on && kind !== 'code-table' ? 'osc8' : 'plain'
+      cases.push(piCase(`pi-${width}-${kind}-${on ? 'on' : 'off'}`, carried, width, rows, destination, on))
+    }
+  }
+}
+
+function piCase(id, mode, width, rows, destination, hyperlinks = mode === 'osc8') {
   return {
     id,
     harness: 'pi',
@@ -166,8 +192,8 @@ function piCase(id, mode, width, rows, destination) {
     width,
     printed: `${rows.join('\r\n')}\r\n`,
     destination,
-    expect: expected(mode, rows, destination),
-    source: `pi-tui ${PI_VERSION} Markdown.render, ANSI-only theme, PI_HYPERLINKS=${mode === 'osc8' ? 1 : 0}`,
+    expect: expected(mode),
+    source: `pi-tui ${PI_VERSION} Markdown.render, ANSI-only theme, PI_HYPERLINKS=${hyperlinks ? 1 : 0}`,
   }
 }
 
@@ -219,8 +245,8 @@ for (const [name, destination] of claudeAddresses) {
     width: 160,
     printed: `${claude.Cb(destination, 'Source', { supportsHyperlinks: false })}\r\n`,
     destination,
-    expect: 'exact',
-    source: 'Claude Code 2.1.319 Cb, hyperlinks off',
+    expect: expected('plain'),
+    source: 'Claude Code 2.1.319 Cb, hyperlinks off (what a launch gets)',
   })
 }
 process.env.TERM_PROGRAM = 'ConsensFlow'
@@ -238,8 +264,8 @@ for (const [name, destination] of claudeAddresses) {
     width: 160,
     printed: `${claude.Cb(destination, 'Source')}\r\n`,
     destination,
-    expect: 'exact',
-    source: 'Claude Code 2.1.319 Cb under FORCE_HYPERLINK=1 and TERM_PROGRAM=ConsensFlow',
+    expect: expected('osc8'),
+    source: 'Claude Code 2.1.319 Cb under FORCE_HYPERLINK=1 and TERM_PROGRAM=ConsensFlow (not set by a launch)',
   })
   // A bare address (no words of its own): the address is both the words and the hyperlink.
   cases.push({
@@ -249,8 +275,8 @@ for (const [name, destination] of claudeAddresses) {
     width: 160,
     printed: `${claude.Cb(destination)}\r\n`,
     destination,
-    expect: 'exact',
-    source: 'Claude Code 2.1.319 Cb(address) under FORCE_HYPERLINK=1',
+    expect: expected('osc8'),
+    source: 'Claude Code 2.1.319 Cb(address) under FORCE_HYPERLINK=1 (not set by a launch)',
   })
 }
 

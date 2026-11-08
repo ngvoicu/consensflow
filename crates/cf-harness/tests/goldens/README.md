@@ -359,23 +359,24 @@ and the hash that names a bundle of an extension is `$HASH`.
   Node's was `unknown`; `inFlight`, `failed`, `quota` and the items are Node's. The
   other Pi readings are unmoved (a failure that is not yet quiet is in flight in
   both, and the extension's evidence settled it already). Moved by hand.
-- **A launch tells Claude Code and Pi that the pane draws hyperlinks** (2026-11-08, T-1315, the
-  review of T-1314). The pane is xterm.js and draws OSC 8, but Claude Code (2.1.319) and Pi
-  (1.5.0) know only the terminals they list, and `ConsensFlow` is none: each printed a link as
-  `words (address)` text, which a long address and a program's own rows (Pi writes its rows with
-  CR/LF, so xterm does not take the next row for a continuation) cut where its width ended. Node
-  started both with no such variable. Every Claude Code window now starts with
-  `FORCE_HYPERLINK=1` (its check `Tb`, read before any terminal detection) and every Pi window
-  with `PI_HYPERLINKS=1` (its `detectCapabilities`), the last variable of each launch's
-  environment and for that launch alone: no settings file of the owner's is written, and a
-  setting of the owner's that names hyperlinks (Claude Code's `lf()?.hyperlinks`, Pi's terminal
-  capability overrides) is read after or before it as its program reads it. Codex sends OSC 8 for
-  an `http` or `https` address whatever the terminal; Devin has a settings-level
-  `disable_osc` and no variable that turns hyperlinks on; Muse has none: none is moved.
-  `launch/` moved for it in each prepared answer of those two harnesses, 39 of Claude Code's
-  and 59 of Pi's in each platform's file, and in nothing else. The move is
-  `tools/move_harness_hyperlink_goldens.py`, which leaves an answer already moved as it is: after
-  a merge brings rows of the old shape, run it on each file and let the scenarios test check it.
+- **A launch tells Pi that the pane draws hyperlinks** (2026-11-08, T-1315, the reviews of T-1291).
+  The pane is xterm.js and draws OSC 8, but Pi (1.5.0) knows only the terminals it lists, and
+  `ConsensFlow` is none: it printed a link as `words (address)` text, which Pi's own rows, written
+  with CR/LF, cut where its width ended. Node started it with no such variable. Every Pi window now
+  starts with `PI_HYPERLINKS=1` (its `detectCapabilities`), the last variable of its environment
+  and for that launch alone: no settings file of the owner's is written, and Pi's own
+  `terminal.hyperlinks` setting is read after the variable, so an owner's choice wins. Nothing else
+  in Pi's tree reads the variable, so the commands a window runs are not changed by it. **Claude
+  Code is not given one** (taken out again, T-1323): `FORCE_HYPERLINK=1` is the switch of its
+  check, but `supports-hyperlinks` answers it before it asks whether stdout is a terminal, so the
+  commands the window runs inherited it and wrote OSC 8 into their output (ESLint's pretty
+  formatter, piped, `--no-color`), which breaks a `grep` of the saved text; its own `hyperlinks`
+  capability is one an attached client sends, not a setting of the owner's. Codex sends OSC 8
+  already; Devin has a settings-level `disable_osc` and no variable that turns hyperlinks on;
+  Muse has none. `launch/` moved for it in each prepared answer of Pi, 59 in each platform's file,
+  and in nothing else. The move is `tools/move_harness_hyperlink_goldens.py`, which leaves an
+  answer already moved as it is: after a merge brings rows of the old shape, run it on each file
+  and let the scenarios test check it.
 - **The offers a launch turns off** (2026-11-03, T-1183). Node started Claude Code with no
   variable of its own and Codex with two settings. Their offers that wait in a window for a
   key nobody presses are turned off for each launch alone: every Claude Code window starts

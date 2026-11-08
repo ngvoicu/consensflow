@@ -335,17 +335,13 @@ fn launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_tas
     assert_eq!(plan.argv, argv);
     assert!(plan.argv.iter().all(|word| !word.contains(TASK)));
     // Nothing of the window's environment moves its PATH, so cf stays usable inside it; its
-    // variables turn Claude Code's surveys off (T-1183) and tell it the pane draws hyperlinks
-    // (T-1315).
+    // one variable turns Claude Code's surveys off (T-1183).
     assert_eq!(
         plan.env,
-        [
-            (
-                "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY".to_owned(),
-                "1".to_owned()
-            ),
-            ("FORCE_HYPERLINK".to_owned(), "1".to_owned()),
-        ],
+        [(
+            "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY".to_owned(),
+            "1".to_owned()
+        )],
         "cf stays usable inside the window"
     );
     assert_eq!(plan.drop_env, ["ANTHROPIC_API_KEY"]);

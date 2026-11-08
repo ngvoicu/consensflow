@@ -85,9 +85,10 @@ pub(crate) fn result_of(code: isize) -> Result<(), String> {
 /// What the thread's `CoInitializeEx` answered, and whether `CoUninitialize` must follow (T-1315).
 ///
 /// `S_OK` and `S_FALSE` (the thread had COM in this apartment already) are both a start that
-/// is ended once. `RPC_E_CHANGED_MODE` is a thread that started COM in another apartment before
-/// us (a multi-threaded one): COM is there and the shell can be asked, and the start is not ours
-/// to end. Any other refusal (`E_OUTOFMEMORY`, `E_INVALIDARG`, ...) is a thread the shell cannot
+/// is ended once. `RPC_E_CHANGED_MODE` is a thread that started COM in another apartment model
+/// before us (the multi-threaded one, or a neutral apartment): COM is there and the shell can be
+/// asked, though not on the single-threaded apartment its documentation recommends, and the
+/// start is not ours to end. Any other refusal (`E_OUTOFMEMORY`, `E_INVALIDARG`, ...) is a thread the shell cannot
 /// be asked on, and is said to the human instead of going on without COM and leaving the shell
 /// to fail in a way it cannot name.
 pub(crate) fn com_started(code: i32) -> Result<bool, String> {
