@@ -1003,8 +1003,10 @@ mod tests {
 
     #[cfg(unix)]
     use super::installed_on;
+    #[cfg(unix)]
+    use super::serve_list_script;
     use super::{allowance_left, question_tools, used_percent, Run, StandIn};
-    use super::{echo_list, serve_list_script, serve_reply};
+    use super::{echo_list, serve_reply};
     #[cfg(unix)]
     use crate::files;
 
