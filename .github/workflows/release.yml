@@ -17,7 +17,10 @@
 # A hand run (Actions → Release → Run workflow) builds, signs and smoke-tests
 # the same files and publishes nothing, even where it is run on a tag: only the
 # push of a tag publishes. It prints the feeds a tag would move, and what a tag
-# would be refused for.
+# would be refused for. `cargo xtask release alpha` gives its hand run — the
+# trial before the tag — the notes it was given as the `notes` input, so the
+# trial reads the ones the tag will carry; a run without them writes the
+# commits since the previous release, cut under the feed's 64 KiB.
 #
 # The update feeds. Installed apps read a rolling release's latest.json: the
 # apps before the bridge (3.0.0-alpha.80 and earlier) read update-alpha and
@@ -42,6 +45,14 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      # The notes the tag will carry, handed to the run that tries the release
+      # before it is tagged. Left empty, the notes are the commits since the
+      # previous release.
+      notes:
+        description: 'The release notes, as the tag will carry them'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -160,8 +171,13 @@ jobs:
 
       # The tool built above reads the version the three sources agree on, and
       # checks the bundle, the archive and the signature before it writes the
-      # feed's entry (tools/cf-release, `prepare-update`).
+      # feed's entry (tools/cf-release, `prepare-update`). A tag's notes are its
+      # message; a hand run's are the `notes` input it was given; a run with
+      # neither writes the commits since the previous release — cut under the
+      # feed's 64 KiB at a whole line, the last line counting those left out.
       - name: Notes, and the update feed for this build
+        env:
+          TRIAL_NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
           release_tool="$GITHUB_WORKSPACE/app/src-tauri/target/release/cf-release"
@@ -178,12 +194,25 @@ jobs:
               git tag -l --format='%(contents)' "$tag" > "$out/notes.txt"
             fi
           fi
+          if [ ! -s "$out/notes.txt" ] && [ -n "${TRIAL_NOTES:-}" ]; then
+            printf '%s\n' "$TRIAL_NOTES" > "$out/notes.txt"
+          fi
           if [ ! -s "$out/notes.txt" ]; then
+            # prepare-update takes no notes past 64 KiB: a longer log is cut at
+            # a whole line, and the last line says how many commits were left out.
             {
               echo "ConsensFlow $version${previous:+, the changes since ${previous#v}}:"
               echo
               git log --no-merges --format='- %s' ${previous:+"$previous..HEAD"}
-            } > "$out/notes.txt"
+            } | LC_ALL=C awk '
+              BEGIN { room = 64 * 1024 - 128 }
+              NR <= 2 { print; room -= length($0) + 1; next }
+              length($0) + 1 <= room { print; room -= length($0) + 1; next }
+              { left += 1 }
+              END {
+                if (left) printf "- %d commits left out, the log cut to keep the notes under 64 KiB\n", left
+              }
+            ' > "$out/notes.txt"
           fi
           archive="ConsensFlow_${version}_aarch64.app.tar.gz"
           cp "$bundle/macos/ConsensFlow.app.tar.gz" "$out/$archive"

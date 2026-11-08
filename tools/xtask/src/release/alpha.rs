@@ -38,8 +38,9 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
     release.ci_passed(&commit, Left::Nothing)?;
     if options.dry_run {
         return Ok(format!(
-            "dry run: every check passed; a hand run of release.yml would be started on {}, and once it \
-             ended green {tag} would be tagged on it with {} and pushed to origin and upstream\n",
+            "dry run: every check passed; a hand run of release.yml would be started on {} with {} \
+             as the notes it reads, and once it ended green {tag} would be tagged on it with them and \
+             pushed to origin and upstream\n",
             short(&commit),
             notes.display()
         ));
@@ -61,7 +62,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
             short(&commit)
         )));
     }
-    release.trial(&commit)?;
+    release.trial(&commit, &notes)?;
 
     let before = release.newest_run("release.yml", Some(&commit), Some("push"))?;
     release.tag_and_push(&tag, &notes, &commit)?;
