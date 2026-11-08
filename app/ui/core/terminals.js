@@ -47,6 +47,9 @@ export class TerminalsView {
   #stage
   #registry
   #link
+  /** The app, and the status line a refusal of it shows in. */
+  #invoke
+  #report
   #cards = new Map()
   #onChange
   /** The human asking to switch the chief, from its card. */
@@ -105,8 +108,28 @@ export class TerminalsView {
       onData: (pane, data) => void this.#link.input(pane, data),
       onReply: (pane, data) => void this.#link.reply(pane, data),
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
+      onLink: (url) => void this.#openLink(url),
     })
     this.#link = new TerminalLink({ invoke, registry: this.#registry, report })
+    this.#invoke = invoke
+    this.#report = report
+  }
+
+  /**
+   * A link the human clicked in a window, opened by the app in their browser. The app says what
+   * it will open (a web page, not too long), whatever a program printed; a refusal shows.
+   */
+  async #openLink(url) {
+    try {
+      const opened = await this.#invoke('open_link', { url })
+      if (opened?.ok !== true) {
+        this.#report(
+          new Error(`The link did not open: ${opened?.error ?? 'no answer from the app'}`),
+        )
+      }
+    } catch (cause) {
+      this.#report(cause)
+    }
   }
 
   /** Bytes from the pane host; a pane the board has not drawn yet still gets them. */

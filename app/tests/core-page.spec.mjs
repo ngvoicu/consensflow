@@ -776,6 +776,8 @@ async function open(page, data = model()) {
       if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue')
         return { ok: true, ticket: 't' }
       if (command.startsWith('update_')) return { ok: false, error: 'not in this test' }
+      // A link opened in the browser, or refused as a test says (`window.__linkRefused`).
+      if (command === 'open_link') return window.__linkRefused ?? { ok: true }
       // The short names Windows keeps for the paths of the drop numbered `id`, as a test says
       // them (`shortNames`, by a path's long name: `{ short }`, or `{ error }` in the app's
       // words), or none; held as a daemon operation is. As the app does, only for the paths of
@@ -3453,6 +3455,511 @@ test("New project and Switch chief say the same of the chief's model: the harnes
     await expect(dialog).toBeHidden()
   }
 })
+
+// Links in a pane (T-1291): an address a program prints is a link, a plain URL and an OSC 8
+// hyperlink (words with the address hidden behind them) alike. It is underlined and titled with
+// what opens it as the pointer comes onto it, and it opens in the human's browser, through the
+// app's `open_link`, only for a click with the system's key held (Cmd on a Mac, Ctrl on Windows,
+// as VS Code's terminal does), so a click into a pane to type never opens one. What the page asks
+// of the app is the address exactly as the program printed it; what may open is the app's to say
+// (`link.rs`), so an address a program hides behind words that is no web page reaches nothing.
+const MAC_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+const WINDOWS_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
+const CHIEF_TERMINAL = '#stage .terminal-card[data-handle="chief"] .xterm'
+
+/** An OSC 8 hyperlink as a program prints it: `words`, with `uri` behind them. */
+const hyperlink = (uri, words) => `\u001b]8;;${uri}\u001b\\${words}\u001b]8;;\u001b\\`
+
+/** The chief's real terminal with `text` printed in it as a program prints it; `seen` is on screen. */
+async function printing(page, text, seen) {
+  await open(page, { ...model(), realTerminals: true })
+  await page.evaluate(
+    (bytes) => window.__output.onmessage({ id: 'p1-chief', generation: 5, seq: 1, bytes }),
+    [...new TextEncoder().encode(text)],
+  )
+  await expect(page.locator(`${CHIEF_TERMINAL} .xterm-rows`)).toContainText(seen)
+}
+
+/** The middle of `words` where the terminal shows them, or of the row `row` (from 0) when none. */
+const placeOf = (page, words, row = 0) =>
+  page.evaluate(
+    ([words, row]) => {
+      const rows = document.querySelector('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+      const walker = document.createTreeWalker(
+        words === null ? rows.children[row] : rows,
+        NodeFilter.SHOW_TEXT,
+      )
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = words === null ? 0 : node.data.indexOf(words)
+        if (at < 0) continue
+        const middle = at + Math.floor((words === null ? 4 : words.length) / 2)
+        const range = document.createRange()
+        range.setStart(node, middle)
+        range.setEnd(node, middle + 1)
+        const box = range.getBoundingClientRect()
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+      }
+      return null
+    },
+    [words, row],
+  )
+
+/**
+ * Where `words` are in the row `row` (from 0): their middle, or with `after` the cell just past
+ * them. Found by the text the row holds, which its spans split as links and colours do.
+ */
+const placeInRow = (page, row, words, after = false) =>
+  page.evaluate(
+    ([row, words, after]) => {
+      const rows = document.querySelector('#stage .terminal-card[data-handle="chief"] .xterm-rows')
+      const walker = document.createTreeWalker(rows.children[row], NodeFilter.SHOW_TEXT)
+      const nodes = []
+      let text = ''
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        nodes.push([node, text.length])
+        text += node.data
+      }
+      const at = text.indexOf(words)
+      if (at < 0) return null
+      const index = after ? at + words.length : at + Math.floor(words.length / 2)
+      const [node, start] = nodes.findLast(([, from]) => from <= index)
+      const range = document.createRange()
+      range.setStart(node, index - start)
+      range.setEnd(node, index - start + 1)
+      const box = range.getBoundingClientRect()
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    },
+    [row, words, after],
+  )
+
+/**
+ * How the terminal draws the text under `place`: its text decoration, line and style. A link's text
+ * under the pointer is "underline solid"; an OSC 8 link's text is "underline dashed" otherwise,
+ * whatever it points to (xterm marks all of it), and other text "none solid". The rows take no
+ * pointer events, so the text is found by where it is.
+ */
+const decorationAt = (page, place) =>
+  page.evaluate(({ x, y }) => {
+    const spans = document.querySelectorAll(
+      '#stage .terminal-card[data-handle="chief"] .xterm-rows span',
+    )
+    for (const span of spans) {
+      const box = span.getBoundingClientRect()
+      if (box.left <= x && x < box.right && box.top <= y && y < box.bottom) {
+        const { textDecorationLine, textDecorationStyle } = getComputedStyle(span)
+        return `${textDecorationLine} ${textDecorationStyle}`
+      }
+    }
+    return 'no text there'
+  }, place)
+
+/** The addresses the page asked the app to open, in order. */
+const linksOpened = (page) =>
+  page.evaluate(() =>
+    window.__calls.filter(([command]) => command === 'open_link').map(([, args]) => args.url),
+  )
+
+/** Two frames on: what the terminal drew for the pointer's last move is on screen. */
+const afterFrames = (page) =>
+  page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+  )
+
+/** A click at `place` with `keys` held, as a human's hand makes it: the pointer comes, then the click. */
+async function clickWith(page, place, keys = [], button = 'left') {
+  await page.mouse.move(place.x, place.y)
+  for (const key of keys) await page.keyboard.down(key)
+  await page.mouse.click(place.x, place.y, { button })
+  for (const key of keys) await page.keyboard.up(key)
+}
+
+for (const [system, agent, key, other] of [
+  ['a Mac', MAC_AGENT, 'Meta', 'Control'],
+  ['Windows', WINDOWS_AGENT, 'Control', 'Meta'],
+]) {
+  const named = key === 'Meta' ? 'Cmd' : 'Ctrl'
+  test.describe(`pane links on ${system}`, () => {
+    test.use({ userAgent: agent })
+
+    // Only an OSC 8 hyperlink is a link (the third review, T-1323): a plain address cannot be told
+    // whole from the screen, as a program that lays out its text in rows of its own writes it cut.
+    test(`a plain URL is no link: no underline, no title, and ${named}+click opens nothing`, async ({
+      page,
+    }) => {
+      const plain = 'https://example.com/docs/a?x=1&y=%20z#frag'
+      const web = 'https://example.org/linked'
+      await printing(page, `Sources: ${plain}\r\n${hyperlink(web, 'Linked')}\r\n`, 'Linked')
+      const place = await placeOf(page, plain)
+      await page.mouse.move(place.x, place.y)
+      await afterFrames(page)
+      expect(await decorationAt(page, place), 'underlined under the pointer').toBe('none solid')
+      await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
+      await expect(page.locator(`${CHIEF_TERMINAL} .xterm-screen`)).not.toHaveClass(
+        /xterm-cursor-pointer/,
+      )
+      await clickWith(page, place, [key])
+      // The click above was heard before this one is: the hyperlink is the only that opens.
+      await clickWith(page, await placeOf(page, 'Linked'), [key])
+      await expect.poll(() => linksOpened(page)).toEqual([web])
+    })
+
+    test(`a click without ${named} opens nothing, nor does the other system's key, nor another button`, async ({
+      page,
+    }) => {
+      const url = 'https://example.com/docs'
+      await printing(page, `${hyperlink(url, 'Docs')}\r\n`, 'Docs')
+      const place = await placeOf(page, 'Docs')
+      await clickWith(page, place)
+      await clickWith(page, place, [other])
+      await clickWith(page, place, ['Shift'])
+      await clickWith(page, place, [key], 'right')
+      await clickWith(page, place, [key], 'middle')
+      // Each click above was heard before this one is: it is the only that opens.
+      await clickWith(page, place, [key])
+      await expect.poll(() => linksOpened(page)).toEqual([url])
+    })
+
+    test(`an OSC 8 hyperlink shows its address in the title where its words hide it, and ${named}+click opens exactly that address`, async ({
+      page,
+    }) => {
+      const url = 'https://example.org/report?q=a%26b&n=2#top'
+      await printing(page, `${hyperlink(url, 'Sources')} and more\r\n`, 'Sources and more')
+      const place = await placeOf(page, 'Sources')
+      expect(await decorationAt(page, place)).toBe('underline dashed')
+      await page.mouse.move(place.x, place.y)
+      await expect.poll(() => decorationAt(page, place)).toBe('underline solid')
+      await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute(
+        'title',
+        `${named}+click to open ${url}`,
+      )
+      await expect(page.locator(`${CHIEF_TERMINAL} .xterm-screen`)).toHaveClass(
+        /xterm-cursor-pointer/,
+      )
+      // The title and the underline go when the pointer does.
+      const beside = await placeOf(page, 'more')
+      await page.mouse.move(beside.x, beside.y)
+      await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
+      await afterFrames(page)
+      expect(await decorationAt(page, place), 'underlined after the pointer left').toBe(
+        'underline dashed',
+      )
+      await clickWith(page, place)
+      await clickWith(page, place, [other])
+      await clickWith(page, place, [key])
+      await expect.poll(() => linksOpened(page)).toEqual([url])
+    })
+
+    test(`${named}+click opens an OSC 8 hyperlink a program ended with BEL, and one over a bare URL, once each`, async ({
+      page,
+    }) => {
+      // Claude Code and Codex end a hyperlink with BEL, Pi with ST; Codex marks the bare
+      // addresses of its text too, so that one range is a link twice over.
+      const url = 'https://example.org/bel?x=1&y=2'
+      const bare = 'https://example.com/bare?z=3'
+      const text = `\u001b]8;;${url}\u0007Docs\u001b]8;;\u0007 ${hyperlink(bare, bare)}\r\n`
+      await printing(page, text, `Docs ${bare}`)
+      await clickWith(page, await placeOf(page, 'Docs'), [key])
+      await clickWith(page, await placeOf(page, bare), [key])
+      await expect.poll(() => linksOpened(page)).toEqual([url, bare])
+    })
+
+    test('an OSC 8 hyperlink to a file, a script, data or an app scheme is no link and reaches nothing', async ({
+      page,
+    }) => {
+      const refused = [
+        ['Files', 'file:///etc/passwd'],
+        ['Script', 'javascript:alert(document.cookie)'],
+        ['Data', 'data:text/html,<script>alert(1)</script>'],
+        ['App', 'consensflow://open?x=1'],
+        ['Mail', 'mailto:someone@example.com'],
+      ]
+      const web = 'https://example.com/ok'
+      const text =
+        refused.map(([words, uri]) => hyperlink(uri, words)).join(' ') +
+        ` ${hyperlink(web, 'Web')}\r\n`
+      await printing(page, text, 'Files Script Data App Mail Web')
+      for (const [words] of refused) {
+        const place = await placeOf(page, words)
+        await page.mouse.move(place.x, place.y)
+        // Not a link: no underline of a link under the pointer, no title to say a click opens it.
+        await afterFrames(page)
+        expect(await decorationAt(page, place), words).toBe('underline dashed')
+        await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
+        await clickWith(page, place, [key])
+      }
+      // The same hand on the one that is a web page opens it, so the clicks above were heard.
+      const place = await placeOf(page, 'Web')
+      await page.mouse.move(place.x, place.y)
+      await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute(
+        'title',
+        `${named}+click to open ${web}`,
+      )
+      await clickWith(page, place, [key])
+      await expect.poll(() => linksOpened(page)).toEqual([web])
+    })
+
+    test(`${named}+click opens an OSC 8 hyperlink whose words xterm wrapped over rows from any of them, whole`, async ({
+      page,
+    }) => {
+      const url = `https://example.com/${'long-segment/'.repeat(30)}end?x=1&y=2`
+      await printing(page, `${hyperlink(url, url)}\r\n`, 'long-segment')
+      const first = await placeOf(page, null, 0)
+      const second = await placeOf(page, null, 1)
+      expect(second.y).toBeGreaterThan(first.y)
+      await page.mouse.move(second.x, second.y)
+      await expect.poll(() => decorationAt(page, second)).toBe('underline solid')
+      await clickWith(page, first, [key])
+      await clickWith(page, second, [key])
+      await expect.poll(() => linksOpened(page)).toEqual([url, url])
+    })
+
+    test(`${named}+click opens a link in a window whose program has taken the mouse`, async ({
+      page,
+    }) => {
+      const url = 'https://example.com/taken'
+      // The program asks to be told of the mouse (any button, SGR), as a full-screen program does.
+      await printing(page, `\u001b[?1000h\u001b[?1006h${hyperlink(url, 'Taken')}\r\n`, 'Taken')
+      const place = await placeOf(page, 'Taken')
+      await page.mouse.move(place.x, place.y)
+      await expect.poll(() => decorationAt(page, place)).toBe('underline solid')
+      await clickWith(page, place)
+      await clickWith(page, place, [key])
+      await expect.poll(() => linksOpened(page)).toEqual([url])
+    })
+
+    // Every way a program prints an address as text: none of it is a link, the address whole or not.
+    test('a plain address in any form is no link, with the system key held or not', async ({
+      page,
+    }) => {
+      const forms = [
+        'https://example.com/a',
+        'HTTPS://example.com/a',
+        'https://en.wikipedia.org/wiki/Function_(mathematics)',
+        "https://en.wikipedia.org/wiki/Bayes'_theorem",
+        'https://example.com/a,b^c',
+        'See https://example.com/a.',
+        '(https://example.com/a)',
+        'Source (https://en.wikipedia.org/wiki/Yahoo!)',
+        '[docs](https://example.com/a?b=1&c=2)',
+        '"https://example.com/a"',
+        'https://[2001:db8::1]/a',
+      ]
+      const web = 'https://example.org/linked'
+      await printing(page, `${forms.join('\r\n')}\r\n${hyperlink(web, 'Linked')}\r\n`, 'Linked')
+      for (const [row, printed] of forms.entries()) {
+        // The cell the address begins in, found by the twelve characters from its scheme.
+        const start = printed.search(/https?:\/\//i)
+        const place = await placeInRow(page, row, printed.slice(start, start + 12))
+        await page.mouse.move(place.x, place.y)
+        await afterFrames(page)
+        await expect(page.locator(CHIEF_TERMINAL), printed).not.toHaveAttribute('title', /.*/)
+        expect(await decorationAt(page, place), printed).toBe('none solid')
+        await clickWith(page, place, [key])
+      }
+      await clickWith(page, await placeOf(page, 'Linked'), [key])
+      await expect.poll(() => linksOpened(page)).toEqual([web])
+    })
+
+    test('an address with a host in letters of its own language or without its slashes is a link as an OSC 8 hyperlink and text is none', async ({
+      page,
+    }) => {
+      // As text neither is a link, as no plain address is; as an OSC 8 hyperlink each opens whole.
+      const idn = 'https://bücher.example/a'
+      const bare = 'http:example.com/a'
+      await printing(
+        page,
+        `${idn}\r\n${bare}\r\n${hyperlink(idn, 'Büchersuche')}\r\n${hyperlink(bare, 'Bare')}\r\n`,
+        'Bare',
+      )
+      for (const [row, words] of [
+        [0, idn],
+        [1, bare],
+      ]) {
+        const place = await placeInRow(page, row, words)
+        await clickWith(page, place, [key])
+        await expect(page.locator(CHIEF_TERMINAL), words).not.toHaveAttribute('title', /.*/)
+      }
+      await clickWith(page, await placeInRow(page, 2, 'Büchersuche'), [key])
+      await clickWith(page, await placeInRow(page, 3, 'Bare'), [key])
+      await expect.poll(() => linksOpened(page)).toEqual([idn, bare])
+    })
+
+    test('a refusal of the app shows in the status line, and the link goes on working', async ({
+      page,
+    }) => {
+      await printing(page, `${hyperlink('https://example.com/a', 'Docs')}\r\n`, 'Docs')
+      await page.evaluate(() => {
+        window.__linkRefused = {
+          ok: false,
+          error: 'The address is longer than 2048 characters',
+        }
+      })
+      const place = await placeOf(page, 'Docs')
+      await clickWith(page, place, [key])
+      await expect(page.locator('#status')).toContainText(
+        'The link did not open: The address is longer than 2048 characters',
+      )
+      await clickWith(page, place, [key])
+      await expect.poll(async () => (await linksOpened(page)).length).toBe(2)
+    })
+  })
+}
+
+// What the harnesses print for a link, replayed (T-1314's review, T-1315). The cases are the output
+// of Pi's, Claude Code's and Codex's own formatting code, with hyperlinks off (the plain `words
+// (address)` each falls back to) and on (what ConsensFlow's launch asks of Pi and Claude Code), at
+// the widths a pane has; `app/tests/fixtures/pane-links/make-harness-cases.mjs` says how each was
+// made. Each case is held to one of two things: a click on the address opens exactly the address the
+// program meant, or it is no link and opens nothing. Never a shortened one. A plain address a
+// program broke over rows of its own (Pi writes its rows with CR/LF, so xterm does not mark them
+// wrapped) may go on in the next row, and then it is no link; an OSC 8 hyperlink carries its address
+// whole on every row it is drawn on.
+const HARNESS_CASES = JSON.parse(
+  readFileSync(new URL('./fixtures/pane-links/harness-cases.json', import.meta.url), 'utf8'),
+)
+
+const ESC = String.fromCharCode(27)
+const BEL = String.fromCharCode(7)
+/** An OSC 8 sequence's end: BEL, or ESC and a backslash. */
+const OSC_END = `(?:${BEL}|${ESC}\\\\)`
+const SGR = new RegExp(`${ESC}\\[[0-9;]*m`, 'g')
+const OSC_8 = new RegExp(`${ESC}\\]8;;[^${BEL}${ESC}]*${OSC_END}`, 'g')
+const HYPERLINK = new RegExp(
+  `${ESC}\\]8;;([^${BEL}${ESC}]*)${OSC_END}(.*?)${ESC}\\]8;;${OSC_END}`,
+  'g',
+)
+
+/** The printable columns of `raw`, a row as a program wrote it: escape sequences taken out. */
+const printable = (raw) => raw.replace(SGR, '').replace(OSC_8, '')
+
+/**
+ * The columns a click should land on for `raw`'s row: the middle of each OSC 8 hyperlink to
+ * `destination` it draws, the start of a plain `https://`, the first word of the row and its
+ * longest (a row the address went on in, which is no link where the address was cut).
+ */
+function pointsOf(raw, destination) {
+  const points = new Map()
+  for (const span of raw.matchAll(HYPERLINK)) {
+    const before = printable(raw.slice(0, span.index))
+    const words = printable(span[2])
+    if (span[1] === destination && words.length > 0) {
+      points.set(before.length + Math.floor(words.length / 2), 'hyperlink')
+    }
+  }
+  const text = printable(raw)
+  const plain = text.search(/https?:\/\//i)
+  if (plain >= 0) points.set(plain + 4, 'address')
+  const first = text.search(/\S/)
+  if (first >= 0 && !points.has(first + 1)) points.set(first + 1, 'word')
+  // The longest run of text on the row too: where the rest of a cut address lands.
+  let longest = null
+  for (const run of text.matchAll(/\S+/g)) {
+    if (longest === null || run[0].length > longest[0].length) longest = run
+  }
+  if (longest !== null) {
+    const middle = longest.index + Math.floor(longest[0].length / 2)
+    if (!points.has(middle)) points.set(middle, 'word')
+  }
+  return points
+}
+
+/**
+ * Prints `printed` in a terminal of `width` columns of the page's own emulator, and answers the
+ * place of each column asked for on each row: a program's rows, laid out as it laid them.
+ */
+const replaying = (page, printed, width) =>
+  page.evaluate(
+    async ([printed, width]) => {
+      const { XtermEmulator } = await import('/term.js')
+      window.replay?.dispose()
+      const host = document.getElementById('replay-host')
+      host.innerHTML = ''
+      window.replayOpened = []
+      window.replay = new XtermEmulator(host, { onLink: (url) => window.replayOpened.push(url) })
+      window.replay.resizeObserver.disconnect()
+      clearTimeout(window.replay.settling)
+      window.replay.terminal.resize(width, 24)
+      await new Promise((done) => window.replay.terminal.write(printed, done))
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+      const box = host.querySelector('.xterm-screen').getBoundingClientRect()
+      return { left: box.left, top: box.top, cell: box.width / width, row: box.height / 24 }
+    },
+    [printed, width],
+  )
+
+/** A blank page of the app's own origin for the replays below: the page's emulator on a host of its own. */
+async function replayPage(page) {
+  await page.route(`${ui.origin}/replay`, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/vendor/xterm.css"><body style="margin:0"><div id="replay-host"></div></body>',
+    }),
+  )
+  await page.goto(`${ui.origin}/replay`)
+}
+
+/**
+ * Clicks, with Cmd held, the cell at `column` of `row` (both from 0) of the replay `place` came
+ * from, and answers what the page asked the app to open and what the pointer's title said.
+ */
+async function clickingCell(page, place, row, column) {
+  const at = {
+    x: place.left + (column + 0.5) * place.cell,
+    y: place.top + (row + 0.5) * place.row,
+  }
+  await page.mouse.move(1390, 790)
+  await page.mouse.move(at.x, at.y)
+  await page.waitForTimeout(40)
+  const title = await page.evaluate(() => window.replay.terminal.element.title)
+  await clickWith(page, at, ['Meta'])
+  const opened = await page.evaluate(() => window.replayOpened.splice(0))
+  return { opened, title }
+}
+
+for (const [group, harness, mode] of [
+  ['Pi prints as text', 'pi', 'plain'],
+  ['Pi prints as OSC 8 hyperlinks (PI_HYPERLINKS=1)', 'pi', 'osc8'],
+  ['Claude Code prints as text', 'claude-code', 'plain'],
+  ['Claude Code is told to print OSC 8 hyperlinks (not by a launch)', 'claude-code', 'osc8'],
+  ['Codex prints as OSC 8 hyperlinks', 'codex', 'osc8'],
+]) {
+  test.describe(`pane links: what ${group}`, () => {
+    test.use({ userAgent: MAC_AGENT, viewport: { width: 1400, height: 800 } })
+    test.describe.configure({ timeout: 120_000 })
+
+    test('opens the exact address on a click, or is no link: never a shortened one', async ({
+      page,
+    }) => {
+      await replayPage(page)
+      const cases = HARNESS_CASES.filter((c) => c.harness === harness && c.mode === mode)
+      expect(cases.length, `${group} has cases`).toBeGreaterThan(0)
+      const wrong = []
+      for (const c of cases) {
+        const place = await replaying(page, c.printed, c.width)
+        const rows = c.printed.split('\r\n')
+        for (const [index, raw] of rows.entries()) {
+          for (const [column, kind] of pointsOf(raw, c.destination)) {
+            const { opened, title } = await clickingCell(page, place, index, column)
+            const saw = `${c.id} row ${index} ${kind}`
+            const wanted = c.expect === 'exact' && kind !== 'word' ? [c.destination] : null
+            if (opened.some((url) => url !== c.destination)) {
+              wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
+            } else if (title !== '' && title !== `Cmd+click to open ${c.destination}`) {
+              wrong.push(`${saw}: title ${title}`)
+            } else if (c.expect === 'none' && (opened.length > 0 || title !== '')) {
+              wrong.push(`${saw}: a link where ${c.destination} was cut`)
+            } else if (wanted && JSON.stringify(opened) !== JSON.stringify(wanted)) {
+              wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
+            }
+          }
+        }
+      }
+      expect(wrong, `${cases.length} cases of ${group}`).toEqual([])
+    })
+  })
+}
 
 test('the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief', async ({
   page,
@@ -11365,10 +11872,6 @@ test('says so when the page runs outside ConsensFlow, and never reads as ready',
 // (enter, over, leave, drop), each with the paths and where the pointer is. These tests say them
 // as the app does, in the places each system says them in (a Mac's in points, Windows' in device
 // pixels), on a display twice as dense as the page, with the programs in real terminals.
-const MAC_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-const WINDOWS_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
 
 /** The app's event `name`, said to the page as Tauri says it. */
 const emitted = (page, name, payload = null) =>
