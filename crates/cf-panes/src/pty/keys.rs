@@ -354,6 +354,101 @@ mod conpty {
     /// code, and the character's code unit (8212).
     const EM_DASH_AS_A_KEY: &[u8] = b"\x1b[0;0;8212;1;0;1_\x1b[0;0;8212;0;0;1_";
 
+    /// What the page might write for a Shift+Enter, and what it writes today (T-1330).
+    const SHIFT_ENTER_CANDIDATES: [(&str, &[u8]); 5] = [
+        ("CR (today)", b"\r"),
+        ("LF", b"\n"),
+        ("ESC CR", b"\x1b\r"),
+        ("CSI 13;2u", b"\x1b[13;2u"),
+        ("CSI 27;2;13~", b"\x1b[27;2;13~"),
+    ];
+
+    /// The keys a program that reads key events reads of `bytes`, written to its pane at
+    /// once: up to `most` of them, read until none more comes for [`SETTLE`].
+    fn keys_of(bytes: &[u8], most: usize) -> (Vec<KeyRead>, String) {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let (key, output) = open(&table, &key_reader(most), &HashMap::new(), 1 << 20);
+        read_until(&table, &key, &output, "READY");
+        table.write(&key, bytes).expect("write the bytes");
+        let mut seen = String::new();
+        let settled = Instant::now() + SETTLE;
+        while keys_read(&seen).len() < most && Instant::now() < settled {
+            if let Ok(chunk) = output.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&take(&table, &key, &chunk));
+            }
+        }
+        table.kill(&key).expect("close the pane");
+        (keys_read(&seen), seen)
+    }
+
+    /// Where Node is on this machine: the first `node.exe` of the `PATH`.
+    #[allow(clippy::disallowed_methods)] // A test's own look at the machine's PATH.
+    fn node() -> Option<std::path::PathBuf> {
+        let path = std::env::var_os("PATH")?;
+        std::env::split_paths(&path)
+            .map(|folder| folder.join("node.exe"))
+            .find(|candidate| candidate.is_file())
+    }
+
+    /// The chunks a Node program that reads its terminal raw (as Claude Code and Pi do, which
+    /// set the console's virtual-terminal input) is given of `bytes`, each as the escaped text
+    /// of its characters.
+    fn node_reads(node: &std::path::Path, bytes: &[u8]) -> (Vec<String>, String) {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let argv = vec![
+            node.to_string_lossy().into_owned(),
+            "-e".to_owned(),
+            "process.stdin.setRawMode(true); console.log('READY'); \
+             process.stdin.on('data', (d) => console.log('DATA=[' + JSON.stringify(d.toString('latin1')) + ']#'))"
+                .to_owned(),
+        ];
+        let (key, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
+        read_until(&table, &key, &output, "READY");
+        table.write(&key, bytes).expect("write the bytes");
+        let mut seen = String::new();
+        let settled = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < settled {
+            if let Ok(chunk) = output.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&take(&table, &key, &chunk));
+            }
+        }
+        table.kill(&key).expect("close the pane");
+        let chunks = seen
+            .match_indices("DATA=[")
+            .filter_map(|(at, _)| {
+                let rest = &seen[at + "DATA=[".len()..];
+                Some(rest.split_once("]#")?.0.to_owned())
+            })
+            .collect();
+        (chunks, seen)
+    }
+
+    /// Records, on the machine the test runs on, what each Shift+Enter candidate becomes in a
+    /// pane of the shipped console host: for a program that reads key events (Codex, Devin and
+    /// Muse, through crossterm) and for a Node program in virtual-terminal input (Claude Code
+    /// and Pi). Run: `cargo test -p cf-panes --lib shift_enter_candidates -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a recording: it prints, it asserts nothing"]
+    fn shift_enter_candidates_are_recorded() {
+        for (name, bytes) in SHIFT_ENTER_CANDIDATES {
+            let (keys, seen) = keys_of(bytes, 8);
+            println!("KEYS {name:>14}: {keys:?} (screen {seen:?})");
+        }
+        match node() {
+            Some(node) => {
+                for (name, bytes) in SHIFT_ENTER_CANDIDATES {
+                    let (chunks, seen) = node_reads(&node, bytes);
+                    println!("NODE {name:>14}: {chunks:?} (screen {seen:?})");
+                }
+            }
+            None => println!("NODE: no node.exe on the PATH"),
+        }
+    }
+
     /// A mark no key of the layout types reaches a program that reads key events as
     /// itself, written as text or as a key, through the console host the app ships beside
     /// its pane host (Microsoft's own, which portable-pty loads, as `cargo test` finds it
