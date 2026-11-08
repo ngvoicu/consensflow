@@ -162,7 +162,7 @@ replace = '''
 
 [[plant]]
 name = "member models: a harness's models are read again at each pick while the dialog is open"
-meant = "Add member reads a harness's models once while the dialog is open, says it reads them, and reads them again at Refresh or at the next opening"
+meant = "Add member shows what a harness listed when the dialog opened, says it reads while that read runs, and reads again at Refresh or at the next opening"
 runs = ["mm-page"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
