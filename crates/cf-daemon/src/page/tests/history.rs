@@ -192,7 +192,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                             {
                                 "conversation": first.id, "row": row("u-1"), "id": "u-1", "role": "user", "complete": true, "at": at,
                                 "text": format!("[ConsensFlow m-{here} · note from @human]\nLook at the docs"),
-                                "delivery": { "line": format!("· m-{here}: a note from @human: \"Look at the docs\" (cf inbox read m-{here})"), "at": 0 },
+                                "delivery": { "at": 0 },
                             },
                             { "conversation": first.id, "row": row("a-1"), "id": "a-1", "role": "assistant", "text": "Reading <b>them</b>", "complete": true, "at": at },
                             { "conversation": first.id, "row": row("u-3"), "id": "u-3", "role": "user", "text": "This session is being continued.", "complete": true, "at": at, "compaction": true },
@@ -553,10 +553,11 @@ async fn reads_a_long_item_whole_a_part_at_a_time_and_only_its_participant_s() {
 }
 
 #[tokio::test]
-async fn folds_each_delivery_from_its_message_s_opening_and_never_loads_a_body_whole() {
+async fn marks_each_delivery_by_its_own_message_and_never_loads_a_body_whole() {
     // The reviewers' case: twenty messages of a megabyte, each delivered with
-    // its opening alone, which a page holds; the lines are said from what
-    // opens each message, and no body is read whole.
+    // its opening alone, which a page holds; each is marked as a delivery
+    // (where it begins, and nothing of its words) by a lookup of its message's
+    // parties, and no body is read whole.
     LocalSet::new()
         .run_until(async {
             let rig = rig();
@@ -589,20 +590,107 @@ async fn folds_each_delivery_from_its_message_s_opening_and_never_loads_a_body_w
             let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
             let said = answer.to_string();
             assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
-            let lines: Vec<&str> = answer["history"]["items"]
+            let marks: Vec<&Value> = answer["history"]["items"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|item| item["delivery"]["line"].as_str().unwrap())
+                .map(|item| &item["delivery"])
                 .collect();
-            let expected: Vec<String> = delivered
+            assert_eq!(marks, vec![&json!({ "at": 0 }); 20]);
+            assert!(!said.contains("\"line\""), "no line of any delivery");
+        })
+        .await;
+}
+
+/// What `history.get` reserved of its bound for a delivery's opening, before it
+/// stopped reserving any: a search whose whole walk costs between this much
+/// under the bound and the bound itself went short of its end.
+const ONCE_RESERVED: usize = 4_352;
+
+#[tokio::test]
+async fn a_search_runs_to_the_whole_of_its_bound_and_finds_what_stands_at_its_very_end() {
+    // The oldest item holds the words; behind it come items that hold none, as
+    // many as a search may go through and (to the byte) no more: a bound that
+    // keeps something back for a delivery's opening stops this search short.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            let words = "Look at the docs, please";
+            // Items that hold no words, each a part at most (read whole), `size` bytes of text.
+            let fillers = |from: usize, count: usize, size: usize| -> Vec<Value> {
+                (from..from + count)
+                    .map(|at| item(&format!("i-{at:05}"), "user", &"x".repeat(size)))
+                    .collect()
+            };
+            let mut copied: i64 = 0;
+            let mut copy = |items: Vec<Value>| {
+                rig.kit
+                    .ledger
+                    .borrow_mut()
+                    .copy_transcript(conversation.id, &items, copied)
+                    .unwrap();
+                copied += items.len() as i64;
+            };
+            // What a search for words that are nowhere goes through, all of it, as it is charged.
+            let walked = || -> usize {
+                let ask = HistoryAsk {
+                    from: HistoryFrom::Newest,
+                    find: Some("words that are nowhere"),
+                    tools: false,
+                    room: PAGE_BYTES,
+                    scan: 4 * HISTORY_SCAN_BYTES,
+                };
+                let read = rig.kit.ledger.borrow().read_history(harbour, "chief", &ask).unwrap();
+                assert!(!read.bounded && read.entries.is_empty());
+                read.charged
+            };
+            let mut start = vec![item("found", "user", words)];
+            start.extend(fillers(0, 300, 50_000));
+            copy(start);
+            // One more of the same size says what an item costs, and so how many more fit,
+            // and how long the last must be for the whole walk to end a kilobyte short of its bound.
+            let before = walked();
+            copy(fillers(300, 1, 50_000));
+            let after = walked();
+            let each = after - before;
+            let more = (HISTORY_SCAN_BYTES - 1_000 - after) / each;
+            copy(fillers(301, more, 50_000));
+            let rest = HISTORY_SCAN_BYTES - 1_000 - after - more * each;
+            let besides = each - 50_000;
+            assert!(rest > besides, "{rest} bytes left for the last item, {besides} of them its own");
+            copy(fillers(301 + more, 1, rest - besides));
+            let whole = walked();
+            assert!(
+                whole <= HISTORY_SCAN_BYTES && whole + ONCE_RESERVED > HISTORY_SCAN_BYTES,
+                "a walk of {whole} bytes, in the {ONCE_RESERVED} bytes under {HISTORY_SCAN_BYTES}"
+            );
+            let answer = ask(
+                &app,
+                "history.get",
+                json!({ "project": harbour, "handle": "chief", "find": "look AT the docs" }),
+            )
+            .await;
+            let said = answer.to_string();
+            assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
+            let found: Vec<&str> = answer["history"]["items"]
+                .as_array()
+                .unwrap()
                 .iter()
-                .enumerate()
-                .map(|(at, (id, _))| {
-                    format!("· m-{id}: a note from @human: \"Read part {at} first\" (cf inbox read m-{id})")
-                })
+                .map(|item| item["id"].as_str().unwrap())
                 .collect();
-            assert_eq!(lines, expected);
+            assert_eq!(found, ["found"], "{}", &said[..said.len().min(300)]);
+            assert_eq!(answer["history"]["partial"], false);
+            assert_eq!(answer["history"]["older"], Value::Null);
         })
         .await;
 }

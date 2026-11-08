@@ -10,7 +10,9 @@
 use std::cell::Cell;
 
 use cf_base::refusal::Refusal;
-use cf_engine::handoff::{whole_history_page, WholeHistoryPage, SHOWN_FIELD};
+use cf_engine::handoff::{
+    whole_history_page, ShownItem, WholeHistoryPage, HISTORY_ROOM, SHOWN_FIELD,
+};
 use cf_ledger::{HistoryFrom, HISTORY_PART, HISTORY_SCAN_BYTES, OPENING_COST, PAGE_BYTES};
 use cf_proto::ledger::{
     HistoryItem, HistoryKey, HistoryRead, HistoryRow, MessageOpening, Scanned, TextCut,
@@ -323,6 +325,57 @@ fn charges_each_delivery_s_opening_against_what_the_read_left_and_ends_the_page_
     assert_eq!(ids(&first), ["1-3"]);
     assert!(first.items[0].delivery.is_some());
     assert_eq!(looked.get(), 3);
+}
+
+#[test]
+fn a_page_of_deliveries_holds_as_many_items_as_its_room_allows_whatever_the_read_left() {
+    let header = "[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done";
+    // Newest first: three deliveries, a word between two of them.
+    let rows = vec![
+        row(1, 3, "user", header),
+        row(1, 2, "user", "a word"),
+        row(1, 1, "user", header),
+        row(1, 0, "user", header),
+    ];
+    let all = read(rows, None);
+    // What the read left would pay for two openings: the page is not cut by it.
+    let shown = whole_history_page(&all, HistoryFrom::Newest, &openings, 2 * OPENING_COST).unwrap();
+    assert_eq!(ids(&shown), ["1-0", "1-1", "1-2", "1-3"]);
+    assert_eq!(shown.older, None, "nothing left to go on to");
+    assert!(shown.items.iter().all(|item| item.id == "1-2" || item.delivery.is_some()));
+    // Nor is a long page of them: it ends where its room does, and not before.
+    let body = format!("[ConsensFlow m-5 · T-1 · result from @zeus]\n{}", "y".repeat(9_000));
+    let rows: Vec<HistoryRow> = (0..200).rev().map(|seq| row(1, seq, "user", &body)).collect();
+    let resume = rows.last().map(|row| row.key);
+    let long = read(rows.clone(), resume);
+    let shown = whole_history_page(&long, HistoryFrom::Newest, &openings, 0).unwrap();
+    let taken = shown.items.len();
+    assert!(taken > 40 && taken < 200, "{taken} items");
+    let size = |items: &[ShownItem]| items.iter().map(|item| serde_json::to_vec(item).unwrap().len() + 1).sum::<usize>();
+    let next = page(&read(vec![rows[taken].clone()], None), HistoryFrom::Newest);
+    assert!(
+        size(&shown.items) + size(&next.items) > HISTORY_ROOM,
+        "the next delivery would have fitted: {taken} items of {}",
+        size(&shown.items)
+    );
+}
+
+#[test]
+fn a_delivery_says_where_it_begins_and_nothing_of_its_words() {
+    let header = "[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done";
+    let rows = vec![
+        row(1, 1, "user", &format!("héllo 🙂{header}")),
+        row(1, 0, "user", header),
+    ];
+    let shown = page(&read(rows, None), HistoryFrom::Newest);
+    let said = serde_json::to_value(&shown.items).unwrap();
+    // What the human typed with it is "héllo 🙂": eight UTF-16 units, as the page counts.
+    assert_eq!(said[0]["delivery"], json!({ "at": 0 }));
+    assert_eq!(said[1]["delivery"], json!({ "at": 8 }));
+    assert!(
+        !said.to_string().contains("\"line\""),
+        "no line of the delivery's outcome: {said}"
+    );
 }
 
 #[test]
