@@ -1000,7 +1000,7 @@ replace = '''            failure: Some(refusal.failure()),
 
 [[plant]]
 name = "pi-setups: a program that ended with an error says no status"
-meant = "a_conversation_that_ended_says_the_code_and_what_the_one_start_said_whole"
+meant = "a_conversation_that_failed_carries_its_kind_and_its_status_beside_its_words"
 runs = ["ps-one-shot"]
 
 [[plant.edit]]

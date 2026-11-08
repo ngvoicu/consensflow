@@ -2292,7 +2292,7 @@ runs = ["quote-less-chief-not-up"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''                    Opened::Refused { error } => (Why::HostRefused, error.as_str()),'''
-replace = '''                    Opened::Refused { error } => (Why::Program(StartFailure::of(StartKind::NotStarted)), error.as_str()),'''
+replace = '''                    Opened::Refused { error } => (Why::Program(cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NotStarted)), error.as_str()),'''
 
 [[plant]]
 name = "windows close: quote less: a window refused as a program that cannot be run loses its kind"

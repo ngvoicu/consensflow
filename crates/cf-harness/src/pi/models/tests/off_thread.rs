@@ -143,21 +143,30 @@ fn a_folder_still_being_read_is_read_by_no_second_thread() {
 #[test]
 fn a_default_model_lookup_that_overlaps_a_listing_is_told_what_the_folder_holds() {
     let pi = StandIn::new(&[], &[]);
-    pi.child(&[answer("models", &[])], Ends::Asked);
-    pi.child(&[answer("models", &[])], Ends::Asked);
-    held_until_asked(2);
-    let (listing, default) = eventually(Box::pin(async {
+    for _ in 0..3 {
+        pi.child(&[answer("models", &[])], Ends::Asked);
+    }
+    held_until_asked(3);
+    let (listing, again, default) = eventually(Box::pin(async {
         tokio::join!(
+            listed(&pi.env, &*pi.processes, &*pi.time, false),
             listed(&pi.env, &*pi.processes, &*pi.time, false),
             default_model(&pi.env, &*pi.processes, &*pi.time),
         )
     }));
-    let (listing, default) = (listing.unwrap_err(), default.unwrap_err());
-    assert!(listing.contains("no provider is set up"), "{listing}");
-    assert!(!listing.contains(LATE), "{listing}");
+    let (listing, again, default) = (
+        listing.unwrap_err(),
+        again.unwrap_err(),
+        default.unwrap_err(),
+    );
+    // The page's listings, both of them, are told what the folder holds.
+    for told in [&listing, &again] {
+        assert!(told.contains("no provider is set up"), "{told}");
+        assert!(!told.contains(LATE), "{told}");
+    }
     // The chief's note says only that the list could not be read; the page tells why (T-1328).
     assert_eq!(default, crate::contract::NoDefault::Unread(None));
-    assert_eq!(setup::reads(), 1, "the one read answered both");
+    assert_eq!(setup::reads(), 1, "the one read answered all three");
 }
 
 /// Two asks for the same folder that overlap are answered by the one read, whole.
