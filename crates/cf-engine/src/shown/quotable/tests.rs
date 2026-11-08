@@ -375,3 +375,106 @@ fn a_hint_that_only_names_a_credential_is_withheld_with_a_pointer_to_where_to_re
         assert!(!said.contains(hint.lines().next().unwrap()), "{said}");
     }
 }
+
+/// The joint review T-1322, blocker 2: a credential's name with a value after it, whatever the
+/// value's length, withholds the block, and so does a name the wrap or a delimiter hides. The
+/// first inputs are the ones a quoting policy that left short values to the masker printed.
+#[test]
+fn the_labelled_values_a_policy_of_leaving_short_ones_to_the_masker_quoted_are_withheld() {
+    for words in [
+        "key: abc",
+        "token: a b c",
+        "Bearer abc",
+        "password\nhunter22",
+        "pass\nword\nhunter22",
+        "key: redgreenblue",
+        "key: abcdefgh ijklmnop",
+        "DB_PASS_WORD=redgreenblue",
+        "password%3Ahunter22",
+        "--password hunter22",
+        "Authentication failed\nhunter22",
+        "OPENAI_API_KEY is not set\nhunter22",
+        "Invalid key: expected string\nkey: abc",
+        "OAuth login expired\npassword\nhunter22",
+        "at the top\nkey:\nabc",
+        "Unexpected token: }\ntok\nen: abc",
+    ] {
+        assert_eq!(quotable(&pi_said(words)), withheld(), "{words:?}");
+    }
+}
+
+const SETUPS: &str = include_str!("../../../../cf-harness/tests/fixtures/pi-homes/scenarios.json");
+const RECORDED: &str =
+    include_str!("../../../../cf-harness/tests/fixtures/pi-homes/answers-mac.json");
+
+/// The words the recorded Pi 1.5.0 gave for the setup that ended on a failed extension.
+fn recorded_failure() -> String {
+    let all: serde_json::Value = serde_json::from_str(RECORDED).unwrap();
+    all["scenarios"]["extension-fails"]["with"]["stderr"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The ten setups the live suite reads (`tests/fixtures/pi-homes`), each read with the extensions
+/// Pi loads and without: the words of a Pi that fails in each, 82 strings with the recorded one.
+/// A policy that quoted Pi's hints because they hold no credential quoted all of them, and
+/// every one beside a credential on the next line (`key: abc`, `password: hunter22`). Under the
+/// chosen policy each is quoted as it was or withheld, and none is quoted beside a credential:
+/// the hint and the secret-bearing block need different provenance, not a pass-list.
+#[test]
+fn the_failures_of_the_recorded_setups_are_never_quoted_beside_a_credential() {
+    let recorded = recorded_failure();
+    let setups: serde_json::Value = serde_json::from_str(SETUPS).unwrap();
+    let answers: serde_json::Value = serde_json::from_str(RECORDED).unwrap();
+    let setups = setups["scenarios"].as_array().unwrap();
+    assert_eq!(setups.len(), 10, "the ten recorded setups");
+    let mut strings = vec![recorded.trim().to_owned()];
+    for setup in setups {
+        let name = setup["name"].as_str().unwrap();
+        for read in ["with", "without"] {
+            let answer = &answers["scenarios"][name][read];
+            assert!(!answer.is_null(), "{name} {read}");
+            strings.extend(setup["files"].as_object().unwrap().keys().map(|file| {
+                recorded
+                    .replace("extensions/broken.ts", file)
+                    .trim()
+                    .to_owned()
+            }));
+            if let Some(providers) = answer["providers"].as_object() {
+                strings.extend(providers.keys().map(|provider| {
+                    format!(
+                        "Authentication failed for \"{provider}\". Run '/login {provider}' to re-authenticate."
+                    )
+                }));
+            }
+            strings.push(format!(
+                "Error: Failed to load extension \"<agent>/{name}\": boom"
+            ));
+        }
+    }
+    assert!(strings.len() >= 50, "{} strings", strings.len());
+    let (mut quoted, mut left_out) = (0, 0);
+    for said in &strings {
+        let told = quotable(&pi_said(said));
+        if told == withheld() {
+            left_out += 1;
+        } else {
+            assert_eq!(told, pi_said(said), "{said}");
+            quoted += 1;
+        }
+        for credential in [
+            "password: hunter22",
+            "key: abc",
+            "token: a b c",
+            "Bearer abc",
+        ] {
+            let beside = format!("{said}\n{credential}");
+            assert_eq!(quotable(&pi_said(&beside)), withheld(), "{beside:?}");
+        }
+    }
+    assert!(
+        quoted > 0 && left_out > 0,
+        "{quoted} quoted, {left_out} withheld"
+    );
+}

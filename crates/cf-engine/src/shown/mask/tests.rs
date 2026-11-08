@@ -449,28 +449,50 @@ fn the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_accou
     assert_eq!(&text[spans[0].0..spans[0].1], "swordfish");
 }
 
-/// T-1227 (startup refusal notes): the paths in the cause of a failed start are replaced, the
-/// words around them kept, and paths side by side are one.
+/// The cause of a failed start: the files the code that built the words marked are replaced
+/// exactly, the rest is kept; free text with a file in it no one marked is not quoted at all (the
+/// joint review T-1322, blocker 4).
 #[test]
-fn the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept() {
+fn the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted(
+) {
+    use cf_base::startup::a_path_in_words as marked;
     for (cause, said) in [
         (
-            r"C:\Users\me\guard\claude.cmd is not an npm shim",
+            format!("{} is not an npm shim", marked(r"C:\tools\pi hunter22.cmd")),
             "[path] is not an npm shim",
         ),
-        ("spawn /usr/local/bin/claude ENOENT", "spawn [path] ENOENT"),
         (
-            r"%LOCALAPPDATA%\pi-node\current holds no node, and C:\Program Files\Pi\pi.cmd needs one",
+            format!("spawn {} ENOENT", marked("/opt/bin/Claude hunter22")),
+            "spawn [path] ENOENT",
+        ),
+        (
+            format!(
+                "{} holds no node, and {} needs one",
+                marked(r"%LOCALAPPDATA%\pi-node\current"),
+                marked(r"C:\Program Files\Pi\pi.cmd")
+            ),
             "[path] holds no node, and [path] needs one",
         ),
-        (
-            "could not fetch https://example.test/models.json: refused",
-            "could not fetch [path] refused",
-        ),
-        ("%HOME% is unset", "[path] is unset"),
-        ("no harness", "no harness"),
-        ("refused by the test", "refused by the test"),
+        ("no harness".to_owned(), "no harness"),
+        ("refused by the test".to_owned(), "refused by the test"),
+        ("codex is broken".to_owned(), "codex is broken"),
     ] {
-        assert_eq!(without_paths(cause), said, "{cause}");
+        assert_eq!(launch_cause(&cause), said, "{cause}");
+    }
+    for cause in [
+        // A file no one marked: a path with a blank, a URL, a folder an environment variable names.
+        r"C:\tools\pi hunter22.cmd is not an npm shim",
+        "spawn /opt/bin/Claude hunter22 ENOENT",
+        "could not fetch https://example.test/models.json: refused",
+        "%HOME% is unset",
+        // A mark that does not close, one inside another, a closing mark alone, and a file beside
+        // a marked one.
+        "spawn \u{2039}/opt/bin/Claude hunter22 ENOENT",
+        "spawn \u{2039}/opt\u{2039}/bin\u{203A} hunter22 ENOENT",
+        "spawn /opt/bin/Claude\u{203A} hunter22 ENOENT",
+        "spawn Claude\u{203A} hunter22 ENOENT",
+        "\u{2039}/a/b\u{203A} then /c/d hunter22",
+    ] {
+        assert_eq!(launch_cause(cause), CAUSE_WITHHELD, "{cause}");
     }
 }

@@ -85,6 +85,8 @@ quote-less-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--tes
 quote-less-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
 quote-less-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_cut_note"]
 quote-less-chief-not-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_not_up::"]
+quote-less-process = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "runnable::"]
+quote-less-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "startup::"]
 quote-less-background-notes = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "background::"]
 engine-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
 engine-assigning = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "assigning::"]
@@ -1075,9 +1077,9 @@ runs = ["engine-shown", "engine-windows"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''    if holds_a_key(&rows)
-        || grouped(&spaced)
+        || grouped(&without_own_session(&spaced, own_session))
 '''
-replace = '''    if grouped(&spaced)
+replace = '''    if grouped(&without_own_session(&spaced, own_session))
 '''
 
 [[plant]]
@@ -1271,10 +1273,10 @@ runs = ["engine-shown"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''    if holds_a_key(&rows)
-        || grouped(&spaced)
+        || grouped(&without_own_session(&spaced, own_session))
 '''
 replace = '''    if holds_a_key(&rows)
-        || rows.iter().any(|row| grouped(row))
+        || rows.iter().any(|row| grouped(&without_own_session(row, own_session)))
 '''
 
 [[plant]]
@@ -2054,43 +2056,13 @@ find = '''    "ssh", "sftp", "scp"'''
 replace = '''    "ssx", "sftp", "scp"'''
 
 [[plant]]
-name = "windows close: quote less: a backslash makes no path"
-meant = "the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''Regex::new(r"(?:\S*[/\\]\S*|%[A-Za-z_]'''
-replace = '''Regex::new(r"(?:\S*[/]\S*|%[A-Za-z_]'''
-
-[[plant]]
-name = "windows close: quote less: an environment variable in percent signs makes no path"
-meant = "the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''|%[A-Za-z_][A-Za-z0-9_]*%\S*)")'''
-replace = '''|%[A-Za-z_]X[A-Za-z0-9_]*%\S*)")'''
-
-[[plant]]
-name = "windows close: quote less: paths side by side are not one"
-meant = "the_paths_in_the_cause_of_a_failed_start_are_replaced_and_the_words_round_them_kept"
-runs = ["engine-shown"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/mask.rs"
-find = '''    while collapsed.contains(&doubled) {'''
-replace = '''    while false && collapsed.contains(&doubled) {'''
-
-[[plant]]
 name = "windows close: quote less: the cause of an adapter that could not prepare a window is told with its path"
 meant = "a_launch_that_failed_says_its_cause_and_never_the_path_of_the_program"
 runs = ["quote-less-chief-not-up"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''without_paths(&cause.to_string())'''
+find = '''launch_cause(&cause.to_string())'''
 replace = '''cause.to_string()'''
 
 [[plant]]
@@ -2100,7 +2072,7 @@ runs = ["quote-less-chief-not-up"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''without_paths(error)'''
+find = '''launch_cause(error)'''
 replace = '''error.to_owned()'''
 
 [[plant]]
@@ -2180,10 +2152,8 @@ runs = ["quote-less-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
-find = '''    if screen::withheld(&[words.to_owned()], None).is_some() {
-        return None;
-    }'''
-replace = ''''''
+find = '''    if screen::withheld(&[words.to_owned()], None).is_some() || screen::names_a_value(&pieces) {'''
+replace = '''    if screen::names_a_value(&pieces) {'''
 
 [[plant]]
 name = "windows close: quote less: an opening is quoted unmasked"
@@ -2206,3 +2176,267 @@ runs = ["engine-shown"]
 file = "crates/cf-proto/src/models.rs"
 find = '''    "(Pi's words withheld: they may hold a credential; run Pi in a terminal to read what it says)";'''
 replace = '''    "(Pi's words withheld: they may hold a credential)";'''
+
+[[plant]]
+name = "windows close: quote less: the URL check looks at the rows with the window's own id taken out"
+meant = "the_windows_own_session_id_is_exempt_from_the_groups_alone"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''splits_url_credentials(&rows, &joined)'''
+replace = '''splits_url_credentials(&rows, &without_own_session(&joined, own_session))'''
+
+[[plant]]
+name = "windows close: quote less: the token check looks at the rows with the window's own id taken out"
+meant = "the_windows_own_session_id_is_exempt_from_the_groups_alone"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        || begins_a_token(&spaced)
+'''
+replace = '''        || begins_a_token(&without_own_session(&spaced, own_session))
+'''
+
+[[plant]]
+name = "windows close: quote less: the screen's own id is persisted exempt from every check"
+meant = "a_pause_note_the_ledger_holds_says_none_of_a_credential_the_windows_own_id_sits_beside"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''splits_url_credentials(&rows, &joined)'''
+replace = '''splits_url_credentials(&rows, &without_own_session(&joined, own_session))'''
+
+[[plant]]
+name = "windows close: quote less: a name with a value is looked for in the lines joined by lines only"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''[lines.join("\n"), lines.concat(), lines.join(" ")]'''
+replace = '''[lines.join("\n")]'''
+
+[[plant]]
+name = "windows close: quote less: a name with a value is looked for as written only"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                .chain(percent_levels(text))
+                .any(|text| NAMED_VALUE.is_match(&text))'''
+replace = '''                .any(|text| NAMED_VALUE.is_match(&text))'''
+
+[[plant]]
+name = "windows close: quote less: key is no credential's name"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''(?i)(?:key|token|secret|passw(?:or)?d|authorization|bearer)'''
+replace = '''(?i)(?:token|secret|passw(?:or)?d|authorization|bearer)'''
+
+[[plant]]
+name = "windows close: quote less: a credential's name needs no delimiter to have a value"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''s?["']?\s*[:=]\s*["']?[^\s"']"#,'''
+replace = '''s?["']?\s*[:=]?\s*["']?[^\s"']"#,'''
+
+[[plant]]
+name = "windows close: quote less: an opening is quoted beside a credential's name"
+meant = "a_cut_note_quotes_no_opening_with_a_credentials_name_and_any_value_after_it"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''screen::withheld(&[words.to_owned()], None).is_some() || screen::names_a_value(&pieces)'''
+replace = '''screen::withheld(&[words.to_owned()], None).is_some()'''
+
+[[plant]]
+name = "windows close: quote less: an opening's words are looked at as one piece"
+meant = "a_cut_note_quotes_no_opening_with_a_credentials_name_and_any_value_after_it"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''    let pieces: Vec<&str> = words.split(' ').collect();'''
+replace = '''    let pieces: Vec<&str> = vec![words];'''
+
+[[plant]]
+name = "windows close: quote less: a block of Pi's words is quoted beside a credential's name and any value"
+meant = "the_labelled_values_a_policy_of_leaving_short_ones_to_the_masker_quoted_are_withheld"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '''screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)'''
+replace = '''screen::withheld(&rows, None).is_some()'''
+
+[[plant]]
+name = "windows close: quote less: a file no one marked is quoted"
+meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    if said.contains(PATH_CLOSES) || NAMES_A_FILE.is_match(&said) {'''
+replace = '''    if said.contains(PATH_CLOSES) {'''
+
+[[plant]]
+name = "windows close: quote less: a closing mark with no opening one is quoted"
+meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    if said.contains(PATH_CLOSES) || NAMES_A_FILE.is_match(&said) {'''
+replace = '''    if NAMES_A_FILE.is_match(&said) {'''
+
+[[plant]]
+name = "windows close: quote less: a mark inside another is a file"
+meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''            Some(close) if !after[..close].contains(PATH_OPENS) => {'''
+replace = '''            Some(close) => {'''
+
+[[plant]]
+name = "windows close: quote less: a mark that does not close is a file"
+meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''            _ => return CAUSE_WITHHELD.to_owned(),'''
+replace = '''            _ => {
+                said.push_str(rest);
+                return said;
+            }'''
+
+[[plant]]
+name = "windows close: quote less: a marked file is quoted"
+meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''                said.push_str(PATH);'''
+replace = '''                said.push_str(&after[..close]);'''
+
+[[plant]]
+name = "windows close: quote less: a folder an environment variable names is no file"
+meant = "the_files_marked_in_the_cause_of_a_failed_start_are_replaced_and_free_text_with_a_file_is_not_quoted"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''Regex::new(r"[/\\]|%[A-Za-z_][A-Za-z0-9_]*%")'''
+replace = '''Regex::new(r"[/\\]")'''
+
+[[plant]]
+name = "windows close: quote less: a marked path is told with its blanks"
+meant = "a_launch_that_failed_with_a_typed_path_says_its_cause_with_the_path_replaced"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''                said.push_str(PATH);'''
+replace = '''                said.push_str(&format!("{PATH} {}", after[..close].split(' ').last().unwrap_or("")));'''
+
+[[plant]]
+name = "windows close: quote less: a script that is no npm shim is refused with its path unmarked"
+meant = "the_refusals_of_a_start_mark_the_files_they_name"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''        a_path_in_words(executable)
+    )'''
+replace = '''        executable
+    )'''
+
+[[plant]]
+name = "windows close: quote less: an npm shim with no Node is refused with its path unmarked"
+meant = "the_refusals_of_a_start_mark_the_files_they_name"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''        a_path_in_words(shim)
+    )'''
+replace = '''        shim.display()
+    )'''
+
+[[plant]]
+name = "windows close: quote less: Pi's shim with no Node is refused with its path unmarked"
+meant = "the_refusals_of_a_start_mark_the_files_they_name"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''            a_path_in_words(shim),
+'''
+replace = '''            shim.display(),
+'''
+
+[[plant]]
+name = "windows close: quote less: Pi's installer's folder is named unmarked"
+meant = "the_refusals_of_a_start_mark_the_files_they_name"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''            a_path_in_words(r"%LOCALAPPDATA%\pi-node\current")
+'''
+replace = '''            r"%LOCALAPPDATA%\pi-node\current"
+'''
+
+[[plant]]
+name = "windows close: quote less: a path is marked by nothing"
+meant = "a_path_is_marked_whole_with_its_blanks_and_a_marker_among_its_characters_is_none"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    format!("{PATH_OPENS}{text}{PATH_CLOSES}")'''
+replace = '''    text'''
+
+[[plant]]
+name = "windows close: quote less: a marker among a path's characters stays"
+meant = "a_path_is_marked_whole_with_its_blanks_and_a_marker_among_its_characters_is_none"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            if c == PATH_OPENS || c == PATH_CLOSES {'''
+replace = '''            if false {'''
+
+[[plant]]
+name = "windows close: quote less: a process that may be the window's is named by its program, whatever it is"
+meant = "a_process_that_may_be_the_windows_own_is_named_by_a_listed_program_and_its_number_alone_otherwise"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''            None => format!("pid {}", process.pid),'''
+replace = '''            None => format!("pid {} ({})", process.pid, process.program),'''
+
+[[plant]]
+name = "windows close: quote less: a process whose name goes on after a listed program is that program"
+meant = "a_process_that_may_be_the_windows_own_is_named_by_a_listed_program_or_by_its_number"
+runs = ["quote-less-background-notes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        Some((program, false)) => Some(program),'''
+replace = '''        Some((program, _)) => Some(program),'''

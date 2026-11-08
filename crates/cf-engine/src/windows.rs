@@ -36,7 +36,7 @@ use crate::role_change::{Compared, Prelude};
 use crate::role_news::{NewsPart, Told};
 use crate::runtime::{begin, caught, returning};
 use crate::seams::EngineError;
-use crate::shown::mask::without_paths;
+use crate::shown::mask::launch_cause;
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::stops::{Interrupted, Unstopped};
@@ -777,7 +777,7 @@ impl Dispatcher {
                     project,
                     participant,
                     failing,
-                    &format!("the launch failed: {}", without_paths(&cause.to_string())),
+                    &format!("the launch failed: {}", launch_cause(&cause.to_string())),
                 );
             }
         };
@@ -1381,7 +1381,7 @@ impl Dispatcher {
             project,
             participant,
             delivering,
-            &format!("the window did not open: {}", without_paths(error)),
+            &format!("the window did not open: {}", launch_cause(error)),
         )
     }
 

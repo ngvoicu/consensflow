@@ -1450,6 +1450,61 @@ fn a_cut_note_quotes_no_opening_that_may_hold_a_secret_and_masks_the_rest() {
     );
 }
 
+/// The joint review T-1322, blocker 3: a credential's name with a value after it, however short the
+/// value, withholds the opening. Being too short for the masker does not make a value safe.
+#[test]
+fn a_cut_note_quotes_no_opening_with_a_credentials_name_and_any_value_after_it() {
+    let mut failed = Vec::new();
+    for opening in [
+        "key: abc",
+        "key: redgreenblue",
+        "key: abcdefgh ijklmnop",
+        "token: a b c",
+        "API_KEY=x",
+        "secret = 'a b'",
+        "Authorization: Bearer abc",
+        "set the key: abc and go on",
+        "tok en: abc",
+        "key%3Aabc",
+    ] {
+        let context = Context::new();
+        let tiers = at_work(&context);
+        context.adapter.busy("chief");
+        context
+            .adapter
+            .turn_began_with("chief", Some("2026-10-15 20:41 UTC"), opening);
+        let after = quit_and_start(&context);
+        after.resume_project(tiers.project.id).unwrap();
+        let told = launch_of(&context, "chief")["message"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        if !told.contains("with words that may hold a secret, so they are not quoted") {
+            failed.push(format!("{opening}: {told}"));
+        }
+        context.close();
+    }
+    // A key with nothing after it, and a message that only names one, are quoted as they were.
+    let context = Context::new();
+    let tiers = at_work(&context);
+    context.adapter.busy("chief");
+    context.adapter.turn_began_with(
+        "chief",
+        Some("2026-10-15 20:41 UTC"),
+        "Run the tests and tell me the key results",
+    );
+    let after = quit_and_start(&context);
+    after.resume_project(tiers.project.id).unwrap();
+    let told = launch_of(&context, "chief")["message"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    if !told.contains("with \"Run the tests and tell me the key results\"") {
+        failed.push(format!("a plain opening: {told}"));
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 #[test]
 fn a_cut_note_that_names_its_turn_and_still_holds_is_told_once_across_resumes() {
     let context = Context::new();

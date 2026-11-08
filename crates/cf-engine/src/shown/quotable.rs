@@ -31,10 +31,16 @@
 //!
 //! What may hold a credential is the screens' own rule on the lines as one text
 //! ([`screen::withheld`]: a secret-like word on any line, a token's beginning, a key's body, a
-//! value in groups, whatever the wrap does to them) and a credential's word with a value after
-//! it, on the same line or the next (`key: abc`, `"secret": "a b"`, `API_KEY=…`, `token:` and
-//! the value below, in any case). The cost is the blocks that name a credential and hold none
-//! (`Invalid key: expected string`): they are left out whole, with the description and the code.
+//! value in groups, whatever the wrap does to them) and a credential's name with a value after
+//! it **whatever the value is** ([`screen::names_a_value`]: `key: abc`, `"secret": "a b"`,
+//! `API_KEY=…`, `token:` and the value below, in any case, the name cut by a line or written in
+//! percent signs). The cost is the blocks that name a credential and hold none
+//! (`Invalid key: expected string`, `OPENAI_API_KEY is not set`): they are left out whole, with
+//! the description and the code, and [`WORDS_WITHHELD`] says where to read them. No list of the
+//! harmless hints is kept, and no value is left to the masker for being too short for it: the
+//! joint review T-1322 found `key: abc`, `password` then `hunter22`, and `Authentication failed`
+//! then `hunter22` quoted by a policy that did, and a hint and a block that holds a secret
+//! differ in where their words came from, which text does not show.
 //! Nothing before the first mark can be a program's, so a forged mark among its words only
 //! makes the block longer.
 
@@ -54,19 +60,6 @@ const QUOTE_LINES: usize = 4;
 /// The most characters they take; the rest is cut and says so.
 const QUOTE_CHARS: usize = 600;
 
-/// A credential's word, the delimiter that gives it a value, and the value's first character:
-/// `key: abc`, `"token" = "a b"`, `API_KEY=…`, `Authorization: …`, and a value on the next line.
-/// A name that has the word anywhere in it counts (`ssh_key`, `x-api-key`), and so does one
-/// that has it as a piece of another word (`monkey: 1`): a false alarm costs a block, a miss
-/// a credential.
-#[allow(clippy::expect_used)]
-static NAMED_VALUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)(?:key|token|secret|passw(?:or)?d|authorization|bearer)s?["']?\s*[:=]\s*["']?[^\s"']"#,
-    )
-    .expect("a pattern")
-});
-
 /// A line of a stack, which is never quoted: Node's `at name (file:line:column)`, `at
 /// file:line:column`, `at name (<anonymous>)`, `at name (native)` and `at async Promise.all (index 0)`. A line that begins with
 /// `at` and is none of these is prose, and is looked at with the rest: it may be the label of
@@ -80,7 +73,7 @@ static FRAME: LazyLock<Regex> = LazyLock::new(|| {
 /// Whether `lines`, taken as one text, may hold a credential.
 fn may_hold_a_credential(lines: &[&str]) -> bool {
     let rows: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-    screen::withheld(&rows, None).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))
+    screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)
 }
 
 /// `reason` as it may be kept and told: masked, and where it carries the words of a program

@@ -1517,3 +1517,64 @@ fn a_windows_own_session_id_on_its_screen_is_no_value_in_groups() {
         "gone (exit code 1); its screen ended with: \"Resume this conversation with: claude --resume [masked]\" (1 key- or token-like string masked)"
     );
 }
+
+/// The joint review T-1322, blocker 1: the window's own id is exempt from the rule of a value in
+/// groups and from no other check. The URL, the prefix, the name and the decoding look at the rows
+/// as they were drawn.
+#[test]
+fn the_windows_own_session_id_is_exempt_from_the_groups_alone() {
+    const OWN: &str = "01234567-89ab-4def-8123-456789abcdef";
+    let url = format!("https://{OWN}:swo");
+    let token = format!("sk-{OWN}");
+    let basic = format!("Basic {OWN}");
+    let slot = format!("password: {OWN}");
+    let escaped = format!("https%3A%2F%2F{OWN}%3Aswo");
+    for (rows, wanted) in [
+        (vec![url.as_str(), "rdfish@vault"], NAMED),
+        (vec!["pad", url.as_str(), "rdfish@vault", "pad"], NAMED),
+        (vec![token.as_str()], NAMED),
+        (vec![basic.as_str()], NAMED),
+        (vec![slot.as_str()], NAMED),
+        (vec![escaped.as_str(), "rdfish%40vault"], NAMED),
+    ] {
+        assert_eq!(note_in(&rows, Some(OWN)), wanted, "{rows:?}");
+    }
+    // The id beside another UUID, or beside the groups of a value, is still a value in groups.
+    let both = format!("{OWN} 9f2c1d3e-7a4b-4c5d-8e6f-0a1b2c3d4e5f");
+    assert_eq!(note_in(&[&both], Some(OWN)), KEY);
+    // The id alone passes, as before.
+    let resume = format!("Resume with: claude --resume {OWN}");
+    assert!(note_in(&[&resume], Some(OWN)).contains("its screen ended with"));
+}
+
+/// The joint review T-1322, blockers 2 and 3: a credential's name with a value after it, however
+/// short the value, is a credential, on the same row or the next, joined or not.
+#[test]
+fn a_credentials_name_with_any_value_after_it_is_a_labelled_value() {
+    for lines in [
+        vec!["key: abc"],
+        vec!["token: a b c"],
+        vec!["key: redgreenblue"],
+        vec!["key: abcdefgh ijklmnop"],
+        vec!["API_KEY=x"],
+        vec!["\"secret\": \"a b\""],
+        vec!["Authorization: Bearer abc"],
+        vec!["tok", "en: abc"],
+        vec!["key:", "abc"],
+        vec!["key%3Aabc"],
+        vec!["token%253Aabc"],
+        vec!["set the key: abc and go on"],
+    ] {
+        assert!(super::names_a_value(&lines), "{lines:?}");
+    }
+    for lines in [
+        vec!["OPENAI_API_KEY is not set"],
+        vec!["the key results"],
+        vec!["token"],
+        vec!["Unexpected end of input"],
+        vec!["key"],
+        vec!["see the keys section"],
+    ] {
+        assert!(!super::names_a_value(&lines), "{lines:?}");
+    }
+}

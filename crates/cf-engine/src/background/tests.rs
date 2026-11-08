@@ -58,3 +58,29 @@ fn a_command_is_its_program_and_never_an_argument_nor_a_path() {
 fn a_process_whose_command_could_not_be_read_is_named_by_its_number() {
     assert_eq!(quote(&[process(42, "")]), "process 42");
 }
+
+#[test]
+fn a_process_that_may_be_the_windows_own_is_named_by_a_listed_program_or_by_its_number() {
+    let left = |program: &str| PossiblyLeft {
+        pid: 7,
+        program: program.to_owned(),
+    };
+    assert_eq!(program_of(&left("node")), Some("node"));
+    assert_eq!(program_of(&left("sleep")), Some("sleep"));
+    // A path to a listed program is the program: nothing else of it is said.
+    assert_eq!(program_of(&left("/Users/me/secret/bin/node")), Some("node"));
+    for program in [
+        "sk-abc defg hijk lmno",
+        "Python",
+        "my secret tool hunter22",
+        "node server.js",
+        "/Users/me/secret folder/bin/tool",
+        "",
+    ] {
+        assert_eq!(program_of(&left(program)), None, "{program}");
+    }
+    assert_eq!(
+        possibly_left_words(&[left("node"), left("sk-abc defg hijk lmno")]).as_deref(),
+        Some("pid 7 (node), pid 7 may be this window's and were not ended")
+    );
+}

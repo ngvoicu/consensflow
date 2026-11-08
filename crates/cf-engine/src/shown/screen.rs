@@ -59,8 +59,9 @@
 //!   reason a URL has ([`escapes_plainly`]): `cobalt%2Dviolet%2Dindigo`.
 //! - **The window's own session id.** A harness may print the conversation's id as it quits
 //!   (`claude --resume <uuid>`), and a UUID is a value in groups. ConsensFlow has each window's
-//!   session: that id, whole and in any case, is taken out before the rows are looked at
-//!   ([`without_own_session`]); any other UUID withholds the screen.
+//!   session: that id, whole and in any case, is taken out of the text the rule of a value in
+//!   groups looks at ([`without_own_session`]), and of no other: every name, prefix, URL and
+//!   decoding check looks at the rows as drawn. Any other UUID withholds the screen.
 //!
 //! What this does **not** close, and says so: a value with its name scrolled out of the tail
 //! that is a word of eleven letters or fewer, a word with digits and symbols under twelve, or one
@@ -71,6 +72,10 @@
 //!
 //! A false alarm (a hash, a long identifier, a sentence of four-letter words) costs the quote of
 //! one screen; a miss costs a key.
+
+use std::sync::LazyLock;
+
+use regex::Regex;
 
 use super::mask::{begins_a_token, has_url_credentials, url_credential_spans};
 use super::secret::names_a_secret;
@@ -108,10 +113,6 @@ pub(super) enum Withheld {
 /// conversation the window ran in, as ConsensFlow has it: a harness may print it when it quits
 /// (`claude --resume <id>`), and that id, a UUID, is no secret ([`without_own_session`]).
 pub(super) fn withheld(tail: &[String], own_session: Option<&str>) -> Option<Withheld> {
-    let tail: Vec<String> = tail
-        .iter()
-        .map(|row| without_own_session(row, own_session))
-        .collect();
     // Every row the host sent is looked at, as drawn: a value that goes on over a row keeps no
     // name on the row it ends on.
     if tail.iter().any(|row| names_a_secret(row)) {
@@ -145,8 +146,12 @@ pub(super) fn withheld(tail: &[String], own_session: Option<&str>) -> Option<Wit
             }
         }
     }
+    // The window's own session id is exempt from the rule of a value in groups and from no other:
+    // every check above and below looks at the rows as they were drawn (the joint review T-1322,
+    // blocker 1: with the id taken out of the rows first, `https://<id>:swo` / `rdfish@vault`
+    // was no URL in either row).
     if holds_a_key(&rows)
-        || grouped(&spaced)
+        || grouped(&without_own_session(&spaced, own_session))
         || bare_words(&rows)
         || escapes_plainly(&joined)
         || escapes_plainly(&spaced)
@@ -156,11 +161,13 @@ pub(super) fn withheld(tail: &[String], own_session: Option<&str>) -> Option<Wit
     None
 }
 
-/// `row` with the window's own session id taken out, where it is whole in it and the session is
+/// `text` with the window's own session id taken out, where it is whole in it and the session is
 /// a UUID (Claude Code prints `claude --resume <uuid>` when it quits): the id is
 /// ConsensFlow's own record and no secret, and the rule of a value in groups would take it for
 /// one. Only the id as a word of its own, in any case, and only where ConsensFlow knows it for
-/// this window's: any other UUID on the screen is still a value in groups.
+/// this window's: any other UUID on the screen is still a value in groups. **Only the text of
+/// the rule of a value in groups is rewritten with it**: no name, prefix, URL or decoding check
+/// is given a text with the id gone.
 fn without_own_session(row: &str, own_session: Option<&str>) -> String {
     let Some(id) = own_session.filter(|id| is_uuid(id)) else {
         return row.to_owned();
@@ -270,6 +277,34 @@ fn escapes_plainly(text: &str) -> bool {
                     .iter()
                     .any(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(byte)))
     })
+}
+
+/// A credential's word, the delimiter that gives it a value, and the value's first character:
+/// `key: abc`, `"token" = "a b"`, `API_KEY=…`, `Authorization: …`. A name that has the word
+/// anywhere in it counts (`ssh_key`, `x-api-key`), and so does one that has it as a piece of
+/// another word (`monkey: 1`): a false alarm costs a block, a miss a credential.
+#[allow(clippy::expect_used)]
+static NAMED_VALUE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)(?:key|token|secret|passw(?:or)?d|authorization|bearer)s?["']?\s*[:=]\s*["']?[^\s"']"#,
+    )
+    .expect("a pattern")
+});
+
+/// Whether `lines`, as the words of one message or the rows of one screen, have a credential's
+/// name with a value after it, **whatever the value is**: `key: abc` is a key as much as
+/// `key: abcdefghijkl` is, and a value too short for the masker to take for one is not a safe one
+/// (the joint review T-1322, blockers 2 and 3). The lines are looked at as they stand, joined by
+/// lines, joined with nothing and joined with a blank, so that a name the wrap cut in two is
+/// whole at the join, and as what they spell where they hold escapes.
+pub(super) fn names_a_value(lines: &[&str]) -> bool {
+    [lines.join("\n"), lines.concat(), lines.join(" ")]
+        .iter()
+        .any(|text| {
+            std::iter::once(text.clone())
+                .chain(percent_levels(text))
+                .any(|text| NAMED_VALUE.is_match(&text))
+        })
 }
 
 /// The byte two hex digits spell.

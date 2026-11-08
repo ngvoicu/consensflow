@@ -112,7 +112,7 @@ fn a_pause_names_a_job_that_may_be_its_windows_though_its_tree_runs_nothing_of_t
     let project = paused_at_rest(&context);
     assert_eq!(
         told_left(&context, project),
-        ["T-1's window stays open while T-1 is paused; pid 4242 (bash) may be this window's and was not ended"]
+        ["T-1's window stays open while T-1 is paused; pid 4242 may be this window's and was not ended"]
     );
     context.close();
 }
@@ -199,7 +199,7 @@ fn a_pause_of_a_task_held_for_its_job_names_the_job_and_the_loop_it_left() {
     assert!(context.host.killed().is_empty());
     assert_eq!(
         told_left(&context, project.id),
-        ["T-1's window stays open while T-1 is paused, with background work its turn left running, which the pause does not end: process 4711; pid 4242 (bash) may be this window's and was not ended"]
+        ["T-1's window stays open while T-1 is paused, with background work its turn left running, which the pause does not end: process 4711; pid 4242 may be this window's and was not ended"]
     );
     context.close();
 }

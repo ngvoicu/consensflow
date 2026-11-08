@@ -711,6 +711,44 @@ fn a_pause_note_the_ledger_holds_still_quotes_the_screens_of_an_ordinary_day() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The joint review T-1322, blocker 1: the window's own session id is exempt from the rule of a
+/// value in groups only. Taken out of the rows before every check, as it was, it made `https://<id>:swo`
+/// / `rdfish@vault` two rows with no URL in either, and the password in them was quoted. Every
+/// other check looks at the rows as they were drawn.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_credential_the_windows_own_id_sits_beside() {
+    const OWN: &str = "01234567-89ab-4def-8123-456789abcdef";
+    let url = format!("https://{OWN}:swo");
+    let token = format!("sk-{OWN}");
+    let basic = format!("Basic {OWN}");
+    let slot = format!("password: {OWN}");
+    let mut failed = Vec::new();
+    for (rows, value) in [
+        // The user of a URL is the id, the password cut in two by the window's wrap.
+        (vec![url.as_str(), "rdfish@vault"], "rdfish"),
+        (
+            vec!["pad one", url.as_str(), "rdfish@vault", "pad two"],
+            "rdfish",
+        ),
+        // The id as the body of a token, of a Basic credential, and in a password's slot.
+        (vec![token.as_str()], "-89ab"),
+        (vec![basic.as_str()], "89ab"),
+        (vec![slot.as_str()], "89ab"),
+    ] {
+        let note = paused_note_on(1, &rows, None, Some(OWN));
+        if note != named_note() || note.contains(value) {
+            failed.push(format!("{rows:?}: {note}"));
+        }
+    }
+    // The id alone, as a harness prints it when it quits, still passes.
+    let resume = format!("claude --resume {OWN}");
+    let note = paused_note_on(1, &["Goodbye!", &resume], None, Some(OWN));
+    if !note.contains("its screen ended with") {
+        failed.push(format!("its own: {note}"));
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// The files a tool worked on are never said in a pause note (T-1224, finding 2): a token split
 /// by blanks, a key's body below the masker's size, and credentials written in percent signs
 /// went to the ledger in the paths a note quoted.

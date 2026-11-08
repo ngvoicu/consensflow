@@ -255,84 +255,155 @@ fn keeps_what_was_queued_for_a_first_chief_whose_window_does_not_open() {
     );
 }
 
-/// What a program's start failed with, as a host or an adapter says it: the file it tried and,
-/// on Windows, a folder of the person's (`startup-refusal-notes-can-quote-a-program-path`,
-/// alpha.3's known issue, T-1178: the guard script's absolute path was in the note).
-const PATH_CAUSES: [(&str, &str); 3] = [
-    (
-        r"C:\Users\me\guard\claude.cmd is not an npm shim, and only cmd.exe could run it in a window",
-        "[path] is not an npm shim, and only cmd.exe could run it in a window",
-    ),
-    (
-        "spawn /Users/me/secret-project/bin/claude ENOENT",
-        "spawn [path] ENOENT",
-    ),
-    (
-        r"%LOCALAPPDATA%\pi-node\current holds no node, and C:\Program Files\Pi\pi.cmd needs one",
-        "[path] holds no node, and [path] needs one",
-    ),
-];
+/// The words of a start that failed, the file it tried marked as the code that built them marks it
+/// (`cf_base::startup::a_path_in_words`), and what a note says of them: the file replaced, the rest
+/// kept (the error code, the advice).
+fn typed_causes() -> [(String, &'static str); 3] {
+    use cf_base::startup::a_path_in_words as marked;
+    [
+        (
+            format!(
+                "{} is not an npm shim, and only cmd.exe could run it in a window",
+                marked(r"C:\tools\pi hunter22.cmd")
+            ),
+            "[path] is not an npm shim, and only cmd.exe could run it in a window",
+        ),
+        (
+            format!("spawn {} ENOENT", marked("/opt/bin/Claude hunter22")),
+            "spawn [path] ENOENT",
+        ),
+        (
+            format!(
+                "{} holds no node, and {} needs one",
+                marked(r"%LOCALAPPDATA%\pi-node\current"),
+                marked(r"C:\Program Files\Pi\pi.cmd")
+            ),
+            "[path] holds no node, and [path] needs one",
+        ),
+    ]
+}
 
-/// A startup refusal says what failed, and the advice in it, and not the path of the program:
-/// the chief's window that did not come up, a member's that failed its task, and a window the
-/// human opened that the host refused.
+/// What a note says of a cause that is free text with a file in it, whose end nothing says: none of
+/// the cause (the joint review T-1322, blocker 4: `C:\tools\pi hunter22.cmd` became
+/// `[path] hunter22.cmd`).
+const WITHHELD_CAUSE: &str = "its cause named a file, so it is not quoted";
+
+/// The pause note of a chief and a member whose start failed with `cause`, from an adapter that
+/// could not prepare the window and from a host that refused to open it: what each note says of
+/// the cause, the note's own advice after it.
+fn startup_notes(cause: &str) -> [String; 3] {
+    // The adapter cannot prepare the chief's window.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.close_project(project.id).unwrap();
+    let said = cause.to_owned();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |_| Err(said.clone())));
+    context.resume_project(project.id).unwrap();
+    let prepared = to_human(&context, project.id).join(" | ");
+    context.close();
+
+    // The host refuses to open it.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.close_project(project.id).unwrap();
+    *context.host.refused_with.borrow_mut() = Some(cause.to_owned());
+    context.host.refuse.set(true);
+    context.resume_project(project.id).unwrap();
+    let refused = to_human(&context, project.id).join(" | ");
+    context.close();
+
+    // A member's task fails with it.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    let said = cause.to_owned();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |_| Err(said.clone())));
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    let task = context.task(project.id, 1);
+    let member = task
+        .messages
+        .iter()
+        .find(|m| m.kind == "note")
+        .map(|m| m.body.clone())
+        .unwrap_or_default();
+    context.close();
+    [prepared, refused, member]
+}
+
+/// A start whose cause marks the file it tried (the code that built the words had the path as data)
+/// says what failed, the error code and the advice, with `[path]` in the file's place, whatever
+/// the path holds: blanks, a name that is a credential.
 #[test]
-fn a_launch_that_failed_says_its_cause_and_never_the_path_of_the_program() {
+fn a_launch_that_failed_with_a_typed_path_says_its_cause_with_the_path_replaced() {
     let mut failed = Vec::new();
-    for (cause, said) in PATH_CAUSES {
-        // The adapter cannot prepare the chief's window.
-        let context = Context::new();
-        let project = context.with_staff(&["zeus"]);
-        context.pass().unwrap();
-        context.close_project(project.id).unwrap();
-        let cause_now = cause.to_owned();
-        *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |_| Err(cause_now.clone())));
-        context.resume_project(project.id).unwrap();
-        let told = to_human(&context, project.id);
-        let wanted = format!(
-            "The chief could not start: the launch failed: {said}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
-        );
-        if told != [wanted] {
-            failed.push(format!("chief, prepared: {told:?}"));
+    for (cause, said) in typed_causes() {
+        let [prepared, refused, member] = startup_notes(&cause);
+        if !prepared.starts_with(&format!(
+            "The chief could not start: the launch failed: {said}. What comes for the chief waits"
+        )) {
+            failed.push(format!("chief, prepared: {prepared}"));
         }
-        context.close();
+        if !refused.starts_with(&format!(
+            "The chief could not start: the window did not open: {said}. What comes for the chief waits"
+        )) {
+            failed.push(format!("chief, refused: {refused}"));
+        }
+        if !member.starts_with(&format!("T-1 failed: the launch failed: {said}.")) {
+            failed.push(format!("member: {member}"));
+        }
+        for note in [&prepared, &refused, &member] {
+            if note.contains("hunter22") {
+                failed.push(format!("a credential in the path: {note}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
 
-        // The host refuses to open it.
-        let context = Context::new();
-        let project = context.with_staff(&["zeus"]);
-        context.pass().unwrap();
-        context.close_project(project.id).unwrap();
-        *context.host.refused_with.borrow_mut() = Some(cause.to_owned());
-        context.host.refuse.set(true);
-        context.resume_project(project.id).unwrap();
-        let told = to_human(&context, project.id);
-        let wanted = format!(
-            "The chief could not start: the window did not open: {said}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
-        );
-        if told != [wanted] {
-            failed.push(format!("chief, refused: {told:?}"));
+/// A start whose cause is free text with a file in it, whose end nothing says (a path with a
+/// blank, a URL, an environment variable's folder), is not quoted at all; the note's own advice
+/// stays. A path cannot be told from the words round it.
+#[test]
+fn a_launch_that_failed_with_a_path_whose_end_nothing_says_quotes_no_word_of_the_cause() {
+    let mut failed = Vec::new();
+    for cause in [
+        r"C:\tools\pi hunter22.cmd is not an npm shim, and only cmd.exe could run it in a window",
+        "spawn /opt/bin/Claude hunter22 ENOENT",
+        r"%LOCALAPPDATA%\pi-node\current holds no node",
+        "could not fetch https://example.test/models.json: refused",
+    ] {
+        let [prepared, refused, member] = startup_notes(cause);
+        if !prepared.starts_with(&format!(
+            "The chief could not start: the launch failed: {WITHHELD_CAUSE}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
+        )) {
+            failed.push(format!("chief, prepared: {prepared}"));
         }
-        context.close();
-
-        // A member's task fails with it, and its requester is told.
-        let context = Context::new();
-        let project = context.with_staff(&["zeus"]);
-        context.pass().unwrap();
-        let cause_now = cause.to_owned();
-        *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |_| Err(cause_now.clone())));
-        context.give(project.id, "zeus", "Parser");
-        context.pass().unwrap();
-        let task = context.task(project.id, 1);
-        let note = task
-            .messages
-            .iter()
-            .find(|m| m.kind == "note")
-            .map(|m| m.body.clone())
-            .unwrap_or_default();
-        if !note.starts_with(&format!("T-1 failed: the launch failed: {said}.")) {
-            failed.push(format!("member: {note}"));
+        if !refused.starts_with(&format!(
+            "The chief could not start: the window did not open: {WITHHELD_CAUSE}. What comes for the chief waits"
+        )) {
+            failed.push(format!("chief, refused: {refused}"));
         }
-        context.close();
+        if !member.starts_with(&format!("T-1 failed: the launch failed: {WITHHELD_CAUSE}.")) {
+            failed.push(format!("member: {member}"));
+        }
+        for note in [&prepared, &refused, &member] {
+            if note.contains("hunter22") || note.contains("example.test") {
+                failed.push(format!("a word of the cause: {note}"));
+            }
+        }
+    }
+    // A cause with no file in it is told as it was.
+    for cause in ["codex is broken", "no conversation found with that id"] {
+        let [prepared, refused, member] = startup_notes(cause);
+        if !prepared.contains(&format!("the launch failed: {cause}."))
+            || !refused.contains(&format!("the window did not open: {cause}."))
+            || !member.contains(&format!("the launch failed: {cause}."))
+        {
+            failed.push(format!("{cause}: {prepared} | {refused} | {member}"));
+        }
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }

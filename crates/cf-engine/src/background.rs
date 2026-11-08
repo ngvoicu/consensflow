@@ -74,12 +74,9 @@ use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
 use crate::shown::command_program;
-use crate::shown::mask::mask;
 
 /// The most commands a note quotes of what a window left running.
 const QUOTED: usize = 5;
-/// The most characters of the name of a process a note quotes.
-const COMMAND_CHARS: usize = 160;
 
 impl Dispatcher {
     /// A turn is about to begin in the window: what its tree runs now came
@@ -334,7 +331,10 @@ fn possibly_left_words(possibly: &[PossiblyLeft]) -> Option<String> {
     let mut named: Vec<String> = possibly
         .iter()
         .take(QUOTED)
-        .map(|process| format!("pid {} ({})", process.pid, program_of(process)))
+        .map(|process| match program_of(process) {
+            Some(program) => format!("pid {} ({program})", process.pid),
+            None => format!("pid {}", process.pid),
+        })
         .collect();
     if possibly.len() > QUOTED {
         named.push(format!("{} more", possibly.len() - QUOTED));
@@ -346,18 +346,15 @@ fn possibly_left_words(possibly: &[PossiblyLeft]) -> Option<String> {
     ))
 }
 
-/// The name of the program of `process` as a note says it: on one line, held to
-/// [`COMMAND_CHARS`] characters, what looks like a key or a token in it hidden.
-fn program_of(process: &PossiblyLeft) -> String {
-    let words = mask(&process.program)
-        .text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if words.is_empty() {
-        "unnamed".to_owned()
-    } else {
-        words.chars().take(COMMAND_CHARS).collect()
+/// The program of `process` as a note says it: the one the list of the last tool call names
+/// ([`command_program`]) when that is the whole of the name the system gave the process, and none
+/// otherwise, the number saying it alone. A process's name is a file's: it can be anything,
+/// `sk-abc defg hijk lmno` among it, and no rule of shape finds where a secret in it ends (the
+/// joint review T-1322, blocker 5).
+fn program_of(process: &PossiblyLeft) -> Option<&'static str> {
+    match command_program(&process.program) {
+        Some((program, false)) => Some(program),
+        _ => None,
     }
 }
 

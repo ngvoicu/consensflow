@@ -449,6 +449,38 @@ fn a_window_closed_with_a_process_that_may_be_its_own_names_it_to_whoever_gave_t
     );
 }
 
+/// The joint review T-1322, blocker 5: what may be the window's and was not ended is named by a
+/// program the list of the last tool call names, and by its number where it does not: a program's
+/// name is a file's, and can hold what a secret is made of.
+#[test]
+fn a_process_that_may_be_the_windows_own_is_named_by_a_listed_program_and_its_number_alone_otherwise(
+) {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_possibly_leaving(&[
+        "sk-abc defg hijk lmno",
+        "node",
+        "Python",
+        "my secret tool hunter22",
+        "sleep",
+    ]);
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 1, "human")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let told = tiers.notes("chief");
+    let said = "T-1's window closed; pid 4001, pid 4002 (node), pid 4003, pid 4004, pid 4005 (sleep) may be this window's and were not ended";
+    assert!(told.contains(&said.to_owned()), "{told:?}");
+    assert!(
+        told.iter()
+            .all(|note| !note.contains("defg") && !note.contains("hunter22")),
+        "{told:?}"
+    );
+}
+
 #[test]
 fn a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_after_its_work() {
     let context = Context::new();
@@ -463,7 +495,7 @@ fn a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_afte
         tiers.notes("chief").last().map(String::as_str),
         Some(
             format!(
-                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK_SAID}; pid 4001 (node), pid 4002 (Python) may be this window's and were not ended. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK_SAID}; pid 4001 (node), pid 4002 may be this window's and were not ended. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
             )
             .as_str()
         )
