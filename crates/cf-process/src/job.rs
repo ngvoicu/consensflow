@@ -21,10 +21,15 @@
 //! (`CREATE_BREAKAWAY_FROM_JOB`) may, and the process it starts is then out of the job: ended
 //! with nothing of it. It is `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, never the silent kind
 //! (`SILENT_BREAKAWAY_OK`, which the removed process-wide job had, and which let every
-//! child of every program out of it). Codex asks: `codex update`, with the managed daemon
-//! running, starts it detached with the flag, and where the job refuses, the update fails
-//! ("this Windows launcher prevents background processes from outliving it", T-363). libuv
-//! never asks, so npm's and Node's children stay in the job. Nothing may leave the job of a
+//! child of every program out of it). Codex asks where it starts or restarts its background
+//! server (`codex app-server daemon …`, which the TUI's own update menu runs as
+//! `daemon update --from-cli`: Codex 0.167.0's `ensure_detached_launch`), and where the job
+//! refuses it fails ("this Windows launcher prevents background processes from outliving
+//! it", T-363). `codex update` itself asks for nothing (T-353, T-1334): for a standalone
+//! install it runs the PowerShell installer, whose script moves the install's `current`
+//! junction to the new release, and for npm or Homebrew it runs theirs. The Admin page's
+//! Update runs that alone, never the daemon's commands. libuv never asks, so npm's and
+//! Node's children stay in the job. Nothing may leave the job of a
 //! program held whole, the plants' runner's: the flag is refused there. Nor the job of an
 //! owned program (`Owned`, the Codex window's): its window's job refuses a breakaway, and a
 //! launch of Codex's daemon that asked for one and was let through would land in that job and

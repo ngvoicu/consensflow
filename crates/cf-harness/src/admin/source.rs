@@ -97,10 +97,29 @@ fn npm_package(harness: Harness) -> Option<&'static str> {
 /// command that updates what is in it. Claude's is told apart another way.
 /// Pi has two: its earlier installer's folder, which updates itself with
 /// `--self`, and the managed install its installer writes today (`bin` of the
-/// agent folder), which says it is updated with `pi update`.
+/// agent folder), which says it is updated with `pi update`. Codex has two,
+/// the first from Node's admin and the second its installer's (`install.ps1`,
+/// `install.sh`), each told in its arm.
 fn own_installer(harness: Harness) -> &'static [(&'static str, &'static [&'static str])] {
     match harness {
-        Harness::Codex => &[("/.codex/bin/", &["update"])],
+        // The standalone installer (Codex 0.167.0) puts a release of the CLI in
+        // `packages/standalone/releases/<version>-<target>` of Codex's home, a `current`
+        // link (a junction on Windows) to the one in use, and a visible folder on the PATH
+        // that leads to `current` (`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` on Windows,
+        // `~/.local/bin` elsewhere). The path is read where it leads (`real_path`), so the
+        // release's folder is what is told, and its home is the person's to place
+        // (`CODEX_HOME`), so nothing of the home is. `codex update`, run by the link, is
+        // Codex's own way to update it: it reads its own place the same way
+        // (`codex-install-context`) and runs the installer's script, which moves `current` to
+        // the new release.
+        //
+        // The first is a folder no Codex installer in `scripts/install` has ever made (its
+        // history, March to November 2026), and where Codex answers `codex update` with
+        // "Could not detect the Codex installation method"; kept, as Node's admin had it.
+        Harness::Codex => &[
+            ("/.codex/bin/", &["update"]),
+            ("/packages/standalone/releases/", &["update"]),
+        ],
         Harness::Pi => &[
             ("/.pi/bin/", &["update", "--self"]),
             ("/.pi/agent/bin/", &["update"]),

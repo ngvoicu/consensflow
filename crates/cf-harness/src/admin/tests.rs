@@ -18,6 +18,7 @@ use crate::testing::{named, EPOCH_MS};
 mod looks;
 #[cfg(unix)]
 mod real;
+pub(super) mod standalone;
 
 /// An admin over a throwaway home, on a clock and with programs and feeds the
 /// test scripts.

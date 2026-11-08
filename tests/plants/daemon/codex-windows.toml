@@ -1,0 +1,145 @@
+# Codex on Windows (T-1334, alpha.4's A4-12; the tasks T-399 and T-436 before it).
+#
+# The Admin page offered no update for Codex's standard install. Codex's standalone installer
+# (`install.ps1`, `install.sh`; Codex 0.167.0) puts a release in `packages/standalone/releases`
+# of Codex's home, a `current` link (a junction on Windows) to the one in use, and a visible folder
+# on the PATH that leads to `current`; the admin read where the link leads, found no folder of an
+# installer it knew (`<home>/.codex/bin/`, which no Codex installer has made), and said it did not
+# recognize the install. Codex's own `codex update` reads the same place (its install context) and
+# runs the installer's script, which moves `current`: that is the update, run by the link the
+# person runs.
+#
+# The live finish's verdict (the plants `codex-windows: a process ...`, below) asked a note of a
+# process that ended in the turn (T-404, T-436). The host's look fell on Codex's PowerShell wrapper
+# of a tool call, which lives under a second and was gone when the task ended; nothing escaped and
+# the window's close had nothing to end, so the chief was told nothing, and the verdict demanded a
+# note. A process the run saw gone as the task came to its end needs none; one still there, one the
+# pane host found in the window when it closed, and a command that ran on are held to it as before.
+
+[run]
+codex-admin-source = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::source"]
+codex-admin-update = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::update"]
+codex-admin-real = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::tests::real"]
+codex-finish-leaving = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "leaving::"]
+
+[[plant]]
+name = "codex-windows: the standalone installer's releases folder is no Codex installer of its own"
+meant = "codex_installed_by_its_standalone_installer_is_updated_by_its_own_update_through_the_links"
+runs = ["codex-admin-source", "codex-admin-update", "codex-admin-real"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+            ("/packages/standalone/releases/", &["update"]),
+'''
+replace = ""
+
+[[plant]]
+name = "codex-windows: the standalone releases are told only in a home called .codex"
+meant = "codex_s_standalone_releases_are_told_in_a_home_of_any_name_and_either_spelling"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '            ("/packages/standalone/releases/", &["update"]),'
+replace = '            ("/.codex/packages/standalone/releases/", &["update"]),'
+
+[[plant]]
+name = "codex-windows: any folder of Codex's packages is the standalone install"
+meant = "what_codex_keeps_beside_its_standalone_cli_is_no_install_to_update"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '            ("/packages/standalone/releases/", &["update"]),'
+replace = '            ("/packages/", &["update"]),'
+
+[[plant]]
+name = "codex-windows: the update runs the release the link leads to, not the link"
+meant = "updates_codex_s_standalone_install_by_its_own_update_through_the_link_the_person_runs"
+runs = ["codex-admin-update", "codex-admin-real"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = "        let mut update = vec![executable.to_owned()];"
+replace = "        let mut update = vec![real.clone()];"
+
+# The live finish's verdict of a command left running (crates/cf-e2e/tests/live_finish/leaving.rs).
+[[plant]]
+name = "codex-windows: a process that ended in the turn is held to the note"
+meant = "a_listed_process_that_ended_in_the_turn_with_nothing_escaped_needs_no_note"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = "            if !ended_in_the_turn(left) {"
+replace = "            if true {"
+
+[[plant]]
+name = "codex-windows: one process of the listed that ended is taken for all of them"
+meant = "a_listed_process_still_there_when_the_task_ended_owes_the_chief_a_note_though_another_ended"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''
+            .iter()
+            .all(|process| left.gone_in_the_turn.contains(&process.pid))
+'''
+replace = '''
+            .iter()
+            .any(|process| left.gone_in_the_turn.contains(&process.pid))
+'''
+
+[[plant]]
+name = "codex-windows: a process the pane host found at the close is no reason for a note"
+meant = "what_the_pane_host_found_in_the_window_at_its_close_owes_the_chief_a_note_whatever_ended"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''
+        && left.at_exit.is_empty()
+'''
+replace = ""
+
+[[plant]]
+name = "codex-windows: a command that ran on is no escape where a listed process ended"
+meant = "a_command_that_ran_on_after_a_listed_process_ended_in_the_turn_is_the_escape_still"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''
+        && left.escaped.is_empty()
+        && left.at_exit.is_empty()
+'''
+replace = '''
+        && left.at_exit.is_empty()
+'''
+
+[[plant]]
+name = "codex-windows: a process is gone when no process of its number is there, whatever it runs"
+meant = "a_listed_process_is_gone_unless_the_machine_has_one_of_its_number_that_runs_the_command"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = "                u64::from(running.identity.pid) == process.pid && running.command.contains(mark)"
+replace = "                u64::from(running.identity.pid) == process.pid"
+
+[[plant]]
+name = "codex-windows: the pane host's find at the close is read as nothing"
+meant = "what_the_pane_host_left_running_is_what_of_it_holds_the_command"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''
+    exit.map(|tree| tree.holding(mark).into_iter().cloned().collect())
+        .unwrap_or_default()
+'''
+replace = '''
+    let _ = (exit, mark);
+    Vec::new()
+'''

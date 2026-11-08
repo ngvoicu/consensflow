@@ -5,6 +5,7 @@
 use std::fs;
 
 use super::*;
+use crate::admin::tests::standalone::{lay_down, Layout};
 
 /// What `path.join` makes of `parts` on this system.
 fn joined(parts: &[&str]) -> String {
@@ -380,6 +381,82 @@ fn pis_managed_install_in_an_agent_folder_the_human_named_is_updated_as_its_inst
         source(Harness::Codex, &executable, &Env::default()).update,
         None
     );
+}
+
+/// Codex's standalone install (`packages/standalone` under its home): the program is in a
+/// release, `current` leads to the release in use, and the folder on the PATH leads to what
+/// `current` leads to. `codex update` is Codex's own way to update it (it runs its installer,
+/// which moves `current` to the new release), so the update is that, run by the link the person
+/// runs.
+#[test]
+fn codex_installed_by_its_standalone_installer_is_updated_by_its_own_update_through_the_links() {
+    for layout in [Layout::Package, Layout::Legacy] {
+        let root = tempfile::tempdir().unwrap();
+        let visible = root
+            .path()
+            .join("local")
+            .join("Programs")
+            .join("OpenAI")
+            .join("Codex")
+            .join("bin");
+        let program = lay_down(&root.path().join("home"), &visible, layout);
+        let executable = program.to_string_lossy().into_owned();
+        let found = source(Harness::Codex, &executable, &Env::default());
+        assert_eq!(
+            said(&found),
+            (
+                "https://registry.npmjs.org/@openai/codex/latest",
+                "npm",
+                Some("Codex's installer"),
+                Some(&[executable.clone(), "update".to_owned()][..]),
+            ),
+            "{layout:?}: the command runs the link the person runs, not the release it leads to"
+        );
+    }
+}
+
+/// Where Codex's home is is the person's to say (`CODEX_HOME`), and Codex reads its own install
+/// by the releases folder under it alone: so does the admin.
+#[test]
+fn codex_s_standalone_releases_are_told_in_a_home_of_any_name_and_either_spelling() {
+    for executable in [
+        r"D:\tools\codex-home\packages\standalone\releases\0.167.0-x86_64-pc-windows-msvc\bin\codex.exe",
+        r"C:\Users\me\.codex\packages\standalone\releases\0.164.0-x86_64-pc-windows-msvc\codex.exe",
+        "/Users/me/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex",
+        "/opt/codex-home/packages/standalone/releases/0.167.0-x86_64-unknown-linux-musl/codex",
+    ] {
+        let found = source(Harness::Codex, executable, &Env::default());
+        assert_eq!(
+            found.distribution.as_deref(),
+            Some("Codex's installer"),
+            "{executable}"
+        );
+        assert_eq!(
+            found.update,
+            Some(vec![executable.to_owned(), "update".to_owned()]),
+            "{executable}"
+        );
+    }
+}
+
+/// What is no standalone CLI is left to the human: the daemon's own packages (a release of
+/// `codex` the background server runs, which no `codex update` of the CLI moves), a release
+/// folder of another program, and the standalone folder with no release in it.
+#[test]
+fn what_codex_keeps_beside_its_standalone_cli_is_no_install_to_update() {
+    for executable in [
+        r"C:\Users\me\.codex\packages\app-server-daemon\releases\0.167.0-x86_64-pc-windows-msvc\bin\codex.exe",
+        "/Users/me/.codex/packages/app-server-daemon/releases/0.167.0-aarch64-apple-darwin/bin/codex",
+        "/Users/me/.other/releases/0.167.0/bin/codex",
+        r"C:\Users\me\.codex\packages\standalone\current\bin\codex.exe",
+    ] {
+        let found = source(Harness::Codex, executable, &Env::default());
+        assert_eq!(
+            (found.distribution, found.update),
+            (None, None),
+            "{executable}"
+        );
+    }
 }
 
 #[test]

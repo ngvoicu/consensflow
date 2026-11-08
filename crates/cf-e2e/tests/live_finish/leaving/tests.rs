@@ -26,6 +26,8 @@ fn good() -> Left {
         finished: false,
         notes: vec![CLOSED.to_owned()],
         alive: Vec::new(),
+        gone_in_the_turn: Vec::new(),
+        at_exit: Vec::new(),
         escaped: Vec::new(),
         after_close: None,
     }
@@ -461,6 +463,131 @@ fn a_chief_told_nothing_of_the_close_is_a_run_that_fails() {
         judge(&left, Expect::Ended).unwrap_err(),
         ["the chief was told nothing of the work the window closed with"]
     );
+}
+
+/// Codex's PowerShell wrapper of a tool call: the pane host's look fell on it while the turn
+/// worked, it lives under a second, and it was gone before the turn ended (T-404 on zeewin, with
+/// Codex 0.164.0, 4 runs of 12). Nothing escaped, the window's close had nothing to end, and the
+/// chief was told nothing, as it should be.
+fn ended_in_the_turn() -> Left {
+    let mut left = good();
+    left.listed = vec![proc(
+        7740,
+        r#"powershell.exe -NoProfile -Command "ping -n 4711 127.0.0.1""#,
+    )];
+    left.notes.clear();
+    left.gone_in_the_turn = vec![7740];
+    left
+}
+
+#[test]
+fn a_listed_process_that_ended_in_the_turn_with_nothing_escaped_needs_no_note() {
+    let left = ended_in_the_turn();
+    assert_eq!(judge(&left, Expect::Ended), Ok(()));
+    assert_eq!(
+        summary(&left, &judge(&left, Expect::Ended)),
+        "T-1 done after 20.0 s; the host listed the command's process (7740), which ended in the turn, before the task did: nothing of it was left for the window's close, and the chief was owed no note"
+    );
+    assert_eq!(
+        passed_as(&left),
+        "the command ended in the turn, before the task did, and the chief was owed no note"
+    );
+}
+
+#[test]
+fn a_listed_process_still_there_when_the_task_ended_owes_the_chief_a_note_though_another_ended() {
+    // Two processes of the command were listed: the wrapper ended in the turn, the command ran.
+    let mut left = ended_in_the_turn();
+    left.listed.push(proc(7741, "ping -n 4711 127.0.0.1"));
+    assert_eq!(
+        judge(&left, Expect::Ended).unwrap_err(),
+        ["the chief was told nothing of the work the window closed with"]
+    );
+    // And one that nothing says was gone is held to the note, as the run always held it.
+    left.gone_in_the_turn.clear();
+    assert_eq!(
+        judge(&left, Expect::Ended).unwrap_err(),
+        ["the chief was told nothing of the work the window closed with"]
+    );
+}
+
+#[test]
+fn what_the_pane_host_found_in_the_window_at_its_close_owes_the_chief_a_note_whatever_ended() {
+    let mut left = ended_in_the_turn();
+    left.at_exit = vec![proc(7742, "ping -n 4711 127.0.0.1")];
+    assert_eq!(
+        judge(&left, Expect::Ended).unwrap_err(),
+        ["the chief was told nothing of the work the window closed with"]
+    );
+}
+
+#[test]
+fn a_command_that_ran_on_after_a_listed_process_ended_in_the_turn_is_the_escape_still() {
+    let mut left = ended_in_the_turn();
+    left.escaped = vec!["4242 ping -n 4711 127.0.0.1".to_owned()];
+    let problems = judge(&left, Expect::Ended).unwrap_err();
+    assert_eq!(problems.len(), 2, "{problems:#?}");
+    assert!(
+        problems[0].starts_with("the command escaped the ending: the pane host listed only what ended before the run last looked (7740)"),
+        "{problems:#?}"
+    );
+    assert_eq!(
+        problems[1],
+        "the chief was told nothing of the work the window closed with"
+    );
+}
+
+#[test]
+fn a_note_that_came_is_told_as_it_always_was_whatever_ended_in_the_turn() {
+    let mut left = ended_in_the_turn();
+    left.notes = vec![CLOSED.to_owned()];
+    assert_eq!(judge(&left, Expect::Ended), Ok(()));
+    assert!(
+        summary(&left, &judge(&left, Expect::Ended))
+            .ends_with("was ended by the window's close and the chief told: T-1's window closed with background work running, which its close ended: sleep 4711"),
+        "{}",
+        summary(&left, &judge(&left, Expect::Ended))
+    );
+    assert_eq!(
+        passed_as(&left),
+        "the command was ended by the window's close after the result, and the chief told"
+    );
+}
+
+/// What of the listed processes the machine still has, by their numbers and what they run: a
+/// number another process took after the one that ended is no such process.
+#[test]
+fn a_listed_process_is_gone_unless_the_machine_has_one_of_its_number_that_runs_the_command() {
+    let listed = vec![
+        proc(4, "powershell.exe -c ping -n 4711 127.0.0.1"),
+        proc(41, "ping -n 4711 127.0.0.1"),
+        proc(42, "powershell.exe -c ping -n 4711 127.0.0.1"),
+    ];
+    let all = vec![
+        running(41, 9, 1, "ping -n 4711 127.0.0.1"),
+        // A process that took the number of a listed one after it ended runs another command.
+        running(42, 99, 1, "C:\\Windows\\notepad.exe"),
+    ];
+    // `4` is not `41`, and `42` runs no command of the run's.
+    assert_eq!(gone_of(&listed, &all, "4711"), [4, 42]);
+    assert_eq!(gone_of(&listed, &[], "4711"), [4, 41, 42]);
+    assert!(gone_of(&[], &all, "4711").is_empty());
+}
+
+#[test]
+fn what_the_pane_host_left_running_is_what_of_it_holds_the_command() {
+    let exit = Tree {
+        total: 3,
+        processes: vec![
+            proc(7, "ping -n 4711 127.0.0.1"),
+            proc(8, "conhost.exe 0xffffffff"),
+        ],
+    };
+    assert_eq!(
+        held_at_exit(Some(&exit), "4711"),
+        [proc(7, "ping -n 4711 127.0.0.1")]
+    );
+    assert!(held_at_exit(None, "4711").is_empty());
 }
 
 #[test]

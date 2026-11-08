@@ -10,6 +10,7 @@ use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 
 use super::*;
+use crate::admin::tests::standalone::{lay_down, Layout};
 use crate::admin::tests::{says, Fixture};
 use crate::admin::Row;
 use crate::testing::{finished, Driver, Response};
@@ -74,6 +75,53 @@ fn updates_a_harness_with_its_own_tool_looks_again_and_says_what_happened() {
             max_buffer: 1_000_000
         }
     );
+}
+
+/// A Codex that Codex's standalone installer laid down (a release, a `current` that leads to it,
+/// and the folder on the PATH that leads to `current`): what the Admin page's Update runs is
+/// Codex's own `codex update`, by the link the person runs, and the look that follows is of the
+/// same link, which leads to the new release once Codex's installer has moved `current`.
+#[test]
+fn updates_codex_s_standalone_install_by_its_own_update_through_the_link_the_person_runs() {
+    for layout in [Layout::Package, Layout::Legacy] {
+        let fixture = Fixture::new();
+        let visible = fixture.root.path().join("bin");
+        let program = lay_down(&fixture.root.path().join("home"), &visible, layout)
+            .to_string_lossy()
+            .into_owned();
+        fixture.capture.answer(
+            "codex --version",
+            [says("codex-cli 0.166.0\n"), says("codex-cli 0.167.0\n")],
+        );
+        fixture.latest.says(Harness::Codex, "0.167.0");
+        fixture.latest.says(Harness::Codex, "0.167.0");
+        fixture.capture.answer(
+            "codex update",
+            [Response::Now(Ok(Captured {
+                stdout: "Updating Codex via `powershell -ExecutionPolicy Bypass -c ...`...\n"
+                    .to_owned(),
+                stderr: String::new(),
+            }))],
+        );
+        let done = said(&update(&fixture, "codex").unwrap());
+        assert_eq!(done["state"], "updated", "{layout:?}: {done}");
+        assert_eq!(done["before"], "0.166.0", "{layout:?}");
+        assert_eq!(done["after"], "0.167.0", "{layout:?}");
+        assert_eq!(done["command"], format!("{program} update"), "{layout:?}");
+        assert_eq!(
+            done["harness"]["distribution"], "Codex's installer",
+            "{layout:?}"
+        );
+        let ran = fixture.capture.take_ran();
+        let updating: Vec<_> = ran
+            .iter()
+            .filter(|(program, _)| program.args == ["update"])
+            .collect();
+        let [(started, _)] = &updating[..] else {
+            panic!("{layout:?}: one update: {ran:?}")
+        };
+        assert_eq!(started.executable.to_string_lossy(), program, "{layout:?}");
+    }
 }
 
 #[test]
