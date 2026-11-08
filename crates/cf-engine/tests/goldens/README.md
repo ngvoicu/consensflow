@@ -193,3 +193,30 @@ section ends "Each member is a model, not a person: it runs any number of tasks 
 in its own window." Changed by hand on 2026-11-03, and recorded from the engine when it was
 merged (T-1176). The role-change budgets moved with it: read whole to 195 rows with specs on
 and 223 without (199 and 227), and to 29 and 58 with the most rules for the staff (33 and 62).
+
+The chief's text, in the 12 `roleInstructions` rows that hold it with a staff, and the
+image designer's text, in its 6 rows, moved in 3.0.7 (T-732, `skill/core/chief.md` and
+`skill/core/staff.md`), in the words below alone; the 5 `teamTable` rows that hold a table
+moved with the table's shape. They were written by the engine itself, as the tests now
+play it, not by hand.
+- **The chief's** two paragraphs: the image designer is given a precise drawing order (the
+  subject and composition, the style, the exact colours and size, transparency when needed,
+  each reference by path and what it is for, the output path), draws exactly that and does
+  not research or choose, and a revision goes back to its window with `--after`
+  (Gabriel, 2026-10-21; T-160); and the chief's model is the human's to change, with their
+  harness's own switch in the chief's window, which a reopen keeps, while Switch the chief
+  is for another harness or a fresh conversation, on a model from that harness's list
+  (CHF-22).
+- **The designer's** own text, in the six rows that hold it: its description, its
+  introduction and the end of its result. It draws exactly what the order says, at the
+  size and path it names, with only the references it names; it does not research the
+  project or redesign what was asked; and where something it needs is missing or
+  contradicts itself it asks with `cf ask` and does not guess. Its result is as it was.
+- **The staff table** has no column of models (T-1234). A member is named by its model
+  (T-1263), so the name says it; a member whose name holds no model (one on its harness's
+  default, one that needs an edit) has the model beside its name, `zeus (Opus · high)`.
+  The `role_change` sizes of the chief's text moved with it, and are measured in the
+  engine's tests and docs.
+- **The image designer's tier** is none (a design task has none): in the 2 `staffOf` rows
+  that hold one, `osiris` reads without the tier its participant holds, and a chief's table
+  says `none` for it, from a staff row that has no tier and the one role of a designer.

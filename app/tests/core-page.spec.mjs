@@ -403,6 +403,18 @@ async function open(page, data = model()) {
       // effort (`cf_ledger::handles`, HMD-12), or a refusal a test names.
       'member.add': (body) => {
         if (data.memberRefusal !== undefined) return { ok: false, error: data.memberRefusal }
+        // An image designer is Codex's own model, named by it, and takes no model, effort or
+        // tier (designer P2): the daemon refuses any, and so does the mock.
+        if (body.roles?.includes('designer')) {
+          if (['model', 'effort', 'tier'].some((field) => body[field] != null)) {
+            return {
+              ok: false,
+              error:
+                "an image designer draws on Codex's own model: it takes no model, effort or tier",
+            }
+          }
+          return answer({ member: { handle: 'codex-default', roles: body.roles, tier: 'light' } })
+        }
         // Named as the daemon names it: Pi's id without its provider, then the effort.
         const id = body.harness === 'pi' ? body.model.replace(/^[^/]+\//, '') : body.model
         const words = [id, body.effort]
@@ -898,6 +910,13 @@ async function pickMember(dialog, { role, harness, model, effort, tier }) {
   await add.locator('[name="memberModel"]').selectOption({ label: model })
   if (effort !== undefined) await add.locator('[name="memberEffort"]').selectOption(effort)
   if (tier !== undefined) await add.locator('[name="memberTier"]').selectOption(tier)
+}
+
+/** An image designer, as Add member picks one: the role, and nothing else (Codex is picked for it). */
+async function pickDesigner(dialog) {
+  const add = dialog.locator('.staff-add')
+  await add.locator('[name="role"]').selectOption('designer')
+  await expect(add.locator('[name="memberHarness"]')).toHaveValue('codex')
 }
 
 test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({
@@ -3411,6 +3430,30 @@ test.describe('on Windows', () => {
   })
 })
 
+test("New project and Switch chief say the same of the chief's model: the harness's own switch in the chief's window keeps its conversation and a reopen keeps the model", async ({
+  page,
+}) => {
+  await open(page)
+  for (const [button, name, words] of [
+    [
+      'New project',
+      'New project',
+      "The chief starts on the harness and model you pick. To change only its model later, switch it in the chief's own window: ConsensFlow follows it, and a reopen keeps it. Switch the chief, on its card, is for another harness or a fresh conversation.",
+    ],
+    [
+      'Switch the chief to another harness or model',
+      'Switch the chief',
+      "The chief goes on in a new window on the harness and model you pick: a fresh conversation, whose first message is the handoff, what you and the chiefs before it said and what waits on the board. The staff keeps working. To change only the model, switch it in the chief's own window instead: it keeps its conversation, ConsensFlow follows it, and a reopen keeps it.",
+    ],
+  ]) {
+    await page.getByRole('button', { name: button }).click()
+    const dialog = page.getByRole('dialog', { name })
+    await expect(dialog.locator('[data-help="chief"]')).toHaveText(words)
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
+  }
+})
+
 test('the chief is picked as a harness, then a model it lists, then an effort it lists for it, nothing picked, in New project and Switch chief', async ({
   page,
 }) => {
@@ -3797,6 +3840,43 @@ test('an image designer is picked on Codex alone, and Add member says so when Co
     ['Devin', false],
     ['Muse Code', false],
   ])
+})
+
+test('an image designer is added with no model, effort or tier: Codex is picked for it and the controls are gone', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const add = dialog.locator('.staff-add')
+  const controls = ['memberModel', 'memberEffort', 'memberTier', 'memberRefresh']
+  for (const name of controls) await expect(add.locator(`[name="${name}"]`)).toBeVisible()
+  const read = await calls(page, 'models.get')
+  await add.locator('[name="role"]').selectOption('designer')
+  for (const name of controls) await expect(add.locator(`[name="${name}"]`)).toBeHidden()
+  await expect(add.locator('[name="memberHarness"]')).toHaveValue('codex')
+  await expect(add.locator('.member-help')).toHaveText(
+    "An image designer draws on Codex's own model: it takes no model, effort or tier.",
+  )
+  // No model of Codex's is read for it, nor when the harness is picked again.
+  await add.locator('[name="memberHarness"]').selectOption('codex')
+  expect(await calls(page, 'models.get')).toEqual(read)
+  await expect(add.locator('[name="memberModel"]')).toBeHidden()
+  await expect(add.locator('.member-help')).toHaveText(
+    "An image designer draws on Codex's own model: it takes no model, effort or tier.",
+  )
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 1, harness: 'codex', roles: ['designer'] }])
+  await expect(page.locator('#status')).toHaveText(
+    '@codex-default joined the staff as Image designer.',
+  )
+  // Another role brings them back, and picks nothing.
+  await add.locator('[name="role"]').selectOption('worker')
+  for (const name of controls) await expect(add.locator(`[name="${name}"]`)).toBeVisible()
+  await expect(add.locator('[name="memberHarness"]')).toHaveValue('')
+  await expect(add.locator('.member-help')).toBeHidden()
 })
 
 test("drops one role from a member's row, and asks before its last", async ({ page }) => {
@@ -9039,16 +9119,13 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   await expect(
     table.locator('tbody tr', { hasText: 'Advisor' }).locator('.member-name'),
   ).toHaveText('meta/muse-spark')
-  await pickMember(dialog, {
-    role: 'designer',
-    harness: 'Codex',
-    model: 'gpt-5.6-luna',
-    tier: 'light',
-  })
+  // An image designer draws on Codex's own model: it takes no model, effort or tier, and is
+  // named by the default it runs on (designer P2).
+  await pickDesigner(dialog)
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(
-    table.locator('tbody tr', { hasText: 'Image designer' }).locator('.member-name'),
-  ).toHaveText('gpt-5.6-luna')
+  const drawing = table.locator('tbody tr', { hasText: 'Image designer' })
+  await expect(drawing.locator('.member-name')).toHaveText('Codex default')
+  await expect(drawing.locator('.member-meta')).toHaveText('Codex')
   await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
   await expect(table.locator('tbody tr')).toHaveCount(5)
   await dialog.getByRole('button', { name: 'Start project' }).click()
@@ -9082,19 +9159,13 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
             tier: 'light',
             roles: ['advisor'],
           },
-          {
-            harness: 'codex',
-            model: 'gpt-5.6-luna',
-            effort: null,
-            tier: 'light',
-            roles: ['designer'],
-          },
+          { harness: 'codex', roles: ['designer'] },
         ],
       },
     ])
 })
 
-test('New project keeps an image designer a member of its own beside a worker on the same model, in either order', async ({
+test('New project keeps an image designer a member of its own beside a worker, in either order', async ({
   page,
 }) => {
   await open(page)
@@ -9106,17 +9177,17 @@ test('New project keeps an image designer a member of its own beside a worker on
     const dialog = page.getByRole('dialog', { name: 'New project' })
     await pickChief(dialog, 'Codex', 'gpt-6-astra')
     for (const role of order) {
-      await pickMember(dialog, { role, harness: 'Codex', model: 'gpt-5.6-luna', tier: 'light' })
+      if (role === 'designer') await pickDesigner(dialog)
+      else {
+        await pickMember(dialog, { role, harness: 'Codex', model: 'gpt-5.6-luna', tier: 'light' })
+      }
       await dialog.getByRole('button', { name: 'Add', exact: true }).click()
     }
     await dialog.getByRole('button', { name: 'Start project' }).click()
-    const one = (role) => ({
-      harness: 'codex',
-      model: 'gpt-5.6-luna',
-      effort: null,
-      tier: 'light',
-      roles: [role],
-    })
+    const one = (role) =>
+      role === 'designer'
+        ? { harness: 'codex', roles: ['designer'] }
+        : { harness: 'codex', model: 'gpt-5.6-luna', effort: null, tier: 'light', roles: [role] }
     await expect
       .poll(async () => (await calls(page, 'project.open')).at(-1)?.staff)
       .toEqual(order.map(one))
@@ -9124,6 +9195,48 @@ test('New project keeps an image designer a member of its own beside a worker on
       window.__calls = []
     })
   }
+})
+
+test("New project carries the last staff's image designer as it runs: on Codex's own model, in no tier", async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [
+    lastMember('zeus', 'claude-code', ['worker']),
+    // As the daemon reads a designer, whatever model its row once held: none, no effort.
+    {
+      harness: 'codex',
+      model: null,
+      modelName: null,
+      effort: null,
+      designer: true,
+      tier: 'light',
+      role: 'designer',
+      roles: ['designer'],
+    },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  await expect(table.locator('tbody tr')).toHaveText([
+    /^claude-sonnet-5.*Worker/,
+    /^Codex default.*Codex.*Image designer/,
+  ])
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'project.open')).at(-1)?.staff)
+    .toEqual([
+      {
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        effort: 'high',
+        tier: 'standard',
+        roles: ['worker'],
+      },
+      { harness: 'codex', roles: ['designer'] },
+    ])
 })
 
 test("docks the chief's terminal and a member's own, offers no Open terminal for them, and feeds them their output", async ({
@@ -12095,10 +12208,9 @@ test("a member's card says its role, tier and harness under a name that holds it
   await expect(meta('claude-opus-5-5-high-amber-pine', 'worker')).toHaveText(
     'worker session of @claude-opus-5-5-high · Claude Code',
   )
-  // The designer's name holds no model: what it runs on is said (its harness's default).
-  await expect(meta('codex-default', 'designer')).toHaveText(
-    'designer · light · Codex · Codex default',
-  )
+  // The designer's name holds no model: what it runs on is said (its harness's default). A
+  // design task has no tier, so none is said of it (designer P2).
+  await expect(meta('codex-default', 'designer')).toHaveText('designer · Codex · Codex default')
   // The same two lines in Project settings' table, where the role is a column of its own.
   await page.getByRole('button', { name: 'Project settings' }).click()
   const table = page
@@ -12109,8 +12221,17 @@ test("a member's card says its role, tier and harness under a name that holds it
     'critical · Codex',
   )
   await expect(rows.filter({ hasText: '@codex-default' }).locator('.member-meta')).toHaveText(
-    'Codex default · light · Codex',
+    'Codex default · Codex',
   )
+  // It has nothing to edit: Codex's own model, no effort, no tier. A member has an Edit.
+  const designer = rows.filter({ hasText: '@codex-default' })
+  await expect(
+    designer.getByRole('button', { name: 'Remove Image designer @codex-default' }),
+  ).toBeVisible()
+  await expect(designer.getByRole('button', { name: /^Edit/ })).toHaveCount(0)
+  await expect(
+    rows.filter({ hasText: '@gpt-6-astra-xhigh' }).getByRole('button', { name: /^Edit/ }),
+  ).toHaveCount(1)
 })
 
 /**

@@ -62,6 +62,7 @@ use super::{
     with_lost, words_of,
 };
 use crate::dispatcher::Dispatcher;
+use crate::image_facts::for_task;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
 use crate::runtime::returning;
@@ -258,9 +259,12 @@ impl Dispatcher {
         // result the worker's own turn end records (T-1204).
         let earlier =
             self.earlier_turns(&thread, &participant, items, &replacements, &words_of(&run))?;
-        let words = with_earlier(
-            with_lost(words_of(&run), &participant.handle, lost),
-            &earlier,
+        let words = for_task(
+            &thread.task,
+            with_earlier(
+                with_lost(words_of(&run), &participant.handle, lost),
+                &earlier,
+            ),
         );
         let body = with_leftovers(
             words,
