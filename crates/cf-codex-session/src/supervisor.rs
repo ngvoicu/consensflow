@@ -43,7 +43,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_base::startup::{StartFailure, StartRefusal};
+use cf_base::file::error_code;
+use cf_base::startup::{harness_exit, StartFailure, StartKind, StartRefusal};
 use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{not_spawned, runnable, start_owned, Ending, Owned};
 use cf_proto::codex::agent_types::{agent_type, AgentType, AGENT_TYPES};
@@ -67,6 +68,17 @@ const POLL: Duration = Duration::from_millis(50);
 const GRACE: Duration = Duration::from_millis(1500);
 /// How long a failed server's last words are waited for.
 const LAST_WORDS: Duration = Duration::from_millis(200);
+
+/// How Codex's app-server went when it did not come up. Its status and what it wrote are on the
+/// window's screen: a window's exit has one byte on a Mac, which carries the kind of failure and no
+/// more (`cf_base::startup::StartKind::exit_status`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServerEnd {
+    /// It ended.
+    Ended,
+    /// It was not ready in the time it had.
+    Silent,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SessionError {
@@ -92,8 +104,10 @@ pub(crate) enum SessionError {
     NoAgentType(String),
     #[error(transparent)]
     Endpoint(#[from] EndpointError),
-    #[error("Codex server could not start: {0}")]
-    Server(String),
+    /// The app-server ended, or was not ready in time: what it wrote to its error stream, and how it
+    /// went.
+    #[error("Codex server could not start: {said}")]
+    Server { said: String, how: ServerEnd },
     /// The system would not start Codex's server.
     #[error("Codex server could not start: {program}: {cause}")]
     ServerNotStarted { program: String, cause: io::Error },
@@ -111,19 +125,55 @@ pub(crate) enum SessionError {
 }
 
 impl SessionError {
-    /// The kind of failure, where this is the harness that could not be started: the window's
+    /// The kind of failure, where this is a window that did not get Codex ready: the window's
     /// program then ends with the status of that kind (`cf_base::startup::StartKind::exit_status`),
-    /// so that the engine reads from how the window ended, and not from its screen, that the
-    /// harness never ran, and a note says the kind and no word of the program's path (T-1328).
-    /// None for any other failure, which the screen tells.
+    /// so that the engine reads from how the window ended, and not from its screen, that Codex never
+    /// ran, and a note says the kind, the code where there is one and what to do, and no word of the
+    /// program's, the server's or a path (T-1328, the second and third readings of T-1322). The full
+    /// cause is on the window's own screen, and ConsensFlow's log has what the screen showed.
+    ///
+    /// Every failure before Codex's TUI ran is one; the failure to remove the window's socket
+    /// folder is not (it comes after the window did its work, and the TUI's status stands for it).
     pub(crate) fn startup(&self) -> Option<StartFailure> {
-        match self {
-            Self::Unrunnable(refusal) => Some(refusal.failure()),
+        Some(match self {
+            Self::Unrunnable(refusal) => refusal.failure(),
             Self::ServerNotStarted { program, cause } | Self::Tui { program, cause } => {
-                Some(not_spawned(Path::new(program), cause).failure())
+                not_spawned(Path::new(program), cause).failure()
             }
-            _ => None,
-        }
+            Self::Server {
+                how: ServerEnd::Ended,
+                ..
+            } => StartFailure::of(StartKind::ServerStopped),
+            Self::Server {
+                how: ServerEnd::Silent,
+                ..
+            } => StartFailure::of(StartKind::ServerSilent),
+            Self::Role { cause, .. } | Self::Children { cause, .. } | Self::Signals(cause) => {
+                set_up(Some(cause))
+            }
+            Self::Broker(StartError::Listen { cause, .. }) => set_up(Some(cause)),
+            Self::NoProgram
+            | Self::Bridge(_)
+            | Self::Arguments(_)
+            | Self::NoRole { .. }
+            | Self::NoRoleFile
+            | Self::NoChildren { .. }
+            | Self::NoChildrenFile
+            | Self::NoAgentType(_)
+            | Self::Endpoint(_)
+            | Self::Broker(_) => set_up(None),
+            Self::Cleanup { .. } => return None,
+        })
+    }
+}
+
+/// A window ConsensFlow could not set up, the system's name for what went wrong where an I/O
+/// error says it.
+pub(crate) fn set_up(cause: Option<&io::Error>) -> StartFailure {
+    let failure = StartFailure::of(StartKind::NotSetUp);
+    match cause.map(error_code) {
+        Some(code) if code != "UNKNOWN" => failure.with_errno(code),
+        _ => failure,
     }
 }
 
@@ -172,7 +222,9 @@ impl Setup {
 }
 
 /// Runs the window: `args` are the Codex program and its arguments. The
-/// result is the exit code, the TUI's; everything is ended and removed by then.
+/// result is the window's exit code, the TUI's (`cf_base::startup::harness_exit`: one of the
+/// statuses this program ends with for a start that failed is never a status of Codex's);
+/// everything is ended and removed by then.
 pub(crate) async fn supervise(env: &Env, args: &[OsString]) -> Result<i32, SessionError> {
     supervise_with(env, args, Setup::standard()).await
 }
@@ -273,7 +325,7 @@ struct Session {
     tui: Option<Owned>,
     broker: Option<Broker>,
     /// What the window is to say once it has ended, on its standard error: which of its programs
-    /// the system gave no job (see [`without_a_job`]).
+    /// the system gave no job (see [`without_a_job`]), and a status of Codex's that was reported as 1.
     notes: Vec<String>,
 }
 
@@ -312,7 +364,17 @@ impl Session {
             }
         };
         // Ended by a signal, there is no code: the window was closed, not failed.
-        Ok(status.ok().and_then(|status| status.code()).unwrap_or(0))
+        let code = status.ok().and_then(|status| status.code()).unwrap_or(0);
+        // The statuses this program ends with for a start that failed are its own: a Codex that
+        // ended with one is reported as a failure, 1, and the window says so (T-1328).
+        let reported = harness_exit(code);
+        if reported != code {
+            let (first, last) = StartKind::exit_statuses();
+            self.notes.push(format!(
+                "ConsensFlow: Codex ended with status {code}; this window ends with {reported}, as {first} to {last} are ConsensFlow's own, for a start that failed"
+            ));
+        }
+        Ok(reported)
     }
 
     /// Starts the app-server with the arguments the TUI may not override, its
@@ -369,7 +431,14 @@ impl Session {
             if ended || Instant::now() > deadline {
                 // What a program that ended wrote last may still be in the pipe.
                 let _ = tokio::time::timeout(LAST_WORDS, drain).await;
-                return Err(SessionError::Server(tail.borrow().text().to_string()));
+                return Err(SessionError::Server {
+                    said: tail.borrow().text().to_string(),
+                    how: if ended {
+                        ServerEnd::Ended
+                    } else {
+                        ServerEnd::Silent
+                    },
+                });
             }
             tokio::select! {
                 () = tokio::time::sleep(POLL) => {}

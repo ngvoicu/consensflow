@@ -195,7 +195,10 @@ impl Adapter for CodexAdapter {
     }
 
     /// A Codex window is `cf codex-session`, which ends with the status of why when it could
-    /// not start Codex (`cf_base::startup::StartKind::exit_status`).
+    /// not get Codex ready (`cf_base::startup::StartKind::exit_status`). Those statuses are its
+    /// own: a status Codex returned in that range is reported as 1
+    /// (`cf_base::startup::harness_exit`), so that a window that ended with one could not have
+    /// been ended by Codex.
     fn never_ran(&self, status: u32) -> Option<cf_base::startup::StartFailure> {
         cf_base::startup::StartKind::of_exit_status(i64::from(status))
             .map(cf_base::startup::StartFailure::of)

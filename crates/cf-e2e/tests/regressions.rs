@@ -47,6 +47,8 @@ mod a_codex_chiefs_idle_prompt_was_read_as_a_dialog;
 mod a_codex_chiefs_lost_turn_end_held_its_next_result;
 #[path = "regressions/a_codex_memory_job_put_a_task_on_the_board_as_the_chief.rs"]
 mod a_codex_memory_job_put_a_task_on_the_board_as_the_chief;
+#[path = "regressions/a_codex_server_that_ended_before_it_was_ready_was_quoted_with_its_path.rs"]
+mod a_codex_server_that_ended_before_it_was_ready_was_quoted_with_its_path;
 #[path = "regressions/a_codex_window_compacting_before_its_first_message_was_closed.rs"]
 #[cfg(unix)]
 mod a_codex_window_compacting_before_its_first_message_was_closed;

@@ -115,6 +115,22 @@ impl Home {
     }
 }
 
+/// That `failed` is a window ConsensFlow could not set up (`errno` the system's name for what went
+/// wrong where an I/O error says it), and that the window ends with the status of that: a note says
+/// no more of it (the third reading of T-1322: every failure before Codex's TUI ran has a status).
+fn not_set_up(failed: &SessionError, errno: Option<&'static str>) {
+    let mut expected = StartFailure::of(StartKind::NotSetUp);
+    if let Some(code) = errno {
+        expected = expected.with_errno(code);
+    }
+    assert_eq!(failed.startup(), Some(expected), "{failed}");
+    assert_eq!(
+        crate::fail(&failed.to_string(), failed.startup()),
+        StartKind::NotSetUp.exit_status(),
+        "{failed}"
+    );
+}
+
 /// That a program's command line holds nothing of ConsensFlow's own variables: not
 /// the board's token, which every user of the machine would read there, nor a name.
 fn no_secret_on(args: &[&str]) {
@@ -342,9 +358,9 @@ fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_
 }
 
 /// T-1328: Codex's window is ConsensFlow's own program, `cf codex-session`. When it could not start
-/// Codex it ends with a status of its own for each kind of why (70 to 77, a choice of
-/// ConsensFlow's: a Codex that itself exits with one of them is read as a start that failed), and
-/// 1 for any other failure; the engine reads the status, and quotes no word of the screen.
+/// Codex it ends with a status of its own for each kind of why (70 to 80, ConsensFlow's own: a Codex
+/// that itself ends with one of them is reported as 1), and 1 for the one failure that comes after the
+/// window ran; the engine reads the status, and quotes no word of the screen.
 #[test]
 fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other_failure_with_1() {
     for (kind, status) in [
@@ -354,15 +370,99 @@ fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other
         (StartKind::NoNodeForPi, 73),
         (StartKind::NotAnNpmShim, 74),
         (StartKind::NotStarted, 75),
+        (StartKind::NoAnswer, 76),
+        (StartKind::Failed, 77),
+        (StartKind::NotSetUp, 78),
+        (StartKind::ServerStopped, 79),
+        (StartKind::ServerSilent, 80),
     ] {
         assert_eq!(crate::fail("boom", Some(StartFailure::of(kind))), status);
     }
     assert_eq!(crate::fail("boom", None), 1);
-    // The server's own words, once it ran, are the screen's: no kind.
+    // The server's own words, once it ran, are no kind: how it went is (the third reading of T-1322).
     assert_eq!(
-        SessionError::Server("it said no".to_owned()).startup(),
-        None
+        SessionError::Server {
+            said: "it said no".to_owned(),
+            how: ServerEnd::Ended,
+        }
+        .startup(),
+        Some(StartFailure::of(StartKind::ServerStopped))
     );
+}
+
+/// T-1328, the third reading of T-1322: Codex's server that ended (or stayed silent) before it was
+/// ready wrote its reason on its error stream, and the window ended with 1, which the engine reads
+/// as Codex's own: its note quoted the screen, `hunter22` and all. A window that did not get
+/// Codex ready, whatever the cause, ends with the status of why: the kind. What the server wrote,
+/// and the status it ended with, are on the window's screen alone.
+#[test]
+fn a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_wrote() {
+    for (body, startup, kind, status) in [
+        (
+            "echo '/opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory' >&2\nexit 127",
+            Duration::from_secs(5),
+            StartFailure::of(StartKind::ServerStopped),
+            79,
+        ),
+        (
+            "echo 'still loading, key: abc' >&2\nexec sleep 60",
+            Duration::from_secs(2),
+            StartFailure::of(StartKind::ServerSilent),
+            80,
+        ),
+    ] {
+        let home = Home::new();
+        let codex = home.codex(body);
+        let failed = home.supervise(codex, &[], startup).unwrap_err();
+        assert_eq!(failed.startup(), Some(kind), "{failed}");
+        assert_eq!(crate::fail(&failed.to_string(), failed.startup()), status);
+        let note = kind.words("Codex");
+        for word in ["hunter22", "/opt", "key: abc", "loading"] {
+            assert!(!note.contains(word), "{word} is in {note}");
+        }
+    }
+}
+
+/// T-1328, the third reading: a status of why is read only of a window ConsensFlow's own program
+/// ended, never of one Codex's TUI returned. The TUI's own status in the range is reported as a
+/// plain failure, 1, and the window says so once it has ended; every other one stands.
+#[test]
+fn a_tui_that_ends_with_a_status_of_whys_number_is_reported_as_a_failure_and_no_start_that_failed()
+{
+    let (first, last) = StartKind::exit_statuses();
+    for tui in [
+        0, 1, 7, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 255,
+    ] {
+        let home = Home::new();
+        let (code, said) = crate::block_on_local(async {
+            let codex = FakeCodex::start(Behaviour::Ready).await;
+            let program = codex_on_loopback_ending_with(&home, codex.address.port(), "", tui);
+            let setup = Setup {
+                startup: Duration::from_secs(10),
+                endpoint: |_| Endpoint::loopback(),
+                say: said_to_the_test,
+                ..Setup::standard()
+            };
+            let code = supervise_with(&home.env, &[program.into_os_string()], setup).await;
+            (code, SAID.with(|said| said.take()))
+        })
+        .unwrap();
+        let code = code.unwrap();
+        assert!(
+            StartKind::of_exit_status(i64::from(code)).is_none(),
+            "the TUI ended with {tui}: the window ended with {code}, a status of why"
+        );
+        if (first..=last).contains(&tui) {
+            assert_eq!(code, 1, "{tui}");
+            assert_eq!(
+                said,
+                [format!("ConsensFlow: Codex ended with status {tui}; this window ends with 1, as {first} to {last} are ConsensFlow's own, for a start that failed")]
+            );
+        } else {
+            assert_eq!(code, tui);
+            assert!(said.is_empty(), "{tui}: {said:?}");
+        }
+    }
 }
 
 #[test]
@@ -386,6 +486,7 @@ fn a_bridge_that_is_missing_or_not_what_a_broker_needs_is_refused_before_anythin
             "Invalid Codex broker configuration",
             "{bridge:?}"
         );
+        not_set_up(&failed, None);
         assert!(!started.exists(), "Codex started under {bridge:?}");
         assert!(
             !home.dir.path().join("tmp").exists(),
@@ -407,6 +508,7 @@ fn a_flag_that_wants_a_value_and_has_none_is_refused_before_anything_starts() {
             .supervise(&codex, &["resume", given], Duration::from_secs(5))
             .unwrap_err();
         assert_eq!(failed.to_string(), said);
+        not_set_up(&failed, None);
     }
     assert!(!started.exists());
 }
@@ -417,16 +519,19 @@ fn a_role_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refused_befo
     for home in [Home::naming_a_missing_role("gone.md"), Home::with_role("")] {
         let started = home.dir.path().join("started");
         let codex = home.codex(&format!("echo started > '{}'", started.display()));
-        let failed = home
+        let error = home
             .supervise(codex, &[], Duration::from_secs(5))
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+        let failed = error.to_string();
         let file = home.env.path(ROLE_VARIABLE).unwrap().display().to_string();
         assert!(
             failed == format!("its role file {file} holds nothing")
                 || failed.starts_with(&format!("could not read its role from {file}: ")),
             "{failed}"
         );
+        // A role that cannot be read says the system's name for why, and one that holds nothing none.
+        let unread = failed.starts_with("could not read");
+        not_set_up(&error, unread.then_some("ENOENT"));
         assert!(!started.exists(), "Codex started without its role");
         assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
     }
@@ -451,6 +556,7 @@ fn a_role_variable_set_to_nothing_is_refused_before_anything_starts() {
         .unwrap()
         .unwrap_err();
     assert_eq!(failed.to_string(), "CF_CODEX_ROLE_FILE names no file");
+    not_set_up(&failed, None);
     assert!(!started.exists(), "Codex started without its role");
 }
 
@@ -465,12 +571,23 @@ fn no_program_named_is_said() {
         .unwrap()
         .unwrap_err();
     assert_eq!(failed.to_string(), "no Codex program was named");
+    not_set_up(&failed, None);
 }
 
 /// Codex as one script for both its programs: the server runs `server_first`,
 /// says where it listens, on loopback, as it does on Windows, and runs until
 /// it is ended; the TUI says what it was given and ends with 7.
 fn codex_on_loopback(home: &Home, port: u16, server_first: &str) -> PathBuf {
+    codex_on_loopback_ending_with(home, port, server_first, 7)
+}
+
+/// [`codex_on_loopback`], the TUI ending with `tui_status`.
+fn codex_on_loopback_ending_with(
+    home: &Home,
+    port: u16,
+    server_first: &str,
+    tui_status: i32,
+) -> PathBuf {
     let dir = home.dir.path().display();
     home.codex(&format!(
         "case \" $* \" in\n\
@@ -483,7 +600,7 @@ fn codex_on_loopback(home: &Home, port: u16, server_first: &str) -> PathBuf {
          *)\n\
          printf '%s\\n' \"$@\" > '{dir}/tui-args'\n\
          printf '%s' \"$CF_CODEX_TUI_TOKEN\" > '{dir}/tui-token'\n\
-         exit 7 ;;\n\
+         exit {tui_status} ;;\n\
          esac"
     ))
 }
@@ -825,9 +942,14 @@ fn a_sub_agents_file_that_is_named_and_cannot_be_read_or_holds_nothing_is_refuse
             setup,
         ))
         .unwrap()
-        .unwrap_err()
-        .to_string();
-        assert!(failed.starts_with(&said), "{failed}");
+        .unwrap_err();
+        assert!(failed.to_string().starts_with(&said), "{failed}");
+        // Whatever it was, it is a window ConsensFlow could not set up; an unreadable file says why.
+        assert_eq!(
+            failed.startup().map(|failure| failure.kind()),
+            Some(StartKind::NotSetUp),
+            "{failed}"
+        );
         assert!(!started.exists(), "Codex started without it");
         assert!(!home.dir.path().join("tmp").exists(), "nothing was made");
     }

@@ -11,7 +11,8 @@
 //! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`, and with
 //! `CF_TEST_CODEX_ENV_LOG` set the names of its environment's variables, never a value, to
 //! that file: the daemon's probes run it on the daemon's own environment.
-//! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
+//! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `missing-native` ends with 127
+//! and a shell's words for a wrapper whose native executable is gone, `die` once a
 //! thread starts, `spawns` starts programs (`children`) for as long as it lives once a
 //! thread starts, `orphans` starts one whose parent has gone, `deaf` takes neither SIGTERM nor
 //! SIGHUP (Codex's own server stalled in its shutdown for 10 s and more when it was closed soon
@@ -20,7 +21,8 @@
 //! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
 //! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
 //! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
-//! end it. With `CF_TEST_CODEX_SCREEN=drawn` (and the TUI waiting) the TUI draws what Codex's
+//! end it; otherwise it ends with 7; with `CF_TEST_CODEX_TUI_STATUS` it ends with that, waiting or not,
+//! once it has begun its first turn. With `CF_TEST_CODEX_SCREEN=drawn` (and the TUI waiting) the TUI draws what Codex's
 //! draws at rest and as a turn goes (T-1240, `screen`): a message of the user's after its `›`, the
 //! model's answer after its `•`, `Worked for` and the time, and under them its composer
 //! ("› Ask Codex to do anything") and its footer, a blank line between each, as the recorded
@@ -175,6 +177,15 @@ fn server(args: &[String]) -> ExitCode {
     if how == "fail" {
         let _ = writeln!(std::io::stderr(), "not logged in");
         return ExitCode::FAILURE;
+    }
+    if how == "missing-native" {
+        // An installed wrapper script whose native executable is gone, as a shell says it: the
+        // window's person-owned paths in it (T-1328, the third reading).
+        let _ = writeln!(
+            std::io::stderr(),
+            "/opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory"
+        );
+        return ExitCode::from(127);
     }
     if how == "deaf" {
         deaf();
@@ -577,6 +588,14 @@ fn tui(args: &[String]) -> ExitCode {
             "turn/start",
             json!({ "threadId": thread, "input": input }),
         );
+    }
+    // The status Codex's TUI ends with is Codex's own, whatever it is: `CF_TEST_CODEX_TUI_STATUS`
+    // has it end with that, as it has begun its first turn, waiting or not (it may be a status the
+    // window's program uses for a start that failed, T-1328).
+    if let Some(status) =
+        own_var("CF_TEST_CODEX_TUI_STATUS").and_then(|status| status.parse::<u8>().ok())
+    {
+        return ExitCode::from(status);
     }
     if own_var("CF_TEST_CODEX_TUI").as_deref() != Some("wait") {
         return ExitCode::from(7);

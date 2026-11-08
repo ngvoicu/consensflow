@@ -186,8 +186,9 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
 }
 
 /// T-1328: a Codex window is `cf codex-session`, which ends with the status of why when it could not
-/// start Codex (70 to 77); the engine asks the adapter what a status says, and only Codex's reads
-/// it. A status of the same number from a window of any other harness is that harness's own.
+/// get Codex ready (70 to 80, its own: it reports a status Codex returned in that range as 1); the
+/// engine asks the adapter what a status says, and only Codex's reads it. A status of the same
+/// number from a window of any other harness is that harness's own.
 #[test]
 fn only_codexs_adapter_reads_a_status_of_why_its_window_never_ran_its_harness() {
     use cf_base::startup::{StartFailure, StartKind};
@@ -210,6 +211,9 @@ fn only_codexs_adapter_reads_a_status_of_why_its_window_never_ran_its_harness() 
         StartKind::NotStarted,
         StartKind::NoAnswer,
         StartKind::Failed,
+        StartKind::NotSetUp,
+        StartKind::ServerStopped,
+        StartKind::ServerSilent,
     ] {
         let status = u32::try_from(kind.exit_status()).unwrap();
         assert_eq!(
@@ -218,7 +222,7 @@ fn only_codexs_adapter_reads_a_status_of_why_its_window_never_ran_its_harness() 
             "{kind:?}"
         );
     }
-    for status in [0, 1, 2, 69, 78, 126, 127, 130, 255, 0xC000_013A] {
+    for status in [0, 1, 2, 69, 81, 126, 127, 130, 255, 0xC000_013A] {
         assert_eq!(codex.never_ran(status), None, "{status}");
     }
     let others: Vec<(&str, Box<dyn Adapter>)> = vec![
@@ -228,7 +232,7 @@ fn only_codexs_adapter_reads_a_status_of_why_its_window_never_ran_its_harness() 
         ("muse", Box::new(MuseAdapter::new(&services))),
     ];
     for (harness, adapter) in others {
-        for status in 70..=77 {
+        for status in 70..=80 {
             assert_eq!(adapter.never_ran(status), None, "{harness} {status}");
         }
     }

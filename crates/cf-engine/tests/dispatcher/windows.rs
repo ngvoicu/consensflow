@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use cf_base::startup::StartKind;
 use cf_engine::testing::Context;
 use serde_json::{json, Value};
 
@@ -1375,6 +1376,87 @@ fn a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quote
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The note the requester of T-1 is told when a Codex worker's window ends with `status` and `rows`
+/// on its screen, as it opens.
+fn note_of_a_codex_worker_that_ended(status: u32, rows: &[&str]) -> String {
+    let context = with_codex();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+            "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project")
+        .id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.expect("its session");
+    context.host.exits_showing(Some(status), None, Some(rows));
+    context.exit(&session);
+    let note = context
+        .task(project, 1)
+        .messages
+        .iter()
+        .find(|message| message.kind == "note")
+        .map(|message| message.body.clone())
+        .unwrap_or_default();
+    context.close();
+    note
+}
+
+/// T-1328, the third reading of T-1322: Codex's server that ended before it was ready wrote its
+/// reason, a path of the person's, on its error stream, and `cf codex-session` printed it on the
+/// window's screen, `ConsensFlow could not open Codex: Codex server could not start: …`, and ended
+/// with 1: a screen the note quoted, `hunter22` and all, at every width. Every way the supervisor
+/// did not get Codex ready now ends the window with a status of its own, which the engine reads: the
+/// note says what failed and where to look, and quotes nothing of the screen.
+#[test]
+fn a_codex_window_that_did_not_get_codex_ready_says_why_from_how_it_ended_and_quotes_no_screen() {
+    let words = "ConsensFlow could not open Codex: Codex server could not start: /opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory";
+    let mut failed = Vec::new();
+    for (kind, said) in [
+        (
+            StartKind::ServerStopped,
+            "Codex's server stopped before it was ready; its cause is in ConsensFlow's log",
+        ),
+        (
+            StartKind::ServerSilent,
+            "Codex's server did not come up in time; its cause is in ConsensFlow's log",
+        ),
+        (
+            StartKind::NotSetUp,
+            "ConsensFlow could not set up Codex's window; its cause is in ConsensFlow's log",
+        ),
+    ] {
+        let status = u32::try_from(kind.exit_status()).unwrap();
+        for columns in [80, 120, 160] {
+            let screen = hard_wrapped(words, columns);
+            let rows: Vec<&str> = screen.iter().map(String::as_str).collect();
+            let note = note_of_a_codex_worker_that_ended(status, &rows);
+            if !note.contains(&format!("(exit code {status}); {said}")) {
+                failed.push(format!("{kind:?} at {columns} columns, not said: {note}"));
+            }
+            for word in [
+                "hunter22",
+                "/opt",
+                "codex:",
+                "No such file",
+                "ConsensFlow could not open",
+            ] {
+                if note.contains(word) {
+                    failed.push(format!(
+                        "{kind:?} at {columns} columns: `{word}` is in {note}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// A Codex window a signal ended is not one that could not start Codex, whatever code the host
 /// also named: the status of why is read only where no signal ended the program.
 #[test]
@@ -1420,7 +1502,7 @@ fn a_status_of_why_is_read_only_of_a_codex_window() {
         ("claude-code", 72),
         ("codex", 1),
         ("codex", 69),
-        ("codex", 78),
+        ("codex", 81),
     ] {
         let context = with_codex();
         let project = context

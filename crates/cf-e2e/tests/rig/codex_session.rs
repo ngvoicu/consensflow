@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cf_base::startup::StartKind;
 use cf_e2e::http::server::{Answer, Response, Server};
 use cf_e2e::ports;
 use cf_e2e::process::{alive_among, end_all, is_alive, Run, Signal, Spawned};
@@ -337,7 +338,15 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
 fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behind() -> Outcome {
     let _turn = serial::turn();
     let mut s = Supervised::start(&[], &[("CF_TEST_CODEX_BACKEND", "fail".to_owned())], None)?;
-    assert_eq!(s.exit()?, Some(1), "{}", s.stderr());
+    // It ends with the status of why (79, the server stopped before it was ready): the third
+    // reading of T-1322 found the server's own words, a path among them, quoted from a window
+    // that ended with 1 (T-1328).
+    assert_eq!(
+        s.exit()?,
+        Some(StartKind::ServerStopped.exit_status()),
+        "{}",
+        s.stderr()
+    );
     assert_eq!(
         s.stderr(),
         "ConsensFlow could not open Codex: Codex server could not start: not logged in\n\n"

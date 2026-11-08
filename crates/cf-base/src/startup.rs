@@ -35,6 +35,14 @@ pub enum StartKind {
     NoAnswer,
     /// It started and ended with an error: the code is the status it exited with.
     Failed,
+    /// ConsensFlow's own program of a window could not set the window up before the harness ran:
+    /// its files, its endpoint, its broker, its runtime. The cause is in ConsensFlow's log.
+    NotSetUp,
+    /// The harness's server (Codex's app-server, which its window's program starts first) ended
+    /// before it was ready: the code is the status it exited with, where it had one.
+    ServerStopped,
+    /// The harness's server was not ready in the time it had.
+    ServerSilent,
 }
 
 /// What a failed start came to, for a note: its kind and the code of its failure where the system
@@ -115,10 +123,13 @@ impl StartFailure {
             StartKind::NotStarted => format!("{who}'s program could not be started"),
             StartKind::NoAnswer => format!("{who}'s program did not answer in time"),
             StartKind::Failed => format!("{who}'s program ended with an error"),
+            StartKind::NotSetUp => format!("ConsensFlow could not set up {who}'s window"),
+            StartKind::ServerStopped => format!("{who}'s server stopped before it was ready"),
+            StartKind::ServerSilent => format!("{who}'s server did not come up in time"),
         };
         match self.code {
             Some(StartCode::Errno(name)) => format!("{said} ({name})"),
-            Some(StartCode::Exit(status)) => format!("{said} (exit code {status})"),
+            Some(StartCode::Exit(status)) => format!("{said} (exit code {})", exit_words(status)),
             None => said,
         }
     }
@@ -140,6 +151,9 @@ impl StartFailure {
             StartKind::NotAnNpmShim => {
                 format!("install {who}'s own build, or its npm shim")
             }
+            StartKind::NotSetUp | StartKind::ServerStopped | StartKind::ServerSilent => {
+                "its cause is in ConsensFlow's log".to_owned()
+            }
             StartKind::NotStarted | StartKind::NoAnswer | StartKind::Failed => return None,
         })
     }
@@ -154,17 +168,17 @@ impl StartFailure {
     }
 }
 
-/// The exit status of a program of ConsensFlow's that stands in for a harness in a window
-/// (`cf codex-session`) when it could not start the harness: one status for each kind, from 70
-/// (sysexits.h gives 64 to 78 to programs to use, so this range is a choice of ConsensFlow's, not
-/// one nothing else uses), so that the engine reads from how the window ended, and not from its
-/// screen, that the harness never ran. Its limit: the window also ends with the harness's own
-/// exit status, so a harness that itself exits with one of these is read as a start that failed,
-/// by kind, in a note that names the kind and quotes nothing.
+/// The exit statuses of a program of ConsensFlow's that stands in for a harness in a window
+/// (`cf codex-session`) when it could not get the harness ready: one for each kind, from this one
+/// on. **They are ConsensFlow's own and no harness's** (T-1328, the third reading of T-1322): the
+/// program reports a status the harness itself ended with through [`harness_exit`], which maps one
+/// of these to 1, so that a window that ended with one of them could not have been ended by the
+/// harness. sysexits.h gives 64 to 78 to programs to use, so nothing keeps a harness from ending
+/// with one of these; this is what does.
 const START_STATUS_BASE: i64 = 70;
 
 impl StartKind {
-    const ALL: [StartKind; 8] = [
+    const ALL: [StartKind; 11] = [
         StartKind::NotFound,
         StartKind::NotAllowed,
         StartKind::NoNode,
@@ -173,9 +187,13 @@ impl StartKind {
         StartKind::NotStarted,
         StartKind::NoAnswer,
         StartKind::Failed,
+        StartKind::NotSetUp,
+        StartKind::ServerStopped,
+        StartKind::ServerSilent,
     ];
 
-    /// The status a window's program ends with when this is why it could not start the harness.
+    /// The status a window's program ends with when this is why it could not get the harness
+    /// ready.
     pub fn exit_status(self) -> i32 {
         let at = Self::ALL.iter().position(|kind| *kind == self).unwrap_or(0);
         i32::try_from(START_STATUS_BASE).unwrap_or(70) + i32::try_from(at).unwrap_or(0)
@@ -186,6 +204,40 @@ impl StartKind {
     pub fn of_exit_status(status: i64) -> Option<StartKind> {
         let at = usize::try_from(status.checked_sub(START_STATUS_BASE)?).ok()?;
         Self::ALL.get(at).copied()
+    }
+
+    /// The first and the last of the statuses a window's program ends with for a start that failed.
+    pub fn exit_statuses() -> (i32, i32) {
+        let first = i32::try_from(START_STATUS_BASE).unwrap_or(70);
+        (
+            first,
+            first + i32::try_from(Self::ALL.len() - 1).unwrap_or(0),
+        )
+    }
+}
+
+/// The status a window's program of ConsensFlow's ends with when the harness it ran ended with
+/// `code`: `code`, but for one of the statuses that program ends with for a start that failed
+/// ([`StartKind::exit_status`]), which is 1, a plain failure, so that those are never a harness's.
+/// The harness's own status is on its terminal, where the person reads it.
+pub fn harness_exit(code: i32) -> i32 {
+    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        1
+    } else {
+        code
+    }
+}
+
+/// A program's exit status in words: the number it returned, or, for a Windows status (an error
+/// or a crash, negative as a signed number), as Windows writes it.
+fn exit_words(status: i64) -> String {
+    if status < 0 {
+        format!(
+            "{:#010X}",
+            u32::try_from(status & 0xFFFF_FFFF).unwrap_or_default()
+        )
+    } else {
+        status.to_string()
     }
 }
 
