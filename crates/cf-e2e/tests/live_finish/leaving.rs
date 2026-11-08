@@ -285,13 +285,29 @@ pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
                 when("after"),
                 still.join("; ")
             );
-            if let Some(close) = close {
+            if let Some(close) = &close {
                 said.push_str("; ");
-                said.push_str(&close);
+                said.push_str(close);
             }
             problems.push(said);
         }
         if left.notes.is_empty() {
+            // The host looks once a second, and a look may have fallen on the shell that
+            // started the command, which lists with the command's words in its own and ends a
+            // moment later: the command it started and detached ran on, and the host never
+            // listed it. Nothing listed is there now, and the close found nothing: that is the
+            // escape too, said as it is where no look fell in the shell (CI run 42425306008).
+            let unlisted = unlisted_but_running(left);
+            if !unlisted.is_empty() {
+                problems.push(format!(
+                    "the command escaped the ending: the pane host listed only what ended before the run last looked ({}), and the command that started still ran {} without ever being listed (the agent detached it from the shell that started it, which ended, so no chain of processes that run led from it to a shell the harness started): {}; {}{}",
+                    listed_pids(&left.listed),
+                    when("once"),
+                    unlisted.join("; "),
+                    close.unwrap_or_default(),
+                    without_a_terminal(&unlisted)
+                ));
+            }
             problems
                 .push("the chief was told nothing of the work the window closed with".to_owned());
         }
@@ -317,19 +333,48 @@ fn looks_for_its_own_orphans(expect: Expect, left: &Left) -> bool {
     expect == Expect::OwnSession && !left.escaped.is_empty()
 }
 
-/// Whether every process the host listed that still ran once the task was done is, after the
+/// Whether the host listed something of the command and what still runs of it is, after the
 /// window's close, in a session of its own ([`in_a_session_of_its_own`]): a job the host saw
-/// while its shell tied it to the window, which then left with the shell. A listed process
-/// still tied to the window (one with a terminal, or a living parent), or none left running,
-/// is no such job.
+/// while its shell tied it to the window, which then left with the shell; or, where nothing
+/// listed was still there and the chief was told nothing, the shell alone, which a look fell on
+/// before it started the job (the job it started then is the one that runs on, and the host never
+/// listed it). A listed process still tied to the window (one with a terminal, or a living
+/// parent) is no such job, and nor is a close that told the chief of work it ended.
 fn listed_then_left_for_a_session_of_its_own(left: &Left) -> bool {
-    !left.alive.is_empty()
-        && in_a_session_of_its_own(left)
-        && left.alive.iter().all(|pid| {
-            left.escaped
+    in_a_session_of_its_own(left)
+        && if left.alive.is_empty() {
+            left.notes.is_empty() && unlisted_but_running(left).len() == left.escaped.len()
+        } else {
+            left.alive.iter().all(|pid| {
+                left.escaped
+                    .iter()
+                    .any(|line| line.starts_with(&format!("{pid} ")))
+            })
+        }
+}
+
+/// What of `left.escaped` the host never listed: the processes of the command that ran on
+/// whose numbers are none of those it listed.
+fn unlisted_but_running(left: &Left) -> Vec<String> {
+    left.escaped
+        .iter()
+        .filter(|line| {
+            !left
+                .listed
                 .iter()
-                .any(|line| line.starts_with(&format!("{pid} ")))
+                .any(|process| line.starts_with(&format!("{} ", process.pid)))
         })
+        .cloned()
+        .collect()
+}
+
+/// The numbers of the processes the host listed, for a line of the verdict.
+fn listed_pids(listed: &[Proc]) -> String {
+    listed
+        .iter()
+        .map(|process| process.pid.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Whether what the host never listed (`judge` asks only of a command it did not list and that
