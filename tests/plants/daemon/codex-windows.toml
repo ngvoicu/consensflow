@@ -35,8 +35,8 @@ runs = ["codex-admin-source", "codex-admin-update", "codex-admin-real"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/admin/source.rs"
-find = "    if harness == Harness::Codex && is_codex_standalone(&real, env) {"
-replace = "    if harness == Harness::Codex && false && is_codex_standalone(&real, env) {"
+find = "            Place::CodexStandalone => is_codex_standalone(real, env),"
+replace = "            Place::CodexStandalone => false,"
 
 [[plant]]
 name = "codex-windows: a program is standalone under any folder that has the names"
@@ -91,14 +91,8 @@ runs = ["codex-admin-update", "codex-admin-real"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/admin/source.rs"
-find = '''
-            Some(format!("{}'s installer", name(harness))),
-            Some(vec![executable.to_owned(), "update".to_owned()]),
-'''
-replace = '''
-            Some(format!("{}'s installer", name(harness))),
-            Some(vec![real.clone(), "update".to_owned()]),
-'''
+find = "        let mut update = vec![executable.to_owned()];"
+replace = "        let mut update = vec![real.clone()];"
 
 # The live finish's verdict of a command left running (crates/cf-e2e/tests/live_finish/leaving.rs
 # and leaving/looks.rs).

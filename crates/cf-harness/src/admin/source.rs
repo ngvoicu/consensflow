@@ -92,24 +92,46 @@ fn npm_package(harness: Harness) -> Option<&'static str> {
     }
 }
 
-/// A harness's own installer (`OWN_INSTALLER`): the folders it puts the CLI
-/// in, each a part of a path written with `/` and the arguments of the
-/// command that updates what is in it. Claude's is told apart another way.
-/// Pi has two: its earlier installer's folder, which updates itself with
-/// `--self`, and the managed install its installer writes today (`bin` of the
-/// agent folder), which says it is updated with `pi update`. Codex's standalone
-/// installer is told by [`is_codex_standalone`], not by a folder name.
-fn own_installer(harness: Harness) -> &'static [(&'static str, &'static [&'static str])] {
+/// Where a harness's own installer puts its CLI.
+enum Place {
+    /// In a folder: a part of a path written with `/`.
+    Folder(&'static str),
+    /// In Codex's standalone install, told as Codex tells it ([`is_codex_standalone`]).
+    CodexStandalone,
+}
+
+impl Place {
+    /// Whether the CLI at `real` (written with `/`, read where its links lead) is in this place,
+    /// as the environment `env` it is run with says.
+    fn holds(&self, real: &str, env: &Env) -> bool {
+        match self {
+            Place::Folder(part) => real.contains(part),
+            Place::CodexStandalone => is_codex_standalone(real, env),
+        }
+    }
+}
+
+/// A harness's own installer (`OWN_INSTALLER`): the places it puts the CLI
+/// in, each with the arguments of the command that updates what is in it.
+/// Claude's is told apart another way. Pi has two: its earlier installer's
+/// folder, which updates itself with `--self`, and the managed install its
+/// installer writes today (`bin` of the agent folder), which says it is
+/// updated with `pi update`. Codex's standalone installer is told as Codex
+/// tells it, not by a folder name.
+fn own_installer(harness: Harness) -> &'static [(Place, &'static [&'static str])] {
     match harness {
-        // A folder no Codex installer in `scripts/install` has ever made (its history, March
-        // to November 2026), and where Codex answers `codex update` with "Could not detect the
-        // Codex installation method"; kept, as Node's admin had it.
-        Harness::Codex => &[("/.codex/bin/", &["update"])],
-        Harness::Pi => &[
-            ("/.pi/bin/", &["update", "--self"]),
-            ("/.pi/agent/bin/", &["update"]),
+        // The first is a folder no Codex installer in `scripts/install` has ever made (its
+        // history, March to November 2026), and where Codex answers `codex update` with "Could
+        // not detect the Codex installation method"; kept, as Node's admin had it.
+        Harness::Codex => &[
+            (Place::Folder("/.codex/bin/"), &["update"]),
+            (Place::CodexStandalone, &["update"]),
         ],
-        Harness::Devin => &[("/devin/cli/", &["update"])],
+        Harness::Pi => &[
+            (Place::Folder("/.pi/bin/"), &["update", "--self"]),
+            (Place::Folder("/.pi/agent/bin/"), &["update"]),
+        ],
+        Harness::Devin => &[(Place::Folder("/devin/cli/"), &["update"])],
         // Muse's launcher updates itself ([`muse_source`]).
         Harness::Claude | Harness::Muse => &[],
     }
@@ -191,15 +213,9 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
             ]),
         );
     }
-    if harness == Harness::Codex && is_codex_standalone(&real, env) {
-        return npm(
-            Some(format!("{}'s installer", name(harness))),
-            Some(vec![executable.to_owned(), "update".to_owned()]),
-        );
-    }
     if let Some((_, arguments)) = own_installer(harness)
         .iter()
-        .find(|(marker, _)| real.contains(marker))
+        .find(|(place, _)| place.holds(&real, env))
     {
         let mut update = vec![executable.to_owned()];
         update.extend(arguments.iter().map(|argument| (*argument).to_owned()));
