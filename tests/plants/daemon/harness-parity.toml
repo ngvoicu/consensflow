@@ -321,8 +321,11 @@ runs = ["page-computer-use"]
 
 [[plant.edit]]
 file = "app/ui/core/computer-use.js"
-find = '''    this.#mend.hidden = permissions === null || GRANTS.every(({ key }) => permissions[key] === true)'''
-replace = '''    this.#mend.hidden = permissions === null'''
+find = '''      permissions === null ||
+      !apps.some(({ name }) => name === 'ConsensFlow') ||
+      GRANTS.every(({ key }) => permissions[key] === true)'''
+replace = '''      permissions === null ||
+      !apps.some(({ name }) => name === 'ConsensFlow')'''
 
 [[plant]]
 name = "parity computer use: Project settings never tells how to mend an entry"
@@ -331,8 +334,10 @@ runs = ["page-computer-use"]
 
 [[plant.edit]]
 file = "app/ui/core/computer-use.js"
-find = '''    this.#mend.hidden = permissions === null || GRANTS.every(({ key }) => permissions[key] === true)'''
-replace = '''    this.#mend.hidden = true'''
+find = '''      permissions === null ||
+      !apps.some(({ name }) => name === 'ConsensFlow') ||
+      GRANTS.every(({ key }) => permissions[key] === true)'''
+replace = '''      true'''
 
 [[plant]]
 name = "parity computer use: Project settings says other words than the note does"
@@ -343,3 +348,16 @@ runs = ["page-computer-use"]
 file = "app/ui/core/computer-use.js"
 find = '''macOS may hold the grant for another copy of the app, so remove it'''
 replace = '''macOS may hold the grant for another copy of the app, so delete it'''
+
+[[plant]]
+name = "parity computer use: Project settings tells how to mend an entry under another app's column, whose entries the words do not name"
+meant = "Project settings: Codex's computer use says whether the ChatGPT app set it up, and leads to Codex Computer Use's own permissions"
+runs = ["page-computer-use"]
+
+[[plant.edit]]
+file = "app/ui/core/computer-use.js"
+find = '''      permissions === null ||
+      !apps.some(({ name }) => name === 'ConsensFlow') ||
+      GRANTS.every(({ key }) => permissions[key] === true)'''
+replace = '''      permissions === null ||
+      GRANTS.every(({ key }) => permissions[key] === true)'''

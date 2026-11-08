@@ -8184,10 +8184,12 @@ test("Project settings: Codex's computer use says whether the ChatGPT app set it
   const data = model()
   allOn(data, 'codex')
   // Run from a terminal, ConsensFlow's permissions are that app's: said where they are shown, and
-  // nowhere else, so not for Codex, whose block has none of ConsensFlow's.
+  // nowhere else, so not for Codex, whose block has none of ConsensFlow's. One of them is not
+  // allowed, and the words on mending an entry (T-903) name ConsensFlow.app: they are not said
+  // under a column that is another app's.
   data.computerUse = {
     grantsOf: 'com.apple.Terminal',
-    permissions: { accessibility: true, screenRecording: true },
+    permissions: { accessibility: true, screenRecording: false },
   }
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
