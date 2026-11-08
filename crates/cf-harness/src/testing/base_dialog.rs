@@ -314,6 +314,28 @@ mod tests {
             })
     }
 
+    /// What T-1315 added to `claude/adapter.rs`, and no code the corpus borrows reads: the variable
+    /// a launch gives Claude Code so that it writes OSC 8 hyperlinks (`HYPERLINKS`, its doc comment,
+    /// and the one line that puts it in the launch's environment). They are taken out again before
+    /// the file is hashed, where they were added and nowhere else: a change that moved them, or
+    /// touched anything near them, is left in and fails the hash.
+    fn without_the_hyperlink_switch(text: &str) -> String {
+        const CHAINED: &str = "                    .chain(&HYPERLINKS)\n";
+        const FIRST: &str =
+            "/// What a window's Claude Code is told of its pane, for its launch alone:";
+        const LAST: &str =
+            "const HYPERLINKS: [(&str, &str); 1] = [(\"FORCE_HYPERLINK\", \"1\")];\n\n";
+        let Some(start) = text.find(FIRST) else {
+            return text.to_owned();
+        };
+        let Some(length) = text[start..].find(LAST) else {
+            return text.to_owned();
+        };
+        let mut kept = String::from(&text[..start]);
+        kept.push_str(&text[start + length + LAST.len()..]);
+        kept.replace(CHAINED, "")
+    }
+
     /// What T-1277 added to `claude/adapter.rs`, and no code the corpus borrows reads: Claude
     /// Code's `dialog_identity` (a `Window` method of its own, which the release head's window did
     /// not have) and the `pub(super)` of `LSP_OFFER` that its module reads. They are taken out
@@ -325,8 +347,11 @@ mod tests {
         const IDENTITY: &str = "    /// What tells one of Claude Code's dialogs from another read of its screen: the time in its\n    /// own warning line blanked, and its offer to install an LSP plugin from its own title down\n    /// (`dialog_identity`, T-1277). Never a time in a command, a hook's reason or a question.\n    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {\n        super::dialog_identity::identity(dialog)\n    }\n\n";
         const NEXT: &str = "    /// Claude Code's list of safe declines: its offer to install an LSP plugin, answered \"No, not\n";
         if file == "claude/adapter.rs" {
-            text.replace(&format!("{IDENTITY}{NEXT}"), NEXT)
-                .replace("pub(super) const LSP_OFFER", "const LSP_OFFER")
+            without_the_hyperlink_switch(
+                &text
+                    .replace(&format!("{IDENTITY}{NEXT}"), NEXT)
+                    .replace("pub(super) const LSP_OFFER", "const LSP_OFFER"),
+            )
         } else {
             text.to_owned()
         }
