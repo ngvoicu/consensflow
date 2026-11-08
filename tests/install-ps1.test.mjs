@@ -56,6 +56,11 @@ const shells = [
 
 const setupName = (version) => `ConsensFlow_${version}_x64-setup.exe`
 
+// PowerShell writes a file of this kind into TEMP every time it starts a script, and removes it itself
+// (`__PSScriptPolicyTest_myzyvayh.elf.ps1`): a test that takes any sole entry of TEMP for the installer's
+// folder found it, and failed (CI run 42055791085, job checks (windows-latest)).
+const POWERSHELL_OWN_FILE = '__PSScriptPolicyTest_te5t1ngx.tmp.ps1'
+
 /**
  * The folder `dir` as `shell` reads it when it is TEMP: the script names its folders by
  * `[IO.Path]::GetTempPath()`, which gives the long form of a TEMP given in its short one
@@ -137,6 +142,9 @@ for (const [label, shell] of shells) {
         ...replacements,
       ])
       for (const folder of ['tmp', 'local']) mkdirSync(path.join(dir, folder))
+      // What PowerShell writes into TEMP itself and removes, here left in it: what a case reads of
+      // TEMP is the installer's, and this is none of it (CI run 42055791085, T-1244).
+      writeFileSync(path.join(dir, 'tmp', POWERSHELL_OWN_FILE), '')
       return {
         dir,
         script,
