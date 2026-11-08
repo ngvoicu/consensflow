@@ -36,8 +36,10 @@
 //!    on: this is the release's gate, which the Release run checks again and
 //!    does not run;
 //! 6. a hand run of the Release workflow (`gh workflow run release.yml --ref
-//!    main`) on that commit, the trial, watched to its end: it builds, signs and
-//!    smoke-tests the packages as the tag's run will, and publishes nothing. One
+//!    main`, the notes file as the run's `notes` input) on that commit, the
+//!    trial, watched to its end: it builds, signs and smoke-tests the packages
+//!    as the tag's run will, and publishes nothing, and its notes step reads
+//!    the notes the tag will carry, as the tag's message gives its own. One
 //!    that does not end green stops the run before any tag, saying the job and
 //!    the step that failed, the run's address and what to do next; so does a `gh`
 //!    that cannot be asked about it. The run watched is of the commit tagged: it is

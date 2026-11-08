@@ -11,6 +11,16 @@ const SETTLE_MS = 200
 /** A Mac, where Cmd+C copies and Ctrl+C is always the program's. */
 const MAC = /Macintosh|Mac OS X/.test(globalThis.navigator?.userAgent ?? '')
 
+/** The key a click must hold to open a link, as VS Code's terminal asks: Cmd on a Mac, Ctrl elsewhere. */
+const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
+
+/**
+ * Whether `event`, a click on a link, is the one that opens it: the primary button with the
+ * system's key held, so a click into a pane to type or select never opens one, and nor does
+ * the other system's key (Ctrl+click is a Mac's secondary click).
+ */
+const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
+
 /**
  * The letter a key types for a shortcut: its own on a Latin layout, else the
  * one its place on the keyboard has (Ctrl+C on a Cyrillic layout is still
@@ -31,8 +41,27 @@ const shortcutLetter = (event) =>
  */
 
 export class XtermEmulator {
-  constructor(host, { onReply = () => {}, onResize = () => {} } = {}) {
+  constructor(host, { onReply = () => {}, onResize = () => {}, onLink = () => {} } = {}) {
     this.host = host
+    // A link is an OSC 8 hyperlink: words with the address hidden behind them, which xterm reads
+    // itself and hands to `linkHandler`. A web address a program prints as text is no link, in
+    // any form: from the screen alone it cannot be told whole, as a program that lays its text
+    // out in rows of its own writes one cut (three reviews, T-1301, T-1314, T-1323), so there is
+    // no reader for it; a program that wants one makes it an OSC 8 hyperlink and carries the
+    // address whole on every row it draws. The pointer on a link underlines it and says in the
+    // terminal's title what opens it and where it goes, the address too, for words can hide any.
+    // Only a web page is a link: xterm drops an OSC 8 address of another scheme (`file:`,
+    // `javascript:`, an app's own) before this is asked, as it does by default;
+    // `allowNonHttpProtocols` says so here, and the app refuses what is not http or https again.
+    const link = {
+      activate: (event, uri) => {
+        if (opensLink(event)) onLink(uri)
+      },
+      hover: (_event, uri) => {
+        if (this.terminal.element) this.terminal.element.title = `${LINK_KEY}+click to open ${uri}`
+      },
+      leave: () => this.terminal.element?.removeAttribute('title'),
+    }
     this.terminal = new Terminal({
       allowProposedApi: false,
       convertEol: false,
@@ -41,6 +70,7 @@ export class XtermEmulator {
       fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace',
       fontSize: 12,
       lineHeight: 1.16,
+      linkHandler: { ...link, allowNonHttpProtocols: false },
       scrollback: 10_000,
     })
     this.fitAddon = new FitAddon()
@@ -174,12 +204,14 @@ export class EmulatorRegistry {
     onData,
     onReply,
     onResize,
+    onLink = () => {},
     createEmulator = (host, callbacks) => new XtermEmulator(host, callbacks),
   }) {
     this.emulators = new Map()
     this.onData = onData
     this.onReply = onReply
     this.onResize = onResize
+    this.onLink = onLink
     this.createEmulator = createEmulator
   }
 
@@ -191,6 +223,7 @@ export class EmulatorRegistry {
     const emulator = this.createEmulator(host, {
       onReply: (data) => this.onReply(pane, data),
       onResize: (cols, rows) => this.onResize(pane, cols, rows),
+      onLink: (uri) => this.onLink(uri),
     })
     const input = emulator.onData((data) => this.onData(pane, data))
     this.emulators.set(key, { emulator, input })

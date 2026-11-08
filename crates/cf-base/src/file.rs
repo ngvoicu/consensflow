@@ -169,6 +169,12 @@ pub fn real_path(path: &Path) -> PathBuf {
     real_path_on(path, cfg!(windows))
 }
 
+/// `path` by its real one on every system, Windows too, where it is a verbatim one (`\\?\C:\…`):
+/// to compare two folders by where they are, never to give to a program ([`real_path`]).
+pub fn resolved_path(path: &Path) -> PathBuf {
+    real_path_on(path, false)
+}
+
 /// [`real_path`], on Windows where `windows` says so.
 fn real_path_on(path: &Path, windows: bool) -> PathBuf {
     if windows {
@@ -208,6 +214,25 @@ mod tests {
         // A path not there yet: its nearest folder that is, by its real path.
         let gone = real.join("not").join("yet");
         assert_eq!(real_path_on(&gone, false), resolved.join("not").join("yet"));
+    }
+
+    /// For comparing two folders by where they are: the real path on every system, Windows too
+    /// (a verbatim one there), whatever `real_path` hands a program.
+    #[test]
+    fn a_resolved_path_is_the_real_one_on_every_system() {
+        let folder = tempfile::tempdir().unwrap();
+        let real = folder.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let resolved = std::fs::canonicalize(&real).unwrap();
+        assert_eq!(resolved_path(&real), resolved);
+        let gone = real.join("not").join("yet");
+        assert_eq!(resolved_path(&gone), resolved.join("not").join("yet"));
+        #[cfg(unix)]
+        {
+            let linked = folder.path().join("linked");
+            std::os::unix::fs::symlink(&real, &linked).unwrap();
+            assert_eq!(resolved_path(&linked), resolved);
+        }
     }
     use std::time::{Duration, SystemTime};
 

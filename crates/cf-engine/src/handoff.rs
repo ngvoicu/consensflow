@@ -26,7 +26,7 @@ use cf_base::js;
 use cf_base::refusal::Refusal;
 use cf_proto::cf_word::CfWord;
 use cf_proto::ledger::{
-    ChiefConversation, ChiefOpenWork, MessageOpening, MessageView, ParticipantView, SwitchedFrom,
+    ChiefConversation, ChiefOpenWork, MessageView, ParticipantView, SwitchedFrom,
 };
 use serde::Serialize;
 
@@ -35,7 +35,8 @@ use pages::paginate;
 pub(crate) use text::name_of;
 use text::{defuse, delivered, first_line, typed_before, Shown};
 pub use viewer::{
-    whole_history_page, Delivery, Openings, ShownItem, WholeHistoryPage, HISTORY_ROOM, SHOWN_FIELD,
+    whole_history_page, Delivery, Live, Owns, ShownItem, WholeHistoryPage, HISTORY_ROOM,
+    SHOWN_FIELD,
 };
 
 /// How ConsensFlow's handoff to a chief the human switched in begins, and the
@@ -83,17 +84,6 @@ impl<'a> From<&'a MessageView> for Gist<'a> {
             kind: &message.kind,
             task_number: message.task_number,
             body: &message.body,
-        }
-    }
-}
-
-impl<'a> From<&'a MessageOpening> for Gist<'a> {
-    fn from(message: &'a MessageOpening) -> Self {
-        Gist {
-            sender: message.sender.as_deref(),
-            kind: &message.kind,
-            task_number: message.task_number,
-            body: &message.opening,
         }
     }
 }

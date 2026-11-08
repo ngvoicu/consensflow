@@ -336,6 +336,10 @@ fn launches_pi_with_its_extension_a_session_name_of_ours_and_no_task_or_role_tex
         Some(path::join(&[&root, "settled"]))
     );
     assert_eq!(env("CF_DELIVERY_LAUNCH_ID").as_deref(), Some(LAUNCH));
+    // The pane draws OSC 8 hyperlinks and Pi does not know its name: this launch says so, so a link
+    // is its words with the whole address behind them, not `words (address)` text cut where Pi's
+    // rows end (T-1315).
+    assert_eq!(env("PI_HYPERLINKS").as_deref(), Some("1"));
     assert_eq!(plan.drop_env, Vec::<String>::new());
 }
 

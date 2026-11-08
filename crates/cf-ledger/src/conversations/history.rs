@@ -3,8 +3,9 @@
 //! as one timeline, read in order from where the viewer is (`read_history`),
 //! with no heading of any conversation (chief-harness, CHF-11): a conversation
 //! is the place its items stand at, and one with none is not there; a long
-//! item's text, a part at a time (`read_history_part`); and the opening of a
-//! message a delivery names, for its line (`message_opening`).
+//! item's text, a part at a time (`read_history_part`); and the parties of a
+//! message a delivery names, to tell whether it is the participant's
+//! (`message_parties`).
 //!
 //! What a read costs is bounded, whatever the size of the history or of one
 //! item in it. It reaches what it reads through the indexes of migration 0020
@@ -36,7 +37,7 @@
 //! it ([`TAIL_BYTES`]), never the whole of it.
 
 use cf_proto::ledger::{
-    HistoryFrom, HistoryItem, HistoryKey, HistoryRead, HistoryRow, ItemDetail, MessageOpening,
+    HistoryFrom, HistoryItem, HistoryKey, HistoryRead, HistoryRow, ItemDetail, MessageParties,
     Scanned, TextCut, TextPart,
 };
 use rusqlite::types::ValueRef;
@@ -45,8 +46,8 @@ use rusqlite::{params, OptionalExtension, Params, Row, Statement, StatementStatu
 use super::transcripts::{HEADER_MAX, NAME_MAX, PART_TAIL};
 use super::ID_SHOWN;
 use crate::model::{quoted, LedgerError};
-use crate::openings::{opening_of, text_of};
 use crate::store::Store;
+use crate::text::text_of;
 
 /// The most of an item's text a page shows, and a part holds: in characters,
 /// as many as a tool's output is copied of, which a frame always carries. An
@@ -76,15 +77,6 @@ const ROW_FIELDS: usize = 4 * ID_SHOWN + 3 + 64 + DRAWN_FIELDS;
 /// and its status (a word each), the time it took and a compaction's tokens (a number
 /// each). The change an edit made is read apart, and charged as a part is.
 const DRAWN_FIELDS: usize = 4 * HEADER_MAX + 4 * NAME_MAX + 2 * 16 + 2 * 20;
-
-/// The most of a message's body its delivery's line reads: the line says its
-/// first line, cut at 160 characters, which this holds behind any blank lines
-/// a body could reasonably open with.
-pub const MESSAGE_OPENING: usize = 4_096;
-
-/// What reading a message's opening is charged, of what a read of the history
-/// may go through: the opening's bytes, and the lookups of its row as a row's.
-pub const OPENING_COST: usize = MESSAGE_OPENING + ROW_COST;
 
 /// What a read is charged for each conversation it comes to, besides its rows:
 /// finding it by its index, and going to its items by theirs. One that shows
@@ -142,6 +134,19 @@ fn conversation_from(newest_first: bool) -> String {
     )
 }
 
+/// The id of participant `?1`'s conversation now (the one that has not ended), from the
+/// index of those. Its row is read up to `ended_at`, past its harness, its native session
+/// (512 characters at most) and its times, each short whatever an older build wrote; its
+/// role, which may be long, is kept after them.
+const CURRENT_CONVERSATION: &str =
+    "SELECT id FROM conversation INDEXED BY conversation_current_unique
+       WHERE participant_id = ?1 AND ended_at IS NULL";
+
+/// The newest item of conversation `?1`, from its head's index alone.
+const NEWEST_ITEM: &str =
+    "SELECT item FROM transcript_head INDEXED BY transcript_head_conversation_index
+       WHERE conversation_id = ?1 ORDER BY item DESC LIMIT 1";
+
 /// Whether there is project `?1`, by its row's id alone, none of its row read.
 const PROJECT_THERE: &str = "SELECT 1 FROM project WHERE id = ?";
 
@@ -178,18 +183,18 @@ const PART_END: &str = "SELECT tail FROM transcript_part WHERE item = ?1 AND par
 /// longer is kept in parts.
 const ROW_TEXT: &str = "SELECT text FROM transcript WHERE rowid = ?1";
 
-/// Message `?1`'s fields a delivery's line shows, each of which its row holds
-/// before its body, and its sender's handle and its task's number, which theirs
-/// hold before anything long.
-const MESSAGE_FIELDS: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender, m.kind, t.number AS task_number
-       FROM message m LEFT JOIN participant s ON s.id = m.sender_id LEFT JOIN task t ON t.id = m.task_id
+/// Message `?1`'s parties: its project and recipient, which its row holds
+/// before its body, and its sender's handle, which the participant's holds
+/// before anything long. Nothing of the body, nor of the task.
+const MESSAGE_PARTIES: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender
+       FROM message m LEFT JOIN participant s ON s.id = m.sender_id
        WHERE m.id = ?";
 
 /// How much of an item's text a search shows before the words it found.
 const BEFORE_A_MATCH: usize = 2_000;
 
-/// What the page says of an entry besides its fields: a delivery's line, the
-/// part it shows, the place it stands.
+/// What the page says of an entry besides its fields: where a delivery
+/// begins, the part it shows, the place it stands.
 const ROW_SLACK: usize = 600;
 
 /// What a read of the history is asked for: from where and which way, the
@@ -774,34 +779,57 @@ pub(crate) fn read_history_part(
     })
 }
 
-/// Message `id`, as far as a delivery's line names it: the fields its row
-/// holds before its body, and the first [`MESSAGE_OPENING`] bytes of the body
-/// alone, read through SQLite's incremental blob reads, so that however long
-/// the body is no more of it is read.
-pub(crate) fn message_opening(
+/// Message `id`'s parties, as far as the history page needs to tell whether a
+/// delivery names one of a participant's: the fields its row holds before its
+/// body, and its sender's handle. The body is never read, so that however long
+/// it is no more of the row is.
+pub(crate) fn message_parties(
     store: &Store,
     id: i64,
-) -> Result<Option<MessageOpening>, LedgerError> {
-    let Some(mut opening) = store
+) -> Result<Option<MessageParties>, LedgerError> {
+    Ok(store
         .db
-        .prepare_cached(MESSAGE_FIELDS)?
+        .prepare_cached(MESSAGE_PARTIES)?
         .query_row([id], |row| {
-            Ok(MessageOpening {
+            Ok(MessageParties {
                 id,
                 project_id: row.get("project_id")?,
                 recipient_id: row.get("recipient_id")?,
                 sender: row.get("sender")?,
-                kind: row.get("kind")?,
-                task_number: row.get("task_number")?,
-                opening: String::new(),
             })
         })
+        .optional()?)
+}
+
+/// Where the one item of participant `handle`'s history that may still be written stands:
+/// the newest of the conversation it has now. Every other item is behind a later one, or in
+/// a conversation that ended, and is not being written any more, whatever its reader said
+/// of it; none where the conversation has no item. Two lookups by an index each, whatever
+/// the history holds, and no text read: of the conversation's row only what is short.
+pub(crate) fn live_item(
+    store: &Store,
+    project_id: i64,
+    handle: &str,
+) -> Result<Option<HistoryKey>, LedgerError> {
+    let participant = whose(store, project_id, handle)?;
+    let Some(conversation) = store
+        .db
+        .prepare_cached(CURRENT_CONVERSATION)?
+        .query_row([participant.id], |row| row.get::<_, i64>(0))
         .optional()?
     else {
         return Ok(None);
     };
-    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;
-    Ok(Some(opening))
+    let newest = store
+        .db
+        .prepare_cached(NEWEST_ITEM)?
+        .query_row([conversation], |row| row.get::<_, i64>(0))
+        .optional()?;
+    Ok(newest.map(|row| HistoryKey {
+        conversation,
+        row,
+        part: 0,
+    }))
 }
 
 /// A text value as text, U+FFFD for what is no UTF-8 in it; none for null.
@@ -929,8 +957,16 @@ mod tests {
             (DIFF_TEXT.into(), vec![by_row("transcript_diff")]),
             (PART_HEAD.into(), vec![by_row("h"), by_row("c")]),
             (
-                MESSAGE_FIELDS.into(),
-                vec![by_row("m"), format!("{} LEFT-JOIN", by_row("s")), format!("{} LEFT-JOIN", by_row("t"))],
+                MESSAGE_PARTIES.into(),
+                vec![by_row("m"), format!("{} LEFT-JOIN", by_row("s"))],
+            ),
+            (
+                CURRENT_CONVERSATION.into(),
+                vec!["SEARCH conversation USING INDEX conversation_current_unique (participant_id=?)".into()],
+            ),
+            (
+                NEWEST_ITEM.into(),
+                vec!["SEARCH transcript_head USING COVERING INDEX transcript_head_conversation_index (conversation_id=?)".into()],
             ),
         ];
         for (sql, expected) in queries {
