@@ -155,9 +155,12 @@ impl StartFailure {
 }
 
 /// The exit status of a program of ConsensFlow's that stands in for a harness in a window
-/// (`cf codex-session`) when it could not start the harness: one status for each kind, in a
-/// range no harness uses (sysexits.h keeps 64 to 78), so that the engine reads from how the
-/// window ended, and not from its screen, that the harness never ran.
+/// (`cf codex-session`) when it could not start the harness: one status for each kind, from 70
+/// (sysexits.h gives 64 to 78 to programs to use, so this range is a choice of ConsensFlow's, not
+/// one nothing else uses), so that the engine reads from how the window ended, and not from its
+/// screen, that the harness never ran. Its limit: the window also ends with the harness's own
+/// exit status, so a harness that itself exits with one of these is read as a start that failed,
+/// by kind, in a note that names the kind and quotes nothing.
 const START_STATUS_BASE: i64 = 70;
 
 impl StartKind {

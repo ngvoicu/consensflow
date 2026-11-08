@@ -342,8 +342,9 @@ fn a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_
 }
 
 /// T-1328: Codex's window is ConsensFlow's own program, `cf codex-session`. When it could not start
-/// Codex it ends with a status of its own for each kind of why (70 to 77, which no harness uses),
-/// and 1 for any other failure; the engine reads the status, and quotes no word of the screen.
+/// Codex it ends with a status of its own for each kind of why (70 to 77, a choice of
+/// ConsensFlow's: a Codex that itself exits with one of them is read as a start that failed), and
+/// 1 for any other failure; the engine reads the status, and quotes no word of the screen.
 #[test]
 fn a_window_that_could_not_start_codex_ends_with_the_status_of_why_and_any_other_failure_with_1() {
     for (kind, status) in [
