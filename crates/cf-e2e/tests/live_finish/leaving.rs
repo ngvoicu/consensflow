@@ -501,9 +501,9 @@ pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
 
 /// What a run that passed is said to have shown, as the name of its check: that the command ran on in
 /// a session of its own, the known limit on a Mac, that it ended in the turn and the chief was owed no
-/// note, or that the window's close ended it and the chief was told. The one [`summary`] tells, by the same shapes: a process of the machine that holds the
-/// command's words and is none of this run's (another tree's run of the stand-in, which the run
-/// cannot tell from its own) changes neither.
+/// note, or that the window's close ended it and the chief was told. The one [`summary`] tells, by the
+/// same shapes: a process of the machine that holds the command's words and is none of this run's
+/// (another tree's run of the stand-in, which the run cannot tell from its own) changes neither.
 fn passed_as(left: &Left) -> &'static str {
     if (left.listed.is_empty() && !left.escaped.is_empty())
         || listed_then_left_for_a_session_of_its_own(left)
