@@ -229,7 +229,8 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
         Regex::new(r"^\S+$")?.is_match(env["CONSENSFLOW_TOKEN"].as_str().unwrap_or_default()),
         "{env}"
     );
-    // The chief's role text: its staff with their roles and tiers, and the cf of this window.
+    // The chief's role text: its staff with their roles and tiers (a member named by its model
+    // says no model beside its name), and the cf of this window.
     let argv: Vec<&str> = open["body"]["argv"]
         .as_array()
         .map(Vec::as_slice)
@@ -246,7 +247,7 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
         .unwrap_or_default();
     let role = files::read_string(Path::new(file))?;
     assert!(
-        Regex::new(r"(?m)^\| mybuilder \| mybuilder \| worker, reviewer \| Standard work \|$")?
+        Regex::new(r"(?m)^\| mybuilder \| worker, reviewer \| Standard work \|$")?
             .is_match(&role),
         "{role}"
     );
