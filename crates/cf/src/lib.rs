@@ -24,8 +24,12 @@ mod board;
 mod hook;
 mod standalone;
 
+#[cfg(test)]
+mod memories_tests;
+
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
+use std::path::Path;
 
 use cf_base::env::Env;
 use cf_board::Board;
@@ -70,8 +74,41 @@ const UI_IN_A_WINDOW: &str = "`cf ui` starts ConsensFlow's own daemon, and this 
     `ui`. Run it in a terminal outside the window, or unset CONSENSFLOW_URL, CONSENSFLOW_TOKEN, \
     CONSENSFLOW_PARTICIPANT and CONSENSFLOW_PROJECT first.";
 
-/// Runs the command in `args`: its exit code. Only a failure to write is an error.
+/// What `cf` says to a board command that changes the board and ran in Codex's memories folder
+/// (`$CODEX_HOME/memories`): that folder is the working folder of Codex's memory job, a thread
+/// of the window's own Codex server that is given the window's role and token, and no window of
+/// the board works from it. The job posted a task as the chief (the issue
+/// `codex-memories-post-to-the-board-as-the-chief`); until the board takes a Codex window's
+/// token only from the window's own thread (native control, 3.0.8), `cf` does not let it.
+/// A test holds the words.
+const IN_CODEX_MEMORIES: &str =
+    "This command ran in Codex's memories folder: Codex's memory job isn't on the board.";
+
+/// Runs the command in `args`: its exit code. Only a failure to write is an error. Its working
+/// folder is the process's ([`run_in`]).
 pub fn run(
+    env: &Env,
+    args: &[OsString],
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> io::Result<u8> {
+    run_in(
+        std::env::current_dir().ok().as_deref(),
+        env,
+        args,
+        input,
+        out,
+        err,
+    )
+}
+
+/// [`run`] as it would run with `folder` as its working folder (none where the system gave it
+/// none): a board command that changes the board is refused where the folder is Codex's
+/// memories folder, or inside it. What reads the board, `cf hook`, and the usage of a command
+/// (`--help`) are not changed by it.
+pub fn run_in(
+    folder: Option<&Path>,
     env: &Env,
     args: &[OsString],
     input: &mut dyn Read,
@@ -97,7 +134,15 @@ pub fn run(
         return Ok(1);
     }
     match Board::from_env(env) {
-        Some(board) => board::run(&given, json, &board, input, out, err),
+        Some(board) => {
+            let board = match folder {
+                Some(folder) if cf_harness::codex::memories::holds(env, folder) => {
+                    board.refusing_writes(IN_CODEX_MEMORIES)
+                }
+                _ => board,
+            };
+            board::run(&given, json, &board, input, out, err)
+        }
         // Tokenless: the human's own `cf`. The words as they came: a `--json`
         // among them is the verb's own, and `ui`, which `main` ran before this
         // (`native_ui`), is no verb here.

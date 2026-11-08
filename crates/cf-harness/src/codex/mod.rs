@@ -10,6 +10,7 @@ pub mod computer_use;
 mod fakes;
 mod last_used;
 mod launch;
+pub mod memories;
 pub(crate) mod models;
 pub(crate) mod paths;
 mod quota;

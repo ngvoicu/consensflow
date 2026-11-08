@@ -20,6 +20,15 @@ pub(crate) fn codex_home(env: &Env) -> Result<String, String> {
     }
 }
 
+/// Codex's home as Codex itself finds it: `CODEX_HOME` when it names something, else `.codex` in
+/// the user's home. (An empty `CODEX_HOME` is none here; [`codex_home`] takes it for the home.)
+pub(crate) fn codex_home_or_default(env: &Env) -> Result<String, String> {
+    match env.path("CODEX_HOME") {
+        Some(root) => Ok(root.to_string_lossy().into_owned()),
+        None => Ok(path::join(&[&home(env)?, ".codex"])),
+    }
+}
+
 /// The `SKILL.md` of the Specmint variant the human installed for Codex, in the
 /// places it reads the skills of the user's: `.agents/skills` in the home, then
 /// the `skills` folder of its own home. None where it is in neither.
