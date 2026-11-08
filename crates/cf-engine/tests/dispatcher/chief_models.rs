@@ -443,11 +443,19 @@ fn a_window_given_up_on_with_a_gone_models_words_is_tried_again_and_keeps_its_mo
     assert!(to_human(&context, project.id)
         .iter()
         .all(|body| !body.contains("no longer available")));
-    assert!(context
-        .adapter
-        .prepared()
+    // Tried again at the backoff, on the model it asked for: a given-up launch is no refusal.
+    context.advance(10_000);
+    context.pass().unwrap();
+    let launches = context.adapter.prepared();
+    assert!(launches.len() >= 2, "{launches:?}");
+    assert!(launches
         .iter()
         .all(|launch| launch["agent"] == agent("claude-opus-5", None)));
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), None)
+    );
 }
 
 /// A failed turn is read in its record's own words, never its screen's.
