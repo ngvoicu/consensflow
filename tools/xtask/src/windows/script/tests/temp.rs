@@ -48,6 +48,18 @@ function Make([string]$name, [string[]]$kids, [double]$hours, [string]$kind = 'f
 /// given `processes` (PowerShell: `$null`, or the objects that stand for the programs there are)
 /// and a `cap`: the line it ends by, and what is left in the Temp.
 fn swept(shell: &str, make: &str, processes: &str, cap: u32) -> (String, Vec<String>) {
+    swept_as(shell, make, processes, cap, false)
+}
+
+/// [`swept`], and only said what would be taken when `dry`.
+fn swept_as(
+    shell: &str,
+    make: &str,
+    processes: &str,
+    cap: u32,
+    dry: bool,
+) -> (String, Vec<String>) {
+    let dry = if dry { " -DryRun" } else { "" };
     let folder = tempfile::tempdir().unwrap();
     let temp = folder.path().join("Temp");
     fs::create_dir(&temp).unwrap();
@@ -56,7 +68,7 @@ fn swept(shell: &str, make: &str, processes: &str, cap: u32) -> (String, Vec<Str
         shell,
         folder.path(),
         &format!(
-            "$ErrorActionPreference = 'Stop'\n$temp = '{}'\n{MAKE}\n{function}\n{make}\n$processes = {processes}\n$r = Clear-TestTemp -Temp $temp -Processes $processes -Now (Get-Date) -Cap {cap}\nWrite-Output \"RESULT removed=$($r.Removed) held=$($r.Held) failed=$($r.Failed.Count) left=$($r.Left) skipped=$($r.Skipped)\"\n",
+            "$ErrorActionPreference = 'Stop'\n$temp = '{}'\n{MAKE}\n{function}\n{make}\n$processes = {processes}\n$r = Clear-TestTemp -Temp $temp -Processes $processes -Now (Get-Date) -Cap {cap}{dry}\nWrite-Output \"RESULT removed=$($r.Removed) held=$($r.Held) failed=$($r.Failed.Count) left=$($r.Left) skipped=$($r.Skipped)\"\n",
             temp.display()
         ),
     );
@@ -147,6 +159,13 @@ Make 'Documents-old' @('file.txt') $old
 "#;
     // A program that runs from nowhere here, and one whose command line names a file in a folder.
     let processes = r#"@([pscustomobject]@{ ExecutablePath = 'C:\Windows\notepad.exe'; CommandLine = $null }, [pscustomobject]@{ ExecutablePath = $null; CommandLine = ('a.exe ' + (Join-Path $temp 'cf-dispatch-Held12') + '\consensflow.db') })"#;
+    // Said what would be taken, nothing is.
+    let (said, all) = swept_as(shell, make, processes, 3000, true);
+    assert_eq!(
+        said,
+        "RESULT removed=9 held=1 failed=0 left=0 skipped=False"
+    );
+    assert_eq!(all.len(), 23, "{all:?}");
     let (result, left) = swept(shell, make, processes, 3000);
     assert_eq!(
         result, "RESULT removed=9 held=1 failed=0 left=0 skipped=False",

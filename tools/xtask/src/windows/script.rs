@@ -1029,8 +1029,8 @@ try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $
 /// The sweep of the test families in Temp ([`temp_sweep`]).
 const TEMP_SWEEP: &str = r##"# temp: begin
 function Clear-TestTemp {
-  param([string]$Temp, $Processes, [DateTime]$Now, [int]$Cap)
-  $result = [pscustomobject]@{ Removed = 0; Held = 0; Failed = @(); Left = 0; Skipped = $false }
+  param([string]$Temp, $Processes, [DateTime]$Now, [int]$Cap, [switch]$DryRun)
+  $result = [pscustomobject]@{ Removed = 0; Held = 0; Failed = @(); Left = 0; Skipped = $false; Taken = [Collections.Generic.List[string]]::new() }
   if ($null -eq $Processes) { $result.Skipped = $true; return $result }
   $cutoff = $Now.ToUniversalTime().AddDays(-«days»)
   $made = @('consensflow.db', 'consensflow.db-wal', 'consensflow.db-shm', 'consensflow.db-journal', 'events.jsonl', 'events.jsonl.lock', 'daemon.log', 'daemon.log.lock', 'data', 'home', 'consensflow', 'profile', 'tree', 'sessions.db', 'wire.jsonl')
@@ -1057,7 +1057,8 @@ function Clear-TestTemp {
     $holds = @($Processes | Where-Object { ($_.ExecutablePath -and $_.ExecutablePath.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.CommandLine -and $_.CommandLine.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) })
     if ($holds.Count) { $result.Held++; continue }
     try {
-      if ($item -is [IO.FileInfo]) { $item.Attributes = [IO.FileAttributes]::Normal; $item.Delete() }
+      if ($DryRun) { }
+      elseif ($item -is [IO.FileInfo]) { $item.Attributes = [IO.FileAttributes]::Normal; $item.Delete() }
       else {
         try { $item.Delete($true) } catch {
           foreach ($inner in Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue) { try { $inner.Attributes = [IO.FileAttributes]::Normal } catch {} }
@@ -1065,6 +1066,7 @@ function Clear-TestTemp {
         }
       }
       $result.Removed++
+      $result.Taken.Add($item.Name)
     } catch { $result.Failed += $item.Name }
   }
   $result
