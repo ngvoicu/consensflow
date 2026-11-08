@@ -222,67 +222,31 @@ fn every_ask_reads_the_harness_and_the_refresh_fetches() {
     // Each read is kept by its id, for a submission made from the list it showed.
     for read in [&first, &again, &refreshed] {
         assert_eq!(
-            lists.shown(Harness::Devin, read.id).as_ref(),
+            lists.shown(Harness::Devin, &read.id).as_ref(),
             Some(&read.listing)
         );
     }
 }
 
 /// A pick that names no read of a list shown is checked against a read made for it, and refused,
-/// with why, where the harness cannot be read; unless the environment has the daemon take it on
-/// the harness's word (the rigs', whose stand-in harnesses list nothing): then nothing is read for
-/// it at all, and a pick that names a read the daemon keeps is checked against it all the same.
+/// with why, where the harness cannot be read; and a read the daemon keeps is the list.
 #[test]
-fn a_pick_naming_no_read_is_refused_where_its_harness_cannot_be_read_unless_the_environment_takes_it_on_its_word(
-) {
-    for (taken, expected) in [(false, Err("Not logged in".to_owned())), (true, Ok(None))] {
-        let folder = home(&["devin"]);
-        let env = if taken {
-            folder.env.clone().with_var(UNREAD_MODELS_VARIABLE, "1")
-        } else {
-            folder.env.clone()
-        };
-        let devin = Listing::answering([Err("Not logged in".to_owned())]);
-        let lists = ModelLists::new(Rc::new(ByKind(vec![("devin", Rc::clone(&devin))])), env);
-        assert_eq!(
-            done(lists.checked(Harness::Devin, None)),
-            expected,
-            "taken: {taken}"
-        );
-        assert_eq!(
-            devin.asked.borrow().len(),
-            usize::from(!taken),
-            "a daemon that takes it on its word asks the harness for nothing"
-        );
-    }
-    // A read the daemon keeps is the list, whatever the variable says.
+fn a_pick_naming_no_read_is_refused_where_its_harness_cannot_be_read() {
     let folder = home(&["devin"]);
-    let env = folder.env.clone().with_var(UNREAD_MODELS_VARIABLE, "1");
-    let lists = ModelLists::new(Rc::new(ByKind(vec![])), env);
+    let devin = Listing::answering([Err("Not logged in".to_owned())]);
+    let lists = lists(&folder, ByKind(vec![("devin", Rc::clone(&devin))]));
+    assert_eq!(
+        done(lists.checked(Harness::Devin, None)),
+        Err("Not logged in".to_owned())
+    );
+    assert_eq!(devin.asked.borrow().len(), 1, "it was read for");
+
+    let lists = ModelLists::new(Rc::new(ByKind(vec![])), folder.env.clone());
     let shown = lists.record(Harness::Devin, models(&["swe-2"], 1_000));
-    let listing = done(lists.checked(Harness::Devin, Some(shown)))
+    let listing = done(lists.checked(Harness::Devin, Some(shown.as_str())))
         .unwrap()
         .unwrap();
     assert_eq!(listing.models[0].id, "swe-2");
-}
-
-#[test]
-fn the_variable_that_has_a_daemon_take_unread_models_on_their_word_is_named_as_the_rig_names_it() {
-    assert_eq!(
-        UNREAD_MODELS_VARIABLE,
-        "CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN"
-    );
-    let env = Env::from_vars([("PATH", "/bin")]);
-    assert!(!unread_models_are_taken(&env));
-    assert!(!unread_models_are_taken(
-        &env.clone().with_var(UNREAD_MODELS_VARIABLE, "0")
-    ));
-    assert!(!unread_models_are_taken(
-        &env.clone().with_var(UNREAD_MODELS_VARIABLE, "")
-    ));
-    assert!(unread_models_are_taken(
-        &env.with_var(UNREAD_MODELS_VARIABLE, "1")
-    ));
 }
 
 /// The reads a submission can be checked against are the last of each harness, by id, and an id
@@ -291,18 +255,118 @@ fn the_variable_that_has_a_daemon_take_unread_models_on_their_word_is_named_as_t
 fn only_the_last_reads_of_a_harness_are_kept_for_a_submission() {
     let home = home(&["devin"]);
     let lists = lists(&home, ByKind(vec![]));
-    let ids: Vec<u64> = (0..=KEPT_READS)
+    let ids: Vec<String> = (0..=KEPT_READS)
         .map(|n| lists.record(Harness::Devin, models(&["a"], i64::try_from(n).unwrap())))
         .collect();
     assert!(
-        lists.shown(Harness::Devin, ids[0]).is_none(),
+        lists.shown(Harness::Devin, &ids[0]).is_none(),
         "the oldest went"
     );
-    assert!(lists.shown(Harness::Devin, ids[1]).is_some());
-    assert!(lists.shown(Harness::Devin, *ids.last().unwrap()).is_some());
+    assert!(lists.shown(Harness::Devin, &ids[1]).is_some());
+    assert!(lists.shown(Harness::Devin, ids.last().unwrap()).is_some());
     assert!(
-        lists.shown(Harness::Pi, ids[1]).is_none(),
+        lists.shown(Harness::Pi, &ids[1]).is_none(),
         "a read of Devin's is none of Pi's"
+    );
+}
+
+/// A pick that names no read is read for and refused where its harness cannot be read, whatever
+/// the environment says: there is no variable, flag or id that has a daemon take a model on its
+/// harness's word (T-1329, C: the rig's variable `CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN` was read in
+/// every build, and `cf ui` and the app pass an inherited value through to the daemon).
+#[test]
+fn no_variable_has_a_daemon_take_a_pick_on_its_harnesss_word() {
+    for set in [None, Some("1"), Some("yes"), Some("true")] {
+        let folder = home(&["devin"]);
+        let env = match set {
+            Some(value) => folder
+                .env
+                .clone()
+                .with_var("CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN", value),
+            None => folder.env.clone(),
+        };
+        let devin = Listing::answering([Err("Not logged in".to_owned())]);
+        let lists = ModelLists::new(Rc::new(ByKind(vec![("devin", Rc::clone(&devin))])), env);
+        assert_eq!(
+            done(lists.checked(Harness::Devin, None)),
+            Err("Not logged in".to_owned()),
+            "variable: {set:?}"
+        );
+        assert_eq!(devin.asked.borrow().len(), 1, "variable: {set:?}");
+    }
+}
+
+/// A dialog that was open as the daemon restarted holds the id of a read the new daemon never
+/// made. A new daemon has made no read at all: the pick is read again and checked against that
+/// read (T-1329, A).
+#[test]
+fn a_read_id_of_an_earlier_daemon_is_unknown_to_a_restarted_daemon_that_has_read_nothing() {
+    let home = home(&["devin"]);
+    let first_daemon = lists(
+        &home,
+        ByKind(vec![(
+            "devin",
+            Listing::repeating(models(&["swe-2"], 1_000)),
+        )]),
+    );
+    let shown = done(first_daemon.read(Harness::Devin, false)).unwrap();
+
+    let devin = Listing::repeating(models(&["swe-3"], 2_000));
+    let restarted = lists(&home, ByKind(vec![("devin", Rc::clone(&devin))]));
+    assert!(
+        restarted.shown(Harness::Devin, &shown.id).is_none(),
+        "the new daemon keeps no read of the old one"
+    );
+    let checked = done(restarted.checked(Harness::Devin, Some(shown.id.as_str())))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        checked.models[0].id, "swe-3",
+        "the pick is checked against a read made now"
+    );
+    assert_eq!(devin.asked.borrow().len(), 1, "and one was made for it");
+}
+
+/// The new daemon's count of reads reaches the number the old dialog holds, on the same
+/// harness: the old id names a read of a list the dialog never showed. It must still be unknown,
+/// so that the pick is read again and checked against a read made for it (T-1329, A: the
+/// reviewer's `review_restart_read_ids_must_not_alias_another_snapshot`).
+#[test]
+fn a_restarted_daemons_count_of_reads_reaching_an_old_dialogs_id_does_not_make_it_that_read() {
+    let home = home(&["devin"]);
+    let first_daemon = lists(
+        &home,
+        ByKind(vec![(
+            "devin",
+            Listing::repeating(models(&["swe-2"], 1_000)),
+        )]),
+    );
+    let shown = done(first_daemon.read(Harness::Devin, false)).unwrap();
+
+    let after = Listing::repeating(models(&["swe-3"], 2_000));
+    let restarted = lists(&home, ByKind(vec![("devin", Rc::clone(&after))]));
+    let other = done(restarted.read(Harness::Devin, false)).unwrap();
+    assert_eq!(other.listing.models[0].id, "swe-3");
+    // The harness lists what the old dialog showed again.
+    after.set(models(&["swe-2"], 3_000));
+    let checked = done(restarted.checked(Harness::Devin, Some(shown.id.as_str())))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        checked.models[0].id, "swe-2",
+        "not checked against the unrelated read the new daemon made first"
+    );
+    assert_eq!(after.asked.borrow().len(), 2, "a read was made for the pick");
+    assert_ne!(
+        shown.id, other.id,
+        "the second daemon's first read has an id of its own"
+    );
+    // And the unrelated read is still the one its own picker showed.
+    assert_eq!(
+        restarted
+            .shown(Harness::Devin, &other.id)
+            .map(|listing| listing.models[0].id.clone()),
+        Some("swe-3".to_owned())
     );
 }
 
@@ -330,12 +394,12 @@ fn a_failed_read_lists_no_model_and_says_why_not_the_list_before() {
     );
     assert_eq!(list.default_model(), None);
     assert_eq!(
-        lists.shown(Harness::Devin, failed.id).as_ref(),
+        lists.shown(Harness::Devin, &failed.id).as_ref(),
         Some(list),
         "the failed read is kept as it was"
     );
     assert_eq!(
-        lists.shown(Harness::Devin, good.id).as_ref(),
+        lists.shown(Harness::Devin, &good.id).as_ref(),
         Some(&good.listing),
         "and a submission made from the list before it is still checked against that list"
     );
@@ -643,7 +707,7 @@ fn failed_on(harness: Harness, failure: &str) -> (String, String) {
     let Freshness::Stale { why } = &read.listing.freshness else {
         panic!("a failed read is stale: {:?}", read.listing);
     };
-    let kept = lists.shown(harness, read.id).unwrap();
+    let kept = lists.shown(harness, &read.id).unwrap();
     let Freshness::Stale { why: kept } = &kept.freshness else {
         panic!("{kept:?}");
     };
@@ -836,7 +900,7 @@ fn a_stale_listing_a_harness_answers_is_kept_without_the_credential_in_its_reaso
     };
     assert!(!why.contains(URL_TOKEN) && !why.contains("user:"), "{why}");
     assert_eq!(listing.models.len(), 1, "the models are as they were");
-    let kept = lists.shown(Harness::Pi, read.id).unwrap();
+    let kept = lists.shown(Harness::Pi, &read.id).unwrap();
     assert_eq!(
         &kept, listing,
         "what a submission is checked against is what was returned"
@@ -911,7 +975,7 @@ mod from_pi_to_the_ledger {
         let adapter: Rc<dyn Adapter> = Rc::new(PiAdapter::new(&services));
         let lists = ModelLists::new(Rc::new(RealPi(adapter)), env);
         let read = eventually_clocked(lists.read(Harness::Pi, refresh), &fakes.time).unwrap();
-        let kept = lists.shown(Harness::Pi, read.id).unwrap();
+        let kept = lists.shown(Harness::Pi, &read.id).unwrap();
         assert_eq!(kept, read.listing, "what is kept is what the daemon told");
         read.listing
     }

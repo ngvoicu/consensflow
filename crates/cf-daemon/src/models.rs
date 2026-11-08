@@ -13,7 +13,10 @@
 //! ([`ModelLists::checked`]), kept for this daemon's life (the last [`KEPT_READS`] of each
 //! harness), never against whichever read was made last. Where there is no such read (none in
 //! this daemon's life, one evicted, or one that failed) the harness is read again and the
-//! submission is checked against that; nothing is accepted unchecked.
+//! submission is checked against that; nothing is accepted unchecked. **An id is a token of
+//! this daemon's life** (its nonce, then the count of its reads): a dialog that was open as the
+//! daemon restarted holds the token of a daemon that is gone, which no later daemon knows
+//! whatever its count has reached (T-1329).
 //!
 //! Nothing is kept in the ledger: what an earlier daemon's life wrote of the lists is forgotten
 //! as it starts ([`crate::start`]).
@@ -36,23 +39,13 @@ use tokio::sync::Mutex;
 /// How many of the reads of each harness a submission can still be checked against.
 pub const KEPT_READS: usize = 8;
 
-/// The variable that has a daemon take a model on its harness's word, as every daemon did before
-/// A4-28, where the pick names no read of a list it showed: the rigs' (`cf-e2e`), whose stand-in
-/// harnesses list nothing and whose cases open projects on models of their own. A person's daemon
-/// has none. A pick that names a read this daemon keeps is checked against it all the same.
-pub const UNREAD_MODELS_VARIABLE: &str = "CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN";
-
-/// Whether `env` has the daemon take a model on its harness's word where the pick names no read.
-pub fn unread_models_are_taken(env: &Env) -> bool {
-    env.text(UNREAD_MODELS_VARIABLE)
-        .is_some_and(|set| !set.is_empty() && set != "0")
-}
-
 /// One read of a harness: the listing it answered, and the id the page sends back with a
-/// submission made from it.
+/// submission made from it: a token of this daemon's life (`<nonce>.<count>`), a text that no
+/// other daemon's reads carry. It is a text, not a number: the page is JavaScript, whose numbers
+/// are exact to 2^53, and a nonce is as long as it is to be no other daemon's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRead {
-    pub id: u64,
+    pub id: String,
     pub listing: ModelListing,
 }
 
@@ -60,9 +53,8 @@ pub struct ModelRead {
 pub struct ModelLists {
     adapters: Rc<dyn Adapters>,
     env: Env,
-    /// Whether a pick naming no read of a list shown is taken at the human's word
-    /// ([`UNREAD_MODELS_VARIABLE`]): never, in a person's daemon.
-    takes_unread: bool,
+    /// What makes the ids of this daemon's reads its own: random, once, as it is built.
+    nonce: String,
     /// One turn for each harness, held through each read of it: two probes of one harness at
     /// once have hung (two Pi's). The harnesses do not wait for one another.
     reading: RefCell<HashMap<Harness, Rc<Mutex<()>>>>,
@@ -71,7 +63,7 @@ pub struct ModelLists {
     /// The last read of each harness that ended, and which read it was (by how many had begun
     /// when it did): an ask that arrived before that read began, and waited, takes it.
     last: RefCell<HashMap<Harness, (u64, ModelRead)>>,
-    /// The id the next read takes.
+    /// The count the next read takes in its id.
     next: Cell<u64>,
     /// The last reads of each harness, oldest first, for a submission to be checked against.
     kept: RefCell<HashMap<Harness, VecDeque<ModelRead>>>,
@@ -82,7 +74,7 @@ impl ModelLists {
     pub fn new(adapters: Rc<dyn Adapters>, env: Env) -> Self {
         Self {
             adapters,
-            takes_unread: unread_models_are_taken(&env),
+            nonce: nonce(),
             env,
             reading: RefCell::new(HashMap::new()),
             begun: RefCell::new(HashMap::new()),
@@ -138,11 +130,12 @@ impl ModelLists {
 
     /// Keeps `listing` as a read of `harness`, which takes the next id.
     fn keep(&self, harness: Harness, listing: ModelListing) -> ModelRead {
+        let count = self.next.get();
+        self.next.set(count + 1);
         let read = ModelRead {
-            id: self.next.get(),
+            id: format!("{}.{count}", self.nonce),
             listing,
         };
-        self.next.set(read.id + 1);
         let mut kept = self.kept.borrow_mut();
         let reads = kept.entry(harness).or_default();
         reads.push_back(read.clone());
@@ -158,7 +151,7 @@ impl ModelLists {
     }
 
     /// The read `id` of `harness`, if this daemon still keeps it.
-    pub fn shown(&self, harness: Harness, id: u64) -> Option<ModelListing> {
+    pub fn shown(&self, harness: Harness, id: &str) -> Option<ModelListing> {
         self.kept
             .borrow()
             .get(&harness)?
@@ -176,7 +169,7 @@ impl ModelLists {
     pub async fn checked(
         &self,
         harness: Harness,
-        read: Option<u64>,
+        read: Option<&str>,
     ) -> Result<Option<ModelListing>, String> {
         if let Some(listing) = read
             .and_then(|id| self.shown(harness, id))
@@ -184,10 +177,8 @@ impl ModelLists {
         {
             return Ok(Some(listing));
         }
-        // A daemon the rig starts reads nothing for a pick: its harnesses are stand-ins, and a
-        // real one it runs (Muse) takes half a minute to say it cannot list. The pick is taken on
-        // its harness's word, as every daemon took it before A4-28.
-        if self.takes_unread || self.adapters.adapter(harness.kind()).is_none() {
+        // A harness with no adapter has no list at all (the five all have one).
+        if self.adapters.adapter(harness.kind()).is_none() {
             return Ok(None);
         }
         let listing = self.get(harness, false).await?;
@@ -203,9 +194,23 @@ impl ModelLists {
     /// Records `listing` as a read of `harness`, as the page would have been shown it: what a
     /// test checks a submission against with no adapter to read from.
     #[cfg(test)]
-    pub(crate) fn record(&self, harness: Harness, listing: ModelListing) -> u64 {
+    pub(crate) fn record(&self, harness: Harness, listing: ModelListing) -> String {
         self.keep(harness, listing).id
     }
+}
+
+/// What makes one daemon's read ids its own: 64 random bits, in hex. Where the system gives no
+/// random bytes (it always does), the process's own id and a count in this process: no two
+/// daemons running at once share either, and one that follows another has another process id.
+fn nonce() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static BUILT: AtomicU64 = AtomicU64::new(0);
+    let mut random = [0u8; 8];
+    let bits = match getrandom::fill(&mut random) {
+        Ok(()) => u64::from_be_bytes(random),
+        Err(_) => (u64::from(std::process::id()) << 32) | BUILT.fetch_add(1, Ordering::Relaxed),
+    };
+    format!("{bits:016x}")
 }
 
 /// `listing` with its stale reason as it may be kept and told ([`cf_engine::quotable`]). A harness

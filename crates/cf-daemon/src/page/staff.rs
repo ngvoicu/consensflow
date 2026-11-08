@@ -309,16 +309,13 @@ pub(super) struct Resolved {
     pub(super) model_name: Option<String>,
 }
 
-/// The read a submission was made from (`read`, the id `models.get` answered with): none where
-/// the body names none.
-pub(super) fn read_of(body: Body<'_>) -> Result<Option<u64>, Said> {
+/// The read a submission was made from (`read`, the token `models.get` answered with): none
+/// where the body names none.
+pub(super) fn read_of(body: Body<'_>) -> Result<Option<&str>, Said> {
     match body.get("read") {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(read)) => read
-            .as_u64()
-            .map(Some)
-            .ok_or_else(|| Said::from("read is the number models.get answered with")),
-        Some(_) => Err(Said::from("read is the number models.get answered with")),
+        Some(Value::String(read)) if !read.is_empty() => Ok(Some(read.as_str())),
+        Some(_) => Err(Said::from("read is the token models.get answered with")),
     }
 }
 
@@ -335,7 +332,7 @@ pub(super) async fn resolve(
     kind: &str,
     model: &str,
     effort: Option<&str>,
-    read: Option<u64>,
+    read: Option<&str>,
 ) -> Result<Resolved, Said> {
     cf_ledger::model::require_model_id(model)?;
     let checked = page.models.checked(harness, read).await.map_err(|why| {

@@ -848,6 +848,10 @@ fn runs_of(staffing: &Staffing, handle: &str) -> (String, String, String, String
     )
 }
 
+/// The token of a read of another daemon's life, whose count is the one this daemon's first read
+/// has: a dialog that was open as the daemon restarted holds one (T-1329, A).
+const FOREIGN_READ: &str = "0000000000000000.1";
+
 #[tokio::test]
 async fn a_submission_is_checked_against_the_read_its_picker_was_shown_not_the_last_one() {
     LocalSet::new()
@@ -855,13 +859,13 @@ async fn a_submission_is_checked_against_the_read_its_picker_was_shown_not_the_l
             let staffing = staffing();
             let first = staffing.reads("devin").await;
             assert_eq!(first["ok"], true, "{first}");
-            let shown = first["read"].as_u64().expect("a read id");
+            let shown = first["read"].as_str().expect("a read token").to_owned();
             // Another dialog reads Devin after it changed what it lists.
             let mut later = recorded("devin");
             later.models.retain(|model| model.id == "adaptive");
             staffing.lists_of("devin").set(later);
             let second = staffing.reads("devin").await;
-            let last = second["read"].as_u64().expect("a read id");
+            let last = second["read"].as_str().expect("a read token").to_owned();
             assert_ne!(shown, last, "each read has an id of its own");
 
             // The pick made from the first list is checked against it, and holds Devin's exact id.
@@ -899,9 +903,11 @@ async fn a_submission_naming_no_read_the_daemon_keeps_reads_the_harness_again_an
                 1,
                 "a read made for the submission"
             );
-            // A read this daemon does not keep (or never made) is no read at all.
+            // A read this daemon does not keep (or never made) is no read at all: a token of another
+            // daemon's life is one, whatever count it carries (a dialog open as the daemon restarted),
+            // and the count of this daemon's first read, "1", is no exception (T-1329, A).
             let again = staffing
-                .add(devin_pick(json!({ "read": 987_654, "tier": "light" })))
+                .add(devin_pick(json!({ "read": FOREIGN_READ, "tier": "light" })))
                 .await;
             assert_eq!(again["ok"], true, "{again}");
             assert_eq!(
@@ -913,7 +919,9 @@ async fn a_submission_naming_no_read_the_daemon_keeps_reads_the_harness_again_an
             let mut changed = recorded("devin");
             changed.models.retain(|model| model.id == "adaptive");
             staffing.lists_of("devin").set(changed);
-            let refused = staffing.add(devin_pick(json!({ "read": 987_654 }))).await;
+            let refused = staffing
+                .add(devin_pick(json!({ "read": FOREIGN_READ })))
+                .await;
             assert_eq!(
                 refused["error"],
                 "devin does not list claude-opus-5-5-fast: pick one of its models",
@@ -933,7 +941,7 @@ async fn a_failed_read_is_no_list_to_check_against_the_harness_is_read_again_and
             staffing.lists_of("devin").fail("Not logged in");
             let failed = staffing.reads("devin").await;
             assert_eq!(failed["listing"]["models"], json!([]), "{failed}");
-            let failed_read = failed["read"].as_u64().unwrap();
+            let failed_read = failed["read"].as_str().unwrap().to_owned();
 
             // Devin can be read again: the pick is checked against that read, and is Devin's
             // exact id for the effort, never `swe-2` and `high` taken verbatim.
@@ -1013,15 +1021,17 @@ async fn an_edit_that_leaves_the_model_and_effort_as_they_are_saves_the_stored_c
 }
 
 #[tokio::test]
-async fn a_read_that_is_no_number_is_refused() {
+async fn a_read_that_is_no_token_is_refused() {
     LocalSet::new()
         .run_until(async {
             let staffing = staffing();
-            let refused = staffing.add(devin_pick(json!({ "read": "latest" }))).await;
-            assert_eq!(
-                refused["error"], "read is the number models.get answered with",
-                "{refused}"
-            );
+            for read in [json!(5), json!(""), json!(["a.1"]), json!(true)] {
+                let refused = staffing.add(devin_pick(json!({ "read": read }))).await;
+                assert_eq!(
+                    refused["error"], "read is the token models.get answered with",
+                    "{read}: {refused}"
+                );
+            }
         })
         .await;
 }
