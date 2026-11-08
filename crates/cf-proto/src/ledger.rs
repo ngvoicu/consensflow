@@ -359,19 +359,15 @@ pub struct TextPart {
     pub revision: i64,
 }
 
-/// A message as far as a delivery's line names it, read no further than its
-/// opening: the project, who it was to and from, what it was and on which
-/// task, and the first bytes of its body (`opening`, cut at a character),
-/// where its first words are.
+/// A message as far as the history page needs it, to say whether a delivery
+/// header in a participant's window names one of that participant's: the
+/// project, and who it was to and from. Its body is never read.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageOpening {
+pub struct MessageParties {
     pub id: i64,
     pub project_id: i64,
     pub recipient_id: i64,
     pub sender: Option<String>,
-    pub kind: String,
-    pub task_number: Option<i64>,
-    pub opening: String,
 }
 
 /// One item a task's windows wrote, and the conversation it is from.

@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use super::{known_conversation, ID_SHOWN};
 use crate::model::{cut, LedgerError};
-use crate::openings::text_of;
 use crate::store::Store;
+use crate::text::text_of;
 
 /// The most of one tool's output that is copied: it can run to megabytes,
 /// and the tool can be run again. Words are copied whole (the human's, an

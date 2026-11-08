@@ -10,6 +10,7 @@ use cf_ledger::{
 };
 use serde_json::Value;
 
+use super::scripted::Scripted;
 use super::*;
 
 /// A project of `name` whose chief runs on Claude Code as `ares`, and zeus on its staff.
@@ -102,6 +103,8 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
             let elsewhere = project(&rig, "elsewhere");
             let here = note(&rig, harbour, "human", "chief", "Look at the docs");
             let zeus_s = note(&rig, harbour, "human", "zeus", "Zeus's own plans");
+            // A message the chief sent, which its window shows the header of: its own.
+            let sent = note(&rig, harbour, "chief", "zeus", "Take the lexer");
             // Another project's chief's own note: a sender of the same handle, not this one.
             let theirs = note(&rig, elsewhere, "chief", "human", "Not yours");
             let chief = chief_of(&rig, harbour);
@@ -127,6 +130,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 summary,
                 item("u-4", "user", &format!("[ConsensFlow m-{theirs} · note]\nx")),
                 item("u-5", "user", &quoted),
+                item("u-6", "user", &format!("[ConsensFlow m-{sent} · note from @chief]\nTake the lexer")),
             ];
             rig.kit
                 .ledger
@@ -192,7 +196,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                             {
                                 "conversation": first.id, "row": row("u-1"), "id": "u-1", "role": "user", "complete": true, "at": at,
                                 "text": format!("[ConsensFlow m-{here} · note from @human]\nLook at the docs"),
-                                "delivery": { "line": format!("· m-{here}: a note from @human: \"Look at the docs\" (cf inbox read m-{here})"), "at": 0 },
+                                "delivery": { "at": 0 },
                             },
                             { "conversation": first.id, "row": row("a-1"), "id": "a-1", "role": "assistant", "text": "Reading <b>them</b>", "complete": true, "at": at },
                             { "conversation": first.id, "row": row("u-3"), "id": "u-3", "role": "user", "text": "This session is being continued.", "complete": true, "at": at, "compaction": true },
@@ -202,6 +206,12 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                                 "text": format!("[ConsensFlow m-{theirs} · note]\nx"),
                             },
                             { "conversation": first.id, "row": row("u-5"), "id": "u-5", "role": "user", "complete": true, "at": at, "text": quoted },
+                            // A message the chief sent is its own.
+                            {
+                                "conversation": first.id, "row": row("u-6"), "id": "u-6", "role": "user", "complete": true, "at": at,
+                                "text": format!("[ConsensFlow m-{sent} · note from @chief]\nTake the lexer"),
+                                "delivery": { "at": 0 },
+                            },
                             // The conversation after the switch, in the same stream.
                             { "conversation": second.id, "row": row("m-1"), "id": "m-1", "role": "assistant", "text": "Taken over", "complete": true, "at": at },
                         ],
@@ -553,10 +563,11 @@ async fn reads_a_long_item_whole_a_part_at_a_time_and_only_its_participant_s() {
 }
 
 #[tokio::test]
-async fn folds_each_delivery_from_its_message_s_opening_and_never_loads_a_body_whole() {
+async fn marks_each_delivery_by_its_own_message_and_never_loads_a_body_whole() {
     // The reviewers' case: twenty messages of a megabyte, each delivered with
-    // its opening alone, which a page holds; the lines are said from what
-    // opens each message, and no body is read whole.
+    // its opening alone, which a page holds; each is marked as a delivery
+    // (where it begins, and nothing of its words) by a lookup of its message's
+    // parties, and no body is read whole.
     LocalSet::new()
         .run_until(async {
             let rig = rig();
@@ -575,7 +586,10 @@ async fn folds_each_delivery_from_its_message_s_opening_and_never_loads_a_body_w
                 let opening = format!("Read part {at} first\n");
                 let body = format!("{opening}{}", "x".repeat(1_000_000 - opening.len()));
                 let id = note(&rig, harbour, "human", "chief", &body);
-                let text = format!("[ConsensFlow m-{id} · note from @human]\n{opening}{}", "x".repeat(15_000));
+                let text = format!(
+                    "[ConsensFlow m-{id} · note from @human]\n{opening}{}",
+                    "x".repeat(15_000)
+                );
                 delivered.push((id, item(&format!("u-{at}"), "user", &text)));
             }
             let items: Vec<Value> = delivered.iter().map(|(_, item)| item.clone()).collect();
@@ -585,24 +599,401 @@ async fn folds_each_delivery_from_its_message_s_opening_and_never_loads_a_body_w
                 .copy_transcript(conversation.id, &items, 0)
                 .unwrap();
             // A read that loaded one body whole would fail.
-            rig.kit.ledger.borrow().limit_value_length(512 * 1024).unwrap();
-            let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
+            rig.kit
+                .ledger
+                .borrow()
+                .limit_value_length(512 * 1024)
+                .unwrap();
+            let answer = ask(
+                &app,
+                "history.get",
+                json!({ "project": harbour, "handle": "chief" }),
+            )
+            .await;
             let said = answer.to_string();
             assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
-            let lines: Vec<&str> = answer["history"]["items"]
+            let marks: Vec<&Value> = answer["history"]["items"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|item| item["delivery"]["line"].as_str().unwrap())
+                .map(|item| &item["delivery"])
                 .collect();
-            let expected: Vec<String> = delivered
+            assert_eq!(marks, vec![&json!({ "at": 0 }); 20]);
+            assert!(!said.contains("\"line\""), "no line of any delivery");
+        })
+        .await;
+}
+
+/// What `history.get` reserved of its bound for a delivery's opening, before it
+/// stopped reserving any: a search whose whole walk ends within this much under
+/// the bound went short of its end.
+const ONCE_RESERVED: usize = 4_352;
+
+/// How far under its bound the search of the test below ends: within what was
+/// reserved ([`ONCE_RESERVED`]), and past what the read holds back to be able to
+/// say that nothing is older (a conversation's lookup, 4,096 bytes), so that it
+/// steps to the oldest item and ends there only where nothing is reserved.
+const SHORT_OF_THE_BOUND: usize = 4_200;
+
+#[tokio::test]
+async fn a_search_runs_to_the_whole_of_its_bound_and_finds_what_stands_at_its_very_end() {
+    // The oldest item holds the words; behind it come items that hold none, as
+    // many as a search may go through and (to the byte) no more: a bound that
+    // keeps something back for a delivery's opening stops this search short.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            let words = "Look at the docs, please";
+            // Items that hold no words, each a part at most (read whole), `size` bytes of text.
+            let fillers = |from: usize, count: usize, size: usize| -> Vec<Value> {
+                (from..from + count)
+                    .map(|at| item(&format!("i-{at:05}"), "user", &"x".repeat(size)))
+                    .collect()
+            };
+            let mut copied: i64 = 0;
+            let mut copy = |items: Vec<Value>| {
+                rig.kit
+                    .ledger
+                    .borrow_mut()
+                    .copy_transcript(conversation.id, &items, copied)
+                    .unwrap();
+                copied += items.len() as i64;
+            };
+            // What the search goes through, all of it, as it is charged, with no bound to stop it.
+            let walked = || -> usize {
+                let ask = HistoryAsk {
+                    from: HistoryFrom::Newest,
+                    find: Some("look AT the docs"),
+                    tools: false,
+                    room: PAGE_BYTES,
+                    scan: 4 * HISTORY_SCAN_BYTES,
+                };
+                let read = rig
+                    .kit
+                    .ledger
+                    .borrow()
+                    .read_history(harbour, "chief", &ask)
+                    .unwrap();
+                assert!(!read.bounded && read.entries.len() == 1);
+                read.charged
+            };
+            let mut start = vec![item("found", "user", words)];
+            start.extend(fillers(0, 300, 50_000));
+            copy(start);
+            // One more of the same size says what an item costs, and so how many more fit,
+            // and how long the last must be for the whole walk to end [`SHORT_OF_THE_BOUND`] under its bound.
+            let before = walked();
+            copy(fillers(300, 1, 50_000));
+            let after = walked();
+            let each = after - before;
+            let more = (HISTORY_SCAN_BYTES - SHORT_OF_THE_BOUND - after) / each;
+            copy(fillers(301, more, 50_000));
+            let rest = HISTORY_SCAN_BYTES - SHORT_OF_THE_BOUND - after - more * each;
+            let besides = each - 50_000;
+            assert!(
+                rest > besides,
+                "{rest} bytes left for the last item, {besides} of them its own"
+            );
+            copy(fillers(301 + more, 1, rest - besides));
+            let whole = walked();
+            assert!(
+                whole <= HISTORY_SCAN_BYTES && whole + ONCE_RESERVED > HISTORY_SCAN_BYTES,
+                "a walk of {whole} bytes, in the {ONCE_RESERVED} bytes under {HISTORY_SCAN_BYTES}"
+            );
+            let answer = ask(
+                &app,
+                "history.get",
+                json!({ "project": harbour, "handle": "chief", "find": "look AT the docs" }),
+            )
+            .await;
+            let said = answer.to_string();
+            assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
+            let found: Vec<&str> = answer["history"]["items"]
+                .as_array()
+                .unwrap()
                 .iter()
-                .enumerate()
-                .map(|(at, (id, _))| {
-                    format!("· m-{id}: a note from @human: \"Read part {at} first\" (cf inbox read m-{id})")
-                })
+                .map(|item| item["id"].as_str().unwrap())
                 .collect();
-            assert_eq!(lines, expected);
+            assert_eq!(found, ["found"], "{}", &said[..said.len().min(300)]);
+            assert_eq!(
+                answer["history"]["partial"],
+                false,
+                "{}",
+                &said[..said.len().min(300)]
+            );
+            assert_eq!(
+                answer["history"]["older"],
+                Value::Null,
+                "{}",
+                &said[..said.len().min(300)]
+            );
+        })
+        .await;
+}
+
+/// An item a reader said is not complete: the assistant's message that is not the turn's
+/// last answer (Claude Code's before a call, Pi's before a step), written as the copy keeps it.
+fn unfinished(id: &str, role: &str, text: &str) -> Value {
+    json!({ "id": id, "role": role, "text": text, "complete": false, "at": "2026-10-16T09:00:00.000Z" })
+}
+
+/// The `(id, complete)` of each item `history.get` gave for `handle`, tools' outputs left out.
+async fn flags(app: &Bridge, project: i64, handle: &str) -> Vec<(String, bool)> {
+    let answer = ask(
+        app,
+        "history.get",
+        json!({ "project": project, "handle": handle }),
+    )
+    .await;
+    assert_eq!(answer["ok"], true, "{answer}");
+    answer["history"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            (
+                item["id"].as_str().unwrap().to_owned(),
+                item["complete"] == true,
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn an_assistant_item_that_ended_is_not_still_writing_and_one_that_ended_without_words_is_not_shown(
+) {
+    // The recorded Claude session's shape (T-1178's six empty records, and the messages a
+    // Pi session says before each of its steps): the assistant's messages before the turn's
+    // last answer are never complete, whatever their reader saw of them; a message of a
+    // call alone has no words. The conversation goes on after them, so none is being
+    // written; the newest item of the conversation, which is, keeps saying so.
+    LocalSet::new()
+        .run_until(async {
+            let in_a_turn = Rc::new(Cell::new("working"));
+            let rig = rig_in(&in_a_turn);
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            let copy = |items: &[Value]| {
+                rig.kit
+                    .ledger
+                    .borrow_mut()
+                    .copy_transcript(conversation.id, items, 0)
+                    .unwrap();
+            };
+            let mut turn = vec![
+                item("u-1", "user", "Run it"),
+                unfinished("a-1", "assistant", ""),
+                item("t-1", "tool", "ok 12 passed"),
+                unfinished("a-2", "assistant", "Looking at the file."),
+                item("t-2", "tool", "fn main() {}"),
+                item("a-3", "assistant", "Done."),
+                item("u-2", "user", "Again"),
+            ];
+            // Being written: its words so far, and the turn is not over.
+            turn.push(unfinished("a-4", "assistant", "Working on"));
+            copy(&turn);
+            assert_eq!(
+                flags(&app, harbour, "chief").await,
+                [("u-1", true), ("a-2", true), ("a-3", true), ("u-2", true), ("a-4", false)]
+                    .map(|(id, complete)| (id.to_owned(), complete)),
+                "a-1 said nothing and was passed over; a-2 ended (the turn went on); a-4 is being written"
+            );
+            // The window goes on: the message is complete, and a new one has just begun with no
+            // words yet. That one is the newest, so it is shown, being written.
+            turn[7] = item("a-4", "assistant", "Working on it, done.");
+            turn.push(unfinished("a-5", "assistant", ""));
+            copy(&turn);
+            let seen = flags(&app, harbour, "chief").await;
+            assert_eq!(seen.last(), Some(&("a-5".to_owned(), false)), "{seen:?}");
+            assert!(seen.contains(&("a-4".to_owned(), true)), "{seen:?}");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn the_last_item_of_a_conversation_that_ended_is_not_still_writing() {
+    // The human switched the chief: the old conversation's last item will not be written
+    // any more, and the newest item of the new one is the one that may be.
+    LocalSet::new()
+        .run_until(async {
+            let in_a_turn = Rc::new(Cell::new("working"));
+            let rig = rig_in(&in_a_turn);
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let first = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    first.id,
+                    &[
+                        item("u-1", "user", "Go"),
+                        unfinished("a-1", "assistant", "Cut off"),
+                    ],
+                    0,
+                )
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .switch_chief(
+                    harbour,
+                    &ChiefSwitch {
+                        harness: "codex".into(),
+                        model: "maia".into(),
+                        effort: None,
+                        cut: false,
+                    },
+                )
+                .unwrap();
+            let second = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "codex")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    second.id,
+                    &[unfinished("m-1", "assistant", "Taking over")],
+                    0,
+                )
+                .unwrap();
+            assert_eq!(
+                flags(&app, harbour, "chief").await,
+                [("u-1", true), ("a-1", true), ("m-1", false)]
+                    .map(|(id, complete)| (id.to_owned(), complete)),
+            );
+        })
+        .await;
+}
+
+/// A rig whose engine says every window is in the state `state` holds when it is asked.
+fn rig_in(state: &Rc<Cell<&'static str>>) -> Rig {
+    rig_over(
+        Env::default(),
+        Some(Rc::new(Scripted::in_state(Rc::clone(state)))),
+    )
+}
+
+#[tokio::test]
+async fn only_a_window_in_a_turn_writes_the_newest_item_of_its_conversation() {
+    // A turn was cut (a pause, a stop, a crash, the quota) and its newest item stayed
+    // unfinished, as a reader leaves any message that is not the turn's last answer. Of
+    // a window that is not in a turn, no item is being written, whatever its state.
+    LocalSet::new()
+        .run_until(async {
+            let state = Rc::new(Cell::new("working"));
+            // Whose window the page asked about, once for each page it served.
+            let asked = Rc::new(RefCell::new(Vec::new()));
+            let mut engine = Scripted::in_state(Rc::clone(&state));
+            let noted = Rc::clone(&asked);
+            engine.reading = Box::new(move |participant| noted.borrow_mut().push(participant));
+            let rig = rig_over(Env::default(), Some(Rc::new(engine)));
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    conversation.id,
+                    &[
+                        item("u-1", "user", "Go"),
+                        unfinished("a-1", "assistant", "Cut off"),
+                    ],
+                    0,
+                )
+                .unwrap();
+            assert_ne!(chief, harbour, "a participant is not its project");
+            let states = [
+                "working", "starting", "idle", "waiting", "out", "unknown", "closed",
+            ];
+            for said in states {
+                state.set(said);
+                assert_eq!(
+                    flags(&app, harbour, "chief").await,
+                    [("u-1", true), ("a-1", said != "working")]
+                        .map(|(id, complete)| (id.to_owned(), complete)),
+                    "a window {said}"
+                );
+            }
+            assert_eq!(
+                *asked.borrow(),
+                vec![chief; states.len()],
+                "the chief's window, once a page"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn the_newest_item_of_a_conversation_whose_window_is_closed_is_not_still_writing() {
+    // The dispatcher itself, which holds no window for this chief: it says `closed`.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            assert_eq!(rig.page.engine.activity(chief)["state"], "closed");
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    conversation.id,
+                    &[
+                        item("u-1", "user", "Go"),
+                        unfinished("a-1", "assistant", "Cut off"),
+                    ],
+                    0,
+                )
+                .unwrap();
+            assert_eq!(
+                flags(&app, harbour, "chief").await,
+                [("u-1", true), ("a-1", true)].map(|(id, complete)| (id.to_owned(), complete))
+            );
         })
         .await;
 }

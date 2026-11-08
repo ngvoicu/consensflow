@@ -531,3 +531,32 @@ fn measure_what_the_history_adds_to_a_real_transcripts_copy() {
         })
     );
 }
+
+/// What the same transcript says of its assistant's messages (T-1178's release check, whose
+/// History kept "still writing…" under six empty records): the turn's last answer is the only
+/// one complete. The three before it made a call and said nothing, and stay unfinished for
+/// good, as a message that is not the turn's last answer always is. `complete` is the answer's,
+/// not the message's being written, and the history does not take it for that (the page says
+/// an item is being written of the newest one alone).
+#[test]
+fn only_the_last_answer_of_a_live_chiefs_turn_is_complete_and_the_messages_of_calls_before_it_said_nothing(
+) {
+    let text = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/claude.jsonl"
+    ))
+    .unwrap()
+    .replace("$SESSION", SESSION);
+    let records: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let record = record_of(&records);
+    let said: Vec<(usize, bool)> = Timeline::of(&record)
+        .from(0)
+        .map(|(item, _)| item)
+        .filter(|item| item.role == Role::Assistant)
+        .map(|item| (item.text.len(), item.complete))
+        .collect();
+    assert_eq!(said, [(0, false), (0, false), (0, false), (5, true)]);
+}

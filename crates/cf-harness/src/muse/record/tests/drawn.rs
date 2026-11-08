@@ -202,3 +202,29 @@ fn a_live_chiefs_session_reads_as_the_live_check_read_it() {
         .iter()
         .all(|(_, item)| item.kind() != Kind::Thinking));
 }
+
+/// What the same session says of its assistant's messages: each is complete, whether a call
+/// follows it or not.
+#[test]
+fn a_live_chiefs_session_leaves_no_assistant_message_unfinished() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/muse.jsonl"
+    ))
+    .unwrap();
+    let session = text
+        .lines()
+        .find_map(|line| {
+            let record: Value = serde_json::from_str(line).ok()?;
+            record["stream"]["id"].as_str().map(str::to_owned)
+        })
+        .unwrap();
+    let record = known(&fresh_reading(&session, &text)).clone();
+    let said: Vec<bool> = Timeline::of(&record)
+        .from(0)
+        .map(|(item, _)| item)
+        .filter(|item| item.role == Role::Assistant)
+        .map(|item| item.complete)
+        .collect();
+    assert_eq!(said, [true, true, true, true]);
+}

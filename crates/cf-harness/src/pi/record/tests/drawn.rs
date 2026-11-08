@@ -204,3 +204,30 @@ fn a_live_chiefs_session_reads_as_the_live_check_read_it() {
     // Its thinking blocks hold no words: no thinking to show.
     assert!(record.beside.is_empty());
 }
+
+/// What the same session says of its assistant's messages: the turn's last answer is the only
+/// one complete. The three steps before it each said a line and went on to a call, and stay
+/// unfinished for good (so the history does not take `complete` for the message's being
+/// written: the page says so of the newest item alone).
+#[test]
+fn only_the_last_answer_of_a_live_chiefs_turn_is_complete_and_the_steps_before_it_are_not() {
+    let records: Vec<Value> = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/pi.jsonl"
+    ))
+    .unwrap()
+    .lines()
+    .map(|line| serde_json::from_str(line).unwrap())
+    .collect();
+    let record = Stage::with(&records).at(0);
+    let said: Vec<(bool, bool)> = Timeline::of(&record)
+        .from(0)
+        .map(|(item, _)| item)
+        .filter(|item| item.role == Role::Assistant)
+        .map(|item| (!item.text.is_empty(), item.complete))
+        .collect();
+    assert_eq!(
+        said,
+        [(true, false), (true, false), (true, false), (true, true)]
+    );
+}

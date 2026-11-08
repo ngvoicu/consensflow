@@ -257,3 +257,24 @@ fn a_live_chiefs_rollout_reads_as_the_live_check_read_it() {
         ]
     );
 }
+
+/// What the same rollout says of its assistant's messages: the one it made is complete.
+#[test]
+fn a_live_chiefs_rollout_leaves_no_assistant_message_unfinished() {
+    let records: Vec<Value> = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/history-items/codex.jsonl"
+    ))
+    .unwrap()
+    .lines()
+    .map(|line| serde_json::from_str(line).unwrap())
+    .collect();
+    let record = read(&records).unwrap();
+    let said: Vec<bool> = Timeline::of(&record)
+        .from(0)
+        .map(|(item, _)| item)
+        .filter(|item| item.role == Role::Assistant)
+        .map(|item| item.complete)
+        .collect();
+    assert_eq!(said, [true]);
+}

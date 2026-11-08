@@ -24,10 +24,8 @@ pub(crate) use chief::{
     chief_gone, chief_history, chief_launched, chief_open_work, chief_ran_on, history_read,
     last_switch, switch_chief,
 };
-pub(crate) use history::{message_opening, read_history, read_history_part};
-pub use history::{
-    HistoryAsk, HISTORY_FIND_MAX, HISTORY_PART, HISTORY_SCAN_BYTES, MESSAGE_OPENING, OPENING_COST,
-};
+pub(crate) use history::{live_item, message_parties, read_history, read_history_part};
+pub use history::{HistoryAsk, HISTORY_FIND_MAX, HISTORY_PART, HISTORY_SCAN_BYTES};
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
 pub(crate) use transcripts::{
     copied_item_with, copied_items_since, copied_items_with, copy_transcript, head_copied,
@@ -138,7 +136,7 @@ pub(crate) fn cut_sessions(db: &Connection) -> rusqlite::Result<()> {
     let mut unbind = db.prepare("UPDATE conversation SET native_session = NULL WHERE id = ?")?;
     for id in long {
         let session = read.query_row([id], |row| {
-            Ok(crate::openings::text_of(row.get_ref(0)?.as_bytes()?))
+            Ok(crate::text::text_of(row.get_ref(0)?.as_bytes()?))
         })?;
         if utf16_len(&session) > NATIVE_SESSION_MAX {
             unbind.execute([id])?;
@@ -159,7 +157,7 @@ pub(crate) fn cut_sessions(db: &Connection) -> rusqlite::Result<()> {
 /// each event a heading reads is kept as a conversation's is.
 pub(crate) fn fields_within(db: &Connection) -> rusqlite::Result<()> {
     let text = |value: ValueRef<'_>| match value {
-        ValueRef::Text(bytes) => Some(crate::openings::text_of(bytes)),
+        ValueRef::Text(bytes) => Some(crate::text::text_of(bytes)),
         _ => None,
     };
     let time_kept =

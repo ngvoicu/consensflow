@@ -9,8 +9,8 @@
 use std::time::Instant;
 
 use cf_ledger::{
-    HistoryAsk, HistoryFrom, HistoryRead, Ledger, MessageOpening, NewMember, NewNote, Scanned,
-    HISTORY_SCAN_BYTES, MESSAGE_OPENING,
+    ChiefSwitch, HistoryAsk, HistoryFrom, HistoryRead, Ledger, MessageParties, NewMember, NewNote,
+    Scanned, HISTORY_SCAN_BYTES,
 };
 use serde_json::Value;
 
@@ -183,13 +183,12 @@ fn a_read_never_loads_the_role_a_conversation_was_given() {
 }
 
 #[test]
-fn a_message_s_opening_is_its_first_bytes_cut_at_a_character_and_its_body_is_never_loaded_whole() {
+fn a_message_s_parties_are_read_alone_and_its_body_is_never_loaded_whole() {
     let dir = tempfile::tempdir().expect("a folder");
     let mut ledger = ledger_in(&dir);
     let project = project(&mut ledger);
-    // A megabyte, a character of four bytes across where the opening ends.
-    let before = format!("{}x", "é".repeat(MESSAGE_OPENING / 2 - 2));
-    let body = format!("{before}{}", "🙂".repeat(250_000));
+    // A megabyte of characters of four bytes.
+    let body = "🙂".repeat(250_000);
     let note = ledger
         .note(
             project.id,
@@ -203,26 +202,104 @@ fn a_message_s_opening_is_its_first_bytes_cut_at_a_character_and_its_body_is_nev
         .expect("a note");
     // A read that loaded the body whole would fail.
     ledger.limit_value_length(64 * 1024).expect("held");
-    let opening = ledger
-        .message_opening(note.id)
+    let parties = ledger
+        .message_parties(note.id)
         .expect("read")
         .expect("there");
     assert_eq!(
-        opening,
-        MessageOpening {
+        parties,
+        MessageParties {
             id: note.id,
             project_id: project.id,
             recipient_id: id_of(&project, "chief"),
             sender: Some("human".into()),
-            kind: "note".into(),
-            task_number: None,
-            opening: before,
         }
     );
     assert!(ledger
-        .message_opening(note.id + 1_000)
+        .message_parties(note.id + 1_000)
         .expect("read")
         .is_none());
+}
+
+#[test]
+fn the_item_that_may_still_be_written_is_the_newest_of_the_conversation_now_and_no_other() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = project(&mut ledger);
+    let chief = id_of(&project, "chief");
+    let first = ledger
+        .start_conversation(chief, "claude-code")
+        .expect("a conversation");
+    assert_eq!(
+        ledger.live_item(project.id, "chief").expect("read"),
+        None,
+        "a conversation with no item has none"
+    );
+    ledger
+        .copy_transcript(
+            first.id,
+            &[item("i-1", "user", "Go"), item("i-2", "assistant", "On it")],
+            0,
+        )
+        .expect("copied");
+    let newest = ledger
+        .read_history(
+            project.id,
+            "chief",
+            &ask(HistoryFrom::Newest, None, true, ROOM),
+        )
+        .expect("read");
+    let live = ledger
+        .live_item(project.id, "chief")
+        .expect("read")
+        .expect("an item");
+    assert_eq!(live, newest.entries[0].key);
+    // Copied again as it grows, it is the same item; one after it is the newest then, a tool's
+    // output too.
+    ledger
+        .copy_transcript(
+            first.id,
+            &[
+                item("i-2", "assistant", "On it, done"),
+                item("i-3", "tool", "ok"),
+            ],
+            1,
+        )
+        .expect("copied");
+    let after = ledger
+        .live_item(project.id, "chief")
+        .expect("read")
+        .expect("an item");
+    assert_eq!((after.conversation, after.row > live.row), (first.id, true));
+    // The human switched the chief: the conversation that ended has none that may be written,
+    // and the one that began has none yet.
+    ledger
+        .switch_chief(
+            project.id,
+            &ChiefSwitch {
+                harness: "codex".into(),
+                model: "maia".into(),
+                effort: None,
+                cut: false,
+            },
+        )
+        .expect("switched");
+    let second = ledger
+        .start_conversation(chief, "codex")
+        .expect("a conversation");
+    assert_eq!(ledger.live_item(project.id, "chief").expect("read"), None);
+    ledger
+        .copy_transcript(second.id, &[item("m-1", "assistant", "Taken over")], 0)
+        .expect("copied");
+    let now = ledger
+        .live_item(project.id, "chief")
+        .expect("read")
+        .expect("an item");
+    assert_eq!(now.conversation, second.id);
+    assert!(
+        ledger.live_item(project.id, "nobody").is_err(),
+        "no such participant"
+    );
 }
 
 #[test]
