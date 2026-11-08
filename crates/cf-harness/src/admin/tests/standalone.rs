@@ -31,15 +31,21 @@ pub(in crate::admin) fn program_name() -> &'static str {
     }
 }
 
-/// The folder Codex keeps its standalone releases and its `current` in, under `home`'s `.codex`.
-pub(in crate::admin) fn standalone_root(home: &Path) -> PathBuf {
-    home.join(".codex").join("packages").join("standalone")
+/// The folder Codex keeps its standalone releases and its `current` in, under its home.
+pub(in crate::admin) fn standalone_root(codex_home: &Path) -> PathBuf {
+    codex_home.join("packages").join("standalone")
 }
 
-/// A standalone Codex laid down for `home`, its visible folder `visible`: the program there, as
-/// the person runs it.
+/// A standalone Codex laid down for `home`'s `.codex`, its visible folder `visible`: the program
+/// there, as the person runs it.
 pub(in crate::admin) fn lay_down(home: &Path, visible: &Path, layout: Layout) -> PathBuf {
-    let root = standalone_root(home);
+    lay_down_in(&home.join(".codex"), visible, layout)
+}
+
+/// A standalone Codex laid down in the Codex home `codex_home` (`CODEX_HOME`, or `.codex` of the
+/// user's home), its visible folder `visible`: the program there, as the person runs it.
+pub(in crate::admin) fn lay_down_in(codex_home: &Path, visible: &Path, layout: Layout) -> PathBuf {
+    let root = standalone_root(codex_home);
     let release = release_in(&root, RELEASE, layout);
     link_dir(&root.join("current"), &release);
     let led_to = match layout {

@@ -4,6 +4,7 @@
 
 use cf_e2e::live::Harness;
 
+use super::looks::Looks;
 use super::*;
 
 fn proc(pid: u64, command: &str) -> Proc {
@@ -554,24 +555,212 @@ fn a_note_that_came_is_told_as_it_always_was_whatever_ended_in_the_turn() {
     );
 }
 
-/// What of the listed processes the machine still has, by their numbers and what they run: a
-/// number another process took after the one that ended is no such process.
+// What the looks show of a command's processes (`looks.rs`), and the verdict that waives a note
+// only on that: the run's looks are played as the observation makes them, the machine twice and
+// the task read last.
+
+/// The command's process as the machine lists it.
+fn job(pid: u32, started: u64) -> Running {
+    running(pid, started, 1, "ping -n 4711 127.0.0.1")
+}
+
+/// A look the turn ran through (`in_turn`), or one the task was over at.
+fn look(looks: &mut Looks, before: &[Running], after: &[Running], in_turn: bool) {
+    looks.look(Some(before), Some(after), in_turn, "4711");
+}
+
+/// What the run had at the end of its observation of the listed process `pid`, with nothing
+/// escaped, the chief told nothing and the pane host's exit as `exit` says it.
+fn judged(looks: &Looks, pid: u64, exit: Option<&Tree>) -> Left {
+    let mut left = good();
+    left.listed = vec![proc(pid, "ping -n 4711 127.0.0.1")];
+    left.notes.clear();
+    left.gone_in_the_turn = looks.gone_of(&left.listed);
+    left.at_exit = held_at_exit(exit, "4711");
+    left
+}
+
+fn nothing_at_exit() -> Tree {
+    Tree {
+        total: 0,
+        processes: Vec::new(),
+    }
+}
+
+/// T-1339's probe: the host lists the command, the worker answers, the window's close kills the
+/// command, the chief is told nothing, and the run first sees the task over after the close, with
+/// the process gone. Nothing shows when it ended, so the note is owed, whatever the pane host said
+/// of the exit: nothing (the wait ran out), an empty list (a background read that failed is saved
+/// as one, `Pane::keep_background`), or the command (the positive control).
 #[test]
-fn a_listed_process_is_gone_unless_the_machine_has_one_of_its_number_that_runs_the_command() {
-    let listed = vec![
-        proc(4, "powershell.exe -c ping -n 4711 127.0.0.1"),
-        proc(41, "ping -n 4711 127.0.0.1"),
-        proc(42, "powershell.exe -c ping -n 4711 127.0.0.1"),
-    ];
-    let all = vec![
-        running(41, 9, 1, "ping -n 4711 127.0.0.1"),
-        // A process that took the number of a listed one after it ended runs another command.
-        running(42, 99, 1, "C:\\Windows\\notepad.exe"),
-    ];
-    // `4` is not `41`, and `42` runs no command of the run's.
-    assert_eq!(gone_of(&listed, &all, "4711"), [4, 42]);
-    assert_eq!(gone_of(&listed, &[], "4711"), [4, 41, 42]);
-    assert!(gone_of(&[], &all, "4711").is_empty());
+fn a_process_the_close_killed_and_the_run_found_gone_only_after_it_is_held_to_the_note() {
+    let mut looks = Looks::default();
+    look(&mut looks, &[job(8612, 5)], &[job(8612, 5)], true);
+    // The task is over, the window has closed and ended the command: the run's next look.
+    look(&mut looks, &[], &[], false);
+    assert_eq!(
+        looks.gone_of(&[proc(8612, "ping -n 4711")]),
+        Vec::<u64>::new()
+    );
+    let missing = judged(&looks, 8612, None);
+    assert_eq!(
+        judge(&missing, Expect::Ended).unwrap_err(),
+        ["the chief was told nothing of the work the window closed with"],
+        "pane.exit missing"
+    );
+    let empty = judged(&looks, 8612, Some(&nothing_at_exit()));
+    assert_eq!(
+        judge(&empty, Expect::Ended).unwrap_err(),
+        ["the chief was told nothing of the work the window closed with"],
+        "pane.exit empty"
+    );
+    let named = Tree {
+        total: 1,
+        processes: vec![proc(8612, "ping -n 4711 127.0.0.1")],
+    };
+    let control = judged(&looks, 8612, Some(&named));
+    assert_eq!(
+        judge(&control, Expect::Ended).unwrap_err(),
+        ["the chief was told nothing of the work the window closed with"],
+        "pane.exit names it"
+    );
+}
+
+/// The wrapper of Codex's tool call (T-404): listed at one look while the turn works, gone at the
+/// next, the task still not over after it. The run saw it end, so it needs no note, with the
+/// pane host's exit as it may be: missing, or empty.
+#[test]
+fn a_process_gone_at_a_look_the_turn_still_ran_through_needs_no_note() {
+    let mut looks = Looks::default();
+    look(&mut looks, &[job(7740, 5)], &[job(7740, 5)], true);
+    look(&mut looks, &[], &[], true);
+    // The task is over at the look after, and the window has closed.
+    look(&mut looks, &[], &[], false);
+    assert_eq!(looks.gone_of(&[proc(7740, "ping -n 4711")]), [7740]);
+    for exit in [None, Some(nothing_at_exit())] {
+        let left = judged(&looks, 7740, exit.as_ref());
+        assert_eq!(judge(&left, Expect::Ended), Ok(()), "{exit:?}");
+    }
+    // It ended between the machine's two listings of one look, and that look was a look of the turn.
+    let mut within = Looks::default();
+    look(&mut within, &[job(7740, 5)], &[], true);
+    assert_eq!(within.gone_of(&[proc(7740, "ping -n 4711")]), [7740]);
+}
+
+/// Where the run could not look again in the turn (the wait for the task to end ran out, or the
+/// task was over at the first look that missed the process), or the machine did not answer, nothing
+/// was seen to end: the note is owed.
+#[test]
+fn a_look_that_was_not_made_in_the_turn_or_not_answered_waives_nothing() {
+    let listed = [proc(7740, "ping -n 4711")];
+    // Seen at the one look; the task over at the next, which missed it.
+    let mut over = Looks::default();
+    look(&mut over, &[job(7740, 5)], &[job(7740, 5)], true);
+    look(&mut over, &[job(7740, 5)], &[], false);
+    assert!(over.gone_of(&listed).is_empty());
+    // The look after it was made in the turn but the machine did not answer the second time.
+    let mut silent = Looks::default();
+    look(&mut silent, &[job(7740, 5)], &[job(7740, 5)], true);
+    silent.look(Some(&[]), None, true, "4711");
+    assert!(silent.gone_of(&listed).is_empty());
+    // Nor the first time: nothing was ever seen, so nothing is known of its identity.
+    let mut deaf = Looks::default();
+    deaf.look(None, None, true, "4711");
+    deaf.look(None, None, true, "4711");
+    assert!(deaf.gone_of(&listed).is_empty());
+    // And a run that never looked has none gone.
+    assert!(Looks::default().gone_of(&listed).is_empty());
+}
+
+/// A process is the one that began when it began: the number it had is another's once it is gone.
+#[test]
+fn a_process_is_told_by_when_it_began_and_a_number_another_process_took_is_not_it() {
+    let listed = [proc(7, "ping -n 4711")];
+    // Its number is taken by a program that holds none of the command's words.
+    let mut reused = Looks::default();
+    look(&mut reused, &[job(7, 100)], &[job(7, 100)], true);
+    look(
+        &mut reused,
+        &[],
+        &[running(7, 200, 1, "C:\\Windows\\notepad.exe")],
+        true,
+    );
+    assert_eq!(
+        reused.gone_of(&listed),
+        [7],
+        "the one that began at 100 is gone"
+    );
+    // The number is taken by a copy of the command: the copy is not the one that was seen end.
+    let mut copy = Looks::default();
+    look(&mut copy, &[job(7, 100)], &[job(7, 100)], true);
+    look(&mut copy, &[], &[job(7, 200)], true);
+    assert!(copy.gone_of(&listed).is_empty(), "the copy still runs");
+    // The same process that is read with other words in its command line is still there.
+    let mut changed = Looks::default();
+    look(&mut changed, &[job(9, 50)], &[job(9, 50)], true);
+    look(&mut changed, &[], &[running(9, 50, 1, "ping")], true);
+    assert!(changed.gone_of(&[proc(9, "ping -n 4711")]).is_empty());
+    // Moved to another parent it is the same process too.
+    let mut moved = Looks::default();
+    look(&mut moved, &[job(9, 50)], &[job(9, 50)], true);
+    look(
+        &mut moved,
+        &[],
+        &[running(9, 50, 4242, "ping -n 4711 127.0.0.1")],
+        true,
+    );
+    assert!(moved.gone_of(&[proc(9, "ping -n 4711")]).is_empty());
+}
+
+/// A process the host listed and the machine never showed with the command's words has no
+/// identity to follow: it is held to the note.
+#[test]
+fn a_listed_process_the_machine_never_showed_is_held_to_the_note() {
+    let mut looks = Looks::default();
+    look(&mut looks, &[], &[], true);
+    look(&mut looks, &[], &[], true);
+    assert!(looks.gone_of(&[proc(7740, "ping -n 4711")]).is_empty());
+    // One seen under the number of another listed process says nothing of it.
+    look(&mut looks, &[job(41, 5)], &[], true);
+    assert_eq!(looks.gone_of(&[proc(41, "ping"), proc(42, "ping")]), [41]);
+}
+
+/// A listed number that two processes had in turn (the second a copy of the command) is gone only
+/// where each ended.
+#[test]
+fn a_number_two_processes_had_in_turn_is_gone_only_where_both_ended() {
+    let listed = [proc(7, "ping -n 4711")];
+    let mut looks = Looks::default();
+    look(&mut looks, &[job(7, 100)], &[job(7, 100)], true);
+    look(&mut looks, &[], &[job(7, 200)], true);
+    assert!(looks.gone_of(&listed).is_empty());
+    look(&mut looks, &[], &[], true);
+    assert_eq!(looks.gone_of(&listed), [7]);
+}
+
+/// What is still there once the task is done is told as it is: a process by when it began where the
+/// run saw it, so a number another process took does not keep a command running that ended, and by
+/// its words and number where the run never saw it.
+#[test]
+fn a_listed_process_is_still_there_unless_another_took_its_number() {
+    let listed = [proc(7, "ping -n 4711"), proc(8, "ping -n 4711")];
+    let mut looks = Looks::default();
+    look(&mut looks, &[job(7, 100)], &[job(7, 100)], true);
+    // 7 is gone and its number is a notepad's; 8 was never seen, and a process of that number runs
+    // the command.
+    let all = [running(7, 200, 1, "notepad.exe"), job(8, 300)];
+    assert_eq!(looks.alive_of(&listed, &all, "4711"), [8]);
+    // The one that began at 100 is there.
+    assert_eq!(looks.alive_of(&listed, &[job(7, 100)], "4711"), [7]);
+    // A copy that took the number of one that was seen is not it.
+    assert!(looks
+        .alive_of(&listed[..1], &[job(7, 200)], "4711")
+        .is_empty());
+    // The same process under other words is still there.
+    assert_eq!(
+        looks.alive_of(&listed[..1], &[running(7, 100, 1, "ping")], "4711"),
+        [7]
+    );
 }
 
 #[test]

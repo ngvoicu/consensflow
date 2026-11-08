@@ -56,6 +56,7 @@ use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
 use cf_e2e::process::{is_alive, Run};
 use cf_e2e::Result as Fallible;
+use looks::Looks;
 
 use crate::check::{
     agent, failure, progress_line, Finished, Progress, CLOSES, DELIVERS, LOOK, WORK,
@@ -601,22 +602,30 @@ fn observe(
 
     let mark = SECONDS.to_string();
     let mut left = Left::default();
+    let mut looks = Looks::default();
     let mut began: Option<Duration> = None;
     let mut pane: Option<String> = None;
     let mut progress = Progress::default();
     let ended = find(log, "the worker's task to end", WORK, LOOK, || {
-        let thread = members.task(number)?;
         let lane = members.lane(agent)?;
         let own = members
             .window_in(lane.clone())
             .and_then(|window| members.window_process(&window));
         // The jobs first: a listing made after a job wrote its process has the job, if it runs.
         let jobs = running_jobs(members);
-        match ThisMachine.processes() {
-            Ok(all) => chosen.choose(&all, own, &jobs, wanted),
+        // The machine twice, the pane host's look between the two, and the task last: a task
+        // read as not over after them says the turn still ran when they were taken, which
+        // `Looks` holds what it takes from them to (the window closes after the task is over).
+        let before = ThisMachine.processes();
+        match &before {
+            Ok(all) => chosen.choose(all, own, &jobs, wanted),
             Err(failed) => chosen.failed.push(failed.to_string()),
         }
         let listing = (!lane["pane"].is_null()).then(|| tree::read(members.rig(), &lane["pane"]));
+        let after = ThisMachine.processes();
+        let thread = members.task(number)?;
+        let over = is_over(&thread) || goes_on(members, number)?;
+        looks.look(before.as_deref().ok(), after.as_deref().ok(), !over, &mark);
         progress.say(log, progress_line(number, &thread, &lane, listing.as_ref()));
         left.state = text(&thread["state"]);
         let now = log.elapsed();
@@ -631,15 +640,13 @@ fn observe(
                 }
             }
         }
-        Ok((is_over(&thread) || goes_on(members, number)?).then_some(()))
+        Ok(over.then_some(()))
     })?
     .is_some();
-    // What of the listed processes is gone once the task is seen over: the turn ended them, or
-    // the window's close did if it has closed already, and `at_exit` (below) says which.
-    match ThisMachine.processes() {
-        Ok(all) => left.gone_in_the_turn = gone_of(&left.listed, &all, &mark),
-        Err(failed) => chosen.failed.push(failed.to_string()),
-    }
+    // Which of the listed processes the looks showed ending while the turn ran: what the turn
+    // ended needs no note. What the window's close ended is told by `at_exit` (below), and what
+    // neither shows is held to the note.
+    left.gone_in_the_turn = looks.gone_of(&left.listed);
     // Held for the command, which never ends within the run: the chief finishes the task.
     if ended && left.state == "working" {
         let finish = format!("T-{number}");
@@ -678,11 +685,15 @@ fn observe(
             },
         )?;
         find(log, "the command to be gone", waits.gone, LOOK, || {
-            left.alive = still_there(&left.listed);
+            left.alive = alive_listed(&looks, &left.listed, &mark);
             Ok(left.alive.is_empty().then_some(()))
         })?;
     }
-    look_for_leftovers(&mut left, still_there, || on_the_machine(wanted));
+    look_for_leftovers(
+        &mut left,
+        |listed| alive_listed(&looks, listed, &mark),
+        || on_the_machine(wanted),
+    );
     let mut exit: Option<Tree> = None;
     if let (true, Some(pane)) = (ended, pane.clone()) {
         find(
@@ -996,20 +1007,6 @@ fn standing(line: &str) -> Option<String> {
     ))
 }
 
-/// The processes of `listed` that are gone from `all`, the machine's processes: those with no
-/// process of the same number whose command line holds `mark`.
-fn gone_of(listed: &[Proc], all: &[Running], mark: &str) -> Vec<u64> {
-    listed
-        .iter()
-        .filter(|process| {
-            !all.iter().any(|running| {
-                u64::from(running.identity.pid) == process.pid && running.command.contains(mark)
-            })
-        })
-        .map(|process| process.pid)
-        .collect()
-}
-
 /// What of the command the pane host said the window left running when it closed: the processes
 /// of `exit` whose command line holds `mark`, none where the host said nothing.
 fn held_at_exit(exit: Option<&Tree>, mark: &str) -> Vec<Proc> {
@@ -1017,7 +1014,16 @@ fn held_at_exit(exit: Option<&Tree>, mark: &str) -> Vec<Proc> {
         .unwrap_or_default()
 }
 
-/// The processes of `listed` that are still running.
+/// The processes of `listed` that are still on the machine, each told by when it began where the
+/// run saw it ([`Looks::alive_of`]); by its number alone where the machine does not answer.
+fn alive_listed(looks: &Looks, listed: &[Proc], mark: &str) -> Vec<u64> {
+    match ThisMachine.processes() {
+        Ok(all) => looks.alive_of(listed, &all, mark),
+        Err(_) => still_there(listed),
+    }
+}
+
+/// The processes of `listed` that are still running, by their numbers.
 fn still_there(listed: &[Proc]) -> Vec<u64> {
     listed
         .iter()
@@ -1052,8 +1058,10 @@ pub fn plan(who: Who) -> Plan {
     .with(worker)
 }
 
-// The tests are in `leaving/`: a module that a path names looks for its own parts
-// beside it, so these are named as well.
+// What the looks show of the command's processes, and the tests, are in `leaving/`: a module
+// that a path names looks for its own parts beside it, so these are named as well.
+#[path = "leaving/looks.rs"]
+mod looks;
 #[cfg(test)]
 #[path = "leaving/tests.rs"]
 mod tests;
