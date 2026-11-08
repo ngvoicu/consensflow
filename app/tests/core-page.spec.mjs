@@ -348,6 +348,9 @@ async function open(page, data = model()) {
     window.__hold = {}
     window.__release = {}
     window.__answered = []
+    // The read ids `models.get` answers with, in order: what a submission names as the list its
+    // picker was shown (A4-28).
+    window.__reads = []
     // Why the daemon is down, while a test has it down: the app answers every
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
@@ -390,8 +393,11 @@ async function open(page, data = model()) {
         const refused = data.modelsRefusal?.[harness]
         if (refused !== undefined) return { ok: false, error: refused }
         const { listing, switchHelp = null } = data.models[harness]
+        const read = window.__reads.length + 1
+        window.__reads.push({ harness, read })
         return answer({
           harness,
+          read,
           listing,
           default: null,
           contributorWarning:
@@ -875,13 +881,27 @@ const named = (buttons) =>
 /** A row's tools, so read. */
 const toolsOf = (row) => named(row.locator('.row-tools button'))
 
-const calls = (page, operation) =>
+/**
+ * The bodies the page sent for 'operation', as it sent them, but for the read each model is picked
+ * from (`read`, the id `models.get` answered with: A4-28), which 'reads' keeps. Most cases are
+ * about what was asked, not which read it was asked from; the ones about the read ask for it.
+ */
+const calls = (page, operation, { reads = false } = {}) =>
   page.evaluate(
-    (operation) =>
-      window.__calls
+    ([operation, reads]) => {
+      const unread = (body) => {
+        if (reads || body === null || typeof body !== 'object') return body
+        const { read, ...rest } = body
+        if (Array.isArray(rest.staff)) {
+          rest.staff = rest.staff.map(({ read: named, ...member }) => member)
+        }
+        return rest
+      }
+      return window.__calls
         .filter(([command, args]) => command === 'daemon_request' && args.operation === operation)
-        .map(([, args]) => args.body),
-    operation,
+        .map(([, args]) => unread(args.body))
+    },
+    [operation, reads],
   )
 
 /** Picks a chief's harness, then one of its models, by what each says, as the human does (CHF-07). */
@@ -3968,6 +3988,155 @@ test("Project settings reads every installed harness's models as it opens, all a
   expect(await harnessesAsked(page)).toEqual(HARNESSES)
 })
 
+test('Settings reads every installed harness as it opens again, whatever role was left picked (A4-28, review 4)', async ({
+  page,
+}) => {
+  const data = model()
+  // A project with no ordinary staff: Add member's role stays where it was left.
+  data.boards[1].lanes = data.boards[1].lanes.filter((lane) =>
+    ['chief', 'human'].includes(lane.participant.role),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  // Designer is picked, and the dialog closed: the role is kept for the next opening.
+  await dialog.locator('[name="role"]').selectOption('designer')
+  await dialog.locator('[value="cancel"]').click()
+  await page.evaluate(() => {
+    window.__calls.length = 0
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog).toBeVisible()
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+})
+
+test("a failed Refresh keeps the edited member's own model and effort (A4-28, review 6)", async ({
+  page,
+}) => {
+  const data = model()
+  data.models.claude.listing.models.find((m) => m.id === 'claude-sonnet-5').efforts = [
+    'low',
+    'high',
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  const models = dialog.locator('[name="memberModel"]')
+  const efforts = dialog.locator('[name="memberEffort"]')
+  await expect(models).toHaveValue('claude-sonnet-5')
+  await expect(efforts).toHaveValue('high')
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = { claude: 'probe read failed' }
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(dialog.locator('.member-help')).toContainText('probe read failed')
+  // The form loses nothing: the member's model, effort and tier stay, and it can be saved.
+  await expect(models).toHaveValue('claude-sonnet-5')
+  await expect(models).toBeEnabled()
+  await expect(efforts).toHaveValue('high')
+  await expect(dialog.locator('[name="memberTier"]')).toHaveValue('standard')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        effort: 'high',
+        tier: 'standard',
+        unchanged: true,
+      },
+    ])
+})
+
+test('a Refresh in one picker updates every picker that shows the harness, and a submission names the read each was shown (A4-28, review 5)', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const chiefModels = dialog.locator('[name="chiefModel"]')
+  const memberModels = dialog.locator('[name="memberModel"]')
+  await dialog.locator('[name="chiefHarness"]').selectOption('claude-code')
+  await dialog.locator('[name="memberHarness"]').selectOption('claude-code')
+  await expect(memberModels).toBeEnabled()
+  const reads = () => page.evaluate(() => window.__reads.filter((r) => r.harness === 'claude'))
+  // One read per harness in the dialog: both pickers show it.
+  expect(await reads()).toHaveLength(1)
+  await page.evaluate(() => {
+    window.__model.models.claude.listing.models = [
+      { id: 'new-current', label: 'New', efforts: [], contributor: false, disabled: false },
+    ]
+  })
+  await dialog.locator('[name="chiefRefresh"]').click()
+  await expect(chiefModels.locator('option')).toHaveText(['Pick a model', 'new-current'])
+  await expect(memberModels.locator('option')).toHaveText(['Pick a model', 'new-current'])
+  const [shown, refreshed] = await reads()
+  expect(refreshed.read).toBeGreaterThan(shown.read)
+  // A pick made from the refreshed list names the refreshed read.
+  await chiefModels.selectOption('new-current')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'project.open', { reads: true })).map((body) => body.read))
+    .toEqual([refreshed.read])
+})
+
+test('Add member, New project and Edit member name the read their list was shown from, and an edit that changes nothing says so (A4-28, review 5)', async ({
+  page,
+}) => {
+  const data = model()
+  data.models.claude.listing.models.find((m) => m.id === 'claude-sonnet-5').efforts = [
+    'low',
+    'high',
+  ]
+  await open(page, data)
+  const readOf = (harness) =>
+    page.evaluate(
+      (harness) => window.__reads.filter((r) => r.harness === harness).at(-1).read,
+      harness,
+    )
+  // Add member: the member is picked from Devin's list, and names that read.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await pickMember(settings, { harness: 'Devin', model: 'swe-2', tier: 'light' })
+  await settings.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'member.add', { reads: true })).map((body) => body.read))
+    .toEqual([await readOf('devin')])
+  // Edit member that changes nothing says so, with the read its list came from; one that
+  // changes the effort does not.
+  await settings.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  await expect(settings.locator('[name="memberModel"]')).toHaveValue('claude-sonnet-5')
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(1)
+  const [unchanged] = await calls(page, 'member.edit', { reads: true })
+  expect(unchanged).toMatchObject({ member: 'zeus', unchanged: true, read: await readOf('claude') })
+  await settings.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  await settings.locator('[name="memberEffort"]').selectOption('low')
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(2)
+  const edits = await calls(page, 'member.edit', { reads: true })
+  expect(edits[1].unchanged).toBeUndefined()
+  expect(edits[1]).toMatchObject({ effort: 'low', read: await readOf('claude') })
+  await settings.getByRole('button', { name: 'Close' }).click()
+
+  // New project: the chief and a staff pick each name the read their list was shown from.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  await pickMember(dialog, { harness: 'Devin', model: 'swe-2', tier: 'light' })
+  await dialog.locator('[name="memberAdd"]').click()
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open', { reads: true })).length).toBe(1)
+  const [opened] = await calls(page, 'project.open', { reads: true })
+  expect(opened.read).toBe(await readOf('pi'))
+  expect(opened.staff.map((member) => member.read)).toEqual([await readOf('devin')])
+})
+
 test("Edit member keeps the member's own model, effort and tier where its harness's models cannot be read, so the form loses nothing (A4-28)", async ({
   page,
 }) => {
@@ -4017,6 +4186,7 @@ test("Edit member keeps the member's own model, effort and tier where its harnes
           model: 'claude-sonnet-5',
           effort: 'high',
           tier: 'standard',
+          unchanged: true,
         },
       ])
     await page.evaluate(() => {
