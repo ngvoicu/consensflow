@@ -1,4 +1,5 @@
-//! `GET /api/staff`: the members of the staff, each with its roles and tier, the harness
+//! `GET /api/staff`: the members of the staff, each with its roles and tier (an image
+//! designer has none, a design task having none), the harness
 //! it runs on and the name the page gives that harness, the model as its harness takes it
 //! and as its harness's list names it (its id), its effort, and whether its name holds
 //! the model and the effort already. A member is a participant who is neither the chief nor the human, runs
@@ -29,7 +30,8 @@ pub(super) async fn handle(
                 "handle": member.handle,
                 "role": member.role,
                 "roles": member.roles,
-                "tier": member.tier,
+                // A design task has no tier, so an image designer is said to have none.
+                "tier": if member.designer { None } else { member.tier.as_deref() },
                 "harness": member.harness,
                 "harnessName": cf_ledger::handles::harness_label(member.harness.as_deref()),
                 "model": said(member.model.as_deref()),

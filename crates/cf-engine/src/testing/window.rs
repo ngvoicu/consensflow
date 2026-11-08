@@ -183,7 +183,13 @@ impl Window for FakeWindow {
                 after_ms: Some(HOOK_ASK_MS),
                 then_tell: Some(HOOK_ASK_THEN.to_owned()),
                 what: "hook prompt on its call".to_owned(),
+                listed: true,
+                members_only: false,
             });
+        }
+        // Claude Code's Computer Use permission prompt: the real window's own decline (T-1300).
+        if let Some(decline) = cf_harness::testing::claude_computer_use_decline(dialog) {
+            return Some(decline);
         }
         if dialog.question != DECLINED_OFFER {
             return None;
@@ -199,6 +205,8 @@ impl Window for FakeWindow {
             after_ms: None,
             then_tell: None,
             what: "offer".to_owned(),
+            listed: true,
+            members_only: false,
         })
     }
 

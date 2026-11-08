@@ -215,6 +215,21 @@ const STAND_IN_MODELS: [&str; 3] = ["fake", "fake-2", "fake-chief"];
 /// named as its harness names that model. `roles` where they are given.
 pub fn member_body(rig: &Rig, agent: &str, roles: Option<Value>) -> Result<Value> {
     let row = stand_in(rig, agent)?;
+    Ok(body_of(&row, agent, roles))
+}
+
+/// [`member_body`] of the stand-in row `row`. An image designer is asked for as Add member asks
+/// for one: Codex and its role, no model, effort or tier (designer P2): it draws on Codex's own
+/// model, and the daemon refuses any of the three.
+fn body_of(row: &Value, agent: &str, roles: Option<Value>) -> Value {
+    let designer = row["designer"] == true
+        || roles
+            .as_ref()
+            .and_then(Value::as_array)
+            .is_some_and(|roles| roles.iter().any(|role| role == "designer"));
+    if designer {
+        return json!({ "harness": row["kind"], "roles": ["designer"] });
+    }
     let model = row["model"]
         .as_str()
         .filter(|model| !STAND_IN_MODELS.contains(model))
@@ -232,10 +247,8 @@ pub fn member_body(rig: &Rig, agent: &str, roles: Option<Value>) -> Result<Value
     }
     if let Some(roles) = roles {
         body["roles"] = roles;
-    } else if row["designer"] == true {
-        body["roles"] = json!(["designer"]);
     }
-    Ok(body)
+    body
 }
 
 /// `more` with a chief's harness and model in it: those of the stand-in `agent`
@@ -256,5 +269,40 @@ fn refused<'v>(answer: &'v Value, op: &str) -> Result<&'v Value> {
         Ok(answer)
     } else {
         Err(Error::Daemon(format!("{op} was refused: {answer}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::body_of;
+
+    #[test]
+    fn an_image_designer_is_asked_for_on_codex_and_its_role_alone() {
+        let designer =
+            json!({ "id": "pygmalion", "kind": "codex", "designer": true, "workTier": "light" });
+        let wanted = json!({ "harness": "codex", "roles": ["designer"] });
+        assert_eq!(body_of(&designer, "pygmalion", None), wanted);
+        assert_eq!(
+            body_of(&designer, "pygmalion", Some(json!(["designer"]))),
+            wanted
+        );
+        // A stand-in written without the flag, asked for in the role.
+        let plain = json!({ "id": "osiris", "kind": "codex" });
+        assert_eq!(body_of(&plain, "osiris", Some(json!(["designer"]))), wanted);
+    }
+
+    #[test]
+    fn any_other_member_is_asked_for_by_its_model_its_tier_and_its_roles() {
+        let worker =
+            json!({ "id": "maia", "kind": "codex", "model": "gpt-6-astra", "effort": "medium" });
+        assert_eq!(
+            body_of(&worker, "maia", Some(json!(["reviewer"]))),
+            json!({
+                "harness": "codex", "model": "gpt-6-astra", "tier": "standard",
+                "effort": "medium", "roles": ["reviewer"],
+            })
+        );
     }
 }

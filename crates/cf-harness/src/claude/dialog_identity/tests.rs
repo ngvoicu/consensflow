@@ -499,3 +499,152 @@ fn the_native_warning_is_one_line_whichever_way_the_screen_wrapped_it() {
         one
     );
 }
+
+// ----- No row is cut on words alone (T-1300, after T-1316's review) -----
+//
+// A first attempt cut every row up to a title Claude Code draws, found in the first four rows. The
+// reader drops the frame of a row, a blank row and a rule, so a title is a row of words, and a
+// command that prints one, or a hook's reason that is one, is a title as far as the words go: the
+// cut erased the command above it and two different commands were one identity.
+
+/// A hook's ask of a command, the rows as the tail shows them: the command's rows, the hook's
+/// header and `reason` rows, its source and the configuration hint Claude Code appends, the
+/// question and its choices.
+fn hook_ask(command: &[&str], reason: &[&str]) -> Vec<String> {
+    let mut lines: Vec<String> = command
+        .iter()
+        .map(|row| format!("\u{2502} {row}"))
+        .collect();
+    lines.push("\u{2502} Hook tool.check requires confirmation for this command:".to_owned());
+    lines.extend(reason.iter().map(|row| format!("\u{2502} {row}")));
+    lines.extend(owned(&[
+        "\u{2502} [plugin:review-shell]",
+        "plugin hooks.json to update hooks",
+        "Do you want to proceed?",
+        "\u{276f} 1. Yes",
+        "  2. No",
+        "Esc to cancel \u{b7} Tab to amend",
+    ]));
+    lines
+}
+
+const TITLES_CLAUDE_DRAWS: [&str; 12] = [
+    "Bash command",
+    "Run command",
+    "PowerShell command",
+    "Edit file",
+    "Create file",
+    "Overwrite file",
+    "Read file",
+    "Fetch",
+    "Use this skill?",
+    "Tool use",
+    "Bash command (unsandboxed)",
+    "Computer Use needs macOS permissions",
+];
+
+#[test]
+fn a_title_a_command_prints_is_a_row_of_the_command_and_cuts_nothing() {
+    for title in TITLES_CLAUDE_DRAWS {
+        let screen = |path: &str| {
+            hook_ask(
+                &[
+                    &format!("rm -rf -- {path}"),
+                    "printf '%s\\n' '",
+                    title,
+                    "cleanup finished'",
+                ],
+                &["Review this shell command."],
+            )
+        };
+        let (one, other) = (
+            read(&screen("$T/review-one")),
+            read(&screen("$T/review-two")),
+        );
+        assert_eq!(identity(&one), one, "{title}: nothing is cut");
+        assert_ne!(identity(&one), identity(&other), "{title}");
+    }
+}
+
+#[test]
+fn a_title_a_hooks_reason_is_cuts_nothing_and_claude_codes_own_formatter_draws_it_so() {
+    // 2.1.319's formatter for a hook's reason "Bash command\n" gives these rows
+    // (the offline render of the formatter in the review of T-1316): the header, the reason's line, the source.
+    for title in TITLES_CLAUDE_DRAWS {
+        let screen = |path: &str| hook_ask(&[&format!("rm -rf -- {path}")], &[title]);
+        let (one, other) = (
+            read(&screen("$T/review-one")),
+            read(&screen("$T/review-two")),
+        );
+        assert_eq!(identity(&one), one, "{title}: nothing is cut");
+        assert_ne!(identity(&one), identity(&other), "{title}");
+    }
+}
+
+#[test]
+fn a_command_row_that_slid_out_is_another_read_whatever_title_is_left_in_the_request() {
+    for title in TITLES_CLAUDE_DRAWS {
+        let whole = hook_ask(&["rm -rf -- $T/review-one"], &[title]);
+        let slid = whole[1..].to_vec();
+        assert_ne!(
+            identity(&read(&whole)),
+            identity(&read(&slid)),
+            "{title}: the read without the command is another dialog"
+        );
+    }
+}
+
+#[test]
+fn the_field_pair_is_two_identities_the_cost_of_never_merging_on_words() {
+    // T-1306's window (m-7776 at 1:57, m-7780 at 0:05): the tail slid two rows. Nothing in what the
+    // engine reads says the rows that went were the conversation's, so the second read is another
+    // dialog and an extra notice is told.
+    let request = [
+        " Delete the sparse bundle by its literal path",
+        " rm -rf /Volumes/Data/consensflow-builds.sparsebundle; echo \"rm finished rc=$?\"",
+        " \u{2502} Dangerous rm operation on mounted drive path: /Volumes/Data/consensflow-builds.sparsebundle",
+    ];
+    let below = |clock: &str| {
+        vec![
+            blocks(clock),
+            " Do you want to proceed?".to_owned(),
+            " \u{276f} 1. Yes".to_owned(),
+            "   2. No".to_owned(),
+        ]
+    };
+    let mut first = owned(&["  \u{23bf} \u{a0}Waiting\u{2026}", " Bash command"]);
+    first.extend(owned(&request));
+    first.extend(below("1:57"));
+    let mut second = owned(&request);
+    second.extend(below("0:05"));
+    let (first, second) = (read(&first), read(&second));
+    assert_ne!(identity(&first), identity(&second));
+    // The countdown alone is still blanked: the same read a countdown later is the same dialog.
+    let mut later = owned(&["  \u{23bf} \u{a0}Waiting\u{2026}", " Bash command"]);
+    later.extend(owned(&request));
+    later.extend(below("0:05"));
+    assert_eq!(identity(&first), identity(&read(&later)));
+    // And what is kept is every row of the read but the time.
+    assert_eq!(identity(&first).detail.len(), first.detail.len());
+}
+
+#[test]
+fn a_request_that_prints_the_computer_use_title_is_cut_nowhere() {
+    // The Computer Use prompt's cut needs its own choices, which a request's words cannot supply
+    // (they are read from the cursor rows): a Yes/No dialog with that title among its rows keeps all.
+    let screen = |path: &str| {
+        hook_ask(
+            &[
+                &format!("rm -rf -- {path}"),
+                "Computer Use needs macOS permissions",
+            ],
+            &["Review this shell command."],
+        )
+    };
+    let (one, other) = (
+        read(&screen("$T/review-one")),
+        read(&screen("$T/review-two")),
+    );
+    assert_eq!(identity(&one), one);
+    assert_ne!(identity(&one), identity(&other));
+}

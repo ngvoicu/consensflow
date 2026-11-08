@@ -532,20 +532,26 @@ fn the_close_of_a_cut_turn_is_no_part_of_any_answer() {
         .filter(|item| item.id != close.id)
         .all(|item| !item.commentary
             && item.synthetic == item.text.starts_with("<task-notification>")));
-    // The same words the model wrote, or the API's refusal says, are not Claude's close.
-    let words = |close: Value| {
-        record_of(&[hello(), close])
-            .items
-            .iter()
-            .any(|item| item.commentary || item.synthetic)
+    // The same words the model wrote, or the API's refusal says, are not Claude's close (no
+    // `commentary`). The refusal's words are the harness's own all the same (`synthetic`,
+    // T-1311), as the model's are not.
+    let marks = |close: Value| {
+        let items = record_of(&[hello(), close]).items;
+        (
+            items.iter().any(|item| item.commentary),
+            items.iter().any(|item| item.synthetic),
+        )
     };
     let said_by_the_model = in_message(closed("c1", "u1"), "model", Some(json!("claude-opus-5-5")));
-    assert!(!words(said_by_the_model));
-    assert!(!words(having(
-        closed("c1", "u1"),
-        json!({ "isApiErrorMessage": true })
-    )));
-    assert!(words(closed("c1", "u1")));
+    assert_eq!(marks(said_by_the_model), (false, false));
+    assert_eq!(
+        marks(having(
+            closed("c1", "u1"),
+            json!({ "isApiErrorMessage": true })
+        )),
+        (false, true)
+    );
+    assert_eq!(marks(closed("c1", "u1")), (true, true));
 }
 
 /// The live run's record of a conversation the app's quit cut in a command and

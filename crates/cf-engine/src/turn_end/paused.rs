@@ -33,6 +33,12 @@
 //! What it wrote between its tools, or in an earlier turn, stays in the transcript, as
 //! everywhere else.
 //!
+//! **Only words after the last tool call are told** (T-878, Calliope's P2 on T-262). A result
+//! with none there takes the last words written before it (`Answers::final_run`), but a
+//! tell's turn that wrote words, answered with `cf answer` and ended on a step with no words
+//! said what it had to in the answer: it is told nothing more, as one that ran `cf answer`
+//! alone is not.
+//!
 //! A harness that marks the text of a turn it was stopped in complete would have a note with
 //! those cut words, after a tell as after any pause; Claude Code marks it incomplete, and
 //! [`answers_to_the_task`] takes only a complete answer.
@@ -124,7 +130,11 @@ impl Dispatcher {
         else {
             return Ok(());
         };
-        let words = words_of(&answers.final_run);
+        // The words after its last tool call alone: a turn that wrote none there answered
+        // with `cf answer`, which the chief has as a message, and the words it wrote before
+        // that call (which a result takes where there are no others, T-262) are no more of
+        // an answer (Calliope's P2 on T-262, T-878).
+        let words = words_of(&answers.after_the_last_tool);
         if words == WITHOUT_ANSWER {
             return Ok(());
         }

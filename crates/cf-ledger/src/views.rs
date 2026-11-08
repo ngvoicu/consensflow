@@ -116,6 +116,20 @@ pub(crate) fn participant_view(row: &ParticipantRow) -> Result<ParticipantView, 
                 .skip(handle.chars().count() + 1)
                 .collect()
         });
+    // An image designer draws with Codex's image tool and its window is launched on Codex's
+    // own default model at no effort: the Codex adapter drops the model and effort its row
+    // holds, which an Add member before this asked of it. What it is read as running on is
+    // what it runs on (designer P2, T-1280).
+    let designer = row.designer == 1;
+    let (model, effort, model_name) = if designer {
+        (None, None, None)
+    } else {
+        (
+            row.model.clone(),
+            row.effort.clone(),
+            row.model_name.clone(),
+        )
+    };
     Ok(ParticipantView {
         id: row.id,
         project_id: row.project_id,
@@ -123,19 +137,19 @@ pub(crate) fn participant_view(row: &ParticipantRow) -> Result<ParticipantView, 
         role: row.role.clone(),
         agent: row.agent.clone(),
         harness: row.harness.clone(),
-        model: row.model.clone(),
-        effort: row.effort.clone(),
-        model_name: row.model_name.clone(),
-        former_handles: serde_json::from_str(&row.former_handles)?,
         // A member's name, or a window's, that holds its model: the card says no more of it.
         name_apart: row.role != "human"
             && row.role != "chief"
             && !crate::handles::names_its_model(
                 &row.handle,
-                row.model_name.as_deref(),
-                row.model.as_deref(),
-                row.effort.as_deref(),
+                model_name.as_deref(),
+                model.as_deref(),
+                effort.as_deref(),
             ),
+        model,
+        effort,
+        model_name,
+        former_handles: serde_json::from_str(&row.former_handles)?,
         needs_edit: row.needs_edit == 1,
         launched_model: row.launched_model.clone(),
         gone_model: row.gone_model.clone(),
@@ -143,7 +157,7 @@ pub(crate) fn participant_view(row: &ParticipantRow) -> Result<ParticipantView, 
             .launched_model
             .clone()
             .filter(|launched| Some(launched) != row.model.as_ref()),
-        designer: row.designer == 1,
+        designer,
         created_at: row.created_at.clone(),
         left_at: row.left_at.clone(),
         tier: row.tier.clone(),

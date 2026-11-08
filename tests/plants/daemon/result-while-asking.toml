@@ -35,9 +35,10 @@ runs = ["rwa-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        let words = with_earlier(words, &earlier);
+find = '''        let words = for_task(&thread.task, with_earlier(words, &earlier));
 '''
 replace = '''        let _ = &earlier;
+        let words = for_task(&thread.task, words);
 '''
 
 [[plant]]
@@ -47,9 +48,10 @@ runs = ["rwa-held"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        let words = with_earlier(words, &earlier);
+find = '''        let words = for_task(&thread.task, with_earlier(words, &earlier));
 '''
 replace = '''        let _ = &earlier;
+        let words = for_task(&thread.task, words);
 '''
 
 [[plant]]
@@ -60,9 +62,10 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        let words = with_earlier(words, &earlier);
+find = '''        let words = for_task(&thread.task, with_earlier(words, &earlier));
 '''
 replace = '''        let _ = &earlier;
+        let words = for_task(&thread.task, words);
 '''
 
 [[plant]]
@@ -73,9 +76,10 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        let words = with_earlier(words, &earlier);
+find = '''        let words = for_task(&thread.task, with_earlier(words, &earlier));
 '''
 replace = '''        let _ = &earlier;
+        let words = for_task(&thread.task, words);
 '''
 
 [[plant]]
@@ -85,13 +89,19 @@ runs = ["rwa-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '''        let words = with_earlier(
-            with_lost(words_of(&run), &participant.handle, lost),
-            &earlier,
+find = '''        let words = for_task(
+            &thread.task,
+            with_earlier(
+                with_lost(words_of(&run), &participant.handle, lost),
+                &earlier,
+            ),
         );
 '''
 replace = '''        let _ = &earlier;
-        let words = with_lost(words_of(&run), &participant.handle, lost);
+        let words = for_task(
+            &thread.task,
+            with_lost(words_of(&run), &participant.handle, lost),
+        );
 '''
 
 [[plant]]
@@ -101,13 +111,19 @@ runs = ["rwa-held"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '''        let words = with_earlier(
-            with_lost(words_of(&run), &participant.handle, lost),
-            &earlier,
+find = '''        let words = for_task(
+            &thread.task,
+            with_earlier(
+                with_lost(words_of(&run), &participant.handle, lost),
+                &earlier,
+            ),
         );
 '''
 replace = '''        let _ = &earlier;
-        let words = with_lost(words_of(&run), &participant.handle, lost);
+        let words = for_task(
+            &thread.task,
+            with_lost(words_of(&run), &participant.handle, lost),
+        );
 '''
 
 [[plant]]

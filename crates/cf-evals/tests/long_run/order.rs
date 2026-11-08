@@ -387,40 +387,42 @@ fn a_result_whose_turn_the_copy_does_not_hold_is_unresolved_never_skipped() {
         open[0].1,
         "m-131's turn was begun by no delivery to @long-worker of T-14 that the log shows before it: whether it is the turn's final answer cannot be judged"
     );
-    // One whose turn says nothing after its last tool call.
-    let scene = Scene::new(&[("long-worker", "claude-code")]);
-    let task = self::task(&scene);
-    scene.message(
-        131,
-        (CHIEF, Some(3)),
-        "result",
-        Some(task),
-        "Done.",
-        &t(2, 0),
-    );
-    let conversation = scene.conversation(3, "claude-code", "s-worker");
-    scene.item(
-        conversation,
-        0,
-        "user",
-        "[ConsensFlow m-120 · T-14 · task from @chief]\nRun them",
-        true,
-        &t(0, 0),
-    );
-    scene.item(
-        conversation,
-        1,
-        "assistant",
-        "Running the tests.",
-        false,
-        &t(0, 10),
-    );
-    scene.item(conversation, 2, "tool", "61 tests pass", true, &t(0, 30));
-    let open = unanswered(&scene.look(ms(4, 0)));
+    // One whose turn says nothing at all, after its last tool call or before it.
+    let said_nothing = |before: &str| {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let task = self::task(&scene);
+        scene.message(
+            131,
+            (CHIEF, Some(3)),
+            "result",
+            Some(task),
+            "Done.",
+            &t(2, 0),
+        );
+        let conversation = scene.conversation(3, "claude-code", "s-worker");
+        scene.item(
+            conversation,
+            0,
+            "user",
+            "[ConsensFlow m-120 · T-14 · task from @chief]\nRun them",
+            true,
+            &t(0, 0),
+        );
+        scene.item(conversation, 1, "assistant", before, false, &t(0, 10));
+        scene.item(conversation, 2, "tool", "61 tests pass", true, &t(0, 30));
+        scene.look(ms(4, 0))
+    };
+    let look = said_nothing("");
+    let open = unanswered(&look);
     assert!(
         open[0].1.contains("says nothing after its last tool call"),
         "{open:?}"
     );
+    // Words before its last tool call are the result the engine gives (its last words, under
+    // the line that says so, T-1311): judged, and "Done." is not it.
+    let look = said_nothing("Running the tests.");
+    assert!(unanswered(&look).is_empty());
+    assert_eq!(found(&look, 4).len(), 1);
     // A turn with its final answer is judged, and unresolved in nothing.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let (task, _) = worked(&scene);
@@ -1352,4 +1354,136 @@ fn a_result_that_is_its_turns_final_answer_holds_the_fourth() {
         &t(0, 25),
     );
     assert!(found(&scene.look(ms(5, 0)), 4).is_empty());
+}
+
+/// What the engine writes above a result the never-empty rule took (`cf-engine`'s
+/// `turn_end::LAST_WORDS`).
+const LAST_WORDS: &str =
+    "Its turn ended with no words after its last command. The last words it wrote:";
+
+/// T-14's worker turn that wrote "Let me check the tests", ran a tool and ended with no
+/// words, its result m-131 saying `body`.
+fn ended_on_a_tool(scene: &Scene, body: &str) {
+    let task = task(scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nReview it",
+        true,
+        &t(0, 0),
+    );
+    scene.item(
+        conversation,
+        1,
+        "assistant",
+        "Reading the diff",
+        false,
+        &t(0, 5),
+    );
+    scene.item(conversation, 2, "tool", "diff", true, &t(0, 8));
+    scene.item(
+        conversation,
+        3,
+        "assistant",
+        "Let me check the tests",
+        false,
+        &t(0, 10),
+    );
+    scene.item(conversation, 4, "tool", "done", true, &t(0, 20));
+    scene.item(conversation, 5, "assistant", "", true, &t(1, 0));
+    scene.message(131, (CHIEF, Some(3)), "result", Some(task), body, &t(1, 5));
+}
+
+#[test]
+fn a_result_of_its_turns_last_words_is_judged_as_the_engine_gives_it() {
+    // T-1310's review of T-878 (`review_fallback_result_is_unjudged_by_the_strict_eval_oracle`):
+    // a turn with no words after its last tool call gives the last words it wrote before it,
+    // under the engine's line saying so (T-262, T-1311). The oracle took only the words after
+    // the last tool, found none, and left the fourth unjudged, which makes a green run's verdict
+    // UNRESOLVED. It judges the result the engine gives: held, and judged.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    ended_on_a_tool(&scene, &format!("{LAST_WORDS}\n\nLet me check the tests"));
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    let unjudged: Vec<_> = invariants::unjudged(&look, &Default::default())
+        .into_iter()
+        .filter(|unjudged| unjudged.invariant == 4)
+        .collect();
+    assert!(unjudged.is_empty(), "{unjudged:?}");
+}
+
+#[test]
+fn a_result_that_is_not_its_turns_last_words_breaks_the_fourth() {
+    // The words before an earlier tool call, or the last words without the line that says what
+    // they are, are not the result the engine gives.
+    for body in [
+        format!("{LAST_WORDS}\n\nReading the diff"),
+        "Let me check the tests".to_owned(),
+    ] {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        ended_on_a_tool(&scene, &body);
+        assert_eq!(found(&scene.look(ms(5, 0)), 4).len(), 1, "{body}");
+    }
+    // A result that says the turn wrote no words: the copy does not say which words are the
+    // harness's own (an error of the API's), which the engine never takes, so it is not held
+    // to them, and stays one that cannot be judged.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    ended_on_a_tool(
+        &scene,
+        "(the agent ended its turn without a written answer)",
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty());
+    assert_eq!(
+        invariants::unjudged(&look, &Default::default())
+            .iter()
+            .filter(|unjudged| unjudged.invariant == 4)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_codex_turn_with_no_final_answer_stays_one_that_cannot_be_judged() {
+    // The copy does not say which of Codex's words are its commentary, which the engine never
+    // takes for a result's last words: its turn is not held to them (T-1311).
+    let scene = Scene::new(&[("long-worker", "codex")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "codex", "s-codex");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(0, 0),
+    );
+    scene.item(
+        conversation,
+        1,
+        "assistant",
+        "Checking the counts now.",
+        false,
+        &t(0, 10),
+    );
+    scene.item(conversation, 2, "tool", "61 tests pass", true, &t(0, 40));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        "Done.",
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty());
+    assert_eq!(
+        invariants::unjudged(&look, &Default::default())
+            .iter()
+            .filter(|unjudged| unjudged.invariant == 4)
+            .count(),
+        1
+    );
 }
