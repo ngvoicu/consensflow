@@ -52,7 +52,7 @@
 //! named by a program of that list or by its number. **The cause of a failed start** is no quote at all (T-1328): a note
 //! carries the kind of failure and its code, typed by the producer (`cf_base::startup`, the
 //! engine's `startup`), and no word of a program's, a host's or an adapter's; the full words stay
-//! on the person's own screen. **A window's own session id** on its screen is not a value in groups
+//! on the person's own screen. **A decision never reads a note** (T-1328, the third reading of T-1322): what recovery reads of a window's end is what it showed ([`Evidence`], the lines as the host sent them), because the text made for a note leaves a screen out whole for a secret-like word, is masked and cut, and says ConsensFlow's own words of how the window ended. **A window's own session id** on its screen is not a value in groups
 //! ([`Shown::with_own_session`]), and no other check is given a text without it.
 //!
 //! **How the program ended** is said as the host said it: its signal where it sent one, and a
