@@ -74,16 +74,6 @@ const UI_IN_A_WINDOW: &str = "`cf ui` starts ConsensFlow's own daemon, and this 
     `ui`. Run it in a terminal outside the window, or unset CONSENSFLOW_URL, CONSENSFLOW_TOKEN, \
     CONSENSFLOW_PARTICIPANT and CONSENSFLOW_PROJECT first.";
 
-/// What `cf` says to a board command that changes the board and ran in Codex's memories folder
-/// (`$CODEX_HOME/memories`): that folder is the working folder of Codex's memory job, a thread
-/// of the window's own Codex server that is given the window's role and token, and no window of
-/// the board works from it. The job posted a task as the chief (the issue
-/// `codex-memories-post-to-the-board-as-the-chief`); until the board takes a Codex window's
-/// token only from the window's own thread (native control, 3.0.8), `cf` does not let it.
-/// A test holds the words.
-const IN_CODEX_MEMORIES: &str =
-    "This command ran in Codex's memories folder: Codex's memory job isn't on the board.";
-
 /// Runs the command in `args`: its exit code. Only a failure to write is an error. Its working
 /// folder is the process's ([`run_in`]).
 pub fn run(
@@ -135,11 +125,12 @@ pub fn run_in(
     }
     match Board::from_env(env) {
         Some(board) => {
-            let board = match folder {
-                Some(folder) if cf_harness::codex::memories::holds(env, folder) => {
-                    board.refusing_writes(IN_CODEX_MEMORIES)
-                }
-                _ => board,
+            // A command run where a harness does its background work with a window's config
+            // (Codex's memory job) is no window's: it changes nothing on the board.
+            let board = match folder.and_then(|folder| cf_harness::background::refusal(env, folder))
+            {
+                Some(why) => board.refusing_writes(why),
+                None => board,
             };
             board::run(&given, json, &board, input, out, err)
         }

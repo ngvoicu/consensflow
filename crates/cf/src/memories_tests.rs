@@ -13,10 +13,9 @@ use cf_base::env::Env;
 use cf_board::scripted::{reply, scripted, ScriptedApi};
 use serde_json::{json, Value};
 
-use super::{run_in, IN_CODEX_MEMORIES};
+use super::run_in;
 
-/// The words, which a Codex memory job's model reads: held as the brief for the guard gave
-/// them.
+/// The words, which a Codex memory job's model reads: as the brief for the guard gave them.
 const WORDS: &str =
     "This command ran in Codex's memories folder: Codex's memory job isn't on the board.";
 
@@ -126,7 +125,6 @@ const HELPS: [&[&str]; 9] = [
 #[test]
 fn a_command_that_changes_the_board_is_refused_in_the_memories_folder_in_the_words_and_asks_nothing(
 ) {
-    assert_eq!(IN_CODEX_MEMORIES, WORDS);
     let window = Window::new(vec![reply(200, json!({}))]);
     for folder in [
         window.memories(),
