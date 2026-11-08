@@ -116,8 +116,9 @@ fn the_window_is_kept_for_the_job_until_the_human_ends_its_session(
     assert!(
         to_chief.len() == 1
             && to_chief[0].contains("ConsensFlow keeps the window open for it")
-            && to_chief[0].contains("--background-job"),
-        "the chief was told, and the note names the job: {to_chief:?}"
+            && to_chief[0].contains("closing it would end: process ")
+            && !to_chief[0].contains("--background-job"),
+        "the chief was told, and the note names the job by its number: {to_chief:?}"
     );
     assert!(
         human.len() == 1 && human[0].contains(&format!("delete @{handle}'s session")),
@@ -276,9 +277,9 @@ fn a_workers_close_names_the_job_it_ended_that_the_agent_had_detached_before_its
         let body = message["body"].as_str().unwrap_or_default();
         message["kind"] == "note"
             && body.starts_with(
-                "T-1's window closed with background work running, which its close ended: ",
+                "T-1's window closed with background work running, which its close ended: process ",
             )
-            && body.contains("--background-job")
+            && !body.contains("--background-job")
     };
     rig.wait_for(
         "the chief to be told what the close ended",

@@ -2170,8 +2170,8 @@ runs = ["quote-less-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/call.rs"
-find = '''"killall", "sleep", "ping",'''
-replace = '''"killall", "ping",'''
+find = '''"sleep", "ping",'''
+replace = '''"ping",'''
 
 [[plant]]
 name = "windows close: quote less: an opening that may hold a secret is quoted"
