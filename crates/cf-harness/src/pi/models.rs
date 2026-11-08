@@ -215,7 +215,10 @@ async fn settled(child: &dyn Child, time: &dyn Time, first: Value, spent: u64) -
         let asked = ask(child, "pi --mode rpc", &line, |answer| {
             answer["type"] == "response" && answer["id"] == id.as_str()
         });
-        let Some(Ok(next)) = arm(time, ASK_MS).bound(asked).await else {
+        // An ask is given what the wait has left (a quarter of a second at the least), so that
+        // the last of them ends within what [`KEEP_MS`] keeps of the read's bound.
+        let left = u64::try_from(until - time.wall_ms()).unwrap_or(0);
+        let Some(Ok(next)) = arm(time, ASK_MS.min(left).max(POLL_MS)).bound(asked).await else {
             break;
         };
         if next.get("success") != Some(&Value::Bool(true)) {

@@ -86,6 +86,26 @@ find = "    SETTLE_CAP_MS.min(BOUND_MS.saturating_sub(spent).saturating_sub(KEEP
 replace = "    SETTLE_CAP_MS"
 
 [[plant]]
+name = "live models: the last ask of the wait is given the whole of its time"
+meant = "the_last_ask_of_a_wait_is_given_no_more_than_what_the_wait_has_left"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "arm(time, ASK_MS.min(left).max(POLL_MS))"
+replace = "arm(time, ASK_MS)"
+
+[[plant]]
+name = "live models: an ask that goes unanswered is given a quarter of a second"
+meant = "an_ask_that_goes_unanswered_ends_the_wait_with_the_list_pi_gave"
+runs = ["lm-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = "arm(time, ASK_MS.min(left).max(POLL_MS))"
+replace = "arm(time, POLL_MS)"
+
+[[plant]]
 name = "live models: an answer that lists no model is waited on"
 meant = "only_an_answer_that_lists_models_is_waited_on"
 runs = ["lm-pi"]
@@ -139,7 +159,10 @@ file = "crates/cf-daemon/src/models.rs"
 find = "                .unwrap_or_else(ModelListing::failed),"
 replace = '''                .unwrap_or_else(|why| {
                     let before = self.ended.borrow().get(&harness).map(|(_, old)| old.clone());
-                    before.map_or_else(|| ModelListing::failed(why.clone()), |old| old.stale(why))
+                    match before {
+                        Some(old) => old.stale(why),
+                        None => ModelListing::failed(why),
+                    }
                 }),'''
 
 [[plant]]

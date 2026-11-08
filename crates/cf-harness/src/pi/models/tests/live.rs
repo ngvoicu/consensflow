@@ -141,6 +141,34 @@ fn a_pi_that_ends_after_its_first_answer_is_still_read() {
 }
 
 #[test]
+fn an_ask_that_goes_unanswered_ends_the_wait_with_the_list_pi_gave() {
+    // Pi answers once and then says nothing, and stays: the second ask is given 5 s.
+    let window = window(lines(&[CACHE], 1), Ends::Asked);
+    let (ids, ms) = read(&window);
+    assert_eq!(ids, ["p/a", "p/b"]);
+    assert_eq!(ms, 250 + 5_000, "one poll, then the ask's own bound");
+}
+
+#[test]
+fn the_last_ask_of_a_wait_is_given_no_more_than_what_the_wait_has_left() {
+    // Every list differs, so the wait runs to its cap; then Pi stops answering. The ask that
+    // began 250 ms before the cap is given what is left (250 ms at the least), not 5 s.
+    let ids: Vec<Vec<String>> = (0..47).map(|n| vec![format!("p/m{n}")]).collect();
+    let lists: Vec<Vec<&str>> = ids
+        .iter()
+        .map(|row| row.iter().map(String::as_str).collect())
+        .collect();
+    let lists: Vec<&[&str]> = lists.iter().map(Vec::as_slice).collect();
+    let window = window(lines(&lists, 47), Ends::Asked);
+    let (listed, ms) = read(&window);
+    assert_eq!(listed, ["p/m46"], "the last list Pi gave");
+    assert!(
+        ms <= 12_000 + 250,
+        "the wait ended at its cap, plus the last ask's quarter second: {ms} ms"
+    );
+}
+
+#[test]
 fn the_read_that_picks_a_launch_s_default_model_does_not_wait() {
     let window = window(lines(&[CACHE, LIVE], 60), Ends::Asked);
     let begun = window.fakes.time.wall_ms();
