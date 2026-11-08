@@ -133,7 +133,7 @@ fn the_trial_is_asked_for_with_the_notes_the_tag_will_carry() {
         world.notes.display()
     );
     let lines = fake.lines();
-    assert!(lines.iter().any(|line| *line == dispatch), "{lines:#?}");
+    assert!(lines.contains(&dispatch), "{lines:#?}");
     assert_eq!(fake.runs_of("release.yml", "workflow_dispatch").len(), 1);
 }
 
