@@ -162,6 +162,8 @@ fn hook_ask_decline(dialog: &Dialog, after_ms: i64) -> Option<Decline> {
         after_ms: Some(after_ms),
         then_tell: Some(then_tell),
         what: "hook prompt on its call".to_owned(),
+        listed: true,
+        members_only: false,
     })
 }
 
@@ -661,6 +663,7 @@ impl Window for ClaudeWindow {
         Some(Dialog {
             prompt_below: self.shows_prompt(&shown.below),
             closes_after_s,
+            asks: shown.dialog.asks || super::computer_use_prompt::is_prompt(&shown.dialog),
             ..shown.dialog
         })
     }
@@ -683,6 +686,9 @@ impl Window for ClaudeWindow {
         if let Some(decline) = hook_ask_decline(dialog, self.hook_ask_ms) {
             return Some(decline);
         }
+        if let Some(decline) = super::computer_use_prompt::decline(dialog) {
+            return Some(decline);
+        }
         if dialog.question != LSP_OFFER {
             return None;
         }
@@ -697,6 +703,8 @@ impl Window for ClaudeWindow {
             after_ms: None,
             then_tell: None,
             what: "offer".to_owned(),
+            listed: true,
+            members_only: false,
         })
     }
 

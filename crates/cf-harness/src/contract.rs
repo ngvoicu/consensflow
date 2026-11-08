@@ -511,6 +511,15 @@ pub struct Decline {
     /// What the dialog is, in the words of the note that it was pressed ("hook prompt on its
     /// call").
     pub what: String,
+    /// Whether [`Decline::choice`] is one of the dialog's own choices, as drawn: the key is then
+    /// pressed only into a read that still lists it. False for a key that closes the dialog with
+    /// no choice listed (Escape in Claude Code's Computer Use permission prompt, whose listed
+    /// choices open System Settings and ask again, T-1300): `choice` then names the key, and the
+    /// read's identity and choices alone hold the press to the dialog told of.
+    pub listed: bool,
+    /// Whether it is made in a member's window only. The chief's window is the human's: a
+    /// dialog there is told as any other and the decline is never pressed (T-1300).
+    pub members_only: bool,
 }
 
 /// What a window's harness says of a dialog of its own being open, beside the screen

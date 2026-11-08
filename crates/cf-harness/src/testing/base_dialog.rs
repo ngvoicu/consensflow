@@ -314,6 +314,16 @@ mod tests {
             })
     }
 
+    /// What T-1300 added to `claude/adapter.rs`: the Computer Use permission prompt counts as a
+    /// dialog that asks, its decline is on the list of safe declines, and the two declines the
+    /// release head had carry the two flags `Decline` gained. None of it is read by the code the
+    /// corpus borrows; each is taken out again, where it was added, before the file is hashed.
+    const T1300_ASKS: &str =
+        "            asks: shown.dialog.asks || super::computer_use_prompt::is_prompt(&shown.dialog),\n";
+    const T1300_DECLINE: &str = "        if let Some(decline) = super::computer_use_prompt::decline(dialog) {\n            return Some(decline);\n        }\n";
+    const T1300_FLAGS_HOOK: &str = "        listed: true,\n        members_only: false,\n";
+    const T1300_FLAGS_OFFER: &str = "            listed: true,\n            members_only: false,\n";
+
     /// What T-1277 added to `claude/adapter.rs`, and no code the corpus borrows reads: Claude
     /// Code's `dialog_identity` (a `Window` method of its own, which the release head's window did
     /// not have) and the `pub(super)` of `LSP_OFFER` that its module reads. They are taken out
@@ -327,6 +337,10 @@ mod tests {
         if file == "claude/adapter.rs" {
             text.replace(&format!("{IDENTITY}{NEXT}"), NEXT)
                 .replace("pub(super) const LSP_OFFER", "const LSP_OFFER")
+                .replace(T1300_ASKS, "")
+                .replace(T1300_DECLINE, "")
+                .replace(T1300_FLAGS_HOOK, "")
+                .replace(T1300_FLAGS_OFFER, "")
         } else {
             text.to_owned()
         }

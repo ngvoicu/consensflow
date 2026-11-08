@@ -3,7 +3,7 @@
 //! holds two reads to one dialog by plain equality of what this returns, and presses a decline
 //! only into a read whose identity equals the one that was told of.
 //!
-//! Two things are taken out of the words, and nothing else:
+//! Three things are taken out of the words, and nothing else:
 //!
 //! - **The time in its warning line.** A permission prompt, a hook's ask, a classifier's ask draws
 //!   under the request's words a line that says when Claude Code will block the request by
@@ -29,6 +29,30 @@
 //!   identity runs from its title down. A read in which the tail cut the title off is another
 //!   read: it is told as another dialog, and since the offer is on the list of safe declines it is
 //!   declined at the next look that shows it so (over-telling, which is the side to err on).
+//!
+//! - **What is drawn above the Computer Use permission prompt** (T-1300). Its top is its title,
+//!   "Computer Use needs macOS permissions", and only where its choices are the prompt's own
+//!   (`computer_use_prompt`): the conversation above slid in the field (the notice of the dialog
+//!   quoted the model's last words above the tool line), and a decline is pressed only into the
+//!   dialog that was told of.
+//!
+//! **No row is cut on words alone** (T-1300, after T-1316's review of a first attempt). The field's
+//! pair (T-1306's window, 2026-11-07, m-7776 at 1:57 and m-7780 at 0:05) was one prompt of a dangerous
+//! `rm` told twice: the pane host's tail is twelve rows, and it slid two as rows below the question
+//! changed, so the first read began at the row of the tool that waits (`⎿  Waiting…`) and the
+//! title, and the second at the request. A first attempt cut every row up to a title Claude Code
+//! draws ("Bash command", …) in the first four rows. It was wrong: the engine reads the tail with
+//! its blank rows and its rules dropped and the frame of each row taken off (`shared::dialog`), so
+//! a title is a row of words, and a command that prints "Bash command", or a hook's reason that is
+//! "Bash command\n" (which Claude Code 2.1.319's own formatter draws as a bare title row), is a
+//! title as far as the words go. The cut erased the command above it, two `rm` of different paths
+//! became one identity, the second was never told and the first's pending "No" was pressed into
+//! it. A row is cut only where the boundary is read from something a request's words cannot be:
+//! the warning's place among the last rows above the question, and the choices of the Computer Use
+//! prompt, which are read from the cursor rows and not from what the dialog says, and which has no
+//! request of its own. Otherwise every row is kept, and a prompt whose tail slid is told again: an
+//! extra notice is safe, a merged identity is not. The route to the pair is a boundary read from the
+//! raw rows (the blank row and the rule the tail drops), not from their words.
 //!
 //! Claude Code's other dialogs have no known top, and their words are compared as they were read.
 //! The note that tells a dialog still quotes the read as it was, the time in it.
@@ -104,6 +128,11 @@ pub(crate) fn identity(dialog: &Dialog) -> Dialog {
         if let Some(top) = detail.iter().rposition(|line| line == LSP_TITLE) {
             detail.drain(..top);
         }
+    }
+    // The Computer Use permission prompt begins at its title, and only where its choices are its
+    // own (T-1300): what the tail shows above it is the conversation's, and it slides.
+    if let Some(top) = super::computer_use_prompt::top(dialog) {
+        detail.drain(..top.min(detail.len()));
     }
     Dialog {
         detail,

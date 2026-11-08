@@ -48,6 +48,15 @@ pub fn claude_dialog_identity(dialog: &crate::contract::Dialog) -> crate::contra
     crate::claude::dialog_identity::identity(dialog)
 }
 
+/// Claude Code's decline of its Computer Use permission prompt
+/// ([`crate::contract::Window::safe_decline`]), for a test window that stands in for it, so that
+/// the engine's tests hold the real key, words and guards (T-1300).
+pub fn claude_computer_use_decline(
+    dialog: &crate::contract::Dialog,
+) -> Option<crate::contract::Decline> {
+    crate::claude::computer_use_prompt::decline(dialog)
+}
+
 pub use admin::{
     Asked, BodyEnding, Delivery, Response, Said, ScriptedCapture, ScriptedLatest, ScriptedNetwork,
     Told,
