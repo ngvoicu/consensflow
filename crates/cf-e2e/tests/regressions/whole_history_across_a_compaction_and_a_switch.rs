@@ -49,16 +49,13 @@ fn holds(items: &[&Value], role: &str, text: &str) -> bool {
     items.iter().any(|item| is_said(item, role, text))
 }
 
-/// What a page says itself, with what its items say taken out: their text and a
-/// delivery's line are what the window was given, which may name a harness (the
-/// handoff ConsensFlow delivers names the one the chief left), shown in full.
+/// What a page says itself, with what its items say taken out: their text is
+/// what the window was given, which may name a harness (the handoff
+/// ConsensFlow delivers names the one the chief left), shown in full.
 fn page_itself(page: &Value) -> Value {
     let mut page = page.clone();
     for item in page["items"].as_array_mut().into_iter().flatten() {
         item["text"] = json!("");
-        if item.get("delivery").is_some() {
-            item["delivery"]["line"] = json!("");
-        }
     }
     page
 }
@@ -164,12 +161,14 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
         (&summary["role"], &summary["compaction"]),
         (&json!("user"), &json!(true))
     );
-    // The Codex conversation going on now: the handoff that brought it in, as one
-    // line, and its work.
+    // The Codex conversation going on now: the handoff that brought it in, marked as a
+    // delivery (where it begins, and no line of its outcome), and its work.
     assert!(
-        now.iter().any(|item| item["delivery"]["line"]
-            .as_str()
-            .is_some_and(|line| line.ends_with("the handoff that brought this chief in"))),
+        now.iter().any(|item| item["delivery"]["at"].is_u64()
+            && item["delivery"].get("line").is_none()
+            && item["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("You are the chief now"))),
         "{read}"
     );
     assert!(

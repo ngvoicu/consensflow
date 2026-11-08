@@ -1,0 +1,892 @@
+[
+ {
+  "id": "pi-48-0",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                          \r\n\u001b[2m(https://en.wikipedia.org/wiki/Function_(mathema\r\n\u001b[2mtics))\u001b[22m                                          \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-1",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                          \r\n\u001b[2m(https://github.com/ngvoicu/consensflow/blob/mai\r\n\u001b[2mn/app/src-tauri/src/link.rs#L10-L20)\u001b[22m            \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-2",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://example.com/a%28b%29)\u001b[22m           \r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-3",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://example.com/a,b^c)\u001b[22m              \r\n",
+  "destination": "https://example.com/a,b^c",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-4",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Function_(mathematics))\u001b[22m                   \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-5",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                                                          \r\n\u001b[2m(https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-\r\n\u001b[2mL20)\u001b[22m                                                                            \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-6",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://example.com/a%28b%29)\u001b[22m                                           \r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-7",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://example.com/a,b^c)\u001b[22m                                              \r\n",
+  "destination": "https://example.com/a,b^c",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-8",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Function_(mathematics))\u001b[22m                                                           \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-9",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20)\u001b[22m                             \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-10",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://example.com/a%28b%29)\u001b[22m                                                                                   \r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-11",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://example.com/a,b^c)\u001b[22m                                                                                      \r\n",
+  "destination": "https://example.com/a,b^c",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-bayes",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                          \r\n\u001b[2m(https://en.wikipedia.org/wiki/Bayes'_theorem)\u001b[22m  \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-bayes",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Bayes'_theorem)\u001b[22m                           \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-bayes",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": "\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Bayes'_theorem)\u001b[22m                                                                   \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-wiki-padded",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                         \r\n \u001b[2m(https://en.wikipedia.org/wiki/Function_(mathe \r\n \u001b[2mmatics))\u001b[22m                                       \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-wiki-padded",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Function_(mathematics))\u001b[22m                  \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-github-padded",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                         \r\n \u001b[2m(https://github.com/ngvoicu/consensflow/blob/m \r\n \u001b[2main/app/src-tauri/src/link.rs#L10-L20)\u001b[22m         \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-github-padded",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                                                         \r\n \u001b[2m(https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L1 \r\n \u001b[2m0-L20)\u001b[22m                                                                         \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-bayes-padded",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m                                         \r\n \u001b[2m(https://en.wikipedia.org/wiki/Bayes'_theorem)\u001b[22m \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-bayes-padded",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Bayes'_theorem)\u001b[22m                          \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-wiki-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                          \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-48-github-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                          \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-48-bayes-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                          \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-48-encoded-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                          \r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-48-comma-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": "\u001b]8;;https://example.com/a,b^c\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                          \r\n",
+  "destination": "https://example.com/a,b^c",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-wiki-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                          \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-github-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                          \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-bayes-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                          \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-encoded-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                          \r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-comma-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": "\u001b]8;;https://example.com/a,b^c\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                          \r\n",
+  "destination": "https://example.com/a,b^c",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-wiki-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                                                                  \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-github-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                                                                  \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-bayes-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                                                                  \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-encoded-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                                                                  \r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-comma-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": "\u001b]8;;https://example.com/a,b^c\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                                                                                                  \r\n",
+  "destination": "https://example.com/a,b^c",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-bare-wiki-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 40,
+  "printed": "See                                     \r\n\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\\u001b[34m\u001b[4mhttps://en.wikipedia.org/wiki/Function_(\u001b[24m\u001b]8;;\u001b\\\r\n\u001b[4;34m\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\mathematics)\u001b[24m\u001b[39m\u001b]8;;\u001b\\ now                        \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-bare-wiki-plain",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 40,
+  "printed": "See                                     \r\n\u001b[34m\u001b[4mhttps://en.wikipedia.org/wiki/Function_(\u001b[24m\r\n\u001b[4;34mmathematics)\u001b[24m\u001b[39m now                        \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-bare-github-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": "See                                             \r\n\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mhttps://github.com/ngvoicu/consensflow/blob/main\u001b[24m\u001b]8;;\u001b\\\r\n\u001b[4;34m\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\/app/src-tauri/src/link.rs#L10-L20\u001b[24m\u001b[39m\u001b]8;;\u001b\\ now          \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-bare-github-plain",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": "See                                             \r\n\u001b[34m\u001b[4mhttps://github.com/ngvoicu/consensflow/blob/main\u001b[24m\r\n\u001b[4;34m/app/src-tauri/src/link.rs#L10-L20\u001b[24m\u001b[39m now          \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-bare-bayes-osc8",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 40,
+  "printed": "See                                     \r\n\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u001b\\\u001b[34m\u001b[4mhttps://en.wikipedia.org/wiki/Bayes'_the\u001b[24m\u001b]8;;\u001b\\\r\n\u001b[4;34m\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u001b\\orem\u001b[24m\u001b[39m\u001b]8;;\u001b\\ now                                \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-bare-bayes-plain",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 40,
+  "printed": "See                                     \r\n\u001b[34m\u001b[4mhttps://en.wikipedia.org/wiki/Bayes'_the\u001b[24m\r\n\u001b[4;34morem\u001b[24m\u001b[39m now                                \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-code-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " ┌──────────────────────────────────┬─────────┐ \r\n │ URL                              │ Note    │ \r\n ├──────────────────────────────────┼─────────┤ \r\n │ https://github.com/ngvoicu/conse\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ nsflow/blob/main/app/src-tauri/s\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ rc/link.rs#L10-L20               │         │ \r\n └──────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-bare-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " ┌──────────────────────────────────┬─────────┐ \r\n │ URL                              │ Note    │ \r\n ├──────────────────────────────────┼─────────┤ \r\n │ \u001b[34m\u001b[4mhttps://github.com/ngvoicu/conse\u001b[24m\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ \u001b[4;34mnsflow/blob/main/app/src-tauri/s\u001b[24m\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ \u001b[4;34mrc/link.rs#L10-L20\u001b[24m\u001b[39m               │         │ \r\n └──────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-label-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " ┌──────────────────────────────────┬─────────┐ \r\n │ URL                              │ Note    │ \r\n ├──────────────────────────────────┼─────────┤ \r\n │ \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m\u001b[22;23;24;25;27;28;29;39m                           │ example │ \r\n │ \u001b[2m(https://github.com/ngvoicu/cons\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ \u001b[2mensflow/blob/main/app/src-tauri/\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ \u001b[2msrc/link.rs#L10-L20)\u001b[22m             │         │ \r\n └──────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-label-table-wiki-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " ┌──────────────────────────────────┬─────────┐ \r\n │ URL                              │ Note    │ \r\n ├──────────────────────────────────┼─────────┤ \r\n │ \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m\u001b[22;23;24;25;27;28;29;39m                           │ example │ \r\n │ \u001b[2m(https://en.wikipedia.org/wiki/F\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ \u001b[2munction_(mathematics))\u001b[22m           │         │ \r\n └──────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-48-code-table-on",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 48,
+  "printed": " ┌──────────────────────────────────┬─────────┐ \r\n │ URL                              │ Note    │ \r\n ├──────────────────────────────────┼─────────┤ \r\n │ https://github.com/ngvoicu/conse\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ nsflow/blob/main/app/src-tauri/s\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ rc/link.rs#L10-L20               │         │ \r\n └──────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-48-bare-table-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": " ┌──────────────────────────────────┬─────────┐ \r\n │ URL                              │ Note    │ \r\n ├──────────────────────────────────┼─────────┤ \r\n │ \u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mhttps://github.com/ngvoicu/conse\u001b[24m\u001b]8;;\u001b\\\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ \u001b[4;34m\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\nsflow/blob/main/app/src-tauri/s\u001b[24m\u001b]8;;\u001b\\\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ \u001b[4;34m\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\rc/link.rs#L10-L20\u001b[24m\u001b[39m\u001b]8;;\u001b\\               │         │ \r\n └──────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-48-label-table-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": " ┌────────┬─────────┐                           \r\n │ URL    │ Note    │                           \r\n ├────────┼─────────┤                           \r\n │ \u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\ │ example │                           \r\n └────────┴─────────┘                           \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-48-label-table-wiki-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 48,
+  "printed": " ┌────────┬─────────┐                           \r\n │ URL    │ Note    │                           \r\n ├────────┼─────────┤                           \r\n │ \u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\ │ example │                           \r\n └────────┴─────────┘                           \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-code-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " ┌──────────────────────────────────────────────────────────────────┬─────────┐ \r\n │ URL                                                              │ Note    │ \r\n ├──────────────────────────────────────────────────────────────────┼─────────┤ \r\n │ https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/s\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ rc/link.rs#L10-L20                                               │         │ \r\n └──────────────────────────────────────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-bare-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " ┌──────────────────────────────────────────────────────────────────┬─────────┐ \r\n │ URL                                                              │ Note    │ \r\n ├──────────────────────────────────────────────────────────────────┼─────────┤ \r\n │ \u001b[34m\u001b[4mhttps://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/s\u001b[24m\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ \u001b[4;34mrc/link.rs#L10-L20\u001b[24m\u001b[39m                                               │         │ \r\n └──────────────────────────────────────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-label-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " ┌──────────────────────────────────────────────────────────────────┬─────────┐ \r\n │ URL                                                              │ Note    │ \r\n ├──────────────────────────────────────────────────────────────────┼─────────┤ \r\n │ \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m\u001b[22;23;24;25;27;28;29;39m                                                           │ example │ \r\n │ \u001b[2m(https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/\u001b[22;23;24;25;27;28;29;39m │         │ \r\n │ \u001b[2msrc/link.rs#L10-L20)\u001b[22m                                             │         │ \r\n └──────────────────────────────────────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-label-table-wiki-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " ┌───────────────────────────────────────────────────────────────┬─────────┐    \r\n │ URL                                                           │ Note    │    \r\n ├───────────────────────────────────────────────────────────────┼─────────┤    \r\n │ \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Function_(mathematics))\u001b[22m │ example │    \r\n └───────────────────────────────────────────────────────────────┴─────────┘    \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-80-code-table-on",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 80,
+  "printed": " ┌──────────────────────────────────────────────────────────────────┬─────────┐ \r\n │ URL                                                              │ Note    │ \r\n ├──────────────────────────────────────────────────────────────────┼─────────┤ \r\n │ https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/s\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ rc/link.rs#L10-L20                                               │         │ \r\n └──────────────────────────────────────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-bare-table-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": " ┌──────────────────────────────────────────────────────────────────┬─────────┐ \r\n │ URL                                                              │ Note    │ \r\n ├──────────────────────────────────────────────────────────────────┼─────────┤ \r\n │ \u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mhttps://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/s\u001b[24m\u001b]8;;\u001b\\\u001b[22;23;24;25;27;28;29;39m │ example │ \r\n │ \u001b[4;34m\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\rc/link.rs#L10-L20\u001b[24m\u001b[39m\u001b]8;;\u001b\\                                               │         │ \r\n └──────────────────────────────────────────────────────────────────┴─────────┘ \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-label-table-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": " ┌────────┬─────────┐                                                           \r\n │ URL    │ Note    │                                                           \r\n ├────────┼─────────┤                                                           \r\n │ \u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\ │ example │                                                           \r\n └────────┴─────────┘                                                           \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-80-label-table-wiki-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 80,
+  "printed": " ┌────────┬─────────┐                                                           \r\n │ URL    │ Note    │                                                           \r\n ├────────┼─────────┤                                                           \r\n │ \u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\ │ example │                                                           \r\n └────────┴─────────┘                                                           \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-code-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": " ┌────────────────────────────────────────────────────────────────────────────────────┬─────────┐                       \r\n │ URL                                                                                │ Note    │                       \r\n ├────────────────────────────────────────────────────────────────────────────────────┼─────────┤                       \r\n │ https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20 │ example │                       \r\n └────────────────────────────────────────────────────────────────────────────────────┴─────────┘                       \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-bare-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": " ┌────────────────────────────────────────────────────────────────────────────────────┬─────────┐                       \r\n │ URL                                                                                │ Note    │                       \r\n ├────────────────────────────────────────────────────────────────────────────────────┼─────────┤                       \r\n │ \u001b[34m\u001b[4mhttps://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b[24m\u001b[39m │ example │                       \r\n └────────────────────────────────────────────────────────────────────────────────────┴─────────┘                       \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-label-table-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": " ┌─────────────────────────────────────────────────────────────────────────────────────────────┬─────────┐              \r\n │ URL                                                                                         │ Note    │              \r\n ├─────────────────────────────────────────────────────────────────────────────────────────────┼─────────┤              \r\n │ \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20)\u001b[22m │ example │              \r\n └─────────────────────────────────────────────────────────────────────────────────────────────┴─────────┘              \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-label-table-wiki-off",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": " ┌───────────────────────────────────────────────────────────────┬─────────┐                                            \r\n │ URL                                                           │ Note    │                                            \r\n ├───────────────────────────────────────────────────────────────┼─────────┤                                            \r\n │ \u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b[2m (https://en.wikipedia.org/wiki/Function_(mathematics))\u001b[22m │ example │                                            \r\n └───────────────────────────────────────────────────────────────┴─────────┘                                            \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=0"
+ },
+ {
+  "id": "pi-120-code-table-on",
+  "harness": "pi",
+  "mode": "plain",
+  "width": 120,
+  "printed": " ┌────────────────────────────────────────────────────────────────────────────────────┬─────────┐                       \r\n │ URL                                                                                │ Note    │                       \r\n ├────────────────────────────────────────────────────────────────────────────────────┼─────────┤                       \r\n │ https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20 │ example │                       \r\n └────────────────────────────────────────────────────────────────────────────────────┴─────────┘                       \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-bare-table-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": " ┌────────────────────────────────────────────────────────────────────────────────────┬─────────┐                       \r\n │ URL                                                                                │ Note    │                       \r\n ├────────────────────────────────────────────────────────────────────────────────────┼─────────┤                       \r\n │ \u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mhttps://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b[24m\u001b[39m\u001b]8;;\u001b\\ │ example │                       \r\n └────────────────────────────────────────────────────────────────────────────────────┴─────────┘                       \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-label-table-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": " ┌────────┬─────────┐                                                                                                   \r\n │ URL    │ Note    │                                                                                                   \r\n ├────────┼─────────┤                                                                                                   \r\n │ \u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\ │ example │                                                                                                   \r\n └────────┴─────────┘                                                                                                   \r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "pi-120-label-table-wiki-on",
+  "harness": "pi",
+  "mode": "osc8",
+  "width": 120,
+  "printed": " ┌────────┬─────────┐                                                                                                   \r\n │ URL    │ Note    │                                                                                                   \r\n ├────────┼─────────┤                                                                                                   \r\n │ \u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u001b\\\u001b[34m\u001b[4mSource\u001b[24m\u001b[39m\u001b]8;;\u001b\\ │ example │                                                                                                   \r\n └────────┴─────────┘                                                                                                   \r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "pi-tui 1.5.0 Markdown.render, ANSI-only theme, PI_HYPERLINKS=1"
+ },
+ {
+  "id": "claude-wiki-plain",
+  "harness": "claude-code",
+  "mode": "plain",
+  "width": 160,
+  "printed": "Source (https://en.wikipedia.org/wiki/Function_(mathematics))\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "none",
+  "source": "Claude Code 2.1.319 Cb, hyperlinks off (what a launch gets)"
+ },
+ {
+  "id": "claude-github-plain",
+  "harness": "claude-code",
+  "mode": "plain",
+  "width": 160,
+  "printed": "Source (https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20)\r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "none",
+  "source": "Claude Code 2.1.319 Cb, hyperlinks off (what a launch gets)"
+ },
+ {
+  "id": "claude-bayes-plain",
+  "harness": "claude-code",
+  "mode": "plain",
+  "width": 160,
+  "printed": "Source (https://en.wikipedia.org/wiki/Bayes'_theorem)\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "none",
+  "source": "Claude Code 2.1.319 Cb, hyperlinks off (what a launch gets)"
+ },
+ {
+  "id": "claude-encoded-plain",
+  "harness": "claude-code",
+  "mode": "plain",
+  "width": 160,
+  "printed": "Source (https://example.com/a%28b%29)\r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "none",
+  "source": "Claude Code 2.1.319 Cb, hyperlinks off (what a launch gets)"
+ },
+ {
+  "id": "claude-yahoo-plain",
+  "harness": "claude-code",
+  "mode": "plain",
+  "width": 160,
+  "printed": "Source (https://en.wikipedia.org/wiki/Yahoo!)\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Yahoo!",
+  "expect": "none",
+  "source": "Claude Code 2.1.319 Cb, hyperlinks off (what a launch gets)"
+ },
+ {
+  "id": "claude-wiki-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007\u001b[94mSource\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb under FORCE_HYPERLINK=1 and TERM_PROGRAM=ConsensFlow (not set by a launch)"
+ },
+ {
+  "id": "claude-wiki-bare-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007\u001b[94mhttps://en.wikipedia.org/wiki/Function_(mathematics)\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb(address) under FORCE_HYPERLINK=1 (not set by a launch)"
+ },
+ {
+  "id": "claude-github-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007\u001b[94mSource\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb under FORCE_HYPERLINK=1 and TERM_PROGRAM=ConsensFlow (not set by a launch)"
+ },
+ {
+  "id": "claude-github-bare-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007\u001b[94mhttps://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb(address) under FORCE_HYPERLINK=1 (not set by a launch)"
+ },
+ {
+  "id": "claude-bayes-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007\u001b[94mSource\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb under FORCE_HYPERLINK=1 and TERM_PROGRAM=ConsensFlow (not set by a launch)"
+ },
+ {
+  "id": "claude-bayes-bare-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007\u001b[94mhttps://en.wikipedia.org/wiki/Bayes'_theorem\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb(address) under FORCE_HYPERLINK=1 (not set by a launch)"
+ },
+ {
+  "id": "claude-encoded-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u0007\u001b[94mSource\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb under FORCE_HYPERLINK=1 and TERM_PROGRAM=ConsensFlow (not set by a launch)"
+ },
+ {
+  "id": "claude-encoded-bare-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u0007\u001b[94mhttps://example.com/a%28b%29\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb(address) under FORCE_HYPERLINK=1 (not set by a launch)"
+ },
+ {
+  "id": "claude-yahoo-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Yahoo!\u0007\u001b[94mSource\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Yahoo!",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb under FORCE_HYPERLINK=1 and TERM_PROGRAM=ConsensFlow (not set by a launch)"
+ },
+ {
+  "id": "claude-yahoo-bare-osc8",
+  "harness": "claude-code",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Yahoo!\u0007\u001b[94mhttps://en.wikipedia.org/wiki/Yahoo!\u001b[39m\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Yahoo!",
+  "expect": "exact",
+  "source": "Claude Code 2.1.319 Cb(address) under FORCE_HYPERLINK=1 (not set by a launch)"
+ },
+ {
+  "id": "codex-actual-0",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-0",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007https://en.wikipedia.org/wik\u001b]8;;\u0007\r\n\u001b]8;;https://en.wikipedia.org/wiki/Function_(mathematics)\u0007i/Function_(mathematics)\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Function_(mathematics)",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ },
+ {
+  "id": "codex-actual-1",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-1",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007https://github.com/ngvoicu/c\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007onsensflow/blob/main/app/src\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007-tauri/src/link.rs#L10-L20\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ },
+ {
+  "id": "codex-actual-2",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-2",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://example.com/a%28b%29\u0007https://example.com/a%28b%29\u001b]8;;\u0007\r\n",
+  "destination": "https://example.com/a%28b%29",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ },
+ {
+  "id": "codex-actual-3",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 160,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
+ },
+ {
+  "id": "codex-hardwrap-3",
+  "harness": "codex",
+  "mode": "osc8",
+  "width": 28,
+  "printed": "\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007https://en.wikipedia.org/wik\u001b]8;;\u0007\r\n\u001b]8;;https://en.wikipedia.org/wiki/Bayes'_theorem\u0007i/Bayes'_theorem\u001b]8;;\u0007\r\n",
+  "destination": "https://en.wikipedia.org/wiki/Bayes'_theorem",
+  "expect": "exact",
+  "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
+ }
+]

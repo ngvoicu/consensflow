@@ -888,3 +888,62 @@ replace = '''      - uses: actions/download-artifact@v8
         run: Invoke-Command -FilePath "$env:RUNNER_TEMP\publisher\cf-publish.ps1"
       # The two files people download, in a folder of their own, laid out as the
 '''
+
+[[plant]]
+name = "workflow: a hand run is given no notes to read"
+meant = "a_hand_run_takes_its_notes_as_the_dispatch_s_input"
+runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''  workflow_dispatch:
+    inputs:
+      # The notes the tag will carry, handed to the run that tries the release
+      # before it is tagged. Left empty, the notes are the commits since the
+      # previous release.
+      notes:
+        description: 'The release notes, as the tag will carry them'
+        required: false
+        type: string
+'''
+replace = '''  workflow_dispatch:
+'''
+
+[[plant]]
+name = "workflow: a hand run given the dispatch's notes writes the commits instead"
+meant = "a_run_given_the_dispatch_s_notes_reads_them_as_the_tag_s_run_reads_the_tag_s"
+runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''          if [ ! -s "$out/notes.txt" ] && [ -n "${TRIAL_NOTES:-}" ]; then
+            printf '%s\n' "$TRIAL_NOTES" > "$out/notes.txt"
+          fi
+'''
+replace = ""
+
+[[plant]]
+name = "workflow: the fallback notes are written whole, past the feed's 64 KiB"
+meant = "the_fallback_is_cut_under_the_feeds_limit_at_a_whole_line_saying_what_was_left_out"
+runs = ["workflow"]
+# Its test runs the steps under bash or parses them with ruby, which the Windows machines lack.
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = ".github/workflows/release.yml"
+find = '''            } | LC_ALL=C awk '
+              BEGIN { room = 64 * 1024 - 128 }
+              NR <= 2 { print; room -= length($0) + 1; next }
+              length($0) + 1 <= room { print; room -= length($0) + 1; next }
+              { left += 1 }
+              END {
+                if (left) printf "- %d commits left out, the log cut to keep the notes under 64 KiB\n", left
+              }
+            ' > "$out/notes.txt"
+'''
+replace = '''            } > "$out/notes.txt"
+'''

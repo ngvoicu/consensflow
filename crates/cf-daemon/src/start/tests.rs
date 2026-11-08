@@ -301,7 +301,11 @@ async fn its_input_ending_stops_it_within_the_apps_two_seconds_and_ends_its_log_
             let root = tempfile::tempdir().unwrap();
             let rig = started(root.path()).await;
             ask(&rig.app, "ping", json!({})).await;
-            let started = Instant::now();
+            // In the clock of the timers the stop waits on, not the machine's (as `stop::tests`
+            // counts): the stop's own work goes to the disk and takes what the disk gives, and the
+            // machine's clock failed bounds of a stop that waited for nothing on a CI Windows.
+            tokio::time::pause();
+            let started = tokio::time::Instant::now();
             // The app closes the daemon's input.
             rig.app.close();
             tokio::time::timeout(Duration::from_secs(5), rig.daemon.finished())
@@ -312,6 +316,7 @@ async fn its_input_ending_stops_it_within_the_apps_two_seconds_and_ends_its_log_
                 "{:?}",
                 started.elapsed()
             );
+            tokio::time::resume();
             assert_eq!(*rig.exited.borrow(), [0]);
             assert_log_ends_as_the_app_reads_it(&rig.home, "stdin ended");
             assert_eq!(rig.said.text(), "");

@@ -135,16 +135,22 @@ async fn whoever_waits_for_the_latch_is_told_why_when_it_is_tripped_and_at_once_
         .await;
 }
 
-#[tokio::test]
+// "Nothing waits" is counted in the clock of the timers a stop waits on, not the machine's: the
+// stop's own work (its first line in the log, the ledger's close) goes to the disk and takes what
+// the disk gives, and a bound of 300 ms on the machine's clock failed twice on a CI Windows that
+// no test of ours was loading (runs 40958716065 and 42365070150). A stop that waits is a stop on
+// a timer, the deadline's, and time stands still unless one is waited on.
+#[tokio::test(start_paused = true)]
 async fn a_stop_says_why_and_how_big_the_daemon_is_and_ends_the_log_with_exit_0() {
     LocalSet::new()
         .run_until(async {
             let rig = rig(idle_pass()).await;
-            let started = Instant::now();
+            let started = tokio::time::Instant::now();
             rig.stopping.run("stdin ended").await;
             assert!(
-                started.elapsed() < Duration::from_millis(300),
-                "nothing waits"
+                started.elapsed() < Duration::from_millis(50),
+                "nothing waits: {:?}",
+                started.elapsed()
             );
             let lines = log_lines(&rig);
             assert_eq!(lines.len(), 2, "{lines:?}");
@@ -154,6 +160,30 @@ async fn a_stop_says_why_and_how_big_the_daemon_is_and_ends_the_log_with_exit_0(
             let megabytes: u64 = size.strip_suffix(" MB").unwrap().parse().unwrap();
             assert!(megabytes > 0);
             assert_eq!(lines[1], "info exit 0");
+            assert_eq!(*rig.exited.borrow(), [0]);
+        })
+        .await;
+}
+
+// The machine stalls the tail of a stop that waits for nothing for half a second, as a loaded CI
+// Windows did: the stall is the machine's time, and none of what the stop waited.
+#[tokio::test(start_paused = true)]
+async fn a_machine_that_stalls_in_the_tail_of_an_idle_stop_changes_nothing_of_what_it_waited() {
+    LocalSet::new()
+        .run_until(async {
+            let mut rig = rig(idle_pass()).await;
+            let ends = Rc::clone(&rig.stopping.ends_children);
+            rig.stopping.ends_children = Rc::new(move || {
+                std::thread::sleep(Duration::from_millis(500));
+                ends();
+            });
+            let started = tokio::time::Instant::now();
+            rig.stopping.run("stdin ended").await;
+            assert!(
+                started.elapsed() < Duration::from_millis(50),
+                "nothing waits: {:?}",
+                started.elapsed()
+            );
             assert_eq!(*rig.exited.borrow(), [0]);
         })
         .await;
@@ -279,21 +309,33 @@ async fn a_pass_that_never_ends_a_door_an_idle_connection_and_a_body_half_sent_c
         .await;
 }
 
+// Counted in the clock of the timers it waits on, as the test above is: the connections are
+// opened in real time and time stands still from the ask. A stop that waited for the door or
+// the idle connection waits out the whole deadline on its timer; the machine's own clock was 409
+// ms on a CI Windows for a stop that waited for nothing (and is no measure of one that did).
 #[tokio::test]
 async fn with_only_doors_and_idle_connections_open_the_stop_is_prompt() {
     LocalSet::new()
         .run_until(async {
-            let rig = rig(idle_pass()).await;
+            let mut rig = rig(idle_pass()).await;
+            // The machine stalls the tail for longer than the deadline, as a CI runner's disk
+            // can: it is the machine's time, and none of what the stop waited for.
+            let ends = Rc::clone(&rig.stopping.ends_children);
+            rig.stopping.ends_children = Rc::new(move || {
+                std::thread::sleep(DEADLINE + Duration::from_millis(200));
+                ends();
+            });
             let mut door = raw(&rig.stopping.api, "GET /door HTTP/1.1\r\nHost: t\r\n\r\n").await;
             let _idle = TcpStream::connect(rig.stopping.api.url().strip_prefix("http://").unwrap())
                 .await
                 .unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
-            let started = Instant::now();
+            tokio::time::pause();
+            let started = tokio::time::Instant::now();
             rig.stopping.run("stdin ended").await;
             // It waited for neither: a stop that did waits out the whole deadline.
-            // How far under it is the machine's (CI's Windows took 409 ms).
             assert!(started.elapsed() < DEADLINE, "{:?}", started.elapsed());
+            tokio::time::resume();
             let mut answered = Vec::new();
             door.read_to_end(&mut answered).await.unwrap();
             assert!(String::from_utf8_lossy(&answered).contains(r#"{"answer":null}"#));

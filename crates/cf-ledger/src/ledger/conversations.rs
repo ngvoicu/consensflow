@@ -6,7 +6,8 @@ use serde_json::Value;
 use super::Ledger;
 use crate::{
     conversations, ChiefConversation, ChiefOpenWork, ChiefSwitch, ConversationView, HistoryAsk,
-    HistoryRead, LastSwitch, LedgerError, MessageOpening, ProjectView, TaskTranscript, TextPart,
+    HistoryKey, HistoryRead, LastSwitch, LedgerError, MessageParties, ProjectView, TaskTranscript,
+    TextPart,
 };
 
 impl Ledger {
@@ -79,11 +80,21 @@ impl Ledger {
         conversations::read_history_part(&self.store, project_id, handle, conversation, row, from)
     }
 
-    /// Message `id` as far as a delivery's line names it: no further than its
-    /// opening ([`crate::MESSAGE_OPENING`] bytes of its body), its body never
-    /// read whole.
-    pub fn message_opening(&self, id: i64) -> Result<Option<MessageOpening>, LedgerError> {
-        conversations::message_opening(&self.store, id)
+    /// Where the one item of participant `handle`'s history that may still be written
+    /// stands: the newest of its conversation now (none where it has none).
+    pub fn live_item(
+        &self,
+        project_id: i64,
+        handle: &str,
+    ) -> Result<Option<HistoryKey>, LedgerError> {
+        conversations::live_item(&self.store, project_id, handle)
+    }
+
+    /// Message `id` as far as the history page needs it, to tell whether a
+    /// delivery names one of a participant's: its project, recipient and
+    /// sender. Its body is never read.
+    pub fn message_parties(&self, id: i64) -> Result<Option<MessageParties>, LedgerError> {
+        conversations::message_parties(&self.store, id)
     }
 
     /// What waits on the chief now, for a chief that takes over.

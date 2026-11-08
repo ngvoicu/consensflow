@@ -21,6 +21,7 @@ mod daemon;
 mod daemon_command;
 mod file_drop;
 mod launcher;
+mod link;
 #[cfg(windows)]
 mod page_crash;
 mod panics;
@@ -465,6 +466,7 @@ pub(crate) fn page_commands<R: Runtime>(
         updates::update_download,
         updates::update_install,
         updates::update_open_page,
+        link::open_link,
         selftest_report,
         #[cfg(any(test, feature = "test-support"))]
         selftest_panic,

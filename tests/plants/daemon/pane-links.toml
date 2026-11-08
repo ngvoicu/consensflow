@@ -1,0 +1,450 @@
+# A link in a pane opens in the human's browser (T-1291, Gabriel, 2026-11-07: "yes turn on the links"):
+# an OSC 8 hyperlink, words with the address behind them, is a link in every pane, and the rules
+# stand, each held by a test:
+#
+# - **only an OSC 8 hyperlink is a link** (the third review, T-1323, after the first two mended a
+#   reader of plain addresses twice): an address a program prints as text is no link in any form,
+#   whole or not, with no underline and no click. From the screen alone it cannot be told whole:
+#   Pi lays its text out in rows of its own and writes them with CR/LF, which cut an address inside
+#   a table cell well short of the pane's edge, and no rule that reads the text can be sure of the
+#   layout. A program that wants a link makes it an OSC 8 hyperlink, which carries its address
+#   whole on every row it is drawn on;
+# - the pointer on a link underlines it and says in the terminal's title what opens it and where it
+#   goes, the address too (words can hide any); the title goes when the pointer does;
+# - a click opens it only with the system's key held (Cmd on a Mac, Ctrl on Windows, as VS Code's
+#   terminal does) and with the primary button: a click into a pane to type, the other system's key,
+#   another button, or a pane whose program has taken the mouse, opens nothing without them;
+# - what the page asks of the app is the address as the program printed it (`open_link`), and an OSC 8
+#   address that is no web page (`file:`, `javascript:`, `data:`, an app's own scheme) is no link;
+# - the app opens only a web page (`http` or `https`), of no more than 2,048 characters, with no
+#   control character in what was printed (the parser would drop a tab or a line break from the middle
+#   of it), and hands the system's opener the address as the parser writes it, as one argument and
+#   no shell between (`app/src-tauri/src/link.rs`, the update's download page opened the same way);
+#   a refusal is said in the status line;
+# - on Windows the system's opener is `ShellExecuteW` with the verb `open`, the address as the file
+#   and no parameters (Explorer read a comma and an equals sign of a checked address as its own
+#   arguments; the review of T-1291, T-1301), its answer is read and 32 or less is a refusal the
+#   status line shows, a refused COM start is said, and the update's download page opens the same
+#   way (T-1315); a test build opens no page unless the test stands an opener in, and never reaches
+#   the system's own;
+# - a Pi launch tells Pi the pane draws OSC 8 (`PI_HYPERLINKS=1`), so its links are hyperlinks; a
+#   Claude Code launch tells it nothing (`FORCE_HYPERLINK=1` made the commands its window runs write
+#   OSC 8 into their output, T-1323), and its links are text, which is no link;
+# - the page replays what Pi, Claude Code and Codex print (`app/tests/fixtures/pane-links/`, 89
+#   cases): an OSC 8 hyperlink opens exactly its address, from any row it is drawn on, and an
+#   address in text opens nothing.
+#
+# A plant that falls through to the system's opener runs a harmless stand-in in its place: the
+# plant of the fail-closed rule says "opens" with `|_| Ok(())`, for a plant that really opened
+# a page would do on the machine of whoever runs it what the rule is there to stop (T-1291's first
+# run opened `file:///etc/passwd` on the Mac). Explorer cannot be planted back for the same reason
+# (the only Explorer left in the app is `update_page::open_with`, which starts a program): the
+# plants of the Windows route say a page opened and ask the shell nothing instead.
+#
+# One plant takes one rule out; a test of it fails. The page's run the browser's, the app's the tests
+# of the link module on this system, and the launch's the launch tests of cf-harness; the xterm they
+# stand on is the tracked `app/ui/vendor`, so no plant bundles it. Every name holds `pane links`, so `npm run plants:daemon -- "pane links"` runs them all.
+
+[run]
+pl-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pane links"]
+pl-app = ["cargo", "xtask", "app", "test", "link::"]
+pl-update = ["cargo", "xtask", "app", "test", "update_page::"]
+pl-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch"]
+
+# --- the page: when a click opens a link ---
+
+[[plant]]
+name = "pane links: a click without the system's key opens a link"
+meant = "pane links on a Mac › a click without Cmd opens nothing, nor does the other system's key, nor another button"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)"
+replace = "const opensLink = (event) => event.button === 0"
+
+[[plant]]
+name = "pane links: the other system's key opens a link too"
+meant = "pane links on a Mac › a click without Cmd opens nothing, nor does the other system's key, nor another button"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)"
+replace = "event.button === 0 && (event.metaKey || event.ctrlKey)"
+
+[[plant]]
+name = "pane links: a click of any button opens a link"
+meant = "pane links on a Mac › a click without Cmd opens nothing, nor does the other system's key, nor another button"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)"
+replace = "(MAC ? event.metaKey : event.ctrlKey)"
+
+# --- the page: what is a link, and what it says ---
+
+[[plant]]
+name = "pane links: an OSC 8 hyperlink is left to xterm's own handler"
+meant = "pane links on a Mac › an OSC 8 hyperlink shows its address in the title where its words hide it, and Cmd+click opens exactly that address"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "      linkHandler: { ...link, allowNonHttpProtocols: false },\n"
+replace = ""
+
+[[plant]]
+name = "pane links: an OSC 8 address that is no web page is a link too"
+meant = "pane links on a Mac › an OSC 8 hyperlink to a file, a script, data or an app scheme is no link and reaches nothing"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "linkHandler: { ...link, allowNonHttpProtocols: false },"
+replace = "linkHandler: { ...link, allowNonHttpProtocols: true },"
+
+[[plant]]
+name = "pane links: the title does not say where a link goes"
+meant = "pane links on a Mac › an OSC 8 hyperlink shows its address in the title where its words hide it, and Cmd+click opens exactly that address"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "title = `${LINK_KEY}+click to open ${uri}`"
+replace = "title = `${LINK_KEY}+click to open`"
+
+[[plant]]
+name = "pane links: the title stays after the pointer has left a link"
+meant = "pane links on a Mac › an OSC 8 hyperlink shows its address in the title where its words hide it, and Cmd+click opens exactly that address"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "      leave: () => this.terminal.element?.removeAttribute('title'),\n"
+replace = "      leave: () => {},\n"
+
+[[plant]]
+name = "pane links: a refusal of the app is not said"
+meant = "pane links on a Mac › a refusal of the app shows in the status line, and the link goes on working"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      if (opened?.ok !== true) {"
+replace = "      if (opened?.ok === undefined) {"
+
+# --- the app: what may open, and how ---
+
+[[plant]]
+name = "pane links: an address of another scheme opens"
+meant = "an_address_that_is_no_web_page_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = '''
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(format!(
+            "Only http and https addresses open, not {}:",
+            url.scheme()
+        ));
+    }
+'''
+replace = ''
+
+[[plant]]
+name = "pane links: an address of any length opens"
+meant = "an_address_of_more_than_2048_characters_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = '''
+    if address.chars().count() > MAX_CHARS {
+        return Err(format!("The address is longer than {MAX_CHARS} characters"));
+    }
+'''
+replace = ''
+
+[[plant]]
+name = "pane links: the length of an address is counted in bytes"
+meant = "an_address_of_more_than_2048_characters_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = "if address.chars().count() > MAX_CHARS {"
+replace = "if address.len() > MAX_CHARS {"
+
+[[plant]]
+name = "pane links: an address with a control character opens"
+meant = "an_address_with_a_control_character_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = '''
+    if address.chars().any(char::is_control) {
+        return Err("The address has a control character".into());
+    }
+'''
+replace = ''
+
+[[plant]]
+name = "pane links: the control characters are looked for in what the parser makes of the address"
+meant = "an_address_with_a_control_character_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = "if address.chars().any(char::is_control) {"
+replace = "if Url::parse(address).is_ok_and(|url| url.as_str().chars().any(char::is_control)) {"
+
+[[plant]]
+name = "pane links: the opener is given the address as the program printed it"
+meant = "an_address_is_opened_as_the_parser_writes_it"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = "    open(checked(address)?.as_str())"
+replace = "    checked(address)?;\n    open(address)"
+
+[[plant]]
+name = "pane links: the command is not one of the page's"
+meant = "the_page_is_told_why_an_address_did_not_open_and_one_that_may_is_opened"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "        link::open_link,\n"
+replace = ""
+
+[[plant]]
+name = "pane links: the opener is started through a shell"
+meant = "the_address_reaches_the_systems_opener_as_one_argument_with_no_shell_between"
+runs = ["pl-app"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = "    let mut command = Command::new(opener);\n"
+replace = '''    let mut command = Command::new("/bin/sh");
+    command.arg("-c").arg(format!("{} {}", opener.display(), page));
+'''
+
+# --- Windows: the shell opens the page, and says if it could not (T-1307) ---
+
+[[plant]]
+name = "pane links: Windows says a page opened and asks the shell nothing"
+meant = "on_windows_the_system_opener_is_shellexecute_with_the_address_as_the_file"
+runs = ["pl-app"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = """        shell::open(address)
+"""
+replace = """        Ok(())
+"""
+
+[[plant]]
+name = "pane links: the shell is asked for another verb"
+meant = "the_shell_is_asked_to_open_the_address_as_the_file_with_no_parameters"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = """        verb: wide("open"),
+        file: wide(address),"""
+replace = """        verb: wide("explore"),
+        file: wide(address),"""
+
+[[plant]]
+name = "pane links: the shell is given the address as its parameters too"
+meant = "the_shell_is_asked_to_open_the_address_as_the_file_with_no_parameters"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = """        file: wide(address),
+        parameters: None,"""
+replace = """        file: wide(address),
+        parameters: Some(wide(address)),"""
+
+[[plant]]
+name = "pane links: an answer of 32 from the shell is taken for a start"
+meant = "an_answer_of_32_or_less_is_a_refusal_the_page_is_told"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    if code > 32 {"
+replace = "    if code >= 32 {"
+
+[[plant]]
+name = "pane links: any answer of the shell above 0 is taken for a start"
+meant = "an_answer_of_32_or_less_is_a_refusal_the_page_is_told"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    if code > 32 {"
+replace = "    if code > 0 {"
+
+[[plant]]
+name = "pane links: the shell's answer is not read"
+meant = "an_answer_of_32_or_less_is_a_refusal_the_page_is_told"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    result_of(execute(&call_for(address))?)"
+replace = """    execute(&call_for(address))?;
+    Ok(())"""
+
+# --- a test build never reaches the system's opener ---
+
+[[plant]]
+name = "pane links: a test build with no stand-in opener falls through to the system's"
+meant = "a_test_build_with_no_stand_in_opener_opens_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link.rs"
+find = """            None => Err("a test build opens no page unless the test stands an opener in".into()),"""
+replace = """            None => open_with(|_| Ok(()), address),"""
+
+# --- a Pi launch asks Pi for hyperlinks (T-1315) ---
+
+[[plant]]
+name = "pane links: Pi's launch does not say the pane draws hyperlinks"
+meant = "launches_pi_with_its_extension_a_session_name_of_ours_and_no_task_or_role_text_on_its_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''                    .chain([(HYPERLINKS.0.to_owned(), HYPERLINKS.1.to_owned())])
+'''
+replace = ""
+
+[[plant]]
+name = "pane links: Pi's launch asks for hyperlinks with a zero"
+meant = "launches_pi_with_its_extension_a_session_name_of_ours_and_no_task_or_role_text_on_its_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''const HYPERLINKS: (&str, &str) = ("PI_HYPERLINKS", "1");'''
+replace = '''const HYPERLINKS: (&str, &str) = ("PI_HYPERLINKS", "0");'''
+
+[[plant]]
+name = "pane links: the download page is not opened through the shell"
+meant = "on_windows_the_download_page_opens_through_the_shell_and_its_answer_is_read"
+runs = ["pl-update"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = "        crate::link::shell::open(page)\n"
+replace = "        Ok(())\n"
+
+[[plant]]
+name = "pane links: a test build opens the download page"
+meant = "a_test_build_opens_no_download_page"
+runs = ["pl-update"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = '''        Err(format!("a test build opens no page: {page}"))
+'''
+replace = "        Ok(())\n"
+
+[[plant]]
+name = "pane links: a COM start that changed mode is an error"
+meant = "a_com_start_that_succeeded_is_ended_one_that_changed_mode_is_not_and_any_other_is_said"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "        RPC_E_CHANGED_MODE => Ok(false),\n"
+replace = ""
+
+[[plant]]
+name = "pane links: a refused COM start is gone on without"
+meant = "a_com_start_that_succeeded_is_ended_one_that_changed_mode_is_not_and_any_other_is_said"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "        started if started >= 0 => Ok(true),\n"
+replace = "        _ => Ok(true),\n"
+
+[[plant]]
+name = "pane links: a COM start is ended whether or not it was ours"
+meant = "the_shell_is_asked_between_com_s_start_and_its_end_and_a_refused_start_asks_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    if ours {\n        end();\n    }\n"
+replace = "    end();\n"
+
+[[plant]]
+name = "pane links: the shell is asked on a thread COM refused"
+meant = "the_shell_is_asked_between_com_s_start_and_its_end_and_a_refused_start_asks_nothing"
+runs = ["pl-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/link/shell.rs"
+find = "    let ours = com_started(start())?;\n"
+replace = "    let ours = com_started(start()).unwrap_or(false);\n"
+
+# --- the third review (T-1323): only an OSC 8 hyperlink is a link ---
+
+[[plant]]
+name = "pane links: a plain address is a link again"
+meant = "pane links on a Mac › a plain URL is no link: no underline, no title, and Cmd+click opens nothing"
+runs = ["pl-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.open(host)\n"
+replace = '''    this.terminal.registerLinkProvider({
+      provideLinks: (y, done) => {
+        const text = this.terminal.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+        const found = /https?:\/\/\S+/i.exec(text)
+        done(
+          found
+            ? [
+                {
+                  range: {
+                    start: { x: found.index + 1, y },
+                    end: { x: found.index + found[0].length, y },
+                  },
+                  text: found[0],
+                  ...link,
+                },
+              ]
+            : undefined,
+        )
+      },
+    })
+    this.terminal.open(host)
+'''
+
+[[plant]]
+name = "pane links: Claude Code's launch forces hyperlinks on the commands it runs"
+meant = "launches_a_fresh_worker_on_its_own_session_id_in_full_permission_mode_its_task_on_no_command_line"
+runs = ["pl-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''const QUIET: [(&str, &str); 1] = [("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1")];'''
+replace = '''const QUIET: [(&str, &str); 2] = [
+    ("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1"),
+    ("FORCE_HYPERLINK", "1"),
+];'''
