@@ -269,13 +269,13 @@ runs = ["lm-members"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '''        let listing = self.get(harness, false).await?;
-        if listing.models.is_empty() {'''
-replace = '''        let listing = self.get(harness, false).await?;
-        if listing.models.is_empty() {
+find = '''        if listing.models.is_empty() {
+            return self.unread(match &listing.freshness {'''
+replace = '''        if listing.models.is_empty() {
             return Ok(None);
         }
-        if false {'''
+        if false {
+            return self.unread(match &listing.freshness {'''
 
 [[plant]]
 name = "live models: an edit that says it changes nothing is checked"
