@@ -7,7 +7,7 @@
 //! [`Daemon`] is the program and what is done to it; [`Home`] is the place it
 //! runs in, with the turn it takes to run there ([`crate::serial`]).
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::BufReader;
 use std::ops::Deref;
 use std::process::ChildStdout;
@@ -19,6 +19,11 @@ use serde_json::Value;
 
 use crate::process::{Run, Signal, Sink, Spawned};
 use crate::wire::{self, First};
+
+/// The variable that has the daemon take a model on its harness's word where that harness's list
+/// cannot be read (`cf_daemon::models::UNREAD_MODELS_VARIABLE`, which a test of the daemon holds
+/// to this name: the rig is a black box and depends on no crate of the product).
+const UNREAD_MODELS_ARE_TAKEN: &str = "CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN";
 use crate::{bundle, cf, checkout, files, serial, Error, Result, ScratchHome};
 
 /// How long a daemon has to say it is ready.
@@ -125,6 +130,15 @@ impl Daemon {
         V: AsRef<OsStr>,
     {
         let own = bundle::copy_of(program, &bundle::folder(root))?;
+        // The rig's stand-in harnesses list no model, and its cases open projects on models of
+        // their own: the daemon takes a model on its harness's word where that cannot be read
+        // (what every daemon did before A4-28), and checks it where it can. A person's has no
+        // such variable.
+        let vars: Vec<(OsString, OsString)> = vars
+            .into_iter()
+            .map(|(name, value)| (name.as_ref().to_owned(), value.as_ref().to_owned()))
+            .chain([(OsString::from(UNREAD_MODELS_ARE_TAKEN), OsString::from("1"))])
+            .collect();
         Self::run(own, ["ui", "--json", "--no-open"], vars)
     }
 

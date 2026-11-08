@@ -235,6 +235,58 @@ fn every_ask_reads_the_harness_and_the_refresh_fetches() {
     }
 }
 
+/// A harness whose list cannot be read has no list to check a pick against: refused, with why,
+/// unless the environment has the daemon take it on the harness's word (the rigs', whose stand-in
+/// harnesses list nothing); where the list can be read it is checked either way.
+#[test]
+fn a_pick_on_a_harness_that_cannot_be_read_is_refused_unless_the_environment_takes_it_on_its_word()
+{
+    for (taken, expected) in [(false, Err("Not logged in".to_owned())), (true, Ok(None))] {
+        let folder = home(&["devin"]);
+        let env = if taken {
+            folder.env.clone().with_var(UNREAD_MODELS_VARIABLE, "1")
+        } else {
+            folder.env.clone()
+        };
+        let devin = Listing::answering([
+            Err("Not logged in".to_owned()),
+            Err("Not logged in".to_owned()),
+        ]);
+        let lists = ModelLists::new(Rc::new(ByKind(vec![("devin", Rc::clone(&devin))])), env);
+        assert_eq!(
+            done(lists.checked(Harness::Devin, None)),
+            expected,
+            "taken: {taken}"
+        );
+    }
+    // Where the list can be read it is the list, whatever the variable says.
+    let folder = home(&["devin"]);
+    let env = folder.env.clone().with_var(UNREAD_MODELS_VARIABLE, "1");
+    let devin = Listing::answering([Ok(models(&["swe-2"], 1_000))]);
+    let lists = ModelLists::new(Rc::new(ByKind(vec![("devin", devin)])), env);
+    let listing = done(lists.checked(Harness::Devin, None)).unwrap().unwrap();
+    assert_eq!(listing.models[0].id, "swe-2");
+}
+
+#[test]
+fn the_variable_that_has_a_daemon_take_unread_models_on_their_word_is_named_as_the_rig_names_it() {
+    assert_eq!(
+        UNREAD_MODELS_VARIABLE,
+        "CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN"
+    );
+    let env = Env::from_vars([("PATH", "/bin")]);
+    assert!(!unread_models_are_taken(&env));
+    assert!(!unread_models_are_taken(
+        &env.clone().with_var(UNREAD_MODELS_VARIABLE, "0")
+    ));
+    assert!(!unread_models_are_taken(
+        &env.clone().with_var(UNREAD_MODELS_VARIABLE, "")
+    ));
+    assert!(unread_models_are_taken(
+        &env.with_var(UNREAD_MODELS_VARIABLE, "1")
+    ));
+}
+
 /// The reads a submission can be checked against are the last of each harness, by id, and an id
 /// names a read of its own harness only.
 #[test]

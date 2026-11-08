@@ -36,6 +36,18 @@ use tokio::sync::Mutex;
 /// How many of the reads of each harness a submission can still be checked against.
 pub const KEPT_READS: usize = 8;
 
+/// The variable that has a daemon take a model on its harness's word where that harness's list
+/// cannot be read, as every daemon did before A4-28: the rigs' (`cf-e2e`), whose stand-in
+/// harnesses list nothing and whose cases open projects on models of their own. A person's daemon
+/// has none. Where the list can be read, a pick is checked against it all the same.
+pub const UNREAD_MODELS_VARIABLE: &str = "CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN";
+
+/// Whether `env` has the daemon take a model on its harness's word where its list cannot be read.
+pub fn unread_models_are_taken(env: &Env) -> bool {
+    env.text(UNREAD_MODELS_VARIABLE)
+        .is_some_and(|set| !set.is_empty() && set != "0")
+}
+
 /// One read of a harness: the listing it answered, and the id the page sends back with a
 /// submission made from it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +60,9 @@ pub struct ModelRead {
 pub struct ModelLists {
     adapters: Rc<dyn Adapters>,
     env: Env,
+    /// Whether a pick on a harness whose list cannot be read is taken at the human's word
+    /// ([`UNREAD_MODELS_VARIABLE`]): never, in a person's daemon.
+    takes_unread: bool,
     /// One turn for each harness, held through each read of it: two probes of one harness at
     /// once have hung (two Pi's). The harnesses do not wait for one another.
     reading: RefCell<HashMap<Harness, Rc<Mutex<()>>>>,
@@ -67,6 +82,7 @@ impl ModelLists {
     pub fn new(adapters: Rc<dyn Adapters>, env: Env) -> Self {
         Self {
             adapters,
+            takes_unread: unread_models_are_taken(&env),
             env,
             reading: RefCell::new(HashMap::new()),
             begun: RefCell::new(HashMap::new()),
@@ -171,14 +187,27 @@ impl ModelLists {
         if self.adapters.adapter(harness.kind()).is_none() {
             return Ok(None);
         }
-        let listing = self.get(harness, false).await?;
+        let listing = match self.get(harness, false).await {
+            Ok(listing) => listing,
+            Err(why) => return self.unread(why),
+        };
         if listing.models.is_empty() {
-            return Err(match &listing.freshness {
+            return self.unread(match &listing.freshness {
                 Freshness::Stale { why } => why.clone(),
                 Freshness::Fresh => "it lists no model".to_owned(),
             });
         }
         Ok(Some(listing))
+    }
+
+    /// What a harness whose list cannot be read comes to: a refusal that says why, or, in a daemon
+    /// the environment has take such a pick on its word ([`UNREAD_MODELS_VARIABLE`]), no list.
+    fn unread(&self, why: String) -> Result<Option<ModelListing>, String> {
+        if self.takes_unread {
+            Ok(None)
+        } else {
+            Err(why)
+        }
     }
 
     /// Records `listing` as a read of `harness`, as the page would have been shown it: what a
