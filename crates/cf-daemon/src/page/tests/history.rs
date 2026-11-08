@@ -576,7 +576,10 @@ async fn marks_each_delivery_by_its_own_message_and_never_loads_a_body_whole() {
                 let opening = format!("Read part {at} first\n");
                 let body = format!("{opening}{}", "x".repeat(1_000_000 - opening.len()));
                 let id = note(&rig, harbour, "human", "chief", &body);
-                let text = format!("[ConsensFlow m-{id} · note from @human]\n{opening}{}", "x".repeat(15_000));
+                let text = format!(
+                    "[ConsensFlow m-{id} · note from @human]\n{opening}{}",
+                    "x".repeat(15_000)
+                );
                 delivered.push((id, item(&format!("u-{at}"), "user", &text)));
             }
             let items: Vec<Value> = delivered.iter().map(|(_, item)| item.clone()).collect();
@@ -586,8 +589,17 @@ async fn marks_each_delivery_by_its_own_message_and_never_loads_a_body_whole() {
                 .copy_transcript(conversation.id, &items, 0)
                 .unwrap();
             // A read that loaded one body whole would fail.
-            rig.kit.ledger.borrow().limit_value_length(512 * 1024).unwrap();
-            let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
+            rig.kit
+                .ledger
+                .borrow()
+                .limit_value_length(512 * 1024)
+                .unwrap();
+            let answer = ask(
+                &app,
+                "history.get",
+                json!({ "project": harbour, "handle": "chief" }),
+            )
+            .await;
             let said = answer.to_string();
             assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
             let marks: Vec<&Value> = answer["history"]["items"]
@@ -603,9 +615,15 @@ async fn marks_each_delivery_by_its_own_message_and_never_loads_a_body_whole() {
 }
 
 /// What `history.get` reserved of its bound for a delivery's opening, before it
-/// stopped reserving any: a search whose whole walk costs between this much
-/// under the bound and the bound itself went short of its end.
+/// stopped reserving any: a search whose whole walk ends within this much under
+/// the bound went short of its end.
 const ONCE_RESERVED: usize = 4_352;
+
+/// How far under its bound the search of the test below ends: within what was
+/// reserved ([`ONCE_RESERVED`]), and past what the read holds back to be able to
+/// say that nothing is older (a conversation's lookup, 4,096 bytes), so that it
+/// steps to the oldest item and ends there only where nothing is reserved.
+const SHORT_OF_THE_BOUND: usize = 4_200;
 
 #[tokio::test]
 async fn a_search_runs_to_the_whole_of_its_bound_and_finds_what_stands_at_its_very_end() {
@@ -641,33 +659,41 @@ async fn a_search_runs_to_the_whole_of_its_bound_and_finds_what_stands_at_its_ve
                     .unwrap();
                 copied += items.len() as i64;
             };
-            // What a search for words that are nowhere goes through, all of it, as it is charged.
+            // What the search goes through, all of it, as it is charged, with no bound to stop it.
             let walked = || -> usize {
                 let ask = HistoryAsk {
                     from: HistoryFrom::Newest,
-                    find: Some("words that are nowhere"),
+                    find: Some("look AT the docs"),
                     tools: false,
                     room: PAGE_BYTES,
                     scan: 4 * HISTORY_SCAN_BYTES,
                 };
-                let read = rig.kit.ledger.borrow().read_history(harbour, "chief", &ask).unwrap();
-                assert!(!read.bounded && read.entries.is_empty());
+                let read = rig
+                    .kit
+                    .ledger
+                    .borrow()
+                    .read_history(harbour, "chief", &ask)
+                    .unwrap();
+                assert!(!read.bounded && read.entries.len() == 1);
                 read.charged
             };
             let mut start = vec![item("found", "user", words)];
             start.extend(fillers(0, 300, 50_000));
             copy(start);
             // One more of the same size says what an item costs, and so how many more fit,
-            // and how long the last must be for the whole walk to end a kilobyte short of its bound.
+            // and how long the last must be for the whole walk to end [`SHORT_OF_THE_BOUND`] under its bound.
             let before = walked();
             copy(fillers(300, 1, 50_000));
             let after = walked();
             let each = after - before;
-            let more = (HISTORY_SCAN_BYTES - 1_000 - after) / each;
+            let more = (HISTORY_SCAN_BYTES - SHORT_OF_THE_BOUND - after) / each;
             copy(fillers(301, more, 50_000));
-            let rest = HISTORY_SCAN_BYTES - 1_000 - after - more * each;
+            let rest = HISTORY_SCAN_BYTES - SHORT_OF_THE_BOUND - after - more * each;
             let besides = each - 50_000;
-            assert!(rest > besides, "{rest} bytes left for the last item, {besides} of them its own");
+            assert!(
+                rest > besides,
+                "{rest} bytes left for the last item, {besides} of them its own"
+            );
             copy(fillers(301 + more, 1, rest - besides));
             let whole = walked();
             assert!(
@@ -689,8 +715,170 @@ async fn a_search_runs_to_the_whole_of_its_bound_and_finds_what_stands_at_its_ve
                 .map(|item| item["id"].as_str().unwrap())
                 .collect();
             assert_eq!(found, ["found"], "{}", &said[..said.len().min(300)]);
-            assert_eq!(answer["history"]["partial"], false);
-            assert_eq!(answer["history"]["older"], Value::Null);
+            assert_eq!(
+                answer["history"]["partial"],
+                false,
+                "{}",
+                &said[..said.len().min(300)]
+            );
+            assert_eq!(
+                answer["history"]["older"],
+                Value::Null,
+                "{}",
+                &said[..said.len().min(300)]
+            );
+        })
+        .await;
+}
+
+/// An item a reader said is not complete: the assistant's message that is not the turn's
+/// last answer (Claude Code's before a call, Pi's before a step), written as the copy keeps it.
+fn unfinished(id: &str, role: &str, text: &str) -> Value {
+    json!({ "id": id, "role": role, "text": text, "complete": false, "at": "2026-10-16T09:00:00.000Z" })
+}
+
+/// The `(id, complete)` of each item `history.get` gave for `handle`, tools' outputs left out.
+async fn flags(app: &Bridge, project: i64, handle: &str) -> Vec<(String, bool)> {
+    let answer = ask(
+        app,
+        "history.get",
+        json!({ "project": project, "handle": handle }),
+    )
+    .await;
+    assert_eq!(answer["ok"], true, "{answer}");
+    answer["history"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            (
+                item["id"].as_str().unwrap().to_owned(),
+                item["complete"] == true,
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn an_assistant_item_that_ended_is_not_still_writing_and_one_that_ended_without_words_is_not_shown(
+) {
+    // The recorded Claude session's shape (T-1178's six empty records, and the messages a
+    // Pi session says before each of its steps): the assistant's messages before the turn's
+    // last answer are never complete, whatever their reader saw of them; a message of a
+    // call alone has no words. The conversation goes on after them, so none is being
+    // written; the newest item of the conversation, which is, keeps saying so.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            let copy = |items: &[Value]| {
+                rig.kit
+                    .ledger
+                    .borrow_mut()
+                    .copy_transcript(conversation.id, items, 0)
+                    .unwrap();
+            };
+            let mut turn = vec![
+                item("u-1", "user", "Run it"),
+                unfinished("a-1", "assistant", ""),
+                item("t-1", "tool", "ok 12 passed"),
+                unfinished("a-2", "assistant", "Looking at the file."),
+                item("t-2", "tool", "fn main() {}"),
+                item("a-3", "assistant", "Done."),
+                item("u-2", "user", "Again"),
+            ];
+            // Being written: its words so far, and the turn is not over.
+            turn.push(unfinished("a-4", "assistant", "Working on"));
+            copy(&turn);
+            assert_eq!(
+                flags(&app, harbour, "chief").await,
+                [("u-1", true), ("a-2", true), ("a-3", true), ("u-2", true), ("a-4", false)]
+                    .map(|(id, complete)| (id.to_owned(), complete)),
+                "a-1 said nothing and was passed over; a-2 ended (the turn went on); a-4 is being written"
+            );
+            // The window goes on: the message is complete, and a new one has just begun with no
+            // words yet. That one is the newest, so it is shown, being written.
+            turn[7] = item("a-4", "assistant", "Working on it, done.");
+            turn.push(unfinished("a-5", "assistant", ""));
+            copy(&turn);
+            let seen = flags(&app, harbour, "chief").await;
+            assert_eq!(seen.last(), Some(&("a-5".to_owned(), false)), "{seen:?}");
+            assert!(seen.contains(&("a-4".to_owned(), true)), "{seen:?}");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn the_last_item_of_a_conversation_that_ended_is_not_still_writing() {
+    // The human switched the chief: the old conversation's last item will not be written
+    // any more, and the newest item of the new one is the one that may be.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let first = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    first.id,
+                    &[
+                        item("u-1", "user", "Go"),
+                        unfinished("a-1", "assistant", "Cut off"),
+                    ],
+                    0,
+                )
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .switch_chief(
+                    harbour,
+                    &ChiefSwitch {
+                        harness: "codex".into(),
+                        model: "maia".into(),
+                        effort: None,
+                        cut: false,
+                    },
+                )
+                .unwrap();
+            let second = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "codex")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    second.id,
+                    &[unfinished("m-1", "assistant", "Taking over")],
+                    0,
+                )
+                .unwrap();
+            assert_eq!(
+                flags(&app, harbour, "chief").await,
+                [("u-1", true), ("a-1", true), ("m-1", false)]
+                    .map(|(id, complete)| (id.to_owned(), complete)),
+            );
         })
         .await;
 }

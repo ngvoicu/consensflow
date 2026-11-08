@@ -25,7 +25,6 @@ mod messages;
 pub mod model;
 mod model_lists;
 mod names;
-mod openings;
 mod page_reads;
 mod projects;
 mod questions;
@@ -39,6 +38,7 @@ mod tasks;
 /// What the players of Node's recordings share, and the tests of this crate use.
 #[cfg(feature = "test-support")]
 pub mod testing;
+mod text;
 mod views;
 mod wake_ups;
 
@@ -46,7 +46,7 @@ pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
     DeletedProject, EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead,
     HistoryRow, ItemDetail, Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView,
-    MessageOpening, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
+    MessageParties, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
     RemovedMember, Resume, Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited,
     TaskMoved, TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView,
     TextCut, TextPart,
@@ -54,7 +54,7 @@ pub use cf_proto::ledger::{
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
     ChiefSwitch, HistoryAsk, FIELD_MAX, HISTORY_FIND_MAX, HISTORY_PART, HISTORY_SCAN_BYTES,
-    ID_SHOWN, MESSAGE_OPENING, NATIVE_SESSION_MAX, OPENING_COST, TRANSCRIPT_ITEM_MAX,
+    ID_SHOWN, NATIVE_SESSION_MAX, TRANSCRIPT_ITEM_MAX,
 };
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;

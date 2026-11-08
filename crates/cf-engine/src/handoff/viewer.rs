@@ -10,11 +10,18 @@
 //! of the app's bridge carries ([`PAGE_BYTES`]). It goes on from a place, the
 //! oldest item shown or the newest, that does not move under it, so a page
 //! never repeats an item another showed nor skips one, whatever is added,
-//! grows or is copied again meanwhile. A delivery ConsensFlow made to this participant says its outcome in
-//! one line, as `cf history` says it, from the opening of the message it names,
-//! each opening charged against what the read may still go through; its whole
-//! text is there too, for the page to open on a click. A long item shows a
-//! part, and is read whole a part at a time, by its place.
+//! grows or is copied again meanwhile. A delivery ConsensFlow made to this
+//! participant is marked with where it begins in the item's text, after what
+//! the human typed with it (the viewer draws it whole, in one block); only the
+//! message it names being this participant's makes it one, and nothing of the
+//! message is read for that but its parties. A long item shows a part, and is
+//! read whole a part at a time, by its place.
+//!
+//! Only the one item that may still be written says so: a reader marks an assistant's
+//! message complete when it is the turn's last answer, and no other (every message before
+//! it, Claude Code's of a call alone and Pi's before a step, stays unfinished for good), so
+//! an item behind a later one, or in a conversation that ended, is shown complete however
+//! its reader left it, and an assistant's message that ended with no words is not shown.
 //!
 //! Every item fits a page, the first too: it shows a part of its text at
 //! most, and every other text a page shows of it is [`SHOWN_FIELD`] characters
@@ -23,15 +30,12 @@
 use cf_base::refusal::Refusal;
 use cf_base::text::utf16_len;
 use cf_ledger::{
-    HistoryFrom, HistoryKey, HistoryRead, HistoryRow, ItemDetail, MessageOpening, TextCut,
-    OPENING_COST, PAGE_BYTES,
+    HistoryFrom, HistoryKey, HistoryRead, HistoryRow, ItemDetail, TextCut, PAGE_BYTES,
 };
-use cf_proto::cf_word::CfWord;
 use serde::Serialize;
 
-use super::entries::{message_id, outcome_line};
+use super::entries::message_id;
 use super::text::{delivered, typed_before};
-use super::Gist;
 
 /// How many bytes of items a page holds: the frame, less what the page says
 /// besides them.
@@ -43,11 +47,15 @@ pub const HISTORY_ROOM: usize = PAGE_BYTES - 1_024;
 /// many and "…".
 pub const SHOWN_FIELD: usize = 256;
 
-/// A message's opening by its id, in this project and this participant's
-/// only: what a delivery's line is said from. A line may name any number, and
-/// only the participant's own messages are read out, so the lookup says none
-/// for another's.
-pub type Openings<'a> = &'a dyn Fn(i64) -> Result<Option<MessageOpening>, Refusal>;
+/// Whether message `id` is one of this project's and this participant's, sent
+/// to it or by it. A header may name any number, and only the participant's own
+/// messages make a delivery, so the lookup says no for another's and for one
+/// not on record.
+pub type Owns<'a> = &'a dyn Fn(i64) -> Result<bool, Refusal>;
+
+/// Where the one item that may still be written stands (the ledger's `live_item`): none
+/// where the participant has no item in its conversation now.
+pub type Live = Option<HistoryKey>;
 
 /// One page of a participant's history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -75,12 +83,14 @@ pub struct ShownItem {
     pub role: String,
     /// Whole, or the part `cut` says.
     pub text: String,
+    /// Whether the item is written: the page says it is unfinished only of the one item
+    /// that may be ([`whole_history_page`]), whatever its reader said.
     pub complete: bool,
     pub at: Option<String>,
     /// The summary a compaction wrote in the user's place.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub compaction: bool,
-    /// A delivery ConsensFlow made to this participant, in one line.
+    /// A delivery ConsensFlow made to this participant: where it begins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delivery: Option<Delivery>,
     /// The text shown is a part of a longer one, which the page reads whole.
@@ -92,47 +102,51 @@ pub struct ShownItem {
     pub detail: Option<ItemDetail>,
 }
 
-/// A delivery's line, and where in the item's text the delivery begins (in
-/// UTF-16 code units): what comes before it is what the human typed with it.
+/// Where in the item's text a delivery begins (in UTF-16 code units): what
+/// comes before it is what the human typed with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Delivery {
-    pub line: String,
     pub at: usize,
 }
 
 /// The page of `read`, the ledger's read from `from`. Its items are taken in
 /// the order the read went while the page has room for them, the first always.
-/// `opening` gives the opening of a message a delivery names, where it is one
-/// this participant was sent or sent: a header that names any other is the
-/// item's text, as it is. Each opening read is charged [`OPENING_COST`]
-/// against `left`, what the read may still go through: an item whose opening
-/// does not fit ends the page before it, as one the page has no room for
-/// does, but the first, which `left` holds room for.
+/// `owns` says whether a message a delivery names is one this participant was
+/// sent or sent: a header that names any other is the item's text, as it is.
+/// The lookup is by the message's row alone, one for each row the read has
+/// already charged; the page charges the read nothing for it.
+///
+/// `live` is where the one item that may still be written stands. Of the rest the page
+/// says they are complete, and an assistant's message with no words is gone through and
+/// not shown: it was a call's alone, or begun and never written, and the turn went on.
 pub fn whole_history_page(
     read: &HistoryRead,
     from: HistoryFrom,
-    opening: Openings<'_>,
-    left: usize,
+    owns: Owns<'_>,
+    live: Live,
 ) -> Result<WholeHistoryPage, Refusal> {
     let mut items: Vec<ShownItem> = Vec::new();
     let mut used = 0;
-    let mut spent = 0;
+    // How many of the read's entries the page went through: those it shows, and those it
+    // passed over, so that the places it goes on from are past both.
+    let mut gone_through = 0;
     for row in &read.entries {
-        let folds = folded(row).is_some_and(|(_, (_, ledger_id))| ledger_id.is_some());
-        let reading = if folds { OPENING_COST } else { 0 };
-        if !items.is_empty() && spent + reading > left {
-            break;
+        let written = live == Some(HistoryKey { part: 0, ..row.key }) && !row.item.complete;
+        if !written && said_nothing(row) {
+            gone_through += 1;
+            continue;
         }
-        spent += reading;
-        let item = shown(row, opening)?;
+        let mut item = shown(row, owns)?;
+        item.complete |= !written;
         let cost = bytes(&item) + 1;
         if !items.is_empty() && used + cost > HISTORY_ROOM {
             break;
         }
         used += cost;
         items.push(item);
+        gone_through += 1;
     }
-    let taken = &read.entries[..items.len()];
+    let taken = &read.entries[..gone_through];
     let trimmed = taken.len() < read.entries.len();
     // Where the next page each way goes on from: past the last item taken where
     // the page was full, else where the read stopped; and back from the first.
@@ -155,14 +169,14 @@ pub fn whole_history_page(
     })
 }
 
-/// Where item `row` holds a delivery the page says in one line, where the
+/// Where item `row` holds a delivery the page marks, where the
 /// delivery begins in the text (after what the human typed with it, none of it
 /// where only Claude's own placeholders and wrapper opening precede the header:
-/// `typed_before`) and the id the header names, as a line writes it and as the
-/// ledger holds one (none where no message could be it): what is neither a
-/// tool's output, an agent's words nor a compaction's summary, shown from its
-/// start, and holds a delivery's header.
-fn folded(row: &HistoryRow) -> Option<(usize, (String, Option<i64>))> {
+/// `typed_before`) and the id the header names, as the ledger holds one (none
+/// where no message could be it): what is neither a tool's output, an agent's
+/// words nor a compaction's summary, shown from its start, and holds a
+/// delivery's header.
+fn folded(row: &HistoryRow) -> Option<(usize, Option<i64>)> {
     let item = &row.item;
     let said = item.role == "tool" || item.role == "assistant" || item.compaction;
     let from_the_start = row.cut.is_none_or(|cut| cut.from == 0);
@@ -174,18 +188,16 @@ fn folded(row: &HistoryRow) -> Option<(usize, (String, Option<i64>))> {
             } else {
                 header.at
             };
-            (at, message_id(header.id))
+            (at, message_id(header.id).1)
         })
 }
 
 /// An item as a page shows it: a delivery this participant was sent or sent,
-/// as its line, said from the message's opening.
-fn shown(row: &HistoryRow, opening: Openings<'_>) -> Result<ShownItem, Refusal> {
+/// marked with where it begins.
+fn shown(row: &HistoryRow, owns: Owns<'_>) -> Result<ShownItem, Refusal> {
     let item = &row.item;
     let delivery = match folded(row) {
-        Some((at, (id, Some(ledger_id)))) => opening(ledger_id)?.map(|found| Delivery {
-            // The human's page: the commands as the board shows them, bare.
-            line: outcome_line(&id, &Gist::from(&found), &CfWord::bare()),
+        Some((at, Some(ledger_id))) if owns(ledger_id)? => Some(Delivery {
             at: utf16_len(&item.text[..at]),
         }),
         _ => None,
@@ -203,6 +215,19 @@ fn shown(row: &HistoryRow, opening: Openings<'_>) -> Result<ShownItem, Refusal> 
         cut: row.cut,
         detail: item.detail.clone(),
     })
+}
+
+/// Whether `row` is an assistant's message with no words to show: not a part of a longer
+/// text, and drawn as words (a reader that said it is another kind of item says so).
+fn said_nothing(row: &HistoryRow) -> bool {
+    let item = &row.item;
+    item.role == "assistant"
+        && item.text.trim().is_empty()
+        && row.cut.is_none()
+        && item
+            .detail
+            .as_ref()
+            .is_none_or(|detail| detail.kind == "text")
 }
 
 /// `text` as a page shows a text that is no item's own: [`SHOWN_FIELD`]
