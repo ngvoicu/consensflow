@@ -385,3 +385,138 @@ fn a_restart_after_a_compaction_the_chief_has_had_a_turn_since_sets_the_shape_up
     let choice = alone.next(&idle).unwrap();
     assert_eq!((choice.lacks, choice.recompact), (None, false));
 }
+
+#[test]
+fn the_schedule_owes_the_project_nothing_once_played_and_a_disruption_waits_until_it_is_due() {
+    let mut schedule = Schedule::new(
+        &[Disruption::Pause, Disruption::Switch],
+        minutes(8),
+        "claude",
+        &staff(&["claude", "codex"]),
+    );
+    // Before the first is due it waits; from then on it is due.
+    assert_eq!(schedule.owed(minutes(7)), Owed::Later);
+    assert_eq!(schedule.owed(minutes(8)), Owed::Due);
+    assert_eq!(schedule.owed(minutes(60)), Owed::Due);
+    // The next is due the interval after the one before was played, not before.
+    schedule.played(Disruption::Pause, minutes(40), "strict".to_owned());
+    assert_eq!(schedule.owed(minutes(47)), Owed::Later);
+    assert_eq!(schedule.owed(minutes(48)), Owed::Due);
+    assert_eq!(schedule.waiting().unwrap().disruption, Disruption::Switch);
+    // Once the last is played, or failed, or closed unplayed, nothing is owed.
+    schedule.failed(Disruption::Switch, minutes(48), "no effect".to_owned());
+    assert_eq!(schedule.owed(minutes(60)), Owed::Nothing);
+    assert!(schedule.waiting().is_none());
+}
+
+#[test]
+fn a_disruption_that_cannot_be_played_here_or_a_run_that_plays_none_owes_nothing() {
+    // No Devin on the staff: the Devin cut is impossible from the start, and nothing waits.
+    let schedule = Schedule::new(
+        &[Disruption::DevinCut],
+        minutes(8),
+        "claude",
+        &staff(&["claude"]),
+    );
+    assert_eq!(schedule.owed(minutes(300)), Owed::Nothing);
+    let none = Schedule::new(&[], minutes(8), "claude", &staff(&["claude"]));
+    assert_eq!(none.owed(minutes(300)), Owed::Nothing);
+    assert!(none.done());
+}
+
+#[test]
+fn the_looks_after_a_disruption_is_due_that_found_no_moment_for_it_are_kept() {
+    let mut schedule = Schedule::new(
+        &[Disruption::DevinCut],
+        minutes(8),
+        "claude",
+        &staff(&["claude", "devin"]),
+    );
+    // Not yet due: not a look for it.
+    schedule.searched(&moment(minutes(7), vec![worker("w", "claude", true, true)]));
+    assert_eq!(schedule.planned[0].searched, Searched::default());
+    // Due: a Claude worker at work in a tool is no Devin; a rest; a Devin at work, no tool.
+    schedule.searched(&moment(minutes(9), vec![worker("w", "claude", true, true)]));
+    let mut resting = moment(minutes(10), Vec::new());
+    resting.chief_idle = true;
+    schedule.searched(&resting);
+    let mut busy_chief = moment(minutes(11), vec![worker("d", "devin", true, false)]);
+    busy_chief.chief_idle = false;
+    schedule.searched(&busy_chief);
+    assert_eq!(
+        schedule.planned[0].searched,
+        Searched {
+            looks: 3,
+            at_work: 2,
+            in_tool: 1,
+            devin: 1,
+            chief_at_rest: 2,
+        }
+    );
+    // A worker not at work on a task is no worker at work.
+    let mut idle = worker("d", "devin", false, false);
+    idle.task = None;
+    schedule.searched(&moment(minutes(12), vec![idle]));
+    assert_eq!(schedule.planned[0].searched.looks, 4);
+    assert_eq!(schedule.planned[0].searched.at_work, 2);
+    // Once played, a disruption is looked for no more (the next waiting is the one counted).
+    schedule.played(Disruption::DevinCut, minutes(12), "loose".to_owned());
+    schedule.searched(&moment(minutes(20), Vec::new()));
+    assert_eq!(schedule.planned[0].searched.looks, 4);
+}
+
+#[test]
+fn a_disruption_not_played_says_what_its_shape_needed_and_what_the_looks_found_of_the_staff() {
+    let mut schedule = Schedule::new(
+        &[Disruption::Pause, Disruption::DevinCut, Disruption::Suspend],
+        minutes(8),
+        "claude",
+        &staff(&["claude", "devin"]),
+    );
+    schedule.played(Disruption::Pause, minutes(9), "strict".to_owned());
+    // The Devin cut is due at 17 minutes: three looks, none with a Devin at work.
+    for at in [18, 19, 20] {
+        schedule.searched(&moment(
+            minutes(at),
+            vec![worker("w", "claude", true, at == 19)],
+        ));
+    }
+    schedule.close("time ran out before its moment came");
+    let reasons: Vec<&str> = schedule
+        .not_played()
+        .iter()
+        .map(|planned| match &planned.state {
+            State::NotPlayed(why) => why.as_str(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        reasons[0],
+        "time ran out before its moment came: it needs a Devin worker at work on a task, mid-tool \
+         (any of its turns at work once half an interval is gone); 3 looks after its time, +17 min, \
+         found no moment for it: a worker at work on a task at 3, a tool or job running at 1, \
+         a Devin worker at work at 0, the chief at rest at 3"
+    );
+    // The suspension was played after the Devin cut, in order, and waited behind it.
+    assert_eq!(
+        reasons[1],
+        "time ran out before its moment came: it needs a worker at work on a task; \
+         it waited behind devin-cut, which was not played: they are played one at a time, in order"
+    );
+    // A disruption whose time had not come when the run ended says so, with its time.
+    let mut early = Schedule::new(
+        &[Disruption::Pause],
+        minutes(8),
+        "claude",
+        &staff(&["claude"]),
+    );
+    early.close("the project ended before its moment came");
+    assert_eq!(
+        early.not_played()[0].state,
+        State::NotPlayed(
+            "the project ended before its moment came: it needs a worker at work on a task, mid-tool \
+             (any turn at work once half an interval is gone); its time, +8 min, had not come"
+                .to_owned()
+        )
+    );
+}

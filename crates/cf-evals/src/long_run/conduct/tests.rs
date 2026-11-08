@@ -319,6 +319,7 @@ fn going() -> Going {
         ledger: None,
         prober: Box::new(Asked::default()),
         edge: Edge::default(),
+        extra: Vec::new(),
     }
 }
 
@@ -554,6 +555,8 @@ fn a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_r
         filled: &run.keeper.filled,
         timeline: &run.timeline,
         stalls: &run.stalls,
+        extra: &[],
+        extra_listed: 2,
         ending: DONE.to_owned(),
         error: None,
         login: None,
@@ -669,6 +672,8 @@ fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its
         filled: &run.keeper.filled,
         timeline: &run.timeline,
         stalls: &run.stalls,
+        extra: &[],
+        extra_listed: 2,
         ending: DONE.to_owned(),
         error: Some(format!("the rig could not close: {secret}")),
         login: None,
@@ -1031,5 +1036,77 @@ fn the_timeline_says_the_records_were_read_once_more_after_the_close_and_how_man
     assert_eq!(
         read_again(&one),
         "the records were read once more after the close: 1 conversation, 0 readings failed"
+    );
+}
+
+#[test]
+fn the_owner_is_told_what_the_schedule_still_owes_the_project_at_each_look() {
+    let names = ["claude".to_owned(), "devin".to_owned()];
+    let mut schedule = Schedule::new(
+        &[Disruption::Pause, Disruption::Suspend],
+        Duration::from_secs(480),
+        "claude",
+        &names,
+    );
+    use crate::run::owner::Owed;
+    let accepted = serde_json::json!({ "number": 1, "state": "accepted" });
+    let working = serde_json::json!({ "number": 2, "state": "working" });
+    let at = |elapsed: u64| (Duration::from_secs(elapsed), Duration::from_secs(30));
+    // The project is done: the chief at rest, every task accepted. A disruption waits, and it
+    // is due only at eight minutes.
+    let quiet = seen_at(Some(IDLE), &[&accepted], at(7 * 60), &schedule);
+    assert!(!quiet.busy && !quiet.board_empty && !quiet.dialog);
+    assert_eq!(quiet.owed, Owed::Later);
+    assert_eq!(
+        seen_at(Some(IDLE), &[&accepted], at(8 * 60), &schedule).owed,
+        Owed::Due
+    );
+    // Staff at work, or the chief not at rest, is busy; a chief waiting on a dialog says so.
+    let staff = seen_at(Some(IDLE), &[&accepted, &working], at(0), &schedule);
+    assert!(staff.busy && staff.staff_at_work);
+    // The chief's own turn is busy, and no staff at work: a piece it answers with words alone
+    // puts nothing on the board.
+    let chief = seen_at(Some("working"), &[&accepted], at(0), &schedule);
+    assert!(chief.busy && !chief.staff_at_work);
+    assert!(!quiet.staff_at_work);
+    assert!(seen_at(Some("waiting"), &[], at(0), &schedule).dialog);
+    // Every disruption played: nothing is owed, however late.
+    schedule.played(
+        Disruption::Pause,
+        Duration::from_secs(500),
+        "strict".to_owned(),
+    );
+    schedule.played(
+        Disruption::Suspend,
+        Duration::from_secs(1000),
+        "strict".to_owned(),
+    );
+    assert_eq!(
+        seen_at(Some(IDLE), &[&accepted], at(5000), &schedule).owed,
+        Owed::Nothing
+    );
+}
+
+#[test]
+fn a_disruption_not_played_says_how_the_run_ended_and_whether_the_owner_gave_the_staff_work() {
+    assert_eq!(
+        why_not_played(TIME_UP, 0),
+        "time ran out before its moment came, and the owner gave no extra work"
+    );
+    assert_eq!(
+        why_not_played(TIME_UP, 1),
+        "time ran out before its moment came, though the owner gave 1 piece of extra work"
+    );
+    assert_eq!(
+        why_not_played(TIME_UP, 3),
+        "time ran out before its moment came, though the owner gave 3 pieces of extra work"
+    );
+    assert_eq!(
+        why_not_played(STOPPED, 0),
+        "the run stopped before its moment came, and the owner gave no extra work"
+    );
+    assert_eq!(
+        why_not_played(DONE, 2),
+        "the project ended before its moment came, though the owner gave 2 pieces of extra work"
     );
 }

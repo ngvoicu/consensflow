@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use super::disruptions::{Schedule, State};
-use super::invariants::{Break, Filled, Unjudged, INVARIANTS};
+use super::invariants::{Break, Filled, Unjudged, END, INVARIANTS};
 use super::known::{self, Known, KNOWN};
 use super::options::Options;
 use super::staff::{Found, LeftOut};
@@ -64,6 +64,10 @@ pub struct Kept<'a> {
     /// What the run kept of a window that stalled, and of every window at an end the
     /// project did not reach: evidence, which fails nothing.
     pub stalls: &'a Stalls,
+    /// When the owner gave a piece of extra work, in milliseconds, in turn, and how many pieces
+    /// the scenario lists.
+    pub extra: &'a [i64],
+    pub extra_listed: usize,
     /// How the run ended: `the project is done`, `time ran out`…
     pub ending: String,
     /// What stopped the run before its end, if anything did.
@@ -72,6 +76,17 @@ pub struct Kept<'a> {
     /// windows ran on (refreshed: the owner's may be stale), if it did anything.
     pub login: Option<String>,
     pub log: Value,
+}
+
+/// How many of a run's disruptions came to each state.
+struct Counts {
+    played: usize,
+    /// Of the played, those played without the field's shape they are for.
+    without_shape: usize,
+    failed: usize,
+    impossible: usize,
+    not_played: usize,
+    waiting: usize,
 }
 
 impl Kept<'_> {
@@ -158,10 +173,21 @@ impl Kept<'_> {
             )
         }));
         if self.ending == TIME_UP {
-            why.push(format!(
-                "time ran out: the run did not reach its end within its budget of {} min",
-                self.options.budget.as_secs() / 60
-            ));
+            let unplayed = self.schedule.not_played().len();
+            why.push(if self.project_ended() && unplayed > 0 {
+                // The project did reach its end (9); it is the schedule that did not: each
+                // disruption not played is told above, with why it found no shape.
+                format!(
+                    "time ran out: the budget of {} min was spent with the project done and {unplayed} of {} disruptions not played",
+                    self.options.budget.as_secs() / 60,
+                    self.schedule.planned.len()
+                )
+            } else {
+                format!(
+                    "time ran out: the run did not reach its end within its budget of {} min",
+                    self.options.budget.as_secs() / 60
+                )
+            });
         }
         if let Some(login) = &self.login {
             why.push(if words {
@@ -179,6 +205,118 @@ impl Kept<'_> {
             });
         }
         why
+    }
+
+    /// Whether the project reached its end within the budget: the end (9) held. It says
+    /// nothing of the schedule of disruptions, which has its own count.
+    fn project_ended(&self) -> bool {
+        !self.breaks.iter().any(|found| found.invariant == END)
+    }
+
+    /// How many of the run's disruptions came to each state, and how many were played
+    /// without the field's shape.
+    fn disruption_counts(&self) -> Counts {
+        let count = |wanted: fn(&State) -> bool| {
+            self.schedule
+                .planned
+                .iter()
+                .filter(|planned| wanted(&planned.state))
+                .count()
+        };
+        Counts {
+            played: count(|state| matches!(state, State::Played { .. })),
+            without_shape: self.schedule.without_their_shape().len(),
+            failed: count(|state| matches!(state, State::Failed { .. })),
+            impossible: count(|state| matches!(state, State::Impossible(_))),
+            not_played: count(|state| matches!(state, State::NotPlayed(_))),
+            waiting: count(|state| matches!(state, State::Waiting)),
+        }
+    }
+
+    /// The project, the time and the disruptions, each told apart: a run is held to all three,
+    /// and a project done early, a budget not spent and a schedule not played are three things.
+    fn coverage(&self) -> Value {
+        let Counts {
+            played,
+            without_shape,
+            failed,
+            impossible,
+            not_played,
+            waiting,
+        } = self.disruption_counts();
+        let seconds = |at: i64| (at - self.started).max(0) / 1000;
+        json!({
+            "project": { "ended": self.project_ended(), "ending": self.ending },
+            "elapsed": {
+                "seconds": seconds(self.ended),
+                "budgetSeconds": self.options.budget.as_secs(),
+            },
+            "disruptions": {
+                "planned": self.schedule.planned.len(),
+                "played": played,
+                "playedWithoutShape": without_shape,
+                "failed": failed,
+                "impossible": impossible,
+                "notPlayed": not_played,
+                "waiting": waiting,
+            },
+            "extraWork": {
+                "given": self.extra.len(),
+                "listed": self.extra_listed,
+                "atSeconds": self.extra.iter().map(|at| seconds(*at)).collect::<Vec<_>>(),
+            },
+        })
+    }
+
+    /// The three of [`Kept::coverage`] as a section of the Markdown report, each on a line of
+    /// its own, with the disruptions by what came of them.
+    fn coverage_markdown(&self) -> String {
+        let Counts {
+            played,
+            without_shape,
+            failed,
+            impossible,
+            not_played,
+            waiting,
+        } = self.disruption_counts();
+        format!(
+            "\n## Coverage\n\n\
+             - project: {} ({})\n\
+             - time: ran {} of {} min\n\
+             - disruptions: {played} of {} played ({without_shape} without their shape, {failed} failed, {impossible} impossible, {not_played} not played, {waiting} waiting)\n\
+             - extra work: given {} time{}, from a list of {}\n",
+            if self.project_ended() {
+                "ended within the budget"
+            } else {
+                "did not reach its end within the budget"
+            },
+            self.ending,
+            (self.ended - self.started).max(0) / 60_000,
+            self.options.budget.as_secs() / 60,
+            self.schedule.planned.len(),
+            self.extra.len(),
+            if self.extra.len() == 1 { "" } else { "s" },
+            self.extra_listed
+        )
+    }
+
+    /// The three of [`Kept::coverage`] in a line: all numbers and the run's own words, as the
+    /// console may say them.
+    fn coverage_line(&self) -> String {
+        let played = self.disruption_counts().played;
+        format!(
+            "project {} · {} of {} min · {played} of {} disruptions played · extra work given {} time{}",
+            if self.project_ended() {
+                "ended"
+            } else {
+                "not ended"
+            },
+            (self.ended - self.started).max(0) / 60_000,
+            self.options.budget.as_secs() / 60,
+            self.schedule.planned.len(),
+            self.extra.len(),
+            if self.extra.len() == 1 { "" } else { "s" }
+        )
     }
 
     /// What stopped the run, as it is kept and said: what looks like a key or a token
@@ -306,6 +444,7 @@ impl Kept<'_> {
                 let unresolved = self.unresolved.iter().filter(|open| open.invariant == *number).count();
                 json!({ "number": number, "name": name, "shape": shape, "held": breaks == 0 && unresolved == 0, "breaks": breaks, "known": known, "unresolved": unresolved })
             }).collect::<Vec<_>>(),
+            "coverage": self.coverage(),
             "disruptions": self.disruptions(),
             "breaks": self.breaks.iter().map(|found| {
                 let mut kept = found.to_value();
@@ -358,6 +497,7 @@ impl Kept<'_> {
         for why in self.why() {
             text.push_str(&format!("- {why}\n"));
         }
+        text.push_str(&self.coverage_markdown());
         text.push_str("\n## Harnesses\n\n| harness | version | members |\n|---|---|---|\n");
         for harness in self.harnesses().as_array().into_iter().flatten() {
             let members: Vec<String> = harness["members"]
@@ -497,6 +637,7 @@ impl Kept<'_> {
                 .into_iter()
                 .map(|why| format!("  why: {why}")),
         );
+        lines.push(format!("  coverage: {}", self.coverage_line()));
         lines.extend(self.breaks.iter().filter_map(|found| {
             Self::known(found).map(|known| format!("  known: {} ({})", found.key, known.issue))
         }));

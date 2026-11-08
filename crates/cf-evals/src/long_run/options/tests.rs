@@ -65,7 +65,10 @@ fn the_staff_the_budget_and_the_times_are_taken_as_given_and_what_is_none_is_ref
             "--switch-to pi --staff claude",
             "--switch-to names a harness of the staff, not pi",
         ),
-        ("--ask both", "--ask is real or stand-in, not both"),
+        (
+            "--ask both",
+            "--ask is real, stand-in or stand-in-fast, not both",
+        ),
     ] {
         let refused = of(line).unwrap_err();
         assert!(matches!(refused, Error::Usage(_)), "{line}");
