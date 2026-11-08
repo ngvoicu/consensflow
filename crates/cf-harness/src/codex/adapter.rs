@@ -194,6 +194,13 @@ impl Adapter for CodexAdapter {
         super::models::gone(words, asked)
     }
 
+    /// A Codex window is `cf codex-session`, which ends with the status of why when it could
+    /// not start Codex (`cf_base::startup::StartKind::exit_status`).
+    fn never_ran(&self, status: u32) -> Option<cf_base::startup::StartFailure> {
+        cf_base::startup::StartKind::of_exit_status(i64::from(status))
+            .map(cf_base::startup::StartFailure::of)
+    }
+
     fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         Box::pin(super::models::default_model(
             &self.services.env,

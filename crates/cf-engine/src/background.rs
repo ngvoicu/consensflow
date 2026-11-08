@@ -73,7 +73,7 @@ use cf_proto::panes::{Background, BackgroundProcess, PossiblyLeft};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
-use crate::shown::command_program;
+use crate::shown::{command_line_program, command_program};
 
 /// The most commands a note quotes of what a window left running.
 const QUOTED: usize = 5;
@@ -197,7 +197,7 @@ impl Dispatcher {
 /// command, its arguments and the paths in it in a pause note, T-1178). A command whose program
 /// the list does not name, or that could not be read, is named by its number.
 fn line(process: &BackgroundProcess) -> String {
-    match command_program(&process.command) {
+    match command_line_program(&process.command) {
         Some((program, true)) => format!("{program} …"),
         Some((program, false)) => program.to_owned(),
         None if process.pid == 0 => "a command".to_owned(),

@@ -666,15 +666,30 @@ mod tests {
         let failed = block_on(async { spawn(&run, None, &system_env(), Streams::Quiet).err() });
         let failed = failed.expect("the program was not there");
         assert_eq!(failed.words(), "spawn /nonexistent/cli ENOENT");
-        // What a note says: the kind and the code, and no file (T-1328).
+    }
+
+    /// What a note says of a program the system would not start: the kind and the code, and no
+    /// file (T-1328: `spawn pi hunter22.cmd ENOENT` lost the code with the path).
+    #[test]
+    fn a_start_the_system_refused_says_the_kind_and_the_code_a_note_says_and_not_the_file() {
+        let run = Run {
+            program: PathBuf::from("/nonexistent/pi hunter22.cmd"),
+            args: Vec::new(),
+            verbatim: false,
+        };
+        let failed = block_on(async { spawn(&run, None, &system_env(), Streams::Quiet).err() })
+            .expect("the program was not there");
+        assert_eq!(failed.words(), "spawn /nonexistent/pi hunter22.cmd ENOENT");
         assert_eq!(
             failed.failure(),
             StartFailure::of(StartKind::NotFound).with_errno("ENOENT")
         );
+        let said = failed.failure().words("Pi");
         assert_eq!(
-            failed.failure().words("Pi"),
+            said,
             "Pi's program was not found (ENOENT); check that Pi is installed and that ConsensFlow can find it"
         );
+        assert!(!said.contains("hunter22") && !said.contains('/'), "{said}");
     }
 
     #[cfg(unix)]

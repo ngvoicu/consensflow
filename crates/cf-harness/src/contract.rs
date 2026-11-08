@@ -115,6 +115,16 @@ pub trait Adapter {
         Box::pin(async { Ok(None) })
     }
 
+    /// What a window's program says by how it ended, where the harness's window is a program of
+    /// ConsensFlow's that stands in for the harness's own (Codex's `cf codex-session`) and ends
+    /// with a status of its own when it could not start the harness
+    /// (`StartKind::exit_status`): then the harness never ran, and a note says the kind of
+    /// failure and quotes no screen, which holds the file that was tried (T-1328). None for
+    /// any other status, and for every harness whose window is the harness itself.
+    fn never_ran(&self, _status: u32) -> Option<StartFailure> {
+        None
+    }
+
     /// The keys that interrupt a turn in this harness's window
     /// (`adapter.interrupt`): Escape once, unless the harness says more.
     fn interrupt(&self) -> Interrupt {

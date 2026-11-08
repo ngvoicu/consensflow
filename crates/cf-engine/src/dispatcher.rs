@@ -824,9 +824,17 @@ impl Dispatcher {
             || delivering
                 .as_ref()
                 .is_some_and(|delivering| delivering.launch);
-        // A Codex window whose program could not start Codex ended with a status that says so:
-        // its note says that, and not what its screen showed (`Shown::with_start`).
-        let shown = shown.with_start(participant.harness.as_deref());
+        // A window whose program is ConsensFlow's own, standing in for its harness's, and which
+        // could not start the harness, ended with a status that says so (Codex's): its note says
+        // that, and not what its screen showed (`Adapter::never_ran`, `Shown::with_start`).
+        let harness = participant.harness.as_deref().unwrap_or_default();
+        let start = shown.exit_status().and_then(|status| {
+            self.seams
+                .adapters
+                .adapter(harness)
+                .and_then(|adapter| adapter.never_ran(status))
+        });
+        let shown = shown.with_start(start, crate::handoff::name_of(harness));
         let closed = format!("@{}'s window closed", participant.handle);
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)

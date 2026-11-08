@@ -1375,6 +1375,43 @@ fn a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quote
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A Codex window a signal ended is not one that could not start Codex, whatever code the host
+/// also named: the status of why is read only where no signal ended the program.
+#[test]
+fn a_status_of_why_is_not_read_of_a_window_a_signal_ended() {
+    let context = with_codex();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+            "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project")
+        .id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.expect("its session");
+    context.host.exits_showing(
+        Some(72),
+        Some("SIGTERM"),
+        Some(&["Running the workspace tests"]),
+    );
+    context.exit(&session);
+    let note = context
+        .task(project, 1)
+        .messages
+        .iter()
+        .find(|message| message.kind == "note")
+        .map(|message| message.body.clone())
+        .unwrap_or_default();
+    assert!(!note.contains("Node.js was not found"), "{note}");
+    assert!(note.contains("Running the workspace tests"), "{note}");
+    context.close();
+}
+
 /// The same status from a window of any other harness is that harness's own: its screen is quoted
 /// as it is, and a Codex window's other statuses are Codex's own.
 #[test]

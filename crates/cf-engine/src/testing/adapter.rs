@@ -1302,6 +1302,15 @@ impl Asked {
 }
 
 impl Adapter for Asked {
+    /// The fake of Codex ends its window as Codex's does: with the status of why when the
+    /// supervisor could not start Codex.
+    fn never_ran(&self, status: u32) -> Option<cf_base::startup::StartFailure> {
+        (self.harness == "codex")
+            .then(|| cf_base::startup::StartKind::of_exit_status(i64::from(status)))
+            .flatten()
+            .map(cf_base::startup::StartFailure::of)
+    }
+
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         let seam = format!("adapter:{}", self.harness);
         let mut asked = json!({

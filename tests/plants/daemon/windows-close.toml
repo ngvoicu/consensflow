@@ -2461,7 +2461,7 @@ replace = '''        StartFailure::of(StartKind::NoNodeForPi),
 
 [[plant]]
 name = "windows close: quote less: a program the system could not start loses its code"
-meant = "a_program_that_is_not_there_says_spawn_and_enoent"
+meant = "a_start_the_system_refused_says_the_kind_and_the_code_a_note_says_and_not_the_file"
 runs = ["quote-less-child"]
 
 [[plant.edit]]
@@ -2471,7 +2471,7 @@ replace = '''        StartFailure::of(StartKind::NotStarted),'''
 
 [[plant]]
 name = "windows close: quote less: a program the system could not start is told with its file"
-meant = "a_program_that_is_not_there_says_spawn_and_enoent"
+meant = "a_start_the_system_refused_says_the_kind_and_the_code_a_note_says_and_not_the_file"
 runs = ["quote-less-child"]
 
 [[plant.edit]]
@@ -2516,8 +2516,8 @@ runs = ["engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
-find = '''        if let Some(failure) = self.start {'''
-replace = '''        if let Some(failure) = self.start.filter(|_| false) {'''
+find = '''        if let Some(words) = &self.start {'''
+replace = '''        if let Some(words) = self.start.as_ref().filter(|_| false) {'''
 
 [[plant]]
 name = "windows close: quote less: a window's status of why is not read"
@@ -2526,8 +2526,8 @@ runs = ["engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        let shown = shown.with_start(participant.harness.as_deref());'''
-replace = '''        let shown = shown;'''
+find = '''        let shown = shown.with_start(start, crate::handoff::name_of(harness));'''
+replace = '''        let shown = shown.with_start(None, crate::handoff::name_of(harness));'''
 
 [[plant]]
 name = "windows close: quote less: a status of why is read of any harness"
@@ -2535,19 +2535,19 @@ meant = "a_status_of_why_is_read_only_of_a_codex_window"
 runs = ["engine-windows"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''        if harness == Some("codex") && self.signal.is_none() {'''
-replace = '''        if harness.is_some() && self.signal.is_none() {'''
+file = "crates/cf-engine/src/testing/adapter.rs"
+find = '''        (self.harness == "codex")'''
+replace = '''        (true)'''
 
 [[plant]]
 name = "windows close: quote less: a status of why is read of a window a signal ended"
-meant = "a_status_of_why_is_read_only_of_a_codex_window"
+meant = "a_status_of_why_is_not_read_of_a_window_a_signal_ended"
 runs = ["engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
-find = '''        if harness == Some("codex") && self.signal.is_none() {'''
-replace = '''        if harness == Some("codex") {'''
+find = '''        self.code.filter(|_| self.signal.is_none())'''
+replace = '''        self.code'''
 
 [[plant]]
 name = "windows close: quote less: the daemon takes a word of the host's for a code"

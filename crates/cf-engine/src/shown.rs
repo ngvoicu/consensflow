@@ -79,7 +79,7 @@ mod tests;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use cf_base::startup::{StartFailure, StartKind};
+use cf_base::startup::StartFailure;
 use cf_harness::records::LastCall;
 use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft, SnapshotTail};
@@ -87,6 +87,7 @@ use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+pub(crate) use call::command_line_program;
 pub(crate) use call::program as command_program;
 use mask::mask;
 
@@ -135,7 +136,7 @@ pub struct Shown {
     own_session: Option<String>,
     /// Why the window's harness never ran, where the window's program (`cf codex-session`)
     /// ended with the status that says so ([`Shown::with_start`]).
-    start: Option<StartFailure>,
+    start: Option<String>,
 }
 
 impl Shown {
@@ -302,8 +303,8 @@ impl Shown {
             said.push_str(&call::words(call));
         }
         // A harness that never ran has no screen worth quoting: it holds the file that was tried.
-        if let Some(failure) = self.start {
-            said.push_str(&format!("; {}", failure.words("Codex")));
+        if let Some(words) = &self.start {
+            said.push_str(&format!("; {words}"));
             return said;
         }
         let Some(tail) = &self.tail else {
@@ -350,20 +351,18 @@ impl Shown {
         self
     }
 
-    /// This exit read for the harness the window ran: a Codex window is `cf codex-session`,
-    /// ConsensFlow's own program, which ends with a status of its own when it could not start
-    /// Codex (`StartKind::exit_status`). Then the window never reached the harness, and its
-    /// note says the kind of failure from the status, not what its screen showed: the screen
-    /// holds the file that was tried (T-1328; the second reading of T-1322 found
-    /// `C:\tools\hunter22\codex.cmd` quoted from it at every width). A status in that range
-    /// from any other harness is that harness's own.
-    pub(crate) fn with_start(mut self, harness: Option<&str>) -> Self {
-        if harness == Some("codex") && self.signal.is_none() {
-            self.start = self
-                .code
-                .and_then(|code| StartKind::of_exit_status(i64::from(code)))
-                .map(StartFailure::of);
-        }
+    /// The status the window's program exited with, where no signal ended it: what its harness's
+    /// adapter reads for a start that failed (`Adapter::never_ran`).
+    pub(crate) fn exit_status(&self) -> Option<u32> {
+        self.code.filter(|_| self.signal.is_none())
+    }
+
+    /// This exit with why the window's harness never ran, where its adapter says so from the
+    /// status the window ended with (`Adapter::never_ran`, T-1328): the note says the kind of
+    /// failure and not what the screen showed, which holds the file that was tried (the second
+    /// reading of T-1322 found `C:\tools\hunter22\codex.cmd` quoted from it at every width).
+    pub(crate) fn with_start(mut self, failure: Option<StartFailure>, who: &str) -> Self {
+        self.start = failure.map(|failure| failure.words(who));
         self
     }
 

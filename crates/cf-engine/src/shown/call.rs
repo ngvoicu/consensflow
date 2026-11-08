@@ -86,6 +86,38 @@ pub(crate) fn program(command: &str) -> Option<(&'static str, bool)> {
     written.then(|| (*listed, words.next().is_some()))
 }
 
+/// [`program`] of a command line as the system lists a running process's. On Windows it begins
+/// with the program's path in quotes, a path with blanks in it (`"C:\Program Files\Git\usr\bin\sleep.exe"
+/// 600`): the program is the last part of that path without its extension, as a path to it is on
+/// any system, and nothing else of the path is said. A quoted name of any other shape, or one the
+/// list does not name, is no program.
+pub(crate) fn command_line_program(command: &str) -> Option<(&'static str, bool)> {
+    let Some(quoted) = command.trim_start().strip_prefix('"') else {
+        return program(command);
+    };
+    let (path, rest) = quoted.split_once('"')?;
+    let name = path.rsplit(['/', '\\']).next()?;
+    let name = [".exe", ".com", ".cmd", ".bat"]
+        .iter()
+        .find_map(|extension| {
+            let cut = name.len().checked_sub(extension.len())?;
+            name.get(cut..)
+                .filter(|end| end.eq_ignore_ascii_case(extension))
+                .map(|_| &name[..cut])
+        })
+        .unwrap_or(name);
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    {
+        return None;
+    }
+    let listed = PROGRAMS
+        .iter()
+        .find(|program| program.eq_ignore_ascii_case(name))?;
+    Some((*listed, !rest.trim().is_empty()))
+}
+
 /// A tool's name as a note says it: masked, on one line, cut short.
 fn label(tool: &str) -> String {
     let one_line = tool.split_whitespace().collect::<Vec<_>>().join(" ");
