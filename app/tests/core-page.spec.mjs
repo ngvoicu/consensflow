@@ -4702,6 +4702,99 @@ test("Edit member keeps the member's own model, effort and tier where its harnes
   }
 })
 
+/**
+ * A Devin member stores the exact id Devin lists for its effort (`swe-2-high` at `high`); its
+ * picker shows the family (`swe-2`) and the effort apart (T-1329, B).
+ */
+const devinMember = (data) => {
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus').participant
+  Object.assign(zeus, { harness: 'devin', model: 'swe-2-high', effort: 'high', modelName: 'swe-2' })
+  data.models.devin.listing.models = [
+    {
+      id: 'swe-2',
+      label: 'SWE-2',
+      efforts: ['low', 'high'],
+      launchIds: { high: 'swe-2-high', low: 'swe-2-low' },
+    },
+  ]
+}
+
+test("a Devin member's edit that changes nothing says so after a Refresh that failed, with the launch id it stores (T-1329, B)", async ({
+  page,
+}) => {
+  const data = model()
+  devinMember(data)
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  const models = dialog.locator('[name="memberModel"]')
+  await expect(models).toHaveValue('swe-2')
+  await expect(dialog.locator('[name="memberEffort"]')).toHaveValue('high')
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = { devin: 'probe read failed' }
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(dialog.locator('.member-help')).toContainText('probe read failed')
+  // The form restores the member's own launch id and effort, and saves them as unchanged: the
+  // daemon asks no list for what did not change.
+  await expect(models).toHaveValue('swe-2-high')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'zeus',
+        harness: 'devin',
+        model: 'swe-2-high',
+        effort: 'high',
+        tier: 'standard',
+        unchanged: true,
+      },
+    ])
+})
+
+test("a Devin member's edit after a failed Refresh and a Refresh that came keeps its model picked, says nothing changed, and sends what the human changes (T-1329, B)", async ({
+  page,
+}) => {
+  const data = model()
+  devinMember(data)
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  const models = dialog.locator('[name="memberModel"]')
+  const efforts = dialog.locator('[name="memberEffort"]')
+  await expect(models).toHaveValue('swe-2')
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = { devin: 'probe read failed' }
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(models).toHaveValue('swe-2-high')
+  // Devin lists again: its family is picked at the member's effort, not left to be picked again.
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = {}
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(models).toHaveValue('swe-2')
+  await expect(efforts).toHaveValue('high')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(1)
+  const [unchanged] = await calls(page, 'member.edit', { reads: true })
+  expect(unchanged).toMatchObject({ member: 'zeus', unchanged: true })
+  // A change of effort is a pick, which the daemon checks against the read it came from.
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  await expect(models).toHaveValue('swe-2')
+  await efforts.selectOption('low')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(2)
+  const edits = await calls(page, 'member.edit', { reads: true })
+  expect(edits[1].unchanged).toBeUndefined()
+  expect(edits[1]).toMatchObject({ model: 'swe-2', effort: 'low' })
+  expect(typeof edits[1].read).toBe('number')
+})
+
 test('Add member shows what a harness listed when the dialog opened, says it reads while that read runs, and reads again at Refresh or at the next opening', async ({
   page,
 }) => {

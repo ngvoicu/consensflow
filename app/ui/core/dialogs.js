@@ -248,6 +248,15 @@ function whereListed(models, member) {
 }
 
 /**
+ * The id a launch passes for `model` at `effort`: Devin's listed id for that effort
+ * (`launchIds`), else the model's own. It is what an edited member stores, so that a pick can
+ * be compared with the member's stored choice by what it launches, not by how it is shown.
+ */
+function launchIdOf(model, effort) {
+  return (effort ? model.launchIds?.[effort] : undefined) ?? modelOf(model)
+}
+
+/**
  * Fills an effort select with the efforts `model` lists (none picked where it lists none or
  * none is picked yet), its harness's default picked where it says one.
  */
@@ -422,8 +431,15 @@ class ModelPicker {
     this.#model.replaceChildren(ask, ...options)
     this.#model.value = ''
     this.#kept = false
-    if (wanted !== null && options.some((option) => option.value === wanted && !option.disabled)) {
-      this.#model.value = wanted
+    // The member's own stored model, kept in the select while its harness could not be read
+    // (Devin's `swe-2-high`), is picked again as the family and effort the list gives it.
+    let pick = wanted
+    if (pick !== null && current !== null && pick === current.model) {
+      const found = whereListed(answer.listing.models, current)
+      if (found) pick = modelOf(found.model)
+    }
+    if (pick !== null && options.some((option) => option.value === pick && !option.disabled)) {
+      this.#model.value = pick
     }
     this.#model.disabled = false
     this.#answer = answer
@@ -773,15 +789,21 @@ class MemberPicker {
     }
     // The read the model was picked from: the daemon checks the pick against that list.
     if (this.#picker.read !== null) values.read = this.#picker.read
-    // An edit that leaves the member's model and effort as the form drew them saves its own,
-    // already resolved launch choice: the daemon checks nothing that did not change.
+    // An edit that leaves the member's model and effort as they were saves its own, already
+    // resolved launch choice: the daemon checks nothing that did not change. They were left
+    // when the form holds what it drew, or the member's own stored choice by what it launches
+    // (Devin's `swe-2` at `high` is the `swe-2-high` it stores, and a Refresh that fails
+    // puts that id back in the form as it is).
     const origin = this.#origin
+    const stored = this.#current
     if (
       this.editing !== null &&
       origin !== null &&
       origin.kind === kind &&
-      origin.model === values.model &&
-      origin.effort === values.effort
+      ((origin.model === values.model && origin.effort === values.effort) ||
+        (stored !== null &&
+          launchIdOf(model, values.effort) === stored.model &&
+          values.effort === (stored.effort ?? null)))
     ) {
       values.unchanged = true
     }
