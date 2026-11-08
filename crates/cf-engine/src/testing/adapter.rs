@@ -706,12 +706,11 @@ impl FakeAdapter {
     }
 
     /// Its record, read with no window open, shows the turn it is in begun by the
-    /// message of `words`, which came at `at`, where a time is given.
+    /// message of `words`, which came at `at`, where a time is given. The harness reads the
+    /// opening from the words as it reads a record's ([`Opening::began_with`]): of them it keeps
+    /// the delivery whose header begins them, and no word.
     pub fn turn_began_with(&self, handle: &str, at: Option<&str>, words: &str) {
-        let opening = Opening {
-            at: at.map(str::to_owned),
-            words: words.to_owned(),
-        };
+        let opening = Opening::began_with(words, at.map(str::to_owned));
         self.with(handle, |agent| agent.opening = Some(opening.clone()));
     }
 

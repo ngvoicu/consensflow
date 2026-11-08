@@ -1097,17 +1097,21 @@ pub enum TurnLeft {
     Cut(Option<Opening>),
 }
 
-/// The message a turn began with, as its record holds it: when it came, where the
-/// record says a time, and its words, its whitespace made single spaces and cut short.
+/// The message a turn began with, as its record holds it: when it came, where the record says
+/// a time, and the delivery of ConsensFlow's it was, where its text begins with the header of
+/// one ([`Opening::began_with`]). **None of its words is kept** (T-1328): a note names a turn by
+/// when it began and, for a delivery the ledger holds, by the ledger's record of it, and quotes
+/// nothing the window showed, since a quote of free text kept leaking a secret (the joint review
+/// T-1322, twice).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Opening {
     /// `2026-10-15 20:41 UTC`.
     pub at: Option<String>,
-    pub words: String,
+    /// The id of the message whose header begins the text, as ConsensFlow pastes one
+    /// (`[ConsensFlow m-12 · T-3 · task from @chief]`), behind only what Claude Code puts there
+    /// itself. A claim of the record, not of the ledger: the engine asks the ledger.
+    pub delivery: Option<i64>,
 }
-
-/// How many characters of a turn's first message [`Opening`] keeps.
-const OPENING_WORDS: usize = 100;
 
 impl Opening {
     /// The message the turn at the end of `items` began with: the last of the user's
@@ -1122,20 +1126,62 @@ impl Opening {
             .iter()
             .rev()
             .find(|item| item.role == Role::User && !item.compaction)?;
-        let words: Vec<&str> = item.text.split_whitespace().collect();
-        let words = words.join(" ");
-        let mut kept: String = words.chars().take(OPENING_WORDS).collect();
-        if kept.len() < words.len() {
-            kept.push('…');
-        }
         let at = item
             .at
             .as_ref()
             .and_then(Value::as_str)
             .and_then(|at| at.parse::<jiff::Timestamp>().ok())
             .map(|at| at.strftime("%Y-%m-%d %H:%M UTC").to_string());
-        Some(Self { at, words: kept })
+        Some(Self::began_with(&item.text, at))
     }
+
+    /// The opening of a turn that began with `text`, at `at`: the delivery whose header begins
+    /// the text, and nothing else of it.
+    pub fn began_with(text: &str, at: Option<String>) -> Self {
+        Self {
+            at,
+            delivery: delivery_of(text),
+        }
+    }
+}
+
+/// The marker every delivery's header begins with, up to its id.
+const HEADER: &str = "[ConsensFlow m-";
+
+/// What Claude Code puts ahead of a paste whose lines are paths of images it attached: a
+/// placeholder for each, `[Image #4]`.
+const IMAGE: &str = "[Image #";
+
+/// The tag Claude Code wraps a paste in, on a line of its own ahead of the paste.
+const PASTED: &str = "pasted_content";
+
+/// The message whose header begins `text`, behind only the placeholders of the images Claude
+/// Code attached and the line that opens its wrapper of a paste (`<pasted_content id="b118">`):
+/// the same reading as `cf-engine`'s `is_paste_of`, which a test of that crate holds this to.
+/// None for any other text, a header quoted after words included: it names no delivery.
+fn delivery_of(text: &str) -> Option<i64> {
+    let mut rest = text.trim_start();
+    // The placeholders: each `[Image #N]`, one space between them.
+    while let Some(after) = rest.strip_prefix(IMAGE) {
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        let next = after[digits..].strip_prefix(']').filter(|_| digits > 0)?;
+        rest = next.trim_start();
+    }
+    // The wrapper's opening line, its tag alone on it.
+    if let Some(tag) = rest.strip_prefix('<').and_then(|r| r.strip_prefix(PASTED)) {
+        let (attributes, inner) = tag.split_once(">\n")?;
+        let whole = (attributes.is_empty() || attributes.starts_with(' '))
+            && !attributes.contains(['>', '\n']);
+        if !whole {
+            return None;
+        }
+        rest = inner.trim_start();
+    }
+    let after = rest.strip_prefix(HEADER)?;
+    let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+    // A space follows the id, as `marker_of` has it; `m-12x` and `m-٣` are none.
+    after[digits..].starts_with(' ').then_some(())?;
+    after[..digits].parse().ok()
 }
 
 /// A harness's own record of a conversation, as the engine serves it to

@@ -1143,8 +1143,8 @@ mod tests {
     #[test]
     fn what_a_window_is_told_when_its_turn_was_cut_is_what_the_daemon_writes() {
         let written = "ConsensFlow stopped while you were working on T-3. Go on where you stopped.";
-        let named = "ConsensFlow stopped while you were working on T-3, in the turn that began with \"Go\". Go on where you stopped.";
-        let chief = "ConsensFlow stopped in the middle of your turn, which was cut: the turn that began with \"Go\". Go on where you stopped.";
+        let named = "ConsensFlow stopped while you were working on T-3, in the turn that began with delivery m-5 (task from @chief, T-3). Go on where you stopped.";
+        let chief = "ConsensFlow stopped in the middle of your turn, which was cut: the turn that began with delivery m-5 (task from @chief, T-3). Go on where you stopped.";
         let note = |body: &str| serde_json::json!({ "kind": "note", "sender": null, "state": "delivered", "body": body });
         assert!(says(&note(written), &worker_cut(3)));
         assert!(says(&note(named), &worker_cut(3)));

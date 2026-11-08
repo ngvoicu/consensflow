@@ -44,11 +44,12 @@
 //! Three more notes quote less by the same rule. **The notes of what a window left running**
 //! (`background`) name the program of each command where the list of the last tool call names
 //! it, and `…` where it goes on, or the process's number: never an argument, a path or a header
-//! (T-1178's known issue). **The note of a turn a Resume tells a window was cut** quotes the
-//! first words of the message that began it only where they may hold no secret (the screen's
-//! rule on the words as one row, and no credential's name with any value after it), masked
-//! ([`quotable_opening`], T-830). **A process that may be a window's** is named by a program of
-//! that list or by its number. **The cause of a failed start** has the files its producer marked
+//! (T-1178's known issue). **The note of a turn a Resume tells a window was cut** quotes
+//! nothing the window showed (T-1328): a turn that began with a delivery the ledger holds, sent
+//! to that window, is named by the ledger's row of it (its id, what it was, whom it was from, its
+//! task), and any other turn by when it began (`resume`). Two readings (T-1322) found a secret
+//! in a quote of the opening by one shape after another. **A process that may be a window's** is
+//! named by a program of that list or by its number. **The cause of a failed start** has the files its producer marked
 //! replaced, and is not quoted where it names one no one marked (`mask::launch_cause`). **A
 //! window's own session id** on its screen is not a value in groups
 //! ([`Shown::with_own_session`]), and no other check is given a text without it.
@@ -92,23 +93,6 @@ pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
 use ours::{owners, Owner};
 pub use quotable::{quotable, WORDS_WITHHELD};
-
-/// The first words of a message, as a note may quote them (the opening of a turn a Resume tells
-/// a window was cut): none where they may hold a secret, by the rule of a screen applied to
-/// the words as one row (a name, a token's beginning, a key's shape: [`screen::withheld`]), else
-/// the words masked as every quote of a note is. A key or a password typed in the first words of
-/// a message is the person's, and the note is the board's (T-830, item 1). A credential's name
-/// with **any** value after it, however short, withholds the quote: being too short for the masker
-/// does not make a value safe (the joint review T-1322, blocker 3).
-pub(crate) fn quotable_opening(words: &str) -> Option<String> {
-    // The message's lines were made one (`Opening::of`), so its words stand as the rows of a wrap:
-    // a name cut in two by a line is whole joined with nothing.
-    let pieces: Vec<&str> = words.split(' ').collect();
-    if screen::withheld(&[words.to_owned()], None).is_some() || screen::names_a_value(&pieces) {
-        return None;
-    }
-    Some(mask(words).text)
-}
 
 /// The most lines of a screen a note quotes: the last ones.
 const QUOTE_LINES: usize = 6;

@@ -84,6 +84,9 @@ engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown
 quote-less-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "background::"]
 quote-less-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
 quote-less-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_cut_note"]
+quote-less-opening = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::tests::"]
+quote-less-ledger-turn = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "continuations::"]
+quote-less-parity = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::tests::the_harness_reads"]
 quote-less-chief-not-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_not_up::"]
 quote-less-process = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "runnable::"]
 quote-less-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "startup::"]
@@ -2146,26 +2149,132 @@ find = '''"sleep", "ping",'''
 replace = '''"ping",'''
 
 [[plant]]
-name = "windows close: quote less: an opening that may hold a secret is quoted"
-meant = "a_cut_note_quotes_no_opening_that_may_hold_a_secret_and_masks_the_rest"
+name = "windows close: quote less: a cut turn is named by a delivery sent to another window"
+meant = "a_cut_note_names_no_delivery_that_was_not_sent_to_that_window_or_that_words_quote"
 runs = ["quote-less-resume"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    if screen::withheld(&[words.to_owned()], None).is_some() || screen::names_a_value(&pieces) {'''
-replace = '''    if screen::names_a_value(&pieces) {'''
+file = "crates/cf-engine/src/resume.rs"
+find = '''.filter(|message| message.recipient_id == participant.id),'''
+replace = '''.filter(|_| true),'''
 
 [[plant]]
-name = "windows close: quote less: an opening is quoted unmasked"
-meant = "a_cut_note_quotes_no_opening_that_may_hold_a_secret_and_masks_the_rest"
+name = "windows close: quote less: a cut turn is never named by its delivery"
+meant = "a_cut_note_names_the_turn_by_the_delivery_the_ledger_holds_and_quotes_none_of_its_words"
 runs = ["quote-less-resume"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    Some(mask(words).text)
-}'''
-replace = '''    Some(words.to_owned())
-}'''
+file = "crates/cf-engine/src/resume.rs"
+find = '''            Some(delivery) => cut_turn(turn.at.as_deref(), delivery),'''
+replace = '''            Some(_) => cut_turn_unquoted(turn.at.as_deref()),'''
+
+[[plant]]
+name = "windows close: quote less: a delivery's header the record held is named though the ledger does not hold it"
+meant = "a_cut_note_quotes_nothing_a_window_showed"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''                .message(id)?
+                .filter(|message| message.recipient_id == participant.id),'''
+replace = '''                .message(id)?
+                .or_else(|| self.seams.ledger.borrow().message(1).ok().flatten()),'''
+
+[[plant]]
+name = "windows close: quote less: a header anywhere in the first words names the delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    let after = rest.strip_prefix(HEADER)?;'''
+replace = '''    let after = &rest[rest.find(HEADER)? + HEADER.len()..];'''
+
+[[plant]]
+name = "windows close: quote less: the placeholders of the images Claude attached hide the delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    while let Some(after) = rest.strip_prefix(IMAGE) {'''
+replace = '''    while let Some(after) = rest.strip_prefix("[Image #x") {'''
+
+[[plant]]
+name = "windows close: quote less: Claude's wrapper of a paste hides the delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    if let Some(tag) = rest.strip_prefix('<').and_then(|r| r.strip_prefix(PASTED)) {'''
+replace = '''    if let Some(tag) = rest.strip_prefix('<').and_then(|r| r.strip_prefix("pasted_x")) {'''
+
+[[plant]]
+name = "windows close: quote less: a wrapper with words in its tag is the paste's"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        if !whole {
+            return None;
+        }'''
+replace = '''        let _ = whole;'''
+
+[[plant]]
+name = "windows close: quote less: an id with a letter after its digits names a delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    after[digits..].starts_with(' ').then_some(())?;'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: the harness keeps the delivery of a turn from an item it does not begin"
+meant = "a_cut_turn_is_told_by_the_time_and_the_delivery_that_began_it_and_no_word_of_the_message"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''            delivery: delivery_of(text),'''
+replace = '''            delivery: None,'''
+
+[[plant]]
+name = "windows close: quote less: a cut turn's name leaves out whom the delivery was from"
+meant = "a_cut_turn_is_named_from_the_row_alone_and_never_from_its_body"
+runs = ["quote-less-ledger-turn"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        "delivery m-{} ({} from {from}{task})",'''
+replace = '''        "delivery m-{} ({}{task})",'''
+
+[[plant]]
+name = "windows close: quote less: a cut turn's name quotes the delivery's body"
+meant = "a_cut_turn_is_named_from_the_row_alone_and_never_from_its_body"
+runs = ["quote-less-ledger-turn"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        delivery.id, delivery.kind
+    );'''
+replace = '''        delivery.id, delivery.body
+    );'''
+
+[[plant]]
+name = "windows close: quote less: the harness reads a delivery's header otherwise than the proof of an arrival does"
+meant = "the_harness_reads_the_delivery_an_item_began_with_as_the_proof_of_an_arrival_does"
+runs = ["quote-less-parity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        rest = next.trim_start();
+    }'''
+replace = '''        rest = next;
+    }'''
 
 [[plant]]
 name = "windows close: quote less: the words of Pi that were withheld point nowhere"
@@ -2249,26 +2358,6 @@ runs = ["engine-shown"]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''s?["']?\s*[:=]\s*["']?[^\s"']"#,'''
 replace = '''s?["']?\s*[:=]?\s*["']?[^\s"']"#,'''
-
-[[plant]]
-name = "windows close: quote less: an opening is quoted beside a credential's name"
-meant = "a_cut_note_quotes_no_opening_with_a_credentials_name_and_any_value_after_it"
-runs = ["quote-less-resume"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''screen::withheld(&[words.to_owned()], None).is_some() || screen::names_a_value(&pieces)'''
-replace = '''screen::withheld(&[words.to_owned()], None).is_some()'''
-
-[[plant]]
-name = "windows close: quote less: an opening's words are looked at as one piece"
-meant = "a_cut_note_quotes_no_opening_with_a_credentials_name_and_any_value_after_it"
-runs = ["quote-less-resume"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''    let pieces: Vec<&str> = words.split(' ').collect();'''
-replace = '''    let pieces: Vec<&str> = vec![words];'''
 
 [[plant]]
 name = "windows close: quote less: a block of Pi's words is quoted beside a credential's name and any value"

@@ -1342,19 +1342,32 @@ fn a_continuation_an_earlier_resume_left_queued_is_withdrawn_where_the_record_no
     );
 }
 
+/// The words a cut note says of a turn it does not name by a delivery of the ledger's.
+const TURN_UNQUOTED: &str = "with words that may hold a secret, so they are not quoted";
+
+/// T-1328: the note that tells a window its turn was cut names the turn by when it began and,
+/// where the message that began it is a delivery the ledger holds (to this window), by the
+/// ledger's record of that delivery: its id, what it was, whom it was from and its task. Nothing
+/// the window showed is in it: not the delivery's words, not a word of anything typed.
 #[test]
-fn a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words() {
+fn a_cut_note_names_the_turn_by_the_delivery_the_ledger_holds_and_quotes_none_of_its_words() {
     let context = Context::new();
     let tiers = at_work(&context);
     let project = tiers.project.id;
+    let brief = tiers.task(1).messages[0].clone();
+    assert_eq!(brief.kind, "task");
     context.adapter.busy("chief");
     context
         .adapter
         .turn_began_with("chief", Some("2026-10-15 20:41 UTC"), "Run the tests");
     context.adapter.turn_began_with(
         "zeus",
-        None,
-        "[ConsensFlow m-3 · T-1 · task from @chief] Write the parser",
+        Some("2026-10-15 20:42 UTC"),
+        &format!(
+            "[ConsensFlow m-{} · T-1 · task from @{}]\nWrite the lexer, with the key: abc",
+            brief.id,
+            brief.sender.as_deref().unwrap()
+        ),
     );
     let after = quit_and_start(&context);
 
@@ -1363,99 +1376,41 @@ fn a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words() {
     assert_match(
         launch_of(&context, "chief")["message"].as_str().unwrap(),
         &format!(
-            "^\\[ConsensFlow m-\\d+ · note from ConsensFlow\\]\n{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC with \"Run the tests\"\\. Go on where you stopped\\.$"
+            "^\\[ConsensFlow m-\\d+ · note from ConsensFlow\\]\n{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC {TURN_UNQUOTED}\\. Go on where you stopped\\.$"
         ),
     );
     let zeus = launch_of(&context, "zeus-amber-pine");
+    let said = zeus["message"]
+        .as_str()
+        .unwrap()
+        .split_once('\n')
+        .unwrap()
+        .1;
     assert_eq!(
-        zeus["message"].as_str().unwrap().split_once('\n').unwrap().1,
-        "ConsensFlow stopped while you were working on T-1, in the turn that began with \"[ConsensFlow m-3 · T-1 · task from @chief] Write the parser\". Go on where you stopped."
+        said,
+        format!(
+            "ConsensFlow stopped while you were working on T-1, in the turn that began at 2026-10-15 20:42 UTC with delivery m-{} (task from @{}, T-1). Go on where you stopped.",
+            brief.id,
+            brief.sender.as_deref().unwrap()
+        )
     );
     // The ledger knows it for zeus's continuation of T-1, which goes with any move of it.
     let note = cut_notes(&context, tiers.id("zeus-amber-pine")).remove(0);
     assert_eq!(continuation_tasks(&note.body), Some(vec![1]));
 }
 
-/// T-830, item 1: the note that tells a window its turn was cut quotes the first 100
-/// characters of the message that began the turn. A key or a password typed there went into a
-/// board note as it was typed, while every other quote goes through the masker. An opening that
-/// may hold a secret is not quoted at all (the rule of a screen, applied to its words as one
-/// row), and the rest of it goes through the masker; the note still names the turn by when it
-/// began, and its tasks still read back from it.
+/// T-1328: the opening of a turn is never quoted. Two readings (T-1322) found a secret in a
+/// quote of it by one shape after another (a short value, a name and its value over three rows,
+/// a prefix cut by a wrap), so none is quoted: a turn that no delivery of the ledger's began is
+/// named by when it began, and a delivery by what the ledger holds of it. None of these words is
+/// in a note, to the chief or to a member, whatever the words are.
 #[test]
-fn a_cut_note_quotes_no_opening_that_may_hold_a_secret_and_masks_the_rest() {
-    let context = Context::new();
-    let tiers = at_work(&context);
-    let project = tiers.project.id;
-    context.adapter.busy("chief");
-    context.adapter.turn_began_with(
-        "chief",
-        Some("2026-10-15 20:41 UTC"),
-        "the password is hunter22 for the staging box",
-    );
-    context.adapter.turn_began_with(
-        "zeus",
-        None,
-        "[ConsensFlow m-3 · T-1 · task from @chief] deploy with sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv",
-    );
-    let after = quit_and_start(&context);
-
-    after.resume_project(project).unwrap();
-
-    let chief = launch_of(&context, "chief")["message"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_match(
-        &chief,
-        &format!(
-            "^\\[ConsensFlow m-\\d+ · note from ConsensFlow\\]\n{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC with words that may hold a secret, so they are not quoted\\. Go on where you stopped\\.$"
-        ),
-    );
-    let zeus = launch_of(&context, "zeus-amber-pine")["message"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_eq!(
-        zeus.split_once('\n').unwrap().1,
-        "ConsensFlow stopped while you were working on T-1, in the turn that began with words that may hold a secret, so they are not quoted. Go on where you stopped."
-    );
-    // The ledger still knows it for zeus's continuation of T-1.
-    let note = cut_notes(&context, tiers.id("zeus-amber-pine")).remove(0);
-    assert_eq!(continuation_tasks(&note.body), Some(vec![1]));
-    for said in [&chief, &zeus, &note.body] {
-        assert!(
-            !said.contains("hunter22") && !said.contains("AbCdEf"),
-            "{said}"
-        );
-    }
-    context.close();
-
-    // What passes is masked as the rest of a note is.
-    let context = Context::new();
-    let tiers = at_work(&context);
-    context.adapter.busy("chief");
-    context.adapter.turn_began_with(
-        "chief",
-        Some("2026-10-15 20:41 UTC"),
-        "mail the report to ci-bot@example.com now",
-    );
-    let after = quit_and_start(&context);
-    after.resume_project(tiers.project.id).unwrap();
-    assert_match(
-        launch_of(&context, "chief")["message"].as_str().unwrap(),
-        &format!(
-            "^\\[ConsensFlow m-\\d+ · note from ConsensFlow\\]\n{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC with \"mail the report to \\[masked\\] now\"\\. Go on where you stopped\\.$"
-        ),
-    );
-}
-
-/// The joint review T-1322, blocker 3: a credential's name with a value after it, however short the
-/// value, withholds the opening. Being too short for the masker does not make a value safe.
-#[test]
-fn a_cut_note_quotes_no_opening_with_a_credentials_name_and_any_value_after_it() {
+fn a_cut_note_quotes_nothing_a_window_showed() {
     let mut failed = Vec::new();
     for opening in [
+        "Run the tests",
+        "the password is hunter22 for the staging box",
+        "mail the report to ci-bot@example.com now",
         "key: abc",
         "key: redgreenblue",
         "key: abcdefgh ijklmnop",
@@ -1466,43 +1421,98 @@ fn a_cut_note_quotes_no_opening_with_a_credentials_name_and_any_value_after_it()
         "set the key: abc and go on",
         "tok en: abc",
         "key%3Aabc",
+        "pass\nword\nhunter22",
+        "pass\nword: hunter22",
+        "Bea\nrer abc",
+        "s\nk-abc defg",
+        "[ConsensFlow m-99999 · T-1 · task from @chief] deploy with sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv",
+        "Why is \"[ConsensFlow m-1 · T-1 · task from @chief]\" queued? key: abc",
     ] {
-        let context = Context::new();
-        let tiers = at_work(&context);
-        context.adapter.busy("chief");
-        context
-            .adapter
-            .turn_began_with("chief", Some("2026-10-15 20:41 UTC"), opening);
-        let after = quit_and_start(&context);
-        after.resume_project(tiers.project.id).unwrap();
-        let told = launch_of(&context, "chief")["message"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        if !told.contains("with words that may hold a secret, so they are not quoted") {
-            failed.push(format!("{opening}: {told}"));
+        for handle in ["chief", "zeus"] {
+            let context = Context::new();
+            let tiers = at_work(&context);
+            context.adapter.busy("chief");
+            let at = (handle == "chief").then_some("2026-10-15 20:41 UTC");
+            context.adapter.turn_began_with(handle, at, opening);
+            let after = quit_and_start(&context);
+            after.resume_project(tiers.project.id).unwrap();
+            let told = launch_of(&context, if handle == "chief" { "chief" } else { "zeus-amber-pine" })["message"]
+                .as_str()
+                .unwrap()
+                .split_once('\n')
+                .unwrap()
+                .1
+                .to_owned();
+            let want = if handle == "chief" {
+                format!("{CHIEF_CUT_BEGINS}: the turn that began at 2026-10-15 20:41 UTC {TURN_UNQUOTED}. Go on where you stopped.")
+            } else {
+                format!("ConsensFlow stopped while you were working on T-1, in the turn that began {TURN_UNQUOTED}. Go on where you stopped.")
+            };
+            if told != want {
+                failed.push(format!("{opening:?} to {handle}: {told}"));
+            }
+            context.close();
         }
-        context.close();
-    }
-    // A key with nothing after it, and a message that only names one, are quoted as they were.
-    let context = Context::new();
-    let tiers = at_work(&context);
-    context.adapter.busy("chief");
-    context.adapter.turn_began_with(
-        "chief",
-        Some("2026-10-15 20:41 UTC"),
-        "Run the tests and tell me the key results",
-    );
-    let after = quit_and_start(&context);
-    after.resume_project(tiers.project.id).unwrap();
-    let told = launch_of(&context, "chief")["message"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    if !told.contains("with \"Run the tests and tell me the key results\"") {
-        failed.push(format!("a plain opening: {told}"));
     }
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1328: the ledger decides whether a header names a delivery. A window's turn began with a
+/// message the ledger sent to that window; the header of another window's, or one that the
+/// words of a message quote after other words, names none.
+#[test]
+fn a_cut_note_names_no_delivery_that_was_not_sent_to_that_window_or_that_words_quote() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let diana_brief = tiers.task(2).messages[0].clone();
+    let zeus_brief = tiers.task(1).messages[0].clone();
+    context.adapter.busy("chief");
+    context.adapter.turn_began_with(
+        "zeus",
+        None,
+        &format!(
+            "[ConsensFlow m-{} · T-2 · task from @chief]\nWrite the lexer",
+            diana_brief.id
+        ),
+    );
+    context.adapter.turn_began_with(
+        "diana",
+        None,
+        &format!(
+            "Why is \"[ConsensFlow m-{} · T-2 · task from @chief]\" queued?",
+            diana_brief.id
+        ),
+    );
+    context.adapter.turn_began_with(
+        "chief",
+        None,
+        &format!(
+            "[ConsensFlow m-{} · T-1 · task from @chief]\nGo",
+            zeus_brief.id
+        ),
+    );
+    let after = quit_and_start(&context);
+
+    after.resume_project(project).unwrap();
+
+    for (handle, want) in [
+        (
+            "zeus-amber-pine",
+            format!("ConsensFlow stopped while you were working on T-1, in the turn that began {TURN_UNQUOTED}. Go on where you stopped."),
+        ),
+        (
+            "diana-brisk-birch",
+            format!("ConsensFlow stopped while you were working on T-2, in the turn that began {TURN_UNQUOTED}. Go on where you stopped."),
+        ),
+        (
+            "chief",
+            format!("{CHIEF_CUT_BEGINS}: the turn that began {TURN_UNQUOTED}. Go on where you stopped."),
+        ),
+    ] {
+        let told = launch_of(&context, handle)["message"].as_str().unwrap().split_once('\n').unwrap().1.to_owned();
+        assert_eq!(told, want, "@{handle}");
+    }
 }
 
 #[test]

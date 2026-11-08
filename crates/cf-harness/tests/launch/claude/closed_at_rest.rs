@@ -133,11 +133,5 @@ fn a_turn_cut_in_its_middle_is_told_with_the_time_and_the_words_of_the_message_t
         panic!("cut, with its message: {:?}", left(&home));
     };
     assert_eq!(opening.at.as_deref(), Some("2026-10-15 20:41 UTC"));
-    assert!(
-        opening
-            .words
-            .starts_with("[ConsensFlow m-12 · T-3 · note from ConsensFlow] Made-up prompt words"),
-        "{}",
-        opening.words
-    );
+    assert_eq!(opening.delivery, Some(12));
 }

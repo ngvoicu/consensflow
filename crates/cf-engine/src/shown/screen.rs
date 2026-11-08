@@ -291,8 +291,7 @@ static NAMED_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("a pattern")
 });
 
-/// Whether `lines`, as the words of one message or the rows of one screen, have a credential's
-/// name with a value after it, **whatever the value is**: `key: abc` is a key as much as
+/// Whether `lines`, the rows of one screen, have a credential's name with a value after it, **whatever the value is**: `key: abc` is a key as much as
 /// `key: abcdefghijkl` is, and a value too short for the masker to take for one is not a safe one
 /// (the joint review T-1322, blockers 2 and 3). The lines are looked at as they stand, joined by
 /// lines, joined with nothing and joined with a blank, so that a name the wrap cut in two is

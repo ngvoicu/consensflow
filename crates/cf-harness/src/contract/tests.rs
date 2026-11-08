@@ -133,9 +133,10 @@ async fn a_reply_and_then_an_idle_compaction_s_summary_ends_at_rest_on_every_har
 }
 
 #[tokio::test]
-async fn a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it() {
+async fn a_cut_turn_is_told_by_the_time_and_the_delivery_that_began_it_and_no_word_of_the_message()
+{
     let long = format!(
-        "[ConsensFlow m-12 · T-3 · task from @chief]\nFix   the\tparser {}",
+        "[ConsensFlow m-12 · T-3 · task from @chief]\nFix   the\tparser, key: abc {}",
         "x".repeat(200)
     );
     for harness in HARNESSES {
@@ -153,21 +154,75 @@ async fn a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_bega
         let Some(TurnLeft::Cut(Some(opening))) = said.turn_cut(harness, "a-session").await else {
             panic!("{harness:?}: cut, with its message");
         };
-        assert_eq!(opening.at.as_deref(), Some("2026-10-15 20:41 UTC"));
-        assert!(
-            opening
-                .words
-                .starts_with("[ConsensFlow m-12 · T-3 · task from @chief] Fix the parser xxx"),
-            "{}",
-            opening.words
-        );
         assert_eq!(
-            opening.words.chars().count(),
-            OPENING_WORDS + 1,
-            "cut short, and marked so"
+            opening,
+            Opening {
+                at: Some("2026-10-15 20:41 UTC".to_owned()),
+                delivery: Some(12)
+            },
+            "{harness:?}"
         );
-        assert!(opening.words.ends_with('…'));
     }
+}
+
+#[test]
+fn only_a_header_that_begins_the_text_names_a_delivery() {
+    let cases: [(&str, Option<i64>); 22] = [
+        ("[ConsensFlow m-12 · T-3 · task from @chief]\nGo", Some(12)),
+        ("  \n[ConsensFlow m-7 · note from ConsensFlow] Go", Some(7)),
+        // Claude Code's wrapper of a paste, and the placeholders of the images it attached.
+        (
+            "<pasted_content id=\"b118\">\n[ConsensFlow m-5 · T-1 · result from @a]\nGo",
+            Some(5),
+        ),
+        (
+            "[Image #4][ConsensFlow m-9 · T-1 · result from @a]",
+            Some(9),
+        ),
+        (
+            "[Image #4] [ConsensFlow m-9 · T-1 · result from @a]",
+            Some(9),
+        ),
+        (
+            "[Image #4]\n\n<pasted_content id=\"b1\">\n[ConsensFlow m-9 · T-1]",
+            Some(9),
+        ),
+        ("[Image #4] [Image #5]\n[ConsensFlow m-10 · x]", Some(10)),
+        // A header quoted after words, or in other words, names none.
+        (
+            "Why is \"[ConsensFlow m-42 · T-1 · task from @chief]\" queued?",
+            None,
+        ),
+        ("Investigate this:\n\n[ConsensFlow m-42 · T-1]", None),
+        ("key: abc [ConsensFlow m-42 · T-1]", None),
+        ("<pasted_content id=\"b1\"> [ConsensFlow m-42 · T-1]", None),
+        (
+            "<pasted_content id=\"b1\" extra>\nwords [ConsensFlow m-42 ·",
+            None,
+        ),
+        ("<b>\n[ConsensFlow m-42 · T-1]", None),
+        ("<pasted_contentx>\n[ConsensFlow m-42 · T-1]", None),
+        (
+            "<pasted_content id=\"a>b\">\n[ConsensFlow m-42 · T-1]",
+            None,
+        ),
+        // Not a header of ConsensFlow's id.
+        ("[ConsensFlow m-12x · T-1]", None),
+        ("[ConsensFlow m-12]", None),
+        ("[ConsensFlow m-٣ · T-1]", None),
+        ("[ConsensFlow m-99999999999999999999 · T-1]", None),
+        ("[ConsensFlow m- · T-1]", None),
+        ("pass word hunter22", None),
+        ("", None),
+    ];
+    let mut failed = Vec::new();
+    for (text, want) in cases {
+        let got = Opening::began_with(text, None).delivery;
+        if got != want {
+            failed.push(format!("{text:?}: {got:?}, wanted {want:?}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 #[tokio::test]
@@ -188,7 +243,8 @@ async fn a_turn_compacted_in_its_middle_is_named_by_the_message_that_began_it_no
     else {
         panic!("cut, with its message");
     };
-    assert_eq!(opening.words, "Run the tests");
+    assert_eq!(opening.delivery, None);
+    assert_eq!(opening.at, None);
 }
 
 #[tokio::test]

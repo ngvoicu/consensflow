@@ -71,7 +71,6 @@ use crate::dispatcher::Dispatcher;
 use crate::handoff::is_handoff;
 use crate::runtime::returning;
 use crate::seams::EngineError;
-use crate::shown::quotable_opening;
 
 /// The Closes under way, by project (the human's, and the one the chief's window
 /// ending makes), as the closes of their windows, and the human's as a whole, to its
@@ -153,18 +152,26 @@ pub(crate) enum Coming {
     Member { task: i64, paid: Option<Stop> },
 }
 
+/// The turn a window was cut in, as its note names it (T-1328): by when it began and, where a
+/// delivery of ConsensFlow's to this window began it, by the ledger's row of that delivery. It
+/// holds nothing the window showed, so no note made from it can quote a secret.
+pub(crate) struct Turn {
+    at: Option<String>,
+    /// The ledger's row of the delivery the turn began with, where the record's first words are
+    /// the header of one the ledger holds, sent to this window ([`Dispatcher::turn_began_with`]).
+    delivery: Option<MessageView>,
+}
+
 impl Coming {
-    /// What the window is told when its turn was cut: the turn, where its record
-    /// shows the message that began it (`opening`). A member is told what it was
-    /// working on, in a continuation (the ledger's words, which go with any move of
-    /// the task). Each came back by the human's Resume, not by a quit alone (a Close
-    /// cuts a turn too), so the words say only that ConsensFlow stopped.
-    pub(crate) fn words(&self, opening: Option<&Opening>) -> String {
-        // The opening is the first words of a message the person typed or the board sent: those
-        // that may hold a secret are not quoted, and the rest is masked (T-830, item 1).
-        let turn = opening.map(|opening| match quotable_opening(&opening.words) {
-            Some(words) => cut_turn(opening.at.as_deref(), &words),
-            None => cut_turn_unquoted(opening.at.as_deref()),
+    /// What the window is told when its turn was cut: the turn, where its record shows the
+    /// message that began it (`turn`). A member is told what it was working on, in a
+    /// continuation (the ledger's words, which go with any move of the task). Each came back by
+    /// the human's Resume, not by a quit alone (a Close cuts a turn too), so the words say only
+    /// that ConsensFlow stopped.
+    pub(crate) fn words(&self, turn: Option<&Turn>) -> String {
+        let turn = turn.map(|turn| match &turn.delivery {
+            Some(delivery) => cut_turn(turn.at.as_deref(), delivery),
+            None => cut_turn_unquoted(turn.at.as_deref()),
         });
         match (self, turn) {
             (Coming::Chief, None) => format!("{CHIEF_CUT}. {RESUME_WORDS}"),
@@ -380,6 +387,30 @@ impl Dispatcher {
         Ok(self.seams.ledger.borrow().stop_of(participant.id)? == *paid)
     }
 
+    /// The turn `opening` is, as a note names it: the delivery the ledger holds, where the
+    /// record's first words are the header of a message the ledger sent to this window,
+    /// and any other opening by its time alone. The header is the record's claim: the ledger
+    /// is asked, and its row is what is named, never the words the window showed (T-1328).
+    fn turn_began_with(
+        &self,
+        participant: &ParticipantView,
+        opening: &Opening,
+    ) -> Result<Turn, EngineError> {
+        let delivery = match opening.delivery {
+            Some(id) => self
+                .seams
+                .ledger
+                .borrow()
+                .message(id)?
+                .filter(|message| message.recipient_id == participant.id),
+            None => None,
+        };
+        Ok(Turn {
+            at: opening.at.clone(),
+            delivery,
+        })
+    }
+
     /// The note that tells a window its turn was cut, when it was, to be its
     /// first message: written now from its record, or the one an earlier Resume left
     /// waiting where the record says it still, word for word (so it is told once).
@@ -407,7 +438,13 @@ impl Dispatcher {
             return Ok(None);
         }
         let words = match self.turn_cut(participant.id).await? {
-            Some(TurnLeft::Cut(opening)) => Some(coming.words(opening.as_ref())),
+            Some(TurnLeft::Cut(opening)) => {
+                let turn = opening
+                    .as_ref()
+                    .map(|opening| self.turn_began_with(participant, opening))
+                    .transpose()?;
+                Some(coming.words(turn.as_ref()))
+            }
             Some(TurnLeft::AtRest) => None,
             None => matches!(coming, Coming::Member { .. }).then(|| coming.words(None)),
         };
