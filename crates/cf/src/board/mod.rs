@@ -483,11 +483,15 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
                 } else {
                     String::new()
                 };
+                // An image designer has no tier (a design task has none): the board says null.
+                let tier = match member.get("tier") {
+                    None | Some(Value::Null) => String::new(),
+                    tier => format!(" · {}", js::text(tier)),
+                };
                 format!(
-                    "@{}{runs} · {} · {} · {}",
+                    "@{}{runs} · {}{tier} · {}",
                     js::text(member.get("handle")),
                     js::join(list(member.get("roles")), "+"),
-                    js::text(member.get("tier")),
                     js::text(member.get("harnessName"))
                 )
             })

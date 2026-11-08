@@ -42,17 +42,24 @@ const byRoleAndTier = (a, b) =>
  * (its model's id and its effort) only where its name does not say it (HMD-12); a pick of New
  * project has no name made yet, and says its harness, its effort and its tier.
  */
-const runsLabel = (member, named = true) =>
-  (named
-    ? [
-        ...(nameApart(member) ? [modelShown(member), member.effort] : []),
-        member.tier,
-        member.harness && harnessLabel(member),
-      ]
-    : [member.harness && harnessLabel(member), member.effort, member.tier]
+const runsLabel = (member, named = true) => {
+  // An image designer has no tier: a design task has none (designer P2).
+  const tier = isDesigner(member) ? null : member.tier
+  return (
+    named
+      ? [
+          ...(nameApart(member) ? [modelShown(member), member.effort] : []),
+          tier,
+          member.harness && harnessLabel(member),
+        ]
+      : [member.harness && harnessLabel(member), member.effort, tier]
   )
     .filter(Boolean)
     .join(' · ')
+}
+
+/** Whether a staff row, or a pick of New project, is an image designer. */
+const isDesigner = (member) => member.designer === true || member.role === 'designer'
 
 /** One row of a staff table: the member, one of its roles, a Remove for that role, and an Edit of the member where it has one. */
 function staffRow(who, role, remove, edit = null) {
@@ -247,7 +254,11 @@ class ModelPicker {
     this.#changed = changed
     this.#takenOff = takenOff
     this.switchHelp = switchHelp
-    harness.addEventListener('change', () => void this.show(harness.value))
+    /** Whether picking a harness reads its models: an image designer picks none (designer P2). */
+    this.reads = true
+    harness.addEventListener('change', () => {
+      if (this.reads) void this.show(harness.value)
+    })
     model.addEventListener('change', () => {
       this.#sayHelp()
       this.#changed()
@@ -271,6 +282,13 @@ class ModelPicker {
   /** The harness picked, by its kind (`claude-code`). */
   get kind() {
     return this.#harness.value
+  }
+
+  /** Picks `kind` with no model to read or to pick: an image designer's Codex (designer P2). */
+  choose(kind) {
+    this.#harness.value = kind
+    this.#asked += 1
+    this.#none('', '')
   }
 
   /** The model picked, as its harness lists it; none while none is. */
@@ -481,6 +499,14 @@ class MemberPicker {
   /** What the add button says while the form adds a member. */
   #adds
 
+  /** The controls of a model, an effort and a tier, which an image designer is given none of. */
+  #modelControls
+
+  /** Whether the form adds an image designer: it draws on Codex's own model and has no tier. */
+  get #designer() {
+    return this.#role.value === 'designer' && this.editing === null
+  }
+
   constructor(form, lists, refreshed) {
     this.#fieldset = form.querySelector('.staff-add')
     this.#legend = this.#fieldset.querySelector('legend')
@@ -488,6 +514,14 @@ class MemberPicker {
     this.#effort = form.elements.memberEffort
     this.#tier = form.elements.memberTier
     this.#refresh = form.elements.memberRefresh
+    // What an image designer has none of: Codex draws on its own model, at no effort, and a
+    // design task has no tier (designer P2).
+    this.#modelControls = [
+      form.elements.memberModel.closest('label'),
+      form.elements.memberEffort.closest('label'),
+      form.elements.memberTier.closest('label'),
+      form.elements.memberRefresh,
+    ]
     this.#submit = this.#fieldset.querySelector('[name="memberAdd"]')
     this.#cancel = form.elements.memberCancel
     this.#help = this.#fieldset.querySelector('.member-help')
@@ -577,6 +611,10 @@ class MemberPicker {
       return null
     }
     if (kind === '') return say('Pick a harness for the member.')
+    if (this.#designer) {
+      this.say('')
+      return { harness: kind, modelName: null }
+    }
     if (model === undefined) return this.#picker.open ? say("Pick the member's model.") : null
     if (model.efforts.length > 0 && this.#effort.value === '') {
       return say(`Pick the effort ${HARNESS_NAMES[kind]} runs ${modelOf(model)} at.`)
@@ -616,10 +654,22 @@ class MemberPicker {
     hint.hidden = words === ''
   }
 
-  /** The harnesses a member in the role picked may run on: Codex alone draws. */
+  /**
+   * The harnesses a member in the role picked may run on: Codex alone draws, and an image
+   * designer is given Codex with no model, effort or tier to pick (designer P2).
+   */
   #fillHarnesses(only = this.#role.value === 'designer' ? ['codex'] : null) {
+    const designer = this.#designer
+    for (const control of this.#modelControls) control.hidden = designer
+    this.#picker.reads = !designer
     try {
       this.#picker.fill(this.#missing, only)
+      if (designer) this.#picker.choose('codex')
+      this.#sayHelp(
+        designer
+          ? "An image designer draws on Codex's own model: it takes no model, effort or tier."
+          : '',
+      )
       this.#submit.disabled = false
       this.say('')
     } catch (refused) {
@@ -809,23 +859,31 @@ export class NewProjectDialog {
 
   /**
    * The last project's staff, picked: its members on a harness installed here, in their
-   * roles; one on its harness's default (an image designer from before the models were the
-   * harnesses' own) is left for the human to pick a model for.
+   * roles; an image designer runs on its harness's own model at no effort and in no tier,
+   * and is picked as it is.
    */
   #pickLast(lastStaff) {
     this.#picked = lastStaff
-      .filter((member) => member.model && !this.#missing.includes(harnessOf(member.harness)))
+      .filter(
+        (member) =>
+          (member.model || member.designer) && !this.#missing.includes(harnessOf(member.harness)),
+      )
       .flatMap((member) =>
-        member.roles.map((role) => ({
-          harness: member.harness,
-          // The model as its harness's list names it (`modelName`): what the daemon takes for
-          // a pick. Devin's `model` is the launch id for the effort, which no list holds.
-          model: member.modelName || member.model,
-          effort: member.effort,
-          tier: member.tier,
-          modelName: member.modelName,
-          role,
-        })),
+        member.roles.map((role) =>
+          member.designer
+            ? // An image designer runs on its harness's own model, at no effort and in no tier.
+              { harness: member.harness, role }
+            : {
+                harness: member.harness,
+                // The model as its harness's list names it (`modelName`): what the daemon takes for
+                // a pick. Devin's `model` is the launch id for the effort, which no list holds.
+                model: member.modelName || member.model,
+                effort: member.effort,
+                tier: member.tier,
+                modelName: member.modelName,
+                role,
+              },
+        ),
       )
     this.#draw()
   }
@@ -1290,12 +1348,15 @@ export class ProjectSettingsDialog {
         },
         `Remove ${ROLE_LABEL[role]} ${name}`,
       )
-      const edit = button(
-        'Edit',
-        'quiet-button',
-        () => void this.#member.edit(this.#memberNow(member)),
-        `Edit ${name}`,
-      )
+      // An image designer has nothing to edit: Codex's own model, no effort, no tier.
+      const edit = member.designer
+        ? null
+        : button(
+            'Edit',
+            'quiet-button',
+            () => void this.#member.edit(this.#memberNow(member)),
+            `Edit ${name}`,
+          )
       const row = staffRow(who(), role, remove, edit)
       row.dataset.handle = member.handle
       if (gone) row.dataset.modelGone = member.model

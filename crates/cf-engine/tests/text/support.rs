@@ -224,18 +224,35 @@ pub fn seat(harness: Option<&str>, model: Option<&str>) -> ParticipantView {
 
 /// A participant as a golden row holds it, whole.
 pub fn participant_of(row: &Value) -> ParticipantView {
+    let (handle, role) = (
+        row["handle"].as_str().unwrap(),
+        row["role"].as_str().unwrap(),
+    );
+    let (model, effort, model_name) = (
+        text(row, "model"),
+        text(row, "effort"),
+        text(row, "modelName"),
+    );
     ParticipantView {
         id: row["id"].as_i64().unwrap(),
         project_id: row["projectId"].as_i64().unwrap(),
-        handle: row["handle"].as_str().unwrap().to_owned(),
-        role: row["role"].as_str().unwrap().to_owned(),
+        handle: handle.to_owned(),
+        role: role.to_owned(),
         agent: text(row, "agent"),
         harness: text(row, "harness"),
-        model: text(row, "model"),
-        effort: text(row, "effort"),
-        model_name: text(row, "modelName"),
+        // As the ledger reads it (`participant_view`): a member's name that holds no model.
+        name_apart: role != "human"
+            && role != "chief"
+            && !cf_ledger::handles::names_its_model(
+                handle,
+                model_name.as_deref(),
+                model.as_deref(),
+                effort.as_deref(),
+            ),
+        model,
+        effort,
+        model_name,
         former_handles: Vec::new(),
-        name_apart: false,
         needs_edit: false,
         launched_model: text(row, "launchedModel"),
         gone_model: None,
@@ -371,7 +388,7 @@ pub fn unknown(_: i64) -> Result<Option<MessageView>, Refusal> {
 pub fn staff_row_of(row: &Value) -> StaffRow {
     StaffRow {
         name: row["name"].as_str().unwrap().to_owned(),
-        model: text(row, "model").unwrap_or_else(|| MODEL_SHOWN.to_owned()),
+        model: Some(text(row, "model").unwrap_or_else(|| MODEL_SHOWN.to_owned())),
         roles: texts(row, "roles"),
         work_tier: row
             .get("workTier")
@@ -387,7 +404,7 @@ pub const MODEL_SHOWN: &str = "Opus · high";
 pub fn staff_row(name: &str, roles: &[&str], work_tier: WorkTier) -> StaffRow {
     StaffRow {
         name: name.to_owned(),
-        model: MODEL_SHOWN.to_owned(),
+        model: Some(MODEL_SHOWN.to_owned()),
         roles: roles.iter().map(|role| (*role).to_owned()).collect(),
         work_tier: Some(work_tier),
     }

@@ -396,7 +396,8 @@ const identityParts = (participant) => {
         ]
       : [
           part('role', participant.roles.join('+')),
-          part('tier', participant.tier),
+          // An image designer has no tier: a design task has none (designer P2).
+          part('tier', participant.designer ? null : participant.tier),
           part('harness', harnessLabel(participant)),
           ...runs,
         ]

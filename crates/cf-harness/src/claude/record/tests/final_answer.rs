@@ -165,3 +165,141 @@ fn the_turn_a_jobs_end_wakes_has_its_own_final_answer_after_the_one_of_the_turn_
         "still a user's item, as Node read it"
     );
 }
+
+#[test]
+fn what_a_message_wrote_after_an_advisors_answer_in_it_is_an_item_of_its_own_after_the_tool() {
+    // T-593's result (m-4165, 3.0.6-alpha.2) began with the line its worker wrote before it
+    // asked the advisor. Claude Code writes the advisor's call and its answer as blocks of the
+    // message that answers, each record a block of it (2.1.x): a text, the server tool's call,
+    // its result, and the report, all of one message id and all `end_turn`. What the message
+    // said before the result stopped for a tool, as a step does; the report is after it.
+    let ended = || json!("end_turn");
+    // The record that holds the result is no place of the message's words, whatever its id
+    // and the call's sort as (Claude Code's `msg_…` before `srvtoolu_…`, and the other way).
+    for message in ["m1", "z1"] {
+        let records = [
+            hello(),
+            assistant(
+                "a1",
+                "u1",
+                json!(message),
+                json!([text(json!("One last check with the advisor"))]),
+                ended(),
+            ),
+            assistant("a2", "a1", json!(message), json!([server_call()]), ended()),
+            assistant("a3", "a2", json!(message), json!([advice_for()]), ended()),
+            assistant(
+                "a4",
+                "a3",
+                json!(message),
+                json!([text(json!("PASS: no findings."))]),
+                ended(),
+            ),
+            summary("s1", "a4"),
+            duration("d1", "s1"),
+        ];
+        let mut stage = Stage::new();
+        stage.write(&records);
+        let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+            panic!("a reading");
+        };
+
+        assert_eq!(record.settlement, Settlement::Settled);
+        assert_eq!(
+            shape(record),
+            [
+                (Role::User, true),
+                (Role::Assistant, false),
+                (Role::Tool, true),
+                (Role::Assistant, true),
+            ],
+            "the words before the advisor's answer are a step that stopped for it ({message})"
+        );
+        let words: Vec<&str> = record.items.iter().map(|item| &*item.text).collect();
+        assert_eq!(words[1], "One last check with the advisor");
+        assert_eq!(words[3], "PASS: no findings.");
+        assert_ne!(record.items[1].id, record.items[3].id, "two items");
+    }
+
+    // An advisor asked first, with nothing said before it: the report alone is the answer.
+    let records = [
+        hello(),
+        assistant("a1", "u1", json!("m1"), json!([server_call()]), ended()),
+        assistant("a2", "a1", json!("m1"), json!([advice_for()]), ended()),
+        assistant(
+            "a3",
+            "a2",
+            json!("m1"),
+            json!([text(json!("PASS: no findings."))]),
+            ended(),
+        ),
+        summary("s1", "a3"),
+    ];
+    let mut stage = Stage::new();
+    stage.write(&records);
+    let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+        panic!("a reading");
+    };
+    let last = record.items.last().expect("an answer");
+    assert_eq!(
+        (last.role, last.complete, &*last.text),
+        (Role::Assistant, true, "PASS: no findings.")
+    );
+    assert_eq!(record.items[record.items.len() - 2].role, Role::Tool);
+}
+
+#[test]
+fn a_message_that_ended_on_an_advisors_answer_ends_on_the_words_before_it() {
+    // Nothing said after the advisor answered: the message's words are those before the call,
+    // and they are what ended the turn (`turn_end` takes them where nothing follows a tool).
+    let records = [
+        hello(),
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!("Checked with the advisor"))]),
+            json!("end_turn"),
+        ),
+        assistant(
+            "a2",
+            "a1",
+            json!("m1"),
+            json!([server_call()]),
+            json!("end_turn"),
+        ),
+        assistant(
+            "a3",
+            "a2",
+            json!("m1"),
+            json!([advice_for()]),
+            json!("end_turn"),
+        ),
+        summary("s1", "a3"),
+    ];
+    let mut stage = Stage::new();
+    stage.write(&records);
+    let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+        panic!("a reading");
+    };
+    assert_eq!(record.settlement, Settlement::Settled);
+    assert_eq!(
+        shape(record),
+        [
+            (Role::User, true),
+            (Role::Assistant, true),
+            (Role::Tool, true)
+        ]
+    );
+    assert_eq!(&*record.items[1].text, "Checked with the advisor");
+}
+
+/// The advisor's call, `s7`, as a block of the message that asks it.
+fn server_call() -> Value {
+    json!({ "type": "server_tool_use", "id": "s7", "name": "advisor" })
+}
+
+/// The advisor's answer to `s7`, as a block of the message that asked it.
+fn advice_for() -> Value {
+    json!({ "type": "advisor_tool_result", "tool_use_id": "s7", "content": "advice" })
+}

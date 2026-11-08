@@ -418,3 +418,96 @@ fn a_server_error_or_an_overloaded_model_is_a_refusal_for_a_moment_and_no_quota(
         assert_eq!(once(&[hello(), with(fields)]), expected, "{fields}");
     }
 }
+
+/// The items of one look at `records`, and the reading's `failed`.
+fn look_at(records: &[Value]) -> (Vec<crate::shared::record::reading::Item>, bool) {
+    let mut stage = Stage::new();
+    stage.write(records);
+    let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+        panic!("a reading");
+    };
+    (record.items.clone(), record.failed)
+}
+
+#[test]
+fn the_words_of_an_api_error_are_the_harnesss_own_until_the_model_says_something_in_its_message() {
+    // T-1310's review of T-878 (T-1311): Claude Code writes an error of the API in the
+    // assistant's place (`isApiErrorMessage`, its model `<synthetic>`), and the turn may go on
+    // without a new message from the user: a call that says nothing, its result, an empty end.
+    // The error's words are the harness's own (`synthetic`), so the result of that turn, which
+    // takes the last words written before the last tool call where there are none after it,
+    // never takes them.
+    let overloaded = in_message(
+        refused("a1", json!({ "apiErrorStatus": 529 })),
+        "content",
+        Some(json!([text(json!("API Error: 529 overloaded"))])),
+    );
+    let call = assistant(
+        "a2",
+        "a1",
+        json!("m2"),
+        json!([tool_use(json!("t1"))]),
+        json!("tool_use"),
+    );
+    let ran = user(
+        "u2",
+        json!("a2"),
+        json!([tool_result(json!("t1"), json!("ok"))]),
+    );
+    let ended = assistant(
+        "a3",
+        "u2",
+        json!("m3"),
+        json!([text(json!(""))]),
+        json!("end_turn"),
+    );
+    let (items, failed) = look_at(&[
+        hello(),
+        overloaded,
+        call,
+        ran,
+        ended,
+        summary("s1", "a3"),
+        duration("d1", "s1"),
+    ]);
+    assert!(!failed, "the turn went on after the error");
+    let error = items
+        .iter()
+        .find(|item| &*item.text == "API Error: 529 overloaded")
+        .expect("the error's item");
+    assert!(error.synthetic, "the harness's own words");
+    assert!(
+        !error.commentary,
+        "no progress note: a reading says commentary, and Node's never did here"
+    );
+
+    // An error in a message whose model had said something, or says something after it: the
+    // message holds the model's words, and is no harness's own.
+    let answered = || {
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!("Hi"))]),
+            json!("end_turn"),
+        )
+    };
+    let refusal = || {
+        in_message(
+            refused("a2", json!({ "apiErrorStatus": 429 })),
+            "id",
+            Some(json!("m1")),
+        )
+    };
+    let back = assistant(
+        "a3",
+        "a2",
+        json!("m1"),
+        json!([text(json!("Back"))]),
+        json!("end_turn"),
+    );
+    let (items, _) = look_at(&[hello(), answered(), refusal()]);
+    assert!(!items[1].synthetic, "{:?}", items[1].text);
+    let (items, _) = look_at(&[hello(), refusal(), back]);
+    assert!(!items[1].synthetic, "{:?}", items[1].text);
+}

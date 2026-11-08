@@ -14,21 +14,29 @@ pub fn team_table(members: &[StaffRow]) -> Result<String, RoleError> {
         return Ok(NOBODY.to_owned());
     }
     let mut table = vec![
-        "| Member | Model | Roles | Work tier |".to_owned(),
-        "|---|---|---|---|".to_owned(),
+        "| Member | Roles | Work tier |".to_owned(),
+        "|---|---|---|".to_owned(),
     ];
     for member in members {
-        // Name, model, roles and tier, nothing else: the chief names a tier and never
-        // picks a member; the model says what the member is.
-        let tier = member.work_tier.ok_or_else(|| RoleError::NoWorkTier {
-            member: member.name.clone(),
-        })?;
-        let cells = [
-            member.name.as_str(),
-            member.model.as_str(),
-            &member.roles.join(", "),
-            work_tier_info(tier).label,
-        ];
+        // Name, roles and tier, nothing else: the chief names a tier and never picks a
+        // member. A member is named by its model, which the name says; where it does not
+        // (a member on its harness's default, one that needs an edit) the model stands
+        // beside it.
+        // An image designer has no tier (`--design`, no tier), and the table says none.
+        let tier = match member.work_tier {
+            Some(tier) => work_tier_info(tier).label,
+            None if member.roles == ["designer"] => "none",
+            None => {
+                return Err(RoleError::NoWorkTier {
+                    member: member.name.clone(),
+                })
+            }
+        };
+        let named = match &member.model {
+            Some(model) => format!("{} ({model})", member.name),
+            None => member.name.clone(),
+        };
+        let cells = [named.as_str(), &member.roles.join(", "), tier];
         table.push(format!("| {} |", cells.map(cell).join(" | ")));
     }
     Ok(table.join("\n"))

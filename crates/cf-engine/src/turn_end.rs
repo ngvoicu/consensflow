@@ -16,8 +16,10 @@
 //! last reply of a request, Codex's `final_answer`), and the progress it writes on the way
 //! is no complete answer. What the harness wrote itself is no answer and cuts none: the
 //! summary of a compaction, a notification it keeps in its record alone, Claude Code's
-//! close of a cut turn. A turn that wrote nothing after its last tool call says so
-//! ([`WITHOUT_ANSWER`]).
+//! close of a cut turn. A turn that wrote nothing after its last tool call gives the last
+//! words it wrote before it in that turn (the chief's decision on T-262: a result is never
+//! empty), and one that wrote no words at all says so ([`WITHOUT_ANSWER`]). A tell's turn is
+//! told on the words after its last tool call alone ([`paused`], T-878).
 //!
 //! **Pending work keeps the task working** (A2; dip-agentos #1, poker-lab's T-442):
 //! Claude Code lets a command run in the background, or a Monitor watch one, and its
@@ -86,14 +88,24 @@ use serde_json::Value;
 
 use crate::delivery_text::{header_id, is_paste_of};
 use crate::dispatcher::Dispatcher;
+use crate::image_facts::for_task;
 use crate::record::Record;
-use crate::role_change::answers_to_the_task;
+use crate::role_change::{answers_to_the_task, Run};
 use crate::seams::{CommandsSeen, EngineError};
 
 use self::asks::asks_the_chief;
 use self::earlier_turns::with_earlier;
 
-/// What a result says of a turn that wrote nothing after its last tool call.
+/// What a result says above the words the never-empty rule took (T-262): its turn wrote none
+/// after its last tool call, and these are the last it wrote before it, which may be a line of
+/// its progress and not a report (T-1310's review of T-878, T-1311). In the plain voice of the
+/// labels of the turns that ended before (`earlier_turns`). cf-evals' long run judges the
+/// result with the same line (`long_run::invariants::order`), held to this one by a test.
+pub(crate) const LAST_WORDS: &str =
+    "Its turn ended with no words after its last command. The last words it wrote:";
+
+/// What a result says of a turn that wrote no words at all, and what a tell's turn says
+/// after its last tool call where it wrote none there.
 pub(crate) const WITHOUT_ANSWER: &str = "(the agent ended its turn without a written answer)";
 
 /// What a worker's turn came to, for its task.
@@ -437,7 +449,7 @@ impl Dispatcher {
             &replacements,
             &words_of(&answers.final_run),
         )?;
-        let words = with_earlier(words, &earlier);
+        let words = for_task(&thread.task, with_earlier(words, &earlier));
         let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));
         self.seams
             .ledger
@@ -1234,11 +1246,49 @@ pub(crate) fn with_lost(words: String, handle: &str, lost: Option<usize>) -> Str
     }
 }
 
+/// What a final answer is written in: its items, and whether they are its turn's last words,
+/// taken where it wrote none after its last tool call (`role_change::Run`).
+pub(crate) trait Words {
+    fn items(&self) -> &[&Item];
+    fn last_words(&self) -> bool {
+        false
+    }
+}
+
+impl Words for [&Item] {
+    fn items(&self) -> &[&Item] {
+        self
+    }
+}
+
+impl<const N: usize> Words for [&Item; N] {
+    fn items(&self) -> &[&Item] {
+        self
+    }
+}
+
+impl Words for Vec<&Item> {
+    fn items(&self) -> &[&Item] {
+        self
+    }
+}
+
+impl Words for Run<'_> {
+    fn items(&self) -> &[&Item] {
+        self
+    }
+
+    fn last_words(&self) -> bool {
+        self.last_words
+    }
+}
+
 /// The words of a final answer, in the items it was written in: each trimmed, a blank
-/// line between, what a harness marks as its progress left out. Where the member wrote
-/// none, what says so.
-pub(crate) fn words_of(final_run: &[&Item]) -> String {
+/// line between, what a harness marks as its progress left out, and [`LAST_WORDS`] above
+/// them where they are its turn's last words. Where the member wrote none, what says so.
+pub(crate) fn words_of(final_run: &(impl Words + ?Sized)) -> String {
     let words: Vec<&str> = final_run
+        .items()
         .iter()
         .filter(|item| !item.commentary)
         .map(|item| js::trim(&item.text))
@@ -1246,6 +1296,8 @@ pub(crate) fn words_of(final_run: &[&Item]) -> String {
         .collect();
     if words.is_empty() {
         WITHOUT_ANSWER.to_owned()
+    } else if final_run.last_words() {
+        format!("{LAST_WORDS}\n\n{}", words.join("\n\n"))
     } else {
         words.join("\n\n")
     }

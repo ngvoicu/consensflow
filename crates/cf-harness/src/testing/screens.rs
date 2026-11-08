@@ -464,6 +464,28 @@ pub const CLAUDE_LSP_TURN_ENDED: &[&str] = &[
     "     4. Disable all LSP recommendations",
 ];
 
+/// Claude Code 2.1.319's Computer Use permission prompt in T-1291's window (2026-11-07, ConsensFlow
+/// 3.0.7-alpha.2: Accessibility granted, Screen Recording not), as the pane host's tail (the
+/// engine's: no empty line, no rule that says no word) shows it. The words, the choices and the
+/// place the sentence wrapped at are the field's: the notice of it (m-7690) quoted the question
+/// "Recording." (the sentence's last row), the two choices and everything above them, and
+/// 2.1.319's own component draws the rest (`sxe`: the two status rows, the sentence, the choices
+/// with their numbers hidden, and under them the dialog's footer). The footer is not in the
+/// notice: its words, and the conversation row above the tool line, are a reconstruction.
+pub const CLAUDE_COMPUTER_USE_PROMPT: &[&str] = &[
+    "\u{23fa} I'll type that URL into the chief's input, Cmd+click it, and then check the log, with plain and",
+    "  Ctrl-click as negative tests.",
+    "\u{23fa} Computer Use[request_access]",
+    "  Computer Use needs macOS permissions",
+    "  Accessibility: \u{2714} granted",
+    "  Screen Recording: \u{2718} not granted",
+    "  Grant the missing permissions in System Settings, then select \"Try again\". macOS may require you to restart Claude Code after granting Screen",
+    "  Recording.",
+    "  \u{276f} Open System Settings \u{2192} Screen Recording",
+    "    Try again",
+    "  Enter to confirm \u{b7} Esc to cancel",
+];
+
 /// Claude Code 2.1.319's permission prompt of a dangerous `rm` (of two empty variables, a command
 /// that runs nothing: `rm "$CFA/$CFB"`), as the pane host's tail (the engine's) showed it in the
 /// kit's live run of 2026-11-07 (T-1277), at the first look: 1:59 left before Claude Code blocks the

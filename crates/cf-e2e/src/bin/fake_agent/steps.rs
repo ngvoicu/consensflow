@@ -10,7 +10,12 @@
 //!
 //! - A line `STEPS <n> <words>` is a turn that works through `n` steps, each saying `Step
 //!   <i> of <n>` and calling a tool, and then answers the words: the progress a worker
-//!   writes before its report, and the report.
+//!   writes before its report, and the report. `STEPS <n> --advised <words>` asks the
+//!   advisor in the message that answers, as Claude Code writes it (2.1.x, T-593's result
+//!   m-4165): the message says [`TO_THE_ADVISOR`], calls the advisor, a server tool whose result is
+//!   a block of the message itself, and then says the words, each a record of the one
+//!   message, all `end_turn`. `STEPS <n> --quiet` answers nothing after its last step's
+//!   tool: an answer with no words.
 //! - A line `SAID <words> THEN <line>` is a turn that writes `words`, calls a tool, and goes on
 //!   with `line` as the line it was given: the first words a window writes in answer to a
 //!   question before it works, then its work, then what that answers (T-1151: Devin, Claude
@@ -73,9 +78,13 @@ use crate::reply::{reply_to, run_cf, Reply, Window};
 /// What opens the text of a notification, which is how a message that is one is told.
 const NOTIFICATION: &str = "<task-notification>";
 
+/// What the message that answers says before it asks the advisor (`STEPS --advised`).
+pub const TO_THE_ADVISOR: &str = "One last check with the advisor";
+
 /// A step of a turn: what the agent said and called a tool for, and, where the call
 /// runs a job in the background, the job's id, or, where it arms a monitor, the monitor's
-/// task and how long it watches.
+/// task and how long it watches. A step that asks the advisor (`advised`) begins the
+/// message that answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Step {
     pub said: String,
@@ -85,6 +94,8 @@ pub struct Step {
     pub watches: Option<String>,
     /// What the call printed, where a case needs it to be words (`cf ask`'s): "ok" otherwise.
     pub printed: Option<String>,
+    /// The step asks the advisor in the message that answers (`STEPS --advised`).
+    pub advised: bool,
 }
 
 impl Step {
@@ -96,6 +107,7 @@ impl Step {
             monitor: None,
             watches: None,
             printed: None,
+            advised: false,
         }
     }
 
@@ -107,6 +119,15 @@ impl Step {
             monitor: None,
             watches: None,
             printed: None,
+            advised: false,
+        }
+    }
+
+    /// The advisor asked in the message that answers.
+    pub fn advising() -> Self {
+        Self {
+            advised: true,
+            ..Self::saying(TO_THE_ADVISOR)
         }
     }
 
@@ -126,6 +147,7 @@ impl Step {
             monitor: None,
             watches: None,
             printed: None,
+            advised: false,
         }
     }
 
@@ -137,6 +159,7 @@ impl Step {
             monitor: Some((id.to_owned(), timeout_ms)),
             watches: None,
             printed: None,
+            advised: false,
         }
     }
 
@@ -349,12 +372,24 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Worked, String>> {
         let on = format!("{}{rest}{}", &text[..line], &text[whole.end()..]);
         return Some(reply_to(&on, window).map(|answer| (vec![Step::saying(&words)], answer)));
     }
-    if let Some(steps) = pattern::once(&STEPS, r"(?m)^STEPS (\d+) (.+)$").captures(text) {
+    if let Some(steps) = pattern::once(
+        &STEPS,
+        r"(?m)^STEPS (\d+) (?:(--quiet)|--advised (.+)|(.+))$",
+    )
+    .captures(text)
+    {
         let Ok(count) = steps[1].parse::<u64>() else {
             return Some(Err(format!("STEPS {}", &steps[1])));
         };
-        let worked = (1..=count).map(|at| Step::progress(at, count)).collect();
-        return Some(Ok((worked, Reply::Text(steps[2].to_owned()))));
+        let mut worked: Vec<Step> = (1..=count).map(|at| Step::progress(at, count)).collect();
+        if steps.get(3).is_some() {
+            worked.push(Step::advising());
+        }
+        let words = steps
+            .get(3)
+            .or(steps.get(4))
+            .map_or("", |words| words.as_str());
+        return Some(Ok((worked, Reply::Text(words.to_owned()))));
     }
     if let Some(monitor) =
         pattern::once(&MONITOR, r"(?m)^CLAUDE-MONITOR (\d+) (\d+) (.+?) :: (.+)$").captures(text)
@@ -551,13 +586,24 @@ fn until_let_end(file: &Path) {
 /// Writes the steps of a turn, in order, as Claude Code does: the assistant's message that
 /// said something and called the tool, and the user's record of the tool's result. `ordinal`
 /// numbers the messages, as a turn's own answer is numbered.
-pub fn write(records: &mut Records, pid: u32, session: &str, steps: &[Step]) -> io::Result<()> {
+pub fn write(
+    records: &mut Records,
+    pid: u32,
+    session: &str,
+    steps: &[Step],
+) -> io::Result<Option<String>> {
+    let mut answering = None;
     for step in steps {
         let number = records.ordinal();
         let (message, call) = (
             format!("{session}-step-{pid}-{number}"),
             format!("toolu-{pid}-{number}"),
         );
+        if step.advised {
+            ask_the_advisor(records, pid, &message, &call, &step.said)?;
+            answering = Some(message);
+            continue;
+        }
         records.append(
             pid,
             json!({
@@ -584,6 +630,39 @@ pub fn write(records: &mut Records, pid: u32, session: &str, steps: &[Step]) -> 
             }),
         )?;
         records.append(pid, result_of(&call, step))?;
+    }
+    Ok(answering)
+}
+
+/// The records of the message `message` that says `said` and asks the advisor (`call`), its
+/// result a block of the message itself, as Claude Code writes a server tool's: a record a
+/// block, each `end_turn`. The answer goes on in the same message.
+fn ask_the_advisor(
+    records: &mut Records,
+    pid: u32,
+    message: &str,
+    call: &str,
+    said: &str,
+) -> io::Result<()> {
+    for block in [
+        json!({ "type": "text", "text": said }),
+        json!({ "type": "server_tool_use", "id": call, "name": "advisor", "input": {} }),
+        json!({
+            "type": "advisor_tool_result", "tool_use_id": call,
+            "content": { "type": "advisor_redacted_result", "encrypted_content": "c2VhbGVk" },
+        }),
+    ] {
+        records.append(
+            pid,
+            json!({
+                "type": "assistant",
+                "isSidechain": false,
+                "message": {
+                    "id": message, "role": "assistant", "content": [block],
+                    "stop_reason": "end_turn",
+                },
+            }),
+        )?;
     }
     Ok(())
 }
@@ -750,6 +829,19 @@ mod tests {
         let said: Vec<&str> = worked.iter().map(|step| step.said.as_str()).collect();
         assert_eq!(said, ["Step 1 of 3", "Step 2 of 3", "Step 3 of 3"]);
         assert!(worked.iter().all(|step| step.job.is_none()));
+        // Asked the advisor in its answer, or answered nothing after its last step.
+        let (worked, answer) = reply("STEPS 2 --advised The report", &window())
+            .expect("a steps line")
+            .expect("it is made");
+        assert_eq!(answer, Reply::Text("The report".to_owned()));
+        let advised: Vec<bool> = worked.iter().map(|step| step.advised).collect();
+        assert_eq!(advised, [false, false, true]);
+        assert_eq!(worked[2].said, TO_THE_ADVISOR);
+        let (worked, answer) = reply("STEPS 2 --quiet", &window())
+            .expect("a steps line")
+            .expect("it is made");
+        assert_eq!(answer, Reply::Text(String::new()));
+        assert_eq!(worked.len(), 2);
         // Anywhere in the message, as a task delivered to a window has its header first.
         assert!(reply(
             "[ConsensFlow m-4 · T-1 · task from @chief]\nSTEPS 1 Done",

@@ -113,6 +113,8 @@ fn its_list_of_safe_declines_holds_the_lsp_offer_alone_declined_by_the_digit_of_
             after_ms: None,
             then_tell: None,
             what: "offer".to_owned(),
+            listed: true,
+            members_only: false,
         })
     );
     // Its hint to install a plugin a command named: every answer but a cancel writes the
@@ -424,5 +426,360 @@ fn a_claude_windows_command_that_prints_the_warning_is_not_blanked_whatever_its_
         assert_eq!(decline.key, b"2");
         assert_eq!(decline.after_ms, Some(600_000));
         assert_eq!(window.safe_decline(&second).as_ref(), Some(&decline));
+    }
+}
+
+// ----- Its Computer Use permission prompt (T-1300) -----
+
+/// The prompt as T-1291's window drew it, the pane host's tail (see the constant).
+fn computer_use_prompt() -> Vec<String> {
+    cf_harness::testing::screens::CLAUDE_COMPUTER_USE_PROMPT
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect()
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_read_as_a_dialog_that_waits_whatever_its_footer_says() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let dialog = plan
+        .window
+        .dialog(&computer_use_prompt())
+        .expect("the prompt");
+    // The wrapped last row of its sentence, as the field's notice quoted it.
+    assert_eq!(dialog.question, "Recording.");
+    assert_eq!(
+        dialog.options,
+        [
+            "Open System Settings \u{2192} Screen Recording",
+            "Try again"
+        ]
+    );
+    assert!(dialog.asks && !dialog.prompt_below);
+    // Its status says nothing while it is open (2.1.319's table of dialogs has no `waitingFor`
+    // for it), so the screen is the only sign: it waits whatever the footer under it says.
+    let mut bare = computer_use_prompt();
+    bare.pop();
+    let bare = plan
+        .window
+        .dialog(&bare)
+        .expect("the prompt without a footer");
+    assert!(bare.asks, "{bare:?}");
+    // Any other list of choices that asks nothing is not read as one that asks.
+    let mut other = computer_use_prompt();
+    other[3] = "  Something else".to_owned();
+    other.pop();
+    let other = plan.window.dialog(&other).expect("a list");
+    assert!(!other.asks, "{other:?}");
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_declined_by_escape_alone_in_a_members_window() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let dialog = plan
+        .window
+        .dialog(&computer_use_prompt())
+        .expect("the prompt");
+    assert_eq!(
+        plan.window.safe_decline(&dialog),
+        Some(Decline {
+            choice: "Esc".to_owned(),
+            key: vec![27],
+            after_ms: None,
+            then_tell: Some("Computer use isn't available in ConsensFlow's windows until ConsensFlow has the Screen Recording permission and has been restarted. Do the task without it.".to_owned()),
+            what: "Computer Use permission prompt".to_owned(),
+            listed: false,
+            members_only: true,
+        })
+    );
+    // Accessibility missing too: its choice leads the list, and the member is told of both.
+    let mut both = computer_use_prompt();
+    both[4] = "  Accessibility: \u{2718} not granted".to_owned();
+    both.insert(
+        8,
+        "  \u{276f} Open System Settings \u{2192} Accessibility".to_owned(),
+    );
+    both[9] = "    Open System Settings \u{2192} Screen Recording".to_owned();
+    both.insert(10, "    Try again".to_owned());
+    both.remove(11);
+    let both = plan.window.dialog(&both).expect("the prompt");
+    assert_eq!(both.options.len(), 3, "{both:?}");
+    let decline = plan.window.safe_decline(&both).expect("on the list");
+    assert_eq!(decline.key, vec![27]);
+    assert!(decline
+        .then_tell
+        .as_deref()
+        .is_some_and(|words| words.contains("the Accessibility and Screen Recording permissions")));
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_not_declined_where_only_its_words_are_quoted() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    // The harness's own prompt drawn under the choices: they are a conversation's words.
+    let mut shown = computer_use_prompt();
+    shown.extend([
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}".to_owned(),
+        "\u{276f} ".to_owned(),
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}".to_owned(),
+        "  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)".to_owned(),
+    ]);
+    match plan.window.dialog(&shown) {
+        None => {}
+        Some(dialog) => assert_eq!(plan.window.safe_decline(&dialog), None, "{dialog:?}"),
+    }
+    // No cursor on the choices: no dialog at all.
+    let mut plain = computer_use_prompt();
+    plain[8] = "  Open System Settings \u{2192} Screen Recording".to_owned();
+    assert_eq!(plan.window.dialog(&plain), None);
+    // The title in a longer row of a command, a title that is not its own: another dialog.
+    let mut quoted = computer_use_prompt();
+    quoted[3] = "  $ echo \"Computer Use needs macOS permissions\"".to_owned();
+    let quoted = plan.window.dialog(&quoted).expect("a list of choices");
+    assert_eq!(plan.window.safe_decline(&quoted), None);
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_one_dialog_whatever_slides_above_its_title() {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let read = |first: &str, second: &str| {
+        let mut screen = computer_use_prompt();
+        screen[0] = first.to_owned();
+        screen[1] = second.to_owned();
+        plan.window.dialog(&screen).expect("the prompt")
+    };
+    let before = read("\u{23fa} Reading the log", "  3 lines so far");
+    let after = read(
+        "\u{23fa} Reading the log",
+        "  40 lines so far, and a long word more",
+    );
+    assert_ne!(before.detail, after.detail, "the tail slid");
+    assert_eq!(
+        plan.window.dialog_identity(&before),
+        plan.window.dialog_identity(&after)
+    );
+    // Its own words are still told apart: the same prompt with Accessibility missing is another.
+    let mut other = computer_use_prompt();
+    other[4] = "  Accessibility: \u{2718} not granted".to_owned();
+    let other = plan.window.dialog(&other).expect("the prompt");
+    assert_ne!(
+        plan.window.dialog_identity(&before),
+        plan.window.dialog_identity(&other)
+    );
+    // A dialog that has other choices keeps all its words: nothing above its title is cut.
+    let mut deny = computer_use_prompt();
+    deny[8] = "  \u{276f} Deny, and tell Claude what to do differently (esc)".to_owned();
+    deny[9] = "    Allow for this session (1 app)".to_owned();
+    let first = plan.window.dialog(&deny).expect("a list");
+    deny[0] = "\u{23fa} Another row".to_owned();
+    let second = plan.window.dialog(&deny).expect("a list");
+    assert_ne!(
+        plan.window.dialog_identity(&first),
+        plan.window.dialog_identity(&second)
+    );
+}
+
+/// The prompt as 2.1.319 draws it on the terminal: its dialog's rule across the top, a blank row
+/// between its title and its body and between the body's blocks (`gap:1`), the choices without
+/// their numbers, the footer under them.
+fn computer_use_prompt_drawn() -> Vec<String> {
+    [
+        "\u{23fa} I'll type that URL into the chief's input, Cmd+click it, and then check the log, with plain and",
+        "  Ctrl-click as negative tests.",
+        "",
+        "\u{23fa} Computer Use[request_access]",
+        "",
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        " Computer Use needs macOS permissions",
+        "",
+        "  Accessibility: \u{2714} granted",
+        "  Screen Recording: \u{2718} not granted",
+        "",
+        "  Grant the missing permissions in System Settings, then select \"Try again\". macOS may require you to restart Claude Code after granting Screen",
+        "  Recording.",
+        "",
+        "  \u{276f} Open System Settings \u{2192} Screen Recording",
+        "    Try again",
+        "",
+        " Enter to confirm \u{b7} Esc to cancel",
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+#[test]
+fn its_computer_use_permission_prompt_is_declined_when_the_pane_host_sends_its_tail_of_the_screen_as_drawn(
+) {
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    // What the engine reads is the pane host's tail: the last twelve rows with a letter or a
+    // digit, no blank row and no rule.
+    let tail = cf_proto::panes::word_tail(computer_use_prompt_drawn(), 12);
+    assert_eq!(tail.len(), 11, "{tail:?}");
+    assert!(tail.iter().all(|row| !row.trim().is_empty()));
+    assert!(tail
+        .iter()
+        .any(|row| row.trim() == "Computer Use needs macOS permissions"));
+    let dialog = plan.window.dialog(&tail).expect("the prompt");
+    assert_eq!(dialog.options.len(), 2, "{dialog:?}");
+    assert!(dialog.asks && !dialog.prompt_below, "{dialog:?}");
+    let decline = plan.window.safe_decline(&dialog).expect("on the list");
+    assert_eq!(decline.key, vec![27]);
+    // A narrow window wraps its sentence in more rows, and the tail still holds the title.
+    let mut narrow = computer_use_prompt_drawn();
+    narrow.splice(
+        11..13,
+        [
+            "  Grant the missing permissions in System".to_owned(),
+            "  Settings, then select \"Try again\". macOS".to_owned(),
+            "  may require you to restart Claude Code".to_owned(),
+            "  after granting Screen Recording.".to_owned(),
+        ],
+    );
+    let tail = cf_proto::panes::word_tail(narrow, 12);
+    let dialog = plan.window.dialog(&tail).expect("the prompt");
+    assert!(plan.window.safe_decline(&dialog).is_some(), "{dialog:?}");
+}
+
+// ----- No row of a request is cut on words alone (T-1300, after T-1316's review) -----
+
+fn rows(lines: &[&str]) -> Vec<String> {
+    lines.iter().map(|line| (*line).to_owned()).collect()
+}
+
+/// A hook's ask of a command, framed as the field's were: `command` rows, the hook's header, its
+/// `reason` rows, its source, the configuration hint, the question, its choices.
+fn hook_ask_of(command: &[&str], reason: &[&str]) -> Vec<String> {
+    let mut screen: Vec<String> = command
+        .iter()
+        .map(|row| format!("\u{2502} {row}"))
+        .collect();
+    screen.push("\u{2502} Hook tool.check requires confirmation for this command:".to_owned());
+    screen.extend(reason.iter().map(|row| format!("\u{2502} {row}")));
+    screen.extend(rows(&[
+        "\u{2502} [plugin:review-shell]",
+        "plugin hooks.json to update hooks",
+        "Do you want to proceed?",
+        "\u{276f} 1. Yes",
+        "  2. No",
+        "Esc to cancel \u{b7} Tab to amend",
+    ]));
+    screen
+}
+
+#[test]
+fn its_permission_prompt_of_the_field_is_two_identities_at_1_57_and_at_0_05() {
+    // T-1306's window, 2026-11-07: the prompt of a dangerous `rm` of a mounted drive's path, told
+    // twice (m-7776, m-7780) because the second read began at the request, two rows lower. Nothing
+    // the engine reads says those rows were the conversation's, so it stays two (the chief,
+    // 2026-11-08: an extra notice is safe, a merged identity is not).
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let screen = |clock: &str, slid: usize| -> Vec<String> {
+        [
+            "  \u{23bf} \u{a0}Waiting\u{2026}".to_owned(),
+            " Bash command".to_owned(),
+            " Delete the sparse bundle by its literal path".to_owned(),
+            " rm -rf /Volumes/Data/consensflow-builds.sparsebundle; echo \"rm finished rc=$?\"".to_owned(),
+            " \u{2502} Dangerous rm operation on mounted drive path: /Volumes/Data/consensflow-builds.sparsebundle".to_owned(),
+            format!(" \u{26a0} Claude Code will automatically block this request in {clock}, to avoid holding up an unattended session"),
+            " Do you want to proceed?".to_owned(),
+            " \u{276f} 1. Yes".to_owned(),
+            "   2. No".to_owned(),
+            " Esc to cancel \u{b7} Tab to amend".to_owned(),
+        ]
+        .into_iter()
+        .skip(slid)
+        .collect()
+    };
+    let first = plan.window.dialog(&screen("1:57", 0)).expect("the prompt");
+    let ticked = plan.window.dialog(&screen("0:05", 0)).expect("the prompt");
+    let slid = plan.window.dialog(&screen("0:05", 2)).expect("the prompt");
+    assert_eq!(
+        plan.window.dialog_identity(&first),
+        plan.window.dialog_identity(&ticked),
+        "the countdown alone is blanked"
+    );
+    assert_ne!(
+        plan.window.dialog_identity(&first),
+        plan.window.dialog_identity(&slid)
+    );
+}
+
+#[test]
+fn its_permission_dialog_keeps_every_row_of_a_request_that_prints_a_title() {
+    // T-1316, adapter-probes.rs:8, :18 and :26, through the real window: a command that prints
+    // "Bash command", a hook's reason that is that title, the command row slid out of the tail.
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let window = &plan.window;
+    let identity = |lines: &[String]| {
+        let dialog = window.dialog(lines).expect("the dialog");
+        let made = window.dialog_identity(&dialog);
+        assert_eq!(made.detail, dialog.detail, "no row of the request is cut");
+        made
+    };
+    // A hook's reason that is a title.
+    let reason = |path: &str| hook_ask_of(&[&format!("rm -rf -- {path}")], &["Bash command"]);
+    assert_ne!(
+        identity(&reason("$T/review-one")),
+        identity(&reason("$T/review-two"))
+    );
+    // The command row slid out, the title left in the reason.
+    let whole = reason("$T/review-one");
+    assert_ne!(identity(&whole), identity(&whole[1..]));
+    // A multi-line command that prints the title, in a twelve-row tail that begins under the dialog's
+    // own title (what the tail keeps of the field's layout).
+    let command = |path: &str| {
+        let mut screen = rows(&[
+            "  \u{23bf} Waiting\u{2026}",
+            " Bash command",
+            " Clean up and print a report",
+        ]);
+        screen.extend(hook_ask_of(
+            &[
+                &format!("rm -rf -- {path}"),
+                "printf '%s\\n' '",
+                "Bash command",
+                "cleanup finished'",
+            ],
+            &["Review this shell command."],
+        ));
+        screen[screen.len() - 12..].to_vec()
+    };
+    let (one, two) = (command("$T/review-one"), command("$T/review-two"));
+    assert!(window.dialog(&one).unwrap().detail[0].contains("rm -rf"));
+    assert_ne!(identity(&one), identity(&two));
+    // Every title Claude Code draws, as a row of the command or of the reason.
+    for title in [
+        "Bash command",
+        "Run command",
+        "PowerShell command",
+        "Edit file",
+        "Create file",
+        "Overwrite file",
+        "Read file",
+        "Fetch",
+        "Use this skill?",
+        "Tool use",
+        "Bash command (unsandboxed)",
+        "Computer Use needs macOS permissions",
+    ] {
+        let as_command =
+            |path: &str| hook_ask_of(&[&format!("rm -rf -- {path}"), title], &["Why."]);
+        let as_reason = |path: &str| hook_ask_of(&[&format!("rm -rf -- {path}")], &[title]);
+        assert_ne!(
+            identity(&as_command("$T/review-one")),
+            identity(&as_command("$T/review-two")),
+            "{title}"
+        );
+        assert_ne!(
+            identity(&as_reason("$T/review-one")),
+            identity(&as_reason("$T/review-two")),
+            "{title}"
+        );
     }
 }

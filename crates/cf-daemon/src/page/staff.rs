@@ -92,6 +92,11 @@ pub(super) async fn edit(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let found = active_member(page, project, |member| member.handle == handle)?
         .ok_or_else(|| Said(format!("no member @{handle} on this project's staff")))?;
     let designer = found.roles.iter().any(|role| role == "designer");
+    if designer {
+        return Err(Said::from(
+            "an image designer has nothing to edit: it draws on Codex's own model",
+        ));
+    }
     let picked = picked(page, body, designer, true)?;
     let edited = page
         .ledger
@@ -198,12 +203,13 @@ fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<
     let harness = Harness::from_kind(&kind)
         .ok_or_else(|| Said(format!("{kind} is no harness ConsensFlow runs")))?;
     if designer && harness != Harness::Codex {
-        return Err(Said::from(
-            "an image designer draws on Codex: pick one of Codex's models",
-        ));
+        return Err(Said::from("an image designer draws on Codex"));
     }
     if adapter {
         page.engine.require_adapter(harness.kind())?;
+    }
+    if designer {
+        return designer_picked(body);
     }
     let model = match body.get("model") {
         Some(Value::String(model)) if !model.is_empty() => model.as_str(),
@@ -220,6 +226,30 @@ fn picked(page: &Page, body: Body<'_>, designer: bool, adapter: bool) -> Result<
         tier,
     })
 }
+
+/// An image designer: Codex's own default model at no effort, whatever it was asked for.
+/// Its window is launched with neither (the Codex adapter drops what a designer's row holds)
+/// and a design task has no tier, so a model, an effort or a tier asked for it is refused
+/// rather than kept as what it does not run on (designer P2, T-1280). The ledger keeps every
+/// member in a tier: a designer is kept in the lowest, which decides nothing.
+fn designer_picked(body: Body<'_>) -> Result<Picked, Said> {
+    let given = |field: &str| !matches!(body.get(field), None | Some(Value::Null));
+    if ["model", "effort", "tier"].into_iter().any(given) {
+        return Err(Said::from(
+            "an image designer draws on Codex's own model: it takes no model, effort or tier",
+        ));
+    }
+    Ok(Picked {
+        harness: Harness::Codex,
+        model: None,
+        effort: None,
+        model_name: None,
+        tier: DESIGNER_TIER,
+    })
+}
+
+/// The tier an image designer is kept in.
+const DESIGNER_TIER: WorkTier = WorkTier::Light;
 
 /// The effort `body` names: none where it names none, else a word its harness lists.
 pub(super) fn effort_of<'b>(body: Body<'b>) -> Result<Option<&'b str>, Said> {
