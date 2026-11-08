@@ -861,10 +861,14 @@ file = "tools/xtask/src/release/github.rs"
 find = '''
             "--ref",
             "main",
+            "-F",
+            &format!("notes=@{}", notes.display()),
         ])?;'''
 replace = '''
             "--ref",
             "main",
+            "-F",
+            &format!("notes=@{}", notes.display()),
         ])
         .unwrap_or_default();'''
 
