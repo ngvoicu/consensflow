@@ -1991,7 +1991,7 @@ replace = '''            if ($false) {'''
 # (`__PSScriptPolicyTest_*.ps1`, CI run 42055791085, T-1244/T-1333): every case has one planted in its TEMP.
 [[plant]]
 name = "installers: the install.ps1 tests read PowerShell's own file in TEMP as the installer's"
-meant = "this run's folder carries its pid, and one killed hard leaves it for the next run to take away"
+meant = "install.ps1 in Windows PowerShell › on Windows › what an earlier install left in the user's temporary folder › this run's folder carries its pid, and one killed hard leaves it for the next run to take away"
 runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
 platforms = ["windows"]
 
