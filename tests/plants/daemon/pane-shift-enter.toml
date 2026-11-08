@@ -1,0 +1,223 @@
+# Shift+Enter in a window is the new line its harness takes (T-1330). xterm.js 6 has no kitty
+# keyboard protocol and no modifyOtherKeys and sends the plain Enter's CR for Shift+Enter, so a
+# message was sent where the human asked for a new line, in every harness. The page now sends
+# (`shiftEnterFor`, app/ui/term.js):
+#
+# - Alt+Enter (ESC CR) to Claude Code, Codex, Devin and Muse Code: each lists it as a new line, and
+#   on Windows it is the one form the console host hands the three that read key events (Codex,
+#   Devin, Muse) as a key they bind: a line feed is the Enter key with Control, and the kitty
+#   protocol's `CSI 13;2u` seven typed characters (cf-panes pty/keys.rs, zeewin2, 2026-11-08);
+# - Ctrl+J (a line feed) to Pi, whose Alt+Enter queues a follow-up message (a send), on Windows
+#   too, where the follow-up is Ctrl+Q;
+# - only for Shift+Enter alone, typed and not chosen in an input method, once, as the human's own
+#   key (a reply of the emulator would take another road), with nothing left for xterm to send
+#   after it; Alt+Enter and Ctrl+J stay xterm's;
+# - to the window of the harness the board says (the card tells the emulator), ESC CR before it does.
+#
+# `app/tests/fixtures/pane-keys/newline-cases.json` says what each harness's input box does with each
+# byte string a pane might write (`make-newline-cases.mjs`: Pi's replayed from its own key matcher,
+# the others read from their source and documentation), and the page tests are held to it, in a
+# real xterm, on a Mac's user agent and on Windows'. The pane host writes bytes as they are and is
+# not planted: what the console host makes of them is the Windows tests' of `cf-panes`.
+#
+# One plant takes one rule out; a test of it fails. Every name holds `pane shift enter`, so
+# `npm run plants:daemon -- "pane shift enter"` runs them all.
+
+[run]
+pse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Shift.Enter in a window"]
+
+[[plant]]
+name = "pane shift enter: any Enter is a Shift+Enter"
+meant = "Shift+Enter in a window, on a Mac › Enter alone is still the message sent, in every harness"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  event.shiftKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: Pi is sent Alt+Enter, which queues a follow-up"
+meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
+replace = "'\\x1b\\r'"
+
+[[plant]]
+name = "pane shift enter: every harness is sent a line feed, which is Ctrl+Enter to a key reader on Windows"
+meant = "Shift+Enter in a window, on Windows › is a new line in a codex window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
+replace = "'\\n'"
+
+[[plant]]
+name = "pane shift enter: every harness is sent the kitty protocol's CSI u, which Windows types as text"
+meant = "Shift+Enter in a window, on Windows › is a new line in a devin window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
+replace = "'\\x1b[13;2u'"
+
+[[plant]]
+name = "pane shift enter: Claude Code is sent a plain Enter"
+meant = "Shift+Enter in a window, on a Mac › is a new line in a claude-code window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
+replace = "(harness === 'pi' ? '\\n' : '\\r')"
+
+[[plant]]
+name = "pane shift enter: xterm sends its Enter after the new line"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''      return false
+    }
+    if (event.type !== 'keydown' || !event.ctrlKey'''
+replace = '''      return true
+    }
+    if (event.type !== 'keydown' || !event.ctrlKey'''
+
+[[plant]]
+name = "pane shift enter: Shift+Enter with Alt is taken too"
+meant = "The keys around Shift+Enter in a window › Shift+Alt+Enter is not Shift+Enter"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.altKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: Shift+Enter with Ctrl is taken too"
+meant = "The keys around Shift+Enter in a window › Shift+Control+Enter is not Shift+Enter"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.ctrlKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: Shift+Enter with Cmd is taken too"
+meant = "The keys around Shift+Enter in a window › Shift+Meta+Enter is not Shift+Enter"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.metaKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: an input method's Shift+Enter is taken too"
+meant = "The keys around Shift+Enter in a window › an input method choosing a candidate with Shift+Enter is not a new line"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.isComposing
+'''
+replace = '''  true
+'''
+
+[[plant]]
+name = "pane shift enter: the key's own action is left to the textarea"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''        event.preventDefault()
+        this.terminal.input(shiftEnterFor(this.harness))'''
+replace = '        this.terminal.input(shiftEnterFor(this.harness))'
+
+[[plant]]
+name = "pane shift enter: the new line is typed on every event of the key"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''      if (event.type === 'keydown') {
+        event.preventDefault()'''
+replace = '''      if (event.type !== 'never') {
+        event.preventDefault()'''
+
+[[plant]]
+name = "pane shift enter: the new line is the emulator's reply, not the human's key"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = 'this.terminal.input(shiftEnterFor(this.harness))'
+replace = 'this.terminal.input(shiftEnterFor(this.harness), false)'
+
+[[plant]]
+name = "pane shift enter: the card does not tell the emulator its harness"
+meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''      this.#registry.setHarness(pane, entry.harness)
+'''
+replace = ''
+
+[[plant]]
+name = "pane shift enter: the registry does not hand the harness on"
+meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''    if (typeof emulator?.setHarness === 'function') emulator.setHarness(harness)
+'''
+replace = ''
+
+[[plant]]
+name = "pane shift enter: the emulator forgets its harness"
+meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''    this.harness = harness ?? null
+'''
+replace = '''    this.harness = null
+'''
+
+[[plant]]
+name = "pane shift enter: xterm answers a keyboard-protocol query"
+meant = "The keys around Shift+Enter in a window › xterm answers no keyboard-protocol query: a Pi that asked is sent Ctrl+J all the same"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))\n"
+replace = '''    this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
+    this.terminal.parser.registerCsiHandler({ prefix: '?', final: 'u' }, () => {
+      this.terminal.input('\x1b[?0u', false)
+      return true
+    })
+'''
