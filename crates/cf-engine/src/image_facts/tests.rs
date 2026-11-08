@@ -355,3 +355,55 @@ fn a_file_that_is_gone_or_is_no_image_gets_no_line_and_a_result_naming_none_is_a
         format!("{}\n{}", fake.display(), gone.display())
     );
 }
+
+/// A path a designer's result names may be anything on the disk, and the engine reads it on its
+/// own thread: opening a FIFO waits for a writer that may never come, and so would the engine.
+/// Only a regular file is opened. The read here is bounded so that a reader that waits ends the
+/// test (a writer is sent to it) instead of hanging it.
+#[cfg(unix)]
+#[test]
+fn a_fifo_named_like_a_picture_is_never_opened() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("x.png");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap();
+    assert!(made.success(), "mkfifo");
+    let (told, heard) = mpsc::channel();
+    let path = fifo.clone();
+    std::thread::spawn(move || {
+        let words = format!("{}\nA kite.", path.display());
+        told.send((read(&path), lines_for(&words))).ok();
+    });
+    let answer = match heard.recv_timeout(Duration::from_secs(3)) {
+        Ok(answer) => answer,
+        Err(_) => {
+            // The reader waits in its open. Writers, one after another, let it go (it opens the
+            // FIFO twice: `read` and `lines_for`), and the test says what it found.
+            let stop = Arc::new(AtomicBool::new(false));
+            let (path, again) = (fifo.clone(), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                while !again.load(Ordering::SeqCst) {
+                    let _ = std::fs::OpenOptions::new().write(true).open(&path);
+                }
+            });
+            let waited = heard.recv_timeout(Duration::from_secs(10));
+            stop.store(true, Ordering::SeqCst);
+            panic!("the engine's read opened a FIFO and waited for a writer: {waited:?}");
+        }
+    };
+    assert_eq!(answer, (None, String::new()));
+}
+
+#[test]
+fn a_path_that_starts_with_two_separators_is_a_network_path_and_is_not_named() {
+    // On Windows `//server/share/x.png` is a UNC path, which can be slow to answer for a
+    // long time; a path of the other kind of two separators is none of the paths named at all.
+    let words = "//server/share/x.png\n\\\\server\\share\\y.png\n//./pipe/z.png\n/a/b.png";
+    assert_eq!(files_named(words), ["/a/b.png"]);
+}

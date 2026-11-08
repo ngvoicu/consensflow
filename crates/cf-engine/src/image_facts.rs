@@ -78,7 +78,15 @@ pub fn facts_of<F: Read + Seek>(file: &mut F) -> Option<Facts> {
 }
 
 /// The facts of the file at `path`, or none where it cannot be opened or is no image.
+///
+/// Only a regular file is ever opened. The engine reads on its own thread a path a worker's
+/// words name, which may be anything on the disk, and opening a FIFO waits for a writer that
+/// may never come: the file's kind is asked of its path first (a link to a regular file is
+/// one), and the handle is asked again, for a path that became another kind between the two.
 pub fn read(path: &Path) -> Option<Facts> {
+    if !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
     let mut file = File::open(path).ok()?;
     if !file.metadata().ok()?.is_file() {
         return None;
@@ -269,7 +277,10 @@ static PATH: LazyLock<Regex> = LazyLock::new(|| {
 
 /// The absolute paths of image files `words` name (`.png`, `.jpg`, `.jpeg`, `.webp`), in order,
 /// each once, at most [`MOST_FILES`]. A path may hold spaces; one that is not absolute is not
-/// one a designer was told to give, and has no file to read.
+/// one a designer was told to give, and has no file to read. One that starts with two
+/// separators is a network path on Windows (`//server/share/x.png`, `//./pipe/x.png`), which can
+/// be slow to answer for a long time, and is none of the paths named; a drive mapped to a share
+/// cannot be told from a local one, and is a known limit.
 pub fn files_named(words: &str) -> Vec<String> {
     let mut named: Vec<String> = Vec::new();
     for line in words.lines() {
@@ -278,7 +289,7 @@ pub fn files_named(words: &str) -> Vec<String> {
         let mut rest = line;
         while let Some(found) = PATH.captures(rest) {
             let Some(path) = found.get(1) else { break };
-            if !named.iter().any(|seen| seen == path.as_str()) {
+            if !path.as_str().starts_with("//") && !named.iter().any(|seen| seen == path.as_str()) {
                 named.push(path.as_str().to_owned());
                 if named.len() == MOST_FILES {
                     return named;

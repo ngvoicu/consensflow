@@ -511,3 +511,26 @@ find = '''    if designer {
         return json!({ "harness": row["kind"], "roles": ["designer"] });'''
 replace = '''    if false {
         return json!({ "harness": row["kind"], "roles": ["designer"] });'''
+
+[[plant]]
+name = "chief-words: the reader opens a path before it asks what kind of file it is"
+meant = "a_fifo_named_like_a_picture_is_never_opened"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''    if !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let mut file = File::open(path).ok()?;'''
+replace = '''    let mut file = File::open(path).ok()?;'''
+
+[[plant]]
+name = "chief-words: a network path is named"
+meant = "a_path_that_starts_with_two_separators_is_a_network_path_and_is_not_named"
+runs = ["cw-image"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/image_facts.rs"
+find = '''            if !path.as_str().starts_with("//") && !named.iter().any(|seen| seen == path.as_str()) {'''
+replace = '''            if !named.iter().any(|seen| seen == path.as_str()) {'''
