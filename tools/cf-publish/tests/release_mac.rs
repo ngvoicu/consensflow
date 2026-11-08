@@ -271,10 +271,7 @@ done"#,
             "the log is {} bytes, not over 64 KiB",
             listed.stdout.len()
         );
-        (
-            root,
-            listed.stdout.lines().map(str::to_owned).collect(),
-        )
+        (root, listed.stdout.lines().map(str::to_owned).collect())
     }
 
     /// The step's notes slice, run in `checkout` as a run of `ref_type` given
@@ -289,10 +286,7 @@ done"#,
         let ran = bash(
             &script,
             checkout,
-            &[
-                ("GITHUB_REF_TYPE", ref_type),
-                ("TRIAL_NOTES", trial_notes),
-            ],
+            &[("GITHUB_REF_TYPE", ref_type), ("TRIAL_NOTES", trial_notes)],
             &[],
         );
         let notes = fs::read_to_string(out.path().join("notes.txt")).unwrap_or_default();
