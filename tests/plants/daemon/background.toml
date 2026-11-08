@@ -105,6 +105,8 @@ rig-members-close-begun = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test
 rig-members-held-up = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_close_says_which_were_left_though_the_pane_host_was_held_up"]
 # How what such a project left is listed, on processes made up.
 e2e-lib-closing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing::"]
+# Where the stand-ins find Git Bash on Windows, which they start an agent's command in (T-1218).
+e2e-lib-git-bash = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::git_bash"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
 regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_never_exits"]
 # The same of a Devin worker whose command goes on reporting on its wire after its turn ended (zeewin, 2026-10-14).
@@ -1076,6 +1078,85 @@ replace = '''const WORK: [&str; 4] = [
     "tool_call",
     "tool_call_update",
 ];'''
+
+# The stand-in Devin's command on Windows (T-1218). The host names a command by a shell the
+# harness started: Devin's commands run in Git Bash there, and a stand-in that ran its command
+# under `cmd.exe`, which is no shell to the host, had it ended by the close and unsaid. A Windows
+# machine's plants (`cargo xtask plants daemon "background windows: the stand-in"`), skipped
+# elsewhere.
+
+[[plant]]
+name = "background windows: the stand-in Devin runs its command under cmd.exe, which no shell chain names"
+meant = "a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done_and_the_command_ended"
+platforms = ["windows"]
+runs = ["regression-reporting-command"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/command.rs"
+find = '''    let shell = Run::new(cf_e2e::process::git_bash().ok_or_else(|| {
+        "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
+            .to_owned()
+    })?)
+    .args(["-c", &format!("{command}; true")]);'''
+replace = '''    let shell = Run::new("cmd").args([
+        "/d".to_owned(),
+        "/c".to_owned(),
+        format!("ping -n {} 127.0.0.1 > nul", seconds + 1),
+    ]);'''
+
+[[plant]]
+name = "background windows: Git Bash is any file named, though it is not there"
+meant = "git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path"
+platforms = ["windows"]
+runs = ["e2e-lib-git-bash"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = "        if named.is_file() {"
+replace = "        if true {"
+
+[[plant]]
+name = "background windows: Git Bash is looked for beside every folder of the path, Git’s or not"
+meant = "git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path"
+platforms = ["windows"]
+runs = ["e2e-lib-git-bash"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '        .filter(|folder| folder.join("git.exe").is_file())'
+replace = "        .filter(|folder| folder.is_dir())"
+
+[[plant]]
+name = "background windows: Git Bash is the file beside the path's Git, in its usr folder"
+meant = "git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path"
+platforms = ["windows"]
+runs = ["e2e-lib-git-bash"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = 'git.join("bin").join("bash.exe")'
+replace = 'git.join("usr").join("bash.exe")'
+
+[[plant]]
+name = "background: a command that cmd.exe runs for the agent is named like a shell's"
+meant = "a_windows_command_is_named_where_a_shell_runs_it_and_none_where_cmd_exe_does"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '    SHELLS.contains(&name)'
+replace = '    SHELLS.contains(&name) || name == "cmd"'
+
+[[plant]]
+name = "background: a command that PowerShell runs for the agent is named by no chain"
+meant = "a_windows_command_is_named_where_a_shell_runs_it_and_none_where_cmd_exe_does"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '    SHELLS.contains(&name)'
+replace = '    SHELLS.contains(&name) && name != "powershell"'
 
 # What the Windows tests read of a pane's job, which is held here on a list of
 # members: a job left once its shell has ended is told by no process of the job having

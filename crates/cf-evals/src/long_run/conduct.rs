@@ -6,7 +6,10 @@
 //! is played once its moment comes, the watch looking all the while it waits
 //! ([`Watching`]). A disruption whose effect is not seen is a break of its own, with
 //! what shows it. The run is over when nothing has moved for the quiet time with the
-//! follow-ups said (the project is done), or when the budget is spent. The run waits
+//! follow-ups said and the schedule played (the project is done), or when the budget is
+//! spent: a project that goes quiet with a disruption still waiting is given a piece of extra
+//! work from the scenario's short fixed list (`Ask::extra_work`), once the disruption is due
+//! and where the budget has the time to finish it, so that its shape can happen. The run waits
 //! out the time a job's end may be told after its result, the app is then closed, and
 //! the project as the app left it is held to the invariants once more, with whatever
 //! of the run's processes the close left (said, and left running), and to the end
@@ -17,7 +20,7 @@
 //! harnesses it found, each break's and each unresolved's key as it is found, the
 //! summary, where the report is), and the report keeps the rest.
 
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -61,7 +64,8 @@ const ENTER: u8 = 13;
 const WITHIN: Duration = Duration::from_secs(240);
 const EVERY: Duration = Duration::from_secs(2);
 
-/// How a run ends, as its report says it.
+/// How a run ends, as its report says it. `DONE` is the end of a project whose schedule is
+/// played too: a project that went quiet with a disruption waiting is not done.
 const DONE: &str = "the project is done";
 const STOPPED: &str = "it could not go on";
 
@@ -86,6 +90,8 @@ struct Going {
     prober: Box<dyn Prober>,
     /// Where all the run says and keeps leaves it.
     edge: Edge,
+    /// When the owner gave a piece of extra work, in milliseconds, in turn.
+    extra: Vec<i64>,
 }
 
 impl Going {
@@ -315,6 +321,7 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
             }
         })),
         edge: edge.clone(),
+        extra: Vec::new(),
     };
     for planned in &run.schedule.planned {
         if let super::disruptions::State::Impossible(why) = &planned.state {
@@ -366,6 +373,8 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         filled: &run.keeper.filled,
         timeline: &run.timeline,
         stalls: &run.stalls,
+        extra: &run.extra,
+        extra_listed: options.ask.extra_work().len(),
         ending: run.ending.clone(),
         error,
         // The app has closed: what the run did to the owner's Claude setup, or to the copy of
@@ -523,13 +532,25 @@ fn finish(
     {
         run.ledger = ledger;
     }
-    let why = match run.ending.as_str() {
+    run.schedule
+        .close(&why_not_played(&run.ending, run.extra.len()));
+    closed.map(|closed| closed.root)
+}
+
+/// Why a disruption that never found its moment was not played, in a run that `ended` as its
+/// report says it, the owner having given `extra` pieces of extra work: that the run ended
+/// first, and whether the owner had given the staff work for its shape to happen.
+fn why_not_played(ended: &str, extra: usize) -> String {
+    let ended = match ended {
         TIME_UP => "time ran out before its moment came",
         STOPPED => "the run stopped before its moment came",
         _ => "the project ended before its moment came",
     };
-    run.schedule.close(why);
-    closed.map(|closed| closed.root)
+    match extra {
+        0 => format!("{ended}, and the owner gave no extra work"),
+        1 => format!("{ended}, though the owner gave 1 piece of extra work"),
+        given => format!("{ended}, though the owner gave {given} pieces of extra work"),
+    }
 }
 
 /// One more look before the app closes, taken with `look`, where a gap a reading may fill
@@ -709,7 +730,7 @@ fn conduct(
     };
     let begun = Instant::now();
     run.deadline = now() + millis(options.budget);
-    let mut owner = Owner::new(scenario);
+    let mut owner = Owner::new(scenario).with_extra_work(options.ask.extra_work());
     let (mut signature, mut changed, mut failed) = (String::new(), Instant::now(), 0);
     loop {
         sleep(options.look);
@@ -745,19 +766,12 @@ fn conduct(
                 listed(&tasks)
             ))?;
         }
-        let seen = Seen {
-            elapsed: begun.elapsed(),
-            quiet: changed.elapsed(),
-            busy: state.as_deref() != Some(IDLE)
-                || tasks.iter().any(|task| {
-                    matches!(
-                        task["state"].as_str(),
-                        Some("queued" | "working" | "waiting")
-                    )
-                }),
-            dialog: state.as_deref() == Some("waiting"),
-            board_empty: tasks.is_empty(),
-        };
+        let seen = seen_at(
+            state.as_deref(),
+            &tasks,
+            (begun.elapsed(), changed.elapsed()),
+            &run.schedule,
+        );
         let file = stage.rig()?.home().join("consensflow.db");
         let step = owner.step(scenario, &seen, options.budget, &mut || {
             chief_open_question(&file)
@@ -793,7 +807,35 @@ fn conduct(
             };
             run.came_of(floor, &choice, begun.elapsed(), outcome)?;
             changed = Instant::now();
+        } else {
+            run.schedule.searched(&moment);
         }
+    }
+}
+
+/// How things are at one look at the project, as the owner takes them: the chief's `state`
+/// and the board's `tasks`, how long the run has gone and how long nothing has changed
+/// (`elapsed`, `quiet`), and what the `schedule` of disruptions still asks of the project.
+fn seen_at(
+    state: Option<&str>,
+    tasks: &[&Value],
+    (elapsed, quiet): (Duration, Duration),
+    schedule: &Schedule,
+) -> Seen {
+    let staff_at_work = tasks.iter().any(|task| {
+        matches!(
+            task["state"].as_str(),
+            Some("queued" | "working" | "waiting")
+        )
+    });
+    Seen {
+        elapsed,
+        quiet,
+        busy: state != Some(IDLE) || staff_at_work,
+        staff_at_work,
+        dialog: state == Some("waiting"),
+        board_empty: tasks.is_empty(),
+        owed: schedule.owed(elapsed),
     }
 }
 
@@ -846,6 +888,20 @@ fn owner_does(
             &nudge,
         )?,
         Step::Next(FollowUp::Say(next)) => say(&chief, floor, run, "the owner's follow-up", &next)?,
+        Step::More(piece) => {
+            let waits = run
+                .schedule
+                .waiting()
+                .map_or("the schedule", |planned| planned.disruption.flag());
+            run.extra.push(now());
+            say(
+                &chief,
+                floor,
+                run,
+                &format!("the owner's extra work, for {waits}"),
+                &piece,
+            )?;
+        }
         Step::Over => {
             floor.note("quiet: the project is done")?;
             return Ok(Some(DONE.to_owned()));

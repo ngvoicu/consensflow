@@ -30,6 +30,7 @@ fn every_command_of_the_plan_is_there_once() {
             "build-cf",
             "stage",
             "conpty",
+            "build-identity",
             "portable pack",
             "portable inspect",
             "app test",

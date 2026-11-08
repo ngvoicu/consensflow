@@ -24,6 +24,7 @@ impl Tools<'static> {
 
 /// The command that runs `program`, one of the [`Tools`]. It is started while
 /// the app's other threads open sockets and pipes, and holds none of them.
+#[allow(clippy::disallowed_methods)] // The app starts plutil and codesign itself, holding only their streams: older than cf-process's rule.
 fn tool(program: &Path) -> Command {
     let mut command = Command::new(program);
     cf_process::hold_only_the_streams(&mut command);

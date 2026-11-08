@@ -10,6 +10,7 @@ use std::time::Duration;
 const LOG: &str = "CONSENSFLOW_TEST_PANIC_LOG";
 
 /// In the child, the log it was given; in the test, None.
+#[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
 fn the_childs_log() -> Option<PathBuf> {
     std::env::var_os(LOG).map(PathBuf::from)
 }

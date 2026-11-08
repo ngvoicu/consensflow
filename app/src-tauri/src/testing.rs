@@ -29,6 +29,7 @@ pub(crate) fn said(ran: &std::process::Output) -> String {
 }
 
 /// The command a test starts `program` with, holding only its streams.
+#[allow(clippy::disallowed_methods)] // The tests' one start of a program, holding only its streams.
 pub(crate) fn command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
     cf_process::hold_only_the_streams(&mut command);

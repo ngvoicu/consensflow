@@ -30,6 +30,8 @@
 
 use std::time::Duration;
 
+use crate::run::owner::Owed;
+
 /// A disruption a long run plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Disruption {
@@ -86,6 +88,26 @@ impl Disruption {
                 "the app quit and started again while a Devin worker is mid-tool (B1)"
             }
             Self::Suspend => "the project suspended and resumed",
+        }
+    }
+
+    /// What the staff must be doing for its moment to come: the shape the field had.
+    pub const fn needs(self) -> &'static str {
+        match self {
+            Self::Pause | Self::Kill => {
+                "a worker at work on a task, mid-tool (any turn at work once half an interval is gone)"
+            }
+            Self::Compact => "the chief at rest, and Claude Code",
+            Self::Restart => {
+                "a worker at work on a task, mid-tool, and after a compaction a chief whose record still ends in it (any turn at work once half an interval is gone)"
+            }
+            Self::Switch => {
+                "staff at work and a job running (any worker at work once half an interval is gone)"
+            }
+            Self::DevinCut => {
+                "a Devin worker at work on a task, mid-tool (any of its turns at work once half an interval is gone)"
+            }
+            Self::Suspend => "a worker at work on a task",
         }
     }
 }
@@ -146,6 +168,23 @@ pub enum State {
     NotPlayed(String),
 }
 
+/// How a disruption was looked for, once it was due: the looks at which its moment did not
+/// come, and what each found of the staff. It says why a disruption that was never played
+/// found no shape.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Searched {
+    /// The looks, after it was due, at which no moment fit it.
+    pub looks: u32,
+    /// Of those, the looks at which a worker was at work on a task.
+    pub at_work: u32,
+    /// The looks at which a worker's turn had a tool or a job running.
+    pub in_tool: u32,
+    /// The looks at which a Devin worker was at work on a task.
+    pub devin: u32,
+    /// The looks at which the chief was at rest.
+    pub chief_at_rest: u32,
+}
+
 /// A disruption of the run, when it is due, and what came of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Planned {
@@ -154,9 +193,47 @@ pub struct Planned {
     /// after the run began).
     pub due: Duration,
     pub state: State,
+    /// What the looks after it was due found, where it was not played.
+    pub searched: Searched,
     /// The field's shape it was played without, where its moment lacked it: the run
     /// did not play what it is for, and says so.
     pub lacked: Option<String>,
+}
+
+impl Planned {
+    /// Why this disruption found no shape: `why` the run ended, what its moment needs, and
+    /// what the looks after it was due found of the staff.
+    pub fn no_shape(&self, why: &str) -> String {
+        let (needs, due) = (self.disruption.needs(), self.due.as_secs() / 60);
+        let Searched {
+            looks,
+            at_work,
+            in_tool,
+            devin,
+            chief_at_rest,
+        } = self.searched;
+        if looks == 0 {
+            return format!("{why}: it needs {needs}; its time, +{due} min, had not come");
+        }
+        format!(
+            "{why}: it needs {needs}; {looks} look{} after its time, +{due} min, found no moment for it: \
+             a worker at work on a task at {at_work}, a tool or job running at {in_tool}, \
+             a Devin worker at work at {devin}, the chief at rest at {chief_at_rest}",
+            if looks == 1 { "" } else { "s" }
+        )
+    }
+}
+
+impl Planned {
+    /// Why a disruption after `before` (the first that waited) was not played: the disruptions
+    /// are played one at a time, in order, each the interval after the one before it was played,
+    /// and `before` never was. `why` is how the run ended.
+    pub fn queued_behind(&self, why: &str, before: &str) -> String {
+        format!(
+            "{why}: it needs {}; it waited behind {before}, which was not played: they are played one at a time, in order",
+            self.disruption.needs()
+        )
+    }
 }
 
 /// A disruption to play now: where, at which moment (`strict`, or `loose` once half
@@ -204,6 +281,7 @@ impl Schedule {
                     Some(why) => State::Impossible(why),
                     None => State::Waiting,
                 },
+                searched: Searched::default(),
                 lacked: None,
             })
             .collect();
@@ -248,6 +326,53 @@ impl Schedule {
         late.then(|| aim(waiting.disruption, moment, false, compacted))
             .flatten()
             .map(|target| choice(target, "loose"))
+    }
+
+    /// What the schedule still asks of the project at `elapsed`: nothing where no disruption
+    /// waits (all played, or none can be), else whether the first that waits is due.
+    pub fn owed(&self, elapsed: Duration) -> Owed {
+        match self
+            .planned
+            .iter()
+            .find(|planned| planned.state == State::Waiting)
+        {
+            None => Owed::Nothing,
+            Some(waiting) if elapsed >= waiting.due => Owed::Due,
+            Some(_) => Owed::Later,
+        }
+    }
+
+    /// The first disruption still waiting to be played.
+    pub fn waiting(&self) -> Option<&Planned> {
+        self.planned
+            .iter()
+            .find(|planned| planned.state == State::Waiting)
+    }
+
+    /// A look at `moment` at which the first disruption that waits found no moment: if it is
+    /// due, what the look found of the staff is kept, for why it found no shape.
+    pub fn searched(&mut self, moment: &Moment) {
+        let Some(waiting) = self
+            .planned
+            .iter_mut()
+            .find(|planned| planned.state == State::Waiting)
+        else {
+            return;
+        };
+        if waiting.due > moment.elapsed {
+            return;
+        }
+        let at_work = |devin: bool| {
+            moment.workers.iter().any(|worker| {
+                worker.working && worker.task.is_some() && (!devin || worker.harness == "devin")
+            })
+        };
+        let found = &mut waiting.searched;
+        found.looks += 1;
+        found.at_work += u32::from(at_work(false));
+        found.in_tool += u32::from(moment.workers.iter().any(|worker| worker.tool));
+        found.devin += u32::from(at_work(true));
+        found.chief_at_rest += u32::from(moment.chief_idle);
     }
 
     /// `disruption` was played without the field's shape it is for: `what`.
@@ -298,11 +423,19 @@ impl Schedule {
         }
     }
 
-    /// The run is over: every disruption still waiting was not played, for `why`.
+    /// The run is over: every disruption still waiting was not played, for `why`. The first
+    /// says what its shape needed and what the looks after it was due found of the staff,
+    /// which is why it found none ([`Planned::no_shape`]); the others are played after it, in
+    /// order, and waited behind it ([`Planned::queued_behind`]).
     pub fn close(&mut self, why: &str) {
+        let mut first: Option<&'static str> = None;
         for planned in &mut self.planned {
             if planned.state == State::Waiting {
-                planned.state = State::NotPlayed(why.to_owned());
+                planned.state = State::NotPlayed(match first {
+                    None => planned.no_shape(why),
+                    Some(before) => planned.queued_behind(why, before),
+                });
+                first.get_or_insert(planned.disruption.flag());
             }
         }
     }

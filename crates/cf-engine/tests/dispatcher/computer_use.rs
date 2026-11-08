@@ -57,7 +57,9 @@ fn a_claude_launch_where_computer_use_is_on_and_a_permission_is_missing_tells_th
         notes[0].body,
         "Claude Code's computer use is on for this project, but ConsensFlow can't control \
          the screen until you allow it Screen & System Audio Recording in System Settings → \
-         Privacy & Security."
+         Privacy & Security. If ConsensFlow is already on in that list, macOS may hold the \
+         grant for another copy of the app, so remove it with − and add \
+         /Applications/ConsensFlow.app with +."
     );
     assert_eq!(notes[0].task_number, None);
 }
@@ -218,5 +220,28 @@ fn the_note_names_what_is_missing_in_plain_words() {
     assert!(said(false, true).contains("allow it Screen & System Audio Recording in"));
     for body in [said(true, true), said(true, false), said(false, true)] {
         assert!(body.starts_with(NOTE_OPENING), "{body}");
+    }
+}
+
+/// System Settings can show ConsensFlow on while macOS holds the grant for another copy of
+/// the app (a build made on this Mac that was allowed, T-903): the note says how to mend it,
+/// for each permission it can name, and the sentence names none, so that the page, which
+/// opens the pane of each name a note has, opens only those that are missing.
+#[test]
+fn the_note_says_how_to_mend_an_entry_macos_holds_for_another_copy_of_the_app() {
+    let mend = "If ConsensFlow is already on in that list, macOS may hold the grant for another \
+                copy of the app, so remove it with − and add /Applications/ConsensFlow.app with +.";
+    for (accessibility, screen_recording) in [(true, true), (true, false), (false, true)] {
+        let body = note_for(ScreenPermissions {
+            accessibility,
+            screen_recording,
+        });
+        assert!(
+            body.ends_with(&format!("in System Settings → Privacy & Security. {mend}")),
+            "{body}"
+        );
+    }
+    for name in ["Accessibility", "Screen & System Audio Recording"] {
+        assert!(!mend.contains(name), "the sentence names {name}");
     }
 }
