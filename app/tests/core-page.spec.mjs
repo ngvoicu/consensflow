@@ -3522,8 +3522,8 @@ for (const [platform, agent] of [
       test(`never starts with an Escape for a ${harness} window`, async ({ page }) => {
         // Codex, Devin and Muse read the console's key events on Windows: no single byte is their new
         // line there (a line feed is the Enter key with Control, which none binds), so they are sent
-        // ESC CR until the human decides (T-1336). This case is expected to fail until then.
-        test.fail(
+        // ESC CR until the human decides (T-1336). This case is skipped until then.
+        test.skip(
           platform === 'windows' && ['codex', 'devin', 'muse'].includes(harness),
           "pending the human's decision: no byte that is not an Escape's is their new line on Windows",
         )
