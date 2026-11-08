@@ -139,6 +139,16 @@ fn main() -> ExitCode {
     match args::parse(&args, own.as_deref()) {
         Asked::Version => say(&format!("{VERSION}\n"))
             .map_or_else(|failed| fail(&failed.to_string()), |()| ExitCode::SUCCESS),
+        // The models the rig's stand-ins list, as the daemon reads them as a dialog opens.
+        Asked::Models => {
+            let home = cf_e2e::process::own_var("CONSENSFLOW_HOME").unwrap_or_default();
+            let models = cf_e2e::stand_in_lists::listed("devin", Path::new(&home));
+            say(&format!(
+                "{}\n",
+                cf_e2e::stand_in_lists::devin_families(&models)
+            ))
+            .map_or_else(|failed| fail(&failed.to_string()), |()| ExitCode::SUCCESS)
+        }
         Asked::Window(launch) => match run(&launch, signals) {
             Ok(never) => match never {},
             Err(failed) => fail(&failed),

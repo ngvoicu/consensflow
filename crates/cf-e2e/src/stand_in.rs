@@ -29,15 +29,20 @@ pub fn install(dir: &Path, name: &str) -> Result<PathBuf> {
 
 /// Puts a stand-in for the harness command `name` in `dir` (made if it is not
 /// there) that the daemon can open a window on, where a case answers for the
-/// pane host and so nothing runs it: the path it is found at. On POSIX any
-/// program opens as it is, so it is [`install`]'s script; on Windows it is
-/// [`window_shim`], naming `agent`.
+/// pane host and so nothing runs it: the path it is found at. No window runs
+/// it, but the daemon runs it to read the models its harness lists (A4-28,
+/// T-1329), which `agent` answers: on POSIX it is a script that runs `agent`
+/// (any program opens as it is); on Windows it is [`window_shim`], naming it.
 pub fn install_for_window(dir: &Path, name: &str, agent: &Path) -> Result<PathBuf> {
-    if !cfg!(windows) {
-        return install(dir, name);
-    }
     let path = dir.join(program_name(name));
-    files::write_executable(&path, window_shim(agent))?;
+    if cfg!(windows) {
+        files::write_executable(&path, window_shim(agent))?;
+    } else {
+        files::write_executable(
+            &path,
+            format!("#!/bin/sh\nexec '{}' \"$@\"\n", agent.display()),
+        )?;
+    }
     Ok(path)
 }
 

@@ -7,7 +7,7 @@
 //! [`Daemon`] is the program and what is done to it; [`Home`] is the place it
 //! runs in, with the turn it takes to run there ([`crate::serial`]).
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::io::BufReader;
 use std::ops::Deref;
 use std::process::ChildStdout;
@@ -20,10 +20,6 @@ use serde_json::Value;
 use crate::process::{Run, Signal, Sink, Spawned};
 use crate::wire::{self, First};
 
-/// The variable that has the daemon take a model on its harness's word where that harness's list
-/// cannot be read (`cf_daemon::models::UNREAD_MODELS_VARIABLE`, which a test of the daemon holds
-/// to this name: the rig is a black box and depends on no crate of the product).
-const UNREAD_MODELS_ARE_TAKEN: &str = "CONSENSFLOW_UNREAD_MODELS_ARE_TAKEN";
 use crate::{bundle, cf, checkout, files, serial, Error, Result, ScratchHome};
 
 /// How long a daemon has to say it is ready.
@@ -48,6 +44,16 @@ impl Home {
             scratch: ScratchHome::new()?,
             _turn: turn,
         })
+    }
+
+    /// The roster the stand-in harnesses of this home list their models from
+    /// ([`crate::stand_in_lists`]): the members a case seats, which the daemon checks against
+    /// what their harness lists. The case's own file beside the home, never the daemon's.
+    pub fn stand_ins(&self, roster: &Value) -> Result<()> {
+        files::write(
+            &self.scratch.root().join(crate::stand_in_lists::ROSTER),
+            format!("{roster}\n"),
+        )
     }
 
     /// The folder a project's work is in.
@@ -144,15 +150,6 @@ impl Daemon {
         A: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        // The rig's stand-in harnesses list no model, and its cases open projects on models of
-        // their own: the daemon takes a model on its harness's word where that cannot be read
-        // (what every daemon did before A4-28), and checks it where it can. A person's has no
-        // such variable. Every start of a daemon the rig makes comes through here.
-        let vars: Vec<(OsString, OsString)> = vars
-            .into_iter()
-            .map(|(name, value)| (name.as_ref().to_owned(), value.as_ref().to_owned()))
-            .chain([(OsString::from(UNREAD_MODELS_ARE_TAKEN), OsString::from("1"))])
-            .collect();
         let mut process = Run::new(program)
             .args(args)
             .vars(vars)
