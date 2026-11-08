@@ -92,9 +92,9 @@ fn models(ids: &[&str], at: i64) -> ModelListing {
 
 /// A home with `installed` on its PATH, and its ledger.
 struct Home {
-    _folder: tempfile::TempDir,
     env: Env,
     ledger: RefCell<Ledger>,
+    _folder: tempfile::TempDir,
 }
 
 fn home(installed: &[&str]) -> Home {

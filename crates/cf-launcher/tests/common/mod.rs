@@ -17,9 +17,9 @@ use tempfile::TempDir;
 /// A throwaway home: every test runs against a `CONSENSFLOW_HOME` and
 /// harness homes of its own, and the environment is handed to every call.
 pub struct Home {
-    pub dir: TempDir,
     /// The folder `PATH` names, and the stand-in harness CLIs go in.
     pub bin: PathBuf,
+    pub dir: TempDir,
 }
 
 impl Home {

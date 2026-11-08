@@ -16,11 +16,11 @@ const WORDS: &str = "the compaction size is a whole number of tokens from 100000
 
 /// The page over a project with a worker, on a bridge.
 struct Asked {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
+    _home: tempfile::TempDir,
 }
 
 fn asked() -> Asked {

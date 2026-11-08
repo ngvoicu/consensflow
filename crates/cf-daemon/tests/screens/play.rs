@@ -71,13 +71,13 @@ struct Game<'a> {
     name: &'a str,
     token: String,
     world: World,
-    ledgers: tempfile::TempDir,
     rig: Option<Rig>,
     closed: bool,
     /// Whether the trace's `close` of its ledger was played.
     ledger_closed: bool,
     /// What has been compared so far.
     tally: Tally,
+    ledgers: tempfile::TempDir,
 }
 
 impl Game<'_> {

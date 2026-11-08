@@ -19,9 +19,9 @@ fn words(words: &[&str]) -> Vec<OsString> {
 
 /// A cache and a folder for the files, beside each other in a temporary folder.
 struct Scene {
-    _dir: tempfile::TempDir,
     cache: PathBuf,
     into: PathBuf,
+    _dir: tempfile::TempDir,
 }
 
 impl Scene {

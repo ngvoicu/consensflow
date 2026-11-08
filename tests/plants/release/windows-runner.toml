@@ -2463,3 +2463,99 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = '''    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci")) {'''
 replace = '''    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci-never")) {'''
+
+# The sweep takes the test families a day old out of the user's Temp (T-1333): the whole of their names,
+# a `.tmp` folder by what is in it, and none that a program runs from; at most 3000 a run; none where the
+# programs cannot be listed; what it cannot take never ends the run. Windows will not remove a folder from
+# under a file a program has open, so the tests that kept a ledger open past their `TempDir`, and the runs
+# that were killed, left their folders for good (zeewin and zeewin2: 45,000 on 2026-11-07).
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes a folder younger than a day"
+meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  $cutoff = $Now.ToUniversalTime().AddDays(-«days»)"
+replace = "  $cutoff = $Now.ToUniversalTime().AddDays(1)"
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes a .tmp folder with a stranger's file in it"
+meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ($made -notcontains $inside.Name.ToLowerInvariant()) { $ours = $false; break }"
+replace = "if ($false) { $ours = $false; break }"
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes a name that only begins like a family's"
+meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "'^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$'"
+replace = "'^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}'"
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes a file with a family's name"
+meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    if ($folder -and $name -cmatch '^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$') { $ours = $true }"
+replace = "    if ($name -cmatch '^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$') { $ours = $true }"
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes a folder a program runs from"
+meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    if ($holds.Count) { $result.Held++; continue }"
+replace = "    if ($false) { $result.Held++; continue }"
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes folders where the programs cannot be listed"
+meant = "where_the_programs_cannot_be_listed_nothing_is_taken_and_a_sweep_takes_at_most_its_cap"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if ($null -eq $Processes) { $result.Skipped = $true; return $result }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the sweep of Temp has no cap"
+meant = "where_the_programs_cannot_be_listed_nothing_is_taken_and_a_sweep_takes_at_most_its_cap"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  foreach ($item in ($order | Select-Object -First $Cap)) {"
+replace = "  foreach ($item in $order) {"
+
+[[plant]]
+name = "windows runner: the sweep of Temp takes any task's folder named T- and a number"
+meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "'^T-[0-9]{2,5}-[A-Za-z0-9._-]+$'"
+replace = "'^T-.*'"
+
+[[plant]]
+name = "windows runner: the sweep of Temp is given more than its cap"
+meant = "the_sweep_takes_the_test_families_a_day_old_and_ends_with_them_and_never_fails_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "pub const TEMP_SWEPT_AT_MOST: u32 = 3000;"
+replace = "pub const TEMP_SWEPT_AT_MOST: u32 = 300000;"

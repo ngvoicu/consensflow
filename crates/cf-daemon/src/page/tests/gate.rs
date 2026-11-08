@@ -11,12 +11,12 @@ use super::*;
 /// The page over a project whose human approves every hand-off, with a task
 /// given to zeus whose brief waits at the gate.
 struct Held {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
     brief: i64,
+    _home: tempfile::TempDir,
 }
 
 fn held() -> Held {

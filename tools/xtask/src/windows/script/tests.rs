@@ -7,12 +7,14 @@ mod golden;
 #[cfg(windows)]
 mod lock;
 mod packages;
+mod powershell;
 mod reports;
 #[cfg(windows)]
 mod stage;
 #[cfg(windows)]
 mod stale;
 mod sweep;
+mod temp;
 mod unpack;
 
 use super::*;

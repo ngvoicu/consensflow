@@ -36,9 +36,9 @@ use crate::seams::DaemonSpawn;
 /// Where the engine's work runs in a test: the daemon's own, on a home of its
 /// own, with its driver spawned on the local set the caller is in.
 pub struct Worked {
+    pub spawn: Rc<DaemonSpawn>,
     /// The home, which holds the log and the trace until it goes.
     pub home: tempfile::TempDir,
-    pub spawn: Rc<DaemonSpawn>,
 }
 
 /// The engine's work for a test, run by the daemon's executor and its driver.
@@ -115,8 +115,6 @@ pub struct Finishings {
 
 /// A project of two windows and a question waiting.
 pub struct Scene {
-    /// The home, which holds the ledger, the log and the trace until the scene goes.
-    pub _home: tempfile::TempDir,
     pub context: Rc<Context>,
     /// How many times the dispatcher was woken.
     pub kicks: Rc<Cell<u32>>,
@@ -129,6 +127,8 @@ pub struct Scene {
     pub zeus: String,
     /// The question `zeus` asked the chief, which waits for an answer.
     pub question: MessageView,
+    /// The home, which holds the ledger, the log and the trace until the scene goes.
+    pub _home: tempfile::TempDir,
 }
 
 impl Scene {

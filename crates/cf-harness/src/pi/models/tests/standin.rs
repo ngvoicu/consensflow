@@ -25,13 +25,13 @@ pub(super) fn answer(request: &str, ids: &[&str]) -> String {
 }
 
 pub(super) struct StandIn {
-    _folder: tempfile::TempDir,
     /// Pi's folder: the pipe tests, which only Unix has, make a file of it a pipe.
     #[cfg_attr(not(unix), allow(dead_code))]
     pub agent: PathBuf,
     pub env: Env,
     pub processes: Rc<ScriptedProcesses>,
     pub time: Rc<ManualTime>,
+    _folder: tempfile::TempDir,
 }
 
 impl StandIn {

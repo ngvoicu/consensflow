@@ -147,6 +147,18 @@ pub const KEPT: [&str; 18] = [
 /// before the run's script does anything else.
 pub const REPORTS_KEPT_DAYS: u32 = 14;
 
+/// How old a folder of the test families in the user's Temp is before the sweep takes it away, in
+/// days (T-1333): by the last change of the folder itself. The sweep runs under the lock, so no run
+/// of this runner (or Kluris's) is using one, and a test folder that is a day old is a dead
+/// run's: a test whose `TempDir` could not be removed (Windows will not remove a folder from under
+/// a file a program has open) or a process that was killed before it dropped it.
+pub const TEMP_KEPT_DAYS: u32 = 1;
+
+/// The most folders of those families one sweep takes away, oldest first: a machine that has not
+/// been swept holds tens of thousands (zeewin and zeewin2 held 45,000 on 2026-11-07), and a run is
+/// not held up for all of them. The next run takes the next ones.
+pub const TEMP_SWEPT_AT_MOST: u32 = 3000;
+
 /// What `--build` runs first: the packages, the page, a pane's cf.exe and the pane host.
 pub const BUILD_STEPS: [&str; 6] = [
     "npm ci --no-audit --no-fund",
@@ -527,6 +539,34 @@ pub fn sweep_script() -> String {
             ("kept", &kept.join(", ")),
             ("excluded", &excluded.join(", ")),
             ("days", &REPORTS_KEPT_DAYS.to_string()),
+            ("temp", &temp_sweep()),
+        ],
+    )
+}
+
+/// The sweep of the test families in the user's Temp, as the sweep holds it (T-1333): the
+/// function that takes them away and its call. The marks around the function are what the tests
+/// take it out by.
+///
+/// Which folders are ours is told by their names alone, and the whole name: `cf-dispatch-` and
+/// `consensflow-integration-` and six letters or digits (a folder, and the `-left.txt` file beside
+/// the second), `cf-pane-probe-…`, `T-<number>-…` (a task's probe), and `.tmp` and six letters or
+/// digits (the `tempfile` crate's own name, which every program that uses it shares) when the
+/// folder is empty or holds only what ConsensFlow's tests make in one: the ledger and its files,
+/// the log and the trace, the stand-in homes of the harnesses. Nothing else in Temp is looked at
+/// (zeewin2's, which is Gabriel's, held 4,416 such `.tmp` folders on 2026-11-08, every one of
+/// them one of these, and a Codex, a Chrome, a Muse and PostgreSQL's installer besides).
+///
+/// A folder is taken only when it is a day old ([`TEMP_KEPT_DAYS`]) and no program runs from it
+/// or has its path on its command line; where the programs cannot be listed nothing is taken.
+/// Windows refuses to remove a folder with a file open in it, which is the last word. At most
+/// [`TEMP_SWEPT_AT_MOST`] go in a sweep. What cannot be taken is said and never ends the run.
+fn temp_sweep() -> String {
+    fill(
+        TEMP_SWEEP,
+        &[
+            ("days", &TEMP_KEPT_DAYS.to_string()),
+            ("most", &TEMP_SWEPT_AT_MOST.to_string()),
         ],
     )
 }
@@ -984,6 +1024,62 @@ $own = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'
 $left = '^(?<folder>.+)\.[0-9a-f]{8}-[0-9a-f]{8}\.tgz$'
 try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $own -and $_.LastWriteTime -lt (Get-Date).AddHours(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
 try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $left -and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) -and $_.LastWriteTime -lt (Get-Date).AddDays(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
+«temp»"##;
+
+/// The sweep of the test families in Temp ([`temp_sweep`]).
+const TEMP_SWEEP: &str = r##"# temp: begin
+function Clear-TestTemp {
+  param([string]$Temp, $Processes, [DateTime]$Now, [int]$Cap)
+  $result = [pscustomobject]@{ Removed = 0; Held = 0; Failed = @(); Left = 0; Skipped = $false }
+  if ($null -eq $Processes) { $result.Skipped = $true; return $result }
+  $cutoff = $Now.ToUniversalTime().AddDays(-«days»)
+  $made = @('consensflow.db', 'consensflow.db-wal', 'consensflow.db-shm', 'consensflow.db-journal', 'events.jsonl', 'events.jsonl.lock', 'daemon.log', 'daemon.log.lock', 'data', 'home', 'consensflow', 'profile', 'tree', 'sessions.db', 'wire.jsonl')
+  $found = [Collections.Generic.List[IO.FileSystemInfo]]::new()
+  foreach ($item in ([IO.DirectoryInfo]::new($Temp)).GetFileSystemInfos()) {
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+    $name = $item.Name
+    $folder = $item -is [IO.DirectoryInfo]
+    $ours = $false
+    if ($folder -and $name -cmatch '^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$') { $ours = $true }
+    elseif (-not $folder -and $name -cmatch '^consensflow-integration-[A-Za-z0-9]{6}-left\.txt$') { $ours = $true }
+    elseif ($folder -and $name -cmatch '^cf-pane-probe-[A-Za-z0-9._-]+$') { $ours = $true }
+    elseif ($folder -and $name -cmatch '^T-[0-9]{2,5}-[A-Za-z0-9._-]+$') { $ours = $true }
+    elseif ($folder -and $name -cmatch '^\.tmp[A-Za-z0-9]{6}$') {
+      $ours = $true
+      try { foreach ($inside in $item.GetFileSystemInfos()) { if ($made -notcontains $inside.Name.ToLowerInvariant()) { $ours = $false; break } } } catch { $ours = $false }
+    }
+    if ($ours -and $item.LastWriteTimeUtc -lt $cutoff) { $found.Add($item) }
+  }
+  $order = @($found | Sort-Object LastWriteTimeUtc)
+  $result.Left = [Math]::Max(0, $order.Count - $Cap)
+  foreach ($item in ($order | Select-Object -First $Cap)) {
+    $path = $item.FullName
+    $holds = @($Processes | Where-Object { ($_.ExecutablePath -and $_.ExecutablePath.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.CommandLine -and $_.CommandLine.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) })
+    if ($holds.Count) { $result.Held++; continue }
+    try {
+      if ($item -is [IO.FileInfo]) { $item.Attributes = [IO.FileAttributes]::Normal; $item.Delete() }
+      else {
+        try { $item.Delete($true) } catch {
+          foreach ($inner in Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue) { try { $inner.Attributes = [IO.FileAttributes]::Normal } catch {} }
+          $item.Delete($true)
+        }
+      }
+      $result.Removed++
+    } catch { $result.Failed += $item.Name }
+  }
+  $result
+}
+# temp: end
+$swept = $null
+try {
+  $running = try { @(Get-CimInstance Win32_Process -ErrorAction Stop) } catch { $null }
+  $swept = Clear-TestTemp -Temp ([IO.Path]::GetTempPath()) -Processes $running -Now (Get-Date) -Cap «most»
+} catch { Write-Output "The test folders in Temp could not be looked at: $($_.Exception.Message)" }
+if ($swept -and $swept.Skipped) { Write-Output '== temp: the programs of this machine could not be listed, so no test folder of the user''s Temp was taken away' }
+elseif ($swept -and ($swept.Removed -or $swept.Held -or $swept.Failed.Count -or $swept.Left)) {
+  Write-Output "== temp: $($swept.Removed) test folders a day old or more taken away from the user's Temp, $($swept.Held) kept (a program runs from them), $($swept.Failed.Count) that Windows would not remove, $($swept.Left) left for the next run"
+  if ($swept.Failed.Count) { Write-Output "The test folders in Temp that could not be removed: $(@($swept.Failed | Select-Object -First 5) -join '; ')" }
+}
 "##;
 
 /// The script that lists the reports, with a mark where the copy's folder goes.

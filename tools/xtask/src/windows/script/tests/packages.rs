@@ -6,10 +6,8 @@
 use std::fs;
 use std::path::Path;
 
-use cf_base::env::Env;
-
+use super::powershell::{self, shell};
 use super::*;
-use crate::process::{self, Invocation};
 
 /// The marks the run script puts around the check, so that a test can run it alone.
 const BEGIN: &str = "# packages: begin\n";
@@ -24,19 +22,6 @@ fn check_in(text: &str) -> String {
         .split_once(END)
         .unwrap_or_else(|| panic!("the check of the packages has no end: {text}"));
     check.to_owned()
-}
-
-/// A PowerShell of this machine: the Mac's (`pwsh`) or Windows' own; none where the
-/// machine has neither on its PATH, and the tests that run it say so. One that is there
-/// and does not run is a failure of the test, not a reason to skip it: a PowerShell
-/// whose startup cache was corrupted by others starting at once ended every test of
-/// these as "no PowerShell", and every plant of them passed (2026-11-08).
-fn shell() -> Option<&'static str> {
-    let path = Env::from_process();
-    let folders: Vec<std::path::PathBuf> = std::env::split_paths(path.search_path()?).collect();
-    ["pwsh", "pwsh.exe", "powershell.exe"]
-        .into_iter()
-        .find(|name| folders.iter().any(|folder| folder.join(name).is_file()))
 }
 
 /// A lockfile's `packages`, from `(key, fields)` each: with the root entry first, as npm
@@ -89,32 +74,14 @@ fn copy(root: (&str, Option<&str>), app: (&str, Option<&str>)) -> tempfile::Temp
 /// What the check makes of `copy`: the steps it adds to a run's, and what it said.
 fn checked(shell: &str, copy: &Path) -> (Vec<String>, String) {
     let check = check_in(&script(&[], "echo hi", &[]));
-    let file = copy.join("check.ps1");
-    fs::write(
-        &file,
-        format!(
+    let out = powershell::run(
+        shell,
+        copy,
+        &format!(
             "$ErrorActionPreference = 'Continue'\nSet-Location -LiteralPath '{}'\n$steps = @()\n{check}\nWrite-Output ('STEPS:' + ($steps -join '|'))\n",
             copy.display()
         ),
-    )
-    .unwrap();
-    let ran = process::capture(
-        &Invocation::new(shell, copy)
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(file.display().to_string()),
-        // PowerShell keeps a cache of how it started in the user's cache folder, which several
-        // starting at once write over each other: each run has a folder of its own for it.
-        &Env::from_process().with_var("XDG_CACHE_HOME", &copy.join("cache").display().to_string()),
-    )
-    .unwrap();
-    assert_eq!(ran.code, 0, "{}", said(&ran));
-    let out = ran.stdout.replace("\r\n", "\n");
+    );
     let steps = out
         .lines()
         .find_map(|line| line.strip_prefix("STEPS:"))

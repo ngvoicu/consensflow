@@ -557,9 +557,9 @@ fn a_gate_nobody_opens_ends_its_run_with_97_and_one_that_is_opened_lets_it_go_on
 
 /// A profile with one run's tarball in it, and the scratch the case works in.
 pub(super) struct Case {
-    pub(super) scratch: tempfile::TempDir,
     pub(super) env: Env,
     pub(super) profile: PathBuf,
+    pub(super) scratch: tempfile::TempDir,
 }
 
 impl Case {

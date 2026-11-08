@@ -290,8 +290,8 @@ mod asked {
     /// leaves status 1 and no words). zeewin2 answers the disk script with `zeewin2` (`free N`,
     /// then `run` if `running`), or does not answer (`none`).
     struct Laptop {
-        bin: tempfile::TempDir,
         context: Context,
+        bin: tempfile::TempDir,
     }
 
     impl Laptop {

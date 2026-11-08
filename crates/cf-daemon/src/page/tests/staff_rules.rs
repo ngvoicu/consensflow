@@ -16,11 +16,11 @@ const RULES: &str = "- Push to origin only.\n- Tests use the .smoke bundle id.";
 
 /// The page over a project with a worker, on a bridge.
 struct Asked {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
+    _home: tempfile::TempDir,
 }
 
 fn asked() -> Asked {

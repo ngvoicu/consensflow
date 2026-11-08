@@ -31,11 +31,11 @@ pub(super) const TASK: &str = "[ConsensFlow m-1 · T-1 · task from @chief]\nWri
 /// A throwaway home, Devin config folder and a stand-in `devin` on PATH that
 /// says its version.
 pub(super) struct Home {
-    pub(super) _dir: TempDir,
     pub(super) root: String,
     pub(super) vars: Vec<(String, String)>,
     pub(super) executable: String,
     pub(super) fakes: Fakes,
+    pub(super) _dir: TempDir,
 }
 
 impl Home {

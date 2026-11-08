@@ -64,13 +64,13 @@ type Settled = Vec<(usize, Result<Answer, String>)>;
 
 /// A send in a folder of its own, its host, clock and randomness the fakes'.
 struct Stage {
-    dir: TempDir,
     /// Where the inbox is, when it is not in the folder of the stage.
     inbox_at: Option<String>,
     time: Rc<ManualTime>,
     entropy: Rc<ScriptedEntropy>,
     host: Rc<Host>,
     driver: Driver<Result<Answer, String>>,
+    dir: TempDir,
 }
 
 impl Stage {

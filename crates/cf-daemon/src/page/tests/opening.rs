@@ -19,11 +19,11 @@ const APOLLO: &str = r#"[{"id":"apollo","kind":"claude-code","model":"m","workTi
 /// The page over a home with apollo saved, on a bridge, with a project of the
 /// kit's already open (what the dialogs of an existing project are asked of).
 struct Asked {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     existing: i64,
+    _home: tempfile::TempDir,
 }
 
 fn asked() -> Asked {

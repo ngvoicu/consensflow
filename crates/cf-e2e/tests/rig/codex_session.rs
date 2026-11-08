@@ -40,12 +40,12 @@ const EXIT: Duration = Duration::from_secs(60);
 /// A supervisor, running: `cf codex-session` on a stand-in Codex, in a home of
 /// its own that goes with it.
 struct Supervised {
-    /// The folder of the window's home: ConsensFlow's home too.
-    root: TempDir,
     /// The port the broker listens on.
     port: u16,
     child: Spawned,
     log: PathBuf,
+    /// The folder of the window's home: ConsensFlow's home too.
+    root: TempDir,
 }
 
 impl Supervised {

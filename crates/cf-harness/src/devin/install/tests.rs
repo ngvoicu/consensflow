@@ -21,10 +21,10 @@ const LAUNCH: &str = "launch-1";
 /// A home of its own: ConsensFlow's folder, Devin's config folder and a
 /// stand-in `devin` on PATH that says its version.
 struct Home {
-    dir: TempDir,
     fakes: Fakes,
     services: Services,
     executable: String,
+    dir: TempDir,
 }
 
 impl Home {

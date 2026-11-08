@@ -165,7 +165,6 @@ type Settled = (Value, Option<Rc<dyn Window>>);
 
 /// A scenario being played.
 struct Played {
-    _dir: TempDir,
     _other: Option<OtherProcess>,
     names: Names,
     env: Map<String, Value>,
@@ -177,6 +176,7 @@ struct Played {
     driver: Driver<Settled>,
     /// The SQLite stores a scenario writes, by their names.
     dbs: HashMap<String, Connection>,
+    _dir: TempDir,
 }
 
 /// A scenario's answer to a host request: at once, failing, or held.

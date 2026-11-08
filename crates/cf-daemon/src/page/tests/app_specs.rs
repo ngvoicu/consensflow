@@ -12,10 +12,10 @@ use super::*;
 /// The page on a bridge, over a home whose agents file holds no agents and, where
 /// given, these `preferences`.
 struct Held {
-    home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
+    home: tempfile::TempDir,
 }
 
 fn held(preferences: Option<Value>) -> Held {
