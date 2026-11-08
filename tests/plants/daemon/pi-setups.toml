@@ -64,8 +64,8 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '        Err(Unlisted::NoModel) => Err(inspect(time, &env).await.unlisted()),'
-replace = '        Err(Unlisted::NoModel) => Err("Pi lists no model: it holds no login for any provider".to_owned()),'
+find = '            let unlisted = inspect(time, &env).await.unlisted();'
+replace = '            let unlisted = "Pi lists no model: it holds no login for any provider".to_owned();'
 
 [[plant]]
 name = "pi-setups: the setup is read from no folder"
@@ -74,8 +74,8 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '        Err(Unlisted::NoModel) => Err(inspect(time, &env).await.unlisted()),'
-replace = '        Err(Unlisted::NoModel) => Err(super::setup::Setup::default().unlisted()),'
+find = '            let unlisted = inspect(time, &env).await.unlisted();'
+replace = '            let unlisted = super::setup::Setup::default().unlisted();'
 
 [[plant]]
 name = "pi-setups: the setup is read though the list names models"
@@ -564,8 +564,8 @@ runs = ["ps-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '.entry(harness).or_default()'
-replace = '.entry(Harness::Pi).or_default()'
+find = 'self.reading.borrow_mut().entry(harness).or_default()'
+replace = 'self.reading.borrow_mut().entry(Harness::Pi).or_default()'
 
 [[plant]]
 name = "pi-setups: the guard of the real-Pi helper does not expand a tilde"

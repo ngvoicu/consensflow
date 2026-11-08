@@ -235,6 +235,27 @@ fn every_ask_reads_the_harness_and_the_refresh_fetches() {
     }
 }
 
+/// The reads a submission can be checked against are the last of each harness, by id, and an id
+/// names a read of its own harness only.
+#[test]
+fn only_the_last_reads_of_a_harness_are_kept_for_a_submission() {
+    let home = home(&["devin"]);
+    let lists = lists(&home, ByKind(vec![]));
+    let ids: Vec<u64> = (0..=KEPT_READS)
+        .map(|n| lists.record(Harness::Devin, models(&["a"], i64::try_from(n).unwrap())))
+        .collect();
+    assert!(
+        lists.shown(Harness::Devin, ids[0]).is_none(),
+        "the oldest went"
+    );
+    assert!(lists.shown(Harness::Devin, ids[1]).is_some());
+    assert!(lists.shown(Harness::Devin, *ids.last().unwrap()).is_some());
+    assert!(
+        lists.shown(Harness::Pi, ids[1]).is_none(),
+        "a read of Devin's is none of Pi's"
+    );
+}
+
 /// A read that fails lists no model and says why: the list read before is not put in its
 /// place, stale or not. What the form already holds stays the page's to show.
 #[test]

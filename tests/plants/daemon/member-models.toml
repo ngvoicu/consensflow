@@ -25,8 +25,8 @@ runs = ["mm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
-find = "        .filter(|listing| !listing.models.is_empty());"
-replace = "        .filter(|_| false);"
+find = "    let Some(listing) = checked else {"
+replace = "    let Some(listing) = checked.filter(|_| false) else {"
 
 [[plant]]
 name = "member models: an effort the harness does not list for the model is taken"
@@ -140,11 +140,11 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 file = "app/ui/core/dialogs.js"
 find = '''
     this.#tier.value = ''
-    this.say('')
+    this.#current = null
 '''
 replace = '''
     this.#tier.value = 'standard'
-    this.say('')
+    this.#current = null
 '''
 
 [[plant]]
@@ -179,8 +179,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    return this.#ask(harness, true)"
-replace = "    return this.get(harness)"
+find = "    const asked = this.#ask(harness, true)\n    asked.then("
+replace = "    const asked = this.get(harness)\n    asked.then("
 
 [[plant]]
 name = "member models: a member whose harness no longer lists its model is not marked"

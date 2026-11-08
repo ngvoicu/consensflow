@@ -318,16 +318,6 @@ find = '        if answers(&answer) {'
 replace = '        if answers(&answer) || true {'
 
 [[plant]]
-name = 'listing: ledger: a stale listing is kept fresh'
-meant = "a_harness_s_listing_is_kept_whole_and_a_failed_read_replaces_it_with_no_list"
-runs = ["ch-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/model_lists.rs"
-find = '        Freshness::Stale { why } => Some(why.as_str()),'
-replace = '        Freshness::Stale { .. } => None::<&str>,'
-
-[[plant]]
 name = "listing: ledger: the players compare the model list table with Node's"
 meant = "takes_the_model_list_table_and_its_schema_out_and_nothing_else"
 runs = ["ch-ledger-testing"]
@@ -704,12 +694,8 @@ runs = ["chm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
-find = '''
-        .filter(|listing| !listing.models.is_empty());
-    let Some(listing) = kept else {'''
-replace = '''
-        .filter(|_| false);
-    let Some(listing) = kept else {'''
+find = "    let Some(listing) = checked else {"
+replace = "    let Some(listing) = checked.filter(|_| false) else {"
 
 [[plant]]
 name = "chief: the page says no contributor warning for the chief's model"
