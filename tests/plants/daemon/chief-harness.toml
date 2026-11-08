@@ -836,7 +836,7 @@ runs = ["chm-dispatcher"]
 file = "crates/cf-engine/src/windows.rs"
 find = '''        let before = record.window.borrow().relaunch;
         let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;'''
-replace = '''        if let Some(gone) = self.gone_model(participant, because)? {
+replace = '''        if let Some(gone) = self.gone_model(participant, &crate::shown::Evidence::of_record(because))? {
             self.reopen_without(record, gone);
             return Ok(());
         }
@@ -2112,7 +2112,7 @@ runs = ["chm-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_model.rs"
 find = '''        Ok(adapter.model_gone(words.as_str(), &asked).then_some(asked))'''
-replace = '''        Ok(adapter.model_gone(&format!("{} {asked}", words.as_str()), &asked).then_some(asked))'''
+replace = '''        Ok(adapter.model_gone(&format!("model is not supported {asked}"), &asked).then_some(asked))'''
 
 [[plant]]
 name = "gone: the evidence of a window is the note made of it"

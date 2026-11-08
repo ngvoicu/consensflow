@@ -2389,7 +2389,7 @@ replace = '''            b"UNKNOWN" => failure.with_errno("UNKNOWN"),'''
 
 [[plant]]
 name = "windows close: quote less: two kinds end a window with one status"
-meant = "every_kind_has_a_status_of_its_own_in_a_range_no_harness_uses_and_reads_back"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_of_consensflows_and_reads_back"
 runs = ["quote-less-base"]
 
 [[plant.edit]]
@@ -2399,7 +2399,7 @@ replace = '''        i32::try_from(START_STATUS_BASE).unwrap_or(70) + i32::try_f
 
 [[plant]]
 name = "windows close: quote less: a status above the range reads as a kind"
-meant = "every_kind_has_a_status_of_its_own_in_a_range_no_harness_uses_and_reads_back"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_of_consensflows_and_reads_back"
 runs = ["quote-less-base"]
 
 [[plant.edit]]
