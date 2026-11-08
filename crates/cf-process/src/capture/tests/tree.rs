@@ -55,7 +55,8 @@ fn tree(file: &Path) -> Run {
             "-Command".to_owned(),
             format!(
                 "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE' -ArgumentList '-n','{lives}','127.0.0.1'; \
-                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' '); Start-Sleep {lives}",
+                 try {{ Set-Content -ErrorAction Stop -Path '{}' -Value (@($PID, $p.Id) -join ' ') }} catch {{ Stop-Process -Id $p.Id -Force; throw }}; \
+                 Start-Sleep {lives}",
                 file.display().to_string().replace('\'', "''")
             ),
         ]

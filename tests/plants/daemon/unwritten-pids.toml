@@ -1,0 +1,57 @@
+# A tree of the stop tests whose write of its pids fails (PowerShell's `Set-Content`, on Windows) after
+# its ping started: the test fails without the pids, and nothing knew of the ping, which outlived the
+# test by up to ten minutes (the stop test's P2 of 2026-10-17, T-138; the job of `cf-process` did not
+# end it). The tree catches the failure of the write, ends the ping it started and fails: a tree whose
+# folder is not there ends by itself, with no ping of its own left. Windows only.
+#
+# Both trees (the daemon's `stop` tests, `cf-process`'s capture tests) have the same program, and a
+# test of their own for it. Every name holds `unwritten pids`, so `npm run plants:daemon -- "unwritten
+# pids"` runs them all, on Windows through `cargo xtask windows`.
+
+[run]
+daemon-lib-stop-write = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::tree::a_tree_whose_write"]
+process-lib-capture-write = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "capture::tests::tree::a_tree_whose_write"]
+
+[[plant]]
+name = "unwritten pids: the stop's tree does not end the ping when its write fails"
+meant = "a_tree_whose_write_of_its_pids_failed_ends_the_ping_it_started_and_itself"
+runs = ["daemon-lib-stop-write"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop/tests/tree.rs"
+find = "catch {{ Stop-Process -Id $p.Id -Force; throw }}"
+replace = "catch {{ throw }}"
+
+[[plant]]
+name = "unwritten pids: the stop's tree does not take the failed write for an error"
+meant = "a_tree_whose_write_of_its_pids_failed_ends_the_ping_it_started_and_itself"
+runs = ["daemon-lib-stop-write"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop/tests/tree.rs"
+find = "Set-Content -ErrorAction Stop -Path"
+replace = "Set-Content -Path"
+
+[[plant]]
+name = "unwritten pids: a capture's tree does not end the ping when its write fails"
+meant = "a_tree_whose_write_of_its_pids_failed_ends_the_ping_it_started_and_itself"
+runs = ["process-lib-capture-write"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = "catch {{ Stop-Process -Id $p.Id -Force; throw }}"
+replace = "catch {{ throw }}"
+
+[[plant]]
+name = "unwritten pids: a capture's tree does not take the failed write for an error"
+meant = "a_tree_whose_write_of_its_pids_failed_ends_the_ping_it_started_and_itself"
+runs = ["process-lib-capture-write"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = "Set-Content -ErrorAction Stop -Path"
+replace = "Set-Content -Path"
