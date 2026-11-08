@@ -174,7 +174,7 @@ fn a_chief_whose_model_is_gone_starts_on_its_harnesss_default_and_the_human_is_t
         .collect();
     assert_eq!(
         told,
-        ["The chief's model, fake-chief, is no longer available in Claude Code: the chief starts on Claude Code's own default model instead. Switch the chief to pick another."]
+        ["The chief's model, fake-chief, is no longer available in Claude Code: the chief starts on fake, Claude Code's default model, instead. Switch the chief to pick another."]
     );
     // And no third window: the default comes up.
     std::thread::sleep(Duration::from_secs(3));
