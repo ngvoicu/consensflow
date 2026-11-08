@@ -32,12 +32,14 @@ fn forgetting_the_kept_listings_takes_every_row_an_older_build_left() {
     drop(db);
     assert_eq!(rows(&file), 3);
 
+    // Opening the ledger forgets nothing (migrations read these rows); forgetting is a call.
+    open_ledger(&file, Options::default())
+        .unwrap()
+        .close()
+        .unwrap();
+    assert_eq!(rows(&file), 3, "an opening leaves the rows");
     let mut ledger = open_ledger(&file, Options::default()).unwrap();
-    assert_eq!(
-        rows(&file),
-        3,
-        "opening the ledger forgets nothing: migrations read these rows"
-    );
     ledger.forget_model_listings().unwrap();
+    ledger.close().unwrap();
     assert_eq!(rows(&file), 0, "every row of every harness");
 }
