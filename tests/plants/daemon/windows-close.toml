@@ -2498,7 +2498,7 @@ runs = ["quote-less-codex-session"]
 [[plant.edit]]
 file = "crates/cf-codex-session/src/supervisor.rs"
 find = '''            Self::Unrunnable(refusal) => refusal.failure().kind(),'''
-replace = '''            Self::Unrunnable(_) => return None,'''
+replace = '''            Self::Unrunnable(_) => StartKind::NotSetUp,'''
 
 [[plant]]
 name = "windows close: quote less: a Codex that was not found is no kind of start"
