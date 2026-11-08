@@ -134,6 +134,15 @@ pub struct Agent {
     running: AtomicBool,
     /// Whether the turn at work was asked to stop (`turn/interrupt`, the TUI's Escape).
     interrupted: AtomicBool,
+    /// The variables the thread's start gave its commands (`shell_environment_policy.set.*` of
+    /// its `config`: ConsensFlow's URL, token and the rest), which Codex's memory job inherits
+    /// with the rest of the config it clones.
+    window_env: Mutex<Vec<(String, String)>>,
+    /// The `cf` command Codex's memory job runs (`CF_TEST_CODEX_MEMORY_JOB`, the words of a
+    /// `CF` line) when the backend is `memory-job`; none otherwise.
+    memory_job: Option<Vec<String>>,
+    /// Whether the job has run: it runs once, after the first turn.
+    job_ran: AtomicBool,
 }
 
 /// What `lock` holds, whether or not a thread that held it panicked.
@@ -194,6 +203,9 @@ impl Agent {
             ),
             running: AtomicBool::new(false),
             interrupted: AtomicBool::new(false),
+            window_env: Mutex::new(Vec::new()),
+            memory_job: memory_job_command(),
+            job_ran: AtomicBool::new(false),
         }
     }
 
@@ -209,6 +221,17 @@ impl Agent {
             .as_str()
             .map(str::to_owned)
             .or_else(|| self.configured.clone());
+        *held(&self.window_env) = params["config"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| {
+                Some((
+                    key.strip_prefix(WINDOW_ENV)?.to_owned(),
+                    value.as_str()?.to_owned(),
+                ))
+            })
+            .collect();
     }
 
     /// The server is asked to resume `thread`: it goes on with it where the Codex
@@ -240,7 +263,50 @@ impl Agent {
     /// The server takes `text` as a turn, which goes on beside it.
     pub fn take(self: &Arc<Self>, text: &str) {
         let (agent, text) = (Arc::clone(self), text.to_owned());
-        thread::spawn(move || agent.turn(&text));
+        thread::spawn(move || {
+            agent.turn(&text);
+            agent.consolidate_memories();
+        });
+    }
+
+    /// Codex's memory job, as the server runs it after a turn (`memory-job`): a thread of its
+    /// own, in the memories folder of the Codex home, that has the window's thread's config
+    /// (its variables here, its role in `developer`) and runs the `cf` command the case gave
+    /// it as the window's participant. It runs once, after the first turn; what it ran and
+    /// what `cf` answered are in the log (`{"run":"memory-job"}`), the names of its variables
+    /// and never a value.
+    fn consolidate_memories(&self) {
+        let (Some(words), Some(home)) = (self.memory_job.as_ref(), self.home.as_ref()) else {
+            return;
+        };
+        if self.job_ran.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let folder = home.join("memories");
+        let _ = fs::create_dir_all(&folder);
+        let thread = uuid::Uuid::new_v4().to_string();
+        let window_env = held(&self.window_env).clone();
+        let ran = cf_e2e::process::Run::new(cf_e2e::process::as_a_shell_finds("cf"))
+            .args(words)
+            .inheriting_env()
+            .vars(window_env.iter().map(|(name, value)| (name, value)))
+            .var("CODEX_THREAD_ID", &thread)
+            .cwd(&folder)
+            .unlimited()
+            .run();
+        let (code, output) = match ran {
+            Ok(ran) => (ran.code, ran.output().trim().to_owned()),
+            Err(failed) => (None, failed.to_string()),
+        };
+        super::record(json!({
+            "run": "memory-job",
+            "thread": thread,
+            "cwd": folder,
+            "developer": held(&self.developer).clone(),
+            "variables": window_env.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+            "code": code,
+            "output": output,
+        }));
     }
 
     /// The turn at work stops, as Codex's does at its TUI's Escape (`turn/interrupt`): it ends
@@ -552,6 +618,19 @@ impl Agent {
             .open(&path)
             .and_then(|mut file| file.write_all(line.as_bytes()));
     }
+}
+
+/// What a thread's `config` names a variable of its commands with.
+const WINDOW_ENV: &str = "shell_environment_policy.set.";
+
+/// The words of the `cf` command Codex's memory job runs: the server runs it when its backend is
+/// `memory-job`, and `CF_TEST_CODEX_MEMORY_JOB` names it as a `CF` line does
+/// (`task add --tier standard :: the brief`).
+fn memory_job_command() -> Option<Vec<String>> {
+    if own_var("CF_TEST_CODEX_BACKEND").as_deref() != Some("memory-job") {
+        return None;
+    }
+    cf_in(&format!("CF {}", own_var("CF_TEST_CODEX_MEMORY_JOB")?))
 }
 
 /// Whether the usage limit refuses this window the message `text`: it says

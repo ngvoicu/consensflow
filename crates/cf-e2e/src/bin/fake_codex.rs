@@ -15,7 +15,8 @@
 //! thread starts, `spawns` starts programs (`children`) for as long as it lives once a
 //! thread starts, `orphans` starts one whose parent has gone, `deaf` takes neither SIGTERM nor
 //! SIGHUP (Codex's own server stalled in its shutdown for 10 s and more when it was closed soon
-//! after it started, T-542) and ends only when it is killed; with `CF_TEST_CODEX_QUESTION` it asks its client a question when
+//! after it started, T-542) and ends only when it is killed, `memory-job` runs Codex's memory
+//! job after the first turn (`agent`, `CF_TEST_CODEX_MEMORY_JOB` the `cf` command it runs); with `CF_TEST_CODEX_QUESTION` it asks its client a question when
 //! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
 //! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
 //! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
