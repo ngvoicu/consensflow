@@ -17,6 +17,7 @@ mod command;
 mod detaching;
 mod fake;
 mod flow;
+mod identity;
 mod machine;
 mod notarizing;
 mod redaction;

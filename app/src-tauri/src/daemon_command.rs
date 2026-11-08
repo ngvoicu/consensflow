@@ -66,6 +66,7 @@ pub(crate) fn daemon_command(
 
 /// The daemon `cf` makes: `cf ui --json --no-open`, with nothing of the app's
 /// own added to its environment.
+#[allow(clippy::disallowed_methods)] // The app starts its daemon itself, holding only its streams: older than cf-process's rule.
 fn command_for(cf: &Path) -> Command {
     let mut command = Command::new(cf);
     command.args(["ui", "--json", "--no-open"]);
@@ -501,6 +502,7 @@ fn marker(what: &str) -> String {
 /// from a shell that exits cleanly, all within `timeout` and before the app quits
 /// (`lookup`); none otherwise, and the shell is ended if it still runs. Only the
 /// shell: what its login files started is the user's ([`LoginLookup`]).
+#[allow(clippy::disallowed_methods)] // The app starts the login shell itself, holding only its streams: older than cf-process's rule.
 fn asked(
     shell: &Path,
     args: &[&str],

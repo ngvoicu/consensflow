@@ -15,9 +15,21 @@
 //! The stand-in agent reads none of that: [`Ask::StandIn`] says the same shapes in
 //! its words (`DISPATCH` lines it runs as `cf task add`, a `JOB` that runs while its
 //! turn works, a `BACKGROUND --wake` that wakes it when the job ends), for the dry run.
+//! [`Ask::StandInFast`] says them with their seconds cut to about half, and its jobs to a
+//! minute: the project of a run that finishes its work long before its schedule of
+//! disruptions is played, as the 2-hour run on Windows did (2026-11-05: its project ended at 53 minutes, with the chief
+//! switch, the Devin cut and the suspension still to play).
+//!
+//! **The extra work** ([`Ask::extra_work`]) is a short fixed list of pieces the owner gives, one
+//! at a time and from the first again when they are given, to a project that went quiet while a
+//! disruption is due and waits for its shape (staff at work, a job running, a Devin worker
+//! mid-tool): the check the ask already has the staff do, the full test suite and the build,
+//! with the dev server's pages. A shape cannot come of a project with nothing left to do, and
+//! the run is neither over nor passed before its schedule is played (`run::owner`).
 
 use std::time::Duration;
 
+use crate::run::owner::Piece;
 use crate::scenarios::{answer, FollowUp, Scenario};
 use crate::{Error, Result};
 
@@ -28,6 +40,9 @@ pub enum Ask {
     Real,
     /// The same shapes in the stand-in agent's words, for the dry run.
     StandIn,
+    /// The stand-in's words with their seconds cut: a project that ends long before its
+    /// schedule is played.
+    StandInFast,
 }
 
 impl Ask {
@@ -36,8 +51,9 @@ impl Ask {
         match word {
             "real" => Ok(Self::Real),
             "stand-in" => Ok(Self::StandIn),
+            "stand-in-fast" => Ok(Self::StandInFast),
             other => Err(Error::Usage(format!(
-                "--ask is real or stand-in, not {other}"
+                "--ask is real, stand-in or stand-in-fast, not {other}"
             ))),
         }
     }
@@ -47,6 +63,7 @@ impl Ask {
         match self {
             Self::Real => "real",
             Self::StandIn => "stand-in",
+            Self::StandInFast => "stand-in-fast",
         }
     }
 
@@ -55,7 +72,17 @@ impl Ask {
     pub fn scenario(self, quiet: Duration) -> Scenario {
         match self {
             Self::Real => real(quiet),
-            Self::StandIn => stand_in(quiet),
+            Self::StandIn => stand_in(quiet, SLOW),
+            Self::StandInFast => stand_in(quiet, FAST),
+        }
+    }
+
+    /// The pieces of extra work the owner may give a project that went quiet before its
+    /// schedule of disruptions was played, in the order they are given.
+    pub fn extra_work(self) -> Vec<Piece> {
+        match self {
+            Self::Real => real_extra_work(),
+            Self::StandIn | Self::StandInFast => stand_in_extra_work(),
         }
     }
 }
@@ -96,6 +123,37 @@ pub const FOLLOW_UP: &str = "\
 One more thing, now that the three phases are done: add a CSV export of the budget alerts \
 (npm run export -- --alerts), with a test, and run the full test suite and the build again.";
 
+/// How long a piece of the real extra work takes, with the chief's report after it: the
+/// owner gives one only where the budget has that much left (the end, 9, is held to it). The
+/// follow-up above took 9 minutes of the 2-hour run on Windows and was still going 9 minutes
+/// after it was given in the 1-hour diagnostic.
+pub const REAL_PIECE_TAKES: Duration = Duration::from_secs(25 * 60);
+
+/// The check the extra work asks again, with the tiers of the ask: the full suite, the full
+/// build in the foreground, the dev server and its pages.
+const CHECK: &str = "\
+put three tasks on the board: the full test suite (npm test) in full at tier standard; the \
+full build (npm run build), one long command run in the foreground, at tier light; and the dev \
+server (npm run dev, started with the Bash tool's run_in_background and left running while the \
+pages are checked) with every page of the built site checked against it with curl, at tier \
+complex. Each reports its numbers. When all three are accepted, tell me in a note \
+(cf note --human) what each one ran and the numbers.";
+
+/// The real ask's extra work: the check again, twice over, as the owner would ask it of a
+/// staff that has finished.
+fn real_extra_work() -> Vec<Piece> {
+    [
+        "Before we close this, check the whole project once more, in full: ",
+        "Once more, the same check, to see that the numbers hold from one run to the next: ",
+    ]
+    .iter()
+    .map(|opening| Piece {
+        say: format!("{opening}{CHECK}"),
+        takes: REAL_PIECE_TAKES,
+    })
+    .collect()
+}
+
 fn real(quiet: Duration) -> Scenario {
     Scenario {
         id: "long-run",
@@ -114,17 +172,68 @@ fn real(quiet: Duration) -> Scenario {
     }
 }
 
+/// The longest a stand-in turn may work with nothing in its record and nothing drawn on its
+/// screen (a `SLEEP`): the engine pauses a task whose window has begun no turn on its brief
+/// two arrival windows after it went in, the screen being quiet (`cf-engine`'s `never_began`,
+/// T-1130, on main since 2026-11-04), and a stand-in's `SLEEP` writes and draws nothing until
+/// it ends, as no real harness's turn does. A task paused so is resumed by no one in a dry
+/// run, and the project never reaches its end (9): the standard dry run failed so on the
+/// release pin of 3.0.7-alpha.2 (T-1256), with turns of 900 s. A stand-in turn stays under
+/// this, with a margin of the arrival window's quarter.
+pub const MOST_SILENT_TURN: Duration = Duration::from_secs(80);
+
 /// The shapes the stand-in chief puts on the board first at the owner's answer: a
 /// build whose job runs while its turn works (a tool call at work), a dev server
 /// whose job wakes its worker when it ends, Devin's long turn and the command it
 /// moves to the background, and a slow test run.
 const STAND_IN_SHAPES: [&str; 5] = [
-    "DISPATCH --tier complex JOB 1200 SLEEP 900 Reply with exactly: BUILT",
+    "DISPATCH --tier complex JOB 1200 SLEEP 80 Reply with exactly: BUILT",
     "DISPATCH --tier complex BACKGROUND --wake 90 Reply with exactly: DEV-SERVER-UP",
-    "DISPATCH --tier light SLEEP 900 Reply with exactly: DEVIN-BUILD-DONE",
+    "DISPATCH --tier light SLEEP 80 Reply with exactly: DEVIN-BUILD-DONE",
     "DISPATCH --tier light BACKGROUND 300 Reply with exactly: DEVIN-MOVED-IT",
-    "DISPATCH --tier complex JOB 1200 SLEEP 900 Reply with exactly: TESTS-PASS",
+    "DISPATCH --tier complex JOB 1200 SLEEP 80 Reply with exactly: TESTS-PASS",
 ];
+
+/// The same five shapes with their seconds cut: each job and turn lasts under a minute, so the
+/// whole project is done in a few minutes, long before a schedule with an interval of minutes
+/// has played its seven disruptions.
+const FAST_SHAPES: [&str; 5] = [
+    "DISPATCH --tier complex JOB 60 SLEEP 40 Reply with exactly: BUILT",
+    "DISPATCH --tier complex BACKGROUND --wake 8 Reply with exactly: DEV-SERVER-UP",
+    "DISPATCH --tier light SLEEP 40 Reply with exactly: DEVIN-BUILD-DONE",
+    "DISPATCH --tier light BACKGROUND 20 Reply with exactly: DEVIN-MOVED-IT",
+    "DISPATCH --tier complex JOB 60 SLEEP 40 Reply with exactly: TESTS-PASS",
+];
+
+/// How long the stand-in's work takes, in seconds: the shapes it begins with, the job and the
+/// turn of the long work queued after them, and the turns of the two follow-ups.
+#[derive(Clone, Copy)]
+struct Pace {
+    shapes: [&'static str; 5],
+    job: u32,
+    sleep: u32,
+    export: u32,
+    last: u32,
+}
+
+/// The pace of the dry run: the jobs outlast their turns by many minutes, and each turn is as
+/// long as a stand-in's may be ([`MOST_SILENT_TURN`]).
+const SLOW: Pace = Pace {
+    shapes: STAND_IN_SHAPES,
+    job: 1200,
+    sleep: 80,
+    export: 80,
+    last: 60,
+};
+
+/// The pace of a project that is done long before its schedule is.
+const FAST: Pace = Pace {
+    shapes: FAST_SHAPES,
+    job: 60,
+    sleep: 40,
+    export: 30,
+    last: 25,
+};
 
 /// How many tasks of long work each tier has queued after the shapes. A stand-in
 /// answers at once what a cut window is told on its return, so every disruption
@@ -133,14 +242,17 @@ const STAND_IN_SHAPES: [&str; 5] = [
 const STAND_IN_MORE: usize = 6;
 
 /// The stand-in chief's work: the shapes, then long work of each tier queued.
-fn stand_in_tasks() -> String {
+fn stand_in_tasks(pace: Pace) -> String {
+    let (job, sleep) = (pace.job, pace.sleep);
     let more = (1..=STAND_IN_MORE).flat_map(|at| {
         [
-            format!("DISPATCH --tier complex JOB 1200 SLEEP 900 Reply with exactly: PHASE-{at}"),
-            format!("DISPATCH --tier light SLEEP 900 Reply with exactly: DEVIN-PHASE-{at}"),
+            format!(
+                "DISPATCH --tier complex JOB {job} SLEEP {sleep} Reply with exactly: PHASE-{at}"
+            ),
+            format!("DISPATCH --tier light SLEEP {sleep} Reply with exactly: DEVIN-PHASE-{at}"),
         ]
     });
-    STAND_IN_SHAPES
+    pace.shapes
         .iter()
         .map(|line| (*line).to_owned())
         .chain(more)
@@ -148,11 +260,12 @@ fn stand_in_tasks() -> String {
         .join("\n")
 }
 
-fn stand_in(quiet: Duration) -> Scenario {
+fn stand_in(quiet: Duration, pace: Pace) -> Scenario {
     let more = |words: &str, seconds: u32| {
         FollowUp::Say(format!(
-            "DISPATCH --tier complex JOB 1200 SLEEP {seconds} Reply with exactly: {words}\n\
-             DISPATCH --tier light SLEEP {seconds} Reply with exactly: DEVIN-{words}"
+            "DISPATCH --tier complex JOB {} SLEEP {seconds} Reply with exactly: {words}\n\
+             DISPATCH --tier light SLEEP {seconds} Reply with exactly: DEVIN-{words}",
+            pace.job
         ))
     };
     Scenario {
@@ -162,18 +275,38 @@ fn stand_in(quiet: Duration) -> Scenario {
         uncommitted: None,
         prompt: "Reply with exactly: Currency?".to_owned(),
         follow_ups: vec![
-            more("CSV-EXPORT", 400),
-            more("LAST-CHECK", 300),
+            more("CSV-EXPORT", pace.export),
+            more("LAST-CHECK", pace.last),
             FollowUp::Say("CF note --human :: All done: BUILT, TESTS-PASS, CSV-EXPORT.".to_owned()),
         ],
-        answers: vec![answer(r"(?i)currency", stand_in_tasks())],
-        fallback: stand_in_tasks(),
+        answers: vec![answer(r"(?i)currency", stand_in_tasks(pace))],
+        fallback: stand_in_tasks(pace),
         nudge: None,
         quiet,
         stand_in_reviews: Vec::new(),
         stand_in_work: Vec::new(),
         expectations: Vec::new(),
     }
+}
+
+/// How long a piece of the stand-in's extra work takes, with the chief's accepting after it.
+pub const STAND_IN_PIECE_TAKES: Duration = Duration::from_secs(4 * 60);
+
+/// The stand-in's extra work: the shapes of one complex and one light task, a turn of
+/// [`MOST_SILENT_TURN`] each, a job running beside the complex one's turn (a tool call at work,
+/// the shape the switch and the Devin cut are for). A stand-in's silent turn is paused by the
+/// product past two minutes (the first dry run of this work, T-26 at `SLEEP 120`).
+fn stand_in_extra_work() -> Vec<Piece> {
+    (1..=2)
+        .map(|at| Piece {
+            say: format!(
+                "DISPATCH --tier complex JOB 100 SLEEP {silent} Reply with exactly: RERUN-{at}\n\
+                 DISPATCH --tier light SLEEP {silent} Reply with exactly: DEVIN-RERUN-{at}",
+                silent = MOST_SILENT_TURN.as_secs()
+            ),
+            takes: STAND_IN_PIECE_TAKES,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -247,9 +380,161 @@ mod tests {
     fn an_ask_is_named_on_the_command_line() {
         assert_eq!(Ask::of("real").unwrap(), Ask::Real);
         assert_eq!(Ask::of("stand-in").unwrap().name(), "stand-in");
+        assert_eq!(Ask::of("stand-in-fast").unwrap(), Ask::StandInFast);
+        assert_eq!(Ask::StandInFast.name(), "stand-in-fast");
         assert_eq!(
             Ask::of("fake").unwrap_err().to_string(),
-            "--ask is real or stand-in, not fake"
+            "--ask is real, stand-in or stand-in-fast, not fake"
         );
+    }
+
+    #[test]
+    fn the_fast_stand_in_says_the_same_shapes_in_fewer_seconds() {
+        let slow = Ask::StandIn.scenario(Duration::from_secs(90));
+        let fast = Ask::StandInFast.scenario(Duration::from_secs(90));
+        let shape = |line: &str| {
+            line.split_whitespace()
+                .filter(|word| word.parse::<u32>().is_err())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let (slow_tasks, fast_tasks) = (
+            terminal_answer(&slow, "Currency?"),
+            terminal_answer(&fast, "Currency?"),
+        );
+        let (slow_lines, fast_lines): (Vec<_>, Vec<_>) =
+            (slow_tasks.lines().collect(), fast_tasks.lines().collect());
+        assert_eq!(slow_lines.len(), fast_lines.len());
+        // The same verbs, tiers and words, line by line, whatever the seconds.
+        for (slow_line, fast_line) in slow_lines.iter().zip(&fast_lines) {
+            assert_eq!(shape(slow_line), shape(fast_line));
+        }
+        // And the seconds are fewer: under a minute for a job or a turn, where the standard
+        // run's jobs last twenty.
+        for line in &fast_lines {
+            for seconds in line
+                .split_whitespace()
+                .filter_map(|word| word.parse::<u32>().ok())
+            {
+                assert!(seconds <= 60, "{line}");
+            }
+        }
+        // The standard run's own: its jobs last twenty minutes, far past its turns.
+        assert_eq!(slow_lines[..5], STAND_IN_SHAPES);
+        assert!(slow_lines.iter().any(|line| line.contains("JOB 1200 ")));
+        assert_eq!(slow.follow_ups.len(), fast.follow_ups.len());
+        assert_eq!((slow.fixture, fast.fixture), ("long-run", "long-run"));
+    }
+
+    #[test]
+    fn the_extra_work_is_a_short_fixed_list_of_the_check_the_ask_already_has_done() {
+        let real = Ask::Real.extra_work();
+        assert_eq!(real.len(), 2);
+        for piece in &real {
+            // The full suite and the build, with the dev server's pages, at the three tiers
+            // of the staff (a Devin worker has the light one), and a note after.
+            for shape in [
+                "npm test",
+                "npm run build",
+                "npm run dev",
+                "run_in_background",
+                "curl",
+                "tier standard",
+                "tier light",
+                "tier complex",
+                "cf note --human",
+            ] {
+                assert!(piece.say.contains(shape), "{shape}: {}", piece.say);
+            }
+            // The longest a follow-up of this kind took in the runs of 2026-11-05 was a quarter
+            // of an hour and more, still going at the 1-hour diagnostic's budget: a piece is
+            // given only with at least 20 minutes left, so that the end (9) has its time.
+            assert_eq!(piece.takes, REAL_PIECE_TAKES);
+            assert!(piece.takes >= Duration::from_secs(20 * 60));
+        }
+        assert_ne!(real[0].say, real[1].say);
+        // The stand-in's pieces are the stand-in's words: one complex job and one light turn.
+        for ask in [Ask::StandIn, Ask::StandInFast] {
+            let pieces = ask.extra_work();
+            assert_eq!(pieces.len(), 2);
+            for piece in &pieces {
+                assert_eq!(piece.say.lines().count(), 2, "{}", piece.say);
+                assert!(piece
+                    .say
+                    .lines()
+                    .all(|line| line.starts_with("DISPATCH --tier ")));
+                assert!(piece.say.contains("JOB ") && piece.say.contains("--tier light"));
+                assert_eq!(piece.takes, STAND_IN_PIECE_TAKES);
+            }
+        }
+    }
+
+    #[test]
+    fn the_real_asks_words_are_what_they_were_with_the_extra_work_besides() {
+        // The ask, its follow-up, its answer and its nudge are the owner's, byte for byte: the
+        // extra work is an addition, not a change of them.
+        let scenario = Ask::Real.scenario(Duration::from_secs(600));
+        assert!(scenario
+            .prompt
+            .starts_with("This is ledgerline, a small bookkeeping library"));
+        assert_eq!(scenario.prompt.len(), PROMPT.len());
+        assert_eq!(scenario.follow_ups, [FollowUp::Say(FOLLOW_UP.to_owned())]);
+        assert_eq!(
+            scenario.nudge,
+            Some("Go on: plan the phases and put the work on the board.")
+        );
+        assert_eq!(scenario.quiet, Duration::from_secs(600));
+        assert!(scenario.expectations.is_empty());
+    }
+
+    /// Every number of seconds that follows a `SLEEP` in the words an ask has the stand-in say:
+    /// the answer's tasks, the follow-ups and the extra work.
+    fn silent_turns(ask: Ask) -> Vec<(String, u64)> {
+        let scenario = ask.scenario(Duration::from_secs(90));
+        let mut words: Vec<String> = scenario.answers.iter().map(|a| a.text.clone()).collect();
+        words.push(scenario.fallback.clone());
+        words.extend(
+            scenario
+                .follow_ups
+                .iter()
+                .filter_map(|follow_up| match follow_up {
+                    FollowUp::Say(said) => Some(said.clone()),
+                    FollowUp::Switch => None,
+                }),
+        );
+        words.extend(ask.extra_work().into_iter().map(|piece| piece.say));
+        let sleep = regex::Regex::new(r"SLEEP (\d+) ").unwrap();
+        words
+            .iter()
+            .flat_map(|text| text.lines())
+            .flat_map(|line| {
+                sleep
+                    .captures_iter(line)
+                    .filter_map(|found| found[1].parse::<u64>().ok())
+                    .map(|seconds| (line.to_owned(), seconds))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_stand_in_turn_is_silent_for_longer_than_the_engine_waits_for_a_turn_to_begin() {
+        // The standard dry run's 900-second turns were paused by the never-began rule two
+        // minutes after their briefs went in, and nobody resumed them (T-1256). The limit is
+        // held under the engine's two arrival windows (a minute each), so that it cannot be
+        // raised to fit a turn.
+        assert!(MOST_SILENT_TURN <= Duration::from_secs(100));
+        for ask in [Ask::StandIn, Ask::StandInFast] {
+            let turns = silent_turns(ask);
+            assert!(!turns.is_empty(), "{}", ask.name());
+            for (line, seconds) in turns {
+                assert!(
+                    seconds <= MOST_SILENT_TURN.as_secs(),
+                    "{}: a turn silent for {seconds} s, past {} s: {line}",
+                    ask.name(),
+                    MOST_SILENT_TURN.as_secs()
+                );
+            }
+        }
     }
 }

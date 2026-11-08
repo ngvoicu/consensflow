@@ -478,7 +478,17 @@ broke, a disruption was not played or was played without the shape it is for, it
 time ran out, or it could not be run to its end. One that did not fail and holds
 what the watch could not judge (an unresolved notice, a gap) is `UNRESOLVED`, each
 listed in why and in the report; only a run with neither is `PASS`. It ends sooner
-than `--hours` when the project is done. On `main` before the turn-end work lands, every
+than `--hours` once the project is done **and its schedule of disruptions is played**
+(the scenario's quiet time passed with nothing owed). A project that goes quiet while a
+disruption is due and waits for its shape (staff at work, a job running, a Devin worker
+mid-tool) is given a piece of extra work, one at a time, from a short fixed list in the
+scenario (`long_run/ask.rs`, `Ask::extra_work`: the full test suite, the build and the dev
+server's pages again, at the tiers of the staff), once the staff are at rest and only where
+the budget has the piece's time left to finish it (the end, 9, is held to the budget); the
+list is gone through again while a disruption waits. A disruption still not played at the
+budget fails the run, and its reason names what its shape needed and what the looks after
+it was due found of the staff. The report's `coverage` (and its Markdown section and one
+console line) tells the project, the time and the disruptions apart. On `main` before the turn-end work lands, every
 job a worker's turn leaves that the daemon ends breaks 3 (its "ended" notice comes
 after the result: the dry run shows it each time), and a Claude Code
 `run_in_background` job its worker said it would wait for breaks 2 as well: that is
@@ -493,4 +503,14 @@ run on the stand-ins, which spends nothing: `cargo test -p cf-evals --test
 long_dry_run -- --ignored --nocapture` (about fifteen minutes, on a budget of half
 an hour; it plays every
 disruption, the stand-in compacting at `/compact` as Claude Code does, and keeps its
-report).
+report. Its stand-ins' turns last 80 seconds at most (`ask::MOST_SILENT_TURN`): the engine's
+never-began rule pauses a task whose window began no turn on its brief two arrival windows
+after it went in, and a stand-in's `SLEEP` writes and draws nothing, so a longer turn is paused
+and nobody resumes it (the 900-second turns this run had until 2026-11-08 failed it so). Two
+more cases of that file play `--ask stand-in-fast`, the same shapes in about half the seconds
+and a minute's jobs, a project done in about five minutes: one with the half-hour
+budget, where the extra work lets every disruption be played, and one with a six-minute
+budget, where none fits and the run fails and names the disruptions it did not play
+(`cargo test -p cf-evals --test long_dry_run -- --ignored --nocapture ends_before`, and
+`finds_no_shape`). Those are Unix cases (`#![cfg(unix)]`: the stand-in `claude` is a shell
+script); on Windows the same code is held by the unit tests alone.

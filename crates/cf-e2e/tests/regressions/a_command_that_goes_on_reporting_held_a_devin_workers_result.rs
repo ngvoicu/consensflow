@@ -58,6 +58,18 @@ fn results(project: &Project) -> cf_e2e::Result<Vec<Value>> {
         .collect())
 }
 
+/// The note that says what T-1's window close ended, once the chief has it.
+fn close_note(project: &Project) -> cf_e2e::Result<Option<Value>> {
+    Ok(project.inbox("chief")?.into_iter().find(|message| {
+        message["kind"] == "note"
+            && message["body"].as_str().is_some_and(|body| {
+                body.starts_with(
+                    "T-1's window closed with background work running, which its close ended: ",
+                ) && body.contains("sleep 600")
+            })
+    }))
+}
+
 #[test]
 fn a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done_and_the_command_ended(
 ) -> Outcome {
@@ -104,20 +116,30 @@ fn a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done
     rig.wait_for("the command to be ended", secs(30), || {
         Ok(!is_alive(command.pid()))
     })?;
+    // The chief's messages are named when it is not told, so that a failure shows what the close
+    // said instead (nothing, on Windows, while the stand-in's command was run by `cmd`).
     rig.wait_for(
         "the chief to be told what the close ended",
         secs(30),
-        || {
-            Ok(project.inbox("chief")?.iter().any(|message| {
-                message["kind"] == "note"
-                    && message["body"].as_str().is_some_and(|body| {
-                        body.starts_with(
-                        "T-1's window closed with background work running, which its close ended: ",
-                    ) && body.contains("sleep 600")
-                    })
-            }))
-        },
-    )?;
+        || Ok(close_note(&project)?.is_some()),
+    )
+    .map_err(|failed| {
+        let told = project.inbox("chief").unwrap_or_default();
+        // What the pane host listed at the window's exit is what the note is made of: a list
+        // that holds the command and no note says the engine dropped it, an empty one that the
+        // host never named it.
+        let listed: Vec<Value> = rig
+            .exits()
+            .iter()
+            .map(|exit| exit["background"].clone())
+            .collect();
+        Error::Daemon(format!(
+            "{failed}; the chief was told: {:?}; the pane host listed at the exits: {listed:?}",
+            told.iter()
+                .map(|message| message["body"].clone())
+                .collect::<Vec<_>>()
+        ))
+    })?;
     rig.close()?;
     Ok(())
 }

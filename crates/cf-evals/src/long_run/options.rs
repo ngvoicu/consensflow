@@ -8,7 +8,7 @@
 //!                       [--quiet-min 10] [--wake-min 20] [--switch-to HARNESS]
 //!                       [--quiet] [--pause] [--kill] [--switch] [--compact]
 //!                       [--restart] [--devin-cut] [--suspend]
-//!                       [--ask real|stand-in] [--reports DIR]
+//!                       [--ask real|stand-in|stand-in-fast] [--reports DIR]
 //!                       [--settle-sec 60] [--drop-reading-sec N]
 //! ```
 //!

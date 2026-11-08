@@ -38,6 +38,11 @@ pub async fn read_feed(endpoint: url::Url, channel: Channel) -> Result<Value, St
 /// installed here too, where nothing has installed it, so that this client is built whatever
 /// reaches it first: reqwest panics at the build of a client where the process has none, and the
 /// updater's plugin, which installs ring before its own client, is not on this path (T-1247).
+///
+/// This is the app's one approved constructor of an HTTPS client (clippy.toml, T-1253): any other
+/// client built in this crate is refused by clippy, so that every one of them has the install
+/// above made before it is built.
+#[allow(clippy::disallowed_methods, clippy::disallowed_types)] // The approved constructor.
 fn client() -> Result<reqwest::Client, String> {
     crate::tls::install_ring_as_default();
     reqwest::Client::builder()
@@ -123,6 +128,7 @@ fn open_system(page: &str) -> Result<(), String> {
 
 /// Opens `page` with `opener`, given the page as its one argument.
 #[cfg_attr(any(test, windows), allow(dead_code))]
+#[allow(clippy::disallowed_methods)] // The app starts the opener itself, older than cf-process's rule.
 pub(crate) fn open_with(opener: &Path, page: &str) -> Result<(), String> {
     let mut command = Command::new(opener);
     // Started while the app's other threads open sockets and pipes.
@@ -169,6 +175,7 @@ mod tests {
     /// the process's, and other tests of this binary run the plugin's check, so this test runs in
     /// a process of its own, its binary run again.
     #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
     fn the_feeds_client_is_built_in_a_process_that_has_installed_no_tls_provider() {
         const CHILD: &str = "CONSENSFLOW_TEST_FEED_CLIENT";
         if std::env::var_os(CHILD).is_some() {

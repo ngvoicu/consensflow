@@ -1,9 +1,11 @@
-# Three rules of the Rust rewrite (consensflow-sme, decisions/2026-10-04-rust-rewrite.md)
-# that clippy keeps: the environment is read once, in main, and handed down
-# as cf_base::env::Env; a process is started only through cf-process; and the
-# time of day is read in one place, cf_base::time's SystemClock.
-# Code older than the rewrite (the Tauri app, the pane host's tests) says so
-# where it is exempt.
+# Four rules that clippy keeps. Three are the Rust rewrite's
+# (consensflow-sme, decisions/2026-10-04-rust-rewrite.md): the environment is read once, in
+# main, and handed down as cf_base::env::Env; a process is started only through cf-process;
+# and the time of day is read in one place, cf_base::time's SystemClock. The fourth is
+# T-1253's, after T-1247: every HTTPS client comes from its crate's one approved
+# constructor, which gives it a TLS provider (see the HTTPS block below).
+# Code older than the rewrite (the Tauri app, the pane host's tests) says so, at the item
+# that is exempt and never for a whole crate.
 disallowed-methods = [
   { path = "std::env::var", reason = "read the environment once, in main: cf_base::env::Env" },
   { path = "std::env::var_os", reason = "read the environment once, in main: cf_base::env::Env" },
@@ -12,6 +14,34 @@ disallowed-methods = [
   { path = "std::process::Command::new", reason = "a process starts only through cf-process" },
   { path = "tokio::process::Command::new", reason = "a process starts only through cf-process" },
   { path = "std::time::SystemTime::now", reason = "the time of day is read in one place: cf_base::time::SystemClock" },
+  # HTTPS (T-1253). The workspace's reqwest is `rustls-no-provider`: a client builds on the TLS
+  # provider the process has installed and panics at its build where it has none (the Windows
+  # update check did, at every start: T-1247). So a client is built in one place per crate,
+  # which names its provider: the app's `update_page::client` (ring, installed for the process:
+  # app/src-tauri/src/tls.rs) and the daemon's `screens::network::client` (a rustls config on
+  # ring, handed to the client). Those two items allow these lints, each with its reason; the
+  # `Default` impl of reqwest's Client has no path to name here, so `disallowed-types` below
+  # holds it. The rules themselves are held: cf-daemon's screens/network/rules.rs builds every
+  # shape and `expect`s its denial, so an entry lost here fails clippy; and
+  # tools/xtask/tests/tls_clients.rs refuses an allow of these lints for a whole module or
+  # crate in a crate that builds a client.
+  { path = "reqwest::Client::new", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
+  { path = "reqwest::Client::builder", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
+  { path = "reqwest::ClientBuilder::new", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
+  { path = "reqwest::get", reason = "reqwest::get builds a client of its own, on no provider of ours: ask through the crate's approved client (clippy.toml, T-1253)" },
+  { path = "rustls::ClientConfig::builder", reason = "a rustls client config names its provider: ClientConfig::builder_with_provider (clippy.toml, T-1253)" },
+  { path = "rustls::ClientConfig::builder_with_protocol_versions", reason = "a rustls client config names its provider: ClientConfig::builder_with_provider (clippy.toml, T-1253)" },
+  { path = "rustls_platform_verifier::ConfigVerifierExt::with_platform_verifier", reason = "this builds a rustls client config on the process's default provider: use builder_with_provider and Verifier::new (clippy.toml, T-1253)" },
+]
+
+# The types of an HTTPS client may be named only where one is built or held: its crate's approved
+# constructor, and the fields and functions that hand it on. Naming the type is how a client
+# comes by its `Default` impl (`Client::default()`, `Default::default()`, a derive over a field
+# of the type), which builds one on no provider; a `use`, an alias or a path to the type is
+# a mention as well.
+disallowed-types = [
+  { path = "reqwest::Client", reason = "an HTTPS client is built and held only by its crate's approved constructor, which gives it a TLS provider; its Default impl builds one with none (clippy.toml, T-1253)" },
+  { path = "reqwest::ClientBuilder", reason = "an HTTPS client is built only by its crate's approved constructor, which gives it a TLS provider (clippy.toml, T-1253)" },
 ]
 
 # Tests may unwrap, expect and print: a failure there is the test's answer.

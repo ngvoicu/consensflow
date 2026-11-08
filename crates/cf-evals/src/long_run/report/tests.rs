@@ -92,6 +92,8 @@ fn kept<'a>(scene: &'a Scene, breaks: &'a [Break], error: Option<String>) -> Kep
         filled: &[],
         timeline: &scene.timeline,
         stalls: &scene.stalls,
+        extra: &[],
+        extra_listed: 2,
         ending: "the project is done".to_owned(),
         error,
         login: None,
@@ -317,7 +319,7 @@ fn a_break_a_disruption_not_played_or_a_run_cut_short_fails_it_and_says_which() 
         kept.why(),
         [
             "invariant 2 broke (A2, no task done while its job runs): 1",
-            "devin-cut was not played: the project ended before its moment came",
+            "devin-cut was not played: the project ended before its moment came: it needs a Devin worker at work on a task, mid-tool (any of its turns at work once half an interval is gone); its time, +20 min, had not come",
             "the run could not be run to its end: the rig could not start again",
         ]
     );
@@ -327,7 +329,7 @@ fn a_break_a_disruption_not_played_or_a_run_cut_short_fails_it_and_says_which() 
         "| claude (chief) | 2.1.90 (Claude Code) | long-claude-1 (worker, claude-sonnet-5-5, complex)",
         "Left out: codex (not on this machine: codex was not found)",
         "| 2 | no task done while its job runs | A2 | **no** | 1 |",
-        "| devin-cut | +20 min | not played: the project ended before its moment came |",
+        "| devin-cut | +20 min | not played: the project ended before its moment came: it needs a Devin worker at work on a task, mid-tool (any of its turns at work once half an interval is gone); its time, +20 min, had not come |",
         "### 2 · no task done while its job runs (+43m00s)",
         "record:\n\n```\nCommand running in background with ID: bk2f9x\n```",
         "| +0m12s | owner | typed the ask |",
@@ -482,5 +484,130 @@ fn a_report_is_named_by_when_it_began_its_chief_and_its_staff() {
             &["claude".to_owned(), "devin".to_owned()]
         ),
         "2026-10-11T10-00-00-000Z-long-chief-claude-staff-claude-devin"
+    );
+}
+
+/// A scene whose schedule has seven disruptions, `played` of them played and the rest closed
+/// unplayed after the project ended, and `extra` pieces of work given.
+fn seven(played: usize) -> Scene {
+    let mut scene = scene();
+    let names = ["claude".to_owned(), "devin".to_owned()];
+    scene.schedule = Schedule::new(&Disruption::ALL, Duration::from_secs(480), "claude", &names);
+    for (at, disruption) in Disruption::ALL.into_iter().take(played).enumerate() {
+        scene.schedule.played(
+            disruption,
+            Duration::from_secs(480 * (at as u64 + 1)),
+            "strict".to_owned(),
+        );
+    }
+    scene.schedule.close("time ran out before its moment came");
+    scene
+}
+
+#[test]
+fn the_report_tells_the_project_the_time_and_the_disruptions_apart() {
+    // The 2-hour run on Windows in short: the project ended at 53 minutes of 120, four of seven
+    // disruptions played.
+    let scene = seven(4);
+    let kept = Kept {
+        ended: STARTED + 53 * 60_000,
+        extra: &[STARTED + 50 * 60_000],
+        ending: "the project is done".to_owned(),
+        ..kept(&scene, &[], None)
+    };
+    let value = kept.value();
+    assert_eq!(
+        value["coverage"],
+        json!({
+            "project": { "ended": true, "ending": "the project is done" },
+            "elapsed": { "seconds": 53 * 60, "budgetSeconds": 7200 },
+            "disruptions": {
+                "planned": 7, "played": 4, "playedWithoutShape": 0, "failed": 0,
+                "impossible": 0, "notPlayed": 3, "waiting": 0,
+            },
+            "extraWork": { "given": 1, "listed": 2, "atSeconds": [50 * 60] },
+        })
+    );
+    // The project ended and the schedule did not: a run that fails, whatever else held.
+    assert_eq!(value["verdict"], "FAIL");
+    let text = kept.markdown();
+    for part in [
+        "\n## Coverage\n\n- project: ended within the budget (the project is done)\n",
+        "- time: ran 53 of 120 min\n",
+        "- disruptions: 4 of 7 played (0 without their shape, 0 failed, 0 impossible, 3 not played, 0 waiting)\n",
+        "- extra work: given 1 time, from a list of 2\n",
+    ] {
+        assert!(text.contains(part), "{part}\n\n{text}");
+    }
+    // The console says the same, in numbers alone.
+    let said = kept.say(Path::new("/r/x.json"), Path::new("/r/x.md"));
+    assert!(
+        said.contains(
+            &"  coverage: project ended · 53 of 120 min · 4 of 7 disruptions played · extra work given 1 time"
+                .to_owned()
+        ),
+        "{said:?}"
+    );
+}
+
+#[test]
+fn a_project_that_did_not_reach_its_end_is_told_so_apart_from_a_schedule_that_was_played() {
+    // The end (9) broke: the project did not reach its end; every disruption was played.
+    let scene = seven(7);
+    let open = Break::new(
+        9,
+        "9:end",
+        "the project did not reach its end: 1 of 25 tasks open",
+    );
+    let breaks = [open];
+    let kept = Kept {
+        ending: TIME_UP.to_owned(),
+        ..kept(&scene, &breaks, None)
+    };
+    let value = kept.value();
+    assert_eq!(value["coverage"]["project"]["ended"], false);
+    assert_eq!(value["coverage"]["disruptions"]["played"], 7);
+    assert_eq!(value["coverage"]["disruptions"]["notPlayed"], 0);
+    assert_eq!(
+        kept.why(),
+        [
+            "invariant 9 broke (end, the project reaches its end within the budget): 1",
+            "time ran out: the run did not reach its end within its budget of 120 min",
+        ]
+    );
+}
+
+#[test]
+fn a_budget_spent_with_the_project_done_and_the_schedule_not_played_names_each_disruption() {
+    // The project reached its end (nothing broke the end); the budget ran out with three
+    // disruptions unplayed. "The run did not reach its end" would be false: the schedule did not.
+    let scene = seven(4);
+    let kept = Kept {
+        ending: TIME_UP.to_owned(),
+        ..kept(&scene, &[], None)
+    };
+    let why = kept.why();
+    assert_eq!(why.len(), 4, "{why:?}");
+    for (line, flag) in why[..3].iter().zip(["switch", "devin-cut", "suspend"]) {
+        assert!(
+            line.starts_with(&format!(
+                "{flag} was not played: time ran out before its moment came: it needs "
+            )),
+            "{line}"
+        );
+    }
+    assert_eq!(
+        why[3],
+        "time ran out: the budget of 120 min was spent with the project done and 3 of 7 disruptions not played"
+    );
+    // The console says that a disruption was not played, and the numbers: none of its words.
+    let said = kept.say(Path::new("/r/x.json"), Path::new("/r/x.md"));
+    assert!(
+        said.contains(&"  why: switch was not played".to_owned()),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().all(|line| !line.contains("it needs")),
+        "{said:?}"
     );
 }
