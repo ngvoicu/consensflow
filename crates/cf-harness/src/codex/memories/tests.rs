@@ -111,6 +111,31 @@ fn an_empty_codex_home_is_none_and_a_window_with_no_home_at_all_has_no_memories_
     assert!(!holds(&nowhere, Path::new("")));
 }
 
+#[test]
+fn a_home_and_a_user_profile_that_name_two_folders_both_have_a_memories_folder() {
+    let first = Home::new();
+    let second = Home::new();
+    let env = env_of(&[
+        ("HOME", &first.text(&[])),
+        ("USERPROFILE", &second.text(&[])),
+    ]);
+    for home in [&first, &second] {
+        assert!(holds(&env, &home.at(&[".codex", "memories"])));
+        assert!(holds(&env, &home.at(&[".codex", "memories", "x"])));
+        assert!(!holds(&env, &home.at(&[".codex"])));
+        assert!(!holds(&env, &home.at(&["project"])));
+    }
+    // One that is set names the only one, whatever the homes are.
+    let moved = env_of(&[
+        ("CODEX_HOME", &first.text(&["project"])),
+        ("HOME", &first.text(&[])),
+        ("USERPROFILE", &second.text(&[])),
+    ]);
+    assert!(holds(&moved, &first.at(&["project", "memories"])));
+    assert!(!holds(&moved, &first.at(&[".codex", "memories"])));
+    assert!(!holds(&moved, &second.at(&[".codex", "memories"])));
+}
+
 #[cfg(unix)]
 #[test]
 fn a_link_into_the_memories_folder_is_inside_it_and_so_is_a_folder_below_a_linked_one() {
@@ -152,8 +177,11 @@ fn a_link_into_the_memories_folder_is_inside_it_and_so_is_a_folder_below_a_linke
 /// Whether `folder`, as it is written, is inside the memories folder `codex_home` names, by the
 /// names of their folders alone: the same on every system, and nothing is looked for on disk.
 fn written_inside(vars: &[(&str, &str)], folder: &str, fold: Fold) -> bool {
-    let memories = memories_folder(&env_of(vars)).expect("a memories folder");
-    inside(Path::new(folder), &memories, fold)
+    let memories = memories_folders(&env_of(vars));
+    assert!(!memories.is_empty(), "a memories folder");
+    memories
+        .iter()
+        .any(|memories| inside(Path::new(folder), memories, fold))
 }
 
 #[test]
@@ -223,20 +251,21 @@ fn a_windows_path_is_inside_in_any_form_it_is_written_in() {
 
 #[test]
 fn a_mac_compares_the_names_of_folders_in_any_case_and_a_system_that_does_not_ignore_it_does_not() {
-    let vars = [("CODEX_HOME", "/Users/gabriel/.codex")];
+    // Written out, not joined: this holds on every system, and a Windows host joins with `\`.
+    let memories = Path::new("/Users/gabriel/.codex/memories");
+    let inside_on = |folder: &str, fold| inside(Path::new(folder), memories, fold);
     let folder = "/users/Gabriel/.CODEX/Memories/x";
-    assert!(written_inside(&vars, folder, Fold::MAC));
-    assert!(!written_inside(&vars, folder, Fold::LINUX));
-    assert!(written_inside(
-        &vars,
-        "/Users/gabriel/.codex/memories/x",
-        Fold::LINUX
-    ));
+    assert!(inside_on(folder, Fold::MAC));
+    assert!(!inside_on(folder, Fold::LINUX));
+    assert!(inside_on("/Users/gabriel/.codex/memories/x", Fold::LINUX));
     // `..` takes the folder before it and the root has none.
-    assert!(!written_inside(
-        &vars,
+    assert!(!inside_on(
         "/Users/gabriel/.codex/memories/../sessions",
         Fold::MAC
     ));
-    assert!(!written_inside(&vars, "/../..", Fold::MAC));
+    assert!(!inside_on("/../..", Fold::MAC));
+    // The memories folder as `memories_folders` names it, for a Codex home written the same way.
+    let named = memories_folders(&env_of(&[("CODEX_HOME", "/Users/gabriel/.codex")]));
+    assert_eq!(named.len(), 1);
+    assert!(named[0].ends_with("memories"));
 }

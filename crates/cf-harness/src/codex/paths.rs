@@ -20,13 +20,26 @@ pub(crate) fn codex_home(env: &Env) -> Result<String, String> {
     }
 }
 
-/// Codex's home as Codex itself finds it: `CODEX_HOME` when it names something, else `.codex` in
-/// the user's home. (An empty `CODEX_HOME` is none here; [`codex_home`] takes it for the home.)
-pub(crate) fn codex_home_or_default(env: &Env) -> Result<String, String> {
-    match env.path("CODEX_HOME") {
-        Some(root) => Ok(root.to_string_lossy().into_owned()),
-        None => Ok(path::join(&[&home(env)?, ".codex"])),
+/// The folders Codex's home may be, as Codex itself finds it: `CODEX_HOME` when it names
+/// something (an empty one names none), else `.codex` in the user's home. A user's home is
+/// `HOME`, and `USERPROFILE` too where it names another folder, which is Windows' own and the one
+/// Codex reads there: both are given, because what is asked is where Codex's own folders are, and
+/// a program is not to miss them for the variable it was told by. None where the home is not known
+/// either ([`codex_home`] is the one `HOME` else `USERPROFILE` names, for what reads from it).
+pub(crate) fn codex_homes(env: &Env) -> Vec<String> {
+    if let Some(root) = env.path("CODEX_HOME") {
+        return vec![root.to_string_lossy().into_owned()];
     }
+    let mut homes: Vec<String> = Vec::new();
+    for name in ["HOME", "USERPROFILE"] {
+        if let Some(home) = env.path(name) {
+            let home = path::join(&[&home.to_string_lossy(), ".codex"]);
+            if !homes.contains(&home) {
+                homes.push(home);
+            }
+        }
+    }
+    homes
 }
 
 /// The `SKILL.md` of the Specmint variant the human installed for Codex, in the

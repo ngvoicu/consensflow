@@ -109,8 +109,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/memories.rs"
-find = "inside(&resolved_path(folder), &resolved_path(&memories), fold)"
-replace = "inside(folder, &resolved_path(&memories), fold)"
+find = "let real = resolved_path(folder);"
+replace = "let real = folder.to_path_buf();"
 
 [[plant]]
 name = "codex memories: the memories folder's links are not resolved"
@@ -120,8 +120,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/memories.rs"
-find = "inside(&resolved_path(folder), &resolved_path(&memories), fold)"
-replace = "inside(&resolved_path(folder), &memories, fold)"
+find = "inside(&real, &resolved_path(memories), fold)"
+replace = "inside(&real, memories, fold)"
 
 [[plant]]
 name = "codex memories: a Codex home that is set is not the one looked in"
@@ -130,8 +130,8 @@ runs = ["harness-lib-memories"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/paths.rs"
-find = 'match env.path("CODEX_HOME") {'
-replace = 'match env.path("CODEX_HOME_IGNORED") {'
+find = 'if let Some(root) = env.path("CODEX_HOME") {'
+replace = 'if let Some(root) = env.path("CODEX_HOME_IGNORED") {'
 
 [[plant]]
 name = "codex memories: an empty Codex home is the folder it names"
@@ -140,8 +140,18 @@ runs = ["harness-lib-memories"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/paths.rs"
-find = 'match env.path("CODEX_HOME") {'
-replace = 'match env.os("CODEX_HOME").map(std::path::Path::new) {'
+find = 'if let Some(root) = env.path("CODEX_HOME") {'
+replace = 'if let Some(root) = env.os("CODEX_HOME").map(std::path::Path::new) {'
+
+[[plant]]
+name = "codex memories: a user profile apart from HOME is not looked in"
+meant = "codex::memories::tests::a_home_and_a_user_profile_that_name_two_folders_both_have_a_memories_folder"
+runs = ["harness-lib-memories"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/paths.rs"
+find = 'for name in ["HOME", "USERPROFILE"] {'
+replace = 'for name in ["HOME"] {'
 
 [[plant]]
 name = "codex memories: a Windows verbatim path keeps its prefix"

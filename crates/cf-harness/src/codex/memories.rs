@@ -13,12 +13,13 @@ use std::path::{Path, PathBuf};
 use cf_base::env::Env;
 use cf_base::file::resolved_path;
 
-use super::paths::codex_home_or_default;
+use super::paths::codex_homes;
 
 /// Whether `folder` is Codex's memories folder of the environment `env`, or inside it: its
 /// links resolved, on the system this is built for. The memories folder is
-/// `$CODEX_HOME/memories`, and `~/.codex/memories` where `CODEX_HOME` is unset or empty; none
-/// where neither it nor the home is known, and then nothing is inside it.
+/// `$CODEX_HOME/memories`, and `~/.codex/memories` where `CODEX_HOME` is unset or empty (of
+/// each home the environment names, `HOME` and `USERPROFILE`); none where neither it nor a home is
+/// known, and then nothing is inside it.
 pub fn holds(env: &Env, folder: &Path) -> bool {
     holds_on(env, folder, Fold::of_this_system())
 }
@@ -61,17 +62,20 @@ impl Fold {
 
 /// [`holds`], with the names compared as `fold` says.
 pub(crate) fn holds_on(env: &Env, folder: &Path, fold: Fold) -> bool {
-    memories_folder(env)
-        .is_some_and(|memories| inside(&resolved_path(folder), &resolved_path(&memories), fold))
+    let real = resolved_path(folder);
+    memories_folders(env)
+        .iter()
+        .any(|memories| inside(&real, &resolved_path(memories), fold))
 }
 
-/// Codex's memories folder of the environment `env`, as it is named: `$CODEX_HOME/memories`,
-/// `~/.codex/memories` where `CODEX_HOME` is unset or empty, none where the home is not known
-/// either.
-pub(crate) fn memories_folder(env: &Env) -> Option<PathBuf> {
-    codex_home_or_default(env)
-        .ok()
+/// Codex's memories folders of the environment `env`, as they are named: `$CODEX_HOME/memories`,
+/// else `.codex/memories` of the user's home (of each of `HOME` and `USERPROFILE`, where they
+/// name two); none where the home is not known.
+pub(crate) fn memories_folders(env: &Env) -> Vec<PathBuf> {
+    codex_homes(env)
+        .into_iter()
         .map(|home| PathBuf::from(home).join("memories"))
+        .collect()
 }
 
 /// Whether `folder` is `memories` or below it, both as they are written (the links of neither
