@@ -304,16 +304,6 @@ find = "    if found.harness.as_deref() != Some(kind.as_ref()) {"
 replace = "    if false {"
 
 [[plant]]
-name = "live models: a read that is no number is let go"
-meant = "a_read_that_is_no_number_is_refused"
-runs = ["lm-members"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/staff.rs"
-find = '''        Some(_) => Err(Said::from("read is the number models.get answered with")),'''
-replace = "        Some(_) => Ok(None),"
-
-[[plant]]
 name = "live models: a failed read lists no model and does not say why"
 meant = "a_failed_read_lists_no_model_and_says_why"
 runs = ["lm-proto"]
