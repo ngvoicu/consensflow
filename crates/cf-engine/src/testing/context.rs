@@ -151,7 +151,24 @@ pub struct Context {
     pub(super) restarted: RefCell<Vec<Rc<Dispatcher>>>,
     file: PathBuf,
     // Last, so the ledger's file goes after the ledger.
+    _lets_go: LetsGoOfTheFile,
     _dir: tempfile::TempDir,
+}
+
+/// Lets the ledger go of its file when the context goes (T-1333), whatever else still holds the
+/// ledger (a task left in a local set): Windows will not remove a folder from under a file that is
+/// open, and the folders of such tests stayed for good, with their `consensflow.db`. A weak hold,
+/// so that [`Context::close`] still finds the ledger held by nothing else.
+struct LetsGoOfTheFile(std::rc::Weak<RefCell<Ledger>>);
+
+impl Drop for LetsGoOfTheFile {
+    fn drop(&mut self) {
+        if let Some(ledger) = self.0.upgrade() {
+            if let Ok(mut ledger) = ledger.try_borrow_mut() {
+                ledger.let_go_of_its_file();
+            }
+        }
+    }
 }
 
 impl Context {
@@ -250,6 +267,7 @@ impl Context {
         };
         let dispatcher = Dispatcher::new(seams.clone());
         host.attach(&dispatcher);
+        let lets_go = LetsGoOfTheFile(Rc::downgrade(&ledger));
         Self {
             executor,
             recorder,
@@ -271,6 +289,7 @@ impl Context {
             seams,
             restarted: RefCell::new(Vec::new()),
             file,
+            _lets_go: lets_go,
             _dir: dir,
         }
     }

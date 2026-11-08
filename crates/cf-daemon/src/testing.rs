@@ -131,6 +131,17 @@ pub struct Scene {
     pub _home: tempfile::TempDir,
 }
 
+impl Drop for Scene {
+    /// The test is over: the ledger lets go of its file before the home is removed, whatever else
+    /// still holds the ledger (the finishing closure, a task left in a local set): Windows will
+    /// not remove a folder from under a file that is open.
+    fn drop(&mut self) {
+        if let Ok(mut ledger) = self.context.ledger.try_borrow_mut() {
+            ledger.let_go_of_its_file();
+        }
+    }
+}
+
 impl Scene {
     /// The id of `handle` in the project.
     pub fn id(&self, handle: &str) -> i64 {

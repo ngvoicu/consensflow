@@ -151,6 +151,17 @@ fn opening_refusal(file: &Path, cause: LedgerError) -> LedgerError {
 
 #[cfg(feature = "test-support")]
 impl Ledger {
+    /// A test is over: lets go of the file, the connection on it closed and a ledger on memory
+    /// left in its place, so that the folder the file is in can be removed. Windows will not
+    /// remove a folder from under a file that is open, and something else may still hold this
+    /// ledger when its fixture goes (a task left in a local set, a clone in a closure): the
+    /// folders of such tests stayed for good, with their `consensflow.db` (T-1333).
+    pub fn let_go_of_its_file(&mut self) {
+        if let Ok(memory) = Connection::open_in_memory() {
+            self.store.db = memory;
+        }
+    }
+
     /// Tells `watcher` of each read of `projects` and `next_delivery`, and
     /// each write of `pause_task` (by its task's number), `take_back` (by the
     /// message's id) and `set_conversation_role_text` (by the conversation's),
