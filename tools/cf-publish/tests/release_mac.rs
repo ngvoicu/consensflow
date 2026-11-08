@@ -207,3 +207,140 @@ mod the_mac_job_as_a_hand_run_and_as_a_tag_run {
         assert_eq!(later.stdout, "feed-alpha\n");
     }
 }
+
+mod the_notes_a_hand_run_writes {
+    //! The part of the notes step that writes `notes.txt` when the run is no
+    //! tag's: the dispatch's `notes` input when one reached it, else the commits
+    //! since the previous release, cut at a whole line under the feed's 64 KiB
+    //! (prepare-update refuses more), the last line saying how many were left
+    //! out. Trial 42197090358 failed on this: the range since the tag was
+    //! 82,306 bytes of commit lines, which the fallback wrote whole.
+    use std::fs;
+    use std::path::Path;
+
+    use cf_publish::testing::workflow::{bash, job, read, step};
+    use cf_publish::testing::{Ran, TempDir};
+
+    use super::*;
+
+    /// The slice of the step's script that writes `notes.txt`: from the previous
+    /// tag's look-up to the archive's copy, needing only `version`, `out` and the
+    /// run's variables (`GITHUB_REF_TYPE`, `TRIAL_NOTES`).
+    fn writing_notes() -> String {
+        let mac = job(&read("release.yml"), "mac");
+        let script = step(&mac, NOTES).script();
+        let start = script
+            .find("previous=")
+            .expect("the step looks for the previous tag");
+        let end = script
+            .find("archive=")
+            .expect("the step names the archive after the notes");
+        script[start..end].to_string()
+    }
+
+    /// A checkout whose `git log` since v1.0.0 is over 64 KiB of commit lines:
+    /// the checkout, and the lines the fallback's log lists.
+    fn checkout_over_64_kib() -> (TempDir, Vec<String>) {
+        let root = TempDir::new("notes");
+        // 60 empty commits of a ~1.4 KiB subject each: 84 KiB of commit lines.
+        let made = bash(
+            r#"set -e
+cd "$CHECKOUT"
+git init -q -b main
+git config user.name Notes && git config user.email notes@example.com
+git commit -q --allow-empty -m "the first commit"
+git tag v1.0.0
+subject=$(printf 'x%.0s' $(seq 1 1400))
+for i in $(seq 1 60); do
+    git commit -q --allow-empty -m "commit $i of a long range since the tag $subject"
+done"#,
+            root.path(),
+            &[("CHECKOUT", &root.path().to_string_lossy())],
+            &[],
+        );
+        assert_eq!(made.status, 0, "{}", made.said());
+        let listed = bash(
+            "git log --no-merges --format='- %s' v1.0.0..HEAD",
+            root.path(),
+            &[],
+            &[],
+        );
+        assert_eq!(listed.status, 0, "{}", listed.said());
+        assert!(
+            listed.stdout.len() > 64 * 1024,
+            "the log is {} bytes, not over 64 KiB",
+            listed.stdout.len()
+        );
+        (root, listed.stdout.lines().map(str::to_owned).collect())
+    }
+
+    /// The step's notes slice, run in `checkout` as a run of `ref_type` given
+    /// `trial_notes` as its input: how it ended, and what `notes.txt` holds.
+    fn the_notes(checkout: &Path, ref_type: &str, trial_notes: &str) -> (Ran, TempDir, String) {
+        let out = TempDir::new("out");
+        let script = format!(
+            "set -euo pipefail\nversion=9.9.9-alpha.9\nout={}\nmkdir -p \"$out\"\n{}",
+            out.path().display(),
+            writing_notes()
+        );
+        let ran = bash(
+            &script,
+            checkout,
+            &[("GITHUB_REF_TYPE", ref_type), ("TRIAL_NOTES", trial_notes)],
+            &[],
+        );
+        let notes = fs::read_to_string(out.path().join("notes.txt")).unwrap_or_default();
+        (ran, out, notes)
+    }
+
+    #[test]
+    fn the_fallback_is_cut_under_the_feeds_limit_at_a_whole_line_saying_what_was_left_out() {
+        let (checkout, listed) = checkout_over_64_kib();
+        let (ran, _out, notes) = the_notes(checkout.path(), "branch", "");
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        assert!(
+            notes.len() < 64 * 1024,
+            "the notes are {} bytes, not under the feed's 64 KiB",
+            notes.len()
+        );
+        let lines: Vec<&str> = notes.lines().collect();
+        assert_eq!(
+            &lines[..2],
+            ["ConsensFlow 9.9.9-alpha.9, the changes since 1.0.0:", ""]
+        );
+        // Whole lines of the log, in order, then the line that counts the rest.
+        let kept = lines.len() - 3;
+        let left_out = format!(
+            "- {} commits left out, the log cut to keep the notes under 64 KiB",
+            listed.len() - kept
+        );
+        assert_eq!(lines[lines.len() - 1], left_out, "{lines:?}");
+        assert_eq!(
+            lines[2..lines.len() - 1],
+            listed[..kept],
+            "the lines kept are not the log's first whole lines"
+        );
+    }
+
+    #[test]
+    fn a_run_given_the_dispatch_s_notes_reads_them_as_the_tag_s_run_reads_the_tag_s() {
+        let (checkout, _listed) = checkout_over_64_kib();
+        let given = "ConsensFlow 9.9.9-alpha.9: the title\n\n- the change the release carries\n";
+        let (ran, _out, notes) = the_notes(checkout.path(), "branch", given);
+        assert_eq!(ran.status, 0, "{}", ran.said());
+        assert_eq!(notes, format!("{given}\n"), "the input's notes, verbatim");
+    }
+
+    #[test]
+    fn a_hand_run_takes_its_notes_as_the_dispatch_s_input() {
+        let workflow = read("release.yml");
+        let dispatch = workflow
+            .split("workflow_dispatch:")
+            .nth(1)
+            .expect("the workflow is run by hand");
+        assert!(
+            dispatch.contains("inputs:") && dispatch.contains("notes:"),
+            "the hand run has no `notes` input the dispatch can carry:\n{dispatch}"
+        );
+    }
+}

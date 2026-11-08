@@ -805,7 +805,7 @@ runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/alpha.rs"
-find = "    release.trial(&commit)?;"
+find = "    release.trial(&commit, &notes)?;"
 replace = ""
 
 [[plant]]
@@ -815,8 +815,8 @@ runs = ["release-commands"]
 
 [[plant.edit]]
 file = "tools/xtask/src/release/alpha.rs"
-find = "    release.trial(&commit)?;"
-replace = "    let _ = release.trial(&commit);"
+find = "    release.trial(&commit, &notes)?;"
+replace = "    let _ = release.trial(&commit, &notes);"
 
 [[plant]]
 name = "release: the trial is run after the tag"
@@ -826,7 +826,7 @@ runs = ["release-commands"]
 [[plant.edit]]
 file = "tools/xtask/src/release/alpha.rs"
 find = '''
-    release.trial(&commit)?;
+    release.trial(&commit, &notes)?;
 '''
 replace = ""
 
@@ -835,7 +835,7 @@ file = "tools/xtask/src/release/alpha.rs"
 find = "    release.tag_and_push(&tag, &notes, &commit)?;"
 replace = '''
     release.tag_and_push(&tag, &notes, &commit)?;
-    release.trial(&commit)?;'''
+    release.trial(&commit, &notes)?;'''
 
 [[plant]]
 name = "release: the trial is asked for on a branch the signing keys' environment does not admit"
@@ -1432,3 +1432,33 @@ runs = ["dispatch-plan"]
 file = "tools/xtask/src/release.rs"
 find = '''        words: &["release", "verify"],'''
 replace = '''        words: &["release", "verifx"],'''
+
+[[plant]]
+name = "release: the trial's dispatch is asked for without the notes"
+meant = "the_trial_is_asked_for_with_the_notes_the_tag_will_carry"
+runs = ["release-commands"]
+
+[[plant.edit]]
+file = "tools/xtask/src/release/github.rs"
+find = '''        self.gh(&[
+            "workflow",
+            "run",
+            "release.yml",
+            "--repo",
+            REPOSITORY,
+            "--ref",
+            "main",
+            "-F",
+            &format!("notes=@{}", notes.display()),
+        ])?;
+'''
+replace = '''        self.gh(&[
+            "workflow",
+            "run",
+            "release.yml",
+            "--repo",
+            REPOSITORY,
+            "--ref",
+            "main",
+        ])?;
+'''

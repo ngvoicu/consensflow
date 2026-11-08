@@ -71,7 +71,10 @@ fn an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by
     let dispatched = lines
         .iter()
         .position(|line| {
-            line == "gh workflow run release.yml --repo ngvoicu/consensflow --ref main"
+            line == &format!(
+                "gh workflow run release.yml --repo ngvoicu/consensflow --ref main -F notes=@{}",
+                world.notes.display()
+            )
         })
         .unwrap();
     let trial_ended = lines
@@ -116,6 +119,22 @@ fn an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_served_by
     ] {
         assert!(said.contains(line), "{line}: {said}");
     }
+}
+
+#[test]
+fn the_trial_is_asked_for_with_the_notes_the_tag_will_carry() {
+    // The hand run's `notes` input is the notes file, so the trial reads the same
+    // notes the tag will: the run's notes step is given them before the fallback.
+    let (world, mut fake) = ready();
+    let (outcome, _) = released(&world, &mut fake, false);
+    outcome.unwrap();
+    let dispatch = format!(
+        "gh workflow run release.yml --repo ngvoicu/consensflow --ref main -F notes=@{}",
+        world.notes.display()
+    );
+    let lines = fake.lines();
+    assert!(lines.contains(&dispatch), "{lines:#?}");
+    assert_eq!(fake.runs_of("release.yml", "workflow_dispatch").len(), 1);
 }
 
 #[test]
@@ -206,9 +225,10 @@ fn a_dry_run_watches_ci_says_it_would_trial_and_tag_and_starts_and_tags_nothing(
     assert_eq!(
         done,
         format!(
-            "dry run: every check passed; a hand run of release.yml would be started on {short}, \
-             and once it ended green v{ALPHA} would be tagged on it with {} and pushed to origin and upstream\n",
-            world.notes.display(),
+            "dry run: every check passed; a hand run of release.yml would be started on {short} \
+             with {notes} as the notes it reads, and once it ended green v{ALPHA} would be tagged \
+             on it with them and pushed to origin and upstream\n",
+            notes = world.notes.display(),
             short = &head[..8]
         )
     );
@@ -697,7 +717,10 @@ fn a_hand_run_that_gh_cannot_start_stops_it_with_what_gh_said_and_nothing_is_tag
         }) => {
             assert_eq!(
                 command,
-                "gh workflow run release.yml --repo ngvoicu/consensflow --ref main"
+                format!(
+                    "gh workflow run release.yml --repo ngvoicu/consensflow --ref main -F notes=@{}",
+                    world.notes.display()
+                )
             );
             assert_eq!(code, 1);
             assert!(said.contains("HTTP 403"), "{said}");
