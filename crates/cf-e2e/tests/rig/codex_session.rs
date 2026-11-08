@@ -352,8 +352,10 @@ fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behin
     // own words: Rust's, deliberately, where Node said `spawn <path> ENOENT`.
     // Its folder is still there, so Windows too says the file is missing (os
     // error 2), not its path (3).
+    // It ends with the status of why (70, the program was not found), which the engine reads from
+    // how the window ended to say that Codex never ran, without quoting this screen (T-1328).
     let mut missing = Supervised::start(&[], &[], Some(&|root| root.join("codex")))?;
-    assert_eq!(missing.exit()?, Some(1), "{}", missing.stderr());
+    assert_eq!(missing.exit()?, Some(70), "{}", missing.stderr());
     let gone = regex::escape(&missing.root.path().join("codex").to_string_lossy());
     let said = missing.stderr();
     assert!(

@@ -223,7 +223,9 @@ fn a_codex_window_says_when_codex_cannot_start_and_leaves_no_socket_behind() {
         ],
         "",
     );
-    assert_eq!(ran.status.code(), Some(1));
+    // The window ends with the status of why (70, the program was not found), so that the engine
+    // reads from how it ended that Codex never ran (T-1328); the words are the person's own.
+    assert_eq!(ran.status.code(), Some(70));
     assert!(ran.stdout.is_empty());
     let said = String::from_utf8_lossy(&ran.stderr);
     assert!(
