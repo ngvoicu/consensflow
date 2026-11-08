@@ -1503,10 +1503,11 @@ fn a_windows_own_session_id_on_its_screen_is_no_value_in_groups() {
             vec!["123e4567-e89b-12d3-a456-426614174000_abcd_efgh"],
             Some(OWN),
         ),
-        // A session that is no UUID takes nothing out.
+        // A session that is no UUID takes nothing out (words with digits in them: the rule of
+        // a value in groups is the one that takes them, and no row of words).
         (
-            vec!["deadbeef cafebabe feedface abcdefab"],
-            Some("deadbeef cafebabe feedface abcdefab"),
+            vec!["ab12cd34 ef56gh78 ij90kl12 mn34op56"],
+            Some("ab12cd34 ef56gh78 ij90kl12 mn34op56"),
         ),
     ] {
         assert_eq!(note_in(&rows, session), KEY, "{rows:?} {session:?}");
@@ -1534,6 +1535,8 @@ fn the_windows_own_session_id_is_exempt_from_the_groups_alone() {
         (vec!["pad", url.as_str(), "rdfish@vault", "pad"], NAMED),
         (vec![token.as_str()], NAMED),
         (vec![basic.as_str()], NAMED),
+        // The scheme on a row and the id on the next: a blank between them is the join of the rows.
+        (vec!["Basic", OWN], NAMED),
         (vec![slot.as_str()], NAMED),
         (vec![escaped.as_str(), "rdfish%40vault"], NAMED),
     ] {

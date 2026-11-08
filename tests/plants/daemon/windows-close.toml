@@ -2057,7 +2057,7 @@ replace = '''    "ssx", "sftp", "scp"'''
 
 [[plant]]
 name = "windows close: quote less: the cause of an adapter that could not prepare a window is told with its path"
-meant = "a_launch_that_failed_says_its_cause_and_never_the_path_of_the_program"
+meant = "a_launch_that_failed_with_a_typed_path_says_its_cause_with_the_path_replaced"
 runs = ["quote-less-chief-not-up"]
 
 [[plant.edit]]
@@ -2067,7 +2067,7 @@ replace = '''cause.to_string()'''
 
 [[plant]]
 name = "windows close: quote less: the cause of a window the host refused is told with its path"
-meant = "a_launch_that_failed_says_its_cause_and_never_the_path_of_the_program"
+meant = "a_launch_that_failed_with_a_typed_path_says_its_cause_with_the_path_replaced"
 runs = ["quote-less-chief-not-up"]
 
 [[plant.edit]]
