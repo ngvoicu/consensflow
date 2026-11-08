@@ -199,7 +199,7 @@ replace = '        store.db.execute("DELETE FROM model_list WHERE 0", [])?;'
 
 [[plant]]
 name = "live models: a dialog reads a harness only when it is picked"
-meant = "New project reads every installed harness's models as it opens"
+meant = "New project reads every installed harness's models as it opens, all at once, and each select says it is reading until its answer comes (A4-28)"
 runs = ["lm-page"]
 
 [[plant.edit]]
@@ -209,7 +209,7 @@ replace = "    void installed"
 
 [[plant]]
 name = "live models: a dialog reads the first harness only"
-meant = "Project settings reads every installed harness's models as it opens"
+meant = "Project settings reads every installed harness's models as it opens, all at once, whether the staff runs on it or not (A4-28)"
 runs = ["lm-page"]
 
 [[plant.edit]]
@@ -219,7 +219,7 @@ replace = "    for (const kind of kinds.slice(0, 1)) this.get(harnessOf(kind))"
 
 [[plant]]
 name = "live models: the chief's picker and the members' read each harness apart"
-meant = "New project reads every installed harness's models as it opens"
+meant = "New project reads every installed harness's models as it opens, all at once, and each select says it is reading until its answer comes (A4-28)"
 runs = ["lm-page"]
 
 [[plant.edit]]
@@ -229,7 +229,7 @@ replace = "    this.#member = new MemberPicker(this.#form, new ModelLists(page.d
 
 [[plant]]
 name = "live models: a member's form loses its model where its harness's models cannot be read"
-meant = "Edit member keeps the member's own model, effort and tier where its harness's models cannot be read"
+meant = "Edit member keeps the member's own model, effort and tier where its harness's models cannot be read, so the form loses nothing (A4-28)"
 runs = ["lm-page"]
 
 [[plant.edit]]
@@ -239,7 +239,7 @@ replace = "    if (true) {"
 
 [[plant]]
 name = "live models: a member's form loses its effort where its harness's models cannot be read"
-meant = "Edit member keeps the member's own model, effort and tier where its harness's models cannot be read"
+meant = "Edit member keeps the member's own model, effort and tier where its harness's models cannot be read, so the form loses nothing (A4-28)"
 runs = ["lm-page"]
 
 [[plant.edit]]
