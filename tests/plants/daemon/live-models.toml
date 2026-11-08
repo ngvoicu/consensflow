@@ -48,7 +48,7 @@ runs = ["lm-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = "    while still < SETTLE_MS && waited < allowed {"
+find = "    while still < SETTLE_MS && time.wall_ms() < until {"
 replace = "    while still < SETTLE_MS {"
 
 [[plant]]
@@ -58,10 +58,10 @@ runs = ["lm-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '''        let Some(Ok(next)) = arm(time, ASK_MS).bound(asked).await else {
+find = '''        let Some(Ok(next)) = arm(time, ASK_MS.min(left).max(POLL_MS)).bound(asked).await else {
             break;
         };'''
-replace = '''        let Some(Ok(next)) = arm(time, ASK_MS).bound(asked).await else {
+replace = '''        let Some(Ok(next)) = arm(time, ASK_MS.min(left).max(POLL_MS)).bound(asked).await else {
             return json!({ "type": "response", "success": false, "error": "the wait failed" });
         };'''
 
