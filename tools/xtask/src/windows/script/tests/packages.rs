@@ -27,19 +27,16 @@ fn check_in(text: &str) -> String {
 }
 
 /// A PowerShell of this machine: the Mac's (`pwsh`) or Windows' own; none where the
-/// machine has neither, and the tests that run it say so.
+/// machine has neither on its PATH, and the tests that run it say so. One that is there
+/// and does not run is a failure of the test, not a reason to skip it: a PowerShell
+/// whose startup cache was corrupted by others starting at once ended every test of
+/// these as "no PowerShell", and every plant of them passed (2026-11-08).
 fn shell() -> Option<&'static str> {
-    ["pwsh", "powershell"].into_iter().find(|name| {
-        process::capture(
-            &Invocation::new(name, ".").args([
-                "-NoProfile",
-                "-Command",
-                "$PSVersionTable.PSVersion.Major",
-            ]),
-            &Env::from_process(),
-        )
-        .is_ok_and(|ran| ran.code == 0)
-    })
+    let path = Env::from_process();
+    let folders: Vec<std::path::PathBuf> = std::env::split_paths(path.search_path()?).collect();
+    ["pwsh", "pwsh.exe", "powershell.exe"]
+        .into_iter()
+        .find(|name| folders.iter().any(|folder| folder.join(name).is_file()))
 }
 
 /// A lockfile's `packages`, from `(key, fields)` each: with the root entry first, as npm
@@ -111,7 +108,9 @@ fn checked(shell: &str, copy: &Path) -> (Vec<String>, String) {
                 "-File",
             ])
             .arg(file.display().to_string()),
-        &Env::from_process(),
+        // PowerShell keeps a cache of how it started in the user's cache folder, which several
+        // starting at once write over each other: each run has a folder of its own for it.
+        &Env::from_process().with_var("XDG_CACHE_HOME", &copy.join("cache").display().to_string()),
     )
     .unwrap();
     assert_eq!(ran.code, 0, "{}", said(&ran));
