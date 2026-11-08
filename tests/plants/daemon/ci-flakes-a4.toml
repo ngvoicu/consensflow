@@ -11,6 +11,9 @@
 #   before it looks again (`fake_agent/status_line.rs`, CI run 39136355690);
 # - an idle daemon's stop is counted in the clock of the timers it waits on, not the machine's
 #   (`crates/cf-daemon/src/stop/tests.rs`, CI runs 40958716065 and 42365070150);
+# - the same count for the daemon's other bounds of a close that waits for nothing: the API's close of
+#   a door and of an idle connection (`api/server/tests.rs`) and the daemon's stop from its input's
+#   end, inside the app's two seconds (`start/tests.rs`);
 # - a rig's close that times out says which of the daemon and the pane host had not left
 #   (`crates/cf-e2e/src/rig/mod.rs`, a resumed Devin case on CI's Windows, run 42419505988).
 #
@@ -23,6 +26,8 @@ a4-pi-delayed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_f
 a4-background = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "background::"]
 a4-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "status_line::"]
 a4-stop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::"]
+a4-api-close = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::server::tests::closing_"]
+a4-start = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::its_input_ending_stops"]
 a4-rig-close = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "the_failure_of_a_close_that_timed_out"]
 
 [[plant]]
@@ -134,3 +139,52 @@ platforms = ["macos", "linux"]
 file = "crates/cf-e2e/src/rig/mod.rs"
 find = '''        (true, false) => "the daemon had not",'''
 replace = '''        (true, false) => "the pane host had not",'''
+
+[[plant]]
+name = "ci flakes a4: a stray process of the machine that holds the command's words makes a pass the limit"
+meant = "a_pass_is_named_for_what_its_summary_tells_and_a_stray_of_the_machine_changes_neither"
+runs = ["a4-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    if (left.listed.is_empty() && !left.escaped.is_empty())
+        || listed_then_left_for_a_session_of_its_own(left)
+    {'''
+replace = '''    if !left.escaped.is_empty() {'''
+
+[[plant]]
+name = "ci flakes a4: the API's close waits after the last connection is gone, the time an idle connection must not cost"
+meant = "closing_ends_a_connection_that_is_idle_at_once"
+runs = ["a4-api-close"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''        let _ = open.wait_for(|connections| *connections == 0).await;'''
+replace = '''        let _ = open.wait_for(|connections| *connections == 0).await;
+        sleep(Duration::from_millis(600)).await;'''
+
+[[plant]]
+name = "ci flakes a4: the API's close of a door waits after the door is answered, longer than it may"
+meant = "closing_answers_a_door_that_waits_at_once_and_lets_the_listener_go"
+runs = ["a4-api-close"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/server.rs"
+find = '''        let _ = open.wait_for(|connections| *connections == 0).await;'''
+replace = '''        let _ = open.wait_for(|connections| *connections == 0).await;
+        sleep(Duration::from_millis(1_200)).await;'''
+
+[[plant]]
+name = "ci flakes a4: a stop from the input's end takes longer than the app's two seconds allow"
+meant = "its_input_ending_stops_it_within_the_apps_two_seconds_and_ends_its_log_as_the_tests_read_it"
+runs = ["a4-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''            self.api.drop_connections();
+        }
+        self.tail();'''
+replace = '''            self.api.drop_connections();
+        }
+        tokio::time::sleep(Duration::from_millis(1_400)).await;
+        self.tail();'''

@@ -288,6 +288,40 @@ fn what_a_task_that_was_not_done_left_running_is_a_problem_too() {
     );
 }
 
+const ENDED: &str =
+    "the command was ended by the window's close after the result, and the chief told";
+const LIMIT: &str = "the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing";
+
+/// A run that passed is said to have shown what its summary tells. A process of the machine that
+/// holds the command's words and is none of the run's (another tree's run of the stand-in beside
+/// this one; the loop of a worker who runs the suite twice) is found among `escaped` and changes
+/// nothing of an ordinary run, in its name as in its verdict.
+#[test]
+fn a_pass_is_named_for_what_its_summary_tells_and_a_stray_of_the_machine_changes_neither() {
+    let ordinary = good();
+    assert_eq!(passed_as(&ordinary), ENDED);
+    let mut with_a_stray = good();
+    with_a_stray.escaped = vec![standing("99998 1 99997 ?? sleep 4711").unwrap()];
+    with_a_stray.after_close = Some(with_a_stray.escaped.clone());
+    assert_eq!(judge(&with_a_stray, Expect::Ended), Ok(()));
+    assert!(
+        summary(&with_a_stray, &judge(&with_a_stray, Expect::Ended))
+            .contains("was ended by the window's close"),
+        "{}",
+        summary(&with_a_stray, &judge(&with_a_stray, Expect::Ended))
+    );
+    assert_eq!(passed_as(&with_a_stray), ENDED);
+    // The limit, in either shape it takes: the host never listed the job, or listed the shell alone.
+    let limit = in_a_session_of_its_own();
+    assert_eq!(passed_as(&limit), LIMIT);
+    let mut shell_alone = in_a_session_of_its_own();
+    shell_alone.listed = vec![proc(
+        99997,
+        "/bin/sh -c nohup fake-agent --background-job 4711",
+    )];
+    assert_eq!(passed_as(&shell_alone), LIMIT);
+}
+
 #[test]
 fn a_command_whose_shell_the_host_listed_before_it_ended_and_whose_job_ran_on_apart_escaped_all_the_same(
 ) {

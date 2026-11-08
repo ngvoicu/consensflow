@@ -460,6 +460,21 @@ pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
     }
 }
 
+/// What a run that passed is said to have shown, as the name of its check: that the command ran on in
+/// a session of its own, the known limit on a Mac, or that the window's close ended it and the chief
+/// was told. The one [`summary`] tells, by the same shapes: a process of the machine that holds the
+/// command's words and is none of this run's (another tree's run of the stand-in, which the run
+/// cannot tell from its own) changes neither.
+fn passed_as(left: &Left) -> &'static str {
+    if (left.listed.is_empty() && !left.escaped.is_empty())
+        || listed_then_left_for_a_session_of_its_own(left)
+    {
+        "the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing"
+    } else {
+        "the command was ended by the window's close after the result, and the chief told"
+    }
+}
+
 /// What the chief was told, whichever way the run came out: the notes that say the turn left
 /// work, a line to each, or that it was told none.
 fn at_the_chief(left: &Left) -> String {
@@ -680,16 +695,7 @@ fn observe(
         None => "the pane host said nothing of what the window left when it closed".to_owned(),
     });
     match &verdict {
-        Ok(()) if !left.escaped.is_empty() => case.check(
-            "the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing",
-            true,
-            summary(&left, &verdict),
-        ),
-        Ok(()) => case.check(
-            "the command was ended by the window's close after the result, and the chief told",
-            true,
-            summary(&left, &verdict),
-        ),
+        Ok(()) => case.check(passed_as(&left), true, summary(&left, &verdict)),
         Err(problems) => {
             for problem in problems {
                 case.fail(problem);
