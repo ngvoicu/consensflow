@@ -426,7 +426,10 @@ async fn a_program_that_cannot_open_in_a_window_fails_the_open_with_the_sentence
             assert_eq!(failed.error, None);
             assert_eq!(
                 failed.message,
-                "/nowhere/claude.cmd is not an npm shim, and only cmd.exe could run it in a window"
+                format!(
+                    "{} is not an npm shim, and only cmd.exe could run it in a window",
+                    cf_base::startup::a_path_in_words("/nowhere/claude.cmd")
+                )
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
             assert_eq!(sent.get(), 0);

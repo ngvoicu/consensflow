@@ -269,7 +269,11 @@ mod started {
         let (on_path, _) = install_pi(&machine.bin());
         for which in [&shim, &on_path] {
             let said = runnable(which, &args, &env).unwrap_err();
-            assert!(said.starts_with(&text(which)), "{said}");
+            // The shim is marked in the words, so that a note about the start can replace it.
+            assert!(
+                said.starts_with(&cf_base::startup::a_path_in_words(which)),
+                "{said}"
+            );
             assert!(
                 said.contains("Make the harness's Node visible to ConsensFlow")
                     && said.contains("install the harness's own build"),
