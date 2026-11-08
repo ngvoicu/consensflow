@@ -369,7 +369,8 @@ fn a_fifo_named_like_a_picture_is_never_opened() {
 
     let dir = tempfile::tempdir().unwrap();
     let fifo = dir.path().join("x.png");
-    let made = std::process::Command::new("mkfifo")
+    #[allow(clippy::disallowed_methods)] // `mkfifo` makes the pipe: nothing else of std can.
+    let made = std::process::Command::new("/usr/bin/mkfifo")
         .arg(&fifo)
         .status()
         .unwrap();
