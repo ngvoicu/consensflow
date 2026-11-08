@@ -195,12 +195,13 @@ pub struct Left {
     /// The processes of `listed` that were still there when the run last looked, once
     /// the task was done, the window closed and the chief told.
     pub alive: Vec<u64>,
-    /// The processes of `listed` that were gone when the run looked as the task came to its
-    /// end, before the result, the window's close and the chief's note: a process the turn
-    /// itself ended (Codex's PowerShell wrapper of a tool call lives under a second, and the
-    /// host's look, once a second, may fall on it), which the close has nothing of to end and
-    /// the chief is owed no note of. Empty where the run did not look, which holds the run to
-    /// the note.
+    /// The processes of `listed` that were gone when the run looked at the machine once it saw
+    /// the task over: a process the turn itself ended (Codex's PowerShell wrapper of a tool
+    /// call lives under a second, and the host's look, once a second, may fall on it), which
+    /// the close has nothing of to end and the chief is owed no note of. The task may be seen
+    /// over after its window has closed, so this alone does not tell a process the turn ended
+    /// from one the close ended: `at_exit` does (what the pane host found in the window at the
+    /// close). Empty where the run did not look, which holds the run to the note.
     pub gone_in_the_turn: Vec<u64>,
     /// The processes of the command the pane host said the window left running when it
     /// closed (its `pane.exit`): what a close ended, whatever came of the listed ones.
@@ -321,8 +322,8 @@ pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
             // A process the turn itself ended, before the task did, leaves the window's close
             // nothing to end and the chief nothing to be told (Codex's PowerShell wrapper of a
             // tool call, which the host's look may fall on: T-404, 4 runs of 12). What was still
-            // there when the task ended, what the window left at its close, and a command that
-            // ran on are held to the note as they always were.
+            // there when the run saw the task over, what the pane host found in the window at
+            // its close, and a command that ran on are held to the note as they always were.
             if !ended_in_the_turn(left) {
                 problems.push(
                     "the chief was told nothing of the work the window closed with".to_owned(),
@@ -389,8 +390,8 @@ fn unlisted_but_running(left: &Left) -> Vec<String> {
 /// Whether everything the host listed of the command ended in the turn, before the task did,
 /// and the chief was told nothing, as it should be: nothing escaped, the pane host found none of
 /// the command in the window when it closed, and each process listed was gone when the run looked
-/// as the task came to its end ([`gone_of`]). A run that did not look has none gone, so it is
-/// held to the note.
+/// once it saw the task over ([`gone_of`]). A run that did not look has none gone, so it is held
+/// to the note.
 fn ended_in_the_turn(left: &Left) -> bool {
     !left.listed.is_empty()
         && left.notes.is_empty()
@@ -633,8 +634,8 @@ fn observe(
         Ok((is_over(&thread) || goes_on(members, number)?).then_some(()))
     })?
     .is_some();
-    // What the turn itself ended, looked at as the task came to its end: before the result, the
-    // window's close and the note, which end and say what the turn left, not what it ended.
+    // What of the listed processes is gone once the task is seen over: the turn ended them, or
+    // the window's close did if it has closed already, and `at_exit` (below) says which.
     match ThisMachine.processes() {
         Ok(all) => left.gone_in_the_turn = gone_of(&left.listed, &all, &mark),
         Err(failed) => chosen.failed.push(failed.to_string()),

@@ -13,7 +13,7 @@
 # process that ended in the turn (T-404, T-436). The host's look fell on Codex's PowerShell wrapper
 # of a tool call, which lives under a second and was gone when the task ended; nothing escaped and
 # the window's close had nothing to end, so the chief was told nothing, and the verdict demanded a
-# note. A process the run saw gone as the task came to its end needs none; one still there, one the
+# note. A process the run found gone once it saw the task over needs none; one still there, one the
 # pane host found in the window when it closed, and a command that ran on are held to it as before.
 
 [run]
