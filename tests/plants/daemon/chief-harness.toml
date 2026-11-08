@@ -833,15 +833,13 @@ meant = "a_window_given_up_on_with_a_gone_models_words_is_tried_again_and_keeps_
 runs = ["chm-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = '''        let before = record.window.borrow().relaunch;
-        let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;'''
-replace = '''        if let Some(gone) = self.gone_model(participant, &crate::shown::Evidence::of_record(because))? {
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''        record.window.borrow_mut().starts_given_up += 1;'''
+replace = '''        record.window.borrow_mut().starts_given_up += 1;
+        if let Some(gone) = self.gone_model(participant, &crate::shown::Evidence::of_record(&error))? {
             self.reopen_without(record, gone);
             return Ok(());
-        }
-        let before = record.window.borrow().relaunch;
-        let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;'''
+        }'''
 
 [[plant]]
 name = "chief: a failed turn is read for a gone model in its screen's words"
