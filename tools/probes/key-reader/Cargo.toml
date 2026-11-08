@@ -1,0 +1,13 @@
+# A probe, outside the workspace (`exclude = ["tools/probes"]`): what Codex's own key reader makes of
+# the bytes a pane writes for a Shift+Enter (T-1336). Codex 0.167.0 pins this fork of crossterm; Devin
+# and Muse read their keys through crossterm too. Run it with `run.py`.
+[package]
+name = "key-reader-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+crossterm = { git = "https://github.com/openai-oss-forks/crossterm", rev = "ed1cdab335221515706178d68495bba2aed1924f" }
+
+[workspace]

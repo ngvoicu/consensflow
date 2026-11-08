@@ -39,7 +39,8 @@
  *   (while a turn runs and no popup is open a plain Escape interrupts it before the composer is
  *   asked) and crossterm's readers (`event/sys/unix/parse.rs`: `\n` in raw mode is Ctrl+J, `ESC CR` is
  *   Alt+Enter, `CSI 13;2u` is Shift+Enter whatever flags were pushed, no `CSI 27;2;13~`; a read that
- *   ends in an Escape is a lone Escape: T-1336 ran this with the pinned fork on the Mac;
+ *   ends in an Escape is a lone Escape); **the Mac reader is run** here from `tools/probes/key-reader/results.json`
+ *   (`run.py`: the pinned fork's own `event::read` through a real pty), the bindings read;
  *   `event/sys/windows/parse.rs`: the Enter key with the modifiers the console says). On Windows
  *   Codex's `tui/windows_key_sequence.rs` rebuilds `ESC [ 1 3 ; 2 u` from seven console key events,
  *   within 50 ms, as Shift+Enter; it does not rescue `ESC CR`.
@@ -61,7 +62,7 @@
  *
  * Run: `node app/tests/fixtures/pane-keys/make-newline-cases.mjs` (Pi installed).
  */
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -166,16 +167,53 @@ const CLAUDE = rows(
   ['nothing', 'interrupt'],
 )
 
-/**
- * Codex, Devin and Muse on the Mac (crossterm's unix reader): a lone Escape at rest is nothing and
- * while a turn runs it interrupts.
- */
-const CROSSTERM_MAC = (busyLf) =>
+// --- Codex's reader, run ---------------------------------------------------------------------------
+
+/** What the pinned crossterm fork read of each byte string through a real pty (`run.py`). */
+const PROBE = JSON.parse(
+  readFileSync(join(HERE, '../../../../tools/probes/key-reader/results.json'), 'utf8'),
+)
+const PROBE_CASE = {
+  cr: 'nothing waiting, CR',
+  lf: 'nothing waiting, LF',
+  'esc-cr': 'nothing waiting, ESC CR',
+  'csi-u': 'nothing waiting, CSI u',
+  'modify-other-keys': 'nothing waiting, modifyOtherKeys',
+  esc: 'nothing waiting, ESC',
+}
+/** The keys the reader read for `id`, as `Code/Modifiers`. */
+const readOf = (id) => {
+  const row = PROBE.cases.find((each) => each.case === PROBE_CASE[id])
+  if (!row) throw new Error(`the probe has no case ${PROBE_CASE[id]}`)
+  return JSON.parse(row.result.match(/keys=(\[.*\])$/)[1])
+}
+/** What Codex's composer does with a key (`keymap.rs` at rust-v0.167.0, read): at rest, and while a turn runs. */
+const CODEX_KEYS = {
+  'Enter/KeyModifiers(0x0)': ['submit', 'submit'],
+  "Char('j')/KeyModifiers(CONTROL)": ['newline', 'newline'],
+  'Enter/KeyModifiers(ALT)': ['newline', 'newline'],
+  'Enter/KeyModifiers(SHIFT)': ['newline', 'newline'],
+  // A plain Escape does nothing at rest and interrupts the turn while one runs (`bottom_pane/mod.rs`).
+  'Esc/KeyModifiers(0x0)': ['nothing', 'interrupt'],
+}
+/** Codex on the Mac: the key its reader reads of each byte string (run), what its keymap does with it (read). */
+const CODEX_MAC = () =>
+  CANDIDATES.map(({ id, bytes }) => {
+    const keys = readOf(id)
+    const [does, whileBusy] = keys.length === 0 ? ['nothing', 'nothing'] : CODEX_KEYS[keys[0]]
+    if (keys.length > 1 || (keys.length === 1 && !CODEX_KEYS[keys[0]])) {
+      throw new Error(`the probe read ${keys} for ${id}: this table does not know it`)
+    }
+    return { id, bytes, does, whileBusy }
+  })
+
+/** Devin and Muse on the Mac: their documented and listed new-line keys (read); crossterm, its version not established. */
+const CROSSTERM_MAC = () =>
   rows(
     ['submit', 'submit'],
-    ['newline', busyLf],
-    ['newline', busyLf],
-    ['newline', busyLf],
+    ['newline', 'newline'],
+    ['newline', 'newline'],
+    ['newline', 'newline'],
     ['nothing', 'nothing'],
     ['nothing', 'interrupt'],
   )
@@ -227,12 +265,12 @@ const HARNESSES = {
     source:
       'codex-rs/tui/src/keymap.rs, textarea.rs, bottom_pane/mod.rs, tui/windows_key_sequence.rs; crossterm event/sys/unix/parse.rs and event/sys/windows/parse.rs',
     evidence: {
-      ran: [],
-      read: ['rows', 'whileBusy'],
-      note: "T-1336's review ran the pinned crossterm fork's reader on the Mac (ESC CR written at the end of a full pty read is read as Escape, Enter; a line feed is Ctrl+J); that probe is not kept in the repository",
+      ran: ['the Mac key reader: the pinned crossterm fork through a real pty (tools/probes/key-reader)'],
+      read: ['the composer keymap', 'whileBusy', 'windows'],
+      note: 'ESC CR written where the pty queue ends is read as Escape, Enter (tools/probes/key-reader/results.json); a line feed is Ctrl+J',
     },
     rows: {
-      mac: CROSSTERM_MAC('newline'),
+      mac: CODEX_MAC(),
       windows: CROSSTERM_WINDOWS(['newline', 'newline']),
     },
   },
@@ -257,7 +295,7 @@ const HARNESSES = {
       note: "how its input handler orders a busy turn's keys is not established: whileBusy repeats the documented new-line action",
     },
     rows: {
-      mac: CROSSTERM_MAC('newline'),
+      mac: CROSSTERM_MAC(),
       windows: CROSSTERM_WINDOWS(['types', 'types']),
     },
   },
@@ -271,7 +309,7 @@ const HARNESSES = {
       note: "how its input handler orders a busy turn's keys is not established: whileBusy repeats the keymap's new-line action",
     },
     rows: {
-      mac: CROSSTERM_MAC('newline'),
+      mac: CROSSTERM_MAC(),
       windows: CROSSTERM_WINDOWS(['types', 'types']),
     },
   },

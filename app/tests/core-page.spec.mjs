@@ -3520,6 +3520,13 @@ for (const [platform, agent] of [
       // console host's 4,096-byte read) reads an Escape alone, which stops a running turn: only a
       // single byte cannot be read in two (T-1336; `crates/cf-panes/src/pty/keys.rs` holds the reads).
       test(`never starts with an Escape for a ${harness} window`, async ({ page }) => {
+        // Codex, Devin and Muse read the console's key events on Windows: no single byte is their new
+        // line there (a line feed is the Enter key with Control, which none binds), so they are sent
+        // ESC CR until the human decides (T-1336). This case is expected to fail until then.
+        test.fail(
+          platform === 'windows' && ['codex', 'devin', 'muse'].includes(harness),
+          "pending the human's decision: no byte that is not an Escape's is their new line on Windows",
+        )
         const shifted = await sentByPress(page, harness, (input) => input.press('Shift+Enter'))
         expect(shifted[0], `${harness} was sent ${JSON.stringify(shifted)}`).not.toBe(27)
       })

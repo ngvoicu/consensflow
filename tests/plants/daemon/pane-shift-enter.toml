@@ -1,30 +1,40 @@
-# Shift+Enter in a window is the new line its harness takes (T-1330). xterm.js 6 has no kitty
+# Shift+Enter in a window is the new line its harness takes (T-1330, T-1336). xterm.js 6 has no kitty
 # keyboard protocol and no modifyOtherKeys and sends the plain Enter's CR for Shift+Enter, so a
 # message was sent where the human asked for a new line, in every harness. The page now sends
 # (`shiftEnterFor`, app/ui/term.js):
 #
-# - Alt+Enter (ESC CR) to Claude Code, Codex, Devin and Muse Code: each lists it as a new line, and
-#   on Windows it is the one form the console host hands the three that read key events (Codex,
-#   Devin, Muse) as a key they bind: a line feed is the Enter key with Control, and the kitty
-#   protocol's `CSI 13;2u` seven typed characters (cf-panes pty/keys.rs, zeewin2, 2026-11-08);
-# - Ctrl+J (a line feed) to Pi, whose Alt+Enter queues a follow-up message (a send), on Windows
-#   too, where the follow-up is Ctrl+Q;
+# - **a key that never starts with Escape** (T-1336): a read that ends between the two bytes of a write
+#   (a pty's input queue nearly full behind a long paste, the console host's 4,096-byte read) reads an
+#   Escape alone, which stops a running turn. So Ctrl+J, a line feed, on a Mac in every harness and on
+#   Windows for Claude Code and Pi;
+# - Alt+Enter (ESC CR) to Codex, Devin and Muse on Windows, which read key events there (a line feed is
+#   the Enter key with Control, bound to nothing; `CSI 13;2u` is seven typed characters), **until the
+#   human decides** (T-1336);
 # - only for Shift+Enter alone, typed and not chosen in an input method, once, as the human's own
 #   key (a reply of the emulator would take another road), with nothing left for xterm to send
-#   after it; Alt+Enter and Ctrl+J stay xterm's;
-# - to the window of the harness the board says (the card tells the emulator), ESC CR before it does.
+#   after it; Alt+Enter and Ctrl+J typed stay xterm's;
+# - to the window of the harness it was **launched** with, which the daemon says with the pane
+#   (`pane.harness`): a member edited while its window is open runs the new harness from its next
+#   window, and a reload changes nothing; the card tells the emulator;
+# - the arbiter counts a line feed as a character of the draft, not an Enter that clears it, so a
+#   delivery stays held behind a Shift+Enter.
 #
-# `app/tests/fixtures/pane-keys/newline-cases.json` says what each harness's input box does with each
-# byte string a pane might write (`make-newline-cases.mjs`: Pi's replayed from its own key matcher,
-# the others read from their source and documentation), and the page tests are held to it, in a
-# real xterm, on a Mac's user agent and on Windows'. The pane host writes bytes as they are and is
-# not planted: what the console host makes of them is the Windows tests' of `cf-panes`.
+# `app/tests/fixtures/pane-keys/newline-cases.json` says what the page writes (`sends`) and what each
+# harness's input box does with each byte string a pane might write (`make-newline-cases.mjs`: Pi's
+# editor and Codex's key reader run, the others read from their source and documentation), and the
+# page tests are held to it, in a real xterm, on a Mac's user agent and on Windows'. The real-pty
+# test of `cf-panes` (`pty/keys.rs`, `boundary`) reads the same `sends`. What the console host makes
+# of the bytes is the Windows tests' of `cf-panes`, which need a Windows machine (no plant of them).
 #
 # One plant takes one rule out; a test of it fails. Every name holds `pane shift enter`, so
 # `npm run plants:daemon -- "pane shift enter"` runs them all.
 
 [run]
-pse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Shift.Enter in a window"]
+pse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Shift.Enter in a window|keeps the keys of the harness"]
+pse-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::"]
+pse-boundary = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::boundary"]
+pse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launched_harness"]
+pse-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::engine::tests"]
 
 [[plant]]
 name = "pane shift enter: any Enter is a Shift+Enter"
@@ -45,8 +55,8 @@ runs = ["pse-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
-replace = "'\\x1b\\r'"
+find = '''  WINDOWS && (harness === 'codex' || harness === 'devin' || harness === 'muse') ? '\x1b\r' : '\n''''
+replace = '''  '\x1b\r''''
 
 [[plant]]
 name = "pane shift enter: every harness is sent a line feed, which is Ctrl+Enter to a key reader on Windows"
@@ -55,8 +65,8 @@ runs = ["pse-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
-replace = "'\\n'"
+find = "WINDOWS && (harness === 'codex'"
+replace = "false && (harness === 'codex'"
 
 [[plant]]
 name = "pane shift enter: every harness is sent the kitty protocol's CSI u, which Windows types as text"
@@ -65,8 +75,8 @@ runs = ["pse-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
-replace = "'\\x1b[13;2u'"
+find = ''''\x1b\r' : '\n''''
+replace = ''''\x1b[13;2u' : '\n''''
 
 [[plant]]
 name = "pane shift enter: Claude Code is sent a plain Enter"
@@ -75,8 +85,8 @@ runs = ["pse-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "(harness === 'pi' ? '\\n' : '\\x1b\\r')"
-replace = "(harness === 'pi' ? '\\n' : '\\r')"
+find = ''''\x1b\r' : '\n''''
+replace = ''''\x1b\r' : '\r''''
 
 [[plant]]
 name = "pane shift enter: xterm sends its Enter after the new line"
@@ -221,3 +231,117 @@ replace = '''    this.terminal.attachCustomKeyEventHandler((event) => this.#prog
       return true
     })
 '''
+
+[[plant]]
+name = "pane shift enter: a Mac's window is sent Alt+Enter, which a read can split"
+meant = "Shift+Enter in a window, on a Mac › never starts with an Escape for a claude-code window"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = ''''\x1b\r' : '\n''''
+replace = ''''\x1b\r' : '\x1b\r''''
+
+[[plant]]
+name = "pane shift enter: a window takes the harness its member is configured to run, not the one it was launched with"
+meant = "A window keeps the keys of the harness it was launched with › a Pi window whose member is edited to Codex keeps Pi's new line until it is replaced"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      entry.harness = pane.harness ?? lane.participant.harness\n"
+replace = "      entry.harness = lane.participant.harness\n"
+
+[[plant]]
+name = "pane shift enter: a window's harness is read from the board's configuration after a reload"
+meant = "A window keeps the keys of the harness it was launched with › a window of a member the ledger now says is on another harness keeps its launched harness after a reload"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      this.#registry.setHarness(pane, entry.harness)\n"
+replace = "      this.#registry.setHarness(pane, lane.participant.harness)\n"
+
+[[plant]]
+name = "pane shift enter: a line feed clears the draft the arbiter counts"
+meant = "a_new_line_in_the_draft_is_part_of_the_draft_and_a_delivery_stays_held"
+runs = ["pse-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''            b'\n' => {
+                classes.with("text");
+                unsent += 1;
+            }
+'''
+replace = '''            b'\n' => {
+                classes.with("enter");
+                unsent = 0;
+            }
+'''
+
+[[plant]]
+name = "pane shift enter: a line feed is no character of the draft"
+meant = "unsent_counts_what_the_keys_leave_in_the_input"
+runs = ["pse-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''                classes.with("text");
+                unsent += 1;
+            }
+            0x03 => {'''
+replace = '''                classes.with("text");
+            }
+            0x03 => {'''
+
+[[plant]]
+name = "pane shift enter: the pane does not say the harness its window was launched with"
+meant = "a_project_opens_its_chief_window_and_closes_it_through_the_trait"
+runs = ["pse-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/engine.rs"
+find = '''        fields.insert("harness".to_owned(), json!(harness));
+'''
+replace = ""
+
+[[plant]]
+name = "pane shift enter: a window's harness is not the one it was launched with"
+meant = "a_member_edited_to_another_harness_leaves_the_window_open_on_the_one_it_was_launched_with"
+runs = ["pse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                .map(|harness| harness.kind().to_owned())"
+replace = "                .map(|_| \"pi\".to_owned())"
+
+[[plant]]
+name = "pane shift enter: Codex on a Mac is sent the Alt+Enter a full pty queue splits"
+meant = "shift_enter_is_never_read_as_a_lone_escape_behind_a_full_queue"
+runs = ["pse-boundary"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/tests/fixtures/pane-keys/newline-cases.json"
+find = '''        "mac": [
+          10
+        ],
+        "windows": [
+          27,
+          13
+        ]
+      }
+    },
+    "pi": {'''
+replace = '''        "mac": [
+          27,
+          13
+        ],
+        "windows": [
+          27,
+          13
+        ]
+      }
+    },
+    "pi": {'''

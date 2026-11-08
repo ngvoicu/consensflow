@@ -235,12 +235,15 @@
       "version": "0.167.0",
       "source": "codex-rs/tui/src/keymap.rs, textarea.rs, bottom_pane/mod.rs, tui/windows_key_sequence.rs; crossterm event/sys/unix/parse.rs and event/sys/windows/parse.rs",
       "evidence": {
-        "ran": [],
-        "read": [
-          "rows",
-          "whileBusy"
+        "ran": [
+          "the Mac key reader: the pinned crossterm fork through a real pty (tools/probes/key-reader)"
         ],
-        "note": "T-1336's review ran the pinned crossterm fork's reader on the Mac (ESC CR written at the end of a full pty read is read as Escape, Enter; a line feed is Ctrl+J); that probe is not kept in the repository"
+        "read": [
+          "the composer keymap",
+          "whileBusy",
+          "windows"
+        ],
+        "note": "ESC CR written where the pty queue ends is read as Escape, Enter (tools/probes/key-reader/results.json); a line feed is Ctrl+J"
       },
       "rows": {
         "mac": [
