@@ -558,7 +558,7 @@ pub fn sweep_script() -> String {
 /// them one of these, and a Codex, a Chrome, a Muse and PostgreSQL's installer besides).
 ///
 /// A folder is taken only when it is a day old ([`TEMP_KEPT_DAYS`]) and no program runs from it
-/// or has its path on its command line; where the programs cannot be listed nothing is taken.
+/// or has its name on its command line; where the programs cannot be listed nothing is taken.
 /// Windows refuses to remove a folder with a file open in it, which is the last word. Only a Temp
 /// that is under the user's profile is swept. At most
 /// [`TEMP_SWEPT_AT_MOST`] go in a sweep. What cannot be taken is said and never ends the run.
@@ -1055,7 +1055,11 @@ function Clear-TestTemp {
   $result.Left = [Math]::Max(0, $order.Count - $Cap)
   foreach ($item in ($order | Select-Object -First $Cap)) {
     $path = $item.FullName
-    $holds = @($Processes | Where-Object { ($_.ExecutablePath -and $_.ExecutablePath.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.CommandLine -and $_.CommandLine.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) })
+    # By its name, which has its random part in it: a path may be written as 8.3 short names (GitHub's
+    # runner) by a program and as long ones by .NET Framework, and a program that names the folder
+    # runs from it or in it.
+    $name = $item.Name
+    $holds = @($Processes | Where-Object { ($_.ExecutablePath -and $_.ExecutablePath.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.CommandLine -and $_.CommandLine.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) })
     if ($holds.Count) { $result.Held++; continue }
     try {
       if ($DryRun) { }

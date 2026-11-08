@@ -8,7 +8,7 @@
 # Every name holds `temp folder last`, so `npm run plants:daemon -- "temp folder last"` runs them all.
 
 [run]
-xtask-temp-folders = ["cargo", "test", "--offline", "-p", "xtask", "--test", "temp_folders"]
+xtask-temp-folders = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "temp_folders"]
 
 [[plant]]
 name = "temp folder last: the rule lets a folder come before a field"
