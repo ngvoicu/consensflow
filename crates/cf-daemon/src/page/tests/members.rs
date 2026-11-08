@@ -987,7 +987,7 @@ async fn an_edit_that_leaves_the_model_and_effort_as_they_are_saves_the_stored_c
             assert_eq!(saved["ok"], true, "{saved}");
             let (harness, model, effort, name) = DEVIN_RUNS;
             assert_eq!(
-                runs_of(&staffing, &saved["member"]["handle"].as_str().unwrap().to_owned()),
+                runs_of(&staffing, saved["member"]["handle"].as_str().unwrap()),
                 (harness.into(), model.into(), effort.into(), name.into())
             );
             assert_eq!(

@@ -150,23 +150,6 @@ fn done<T>(work: impl Future<Output = T>) -> T {
     }
 }
 
-/// `work`, done, for a read that has Pi's folder read on a thread of its own (the real Pi
-/// adapter's, when Pi lists no model): polled until it is, for up to ten seconds of real time.
-fn eventually<T>(work: impl Future<Output = T>) -> T {
-    let mut work = pin!(work);
-    let began = std::time::Instant::now();
-    loop {
-        if let Poll::Ready(value) = work.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-            return value;
-        }
-        assert!(
-            began.elapsed() < std::time::Duration::from_secs(10),
-            "waited"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-}
-
 /// `work`, done, for a read of the real Pi adapter, which waits on the clock for Pi's providers
 /// and, where Pi lists none, on a thread of its own that reads Pi's folder: polled until it is
 /// done; the clock is fired only where nothing real moved for a while, so that a wait on it
