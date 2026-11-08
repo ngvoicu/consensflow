@@ -130,15 +130,6 @@ impl Daemon {
         V: AsRef<OsStr>,
     {
         let own = bundle::copy_of(program, &bundle::folder(root))?;
-        // The rig's stand-in harnesses list no model, and its cases open projects on models of
-        // their own: the daemon takes a model on its harness's word where that cannot be read
-        // (what every daemon did before A4-28), and checks it where it can. A person's has no
-        // such variable.
-        let vars: Vec<(OsString, OsString)> = vars
-            .into_iter()
-            .map(|(name, value)| (name.as_ref().to_owned(), value.as_ref().to_owned()))
-            .chain([(OsString::from(UNREAD_MODELS_ARE_TAKEN), OsString::from("1"))])
-            .collect();
         Self::run(own, ["ui", "--json", "--no-open"], vars)
     }
 
@@ -153,6 +144,15 @@ impl Daemon {
         A: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        // The rig's stand-in harnesses list no model, and its cases open projects on models of
+        // their own: the daemon takes a model on its harness's word where that cannot be read
+        // (what every daemon did before A4-28), and checks it where it can. A person's has no
+        // such variable. Every start of a daemon the rig makes comes through here.
+        let vars: Vec<(OsString, OsString)> = vars
+            .into_iter()
+            .map(|(name, value)| (name.as_ref().to_owned(), value.as_ref().to_owned()))
+            .chain([(OsString::from(UNREAD_MODELS_ARE_TAKEN), OsString::from("1"))])
+            .collect();
         let mut process = Run::new(program)
             .args(args)
             .vars(vars)
