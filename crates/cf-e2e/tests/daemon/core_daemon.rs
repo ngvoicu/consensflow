@@ -247,8 +247,7 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
         .unwrap_or_default();
     let role = files::read_string(Path::new(file))?;
     assert!(
-        Regex::new(r"(?m)^\| mybuilder \| worker, reviewer \| Standard work \|$")?
-            .is_match(&role),
+        Regex::new(r"(?m)^\| mybuilder \| worker, reviewer \| Standard work \|$")?.is_match(&role),
         "{role}"
     );
     // On Windows, cf.exe, its path in forward slashes: Git Bash drops backslashes.
