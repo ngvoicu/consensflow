@@ -519,3 +519,28 @@ impl Default for Context {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Windows will not remove a folder from under a file that is open, and a task left in a local
+    /// set may hold the ledger when the context goes: the folder stayed for good, with its
+    /// `consensflow.db` (T-1333). The ledger lets go of its file with the context.
+    #[test]
+    fn a_context_leaves_nothing_of_its_folder_though_something_still_holds_its_ledger() {
+        let context = Context::new();
+        let folder = context.file.parent().unwrap().to_path_buf();
+        assert!(
+            folder.join("consensflow.db").exists(),
+            "the ledger's file is there"
+        );
+        let held = Rc::clone(&context.ledger);
+        drop(context);
+        assert!(
+            !folder.exists(),
+            "the folder of the context is gone, the ledger held or not: {folder:?}"
+        );
+        drop(held);
+    }
+}

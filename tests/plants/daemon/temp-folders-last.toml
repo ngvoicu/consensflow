@@ -8,6 +8,8 @@
 # Every name holds `temp folder last`, so `npm run plants:daemon -- "temp folder last"` runs them all.
 
 [run]
+engine-context-folder = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::context::tests::a_context_leaves_nothing"]
+daemon-scene-home = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "testing::tests::a_scene_leaves_nothing"]
 xtask-temp-folders = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "temp_folders"]
 
 [[plant]]
@@ -59,3 +61,28 @@ replace = "}"
 file = "crates/cf-evals/tests/long_run/scene.rs"
 find = "pub struct Scene {\n"
 replace = "pub struct Scene {\n    _folder: Folder,\n"
+
+# A fixture that something else still holds the ledger of (a task left in a local set, a closure) lets go
+# of the file as it goes, or the folder stays on Windows. These two are tried on Windows only: Unix
+# removes a folder with a file open in it.
+[[plant]]
+name = "temp folder last: the engine's context keeps its ledger's file open as it goes"
+meant = "a_context_leaves_nothing_of_its_folder_though_something_still_holds_its_ledger"
+runs = ["engine-context-folder"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/context.rs"
+find = "                ledger.let_go_of_its_file();"
+replace = "                let _ = &mut ledger;"
+
+[[plant]]
+name = "temp folder last: the daemon's scene keeps its ledger's file open as it goes"
+meant = "a_scene_leaves_nothing_of_its_home_though_something_still_holds_its_ledger"
+runs = ["daemon-scene-home"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/testing.rs"
+find = "            ledger.let_go_of_its_file();"
+replace = "            let _ = &mut ledger;"

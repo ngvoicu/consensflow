@@ -376,3 +376,28 @@ pub fn said(answer: Result<Answer, Failure>) -> (u16, serde_json::Value) {
         other => panic!("not JSON: {other:?}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Windows will not remove a folder from under a file that is open, and the scene's closures
+    /// and a task left in a local set hold its ledger when the scene goes: the home stayed for
+    /// good, with its `consensflow.db` (T-1333). The ledger lets go of its file with the scene.
+    #[test]
+    fn a_scene_leaves_nothing_of_its_home_though_something_still_holds_its_ledger() {
+        let scene = scene();
+        let home = scene._home.path().to_path_buf();
+        assert!(
+            home.join("consensflow.db").exists(),
+            "the ledger's file is there"
+        );
+        let held = Rc::clone(&scene.context.ledger);
+        drop(scene);
+        assert!(
+            !home.exists(),
+            "the home of the scene is gone, the ledger held or not: {home:?}"
+        );
+        drop(held);
+    }
+}
