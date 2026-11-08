@@ -2375,3 +2375,91 @@ runs = ["xtask-test-shell-status"]
 file = "tools/xtask/tests/shell_status.rs"
 find = '''        if command.contains("$(") || command.contains('`') {'''
 replace = '''        if command.contains("$(x") || command.contains('`') {'''
+
+# A run without `--build` stands on the packages an earlier build installed (T-1333, T-138; zeewin,
+# 2026-10-17: 12 UI plants failed "Could not resolve mermaid"). The run script holds them to the
+# lockfiles it shipped (`script::packages_check`, a Node program piped to `node -`): each folder whose
+# `node_modules` are not its lockfile's gets its own `npm ci` among the run's steps, and a line says
+# why. What the lockfile lists and `npm ci` leaves out for this system is not missing. A run that
+# builds installs them itself.
+
+[[plant]]
+name = "windows runner: packages that are not the lockfile's are not seen"
+meant = "a_folder_whose_packages_are_not_the_lockfiles_is_made_so_by_its_own_npm_ci_and_says_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if (said.length) {"
+replace = "  if (false) {"
+
+[[plant]]
+name = "windows runner: a package the lockfile dropped is not seen"
+meant = "a_folder_whose_packages_are_not_the_lockfiles_is_made_so_by_its_own_npm_ci_and_says_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    if (key.startsWith('node_modules/') && !(key in shipped)) extra.push(name(key))"
+replace = "    if (false) extra.push(name(key))"
+
+[[plant]]
+name = "windows runner: a package for another system than this one is missing"
+meant = "packages_that_are_the_lockfiles_are_left_alone_the_ones_that_are_not_for_this_system_included"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "      const left = entry.optional === true || another(entry.os, process.platform) || another(entry.cpu, process.arch)"
+replace = "      const left = false"
+
+[[plant]]
+name = "windows runner: a package that differs is said and no npm ci is run"
+meant = "a_folder_whose_packages_are_not_the_lockfiles_is_made_so_by_its_own_npm_ci_and_says_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    $steps += $package[2]"
+replace = "    $null = $package[2]"
+
+[[plant]]
+name = "windows runner: a package that differs runs on without a word"
+meant = "a_folder_whose_packages_are_not_the_lockfiles_is_made_so_by_its_own_npm_ci_and_says_why"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''    Write-Output "== packages: $($package[1]) is not what the lockfile says ($differs), so its npm ci runs first"
+'''
+replace = ""
+
+[[plant]]
+name = "windows runner: the packages of the app are not held to its lockfile"
+meant = "a_folder_with_no_installed_packages_at_all_is_made_so_and_one_with_no_lockfile_is_left_alone"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "@(@('.', 'node_modules', '«root»'), @('app', 'app/node_modules', '«app»'))"
+replace = "@(@('.', 'node_modules', '«root»'))"
+
+[[plant]]
+name = "windows runner: a run without the build is not held to the lockfiles"
+meant = "a_run_without_the_build_holds_its_packages_to_the_lockfiles_before_its_steps_and_one_with_it_does_not"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci")) {'''
+replace = '''    let packages = if true {'''
+
+[[plant]]
+name = "windows runner: a run with the build is held to the lockfiles too"
+meant = "a_run_without_the_build_holds_its_packages_to_the_lockfiles_before_its_steps_and_one_with_it_does_not"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci")) {'''
+replace = '''    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci-never")) {'''

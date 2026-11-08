@@ -419,9 +419,16 @@ pub fn run_script(script: &Script) -> String {
             )
         })
         .collect();
+    // A run that installs the packages itself (`--build`) has nothing to hold them to.
+    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci")) {
+        String::new()
+    } else {
+        packages_check()
+    };
     fill(
         RUN_TEMPLATE,
         &[
+            ("packages", &packages),
             ("job", JOB_SOURCE),
             ("node", script.node),
             ("in_job", IN_JOB),
@@ -716,7 +723,8 @@ Set-Location $dir
 $ErrorActionPreference = 'Continue'
 $env:«test_machine» = «machine»
 Write-Output "== test machine: $env:«test_machine»"
-«limits»foreach ($step in @(«steps»)) {
+«limits»$steps = @(«steps»)
+«packages»foreach ($step in $steps) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
@@ -734,6 +742,114 @@ $run = Join-Path $dir '«command_file»'
 [IO.File]::WriteAllText($run, "@echo off«crlf»" + '«command»' + "«crlf»")
 cmd /c "$run 2>&1"
 Exit-Run $LASTEXITCODE
+"##;
+
+/// What the packages of a run without `--build` are held to ([`packages_check`]): the program,
+/// in Node (the lockfiles are JSON, and Windows PowerShell 5.1 reads little of it), that the check
+/// pipes to `node - <folder>`. It prints one line and ends with 1 where the folder's
+/// `node_modules` are not what its `package-lock.json` says, and ends with 0, saying nothing,
+/// where they are or the folder has no lockfile.
+///
+/// - npm's own record of what it installed (`node_modules/.package-lock.json`, with no entry for
+///   the root) is compared with the lockfile the run shipped: a package missing, at another
+///   version or integrity, or left that the lockfile has dropped.
+/// - What the lockfile lists and `npm ci` leaves out is not missing: a package marked optional,
+///   and one for another system or processor than the one Node runs on (`esbuild`'s binaries for
+///   every system are listed, and Windows installs its own). Were it, every run would be refused.
+/// - A lockfile it cannot read is a difference too, said.
+const PACKAGES_JS: &str = r#"const fs = require('fs')
+const root = process.argv[2]
+const read = (file) => {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8')).packages || {}
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+}
+const another = (list, mine) => {
+  if (!Array.isArray(list) || list.length === 0) return false
+  if (list.includes('!' + mine)) return true
+  const allowed = list.filter((word) => !word.startsWith('!'))
+  return allowed.length > 0 && !allowed.includes(mine)
+}
+const list = (words) => words.slice(0, 3).join(', ') + (words.length > 3 ? ' and ' + (words.length - 3) + ' more' : '')
+const name = (key) => key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length)
+try {
+  const shipped = read(root + '/package-lock.json')
+  if (shipped === null) process.exit(0)
+  const installed = read(root + '/node_modules/.package-lock.json')
+  if (installed === null) {
+    console.log('node_modules holds no .package-lock.json: no npm ci has been run there')
+    process.exit(1)
+  }
+  const missing = []
+  const changed = []
+  const extra = []
+  for (const [key, entry] of Object.entries(shipped)) {
+    if (!key.startsWith('node_modules/')) continue
+    const have = installed[key]
+    if (!have) {
+      const left = entry.optional === true || another(entry.os, process.platform) || another(entry.cpu, process.arch)
+      if (!left) missing.push(name(key) + ' ' + entry.version)
+    } else if (have.version !== entry.version || (have.integrity && entry.integrity && have.integrity !== entry.integrity)) {
+      changed.push(name(key) + ' ' + have.version + ' where the lockfile says ' + entry.version)
+    }
+  }
+  for (const key of Object.keys(installed)) {
+    if (key.startsWith('node_modules/') && !(key in shipped)) extra.push(name(key))
+  }
+  const said = []
+  if (missing.length) said.push('missing: ' + list(missing))
+  if (changed.length) said.push('changed: ' + list(changed))
+  if (extra.length) said.push('extra: ' + list(extra))
+  if (said.length) {
+    console.log(said.join('; '))
+    process.exit(1)
+  }
+} catch (error) {
+  console.log('could not be compared: ' + error.message)
+  process.exit(1)
+}
+"#;
+
+/// The check of a run without `--build` (T-1333, T-138): each folder whose `node_modules` are not
+/// what its lockfile says gets its own `npm ci`, among the run's steps, and a line that says why.
+/// It ends the question the build's `npm ci` answers, for the runs that do not build: `--build`
+/// installs the packages and a run without it used whatever an earlier build had installed, saying
+/// nothing (12 UI plants failed on zeewin, 2026-10-17, "Could not resolve mermaid").
+///
+/// It makes the packages so and does not refuse, as [`PREPARE_STEPS`] does for the crates and the
+/// console host: a copy that nobody has built in is not left to run on what happens to be there,
+/// the step is idempotent, and the run says what it did. A refusal would cost a run's wait for the
+/// machine twice, and `--build` also builds the page and the bundle, which a run of tests does not
+/// need. The step is the build's own line, so it runs as it does there, and a run whose `npm ci`
+/// fails ends with its status. A tree with no lockfile in a folder has no `npm ci` to run there.
+///
+/// The marks around it are what the tests take the check out by.
+pub fn packages_check() -> String {
+    fill(
+        PACKAGES_TEMPLATE,
+        &[
+            ("js", PACKAGES_JS),
+            ("root", BUILD_STEPS[0]),
+            ("app", BUILD_STEPS[1]),
+        ],
+    )
+}
+
+const PACKAGES_TEMPLATE: &str = r##"# packages: begin
+$packagesJs = @'
+«js»'@
+foreach ($package in @(@('.', 'node_modules', '«root»'), @('app', 'app/node_modules', '«app»'))) {
+  $differs = (@($packagesJs | node - $package[0] 2>&1 | ForEach-Object { "$_" }) -join ' ').Trim()
+  if ($LASTEXITCODE -ne 0) {
+    if (-not $differs) { $differs = 'node could not compare them' }
+    Write-Output "== packages: $($package[1]) is not what the lockfile says ($differs), so its npm ci runs first"
+    $steps += $package[2]
+  }
+}
+# packages: end
 "##;
 
 /// The C# that `Add-Type` makes of the job in the run script: a job that ends every

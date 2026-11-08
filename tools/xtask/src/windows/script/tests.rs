@@ -6,6 +6,7 @@
 mod golden;
 #[cfg(windows)]
 mod lock;
+mod packages;
 mod reports;
 #[cfg(windows)]
 mod stage;
