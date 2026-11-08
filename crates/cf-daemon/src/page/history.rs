@@ -11,7 +11,8 @@
 //! gone through, each conversation and row it comes to charged; a part is
 //! one part read. A delivery's message is looked up by its row, for its
 //! parties alone, once for each row the read has charged; and where the one item
-//! that may still be written stands, by two lookups of an index each.
+//! that may still be written stands, by two lookups of an index each, asked only
+//! while the participant's window is in a turn.
 
 use cf_base::refusal::Refusal;
 use cf_engine::handoff::{whole_history_page, HISTORY_ROOM};
@@ -64,7 +65,15 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
                     || found.sender.as_deref() == Some(handle.as_ref()))
         }))
     };
-    let live = page.ledger.borrow().live_item(project, &handle)?;
+    // An item is being written only while its participant's window is in a turn, which the
+    // engine says as the board's lanes do (`activity`, what it holds of each window, no
+    // look made): of a window at rest, paused, waiting, out of quota, closed or not read,
+    // none is, whatever its reader left unfinished.
+    let live = if page.engine.activity(read.participant)["state"] == "working" {
+        page.ledger.borrow().live_item(project, &handle)?
+    } else {
+        None
+    };
     one("history", whole_history_page(&read, from, &owns, live)?)
 }
 

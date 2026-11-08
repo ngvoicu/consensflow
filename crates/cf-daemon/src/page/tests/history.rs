@@ -10,6 +10,7 @@ use cf_ledger::{
 };
 use serde_json::Value;
 
+use super::scripted::Scripted;
 use super::*;
 
 /// A project of `name` whose chief runs on Claude Code as `ares`, and zeus on its staff.
@@ -778,7 +779,8 @@ async fn an_assistant_item_that_ended_is_not_still_writing_and_one_that_ended_wi
     // written; the newest item of the conversation, which is, keeps saying so.
     LocalSet::new()
         .run_until(async {
-            let rig = rig();
+            let in_a_turn = Rc::new(Cell::new("working"));
+            let rig = rig_in(&in_a_turn);
             let (daemon, app) = bridge_pair_over(&rig.spawn);
             register(&daemon, &rig.page, &rig.spawn);
             let harbour = project(&rig, "harbour");
@@ -832,7 +834,8 @@ async fn the_last_item_of_a_conversation_that_ended_is_not_still_writing() {
     // any more, and the newest item of the new one is the one that may be.
     LocalSet::new()
         .run_until(async {
-            let rig = rig();
+            let in_a_turn = Rc::new(Cell::new("working"));
+            let rig = rig_in(&in_a_turn);
             let (daemon, app) = bridge_pair_over(&rig.spawn);
             register(&daemon, &rig.page, &rig.spawn);
             let harbour = project(&rig, "harbour");
@@ -887,6 +890,109 @@ async fn the_last_item_of_a_conversation_that_ended_is_not_still_writing() {
                 flags(&app, harbour, "chief").await,
                 [("u-1", true), ("a-1", true), ("m-1", false)]
                     .map(|(id, complete)| (id.to_owned(), complete)),
+            );
+        })
+        .await;
+}
+
+/// A rig whose engine says every window is in the state `state` holds when it is asked.
+fn rig_in(state: &Rc<Cell<&'static str>>) -> Rig {
+    rig_over(
+        Env::default(),
+        Some(Rc::new(Scripted::in_state(Rc::clone(state)))),
+    )
+}
+
+#[tokio::test]
+async fn only_a_window_in_a_turn_writes_the_newest_item_of_its_conversation() {
+    // A turn was cut (a pause, a stop, a crash, the quota) and its newest item stayed
+    // unfinished, as a reader leaves any message that is not the turn's last answer. Of
+    // a window that is not in a turn, no item is being written, whatever its state.
+    LocalSet::new()
+        .run_until(async {
+            let state = Rc::new(Cell::new("working"));
+            // Whose window the page asked about, once for each page it served.
+            let asked = Rc::new(RefCell::new(Vec::new()));
+            let mut engine = Scripted::in_state(Rc::clone(&state));
+            let noted = Rc::clone(&asked);
+            engine.reading = Box::new(move |participant| noted.borrow_mut().push(participant));
+            let rig = rig_over(Env::default(), Some(Rc::new(engine)));
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    conversation.id,
+                    &[
+                        item("u-1", "user", "Go"),
+                        unfinished("a-1", "assistant", "Cut off"),
+                    ],
+                    0,
+                )
+                .unwrap();
+            assert_ne!(chief, harbour, "a participant is not its project");
+            let states = [
+                "working", "starting", "idle", "waiting", "out", "unknown", "closed",
+            ];
+            for said in states {
+                state.set(said);
+                assert_eq!(
+                    flags(&app, harbour, "chief").await,
+                    [("u-1", true), ("a-1", said != "working")]
+                        .map(|(id, complete)| (id.to_owned(), complete)),
+                    "a window {said}"
+                );
+            }
+            assert_eq!(
+                *asked.borrow(),
+                vec![chief; states.len()],
+                "the chief's window, once a page"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn the_newest_item_of_a_conversation_whose_window_is_closed_is_not_still_writing() {
+    // The dispatcher itself, which holds no window for this chief: it says `closed`.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            assert_eq!(rig.page.engine.activity(chief)["state"], "closed");
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(
+                    conversation.id,
+                    &[
+                        item("u-1", "user", "Go"),
+                        unfinished("a-1", "assistant", "Cut off"),
+                    ],
+                    0,
+                )
+                .unwrap();
+            assert_eq!(
+                flags(&app, harbour, "chief").await,
+                [("u-1", true), ("a-1", true)].map(|(id, complete)| (id.to_owned(), complete))
             );
         })
         .await;

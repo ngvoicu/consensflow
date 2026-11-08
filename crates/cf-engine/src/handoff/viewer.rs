@@ -22,6 +22,8 @@
 //! it, Claude Code's of a call alone and Pi's before a step, stays unfinished for good), so
 //! an item behind a later one, or in a conversation that ended, is shown complete however
 //! its reader left it, and an assistant's message that ended with no words is not shown.
+//! Nor is any item being written while its participant's window is not in a turn (at rest,
+//! paused, closed): the caller then gives no item that may be.
 //!
 //! Every item fits a page, the first too: it shows a part of its text at
 //! most, and every other text a page shows of it is [`SHOWN_FIELD`] characters
@@ -53,8 +55,9 @@ pub const SHOWN_FIELD: usize = 256;
 /// not on record.
 pub type Owns<'a> = &'a dyn Fn(i64) -> Result<bool, Refusal>;
 
-/// Where the one item that may still be written stands (the ledger's `live_item`): none
-/// where the participant has no item in its conversation now.
+/// Where the one item that may still be written stands (the ledger's `live_item`, asked
+/// while the participant's window is in a turn): none where it is not, or has no item in
+/// its conversation now.
 pub type Live = Option<HistoryKey>;
 
 /// One page of a participant's history.

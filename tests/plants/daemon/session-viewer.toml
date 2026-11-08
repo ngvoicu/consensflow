@@ -1608,8 +1608,8 @@ runs = ["viewer-daemon-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/history.rs"
-find = "    let live = page.ledger.borrow().live_item(project, &handle)?;"
-replace = "    let live = None;"
+find = "        page.ledger.borrow().live_item(project, &handle)?"
+replace = "        None"
 
 [[plant]]
 name = "session viewer: the item that may still be written is the oldest of its conversation"
@@ -1631,3 +1631,54 @@ file = "crates/cf-ledger/src/conversations/history.rs"
 find = """    "SELECT id FROM conversation INDEXED BY conversation_current_unique"""
 replace = """    "SELECT *, id FROM conversation INDEXED BY conversation_current_unique"""
 
+# T-1324: an item is being written only while its participant's window is in a turn.
+
+[[plant]]
+name = "session viewer: every window is taken for one in a turn"
+meant = "only_a_window_in_a_turn_writes_the_newest_item_of_its_conversation"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/history.rs"
+find = '''    let live = if page.engine.activity(read.participant)["state"] == "working" {'''
+replace = "    let live = if true {"
+
+[[plant]]
+name = "session viewer: a window at rest or waiting is taken for one in a turn"
+meant = "only_a_window_in_a_turn_writes_the_newest_item_of_its_conversation"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/history.rs"
+find = '''    let live = if page.engine.activity(read.participant)["state"] == "working" {'''
+replace = '''    let live = if page.engine.activity(read.participant)["state"] != "closed" {'''
+
+[[plant]]
+name = "session viewer: no window is taken for one in a turn"
+meant = "only_a_window_in_a_turn_writes_the_newest_item_of_its_conversation"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/history.rs"
+find = '''    let live = if page.engine.activity(read.participant)["state"] == "working" {'''
+replace = '''    let live = if page.engine.activity(read.participant)["state"] == "never" {'''
+
+[[plant]]
+name = "session viewer: the page asks after the project's window, not the participant's"
+meant = "only_a_window_in_a_turn_writes_the_newest_item_of_its_conversation"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/history.rs"
+find = '''    let live = if page.engine.activity(read.participant)["state"] == "working" {'''
+replace = '''    let live = if page.engine.activity(project)["state"] == "working" {'''
+
+[[plant]]
+name = "session viewer: a window that is closed is taken for one in a turn"
+meant = "the_newest_item_of_a_conversation_whose_window_is_closed_is_not_still_writing"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/history.rs"
+find = '''    let live = if page.engine.activity(read.participant)["state"] == "working" {'''
+replace = '''    let live = if page.engine.activity(read.participant)["state"] != "" {'''
