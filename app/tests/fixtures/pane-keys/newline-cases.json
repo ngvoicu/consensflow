@@ -232,6 +232,10 @@
         "windows": [
           10
         ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "newline"
       }
     },
     "codex": {
@@ -239,14 +243,14 @@
       "source": "codex-rs/tui/src/keymap.rs, textarea.rs, bottom_pane/mod.rs, tui/windows_key_sequence.rs; crossterm event/sys/unix/parse.rs and event/sys/windows/parse.rs",
       "evidence": {
         "ran": [
-          "the Mac key reader: the pinned crossterm fork through a real pty (tools/probes/key-reader)"
+          "the Mac key reader: the pinned crossterm fork through a real pty (tools/probes/key-reader)",
+          "the Windows key reader: the pinned crossterm fork's EventStream inside Codex's own WindowsKeySequence, through the shipped console host (tools/probes/key-reader/results-windows.json)"
         ],
         "read": [
           "the composer keymap",
-          "whileBusy",
-          "windows"
+          "whileBusy"
         ],
-        "note": "ESC CR written where the pty queue ends is read as Escape, Enter (tools/probes/key-reader/results.json); a line feed is Ctrl+J"
+        "note": "ESC CR written where the pty queue ends is read as Escape, Enter (tools/probes/key-reader/results.json); a line feed is Ctrl+J. On Windows a line feed is Enter with Control, bound to nothing; ESC CR where a console read ends after the Escape is Esc, then Enter (a stop and a send); the kitty CSI 13;2u is Shift+Enter except where a read ends after ESC [ (Alt+[ and 13;2u typed), and an Escape alone where a pause of more than 50 ms comes after its Escape (results-windows.json)"
       },
       "rows": {
         "mac": [
@@ -387,9 +391,12 @@
           10
         ],
         "windows": [
-          27,
-          13
+          10
         ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
       }
     },
     "pi": {
@@ -544,6 +551,10 @@
         "windows": [
           10
         ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "newline"
       }
     },
     "devin": {
@@ -695,9 +706,12 @@
           10
         ],
         "windows": [
-          27,
-          13
+          10
         ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
       }
     },
     "muse": {
@@ -849,9 +863,12 @@
           10
         ],
         "windows": [
-          27,
-          13
+          10
         ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
       }
     }
   }

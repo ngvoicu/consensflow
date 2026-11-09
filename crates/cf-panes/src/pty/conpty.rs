@@ -68,7 +68,6 @@ use crate::job_object::JobObject;
 use environment::environment_block;
 
 mod environment;
-mod unread;
 
 /// The two flags portable-pty gives a console besides the cursor it has it inherit, which
 /// Windows' headers do not name: a resize that does not redraw what scrolled away, and
@@ -346,13 +345,6 @@ impl Input {
 impl io::Write for Input {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.file.write(bytes)
-    }
-
-    /// Every write of the window's input: a key that begins with Escape is written into a pipe
-    /// that holds nothing unread, so that the console host reads its bytes together and does not
-    /// take an Escape that ends one of its reads for the Escape key (`unread`).
-    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-        unread::write_all_keeping_keys_whole(&mut self.file, bytes).map(drop)
     }
 
     fn flush(&mut self) -> io::Result<()> {

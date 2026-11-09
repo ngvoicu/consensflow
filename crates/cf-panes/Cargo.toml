@@ -63,7 +63,6 @@ portable-pty = { workspace = true, features = ["serde_support"] }
 cf-process.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
 windows-sys = { workspace = true, features = [
-    "Wdk_Storage_FileSystem",
     "Wdk_System_Threading",
     "Win32_Foundation",
     "Win32_Security",

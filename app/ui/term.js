@@ -21,36 +21,37 @@ const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
  */
 const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
 
-/** A Windows page: its console host turns what a window is written into key events first. */
-const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
-
 /**
- * What a window is sent for Shift+Enter (T-1330, T-1336). xterm.js 6 has neither the kitty keyboard
- * protocol nor modifyOtherKeys, and sends the plain Enter's CR for Shift+Enter, so a message was
- * sent where the human asked for a new line, in every harness. A window is not asked what it takes;
- * the page sends the new-line key its harness lists, as the bytes a terminal writes for it.
+ * What a window is sent for Shift+Enter (T-1330, T-1336, T-1348): a line feed, Ctrl+J, **one byte,
+ * in every harness on a Mac and on Windows.** xterm.js 6 has neither the kitty keyboard protocol
+ * nor modifyOtherKeys, and sends the plain Enter's CR for Shift+Enter, so a message was sent where
+ * the human asked for a new line, in every harness. A window is not asked what it takes; the page
+ * sends the key every harness lists, as the byte a terminal writes for it.
  *
  * **A pane's key never starts with Escape.** A program takes a lone Escape for "stop", and a read
- * that ends between the two bytes of a write reads the Escape alone: a pty whose input queue is
- * nearly full (a window behind a long paste, slow to read: on a Mac, Codex read `ESC CR` as Escape
- * and Enter), the console host's 4,096-byte read on Windows. Only a single byte cannot be split.
+ * that ends between the two bytes of a write reads the Escape alone, then the rest: a pty whose
+ * input queue is nearly full (a window behind a long paste, slow to read: on a Mac, Codex read
+ * `ESC CR` as Escape and Enter, which stops a turn and sends the message), the console host's
+ * 4,096-byte read on Windows. Only a single byte cannot be split.
  *
- * - **Ctrl+J, a line feed,** on a Mac, in every harness: each lists it as a new line (Claude Code's
- *   `chat:newline`, Codex's and Muse's keymaps, Devin's `ctrl-j`, Pi's `tui.input.newLine`), and
- *   a program in raw mode reads it as the key it is. On Windows it is Pi's and Claude Code's too: they
- *   set the console's virtual-terminal input, which hands it on whole.
- * - **Alt+Enter, ESC CR,** to Codex, Devin and Muse on Windows (the chief's decision, T-1336): they read
- *   the console's key events, which make a line feed the Enter key with Control, bound to nothing, and the
- *   kitty protocol's `CSI 13;2u` seven characters (Codex alone rebuilds them), so no single byte is
- *   their new line there. ESC CR is, and **the pane host writes every key that begins with Escape
- *   into the Windows console's input only when it holds nothing unread**, so the console host's
- *   4,096-byte read cannot end after the Escape (`cf-panes` `pty/conpty/unread.rs`).
+ * - **A Mac:** every harness lists Ctrl+J as a new line (Claude Code's `chat:newline`, Codex's and
+ *   Muse's keymaps, Devin's `ctrl-j`, Pi's `tui.input.newLine`), and a program in raw mode reads it
+ *   as the key it is.
+ * - **Windows, Claude Code and Pi:** they set the console's virtual-terminal input, which hands the
+ *   byte on whole, so it is their new line there too.
+ * - **Windows, Codex, Devin and Muse:** they read the console's key events, which make a line feed
+ *   the Enter key with Control, bound to nothing: **Shift+Enter does nothing there, safely** (it
+ *   used to send the message). Their new line is Alt+Enter, `ESC CR`, which a read can split into
+ *   the Escape key and then Enter; and the kitty protocol's `CSI 13;2u` reaches them as seven key
+ *   events, which Codex's own reader rebuilds as Shift+Enter, except where the console host's
+ *   read ends after `ESC [` (it reads Alt+[ and types `13;2u`: measured, T-1348). A guard in the
+ *   pane host that waited for an empty pipe before an Escape-led write was built and taken out
+ *   (T-1336, T-1348): it waits for ever on a host whose pending read is smaller than the pipe's
+ *   quota.
  *
- * Alt+Enter and Ctrl+J typed by the human stay xterm's. A window whose harness the board has not
- * said yet is sent a line feed, the one key no harness takes for a send.
+ * Alt+Enter and Ctrl+J typed by the human stay xterm's.
  */
-export const shiftEnterFor = (harness) =>
-  WINDOWS && (harness === 'codex' || harness === 'devin' || harness === 'muse') ? '\x1b\r' : '\n'
+const SHIFT_ENTER = '\n'
 
 /** Whether `event` is Shift+Enter alone, typed (not an input method choosing a candidate). */
 const isShiftEnter = (event) =>
@@ -83,8 +84,6 @@ const shortcutLetter = (event) =>
 export class XtermEmulator {
   constructor(host, { onReply = () => {}, onResize = () => {}, onLink = () => {} } = {}) {
     this.host = host
-    /** The harness the window runs, once the board says so (`setHarness`): what Shift+Enter is sent as. */
-    this.harness = null
     // A link is an OSC 8 hyperlink: words with the address hidden behind them, which xterm reads
     // itself and hands to `linkHandler`. A web address a program prints as text is no link, in
     // any form: from the screen alone it cannot be told whole, as a program that lays its text
@@ -165,7 +164,7 @@ export class XtermEmulator {
       // press xterm would make of the rest of it (the keypress after the keydown) is none.
       if (event.type === 'keydown') {
         event.preventDefault()
-        this.terminal.input(shiftEnterFor(this.harness))
+        this.terminal.input(SHIFT_ENTER)
       }
       return false
     }
@@ -178,11 +177,6 @@ export class XtermEmulator {
       this.terminal.clearSelection()
     }
     return false
-  }
-
-  /** The harness the window runs (`claude-code`, `codex`, `pi`, `devin`, `muse`), or null where the board has not said. */
-  setHarness(harness) {
-    this.harness = harness ?? null
   }
 
   /** Resolve only after xterm's parser has committed these bytes. */
@@ -288,12 +282,6 @@ export class EmulatorRegistry {
 
   get(pane) {
     return this.emulators.get(paneKey(pane))?.emulator ?? null
-  }
-
-  /** The harness the window of `pane` runs, as the board says it: the emulator keeps it for its keys. */
-  setHarness(pane, harness) {
-    const emulator = this.get(pane)
-    if (typeof emulator?.setHarness === 'function') emulator.setHarness(harness)
   }
 
   retire(key) {

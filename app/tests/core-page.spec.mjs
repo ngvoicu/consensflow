@@ -3459,15 +3459,16 @@ const MAC_AGENT =
 const WINDOWS_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
 
-// Shift+Enter in a window (T-1330, T-1336). xterm.js 6 has no kitty keyboard protocol and no
+// Shift+Enter in a window (T-1330, T-1336, T-1348). xterm.js 6 has no kitty keyboard protocol and no
 // modifyOtherKeys, and sends the plain Enter's byte for Shift+Enter, so a message was sent where the
 // human asked for a new line, in every harness. `fixtures/pane-keys/newline-cases.json` holds what the
-// page writes for it (`sends`, by harness and platform) and what each harness's input box does with
-// each byte string a pane might write, at rest and while a turn runs (`make-newline-cases.mjs` says
-// how each was found: Pi's editor run, the others read from their source and documentation).
-// These presses are made in a real xterm and held to what the page sent. **A pane's key never starts
-// with Escape**: a program takes a lone Escape for "stop", and a read that ends between the two
-// bytes of a write reads it alone (T-1336).
+// page writes for it (`sends`, by harness and platform), what that does in each harness's input box
+// (`shiftEnter`), and what each harness's input box does with each byte string a pane might write, at
+// rest and while a turn runs (`make-newline-cases.mjs` says how each was found: Pi's editor and
+// Codex's key readers run, the others read from their source and documentation). These presses are
+// made in a real xterm and held to what the page sent. **A pane's key never starts with Escape**: a
+// program takes a lone Escape for "stop", and a read that ends between the two bytes of a write
+// reads it alone (T-1336). It is a line feed, one byte, in every harness on both platforms.
 const NEWLINE_CASES = JSON.parse(
   readFileSync(new URL('./fixtures/pane-keys/newline-cases.json', import.meta.url), 'utf8'),
 )
@@ -3520,38 +3521,36 @@ for (const [platform, agent] of [
     test.use({ userAgent: agent })
 
     for (const harness of Object.keys(NEWLINE_CASES.harnesses)) {
-      test(`is a new line in a ${harness} window, and Enter is still the message sent`, async ({
+      // A new line where the harness has a key for the bytes the page writes; nothing, safely, where it
+      // has none (Codex, Devin and Muse on Windows: a line feed is the Enter key with Control, which
+      // none binds): never the message sent, a follow-up queued or a turn interrupted.
+      const does = NEWLINE_CASES.harnesses[harness].shiftEnter[platform]
+      test(`is ${does === 'newline' ? 'a new line' : 'no key at all'} in a ${harness} window, and Enter is still the message sent`, async ({
         page,
       }) => {
+        expect(['newline', 'nothing'], `${harness} on ${platform}`).toContain(does)
         const shifted = await sentByPress(page, harness, (input) => input.press('Shift+Enter'))
         expect(
           inputBoxDoes(harness, platform, shifted),
           `${harness} was sent ${JSON.stringify(shifted)} for Shift+Enter`,
-        ).toBe('newline')
+        ).toBe(does)
         expect(
           inputBoxDoes(harness, platform, shifted, true),
           `${harness} was sent ${JSON.stringify(shifted)} for Shift+Enter while a turn runs`,
-        ).toBe('newline')
+        ).toBe(does)
         expect(shifted, `what the fixture says ${harness} is sent`).toEqual(
           NEWLINE_CASES.harnesses[harness].sends[platform],
         )
       })
 
       // A read that ends between the two bytes of a key's write (a pty's input queue nearly full, the
-      // console host's 4,096-byte read) reads an Escape alone, which stops a running turn: only a
-      // single byte cannot be read in two (T-1336; `crates/cf-panes/src/pty/keys.rs` holds the reads).
-      // The one place the page writes an Escape-led key is Codex, Devin and Muse on Windows, which read
-      // the console's key events: no single byte is their new line there (a line feed is the Enter key
-      // with Control, which none binds), so they are sent ESC CR, and **the pane host writes every
-      // Escape-led key of a Windows window into an input that holds nothing unread**, so the console
-      // host reads its bytes together (`conpty/unread.rs`, held by the Windows tests of `cf-panes`).
-      const guarded = platform === 'windows' && ['codex', 'devin', 'muse'].includes(harness)
-      test(`${guarded ? 'is the Alt+Enter the pane host writes whole' : 'never starts with an Escape'} for a ${harness} window`, async ({
-        page,
-      }) => {
+      // console host's 4,096-byte read) reads an Escape alone, which stops a running turn, and then the
+      // rest, which may send the message: only a single byte cannot be read in two (T-1336;
+      // `crates/cf-panes/src/pty/keys.rs` holds the reads). So the page writes one byte, in every
+      // harness and on both platforms (T-1348).
+      test(`is one byte, never an Escape, for a ${harness} window`, async ({ page }) => {
         const shifted = await sentByPress(page, harness, (input) => input.press('Shift+Enter'))
-        if (guarded) expect(shifted, `${harness} on Windows`).toEqual([27, 13])
-        else expect(shifted[0], `${harness} was sent ${JSON.stringify(shifted)}`).not.toBe(27)
+        expect(shifted, `${harness} was sent ${JSON.stringify(shifted)}`).toEqual([10])
       })
     }
 
@@ -3687,116 +3686,6 @@ test.describe('The keys around Shift+Enter in a window', () => {
 // next window runs (the ledger says so at once), and the window already open runs on, so the pane
 // carries the harness it was launched with (`pane.harness`, from the daemon), and a window's keys
 // follow that, across a page reload too.
-test.describe('A window keeps the keys of the harness it was launched with', () => {
-  test.use({ userAgent: WINDOWS_AGENT })
-
-  /** The bytes a real xterm sent to pane `id` for each Shift+Enter pressed in the window of `handle`. */
-  const pressing = async (page, handle, id) => {
-    const input = page.locator(
-      `#stage .terminal-card[data-handle="${handle}"] .xterm-helper-textarea`,
-    )
-    const before = await page.evaluate(
-      (pane) =>
-        window.__calls.filter(([n, a]) => n === 'pane_input_enqueue' && a.id === pane).length,
-      id,
-    )
-    await input.press('Shift+Enter')
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (pane) =>
-            window.__calls.filter(([n, a]) => n === 'pane_input_enqueue' && a.id === pane).length,
-          id,
-        ),
-      )
-      .toBe(before + 1)
-    return page.evaluate(
-      (pane) =>
-        window.__calls.filter(([n, a]) => n === 'pane_input_enqueue' && a.id === pane).at(-1)[1]
-          .bytes,
-      id,
-    )
-  }
-
-  test("a Pi window whose member is edited to Codex keeps Pi's new line until it is replaced", async ({
-    page,
-  }) => {
-    const data = model()
-    data.realTerminals = true
-    data.editRenames = true
-    const memberLane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
-    Object.assign(memberLane.participant, {
-      harness: 'pi',
-      model: 'openrouter/anthropic/claude-opus-5.5',
-    })
-    Object.assign(memberLane, { tasks: [], activity: { state: 'closed' }, pane: null })
-    data.boards[1].lanes.push({
-      participant: session(20, memberLane.participant, 'amber-pine'),
-      tasks: [task(21, 'Probe', 'working', 'chief', 'zeus-amber-pine')],
-      activity: { state: 'working' },
-      // The window was launched on Pi: the daemon says so with its pane.
-      pane: { id: 'p1-still-pi', generation: 9, harness: 'pi' },
-    })
-    await open(page, data)
-    await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
-    await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-    const before = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
-    await before.evaluate((node) => {
-      window.__sameCard = node
-    })
-    expect(await pressing(page, 'zeus-amber-pine', 'p1-still-pi')).toEqual(
-      NEWLINE_CASES.harnesses.pi.sends.windows,
-    )
-
-    await page.getByRole('button', { name: 'Project settings' }).click()
-    const settings = page.getByRole('dialog', { name: 'Project settings' })
-    await settings.getByRole('button', { name: 'Edit @zeus' }).first().click()
-    await pickMember(settings, { harness: 'Codex', model: 'gpt-6-astra', tier: 'standard' })
-    await settings.getByRole('button', { name: 'Save member' }).click()
-    await expect(page.locator('#status')).toContainText('from its next window')
-    await settings.getByRole('button', { name: 'Close' }).click()
-    // The same card and emulator, under the member's new name.
-    const after = page.locator('#stage .terminal-card[data-handle="gpt-6-astra-amber-pine"]')
-    await expect(after).toHaveCount(1)
-    expect(await after.evaluate((node) => node === window.__sameCard)).toBe(true)
-    expect(
-      await pressing(page, 'gpt-6-astra-amber-pine', 'p1-still-pi'),
-      'the window still runs Pi',
-    ).toEqual(NEWLINE_CASES.harnesses.pi.sends.windows)
-  })
-
-  test('a window of a member the ledger now says is on another harness keeps its launched harness when the page is loaded afresh', async ({
-    page,
-  }) => {
-    for (const [launched, configured] of [
-      ['pi', 'codex'],
-      ['codex', 'pi'],
-    ]) {
-      // What the daemon answers once the member has been edited and the page is loaded again: the
-      // window's pane says what it was launched with, whatever the participant is set to run now.
-      const data = model()
-      data.realTerminals = true
-      const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-      chief.participant.harness = configured
-      chief.pane = { id: 'p1-chief', generation: 5, harness: launched }
-      await open(page, data)
-      const input = page.locator(
-        '#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea',
-      )
-      await input.focus()
-      await input.press('Shift+Enter')
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () =>
-              window.__calls.filter(([n]) => n === 'pane_input_enqueue').at(-1)?.[1].bytes ?? [],
-          ),
-        )
-        .toEqual(NEWLINE_CASES.harnesses[launched].sends.windows)
-    }
-  })
-})
-
 test("New project and Switch chief say the same of the chief's model: the harness's own switch in the chief's window keeps its conversation and a reopen keeps the model", async ({
   page,
 }) => {
@@ -13198,6 +13087,25 @@ test.describe('file drop on Windows', () => {
     await humanPaste(page, 'chief', 'a — b')
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('a — b')
   })
+
+  // What a drop may carry is the harness the window was launched with, which the daemon says with
+  // its pane (T-1336): a member edited to another harness runs it from its next window.
+  for (const [launched, configured, typed, asked] of [
+    ['devin', 'codex', [`"${SMILING}"`], []],
+    ['codex', 'devin', ['C:\\Users\\me\\A-B~1.PNG'], [[SMILING]]],
+  ]) {
+    test(`goes by ${launched}, which a window was launched with, and not ${configured}, which its member is set to run now`, async ({
+      page,
+    }) => {
+      const data = chiefOn(configured, ALIASED)
+      const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+      chief.pane = { ...CHIEF_PANE, harness: launched }
+      await sideBySide(page, data)
+      await dragged.drop(page, [SMILING], told(await middleOf(page, 'chief'), 2))
+      await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(typed)
+      expect(await askedShort(page)).toEqual(asked)
+    })
+  }
 
   test('types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words', async ({
     page,
