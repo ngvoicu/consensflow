@@ -213,6 +213,14 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
             ]),
         );
     }
+    if let (Some(package), true) = (npm_package(harness), env.on_windows()) {
+        if let Some(prefix) = windows_npm_prefix(&real, harness.as_str(), package) {
+            return npm(
+                Some("npm".to_owned()),
+                windows_npm_update(&prefix, package, env),
+            );
+        }
+    }
     if let Some((_, arguments)) = own_installer(harness)
         .iter()
         .find(|(place, _)| place.holds(&real, env))
@@ -230,6 +238,75 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
     npm(None, None)
 }
 
+/// The prefix of the global npm install on Windows that the CLI at `real` (written with `/`) is
+/// of, `name` its command and `package` its npm package, none where it is no such install.
+///
+/// npm's own layout there (`npm prefix -g`; the default is `%APPDATA%\npm`): the prefix holds the
+/// shims of the global CLIs (`name.cmd`, `name.ps1` and `name`) and `node_modules` beside them,
+/// the package in it, with no `lib` and no `bin`. So a shim of the CLI's name in a folder that
+/// has `node_modules\<package>` beside it is the install, and so is a file of that package when
+/// its shim is in the folder `node_modules` is in. A project's own install has its shims in
+/// `node_modules\.bin`, which is neither.
+fn windows_npm_prefix(real: &str, name: &str, package: &str) -> Option<String> {
+    let file = Path::new(real);
+    let shim_of = file
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case(name));
+    if let (true, Some(folder)) = (shim_of, file.parent()) {
+        if folder
+            .join("node_modules")
+            .join(package)
+            .join("package.json")
+            .is_file()
+        {
+            return Some(folder.to_string_lossy().into_owned());
+        }
+    }
+    let inside = format!("/node_modules/{package}/");
+    let prefix = &real[..real.find(&inside)?];
+    Path::new(prefix)
+        .join(format!("{name}.cmd"))
+        .is_file()
+        .then(|| prefix.to_owned())
+}
+
+/// The command that updates the npm global install in `prefix` on Windows: the `npm.cmd` in the
+/// prefix where there is one (a portable Node folder, nvm-windows's), else the first on the PATH
+/// (the Node installer's is in `C:\Program Files\nodejs`, not in the prefix), told the prefix, so that
+/// the install is updated where it is whatever prefix that npm has by its own settings (a PATH
+/// can have another Node's npm first). None where no npm is found.
+fn windows_npm_update(prefix: &str, package: &str, env: &Env) -> Option<Vec<String>> {
+    let own = Path::new(prefix).join("npm.cmd");
+    let npm = if own.is_file() {
+        own
+    } else {
+        cf_process::on_path("npm", env)?
+    };
+    Some(vec![
+        path::join(&[&npm.to_string_lossy()]),
+        "install".to_owned(),
+        "-g".to_owned(),
+        "--prefix".to_owned(),
+        path::join(&[prefix]),
+        format!("{package}@latest"),
+    ])
+}
+
+/// The user's home as Codex reads it (`dirs::home_dir()`, 0.167.0): on Windows the user's profile
+/// folder, which the environment gives as `USERPROFILE`, and never `HOME`, which a shell (Git Bash:
+/// `/c/Users/me`, or any folder it was told) sets for itself; elsewhere `HOME` where that is not
+/// empty. Codex falls back to the account database where `HOME` is empty and the admin cannot,
+/// so it has none then.
+fn codex_user_home(env: &Env) -> Option<String> {
+    let name = if env.on_windows() {
+        "USERPROFILE"
+    } else {
+        "HOME"
+    };
+    set(env, name)
+}
+
 /// Whether the Codex at `real` (written with `/`, read where its links lead) is one of Codex's
 /// standalone install, which `codex update` updates: its installer (`install.ps1`, `install.sh`,
 /// Codex 0.167.0) puts a release in `packages/standalone/releases/<version>-<target>` of Codex's
@@ -237,8 +314,8 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
 /// leads to `current`.
 ///
 /// Codex tells it by that and nothing else (`codex-install-context`): its home is `CODEX_HOME`
-/// where that is set (it must be a folder that is there), else `.codex` in the user's home, and
-/// both are read where they lead; the program is standalone when it is under `releases` of
+/// where that is set (an absolute one, which must be a folder that is there), else `.codex` in the
+/// user's home ([`codex_user_home`]), and both are read where they lead; the program is standalone when it is under `releases` of
 /// `packages/standalone` there. The admin asks the same, with the environment Codex will be run
 /// with, so that what it offers an Update of is what `codex update` will update, and not a Codex
 /// that merely has such folders in its path (a project's, or a daemon's package inside one), or one
@@ -247,15 +324,18 @@ pub fn release_source(harness: Harness, executable: &str, env: &Env) -> Source {
 fn is_codex_standalone(real: &str, env: &Env) -> bool {
     let chosen = match set(env, "CODEX_HOME") {
         Some(chosen) => {
+            // A relative one is read against the folder Codex is started in, and `codex update`
+            // runs its installer script in another (a temporary one), which reads the variable
+            // there: two homes for one install, so none is offered an Update.
             let chosen = PathBuf::from(chosen);
-            if !chosen.is_dir() {
+            if !chosen.is_absolute() || !chosen.is_dir() {
                 return false;
             }
             chosen
         }
-        None => match home(env) {
-            Ok(home) => PathBuf::from(path::join(&[&home, ".codex"])),
-            Err(_) => return false,
+        None => match codex_user_home(env) {
+            Some(home) => PathBuf::from(path::join(&[&home, ".codex"])),
+            None => return false,
         },
     };
     let Ok(codex_home) = fs::canonicalize(chosen) else {

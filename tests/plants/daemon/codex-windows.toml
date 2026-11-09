@@ -81,3 +81,114 @@ runs = ["codex-admin-update", "codex-admin-real"]
 file = "crates/cf-harness/src/admin/source.rs"
 find = "        let mut update = vec![executable.to_owned()];"
 replace = "        let mut update = vec![real.clone()];"
+
+# Codex's home on Windows is the profile folder, and a relative CODEX_HOME is offered no Update
+# (T-1339's second reading).
+[[plant]]
+name = "codex-windows: the home Codex reads on Windows is HOME, a shell's"
+meant = "the_home_codex_reads_is_the_windows_profile_on_windows_and_home_elsewhere"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '    let name = if env.on_windows() { "USERPROFILE" } else { "HOME" };'
+replace = '    let name = "HOME";'
+
+[[plant]]
+name = "codex-windows: a relative CODEX_HOME is a home like any other"
+meant = "a_relative_codex_home_is_offered_no_update"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = "            if !chosen.is_absolute() || !chosen.is_dir() {"
+replace = "            if !chosen.is_dir() {"
+
+# npm's global folder on Windows (T-1340's brief, taken over by T-1334): the shims in the prefix
+# beside node_modules, the package in it, and the update by an npm told the prefix.
+[[plant]]
+name = "codex-windows: npm on Windows is no layout the admin reads"
+meant = "a_global_npm_install_on_windows_is_told_by_its_shim_beside_node_modules_and_updated_into_its_prefix"
+runs = ["codex-admin-source", "codex-admin-update"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = "    if let (Some(package), true) = (npm_package(harness), env.on_windows()) {"
+replace = "    if let (Some(package), true) = (npm_package(harness), false) {"
+
+[[plant]]
+name = "codex-windows: npm's Windows layout is read on any system"
+meant = "the_windows_layout_is_read_only_where_the_environment_is_windows"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = "    if let (Some(package), true) = (npm_package(harness), env.on_windows()) {"
+replace = "    if let (Some(package), true) = (npm_package(harness), true) {"
+
+[[plant]]
+name = "codex-windows: the npm update is told no prefix"
+meant = "a_global_npm_install_on_windows_is_told_by_its_shim_beside_node_modules_and_updated_into_its_prefix"
+runs = ["codex-admin-source", "codex-admin-update"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+        "--prefix".to_owned(),
+        path::join(&[prefix]),
+'''
+replace = ""
+
+[[plant]]
+name = "codex-windows: the npm beside a custom prefix is passed over for the PATH's"
+meant = "the_npm_beside_a_custom_prefix_is_the_one_run_and_none_found_gives_no_command"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = "    let npm = if own.is_file() {"
+replace = "    let npm = if false {"
+
+[[plant]]
+name = "codex-windows: any file beside the package is the harness's shim"
+meant = "what_is_no_global_npm_install_on_windows_is_the_humans_to_update"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = "        .is_some_and(|stem| stem.eq_ignore_ascii_case(name));"
+replace = "        .is_some();"
+
+[[plant]]
+name = "codex-windows: a package's file is the install without its shim"
+meant = "what_is_no_global_npm_install_on_windows_is_the_humans_to_update"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+        .is_file()
+        .then(|| prefix.to_owned())
+'''
+replace = '''
+        .parent()
+        .is_some()
+        .then(|| prefix.to_owned())
+'''
+
+[[plant]]
+name = "codex-windows: the shim stands for the install without its package"
+meant = "what_is_no_global_npm_install_on_windows_is_the_humans_to_update"
+runs = ["codex-admin-source"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+            .join("package.json")
+            .is_file()
+'''
+replace = '''
+            .join("package.json")
+            .parent()
+            .is_some()
+'''

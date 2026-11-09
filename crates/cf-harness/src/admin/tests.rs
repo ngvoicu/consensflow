@@ -16,8 +16,11 @@ use crate::testing::{finished, Driver, ManualTime, Response, ScriptedCapture, Sc
 use crate::testing::{named, EPOCH_MS};
 
 mod looks;
+pub(super) mod npm_windows;
 #[cfg(unix)]
 mod real;
+#[cfg(windows)]
+mod real_windows;
 pub(super) mod standalone;
 
 /// An admin over a throwaway home, on a clock and with programs and feeds the
@@ -33,14 +36,22 @@ pub(super) struct Fixture {
 
 impl Fixture {
     pub(super) fn new() -> Self {
+        Self::in_env(|root| {
+            let text = |folder: &str| root.join(folder).to_string_lossy().into_owned();
+            Env::from_vars([
+                ("HOME", text("home")),
+                ("USERPROFILE", text("home")),
+                ("PATH", text("bin")),
+                ("CONSENSFLOW_HOME", text("consensflow")),
+                ("CLAUDE_CONFIG_DIR", text("home/.claude")),
+            ])
+        })
+    }
+
+    /// An admin over a throwaway folder whose environment `make` says, given the folder.
+    pub(super) fn in_env(make: impl FnOnce(&std::path::Path) -> Env) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let text = |folder: &str| root.path().join(folder).to_string_lossy().into_owned();
-        let env = Env::from_vars([
-            ("HOME", text("home")),
-            ("PATH", text("bin")),
-            ("CONSENSFLOW_HOME", text("consensflow")),
-            ("CLAUDE_CONFIG_DIR", text("home/.claude")),
-        ]);
+        let env = make(root.path());
         let time = Rc::new(ManualTime::new(EPOCH_MS));
         let capture = Rc::new(ScriptedCapture::default());
         let latest = Rc::new(ScriptedLatest::default());
