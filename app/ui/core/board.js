@@ -321,7 +321,7 @@ function route(task) {
         ? 'held until you say its model may go on'
         : task.heldUntil.startsWith('9999-')
           ? 'unavailable until you say it works again'
-          : `out of quota until ${backAt(task.heldUntil)}`
+          : `out of quota until ${backAt(task.heldUntil)}; renewed early? Try its member again now`
     return `${until} · from ${who(task.requester)}`
   }
   return task.blockedBy.length === 0
@@ -481,7 +481,7 @@ export function laneStatus(lane, board, now) {
     } else if (unavailable(participant)) {
       out = `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Press Try again now once it works`
     } else {
-      out = `Out of quota until ${backAt(participant.outUntil, now)}`
+      out = `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
     }
     return ['out', lane.holding ? `${out}. ${holding}` : out]
   }

@@ -445,7 +445,20 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .mark_back(member.id, "by @human")?;
+        // The quota the human renewed is the account's: every project's members on the
+        // harness's one login are back (T-1357), this project's first.
+        let projects: Vec<i64> = self
+            .seams
+            .ledger
+            .borrow()
+            .projects()?
+            .into_iter()
+            .map(|other| other.id)
+            .collect();
         self.back_on_its_account(project, &member, &News::Human)?;
+        for other in projects.into_iter().filter(|other| *other != project) {
+            self.back_on_its_account(other, &member, &News::Human)?;
+        }
         self.changed();
         Ok(back)
     }

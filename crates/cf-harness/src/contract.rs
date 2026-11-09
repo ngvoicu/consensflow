@@ -184,6 +184,18 @@ pub trait Adapter {
         false
     }
 
+    /// Whether the machine has one login for this harness, which all its windows use, so
+    /// that the human's word that its quota is renewed (Try again now, T-1357) is for every
+    /// member on it, in every project: the quota they renewed is the account's, not one
+    /// member's. Not Pi, which logs into a provider for each model, so two of its members may
+    /// be on two accounts. It holds where [`Adapter::one_account`] does, and for Codex, Devin
+    /// and Muse as well: each keeps the machine's one login, though nobody has probed what a
+    /// login changed under an open window does there, which `one_account` needs and this
+    /// does not (a window's own turn is never taken as news here: only the human's word is).
+    fn one_login(&self) -> bool {
+        self.one_account()
+    }
+
     /// How a window is given its first message ([`FirstMessage`]).
     fn first_message(&self) -> FirstMessage;
 

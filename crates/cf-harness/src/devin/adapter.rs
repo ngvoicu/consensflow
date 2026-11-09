@@ -281,6 +281,11 @@ const DEVIN_PASTE: SilentPaste = SilentPaste {
 };
 
 impl Adapter for DevinAdapter {
+    /// Devin keeps the machine's one login, which all its windows use.
+    fn one_login(&self) -> bool {
+        true
+    }
+
     fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(super::models::listed(
             &self.services.env,

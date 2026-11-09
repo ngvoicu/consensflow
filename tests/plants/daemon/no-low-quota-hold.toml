@@ -19,12 +19,27 @@
 # a Codex refusal at the edge of its allowance takes the reset of the window that is past 95
 # percent (`reset_after`), which picks a reset and holds nobody.
 #
+# The same table holds the plants of T-1357, the quota the person renewed by hand: the board
+# learns of a quota from a record of one of a member's windows, so a member marked out until its
+# reset stays out when the human renews the quota early, unless they say so (Try again now,
+# `member.back`, `back_from_quota`). Their word is for the account they renewed: every member on
+# the harness's one login is back (`Adapter::one_login`: Claude Code, Codex, Devin and Muse, not
+# Pi, which logs into a provider for each model), in every project; the wait for a free member
+# says what to press (`scheduler.rs`, `out_for_a_reset`), and the board's lane and a held task's
+# card say the quota may have been renewed. Tests: `crates/cf-engine/tests/dispatcher/
+# renewed_quota.rs`, `crates/cf-harness/tests/launch/one_login.rs`, the page's.
+#
 # Every name holds `no low hold`, so `cargo xtask plants daemon "no low hold"` runs them all.
 
 [run]
 no-low-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota::"]
 no-low-hold-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::"]
 no-low-hold-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+no-low-hold-renewed = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "renewed_quota::"]
+no-low-hold-busy = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
+no-low-hold-login = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "one_login"]
+no-low-hold-page-lane = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "shows a member out of quota"]
+no-low-hold-page-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a task held while its member is out of quota says when it goes on"]
 
 [[plant]]
 name = "no low hold: a member nearly out of quota is given no new work on any harness"
@@ -217,4 +232,226 @@ find = '''
 '''
 replace = '''
         .filter(|quota| quota.level() == Level::Exhausted)
+'''
+
+[[plant]]
+name = "no low hold: the human's word is for the harnesses whose windows follow a login, as a turn's is"
+meant = "the_humans_word_for_one_codex_member_brings_back_every_member_on_its_login_in_every_project"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                News::Human => adapter.one_login(),
+'''
+replace = '''
+                News::Human => adapter.one_account(),
+'''
+
+[[plant]]
+name = "no low hold: the human's word is for Pi's members too"
+meant = "the_humans_word_for_one_pi_member_is_for_that_member_alone"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                News::Human => adapter.one_login(),
+'''
+replace = '''
+                News::Human => true,
+'''
+
+[[plant]]
+name = "no low hold: the human's word is for the project it is said in"
+meant = "the_humans_word_for_one_codex_member_brings_back_every_member_on_its_login_in_every_project"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        for other in projects.into_iter().filter(|other| *other != project) {
+'''
+replace = '''
+        for other in projects.into_iter().filter(|_| false) {
+'''
+
+[[plant]]
+name = "no low hold: a wait for a member out of quota says nothing of a renewal"
+meant = "a_wait_for_a_member_out_of_quota_says_to_press_try_again_now_if_it_was_renewed_early"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                let renewed = if renewable.is_empty() {
+'''
+replace = '''
+                let renewed = if true {
+'''
+
+[[plant]]
+name = "no low hold: a wait for a member held for its account or its model says to renew its quota"
+meant = "a_wait_for_a_member_held_for_its_account_or_its_model_names_no_renewal_of_a_quota"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        !never(until) && self.busy_until(member).as_deref() != Some(until)
+'''
+replace = '''
+        self.busy_until(member).as_deref() != Some(until)
+'''
+
+[[plant]]
+name = "no low hold: a wait for a member whose model is busy says to renew its quota"
+meant = "the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota"
+runs = ["no-low-hold-busy"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        !never(until) && self.busy_until(member).as_deref() != Some(until)
+'''
+replace = '''
+        !never(until)
+'''
+
+[[plant]]
+name = "no low hold: a wait names a member that is not out"
+meant = "a_wait_names_for_a_renewal_only_the_members_out_now"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let Some(until) = out_until.filter(|until| self.out(Some(until))) else {
+'''
+replace = '''
+        let Some(until) = out_until else {
+'''
+
+[[plant]]
+name = "no low hold: Codex has no one login for the human's word"
+meant = "every_harness_but_pi_has_one_login_on_every_platform"
+runs = ["no-low-hold-login"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''
+    /// Codex keeps the machine's one login, which all its windows use.
+    fn one_login(&self) -> bool {
+        true
+    }
+'''
+replace = '''
+    /// Codex keeps the machine's one login, which all its windows use.
+    fn one_login(&self) -> bool {
+        false
+    }
+'''
+
+[[plant]]
+name = "no low hold: Devin has no one login for the human's word"
+meant = "every_harness_but_pi_has_one_login_on_every_platform"
+runs = ["no-low-hold-login"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''
+    /// Devin keeps the machine's one login, which all its windows use.
+    fn one_login(&self) -> bool {
+        true
+    }
+'''
+replace = '''
+    /// Devin keeps the machine's one login, which all its windows use.
+    fn one_login(&self) -> bool {
+        false
+    }
+'''
+
+[[plant]]
+name = "no low hold: Muse has no one login for the human's word"
+meant = "every_harness_but_pi_has_one_login_on_every_platform"
+runs = ["no-low-hold-login"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/adapter.rs"
+find = '''
+    /// Muse keeps the machine's one login, which all its windows use.
+    fn one_login(&self) -> bool {
+        true
+    }
+'''
+replace = '''
+    /// Muse keeps the machine's one login, which all its windows use.
+    fn one_login(&self) -> bool {
+        false
+    }
+'''
+
+[[plant]]
+name = "no low hold: Pi has one login for the human's word"
+meant = "every_harness_but_pi_has_one_login_on_every_platform"
+runs = ["no-low-hold-login"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+    fn one_login(&self) -> bool {
+        self.one_account()
+    }
+'''
+replace = '''
+    fn one_login(&self) -> bool {
+        true
+    }
+'''
+
+[[plant]]
+name = "no low hold: Claude Code has no one login for the human's word"
+meant = "every_harness_but_pi_has_one_login_on_every_platform"
+runs = ["no-low-hold-login"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+    fn one_login(&self) -> bool {
+        self.one_account()
+    }
+'''
+replace = '''
+    fn one_login(&self) -> bool {
+        false
+    }
+'''
+
+[[plant]]
+name = "no low hold: a lane out of quota does not say it may have been renewed"
+meant = "shows a member out of quota, and a reviewer's review tasks as cards on its row like any task"
+runs = ["no-low-hold-page-lane"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+      out = `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
+'''
+replace = '''
+      out = `Out of quota until ${backAt(participant.outUntil, now)}`
+'''
+
+[[plant]]
+name = "no low hold: a held task's card does not say its member may have been renewed"
+meant = "a task held while its member is out of quota says when it goes on"
+runs = ["no-low-hold-page-card"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+          : `out of quota until ${backAt(task.heldUntil)}; renewed early? Try its member again now`
+'''
+replace = '''
+          : `out of quota until ${backAt(task.heldUntil)}`
 '''

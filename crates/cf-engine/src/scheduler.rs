@@ -355,6 +355,26 @@ impl Dispatcher {
                         false => "none of them is free".to_owned(),
                     });
                 }
+                // A member out until its reset may have had its quota renewed by hand: the
+                // human's Try again now says so, and the wait says to press it (T-1357).
+                let renewable: Vec<String> = candidates
+                    .iter()
+                    .filter(|candidate| {
+                        self.out_for_a_reset(
+                            candidate.member.id,
+                            candidate.member.out_until.as_deref(),
+                        )
+                    })
+                    .map(|candidate| format!("@{}", candidate.member.handle))
+                    .collect();
+                let renewed = if renewable.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " If the quota was renewed early, the human presses Try again now on {}.",
+                        renewable.join(" or ")
+                    )
+                };
                 self.seams.ledger.borrow_mut().note(
                     project.id,
                     &NewNote {
@@ -362,7 +382,7 @@ impl Dispatcher {
                         to: task.requester.clone(),
                         task: Some(task.number),
                         body: format!(
-                            "T-{} waits for a free {pool}: {}.",
+                            "T-{} waits for a free {pool}: {}.{renewed}",
                             task.number,
                             why.join("; ")
                         ),
@@ -463,6 +483,16 @@ impl Dispatcher {
     /// Whether a member is out of quota now.
     pub(crate) fn is_out(&self, member: &ParticipantView) -> bool {
         self.out(member.out_until.as_deref())
+    }
+
+    /// Whether a member is out until a reset its harness named (or an hour on): the human may
+    /// know it was renewed early. Not one held for its account or its model's move (`never`
+    /// holds both) or for a busy server, which a renewal does not end.
+    fn out_for_a_reset(&self, member: i64, out_until: Option<&str>) -> bool {
+        let Some(until) = out_until.filter(|until| self.out(Some(until))) else {
+            return false;
+        };
+        !never(until) && self.busy_until(member).as_deref() != Some(until)
     }
 
     fn out(&self, until: Option<&str>) -> bool {
@@ -746,7 +776,8 @@ impl Dispatcher {
     /// until its reset, with everything sent to it queued (the field report of
     /// 2026-10-22, T-254).
     ///
-    /// The human's word brings back all of them. A window's turn that got through
+    /// The human's word brings back all of them, in every project (`back_from_quota`):
+    /// the quota they renewed by hand is the account's. A window's turn that got through
     /// is news for those marked out before it, read from the ledger as it is now
     /// (one marked out earlier in this pass too), once for each answer. One
     /// account is not one quota: a plan may limit one model by the week, so a
@@ -763,12 +794,18 @@ impl Dispatcher {
         let Some(harness) = owner.harness.as_deref() else {
             return Ok(());
         };
-        let one_account = self
+        // A window's turn is news for the others only where nobody has to look to know they
+        // share the account (`one_account`); the human's word is for the harness's one login on
+        // the machine (`one_login`): the quota they renewed is the account's.
+        let shared = self
             .seams
             .adapters
             .adapter(harness)
-            .is_some_and(|adapter| adapter.one_account());
-        if !one_account {
+            .is_some_and(|adapter| match news {
+                News::Human => adapter.one_login(),
+                News::Turn { .. } => adapter.one_account(),
+            });
+        if !shared {
             return Ok(());
         }
         if let News::Turn {
