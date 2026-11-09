@@ -317,6 +317,36 @@ file = "app/ui/selftest.js"
 find = "      model: 'claude-fable-5-1',\n"
 replace = "      model: 'claude-fable-6-0',\n"
 
+[[plant]]
+name = "packaged smoke: the hidden case's harness lists neither model the page's self-test opens its project with"
+meant = "the_script_lists_every_model_the_pages_selftest_opens_its_project_with"
+runs = ["smoke-harness-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-hidden-harness.sh"
+find = "chief worker claude-fable-5-1 terpsichore; do"
+replace = "chief worker; do"
+
+[[plant]]
+name = "packaged smoke: the hidden case's harness does not answer the read of the models"
+meant = "each_script_answers_the_read_of_its_models_with_every_model_the_selftest_names"
+runs = ["smoke-harness-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-hidden-harness.sh"
+find = 'if [ "$1" = "-p" ]; then'
+replace = 'if [ "$1" = "-q" ]; then'
+
+[[plant]]
+name = "packaged smoke: the smoke's harness answers the read of the models and then draws a window"
+meant = "each_script_answers_the_read_of_its_models_with_every_model_the_selftest_names"
+runs = ["smoke-harness-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-harness.sh"
+find = "  done\n  exit 0\nfi\necho $$ >> \"$CFSMOKE_PIDFILE\"\n"
+replace = "  done\nfi\necho $$ >> \"$CFSMOKE_PIDFILE\"\n"
+
 # The cases it leaves out (CONSENSFLOW_SMOKE_SKIP): CI's packaged job leaves out the hidden
 # window's until alpha.5's host-display core (T-1362).
 [[plant]]
