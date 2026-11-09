@@ -89,7 +89,6 @@ fn a_program_that_took_an_ended_windows_number_is_none_of_the_windows() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_window_still_there_is_said_with_what_it_is() {
     let folder = tempfile::tempdir().unwrap();
