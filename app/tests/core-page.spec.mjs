@@ -1602,6 +1602,31 @@ test('names the day of a reset that is not today, and tries a member or the chie
   await expect(page.locator('tr[data-handle="zeus"] .try-again')).toHaveCount(0)
 })
 
+test('the staff in Project settings says a member is out of quota and tries it again now', async ({
+  page,
+}) => {
+  // The human renewed the quota by hand (T-1357): the staff list says who is out and has the
+  // button, as the board's row does, and a member not out has neither.
+  const data = model()
+  const reset = new Date(Date.now() + 90 * 60_000).toISOString()
+  const lanes = data.boards[1].lanes
+  lanes.find((lane) => lane.participant.handle === 'diana').participant.outUntil = reset
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const diana = dialog.locator('#staff-members tr[data-handle="diana"]')
+  await expect(diana.locator('.member-out')).toHaveText(
+    /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/,
+  )
+  await expect(dialog.locator('#staff-members tr[data-handle="zeus"] .member-out')).toHaveCount(0)
+  await expect(dialog.locator('#staff-members tr[data-handle="zeus"] .try-again')).toHaveCount(0)
+  await diana
+    .getByRole('button', { name: 'Try @diana again now, before its quota resets' })
+    .first()
+    .click()
+  expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
+})
+
 test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
   const data = model()
   const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')

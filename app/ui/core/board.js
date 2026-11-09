@@ -426,6 +426,25 @@ function identityLine(participant, className) {
 }
 
 /**
+ * What a participant out of quota is waiting for, or null when it is not out: why, in the
+ * engine's own words (its account refused, its model moved on its own), where it said them;
+ * else what the time it marked the member out until says of it, and that the human may have
+ * renewed the quota early (T-1357). Said on its row, the chief's card and the staff list.
+ */
+export function outWords({ participant, activity }, now) {
+  if (!outOfQuota(participant, now)) return null
+  const said = (prefix) =>
+    activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+  if (modelMoved(participant)) {
+    return `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
+  }
+  if (unavailable(participant)) {
+    return `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Press Try again now once it works`
+  }
+  return `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
+}
+
+/**
  * What a row, or the chief's card in the dock, says its participant is
  * doing, and the state that colours it: a chief being switched or a member out of
  * quota say so before anything its window does. A member with no terminal open says nothing (null): its row has no
@@ -470,21 +489,8 @@ export function laneStatus(lane, board, now) {
       'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it',
     ]
   }
-  if (outOfQuota(participant, now)) {
-    // Why, in the engine's own words (its account refused, its model moved on its own), where
-    // it said them; else what the time it marked the member out until says of it.
-    const said = (prefix) =>
-      activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
-    let out
-    if (modelMoved(participant)) {
-      out = `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
-    } else if (unavailable(participant)) {
-      out = `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Press Try again now once it works`
-    } else {
-      out = `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
-    }
-    return ['out', lane.holding ? `${out}. ${holding}` : out]
-  }
+  const out = outWords(lane, now)
+  if (out !== null) return ['out', lane.holding ? `${out}. ${holding}` : out]
   if (lane.holding) return ['holding', holding]
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]

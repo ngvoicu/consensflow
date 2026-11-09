@@ -39,6 +39,7 @@ no-low-hold-renewed = ["cargo", "test", "--offline", "-p", "cf-engine", "--test"
 no-low-hold-busy = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
 no-low-hold-login = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "one_login"]
 no-low-hold-page-lane = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "shows a member out of quota"]
+no-low-hold-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the staff in Project settings says a member is out"]
 no-low-hold-page-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a task held while its member is out of quota says when it goes on"]
 
 [[plant]]
@@ -436,10 +437,10 @@ runs = ["no-low-hold-page-lane"]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-      out = `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
+  return `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
 '''
 replace = '''
-      out = `Out of quota until ${backAt(participant.outUntil, now)}`
+  return `Out of quota until ${backAt(participant.outUntil, now)}`
 '''
 
 [[plant]]
@@ -454,4 +455,32 @@ find = '''
 '''
 replace = '''
           : `out of quota until ${backAt(task.heldUntil)}`
+'''
+
+[[plant]]
+name = "no low hold: the staff list does not say a member is out"
+meant = "the staff in Project settings says a member is out of quota and tries it again now"
+runs = ["no-low-hold-page-staff"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    const words = lane ? outWords(lane, Date.now()) : null
+'''
+replace = '''
+    const words = null
+'''
+
+[[plant]]
+name = "no low hold: the staff list's Try again now says nothing to the daemon"
+meant = "the staff in Project settings says a member is out of quota and tries it again now"
+runs = ["no-low-hold-page-staff"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+          await page.daemon('member.back', {
+'''
+replace = '''
+          await page.daemon('member.noted', {
 '''
