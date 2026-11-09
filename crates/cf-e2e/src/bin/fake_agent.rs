@@ -169,7 +169,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_e2e::pattern;
-use cf_e2e::process::{own_var, started};
+use cf_e2e::process::own_var;
+use cf_e2e::rig::start_of;
 use regex::Regex;
 use serde_json::json;
 
@@ -291,7 +292,7 @@ fn run(
     // with when this one began: a number a run of minutes gave out again is
     // held to the process it is now, not the number (T-1077).
     let beside = Path::new(&home).parent().unwrap_or(Path::new("."));
-    note_process(beside, pid, &launch.session, started(pid).as_deref())
+    note_process(beside, pid, &launch.session, start_of(pid).as_deref())
         .map_err(|failed| failed.to_string())?;
     // Ended when its terminal hangs up or it is asked to: the status file goes,
     // and the code is 0, as the Node stand-in's was.

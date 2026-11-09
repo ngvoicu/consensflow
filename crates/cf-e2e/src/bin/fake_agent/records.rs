@@ -267,7 +267,7 @@ fn write_line(out: &mut impl Write, record: &Value) -> io::Result<()> {
 
 /// Writes down that the window's process `pid` runs `session`, in the files
 /// the test reads, beside the daemon's home: its id alone, with the session, and
-/// when it began (`began`, in the words `cf_e2e::process::started` says it), which
+/// when it began (`began`, in the words `cf_e2e::rig::start_of` says it), which
 /// the rig's look at what was left holds a still-held number to: a process is a
 /// window's only while it is the one that began then.
 pub fn note_process(beside: &Path, pid: u32, session: &str, began: Option<&str>) -> io::Result<()> {

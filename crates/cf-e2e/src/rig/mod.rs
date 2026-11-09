@@ -57,6 +57,7 @@ use crate::{checkout, files, wire, Error, Result};
 pub use commands::names_command;
 pub use homes::HarnessHome;
 pub use jobs::Job;
+pub use left::start_of;
 pub use names::project_name;
 pub use project::{chief_body, chief_of, member_body, write_staff, Project};
 pub use route::{Held, Pasted};

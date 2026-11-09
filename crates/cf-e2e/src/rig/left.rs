@@ -100,6 +100,19 @@ fn command(pid: u32) -> Option<String> {
         .map(|running| running.command)
 }
 
+/// When the process `pid` began, in the words the leftover check holds a noted
+/// number to: the same for the same process, others for one that took its number
+/// after it; none where it is gone. Read in this process from the system's own record
+/// of the process (macOS's `proc_pidinfo`, Windows' `GetProcessTimes`, `ps` on Linux),
+/// with no program started on the Mac or on Windows: a stand-in asks it of itself as its
+/// window opens, before the window draws anything, and a PowerShell asked it in 11 to
+/// 17 s on GitHub's Windows runner, which held every window of a rig that long (T-1358).
+pub fn start_of(pid: u32) -> Option<String> {
+    use crate::live::members::{Machine, ThisMachine};
+    let identity = ThisMachine.identity(pid).ok()??;
+    Some(identity.started.to_string())
+}
+
 /// Whether the process `pid` is another's than the window the note is of. Where the
 /// note says when the window's began, one that began at another time is another
 /// program's — the window's ended, and the system gave its number to it. Where none
@@ -108,7 +121,7 @@ fn another_holds(pid: u32, began: &HashMap<u32, Vec<String>>, noted: &Path) -> b
     let Some(begins) = began.get(&pid).filter(|begins| !begins.is_empty()) else {
         return began_after(pid, noted);
     };
-    match process::started(pid) {
+    match start_of(pid) {
         Some(this) => !begins.contains(&this),
         // The system will not say when it began: gone by now it is none of the
         // windows'; still there but not to be told from, it is held to being one.
@@ -118,7 +131,7 @@ fn another_holds(pid: u32, began: &HashMap<u32, Vec<String>>, noted: &Path) -> b
 
 /// When each noted process began, by its number, as `began.jsonl` beside `pids_file`
 /// says it: a line for each a stand-in wrote, `pid` and the words the system said its
-/// start in (`process::started`), the same words it is looked at in here.
+/// start in ([`start_of`]), the same words it is looked at in here.
 fn began_beside(pids_file: &Path) -> HashMap<u32, Vec<String>> {
     let mut began: HashMap<u32, Vec<String>> = HashMap::new();
     let file = pids_file.with_file_name("began.jsonl");

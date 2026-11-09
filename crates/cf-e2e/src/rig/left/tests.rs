@@ -49,7 +49,7 @@ fn noted(folder: &Path, pid: u32, ago: Duration) -> std::path::PathBuf {
 }
 
 /// `began.jsonl` beside the `pids` file, saying the process `pid` began `started`,
-/// in the words `process::started` would say them.
+/// in the words [`start_of`] would say them.
 fn began(folder: &Path, pid: u32, started: &str) {
     fs::write(folder.join("began.jsonl"), format!("{pid}\t{started}\n")).unwrap();
 }
@@ -61,11 +61,7 @@ fn a_process_that_began_when_its_note_says_is_the_windows() {
     let folder = tempfile::tempdir().unwrap();
     let window = sleeper();
     let file = noted(folder.path(), window.id(), Duration::ZERO);
-    began(
-        folder.path(),
-        window.id(),
-        &process::started(window.id()).unwrap(),
-    );
+    began(folder.path(), window.id(), &start_of(window.id()).unwrap());
     let left = left_behind(&file, Duration::from_millis(200), SLEEPER).expect("a window was left");
     assert!(left.starts_with(&window.id().to_string()), "{left}");
 }
@@ -210,4 +206,20 @@ fn the_program_a_window_runs_is_the_stand_in_binary_that_notes_its_number() {
         source.contains("note_process(beside, pid,"),
         "fake_agent notes its number"
     );
+}
+
+/// A process's start is read in the process, with no program started: a stand-in asks it of
+/// itself as its window opens, before its window draws anything, and a PowerShell to ask it
+/// (11 to 17 s on GitHub's Windows runner) held every window of a rig that long (T-1358: the
+/// rig's and the live matrix's Windows cases timed out on screens that stayed empty).
+#[test]
+fn a_processes_start_is_read_at_once_and_is_the_same_each_time() {
+    let me = std::process::id();
+    let at = std::time::Instant::now();
+    let first = start_of(me).expect("this process began");
+    for _ in 0..19 {
+        assert_eq!(start_of(me).as_deref(), Some(first.as_str()));
+    }
+    let took = at.elapsed();
+    assert!(took < Duration::from_millis(50), "20 reads took {took:?}");
 }
