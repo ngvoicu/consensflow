@@ -348,6 +348,13 @@ impl io::Write for Input {
         self.file.write(bytes)
     }
 
+    /// Every write of the window's input: a key that begins with Escape is written into a pipe
+    /// that holds nothing unread, so that the console host reads its bytes together and does not
+    /// take an Escape that ends one of its reads for the Escape key (`unread`).
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        unread::write_all_keeping_keys_whole(&mut self.file, bytes).map(drop)
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         self.file.flush()
     }
@@ -800,4 +807,4 @@ pub(super) mod closes {
 }
 
 #[cfg(test)]
-mod tests;
+pub(in crate::pty) mod tests;

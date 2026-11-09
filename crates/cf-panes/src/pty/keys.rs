@@ -64,8 +64,16 @@ mod conpty {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    use std::sync::mpsc;
+    use std::thread;
+
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SUSPEND_RESUME};
+
     use super::{keys_read, KeyRead};
+    use crate::arbiter::{EnterTiming, InputArbiter};
     use crate::pty::conpty::host_library;
+    use crate::pty::conpty::tests::child_of;
     use crate::pty::conpty_test::{open, powershell, read_until, take};
     use crate::pty::{serial_pty_test, PaneKey, PaneOutput, PaneTable};
 
@@ -426,74 +434,261 @@ mod conpty {
 
     /// A program that says READY, prints each key it reads that is not an `x` as
     /// `KEY<n>=[<key>|<character>|<modifiers>]#` (`n` counting every key read), and says DONE
-    /// once no key has come for three seconds.
-    fn quiet_key_reader() -> Vec<String> {
-        powershell(
+    /// once no key has come for `quiet` seconds.
+    fn quiet_key_reader(quiet: u32) -> Vec<String> {
+        powershell(&format!(
             "Write-Output 'READY'; $n = 0; $last = Get-Date; \
-             while (((Get-Date) - $last).TotalSeconds -lt 3) { \
-               if ([Console]::KeyAvailable) { $k = [Console]::ReadKey($true); $n++; $last = Get-Date; \
-                 if ($k.KeyChar -ne 'x') { Write-Output (\"KEY{0}=[{1}|{2}|{3}]#\" -f $n, $k.Key, [int]$k.KeyChar, [int]$k.Modifiers) } } \
-               else { Start-Sleep -Milliseconds 20 } }; \
-             Write-Output 'DONE'",
-        )
+             while (((Get-Date) - $last).TotalSeconds -lt {quiet}) {{ \
+               if ([Console]::KeyAvailable) {{ $k = [Console]::ReadKey($true); $n++; $last = Get-Date; \
+                 if ($k.KeyChar -ne 'x') {{ Write-Output (\"KEY{{0}}=[{{1}}|{{2}}|{{3}}]#\" -f $n, $k.Key, [int]$k.KeyChar, [int]$k.Modifiers) }} }} \
+               else {{ Start-Sleep -Milliseconds 20 }} }}; \
+             Write-Output 'DONE'"
+        ))
     }
 
     /// The keys, other than the `x`s, that a program which reads key events reads when `filler`
-    /// `x`s and then `key` are written to its pane in one write (as the pane host writes a
-    /// human's keys behind a paste that has not been read yet).
-    fn keys_behind(filler: usize, key: &[u8]) -> (Vec<(String, u32, u32)>, String) {
+    /// `x`s and then `key` are written to its pane in one write: through the pane host's human
+    /// path (the arbiter's typed write, as the page's keys are) where `human`, else straight to the
+    /// pane's input; and how long the write took.
+    fn keys_behind(
+        filler: usize,
+        key: &[u8],
+        human: bool,
+    ) -> (Vec<(String, u32, u32)>, String, Duration) {
         let _pty_guard = serial_pty_test();
         of_the_shipped_host();
         let table = Arc::new(PaneTable::new());
-        let (pane, output) = open(&table, &quiet_key_reader(), &HashMap::new(), 1 << 20);
+        let (pane, output) = open(&table, &quiet_key_reader(3), &HashMap::new(), 1 << 20);
         read_until(&table, &pane, &output, "READY");
         let mut bytes = vec![b'x'; filler];
         bytes.extend_from_slice(key);
-        table.write(&pane, &bytes).expect("write the keys");
+        let started = Instant::now();
+        if human {
+            let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+            arbiter.register(&pane).expect("register the pane");
+            arbiter
+                .write_typed(&table, &pane, &bytes)
+                .expect("write the keys as the human's");
+        } else {
+            table.write(&pane, &bytes).expect("write the keys");
+        }
+        let waited = started.elapsed();
         let seen = read_until(&table, &pane, &output, "DONE");
         table.kill(&pane).expect("close the pane");
         let keys = keys_read(&seen)
             .into_iter()
             .map(|read| (read.key, read.character, read.modifiers))
             .collect();
-        (keys, seen)
+        (keys, seen, waited)
     }
 
-    /// What the page writes for a new line must never reach a window as a lone Escape (T-1336):
-    /// an Escape is the key that stops a harness's turn. The console host reads its input
+    /// A key that begins with Escape must never reach a window as a lone Escape (T-1336): an Escape
+    /// is the key that stops a harness's turn. The console host reads a pane's input
     /// `CONSOLE_READ` bytes at a time and takes an Escape that ends a read for the Escape key,
     /// whatever follows in the next (it holds one only after it has read a key written in
     /// win32-input-mode, which holds every lone Escape the engine presses for good:
     /// `after_one_key_in_win32_input_mode_the_console_host_holds_the_lone_escapes_the_engine_presses`).
-    /// So an `ESC CR` that begins at the last byte of a read is the Escape key, then Enter.
+    /// So an `ESC CR` written where a read ends was the Escape key, then Enter (measured on
+    /// zeewin2, 2026-11-09). The pane host writes an Escape-led key into an input that holds nothing
+    /// unread (`conpty/unread.rs`), so the console host reads its bytes together: Alt+Enter
+    /// wherever the filler ends, written through the human's path or straight to the pane.
     #[test]
-    fn an_escape_led_key_that_begins_where_the_console_hosts_read_ends_is_a_lone_escape() {
-        let (split, seen) = keys_behind(CONSOLE_READ - 1, b"\x1b\r");
-        assert_eq!(
-            split,
-            [("Escape".to_owned(), 27, 0), ("Enter".to_owned(), 13, 0)],
-            "ESC CR written at the end of a read; its screen: {seen:?}"
-        );
-        let (whole, seen) = keys_behind(CONSOLE_READ - 100, b"\x1b\r");
-        assert_eq!(
-            whole,
-            [("Enter".to_owned(), 13, 1)],
-            "ESC CR written inside a read; its screen: {seen:?}"
-        );
+    fn an_escape_led_key_behind_a_full_read_reaches_a_key_reader_whole_through_the_hosts_human_path(
+    ) {
+        for filler in [CONSOLE_READ - 1, CONSOLE_READ - 100, CONSOLE_READ, 0] {
+            for human in [true, false] {
+                let (keys, seen, waited) = keys_behind(filler, b"\x1b\r", human);
+                println!("ESC CR behind {filler} bytes, human {human}: written in {waited:?}");
+                assert_eq!(
+                    keys,
+                    [("Enter".to_owned(), 13, 1)],
+                    "ESC CR behind {filler} bytes, human {human}; its screen: {seen:?}"
+                );
+            }
+        }
     }
 
     /// A line feed is one byte, which no read can split: it is the same key, Enter with Control,
-    /// wherever it falls.
+    /// wherever it falls, and it waits for nothing.
     #[test]
     fn a_line_feed_is_the_same_key_wherever_the_console_hosts_read_ends() {
         for filler in [CONSOLE_READ - 1, CONSOLE_READ - 100, 0] {
-            let (keys, seen) = keys_behind(filler, b"\n");
+            let (keys, seen, _) = keys_behind(filler, b"\n", true);
             assert_eq!(
                 keys,
                 [("Enter".to_owned(), 10, 4)],
                 "a line feed after {filler} bytes; its screen: {seen:?}"
             );
         }
+    }
+
+    /// Every Escape-led key a person types goes through the same write: an arrow is one key
+    /// where a read would end after its Escape, and Escape itself is the Escape key, one.
+    #[test]
+    fn an_arrow_and_escape_itself_behind_a_full_read_reach_a_key_reader_as_those_keys() {
+        let (arrow, seen, _) = keys_behind(CONSOLE_READ - 1, b"\x1b[A", true);
+        assert_eq!(
+            arrow.len(),
+            1,
+            "an arrow is one key: {arrow:?}; its screen: {seen:?}"
+        );
+        assert_eq!(arrow[0].0, "UpArrow", "{arrow:?}; its screen: {seen:?}");
+        let (escape, seen, _) = keys_behind(CONSOLE_READ - 1, b"\x1b", true);
+        assert_eq!(
+            escape,
+            [("Escape".to_owned(), 27, 0)],
+            "Escape itself is one Escape key; its screen: {seen:?}"
+        );
+        let (alt_x, seen, _) = keys_behind(CONSOLE_READ - 1, b"\x1bx", true);
+        assert_eq!(
+            alt_x,
+            [("X".to_owned(), 120, 1)],
+            "Alt+x is one key; its screen: {seen:?}"
+        );
+    }
+
+    /// A process that is suspended, resumed when this is dropped, whatever the test ended with: a
+    /// console host that reads nothing.
+    struct Suspended(HANDLE);
+
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtSuspendProcess(process: HANDLE) -> i32;
+        fn NtResumeProcess(process: HANDLE) -> i32;
+    }
+
+    impl Suspended {
+        fn of(pid: u32) -> Self {
+            // SAFETY: the right to suspend and resume, a handle closed with the process's own
+            // handle below (it is the test's, and the test ends first).
+            let handle = unsafe { OpenProcess(PROCESS_SUSPEND_RESUME, 0, pid) };
+            assert!(
+                !handle.is_null(),
+                "open the console host {pid} to suspend it"
+            );
+            // SAFETY: an open handle with the right.
+            let status = unsafe { NtSuspendProcess(handle) };
+            assert_eq!(status, 0, "suspend the console host");
+            Self(handle)
+        }
+    }
+
+    impl Drop for Suspended {
+        fn drop(&mut self) {
+            // SAFETY: the handle is open with the right, resumed once.
+            unsafe { NtResumeProcess(self.0) };
+        }
+    }
+
+    /// An Escape-led key written while the console host reads nothing waits behind what is
+    /// unread, as it would have waited in the pipe (T-1336): it is not written, nothing written
+    /// after it passes it, no byte is lost, and another pane, with a console host of its own, goes on
+    /// at once. Once the console host reads, the key and what follows arrive in order, whole.
+    #[test]
+    fn an_escape_led_key_waits_for_a_console_host_that_reads_nothing_and_nothing_is_lost_or_held_elsewhere(
+    ) {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let (pane, output) = open(&table, &quiet_key_reader(60), &HashMap::new(), 1 << 20);
+        read_until(&table, &pane, &output, "READY");
+        let host = child_of(std::process::id(), "OpenConsole.exe");
+        let suspended = Suspended::of(host.1);
+
+        // Text goes into the pipe at once, and stays unread: no Escape, no wait.
+        let started = Instant::now();
+        table
+            .write(&pane, &[b'x'; 100])
+            .expect("text into the pipe");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "text is no key to wait for"
+        );
+
+        // The key waits; what is written after it is behind it.
+        let (key_done, key_waited) = mpsc::channel();
+        let (later_done, later_waited) = mpsc::channel();
+        let (key_table, key_pane) = (Arc::clone(&table), pane.clone());
+        let key = thread::spawn(move || {
+            let started = Instant::now();
+            let result = key_table.write(&key_pane, b"\x1b\r");
+            let _ = key_done.send((result.is_ok(), started.elapsed()));
+        });
+        thread::sleep(Duration::from_millis(200));
+        let (later_table, later_pane) = (Arc::clone(&table), pane.clone());
+        let later = thread::spawn(move || {
+            let result = later_table.write(&later_pane, b"z");
+            let _ = later_done.send(result.is_ok());
+        });
+        thread::sleep(Duration::from_millis(800));
+        assert!(
+            key_waited.try_recv().is_err(),
+            "the key was written into a pipe that holds unread bytes"
+        );
+        assert!(
+            later_waited.try_recv().is_err(),
+            "a key written after it passed it"
+        );
+
+        // Another pane goes on: its key is written and read at once.
+        let other_table = Arc::new(PaneTable::new());
+        let (other, other_output) = open(
+            &other_table,
+            &quiet_key_reader(60),
+            &HashMap::new(),
+            1 << 20,
+        );
+        read_until(&other_table, &other, &other_output, "READY");
+        let started = Instant::now();
+        other_table
+            .write(&other, b"\x1b[A")
+            .expect("another pane's arrow");
+        let seen = read_until(&other_table, &other, &other_output, "KEY1=");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "another pane's arrow took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            keys_read(&seen).first().map(|read| read.key.as_str()),
+            Some("UpArrow"),
+            "its screen: {seen:?}"
+        );
+        other_table.kill(&other).expect("close the other pane");
+
+        // The console host reads again: the key and the text after it arrive, in order.
+        drop(suspended);
+        let (written, waited) = key_waited
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the key was written once the console host read");
+        assert!(written, "the key's write failed");
+        assert!(
+            later_waited
+                .recv_timeout(Duration::from_secs(20))
+                .expect("the later key"),
+            "the later write failed"
+        );
+        key.join().expect("the key's thread");
+        later.join().expect("the later thread");
+        println!("the longest wait: {waited:?} (the console host read nothing for about a second)");
+        assert!(
+            waited >= Duration::from_millis(700),
+            "the key did not wait: {waited:?}"
+        );
+        let seen = read_until(&table, &pane, &output, "KEY102=");
+        table.kill(&pane).expect("close the pane");
+        let read: Vec<(usize, String, u32, u32)> = keys_read(&seen)
+            .into_iter()
+            .map(|read| (read.number, read.key, read.character, read.modifiers))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (101, "Enter".to_owned(), 13, 1),
+                (102, "Z".to_owned(), 122, 0)
+            ],
+            "100 `x`s, then Alt+Enter, then `z`: none lost, in order; its screen: {seen:?}"
+        );
     }
 
     /// What the console host makes of the bytes the page writes for Shift+Enter (T-1330), for the

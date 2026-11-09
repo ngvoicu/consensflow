@@ -36,7 +36,7 @@ const HOLD: Duration = Duration::from_secs(5);
 
 /// A process the test found, held open by a handle of its own (so that its number stays
 /// its own), and ended when the test is done with it, whatever the test found.
-struct Found(HANDLE, u32);
+pub(in crate::pty) struct Found(pub(in crate::pty) HANDLE, pub(in crate::pty) u32);
 
 impl Found {
     fn runs(&self) -> bool {
@@ -70,7 +70,7 @@ fn held(pid: u32) -> Found {
 }
 
 /// The process `parent` started that runs `program`, held open, once there is one.
-fn child_of(parent: u32, program: &str) -> Found {
+pub(in crate::pty) fn child_of(parent: u32, program: &str) -> Found {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         // SAFETY: a snapshot of the system's processes, closed below.
