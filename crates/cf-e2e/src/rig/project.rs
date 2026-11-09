@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use super::Rig;
+// The models a stand-in agent runs on (`fake`, `fake-2`, `fake-chief`), which a real
+// harness has none of: a member on one is asked for by its own name instead.
+use crate::stand_in_lists::STAND_IN_MODELS;
 use crate::{files, Error, Result};
 
 /// A project of the daemon's, by its id.
@@ -28,9 +31,7 @@ impl<'a> Project<'a> {
     /// stand-in by its name, `{agent, roles}`, sent as its harness, model, effort and
     /// tier: [`member_body`]). The daemon's answer is a refusal when it says it is not `ok`.
     pub fn open(rig: &'a Rig, agent: &str, more: Value) -> Result<Self> {
-        let (harness, model) = chief_of(rig, agent)?;
-        let mut request =
-            json!({ "directory": rig.workspace(), "harness": harness, "model": model });
+        let mut request = chief_body(rig, agent, json!({ "directory": rig.workspace() }))?;
         if let (Some(request), Some(more)) = (request.as_object_mut(), more.as_object()) {
             request.extend(
                 more.iter()
@@ -203,14 +204,10 @@ pub fn chief_of(rig: &Rig, agent: &str) -> Result<(String, String)> {
     ))
 }
 
-/// The models a stand-in agent runs on (`fake`, `fake-2`, `fake-chief`), which a real
-/// harness has none of: a member on one is asked for by its own name instead.
-const STAND_IN_MODELS: [&str; 3] = ["fake", "fake-2", "fake-chief"];
-
 /// The member the stand-in `agent` is, as Add member and New project ask for one: its
 /// harness, its tier (`standard` where it names none), its effort (Pi's thinking), and its
 /// model. A member of the stand-in harness runs every model alike: its model is the
-/// stand-in's name, which the harness, never read, takes at its word and names the member
+/// stand-in's name, which the stand-in harness lists (`stand_in_lists`) and names the member
 /// by, so its handle is `agent`. A member of a real harness runs its real model, and is
 /// named as its harness names that model. `roles` where they are given.
 pub fn member_body(rig: &Rig, agent: &str, roles: Option<Value>) -> Result<Value> {
@@ -252,13 +249,22 @@ fn body_of(row: &Value, agent: &str, roles: Option<Value>) -> Value {
 }
 
 /// `more` with a chief's harness and model in it: those of the stand-in `agent`
-/// ([`chief_of`]), as New project and Switch chief send them.
+/// ([`chief_of`]) and its effort where it runs at one, as New project and Switch chief send them.
 pub fn chief_body(rig: &Rig, agent: &str, more: Value) -> Result<Value> {
     let (harness, model) = chief_of(rig, agent)?;
+    let row = stand_in(rig, agent)?;
     let mut body = more;
     if let Some(fields) = body.as_object_mut() {
         fields.insert("harness".to_owned(), json!(harness));
         fields.insert("model".to_owned(), json!(model));
+        // The effort the stand-in runs at: its harness lists a model's efforts, and a pick
+        // names one of them, as the dialog's does (A4-28).
+        if let Some(effort) = ["effort", "thinking"]
+            .into_iter()
+            .find_map(|key| row.get(key).filter(|effort| !effort.is_null()))
+        {
+            fields.entry("effort").or_insert_with(|| effort.clone());
+        }
     }
     Ok(body)
 }

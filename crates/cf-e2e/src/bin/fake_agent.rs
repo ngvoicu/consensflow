@@ -127,6 +127,8 @@ mod build;
 mod images;
 #[path = "fake_agent/input_box.rs"]
 mod input_box;
+#[path = "fake_agent/lists.rs"]
+mod lists;
 #[path = "fake_agent/noise.rs"]
 mod noise;
 #[path = "fake_agent/offers.rs"]
@@ -219,6 +221,11 @@ const SHORT_WRITE: Duration = Duration::from_secs(2);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // The read of the models Claude Code lists, which the daemon makes as a dialog opens
+    // (`claude -p`, no window, no turn).
+    if lists::is_read(&args) {
+        return lists::answer();
+    }
     // The work a window left running is this program, with a word first that no
     // window is launched with: it holds its signals as it needs, not as a window.
     if args.first().map(String::as_str) == Some(background::JOB) {

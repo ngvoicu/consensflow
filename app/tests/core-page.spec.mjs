@@ -348,6 +348,9 @@ async function open(page, data = model()) {
     window.__hold = {}
     window.__release = {}
     window.__answered = []
+    // The read ids `models.get` answers with, in order: what a submission names as the list its
+    // picker was shown (A4-28).
+    window.__reads = []
     // Why the daemon is down, while a test has it down: the app answers every
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
@@ -390,8 +393,12 @@ async function open(page, data = model()) {
         const refused = data.modelsRefusal?.[harness]
         if (refused !== undefined) return { ok: false, error: refused }
         const { listing, switchHelp = null } = data.models[harness]
+        // A token of the daemon's life, as the daemon names a read: a text, never a number.
+        const read = `0123456789abcdef.${window.__reads.length + 1}`
+        window.__reads.push({ harness, read })
         return answer({
           harness,
+          read,
           listing,
           default: null,
           contributorWarning:
@@ -877,13 +884,27 @@ const named = (buttons) =>
 /** A row's tools, so read. */
 const toolsOf = (row) => named(row.locator('.row-tools button'))
 
-const calls = (page, operation) =>
+/**
+ * The bodies the page sent for 'operation', as it sent them, but for the read each model is picked
+ * from (`read`, the id `models.get` answered with: A4-28), which 'reads' keeps. Most cases are
+ * about what was asked, not which read it was asked from; the ones about the read ask for it.
+ */
+const calls = (page, operation, { reads = false } = {}) =>
   page.evaluate(
-    (operation) =>
-      window.__calls
+    ([operation, reads]) => {
+      const unread = (body) => {
+        if (reads || body === null || typeof body !== 'object') return body
+        const { read, ...rest } = body
+        if (Array.isArray(rest.staff)) {
+          rest.staff = rest.staff.map(({ read: named, ...member }) => member)
+        }
+        return rest
+      }
+      return window.__calls
         .filter(([command, args]) => command === 'daemon_request' && args.operation === operation)
-        .map(([, args]) => args.body),
-    operation,
+        .map(([, args]) => unread(args.body))
+    },
+    [operation, reads],
   )
 
 /** Picks a chief's harness, then one of its models, by what each says, as the human does (CHF-07). */
@@ -4165,8 +4186,9 @@ test("Refresh beside the chief's model reads the picked harness's models again, 
       .getByRole('button', { name: 'Refresh models' })
       .click()
     await expect(models.locator('option')).toHaveText(['Pick a model', 'swe-2', 'swe-3'])
+    // Every installed harness was read as the dialog opened, and Devin once more at Refresh.
     expect(await calls(page, 'models.get')).toEqual([
-      { harness: 'devin' },
+      ...['claude', 'codex', 'pi', 'devin', 'muse'].map((harness) => ({ harness })),
       { harness: 'devin', refresh: true },
     ])
     await page.evaluate(() => {
@@ -4420,27 +4442,385 @@ test('takes a member off the staff once the human confirms', async ({ page }) =>
   await expect(page.locator('#status')).toHaveText('@zeus left the staff.')
 })
 
-test("Add member reads a harness's models once while the dialog is open, says it reads them, and reads them again at Refresh or at the next opening", async ({
+const HARNESSES = ['claude', 'codex', 'devin', 'muse', 'pi']
+const harnessesAsked = async (page) =>
+  (await calls(page, 'models.get')).map((body) => body.harness).sort()
+
+test("New project reads every installed harness's models as it opens, all at once, and each select says it is reading until its answer comes (A4-28)", async ({
   page,
 }) => {
   await open(page)
+  // Every read takes a while, so that a read asked after another's answer shows.
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 1500
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  // All five are asked before any answers: no harness waits for another, and none waits for
+  // the human to pick it.
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  expect(await answers(page, 'models.get')).toBe(0)
+  const models = dialog.locator('[name="chiefModel"]')
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Pi' })
+  await expect(models.locator('option')).toHaveText(["Reading Pi's models…"])
+  await expect(models).toBeDisabled()
+  await expect(models).toBeEnabled()
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['meta/muse-spark', false],
+    ['meta/muse-spark-1.3-contributor', false],
+  ])
+  // The pick used the read made as the dialog opened: nothing was asked twice.
+  expect(await harnessesAsked(page)).toEqual(HARNESSES)
+})
+
+test("Project settings reads every installed harness's models as it opens, all at once, whether the staff runs on it or not (A4-28)", async ({
+  page,
+}) => {
+  await open(page)
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 1500
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  expect(await answers(page, 'models.get')).toBe(0)
+  const models = dialog.locator('[name="memberModel"]')
+  await dialog.locator('[name="memberHarness"]').selectOption({ label: 'Devin' })
+  await expect(models.locator('option')).toHaveText(["Reading Devin's models…"])
+  await expect(models).toBeEnabled()
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['swe-2', false],
+  ])
+  expect(await harnessesAsked(page)).toEqual(HARNESSES)
+})
+
+test('Settings reads every installed harness as it opens again, whatever role was left picked (A4-28, review 4)', async ({
+  page,
+}) => {
+  const data = model()
+  // A project with no ordinary staff: Add member's role stays where it was left.
+  data.boards[1].lanes = data.boards[1].lanes.filter((lane) =>
+    ['chief', 'human'].includes(lane.participant.role),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  // Designer is picked, and the dialog closed: the role is kept for the next opening.
+  await dialog.locator('[name="role"]').selectOption('designer')
+  await dialog.locator('[value="cancel"]').click()
+  await page.evaluate(() => {
+    window.__calls.length = 0
+  })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog).toBeVisible()
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+})
+
+test("a failed Refresh keeps the edited member's own model and effort (A4-28, review 6)", async ({
+  page,
+}) => {
+  const data = model()
+  data.models.claude.listing.models.find((m) => m.id === 'claude-sonnet-5').efforts = [
+    'low',
+    'high',
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  const models = dialog.locator('[name="memberModel"]')
+  const efforts = dialog.locator('[name="memberEffort"]')
+  await expect(models).toHaveValue('claude-sonnet-5')
+  await expect(efforts).toHaveValue('high')
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = { claude: 'probe read failed' }
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(dialog.locator('.member-help')).toContainText('probe read failed')
+  // The form loses nothing: the member's model, effort and tier stay, and it can be saved.
+  await expect(models).toHaveValue('claude-sonnet-5')
+  await expect(models).toBeEnabled()
+  await expect(efforts).toHaveValue('high')
+  await expect(dialog.locator('[name="memberTier"]')).toHaveValue('standard')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'zeus',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        effort: 'high',
+        tier: 'standard',
+        unchanged: true,
+      },
+    ])
+})
+
+test('a Refresh in one picker updates every picker that shows the harness, and a submission names the read each was shown (A4-28, review 5)', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const chiefModels = dialog.locator('[name="chiefModel"]')
+  const memberModels = dialog.locator('[name="memberModel"]')
+  await dialog.locator('[name="chiefHarness"]').selectOption('claude-code')
+  await dialog.locator('[name="memberHarness"]').selectOption('claude-code')
+  await expect(memberModels).toBeEnabled()
+  const reads = () => page.evaluate(() => window.__reads.filter((r) => r.harness === 'claude'))
+  // One read per harness in the dialog: both pickers show it.
+  expect(await reads()).toHaveLength(1)
+  await page.evaluate(() => {
+    window.__model.models.claude.listing.models = [
+      { id: 'new-current', label: 'New', efforts: [], contributor: false, disabled: false },
+    ]
+  })
+  await dialog.locator('[name="chiefRefresh"]').click()
+  await expect(chiefModels.locator('option')).toHaveText(['Pick a model', 'new-current'])
+  await expect(memberModels.locator('option')).toHaveText(['Pick a model', 'new-current'])
+  const [shown, refreshed] = await reads()
+  expect(refreshed.read).not.toBe(shown.read)
+  // A pick made from the refreshed list names the refreshed read.
+  await chiefModels.selectOption('new-current')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'project.open', { reads: true })).map((body) => body.read))
+    .toEqual([refreshed.read])
+})
+
+test('Add member, New project and Edit member name the read their list was shown from, and an edit that changes nothing says so (A4-28, review 5)', async ({
+  page,
+}) => {
+  const data = model()
+  data.models.claude.listing.models.find((m) => m.id === 'claude-sonnet-5').efforts = [
+    'low',
+    'high',
+  ]
+  await open(page, data)
+  const readOf = (harness) =>
+    page.evaluate(
+      (harness) => window.__reads.filter((r) => r.harness === harness).at(-1).read,
+      harness,
+    )
+  // Add member: the member is picked from Devin's list, and names that read.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await pickMember(settings, { harness: 'Devin', model: 'swe-2', tier: 'light' })
+  await settings.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'member.add', { reads: true })).map((body) => body.read))
+    .toEqual([await readOf('devin')])
+  // Edit member that changes nothing says so, with the read its list came from; one that
+  // changes the effort does not.
+  await settings.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  await expect(settings.locator('[name="memberModel"]')).toHaveValue('claude-sonnet-5')
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(1)
+  const [unchanged] = await calls(page, 'member.edit', { reads: true })
+  expect(unchanged).toMatchObject({ member: 'zeus', unchanged: true, read: await readOf('claude') })
+  await settings.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  await settings.locator('[name="memberEffort"]').selectOption('low')
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(2)
+  const edits = await calls(page, 'member.edit', { reads: true })
+  expect(edits[1].unchanged).toBeUndefined()
+  expect(edits[1]).toMatchObject({ effort: 'low', read: await readOf('claude') })
+  await settings.getByRole('button', { name: 'Close' }).click()
+
+  // New project: the chief and a staff pick each name the read their list was shown from.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  await pickMember(dialog, { harness: 'Devin', model: 'swe-2', tier: 'light' })
+  await dialog.locator('[name="memberAdd"]').click()
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open', { reads: true })).length).toBe(1)
+  const [opened] = await calls(page, 'project.open', { reads: true })
+  expect(opened.read).toBe(await readOf('pi'))
+  expect(opened.staff.map((member) => member.read)).toEqual([await readOf('devin')])
+})
+
+test("Edit member keeps the member's own model, effort and tier where its harness's models cannot be read, so the form loses nothing (A4-28)", async ({
+  page,
+}) => {
+  for (const [why, arrange] of [
+    [
+      'the daemon refuses the read',
+      (data) => {
+        data.modelsRefusal = { claude: 'claude answered nothing' }
+      },
+    ],
+    [
+      'the harness lists no model',
+      (data) => {
+        data.models.claude.listing = {
+          models: [],
+          readAt: null,
+          freshness: { state: 'stale', why: 'claude is not logged in' },
+          how: '',
+        }
+      },
+    ],
+  ]) {
+    const data = model()
+    arrange(data)
+    await open(page, data)
+    await page.getByRole('button', { name: 'Project settings' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Project settings' })
+    const add = dialog.locator('.staff-add')
+    await dialog.getByRole('button', { name: 'Edit @zeus' }).click()
+    await expect(add.locator('legend'), why).toHaveText('Edit @zeus')
+    const models = add.locator('[name="memberModel"]')
+    // Its harness's list is not there, and the member's model stands where the list would be.
+    await expect(models, why).toHaveValue('claude-sonnet-5')
+    await expect(models.locator('option'), why).toHaveText(['claude-sonnet-5'])
+    await expect(add.locator('[name="memberEffort"]'), why).toHaveValue('high')
+    await expect(add.locator('[name="memberTier"]'), why).toHaveValue('standard')
+    await expect(add.locator('.member-help'), why).toContainText(/could not be read|lists no model/)
+    // Saved as it is: the daemon takes a harness it cannot read at its word.
+    await dialog.getByRole('button', { name: 'Save member' }).click()
+    await expect
+      .poll(() => calls(page, 'member.edit'), why)
+      .toEqual([
+        {
+          project: 1,
+          member: 'zeus',
+          harness: 'claude-code',
+          model: 'claude-sonnet-5',
+          effort: 'high',
+          tier: 'standard',
+          unchanged: true,
+        },
+      ])
+    await page.evaluate(() => {
+      window.__calls.length = 0
+    })
+  }
+})
+
+/**
+ * A Devin member stores the exact id Devin lists for its effort (`swe-2-high` at `high`); its
+ * picker shows the family (`swe-2`) and the effort apart (T-1329, B).
+ */
+const devinMember = (data) => {
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus').participant
+  Object.assign(zeus, { harness: 'devin', model: 'swe-2-high', effort: 'high', modelName: 'swe-2' })
+  data.models.devin.listing.models = [
+    {
+      id: 'swe-2',
+      label: 'SWE-2',
+      efforts: ['low', 'high'],
+      launchIds: { high: 'swe-2-high', low: 'swe-2-low' },
+    },
+  ]
+}
+
+test("a Devin member's edit that changes nothing says so after a Refresh that failed, with the launch id it stores (T-1329, B)", async ({
+  page,
+}) => {
+  const data = model()
+  devinMember(data)
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  const models = dialog.locator('[name="memberModel"]')
+  await expect(models).toHaveValue('swe-2')
+  await expect(dialog.locator('[name="memberEffort"]')).toHaveValue('high')
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = { devin: 'probe read failed' }
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(dialog.locator('.member-help')).toContainText('probe read failed')
+  // The form restores the member's own launch id and effort, and saves them as unchanged: the
+  // daemon asks no list for what did not change.
+  await expect(models).toHaveValue('swe-2-high')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'zeus',
+        harness: 'devin',
+        model: 'swe-2-high',
+        effort: 'high',
+        tier: 'standard',
+        unchanged: true,
+      },
+    ])
+})
+
+test("a Devin member's edit after a failed Refresh and a Refresh that came keeps its model picked, says nothing changed, and sends what the human changes (T-1329, B)", async ({
+  page,
+}) => {
+  const data = model()
+  devinMember(data)
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  const models = dialog.locator('[name="memberModel"]')
+  const efforts = dialog.locator('[name="memberEffort"]')
+  await expect(models).toHaveValue('swe-2')
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = { devin: 'probe read failed' }
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(models).toHaveValue('swe-2-high')
+  // Devin lists again: its family is picked at the member's effort, not left to be picked again.
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = {}
+  })
+  await dialog.locator('[name="memberRefresh"]').click()
+  await expect(models).toHaveValue('swe-2')
+  await expect(efforts).toHaveValue('high')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(1)
+  const [unchanged] = await calls(page, 'member.edit', { reads: true })
+  expect(unchanged).toMatchObject({ member: 'zeus', unchanged: true })
+  // A change of effort is a pick, which the daemon checks against the read it came from.
+  await dialog.getByRole('button', { name: 'Edit @zeus', exact: true }).click()
+  await expect(models).toHaveValue('swe-2')
+  await efforts.selectOption('low')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit', { reads: true })).length).toBe(2)
+  const edits = await calls(page, 'member.edit', { reads: true })
+  expect(edits[1].unchanged).toBeUndefined()
+  expect(edits[1]).toMatchObject({ model: 'swe-2', effort: 'low' })
+  expect(edits[1].read).toBe(await page.evaluate(() => window.__reads.at(-1).read))
+})
+
+test('Add member shows what a harness listed when the dialog opened, says it reads while that read runs, and reads again at Refresh or at the next opening', async ({
+  page,
+}) => {
+  await open(page)
+  // A read takes a moment, so that one is on its way when its harness is picked.
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 800
+  })
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const harness = dialog.locator('[name="memberHarness"]')
   const models = dialog.locator('[name="memberModel"]')
   const reads = async () =>
     (await calls(page, 'models.get')).filter((body) => body.harness === 'devin')
-  // The staff's harnesses are read as the dialog opens, for the marks of gone models.
-  await expect.poll(() => calls(page, 'models.get')).toContainEqual({ harness: 'claude' })
-  // A read the daemon holds, of a harness nobody on the staff runs: the model select says it
-  // is reading.
-  await hold(page, 'models.get')
+  // Every installed harness is read as the dialog opens (A4-28), the staff's and the others'.
+  await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
+  // Devin's read is on its way: the model select says it is reading, and fills when it comes.
   await harness.selectOption({ label: 'Devin' })
   await expect(models.locator('option')).toHaveText(["Reading Devin's models…"])
   await expect(models).toBeDisabled()
-  await letGo(page, 'models.get')
   await expect(models).toBeEnabled()
-  // Another harness and back: Devin's read is the one already made.
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 0
+  })
+  // Another harness and back: Devin's read is the one made as the dialog opened.
   await harness.selectOption({ label: 'Pi' })
   await expect(models).toBeEnabled()
   await harness.selectOption({ label: 'Devin' })
@@ -4451,9 +4831,10 @@ test("Add member reads a harness's models once while the dialog is open, says it
   await dialog.getByRole('button', { name: 'Refresh models' }).click()
   await expect.poll(reads).toEqual([{ harness: 'devin' }, { harness: 'devin', refresh: true }])
   await expect(models).toHaveValue('swe-2')
-  // The next opening reads it afresh at its first ask.
+  // The next opening reads it afresh, as it opens.
   await dialog.getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect.poll(async () => (await reads()).length).toBe(3)
   await harness.selectOption({ label: 'Devin' })
   await expect(models).toBeEnabled()
   expect(await reads()).toHaveLength(3)
@@ -7357,6 +7738,29 @@ function closedFoundry() {
   return data
 }
 
+/**
+ * The key that takes the keyboard to the next control, a button too. Chromium's Tab does. WebKit's
+ * passes a button or a link by, and stops at fields and what has a `tabindex`, unless the system's
+ * Full Keyboard Access is on (off in a Mac's defaults): then Option+Tab is the one that passes them
+ * by. So it is found as the engine has it, by a Tab from a button to the one beside it.
+ */
+async function nextControlKey(page) {
+  await page.evaluate(() => {
+    const pair = document.createElement('div')
+    pair.id = 'tab-probe'
+    pair.innerHTML =
+      '<button id="tab-first" type="button">1</button><button type="button">2</button>'
+    document.body.append(pair)
+    document.querySelector('#tab-first').focus()
+  })
+  await page.keyboard.press('Tab')
+  const reached = await page.evaluate(
+    () => document.activeElement?.previousElementSibling?.id === 'tab-first',
+  )
+  await page.evaluate(() => document.querySelector('#tab-probe').remove())
+  return reached ? 'Tab' : 'Alt+Tab'
+}
+
 test('shows a closed project read-only: it reads, nothing on it acts, and a banner resumes it', async ({
   page,
 }) => {
@@ -7388,10 +7792,11 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
     name: 'Switch the chief to another harness or model',
   })
   await expect(switchChief).toHaveCount(0)
+  const next = await nextControlKey(page)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
   for (let press = 0; press < 4; press += 1) {
-    await page.keyboard.press('Tab')
+    await page.keyboard.press(next)
     reached.push(
       await page.evaluate(
         () =>
@@ -7652,6 +8057,34 @@ test('project menu: Escape closes it, and so does a click elsewhere, the keyboar
   // None of it asked the daemon for a change.
   expect(await calls(page, 'project.rename')).toEqual([])
   expect(await calls(page, 'project.describe')).toEqual([])
+})
+
+test('a click gives the control it lands on the keyboard, in every engine: a button, a checkbox, a radio button', async ({
+  page,
+}) => {
+  await open(page)
+  // Controls of its own, so that what the page draws does not decide what is measured.
+  await page.evaluate(() => {
+    const scratch = document.createElement('div')
+    scratch.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 9999; background: white;'
+    scratch.innerHTML = `<button id="s-button" type="button">press</button>
+      <input id="s-check" type="checkbox" aria-label="check">
+      <input id="s-radio" type="radio" name="s" aria-label="radio">
+      <span id="s-text">text</span>`
+    document.body.append(scratch)
+  })
+  // WebKit leaves each of them unfocused when a click lands on it; Chromium focuses it.
+  for (const id of ['#s-button', '#s-check', '#s-radio', '#s-button']) {
+    await page.locator(id).click()
+    await expect(page.locator(id)).toBeFocused()
+  }
+  // A click a script makes moves nothing: only a person's click gives the keyboard.
+  await page.locator('#s-button').focus()
+  await page.evaluate(() => document.querySelector('#s-check').click())
+  await expect(page.locator('#s-button')).toBeFocused()
+  // A click on words is no control's: it gives the keyboard to nothing.
+  await page.locator('#s-text').click()
+  await expect(page.locator('#s-button')).not.toBeFocused()
 })
 
 test('project menu: a board drawn again leaves the menu open, and Escape then goes back to the project as it is drawn now', async ({
