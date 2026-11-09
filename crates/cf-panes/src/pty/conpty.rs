@@ -807,4 +807,4 @@ pub(super) mod closes {
 }
 
 #[cfg(test)]
-pub(in crate::pty) mod tests;
+mod tests;

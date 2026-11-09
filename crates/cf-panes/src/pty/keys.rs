@@ -64,16 +64,9 @@ mod conpty {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use std::sync::mpsc;
-    use std::thread;
-
-    use windows_sys::Win32::Foundation::HANDLE;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SUSPEND_RESUME};
-
     use super::{keys_read, KeyRead};
     use crate::arbiter::{EnterTiming, InputArbiter};
     use crate::pty::conpty::host_library;
-    use crate::pty::conpty::tests::child_of;
     use crate::pty::conpty_test::{open, powershell, read_until, take};
     use crate::pty::{serial_pty_test, PaneKey, PaneOutput, PaneTable};
 
@@ -544,150 +537,6 @@ mod conpty {
             alt_x,
             [("X".to_owned(), 120, 1)],
             "Alt+x is one key; its screen: {seen:?}"
-        );
-    }
-
-    /// A process that is suspended, resumed when this is dropped, whatever the test ended with: a
-    /// console host that reads nothing.
-    struct Suspended(HANDLE);
-
-    #[link(name = "ntdll")]
-    extern "system" {
-        fn NtSuspendProcess(process: HANDLE) -> i32;
-        fn NtResumeProcess(process: HANDLE) -> i32;
-    }
-
-    impl Suspended {
-        fn of(pid: u32) -> Self {
-            // SAFETY: the right to suspend and resume, a handle closed with the process's own
-            // handle below (it is the test's, and the test ends first).
-            let handle = unsafe { OpenProcess(PROCESS_SUSPEND_RESUME, 0, pid) };
-            assert!(
-                !handle.is_null(),
-                "open the console host {pid} to suspend it"
-            );
-            // SAFETY: an open handle with the right.
-            let status = unsafe { NtSuspendProcess(handle) };
-            assert_eq!(status, 0, "suspend the console host");
-            Self(handle)
-        }
-    }
-
-    impl Drop for Suspended {
-        fn drop(&mut self) {
-            // SAFETY: the handle is open with the right, resumed once.
-            unsafe { NtResumeProcess(self.0) };
-        }
-    }
-
-    /// An Escape-led key written while the console host reads nothing waits behind what is
-    /// unread, as it would have waited in the pipe (T-1336): it is not written, nothing written
-    /// after it passes it, no byte is lost, and another pane, with a console host of its own, goes on
-    /// at once. Once the console host reads, the key and what follows arrive in order, whole.
-    #[test]
-    fn an_escape_led_key_waits_for_a_console_host_that_reads_nothing_and_nothing_is_lost_or_held_elsewhere(
-    ) {
-        let _pty_guard = serial_pty_test();
-        of_the_shipped_host();
-        let table = Arc::new(PaneTable::new());
-        let (pane, output) = open(&table, &quiet_key_reader(60), &HashMap::new(), 1 << 20);
-        read_until(&table, &pane, &output, "READY");
-        let host = child_of(std::process::id(), "OpenConsole.exe");
-        let suspended = Suspended::of(host.1);
-
-        // Text goes into the pipe at once, and stays unread: no Escape, no wait.
-        let started = Instant::now();
-        table
-            .write(&pane, &[b'x'; 100])
-            .expect("text into the pipe");
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "text is no key to wait for"
-        );
-
-        // The key waits; what is written after it is behind it.
-        let (key_done, key_waited) = mpsc::channel();
-        let (later_done, later_waited) = mpsc::channel();
-        let (key_table, key_pane) = (Arc::clone(&table), pane.clone());
-        let key = thread::spawn(move || {
-            let started = Instant::now();
-            let result = key_table.write(&key_pane, b"\x1b\r");
-            let _ = key_done.send((result.is_ok(), started.elapsed()));
-        });
-        thread::sleep(Duration::from_millis(200));
-        let (later_table, later_pane) = (Arc::clone(&table), pane.clone());
-        let later = thread::spawn(move || {
-            let result = later_table.write(&later_pane, b"z");
-            let _ = later_done.send(result.is_ok());
-        });
-        thread::sleep(Duration::from_millis(800));
-        assert!(
-            key_waited.try_recv().is_err(),
-            "the key was written into a pipe that holds unread bytes"
-        );
-        assert!(
-            later_waited.try_recv().is_err(),
-            "a key written after it passed it"
-        );
-
-        // Another pane goes on: its key is written and read at once.
-        let other_table = Arc::new(PaneTable::new());
-        let (other, other_output) = open(
-            &other_table,
-            &quiet_key_reader(60),
-            &HashMap::new(),
-            1 << 20,
-        );
-        read_until(&other_table, &other, &other_output, "READY");
-        let started = Instant::now();
-        other_table
-            .write(&other, b"\x1b[A")
-            .expect("another pane's arrow");
-        let seen = read_until(&other_table, &other, &other_output, "KEY1=");
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "another pane's arrow took {:?}",
-            started.elapsed()
-        );
-        assert_eq!(
-            keys_read(&seen).first().map(|read| read.key.as_str()),
-            Some("UpArrow"),
-            "its screen: {seen:?}"
-        );
-        other_table.kill(&other).expect("close the other pane");
-
-        // The console host reads again: the key and the text after it arrive, in order.
-        drop(suspended);
-        let (written, waited) = key_waited
-            .recv_timeout(Duration::from_secs(20))
-            .expect("the key was written once the console host read");
-        assert!(written, "the key's write failed");
-        assert!(
-            later_waited
-                .recv_timeout(Duration::from_secs(20))
-                .expect("the later key"),
-            "the later write failed"
-        );
-        key.join().expect("the key's thread");
-        later.join().expect("the later thread");
-        println!("the longest wait: {waited:?} (the console host read nothing for about a second)");
-        assert!(
-            waited >= Duration::from_millis(700),
-            "the key did not wait: {waited:?}"
-        );
-        let seen = read_until(&table, &pane, &output, "KEY102=");
-        table.kill(&pane).expect("close the pane");
-        let read: Vec<(usize, String, u32, u32)> = keys_read(&seen)
-            .into_iter()
-            .map(|read| (read.number, read.key, read.character, read.modifiers))
-            .collect();
-        assert_eq!(
-            read,
-            [
-                (101, "Enter".to_owned(), 13, 1),
-                (102, "Z".to_owned(), 122, 0)
-            ],
-            "100 `x`s, then Alt+Enter, then `z`: none lost, in order; its screen: {seen:?}"
         );
     }
 

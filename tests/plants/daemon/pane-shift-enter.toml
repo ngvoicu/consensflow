@@ -34,6 +34,8 @@ pse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tes
 pse-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::"]
 pse-boundary = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::boundary"]
 pse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launched_harness"]
+pse-win-keys = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::conpty"]
+pse-escapes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::escapes"]
 pse-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::engine::tests"]
 
 [[plant]]
@@ -345,3 +347,70 @@ replace = '''        "mac": [
       }
     },
     "pi": {'''
+
+# --- Windows: the pane host writes an Escape-led key into an input that holds nothing unread (T-1336) ---
+# These run on a Windows machine only: `cargo xtask plants daemon "windows-guard"`.
+
+[[plant]]
+name = "pane shift enter windows-guard: an input is written as it comes, with no wait before an Escape-led key"
+meant = "an_escape_led_key_behind_a_full_read_reaches_a_key_reader_whole_through_the_hosts_human_path"
+runs = ["pse-win-keys"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "        unread::write_all_keeping_keys_whole(&mut self.file, bytes).map(drop)"
+replace = "        io::Write::write_all(&mut self.file, bytes)"
+
+[[plant]]
+name = "pane shift enter windows-guard: a part that begins with Escape is written without a wait"
+meant = "an_escape_led_key_behind_a_full_read_reaches_a_key_reader_whole_through_the_hosts_human_path"
+runs = ["pse-win-keys"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/unread.rs"
+find = "        if part.first() == Some(&0x1b) {"
+replace = "        if part.first() == Some(&0xff) {"
+
+[[plant]]
+name = "pane shift enter windows-guard: the wait does not wait for the unread bytes"
+meant = "an_escape_led_key_waits_for_a_console_host_that_reads_nothing_and_nothing_is_lost_or_held_elsewhere"
+runs = ["pse-win-keys"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/unread.rs"
+find = "    while matches!(unread(pipe), Ok(held) if held > 0) {"
+replace = "    while matches!(unread(pipe), Ok(held) if held > usize::MAX / 2) {"
+
+[[plant]]
+name = "pane shift enter windows-guard: a write is not cut where an Escape-led key begins"
+meant = "an_escape_led_key_behind_a_full_read_reaches_a_key_reader_whole_through_the_hosts_human_path"
+runs = ["pse-win-keys"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty/unread.rs"
+find = "    for part in parts(bytes) {"
+replace = "    for part in [bytes] {"
+
+[[plant]]
+name = "pane shift enter windows-guard: a run of Escapes is two keys"
+meant = "a_write_is_cut_where_an_escape_led_key_begins"
+runs = ["pse-escapes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/escapes.rs"
+find = "        if bytes[at] == 0x1b && bytes[at - 1] != 0x1b {"
+replace = "        if bytes[at] == 0x1b {"
+
+[[plant]]
+name = "pane shift enter windows-guard: nothing is cut off from the text before an Escape-led key"
+meant = "a_write_is_cut_where_an_escape_led_key_begins"
+runs = ["pse-escapes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/escapes.rs"
+find = "        if bytes[at] == 0x1b && bytes[at - 1] != 0x1b {"
+replace = "        if false && bytes[at] == 0x1b && bytes[at - 1] != 0x1b {"
