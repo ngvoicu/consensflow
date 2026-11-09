@@ -281,9 +281,9 @@ meant = "a_setting_the_daemon_refuses_refuses_the_whole_start_in_the_dialogs_wor
 runs = ["daemon-opening-page"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/page/projects.rs"
-find = '        specs: SpecsChange::from_opening(request.get("specs")).ok()?,'
-replace = '        specs: SpecsChange::from_opening(request.get("specs")).unwrap_or_default(),'
+file = "crates/cf-ledger/src/projects.rs"
+find = '            specs: SpecsChange::from_opening(value.get("specs"))?,'
+replace = '            specs: SpecsChange::from_opening(value.get("specs")).unwrap_or_default(),'
 
 [[plant]]
 name = "project settings: the page leaves the calls out of the request it makes to the ledger"

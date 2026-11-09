@@ -527,7 +527,8 @@ fn rules_or_a_size_that_fail_while_the_project_is_being_written_leave_no_project
             "{what}"
         );
         // No project, and nothing of one: the count is the same, and the ids go on from the one
-        // that was there (a row written and rolled back would have taken one).
+        // that was there. That shows no row was kept; it does not show one was tried, for SQLite
+        // gives a rolled-back row's id again (1, a rolled-back 2, then 2), AUTOINCREMENT or not.
         assert_eq!(ledger.projects().expect("projects").len(), before, "{what}");
     }
     // Nothing was written for any of them, and what the project that was there has is its own.
