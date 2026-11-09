@@ -294,7 +294,7 @@ pub fn keychain_services() -> Option<BTreeSet<String>> {
 /// What the Keychain came to for a run whose Claude Code worked in `folder`, from the names it had
 /// `before` the run and `now`.
 #[derive(Debug, Default, PartialEq, Eq)]
-struct Kept {
+struct InKeychain {
     /// The item Claude Code made for the run's folder (in words): the run's own, and a failure.
     own: Vec<String>,
     /// The other items gained since, which are some other process's as far as this run can tell (the
@@ -303,16 +303,16 @@ struct Kept {
     others: Vec<String>,
 }
 
-/// What the Keychain came to for the run that worked in `folder` ([`Kept`]).
+/// What the Keychain came to for the run that worked in `folder` ([`InKeychain`]).
 ///
 /// Claude Code keeps what it stores securely in the Keychain, as an item named for the folder's path
 /// ([`keychain::item_of`]), once it writes it: the OAuth state of an MCP server it connected to
 /// is enough, and the login the folder held goes into the item with it and out of the folder
 /// (T-1102). Before, every item gained was said to be a refresh of the login, and one made by
 /// another run on the machine failed this one (T-1044).
-fn keychain_of(folder: &Path, before: &BTreeSet<String>, now: &BTreeSet<String>) -> Kept {
+fn keychain_of(folder: &Path, before: &BTreeSet<String>, now: &BTreeSet<String>) -> InKeychain {
     let own = keychain::item_of(folder);
-    let mut kept = Kept::default();
+    let mut kept = InKeychain::default();
     for name in now.difference(before) {
         if *name == own {
             kept.own.push(format!(

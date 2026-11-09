@@ -197,7 +197,7 @@ fn the_item_claude_code_made_for_the_runs_folder_is_the_runs_and_a_failure_with_
     let folder = Path::new("/tmp/cf-keychain-vector-1");
     let own = "Claude Code-credentials-b0d4aa31";
     let had = BTreeSet::from(["Claude Code-credentials".to_owned()]);
-    assert_eq!(keychain_of(folder, &had, &had), Kept::default());
+    assert_eq!(keychain_of(folder, &had, &had), InKeychain::default());
     let now = BTreeSet::from(["Claude Code-credentials".to_owned(), own.to_owned()]);
     let kept = keychain_of(folder, &had, &now);
     assert_eq!(kept.own.len(), 1, "{kept:?}");
@@ -230,7 +230,7 @@ fn an_item_another_process_made_is_a_note_of_this_run_and_not_its_failure() {
     assert!(!kept.others[0].contains("refresh"), "{kept:?}");
     // An item the Keychain had before the run is no one's of the run, whatever its name.
     let both = BTreeSet::from(["Claude Code-credentials-b0d4aa31".to_owned()]);
-    assert_eq!(keychain_of(folder, &both, &both), Kept::default());
+    assert_eq!(keychain_of(folder, &both, &both), InKeychain::default());
 }
 
 /// A Keychain item of the name Claude Code gives `folder`, made here and deleted by that name when this
