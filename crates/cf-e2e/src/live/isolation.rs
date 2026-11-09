@@ -867,6 +867,24 @@ impl Isolation {
         };
         let provider = match providers {
             Some([provider]) => provider,
+            // The renewal runs Pi once on one model, for one login: a run whose windows are on two
+            // providers (an eval's chief and staff) is not renewed, and says so (no eval or live
+            // case seats two on a test machine, T-1373).
+            Some(many)
+                if many.len() > 1
+                    && self.renewal.is_some()
+                    && many
+                        .iter()
+                        .any(|provider| pi::renewable(text, provider, now, left)) =>
+            {
+                return Err(Error::Daemon(format!(
+                    "{refused} A login that has run short is renewed on a test machine only for a \
+                     run whose Pi windows are all on one provider; this run's are on two or more \
+                     providers ({}), which is not supported: run its Pi windows on one provider, \
+                     or renew the login by running Pi once yourself.",
+                    many.join(", ")
+                )));
+            }
             _ => return Err(refused),
         };
         let Some(renewal) = self

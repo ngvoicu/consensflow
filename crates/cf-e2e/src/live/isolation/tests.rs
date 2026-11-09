@@ -1607,6 +1607,40 @@ fn a_pi_entry_that_ended_on_a_test_machine_is_renewed_by_pi_once_and_the_run_goe
     isolation.finish().unwrap();
 }
 
+/// A run whose Pi windows are on two providers (an eval's chief and staff) is not renewed: the
+/// renewal runs Pi once on one model, for one login. Its refusal says so plainly, before Pi is
+/// run or anything is made (T-1373 item 6: no eval or live case seats two today).
+#[test]
+fn a_pi_run_on_two_providers_is_not_renewed_and_its_refusal_says_two_are_not_supported() {
+    let run = Renewing::new();
+    let models = ["openai/gpt-6-luna".to_owned(), "openrouter/x".to_owned()];
+    let mut isolation = Isolation::pi_on(
+        run.owner.home.path(),
+        &run.owner.path(".pi/agent"),
+        &models,
+        hours(1),
+    );
+    isolation.parent = run.owner.parent.path().to_path_buf();
+    let program = stand_in(run.tools.path(), &run.log(), &run.renews(), 0);
+    isolation.renewal = Some(pi::renewal(
+        zeewin2(),
+        run.owner.home.path(),
+        &run.owner.path(".pi/agent"),
+        &models[0],
+        move || Ok(program.clone()),
+    ));
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` has expired"), "{said}");
+    assert!(
+        said.contains("two or more providers")
+            && said.contains("openai")
+            && said.contains("openrouter"),
+        "{said}"
+    );
+    assert_eq!(run.started(), None, "Pi was not run");
+    assert_eq!(run.owner.made(), 0);
+}
+
 #[test]
 fn a_renewal_that_fails_refuses_the_pi_run_in_words_that_say_so_and_makes_no_home() {
     let run = Renewing::new();
