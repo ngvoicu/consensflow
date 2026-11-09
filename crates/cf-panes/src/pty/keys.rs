@@ -532,11 +532,12 @@ mod conpty {
             [("Escape".to_owned(), 27, 0)],
             "Escape itself is one Escape key; its screen: {seen:?}"
         );
-        let (alt_x, seen, _) = keys_behind(CONSOLE_READ - 1, b"\x1bx", true);
+        // Alt+y, not Alt+x: the reader does not print the `x`s it counts as filler.
+        let (alt_y, seen, _) = keys_behind(CONSOLE_READ - 1, b"\x1by", true);
         assert_eq!(
-            alt_x,
-            [("X".to_owned(), 120, 1)],
-            "Alt+x is one key; its screen: {seen:?}"
+            alt_y,
+            [("Y".to_owned(), 121, 1)],
+            "Alt+y is one key; its screen: {seen:?}"
         );
     }
 

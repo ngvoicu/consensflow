@@ -382,8 +382,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/conpty/unread.rs"
-find = "    while matches!(unread(pipe), Ok(held) if held > 0) {"
-replace = "    while matches!(unread(pipe), Ok(held) if held > usize::MAX / 2) {"
+find = "    while holds_unread(pipe) {"
+replace = "    while false && holds_unread(pipe) {"
 
 [[plant]]
 name = "pane shift enter windows-guard: a write is not cut where an Escape-led key begins"
