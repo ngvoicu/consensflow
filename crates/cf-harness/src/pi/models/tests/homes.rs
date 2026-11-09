@@ -351,8 +351,14 @@ fn the_real_pi_helper_runs_the_pi_cf_pi_names_and_no_other_on_the_path() {
 /// exact names at the top of Pi's folder, and nothing else (the review T-1325). A catalog is a
 /// cache a package or Pi keeps for itself (`Decisions F1a`); a login, a setting, a configured
 /// model (`models.json`), a package or an extension is not, and a read that changes one is a
-/// failure, whatever its name holds.
-const CATALOG_FILES: &[&str] = &["models-store.json", "cliproxyapi-models.json"];
+/// failure, whatever its name holds. Pi 1.5.0 keeps its models.dev catalog's caches below `tmp`
+/// (a read in the live kit's folder wrote both, T-1358).
+const CATALOG_FILES: &[&str] = &[
+    "models-store.json",
+    "cliproxyapi-models.json",
+    "tmp/models-dev-cache.json",
+    "tmp/models-dev-prompt-cache.json",
+];
 
 /// The paths a read changed that it may not have: every one added, taken away or changed
 /// between `before` and `after` that is not one of [`CATALOG_FILES`].
@@ -393,6 +399,16 @@ fn only_pi_s_catalog_files_may_change_in_a_copy_and_nothing_else_may_be_added_or
     catalogs.insert("models-store.json".to_owned(), "2".to_owned());
     catalogs.remove("cliproxyapi-models.json");
     assert_eq!(unexpected_changes(&before, &catalogs), Vec::<String>::new());
+    // Pi 1.5.0's caches of its models.dev catalog, which a read writes below `tmp` (T-1358).
+    let mut cached = before.clone();
+    cached.insert("tmp/models-dev-cache.json".to_owned(), "c".to_owned());
+    cached.insert(
+        "tmp/models-dev-prompt-cache.json".to_owned(),
+        "c".to_owned(),
+    );
+    assert_eq!(unexpected_changes(&before, &cached), Vec::<String>::new());
+    cached.insert("tmp/another.json".to_owned(), "c".to_owned());
+    assert_eq!(unexpected_changes(&before, &cached), ["tmp/another.json"]);
     assert_eq!(unexpected_changes(&digest_of(&[]), &catalogs).len(), 4);
     // A login or a setting changed, a file added, one taken away: each is named.
     for (name, text) in [

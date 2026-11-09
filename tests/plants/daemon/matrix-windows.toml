@@ -3,7 +3,7 @@
 # CLIProxyAPI (T-1172). Rules, each held by tests a Mac runs: a test machine whose Pi has no
 # OpenRouter login runs Pi on the model the kit names for that machine, says which, and chooses
 # nothing else, and the owner's Mac whose Pi has only the local proxy's `cliproxyapi` login runs
-# Pi on `cliproxyapi/muse-spark-1.3-contributor` at `minimal`, says which, and chooses nothing
+# Pi on `cliproxyapi/swe-2` at `medium` (T-1358), says which, and chooses nothing
 # else (`live/agents.rs`); a run on a provider the agent folder gives Pi carries its files, its
 # package, a `settings.json` that names it and its login with no refresh token, is refused before
 # a window where the provider or the proxy is missing, and holds every one of the provider's
@@ -121,20 +121,20 @@ runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''        model: "cliproxyapi/muse-spark-1.3-contributor",
-        effort: Some("minimal"),'''
-replace = '''        model: "cliproxyapi/muse-spark-1.3-contributor",
+find = '''        model: "cliproxyapi/swe-2",
+        effort: Some("medium"),'''
+replace = '''        model: "cliproxyapi/swe-2",
         effort: None,'''
 
 [[plant]]
-name = "matrix: the owner's Mac's Pi runs on a model that is not the contributor's"
+name = "matrix: the owner's Mac's Pi runs on a model that is not swe-2"
 meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
 runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''        model: "cliproxyapi/muse-spark-1.3-contributor",'''
-replace = '''        model: "cliproxyapi/muse-spark-1.3",'''
+find = '''        model: "cliproxyapi/swe-2",'''
+replace = '''        model: "cliproxyapi/swe-1",'''
 
 [[plant]]
 name = "matrix: the owner's Mac is taken for a machine the kit has no row for"
@@ -149,14 +149,14 @@ replace = '''        machine: Some("elsewhere"),
         provider: "cliproxyapi",'''
 
 [[plant]]
-name = "matrix: the note on the Mac's Pi model leaves out that the proxy spends an allowance"
+name = "matrix: the note on the Mac's Pi model leaves out that the proxy's pool is free"
 meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
 runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''        cheap: "the person's own CLIProxyAPI proxy's contributor model, the same one the cheap Muse model is, whose allowance may be used to 100%",'''
-replace = '''        cheap: "the person's own CLIProxyAPI proxy's contributor model, the same one the cheap Muse model is",'''
+find = '''        cheap: "the person's own CLIProxyAPI proxy's swe-2, a free pool, at the lowest effort Pi lists for it",'''
+replace = '''        cheap: "the person's own CLIProxyAPI proxy's swe-2, at the lowest effort Pi lists for it",'''
 
 [[plant]]
 name = "matrix: a provider's package is named but never copied"

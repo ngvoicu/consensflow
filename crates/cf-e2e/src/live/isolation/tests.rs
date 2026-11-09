@@ -154,8 +154,7 @@ impl Owner {
         );
         write(
             &agent.join("cliproxyapi-models.json"),
-            &json!({ "models": [{ "id": "muse-spark-1.3-contributor" }], "fetchedAt": at(NOW) })
-                .to_string(),
+            &json!({ "models": [{ "id": "swe-2" }], "fetchedAt": at(NOW) }).to_string(),
         );
         write(
             &agent.join("settings.json"),
@@ -492,7 +491,7 @@ fn proxy_gone() -> String {
 fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login() {
     let owner = Owner::new();
     owner.cliproxyapi(&proxy_answering());
-    let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
     let home = isolation.made_at(at(NOW)).unwrap();
     // The login, the provider's own files and its package, and a `settings.json` that names
     // the provider's package alone: the owner's other package and npm's manifests are left.
@@ -585,7 +584,7 @@ fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and
             &json!({ "packages": ["npm:pi-web-access", named, "git:github.com/ngvoicu/pi-cached-compaction@main"] })
                 .to_string(),
         );
-        let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+        let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
         let home = isolation.made_at(at(NOW)).unwrap();
         let copied: Vec<String> = files_below(&home)
             .into_iter()
@@ -644,7 +643,7 @@ fn a_copied_pi_package_keeps_each_files_mode() {
     let helper = owner.path(&format!(".pi/agent/{below}"));
     write(&helper, "#!/bin/sh\necho helper\n");
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
-    let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
     let home = isolation.made_at(at(NOW)).unwrap();
     assert_eq!(mode(&home.join(format!("pi/agent/{below}"))), 0o755);
 }
@@ -701,7 +700,7 @@ fn a_pi_run_on_a_package_from_git_is_refused_where_its_checkout_is_not_clean() {
     ] {
         write(&package.join(dirty), "code no commit holds");
         let said = owner
-            .pi("cliproxyapi/muse-spark-1.3-contributor", hours(1))
+            .pi("cliproxyapi/swe-2", hours(1))
             .made_at(at(NOW))
             .unwrap_err()
             .to_string();
@@ -742,7 +741,7 @@ fn a_pi_run_is_refused_where_the_npm_package_on_disk_is_not_the_version_its_spec
         );
     };
     let made = |owner: &Owner| {
-        let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+        let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
         isolation
             .made_at(at(NOW))
             .map(|_| isolation.said().join("\n"))
@@ -778,7 +777,7 @@ fn a_proxy_that_does_not_answer_is_said_with_no_part_of_its_url_that_can_hold_a_
         "http://user:SECRET-PASSWORD@127.0.0.1:{port}/v1?key=SECRET-KEY#SECRET-FRAGMENT"
     ));
     let said = owner
-        .pi("cliproxyapi/muse-spark-1.3-contributor", hours(1))
+        .pi("cliproxyapi/swe-2", hours(1))
         .made_at(at(NOW))
         .unwrap_err()
         .to_string();
@@ -879,7 +878,7 @@ fn a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missin
     let owner = Owner::new();
     let refused = |owner: &Owner| {
         owner
-            .pi("cliproxyapi/muse-spark-1.3-contributor", hours(1))
+            .pi("cliproxyapi/swe-2", hours(1))
             .made_at(at(NOW))
             .unwrap_err()
             .to_string()

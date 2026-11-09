@@ -251,9 +251,11 @@ struct PiOn {
 /// for the cheap model's provider: zeewin2's and zeewin's Pi 1.4.0 hold a ChatGPT login
 /// under `openai` and no OpenRouter entry, and `openai/gpt-5.6-luna` is the cheap Codex
 /// model on that login and ran Pi 6 of 6 there (T-1136). The owner's Mac's Pi 1.5.0 holds
-/// one `cliproxyapi` login, the local CLIProxyAPI proxy's, and no other; its model is the
-/// contributor the cheap Muse model is, whose allowance may be used to 100% (T-1172;
-/// the owner, 2026-11-03: "Pi on this Mac can be used with the models pi has now"). A machine
+/// one `cliproxyapi` login, the local CLIProxyAPI proxy's, and no other (T-1172; the owner,
+/// 2026-11-03: "Pi on this Mac can be used with the models pi has now"); its model is the proxy's
+/// `swe-2`, a free pool (the owner, 2026-11-09), at `medium`, the lowest of the efforts Pi's own
+/// list in the kit's folder gives it (`medium`, `high`, `max`; T-1358). The contributor model the
+/// kit ran before is no longer served there. A machine
 /// this has no row for keeps the cheap model, and the kit's isolation refuses the run
 /// before anything is spent, naming the logins Pi has.
 const PI_ON: [PiOn; 3] = [
@@ -274,9 +276,9 @@ const PI_ON: [PiOn; 3] = [
     PiOn {
         machine: None,
         provider: "cliproxyapi",
-        model: "cliproxyapi/muse-spark-1.3-contributor",
-        effort: Some("minimal"),
-        cheap: "the person's own CLIProxyAPI proxy's contributor model, the same one the cheap Muse model is, whose allowance may be used to 100%",
+        model: "cliproxyapi/swe-2",
+        effort: Some("medium"),
+        cheap: "the person's own CLIProxyAPI proxy's swe-2, a free pool, at the lowest effort Pi lists for it",
     },
 ];
 
@@ -829,8 +831,8 @@ mod tests {
     /// The owner's Mac's Pi holds one login, `cliproxyapi` — the local CLIProxyAPI proxy's — and
     /// none for the cheap model's provider, OpenRouter, so it runs on the model that login serves:
     /// the contributor model the cheap Muse model is, at `minimal` effort, and the run says why
-    /// (T-1172; the owner, 2026-11-03: "Pi on this Mac can be used with the models pi has now"; the
-    /// contributor model's allowance may be used to 100%, 2026-11-02).
+    /// (T-1172; the owner, 2026-11-03: "Pi on this Mac can be used with the models pi has now"),
+    /// on the proxy's free pool `swe-2` (the owner, 2026-11-09).
     #[test]
     fn the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so()
     {
@@ -844,18 +846,18 @@ mod tests {
             .unwrap()
             .on_machine(None, Some(&have(&["cliproxyapi"])));
         let pi = models.of(Harness::Pi);
-        assert_eq!(pi.name, "cliproxyapi/muse-spark-1.3-contributor");
-        assert_eq!(pi.effort.as_deref(), Some("minimal"));
+        assert_eq!(pi.name, "cliproxyapi/swe-2");
+        assert_eq!(pi.effort.as_deref(), Some("medium"));
         let said = models.line();
         assert!(
-            said.contains("pi cliproxyapi/muse-spark-1.3-contributor, effort minimal"),
+            said.contains("pi cliproxyapi/swe-2, effort medium"),
             "{said}"
         );
         assert!(
             said.contains("`cliproxyapi`") && said.contains("none for openrouter"),
             "{said}"
         );
-        assert!(said.contains("allowance"), "{said}");
+        assert!(said.contains("free pool"), "{said}");
     }
 
     /// A test machine whose Pi has an `openai` login (a ChatGPT subscription's) and none for the
