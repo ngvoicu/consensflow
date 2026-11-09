@@ -1119,10 +1119,8 @@ mod tests {
             // Only the chief's harness is the machine's: the stand-in is the member's Claude.
             assert_eq!(plan.harnesses(), [chief]);
         }
-        assert_eq!(
-            live::agents::model(Harness::Pi).name,
-            "openrouter/meta/muse-spark-1.3"
-        );
+        // Which model Pi gets is the machine's (the cheap one, or the owner's Mac's cliproxyapi
+        // one, T-1172): `agents`' own tests hold that; here only that the chief is on it.
     }
 
     #[test]
