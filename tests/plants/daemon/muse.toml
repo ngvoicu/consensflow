@@ -82,6 +82,10 @@ muse-codex-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test",
 muse-quota-wait = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_paste_that_landed"]
 muse-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::tests::a_question_for_no_op"]
 muse-daemon-launcher = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_muse"]
+# The daemon's thread and its stack (T-1360, taken for P2 A1): `cf ui` hands the daemon a thread of 16 MiB, for a debug
+# build's launch overflowed the 1 MiB of Windows' main thread once a launch asked its harness its version.
+muse-daemon-cli = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "cli::tests::"]
+muse-daemon-stop = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "--test", "daemon_muse"]
 muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
 # The reader: a turn stopped before a word of it, its message put back in the box.
@@ -3646,3 +3650,47 @@ find = '''
     asking.probes.forget(launcher);
 '''
 replace = ""
+
+# --- the daemon's stack (T-1360), taken with `cf ui`'s own thread for P2 A1 ---
+
+[[plant]]
+name = "muse: the daemon's stack is the main thread's of Windows"
+meant = "the_daemons_stack_is_more_than_the_main_threads_of_windows_and_of_a_test"
+runs = ["muse-daemon-cli"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''pub(crate) const DAEMON_STACK_BYTES: usize = 16 * 1024 * 1024;'''
+replace = '''pub(crate) const DAEMON_STACK_BYTES: usize = 1024 * 1024;'''
+
+[[plant]]
+name = "muse: the daemon is served on the thread that asks for it"
+meant = "the_daemon_runs_on_a_thread_of_its_own_and_not_on_the_main_one"
+runs = ["muse-daemon-cli"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''    match on_a_stack_of_its_own(move || serve(&env, &args)) {'''
+replace = '''    match Ok::<i32, io::Error>(serve(&env, &args)) {'''
+
+[[plant]]
+name = "muse: a panic of the daemon is lost on its thread"
+meant = "a_panic_of_the_daemon_is_carried_to_the_thread_that_waits_for_it"
+runs = ["muse-daemon-cli"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''        .unwrap_or_else(|panic| std::panic::resume_unwind(panic)))'''
+replace = '''        .unwrap_or_else(|_| panic!("the daemon's thread ended")))'''
+
+# Windows' main thread has 1 MiB: the daemon on it overflowed its stack opening a chief's window.
+[[plant]]
+name = "muse: the daemon's thread has the stack of Windows' main thread"
+meant = "a_launcher_that_says_a_supported_version_gets_its_chief_s_pane_and_the_daemon_still_answers"
+runs = ["muse-daemon-stop"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/cli.rs"
+find = '''        .stack_size(DAEMON_STACK_BYTES)'''
+replace = '''        .stack_size(1024 * 1024)'''
