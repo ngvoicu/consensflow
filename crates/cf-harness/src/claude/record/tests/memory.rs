@@ -52,12 +52,12 @@ const MEGABYTE: f64 = 1_048_576.0;
 
 /// A transcript to look at, and what is known of it.
 struct Subject {
-    _folder: Option<TempDir>,
     file: PathBuf,
     session: String,
     lines: Option<usize>,
     bytes: u64,
     watched: Option<String>,
+    _folder: Option<TempDir>,
 }
 
 impl Subject {

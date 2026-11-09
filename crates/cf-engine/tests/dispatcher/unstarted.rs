@@ -337,14 +337,18 @@ fn a_window_that_never_says_which_session_it_opened_fails_with_what_its_screen_w
 
     assert_eq!(context.task(project.id, 1).task.state, "failed");
     let because = format!(
-        "the window could not take its first message: Devin never said which session it opened \
-         (its wire log stayed empty); its screen ended with: \"{QUOTED}\""
+        "the window could not take its first message (its cause is in ConsensFlow's log); \
+         its screen ended with: \"{QUOTED}\""
     );
     let told = told(&context, project.id);
     assert_eq!(told.to_chief, [failure_of_t1(&because)]);
+    // What Devin said is in the log, masked, in a line of its own: a note has the stage alone.
     assert_eq!(
         told.logged,
-        [format!("the launch of p1-{ZEUS} failed: {because}")]
+        [
+            "@zeus: the window could not take its first message (its cause is in ConsensFlow's log); it was told: Devin never said which session it opened (its wire log stayed empty)".to_owned(),
+            format!("the launch of p1-{ZEUS} failed: {because}")
+        ]
     );
 }
 
@@ -486,7 +490,7 @@ fn a_screen_with_a_great_deal_on_it_is_cut_to_its_last_lines_and_a_few_hundred_c
 fn a_key_looking_string_on_the_screen_is_masked_in_the_note_and_in_the_log() {
     let context = Context::new();
     let project = launched(&context);
-    let key = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+    let key = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
     let screen = format!("request with {key} was refused");
     context
         .host

@@ -28,7 +28,7 @@ mod sync;
 mod write;
 
 pub use append::{append_rotating, aside, lock_beside};
-pub use errno::{errno_name, error_code, is_missing, uv_words};
+pub use errno::{errno_name, error_code, is_missing, known_code, uv_words};
 pub use error::FileError;
 pub use promises::{read_file, rename, rm_force};
 pub use sync::{make_temporary_folder, read_file_sync, remove_all};

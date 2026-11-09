@@ -373,9 +373,9 @@ mod tests {
     use super::*;
 
     struct Launch {
-        _dir: tempfile::TempDir,
         role: std::path::PathBuf,
         said: std::path::PathBuf,
+        _dir: tempfile::TempDir,
     }
 
     fn launch() -> Launch {

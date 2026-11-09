@@ -6,6 +6,7 @@
 //! An answer is the first line, read as JSON, that the asker's test takes for it: the
 //! notifications and the answers to other requests that come between are passed over.
 
+use cf_base::startup::{StartFailure, StartKind, StartRefusal};
 use cf_proto::models::{IT_SAID, WORDS_WITHHELD};
 use serde_json::Value;
 
@@ -24,6 +25,54 @@ const LINE_LIMIT: usize = 16 << 20;
 /// stream is read apart, and closes a moment after the program has gone.
 const SAYING_WHY_MS: u64 = 2_000;
 
+/// Why a conversation with a program failed: the words, for the page and the person's own screen
+/// (they may carry what the program said), and, where the failure has a kind, what a note says of
+/// it and nothing more (`cf_base::startup`, T-1328).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Said {
+    pub(crate) words: String,
+    pub(crate) failure: Option<StartFailure>,
+}
+
+impl From<String> for Said {
+    fn from(words: String) -> Self {
+        Self {
+            words,
+            failure: None,
+        }
+    }
+}
+
+impl From<StartRefusal> for Said {
+    fn from(refusal: StartRefusal) -> Self {
+        Self {
+            failure: Some(refusal.failure()),
+            words: refusal.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for Said {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.words)
+    }
+}
+
+/// A conversation's failure reads as its words, where the words are what is looked at.
+impl std::ops::Deref for Said {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.words
+    }
+}
+
+impl From<Said> for String {
+    fn from(said: Said) -> Self {
+        said.words
+    }
+}
+
 /// What `talk` makes of the program `program` starts, which `what` names in a failure
 /// (`codex app-server`). Fails with the reason where it does not start, ends, or is still
 /// talking at `bound_ms`. The program is ended whichever way.
@@ -34,7 +83,7 @@ pub(crate) async fn conversation<T>(
     what: &str,
     bound_ms: u64,
     talk: impl AsyncFnOnce(&dyn Child) -> Result<T, String>,
-) -> Result<T, String> {
+) -> Result<T, Said> {
     conversation_as(
         processes,
         time,
@@ -60,7 +109,7 @@ pub(crate) async fn conversation_as<T>(
     what: &str,
     bound_ms: u64,
     talk: impl AsyncFnOnce(&dyn Child) -> Result<T, String>,
-) -> Result<T, String> {
+) -> Result<T, Said> {
     let child = processes.spawn(program, streams)?;
     let armed = arm(time, bound_ms);
     let answered = armed.bound(talk(&*child)).await;
@@ -72,15 +121,21 @@ pub(crate) async fn conversation_as<T>(
             if keeps_words {
                 let _ = arm(time, SAYING_WHY_MS).bound(child.closed()).await;
             }
-            Err(failure)
+            Err(Said {
+                words: failure,
+                failure: Some(StartFailure::of(StartKind::Failed)),
+            })
         }
-        None => Err(format!(
-            "{what} did not answer within {} s",
-            bound_ms / 1000
-        )),
+        None => Err(Said {
+            words: format!("{what} did not answer within {} s", bound_ms / 1000),
+            failure: Some(StartFailure::of(StartKind::NoAnswer)),
+        }),
     };
     let outcome = if keeps_words {
-        outcome.map_err(|failure| with_its_words(failure, &*child))
+        outcome.map_err(|said| Said {
+            words: with_its_words(said.words, &*child),
+            failure: with_its_status(said.failure, &*child),
+        })
     } else {
         outcome
     };
@@ -114,6 +169,15 @@ fn with_its_words(failure: String, child: &dyn Child) -> String {
     } else {
         format!("{failure}{code}{IT_SAID}{said}")
     }
+}
+
+/// What a note says of a program that ended with an error: the status it exited with, where it
+/// exited with one. Nothing it wrote is in it.
+fn with_its_status(kind: Option<StartFailure>, child: &dyn Child) -> Option<StartFailure> {
+    kind.map(|kind| match child.code() {
+        Some(code) if kind.kind() == StartKind::Failed => kind.with_exit(i64::from(code)),
+        _ => kind,
+    })
 }
 
 /// Writes `line`, then reads until the line `answers` takes: that line, as JSON. Fails

@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::file::{stat, FileError, Identity};
+pub use cf_base::startup::StartRefusal;
 use cf_process::{runnable, with_required, CaptureFailed, Captured, Ender};
 pub use cf_process::{Ending, Failed, Limits, Streams};
 use futures_util::future::{FutureExt, LocalBoxFuture, Shared};
@@ -37,8 +38,9 @@ pub trait Processes {
     /// among the failures, with its code.
     fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>>;
 
-    /// `spawn`: the child, or why it did not start.
-    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String>;
+    /// `spawn`: the child, or why it did not start: the words for the person's own screen, and
+    /// the kind of failure a note says (`cf_base::startup`).
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, StartRefusal>;
 }
 
 /// A program running beside the adapter. Each call takes it shared: a
@@ -120,11 +122,13 @@ impl SystemProcesses {
     }
 
     /// How `program` starts, and the environment it starts in; or why it
-    /// cannot (an npm shim with no Node to run on).
-    fn start(&self, program: &Program) -> Result<(cf_process::Run, Env), String> {
+    /// cannot (an npm shim with no Node to run on): in the words the person reads on their own
+    /// screen, with the kind a note says beside them.
+    fn start(&self, program: &Program) -> Result<(cf_process::Run, Env), StartRefusal> {
         let env = with_required(&program.env, &self.this);
         let args: Vec<OsString> = program.args.iter().map(OsString::from).collect();
-        Ok((runnable(&program.executable, &args, &env)?, env))
+        let run = runnable(&program.executable, &args, &env)?;
+        Ok((run, env))
     }
 }
 
@@ -132,13 +136,13 @@ impl Processes for SystemProcesses {
     fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>> {
         let started = self.start(&program);
         Box::pin(async move {
-            let (run, env) = started.map_err(Failed::unstarted)?;
+            let (run, env) = started.map_err(|refusal| Failed::unstarted(refusal.into()))?;
             let kept = |ender| self.keep(ender);
             cf_process::execute(&run, program.cwd.as_deref(), &env, limits, kept).await
         })
     }
 
-    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, StartRefusal> {
         let (run, env) = self.start(&program)?;
         let child = cf_process::spawn(&run, program.cwd.as_deref(), &env, streams)?;
         self.keep(child.ender());
@@ -156,7 +160,7 @@ impl Capture for SystemProcesses {
     ) -> Work<'_, Result<Captured, CaptureFailed>> {
         let started = self.start(&program);
         Box::pin(async move {
-            let (run, env) = started.map_err(CaptureFailed::unstarted)?;
+            let (run, env) = started.map_err(|refusal| CaptureFailed::unstarted(refusal.into()))?;
             let kept = |ender| self.keep(ender);
             cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await
         })

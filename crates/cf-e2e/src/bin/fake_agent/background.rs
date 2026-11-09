@@ -239,17 +239,20 @@ impl Jobs {
     /// Notes the process `pid` as one of the window's the rig looks for, named `label`: a
     /// program the window started that is no job of this program (a command of the
     /// harness's own that a script runs), in the file a job's would be
-    /// (`<label>-<window>-<n>.pid`), for a case to ask whether it ran.
+    /// (`<label>-<window>-<n>.pid`), for a case to ask whether it ran. What it returns is the
+    /// file without its kind, for the files that go beside it.
     #[cfg(unix)]
-    pub fn note(&self, label: &str, pid: u32) -> Result<(), String> {
+    pub fn note(&self, label: &str, pid: u32) -> Result<PathBuf, String> {
         fs::create_dir_all(&self.folder)
             .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
         let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
-        let file = self
+        let base = self
             .folder
-            .join(format!("{label}-{}-{number}.pid", self.window));
+            .join(format!("{label}-{}-{number}", self.window));
+        let file = base.with_extension("pid");
         cf_e2e::files::write_whole(&file, &format!("{pid}\n"))
-            .map_err(|failed| format!("{}: {failed}", file.display()))
+            .map_err(|failed| format!("{}: {failed}", file.display()))?;
+        Ok(base)
     }
 
     /// The file of the window's next job named `label` (`<label>-<window>-<n>`), for a

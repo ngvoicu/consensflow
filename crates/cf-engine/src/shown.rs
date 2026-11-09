@@ -41,6 +41,20 @@
 //! nothing else, a lone padding row `=`) and a value in groups (`YWJj-ZGVm-…`). All in
 //! [`screen`].
 //!
+//! Three more notes quote less by the same rule. **The notes of what a window left running**
+//! (`background`) name the program of each command where the list of the last tool call names
+//! it, and `…` where it goes on, or the process's number: never an argument, a path or a header
+//! (T-1178's known issue). **The note of a turn a Resume tells a window was cut** quotes
+//! nothing the window showed (T-1328): a turn that began with a delivery the ledger holds, sent
+//! to that window, is named by the ledger's row of it (its id, what it was, whom it was from, its
+//! task), and any other turn by when it began (`resume`). Two readings (T-1322) found a secret
+//! in a quote of the opening by one shape after another. **A process that may be a window's** is
+//! named by a program of that list or by its number. **The cause of a failed start** is no quote at all (T-1328): a note
+//! carries the kind of failure and its code, typed by the producer (`cf_base::startup`, the
+//! engine's `startup`), and no word of a program's, a host's or an adapter's; the full words stay
+//! on the person's own screen. **A decision never reads a note** (T-1328, the third reading of T-1322): what recovery reads of a window's end is what it showed ([`Evidence`], the lines as the host sent them), because the text made for a note leaves a screen out whole for a secret-like word, is masked and cut, and says ConsensFlow's own words of how the window ended. **A window's own session id** on its screen is not a value in groups
+//! ([`Shown::with_own_session`]), and no other check is given a text without it.
+//!
 //! **How the program ended** is said as the host said it: its signal where it sent one, and a
 //! status above 128 as consistent with the signal it names (143 SIGTERM, 137 SIGKILL,
 //! [`signalled`]), no more; whether ConsensFlow sent it is said only from what the engine
@@ -65,6 +79,7 @@ mod tests;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use cf_base::startup::StartFailure;
 use cf_harness::records::LastCall;
 use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, PossiblyLeft, SnapshotTail};
@@ -72,6 +87,8 @@ use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+pub(crate) use call::command_line_program;
+pub(crate) use call::program as command_program;
 use mask::mask;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -114,6 +131,12 @@ pub struct Shown {
     part: Part,
     /// The last tool call the window's record shows ([`Shown::with_last_call`]).
     last_call: Option<Arc<LastCall>>,
+    /// The session of the conversation the window ran in, as ConsensFlow has it
+    /// ([`Shown::with_own_session`]).
+    own_session: Option<String>,
+    /// Why the window's harness never ran, where the window's program (`cf codex-session`)
+    /// ended with the status that says so ([`Shown::with_start`]).
+    start: Option<String>,
 }
 
 impl Shown {
@@ -129,6 +152,8 @@ impl Shown {
             pasted: false,
             part: Part::Unknown,
             last_call: None,
+            own_session: None,
+            start: None,
         }
     }
 
@@ -228,6 +253,33 @@ impl Shown {
         self.tail.as_deref().unwrap_or_default()
     }
 
+    /// What the screen showed, for the engine to classify why the window ended: the last
+    /// lines of it with a word in them, as the host sent them with their blanks made one, and
+    /// nothing done to them ([`Evidence`]). Empty where the host sent no screen.
+    pub(crate) fn evidence(&self) -> Evidence {
+        let lines: Vec<String> = self
+            .lines()
+            .iter()
+            .filter(|line| line.chars().any(char::is_alphanumeric))
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect();
+        let from = lines.len().saturating_sub(QUOTE_LINES);
+        Evidence(lines[from..].join("\n"))
+    }
+
+    /// What the screen showed, for ConsensFlow's log alone (masked, as every quote is, and not
+    /// withheld: the log is the person's own file): where a note says only why a window never
+    /// ran its harness, this keeps what it showed.
+    pub(crate) fn in_the_log(&self) -> String {
+        match &self.tail {
+            None => "the host sent no screen".to_owned(),
+            Some(tail) => Quote::of(tail, Keep::Last).map_or_else(
+                || "its screen was empty".to_owned(),
+                |quote| quote.after("its screen ended with"),
+            ),
+        }
+    }
+
     /// Whether the host said anything of the window.
     /// Whether the window's program is gone, as far as the host said: yes where
     /// it said how the window ended and named no program it could not end, no
@@ -277,6 +329,11 @@ impl Shown {
         if let Some(call) = &self.last_call {
             said.push_str(&call::words(call));
         }
+        // A harness that never ran has no screen worth quoting: it holds the file that was tried.
+        if let Some(words) = &self.start {
+            said.push_str(&format!("; {words}"));
+            return said;
+        }
         let Some(tail) = &self.tail else {
             return said;
         };
@@ -284,7 +341,7 @@ impl Shown {
         // `4aeb48564`: where the extent of a secret cannot be proven the whole screen goes, and
         // no row beside a secret is ever quoted. Every line the host sent is looked at, not only
         // those the quote would keep, and the rows together as well as one by one (`screen`).
-        match screen::withheld(tail) {
+        match screen::withheld(tail, self.own_session.as_deref()) {
             Some(screen::Withheld::Secret) => {
                 said.push_str("; its last screen lines named a secret, so they are left out");
                 return said;
@@ -309,6 +366,30 @@ impl Shown {
     /// signal's source is told only by that, never by an exit code.
     pub(crate) fn with_part(mut self, part: Part) -> Self {
         self.part = part;
+        self
+    }
+
+    /// This exit with the session of the conversation its window ran in, as ConsensFlow has it
+    /// (the ledger's `native_session`): the id a harness prints when it quits
+    /// (`claude --resume <id>`) is no secret, and the screen that shows it is quoted. Any other
+    /// id on the screen still withholds it ([`screen`]).
+    pub(crate) fn with_own_session(mut self, session: Option<String>) -> Self {
+        self.own_session = session;
+        self
+    }
+
+    /// The status the window's program exited with, where no signal ended it: what its harness's
+    /// adapter reads for a start that failed (`Adapter::never_ran`).
+    pub(crate) fn exit_status(&self) -> Option<u32> {
+        self.code.filter(|_| self.signal.is_none())
+    }
+
+    /// This exit with why the window's harness never ran, where its adapter says so from the
+    /// status the window ended with (`Adapter::never_ran`, T-1328): the note says the kind of
+    /// failure and not what the screen showed, which holds the file that was tried (the second
+    /// reading of T-1322 found `C:\tools\hunter22\codex.cmd` quoted from it at every width).
+    pub(crate) fn with_start(mut self, failure: Option<StartFailure>, who: &str) -> Self {
+        self.start = failure.map(|failure| failure.words(who));
         self
     }
 
@@ -357,6 +438,29 @@ impl Shown {
             }
             (Part::Unknown, _) => said,
         })
+    }
+}
+
+/// What a window showed or a harness's record said, as the engine's own classifiers read it to
+/// decide something about the window's end (a model its harness no longer has, [`Dispatcher::gone_model`]):
+/// the lines as they were, never masked, withheld, cut or reworded. **The text made for a note
+/// ([`Shown::after`], [`after_words`]) is never read for a decision** (T-1328, the third reading of
+/// T-1322): it holds less than the window showed (a screen that names a secret is left out whole, a
+/// quote is cut and masked), and says things that are ConsensFlow's (the kind of a start that
+/// failed), so a classifier that read it lost a retired model with a footer that counted tokens,
+/// and with a status the note had replaced. A classifier takes this, which only a window's own
+/// words make: no `String` made for a note is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Evidence(String);
+
+impl Evidence {
+    /// The words a harness's record gave of a failure: its own, which no note was made of.
+    pub(crate) fn of_record(words: &str) -> Self {
+        Self(words.to_owned())
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
     }
 }
 

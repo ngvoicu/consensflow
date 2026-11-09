@@ -58,8 +58,8 @@ fn ascii() -> String {
 
 /// A text in a file, the command `cf setup` made beside it, and a scripted board for one `cf ask`.
 struct Case {
-    folder: tempfile::TempDir,
     text: String,
+    folder: tempfile::TempDir,
 }
 
 impl Case {

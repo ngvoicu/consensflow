@@ -102,7 +102,6 @@ struct Stage<'a> {
     /// The stores' writers, by the scenario's name for each: closed before
     /// the root is removed.
     writers: HashMap<String, Connection>,
-    root: TempDir,
     clock: i64,
     env: Env,
     cache: Cache,
@@ -116,6 +115,7 @@ struct Stage<'a> {
     departed: Vec<(String, String)>,
     /// The words of the refusals for a moment read where Node read none (T-1112).
     busy: BTreeSet<String>,
+    root: TempDir,
 }
 
 impl Stage<'_> {

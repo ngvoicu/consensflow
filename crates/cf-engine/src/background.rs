@@ -73,12 +73,10 @@ use cf_proto::panes::{Background, BackgroundProcess, PossiblyLeft};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
-use crate::shown::mask::mask;
+use crate::shown::{command_line_program, command_program};
 
 /// The most commands a note quotes of what a window left running.
 const QUOTED: usize = 5;
-/// The most characters of one command a note quotes.
-const COMMAND_CHARS: usize = 160;
 
 impl Dispatcher {
     /// A turn is about to begin in the window: what its tree runs now came
@@ -192,27 +190,23 @@ impl Dispatcher {
     }
 }
 
-/// The command of `process` as a note says it: held to one line and to
-/// [`COMMAND_CHARS`] characters, what looks like a key or a token in it hidden
-/// (and counted in `masked`), a process whose command could not be read named by
-/// its number.
-fn line(process: &BackgroundProcess, masked: &mut usize) -> String {
-    let hidden = mask(&process.command);
-    *masked += hidden.count;
-    let words = hidden.text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if words.chars().count() > COMMAND_CHARS {
-        let kept: String = words.chars().take(COMMAND_CHARS - 1).collect();
-        format!("{kept}…")
-    } else if words.is_empty() {
-        format!("process {}", process.pid)
-    } else {
-        words
+/// The command of `process` as a note says it: the program where the list names it, and `…`
+/// where the command goes on after it (`python3 …`), **never an argument** (the privacy rule of
+/// the last tool call, [`command_program`]: a command line carries a credential in more shapes
+/// than a rule can list, and a note that quoted these, masked and cut short, put a shell
+/// command, its arguments and the paths in it in a pause note, T-1178). A command whose program
+/// the list does not name, or that could not be read, is named by its number.
+fn line(process: &BackgroundProcess) -> String {
+    match command_line_program(&process.command) {
+        Some((program, true)) => format!("{program} …"),
+        Some((program, false)) => program.to_owned(),
+        None if process.pid == 0 => "a command".to_owned(),
+        None => format!("process {}", process.pid),
     }
 }
 
-/// The commands of what a window left running, as a note quotes them: the first
-/// few, each held to one line and a few characters, what looks like a key or a
-/// token in them hidden, and how many were left out or hidden said after them.
+/// The commands of what a window left running, as a note quotes them: the first few, each
+/// by its program and nothing after it ([`line`]), and how many were left out said after them.
 fn quote(left: &[BackgroundProcess]) -> String {
     quote_of(left, left.len())
 }
@@ -307,8 +301,8 @@ pub(crate) fn close_would_end(
     (!said.is_empty()).then(|| said.join("; "))
 }
 
-/// The command lines `commands`, as a note quotes them: the first few, each held to one line
-/// and a few characters, what looks like a key or a token hidden, as [`quote`] does.
+/// The command lines `commands`, as a note quotes them: the first few, each by its program and
+/// nothing after it, as [`quote`] does.
 fn quote_commands(commands: &[String]) -> String {
     let listed: Vec<BackgroundProcess> = commands
         .iter()
@@ -337,7 +331,10 @@ fn possibly_left_words(possibly: &[PossiblyLeft]) -> Option<String> {
     let mut named: Vec<String> = possibly
         .iter()
         .take(QUOTED)
-        .map(|process| format!("pid {} ({})", process.pid, program_of(process)))
+        .map(|process| match program_of(process) {
+            Some(program) => format!("pid {} ({program})", process.pid),
+            None => format!("pid {}", process.pid),
+        })
         .collect();
     if possibly.len() > QUOTED {
         named.push(format!("{} more", possibly.len() - QUOTED));
@@ -349,18 +346,15 @@ fn possibly_left_words(possibly: &[PossiblyLeft]) -> Option<String> {
     ))
 }
 
-/// The name of the program of `process` as a note says it: on one line, held to
-/// [`COMMAND_CHARS`] characters, what looks like a key or a token in it hidden.
-fn program_of(process: &PossiblyLeft) -> String {
-    let words = mask(&process.program)
-        .text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if words.is_empty() {
-        "unnamed".to_owned()
-    } else {
-        words.chars().take(COMMAND_CHARS).collect()
+/// The program of `process` as a note says it: the one the list of the last tool call names
+/// ([`command_program`]) when that is the whole of the name the system gave the process, and none
+/// otherwise, the number saying it alone. A process's name is a file's: it can be anything,
+/// `sk-abc defg hijk lmno` among it, and no rule of shape finds where a secret in it ends (the
+/// joint review T-1322, blocker 5).
+fn program_of(process: &PossiblyLeft) -> Option<&'static str> {
+    match command_program(&process.program) {
+        Some((program, false)) => Some(program),
+        _ => None,
     }
 }
 
@@ -370,21 +364,11 @@ fn quote_of(listed: &[BackgroundProcess], total: usize) -> String {
     if listed.is_empty() {
         return format!("{total} processes");
     }
-    let mut masked = 0;
-    let mut commands: Vec<String> = listed
-        .iter()
-        .take(QUOTED)
-        .map(|process| line(process, &mut masked))
-        .collect();
+    let mut commands: Vec<String> = listed.iter().take(QUOTED).map(line).collect();
     if total > QUOTED {
         commands.push(format!("and {} more", total - QUOTED));
     }
-    let mut quoted = commands.join("; ");
-    if masked > 0 {
-        let strings = if masked == 1 { "string" } else { "strings" };
-        quoted.push_str(&format!(" ({masked} key- or token-like {strings} masked)"));
-    }
-    quoted
+    commands.join("; ")
 }
 
 #[cfg(test)]

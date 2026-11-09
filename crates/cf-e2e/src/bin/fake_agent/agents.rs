@@ -23,11 +23,27 @@ impl Agents {
     /// Starts `count` agents, which end together after `seconds`; `then` runs
     /// once they have ended, as the turn they wake begins.
     pub fn start(&self, count: u64, seconds: u64, then: impl FnOnce() + Send + 'static) {
+        self.start_until(
+            count,
+            move || thread::sleep(Duration::from_secs(seconds)),
+            then,
+        );
+    }
+
+    /// Starts `count` agents, which end when `until` returns: a case that must look at the
+    /// window while they run ends them by what it does (`CLAUDE-HELD`: a file it writes), not
+    /// by a clock that a loaded machine can outrun. `then` runs once they have ended.
+    pub fn start_until(
+        &self,
+        count: u64,
+        until: impl FnOnce() + Send + 'static,
+        then: impl FnOnce() + Send + 'static,
+    ) {
         self.started.store(true, Ordering::SeqCst);
         self.running.fetch_add(count, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(seconds));
+            until();
             running.fetch_sub(count, Ordering::SeqCst);
             then();
         });
@@ -62,6 +78,30 @@ mod tests {
         woken.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(agents.used(), "it remembers it started some");
         assert_eq!(agents.running(), 0, "and none run now");
+    }
+
+    #[test]
+    fn agents_started_until_something_happens_run_until_it_does() {
+        let agents = Agents::default();
+        let (may_end, gate) = mpsc::channel::<()>();
+        let (waiting, held) = mpsc::channel::<()>();
+        let (ended, woken) = mpsc::channel();
+        agents.start_until(
+            1,
+            move || {
+                waiting.send(()).unwrap();
+                let _ = gate.recv();
+            },
+            move || ended.send(()).unwrap(),
+        );
+        // The agent is held by what it waits for: it said so, and nothing woke for it.
+        held.recv_timeout(Duration::from_secs(30))
+            .expect("the agent waits for what ends it");
+        assert_eq!(agents.running(), 1, "it runs as it is started");
+        assert!(woken.try_recv().is_err(), "and nothing wakes for it");
+        may_end.send(()).unwrap();
+        woken.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert_eq!(agents.running(), 0);
     }
 
     #[test]

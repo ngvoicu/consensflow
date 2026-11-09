@@ -258,7 +258,7 @@ fn turn_cut(question: &Value) -> Result<Value, String> {
         Some(TurnLeft::Cut(opening)) => json!({
             "cut": true,
             "began": opening.as_ref().and_then(|opening| opening.at.clone()),
-            "words": opening.map(|opening| opening.words),
+            "delivery": opening.and_then(|opening| opening.delivery),
         }),
     })
 }

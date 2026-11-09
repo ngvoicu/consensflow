@@ -47,11 +47,11 @@ const ROLE: &str = "# ConsensFlow worker\n\nRole text for the test.";
 
 /// A throwaway home, ConsensFlow's folder and a stand-in `pi` on PATH.
 struct Home {
-    _dir: TempDir,
     root: String,
     vars: Vec<(String, String)>,
     /// Where the stand-in `pi` is found, once it is installed.
     executable: String,
+    _dir: TempDir,
 }
 
 impl Home {

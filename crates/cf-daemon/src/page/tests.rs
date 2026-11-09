@@ -19,7 +19,6 @@ use super::*;
 use crate::testing::{bridge_pair_over, worked, Worked};
 
 struct Rig {
-    home: tempfile::TempDir,
     kicks: Rc<Cell<u32>>,
     page: Rc<Page>,
     spawn: Rc<DaemonSpawn>,
@@ -27,6 +26,7 @@ struct Rig {
     kit: Context,
     /// The System Settings panes the page asked to open, which none is.
     opened: Rc<RefCell<Vec<crate::computer_use::Pane>>>,
+    home: tempfile::TempDir,
 }
 
 /// Called inside the local set the test runs in: the executor's driver is

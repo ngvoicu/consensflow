@@ -324,6 +324,18 @@ mod tests {
     const T1300_FLAGS_HOOK: &str = "        listed: true,\n        members_only: false,\n";
     const T1300_FLAGS_OFFER: &str = "            listed: true,\n            members_only: false,\n";
 
+    /// What T-1328 changed in `claude/adapter.rs`: `default_model` answers `NoDefault` where it
+    /// answered a `String`, and the import of it. Nothing the corpus borrows reads either; each is
+    /// taken back to the release head's text before the file is hashed.
+    const T1328_IMPORT: (&str, &str) = (
+        "    NoDefault, Observed, Over, Pane, PaneHost, Prepared, Question, Readiness, Records,\n    ServersChosen, Skill, Specs, Trusts, Used, Waiting, Window, Work,\n",
+        "    Observed, Over, Pane, PaneHost, Prepared, Question, Readiness, Records, ServersChosen, Skill,\n    Specs, Trusts, Used, Waiting, Window, Work,\n",
+    );
+    const T1328_DEFAULT: (&str, &str) = (
+        "fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {",
+        "fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {",
+    );
+
     /// What T-1277 added to `claude/adapter.rs`, and no code the corpus borrows reads: Claude
     /// Code's `dialog_identity` (a `Window` method of its own, which the release head's window did
     /// not have) and the `pub(super)` of `LSP_OFFER` that its module reads. They are taken out
@@ -341,6 +353,8 @@ mod tests {
                 .replace(T1300_DECLINE, "")
                 .replace(T1300_FLAGS_HOOK, "")
                 .replace(T1300_FLAGS_OFFER, "")
+                .replace(T1328_IMPORT.0, T1328_IMPORT.1)
+                .replace(T1328_DEFAULT.0, T1328_DEFAULT.1)
         } else {
             text.to_owned()
         }

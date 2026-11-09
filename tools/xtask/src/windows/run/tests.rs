@@ -46,9 +46,9 @@ fn decoded(line: &str) -> String {
 /// A machine for the tests: a checkout with files in it, and the folder of the
 /// stand-ins' programs and of what they write down.
 struct Rig {
+    context: Context,
     checkout: tempfile::TempDir,
     bin: tempfile::TempDir,
-    context: Context,
 }
 
 impl Rig {

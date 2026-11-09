@@ -37,11 +37,11 @@ pub struct Seen {
 
 /// The API, listening, and what a player reaches of it.
 pub struct Rig {
-    _home: tempfile::TempDir,
     pub ledger: ledger::Rig,
     pub front: Front,
     pub seen: Rc<RefCell<Vec<Seen>>>,
     pub api: Api,
+    _home: tempfile::TempDir,
 }
 
 impl Rig {

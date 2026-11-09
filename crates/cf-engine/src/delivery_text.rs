@@ -1274,4 +1274,40 @@ mod tests {
         assert!(!goes_whole(&carrier, &carried, &CfWord::bare()));
         assert!(delivery_text(&carrier, &carried, &CfWord::bare()).contains("cf task get T-1"));
     }
+
+    /// The harness reads the delivery a cut turn began with (`Opening::began_with`, T-1328)
+    /// from a record's item as this crate's proof of an arrival does (`is_paste_of`): the
+    /// header begins the item, behind only what Claude Code put there itself. A header that
+    /// words quote, or that follows other words, names none in either.
+    #[test]
+    fn the_harness_reads_the_delivery_an_item_began_with_as_the_proof_of_an_arrival_does() {
+        use cf_harness::contract::Opening;
+        let delivery = message(12, Some(3), "Fix the parser".to_owned());
+        let paste = delivery_text(&delivery, &[], &CfWord::bare());
+        let wrapped = |inner: &str| {
+            format!("<pasted_content id=\"b118\">\n{inner}\n</pasted_content id=\"b118\">")
+        };
+        let mut failed = Vec::new();
+        for (text, named) in [
+            (paste.clone(), true),
+            (wrapped(&paste), true),
+            (format!("[Image #4]{paste}"), true),
+            (format!("[Image #4]\n\n{}", wrapped(&paste)), true),
+            (format!("[Image #4] [Image #5]{paste}"), true),
+            (format!("  \n{paste}"), true),
+            (format!("Why is \"{paste}\" queued?"), false),
+            (format!("Investigate this:\n\n{paste}"), false),
+            (format!("key: abc {paste}"), false),
+            (format!("<pasted_content id=\"b1\"> {paste}"), false),
+            (paste.replace("m-12", "m-12x"), false),
+            ("pass\nword\nhunter22".to_owned(), false),
+        ] {
+            let theirs = Opening::began_with(&text, None).delivery;
+            let ours = header_id(&text).filter(|id| is_paste_of(&text, *id, None));
+            if theirs != ours || theirs.is_some() != named {
+                failed.push(format!("{text:?}: harness {theirs:?}, proof {ours:?}"));
+            }
+        }
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
 }

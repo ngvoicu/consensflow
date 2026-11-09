@@ -16,9 +16,9 @@ use crate::windows::options::DEFAULT_DIR;
 
 /// A checkout, and the folder of the stand-ins' programs and of what they hold and write down.
 struct Rig {
+    context: Context,
     checkout: tempfile::TempDir,
     bin: tempfile::TempDir,
-    context: Context,
 }
 
 /// An ssh that counts what it is asked: the first time it says which tree it unpacked (the one

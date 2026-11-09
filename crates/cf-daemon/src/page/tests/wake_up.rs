@@ -15,11 +15,11 @@ use crate::testing::{request, said, scene};
 
 /// The page over a project whose chief and zeus the engine's kit opened.
 struct Asked {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
+    _home: tempfile::TempDir,
 }
 
 fn asked() -> Asked {

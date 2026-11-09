@@ -15,6 +15,9 @@
 //! when the window closed is the cause, and `cargo …` points at it; the rest of the line is the
 //! record's, which the human can read.
 //!
+//! The notes of what a window left running say its commands the same way ([`program`], used by
+//! `background`): the program the list names and `…`, or the process's number.
+//!
 //! **Never a file's name either** (the re-check T-1224): a path carries a secret in more shapes
 //! than a rule can list, and each was found: a token split by blanks, a key's body of twelve
 //! characters, a URL with its credentials written in percent signs
@@ -33,11 +36,11 @@ const TOOL_CHARS: usize = 40;
 /// version-control and file tools. The program only: what it was given is never said, so a
 /// program that takes a credential on its line (`git`, `npm`, `cargo login`) is named safely,
 /// and the list is of programs worth naming, not of programs that are safe to run.
-const PROGRAMS: [&str; 42] = [
+const PROGRAMS: &[&str] = &[
     "cargo", "rustc", "rustfmt", "npm", "npx", "yarn", "pnpm", "bun", "tsc", "vitest", "jest",
     "biome", "eslint", "prettier", "make", "cmake", "ninja", "git", "ls", "cat", "head", "tail",
     "wc", "diff", "mkdir", "rm", "cp", "mv", "tar", "python", "python3", "pytest", "node", "go",
-    "mvn", "gradle", "dotnet", "java", "ruby", "kill", "pkill", "killall",
+    "mvn", "gradle", "dotnet", "java", "ruby", "kill", "pkill", "killall", "sleep", "ping",
 ];
 
 /// What a note says of `call`, after "; ", or nothing where the call names nothing.
@@ -72,7 +75,7 @@ pub(super) fn words(call: &LastCall) -> String {
 /// The program a shell command begins with, where the list names it, and whether the command
 /// goes on after it. The first word as it is written: a path to it is its last part, and
 /// nothing else is looked at.
-fn program(command: &str) -> Option<(&'static str, bool)> {
+pub(crate) fn program(command: &str) -> Option<(&'static str, bool)> {
     let mut words = command.split_whitespace();
     let first = words.next()?;
     let name = first.rsplit('/').next().unwrap_or(first);
@@ -81,6 +84,38 @@ fn program(command: &str) -> Option<(&'static str, bool)> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c));
     written.then(|| (*listed, words.next().is_some()))
+}
+
+/// [`program`] of a command line as the system lists a running process's. On Windows it begins
+/// with the program's path in quotes, a path with blanks in it (`"C:\Program Files\Git\usr\bin\sleep.exe"
+/// 600`): the program is the last part of that path without its extension, as a path to it is on
+/// any system, and nothing else of the path is said. A quoted name of any other shape, or one the
+/// list does not name, is no program.
+pub(crate) fn command_line_program(command: &str) -> Option<(&'static str, bool)> {
+    let Some(quoted) = command.trim_start().strip_prefix('"') else {
+        return program(command);
+    };
+    let (path, rest) = quoted.split_once('"')?;
+    let name = path.rsplit(['/', '\\']).next()?;
+    let name = [".exe", ".com", ".cmd", ".bat"]
+        .iter()
+        .find_map(|extension| {
+            let cut = name.len().checked_sub(extension.len())?;
+            name.get(cut..)
+                .filter(|end| end.eq_ignore_ascii_case(extension))
+                .map(|_| &name[..cut])
+        })
+        .unwrap_or(name);
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    {
+        return None;
+    }
+    let listed = PROGRAMS
+        .iter()
+        .find(|program| program.eq_ignore_ascii_case(name))?;
+    Some((*listed, !rest.trim().is_empty()))
 }
 
 /// A tool's name as a note says it: masked, on one line, cut short.

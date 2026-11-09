@@ -16,12 +16,12 @@ pub(crate) const TOKEN: &str = "the-ui-token";
 
 /// Screens over a home in a temporary folder, and what a test reaches into.
 pub(crate) struct Rig {
-    pub(crate) _home: tempfile::TempDir,
     /// Where each harness installed is: its stand-in.
     pub(crate) installed: Vec<(String, PathBuf)>,
     pub(crate) screens: Screens,
     pub(crate) latest: Rc<ScriptedLatest>,
     pub(crate) capture: Rc<ScriptedCapture>,
+    pub(crate) _home: tempfile::TempDir,
 }
 
 impl Rig {

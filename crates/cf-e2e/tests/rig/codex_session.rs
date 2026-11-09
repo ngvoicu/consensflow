@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cf_base::startup::StartKind;
 use cf_e2e::http::server::{Answer, Response, Server};
 use cf_e2e::ports;
 use cf_e2e::process::{alive_among, end_all, is_alive, Run, Signal, Spawned};
@@ -40,12 +41,12 @@ const EXIT: Duration = Duration::from_secs(60);
 /// A supervisor, running: `cf codex-session` on a stand-in Codex, in a home of
 /// its own that goes with it.
 struct Supervised {
-    /// The folder of the window's home: ConsensFlow's home too.
-    root: TempDir,
     /// The port the broker listens on.
     port: u16,
     child: Spawned,
     log: PathBuf,
+    /// The folder of the window's home: ConsensFlow's home too.
+    root: TempDir,
 }
 
 impl Supervised {
@@ -58,8 +59,18 @@ impl Supervised {
         vars: &[(&str, String)],
         codex: Option<&dyn Fn(&Path) -> PathBuf>,
     ) -> Result<Self> {
+        Self::start_in("cf-cx-", args, vars, codex)
+    }
+
+    /// [`Supervised::start`], the home in a folder named from `prefix`.
+    fn start_in(
+        prefix: &str,
+        args: &[&str],
+        vars: &[(&str, String)],
+        codex: Option<&dyn Fn(&Path) -> PathBuf>,
+    ) -> Result<Self> {
         let root = tempfile::Builder::new()
-            .prefix("cf-cx-")
+            .prefix(prefix)
             .tempdir()
             .map_err(|source| Error::File {
                 action: "make a folder in",
@@ -337,10 +348,18 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
 fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behind() -> Outcome {
     let _turn = serial::turn();
     let mut s = Supervised::start(&[], &[("CF_TEST_CODEX_BACKEND", "fail".to_owned())], None)?;
-    assert_eq!(s.exit()?, Some(1), "{}", s.stderr());
+    // It ends with the status of why (79, the server stopped before it was ready): the third
+    // reading of T-1322 found the server's own words, a path among them, quoted from a window
+    // that ended with 1 (T-1328).
+    assert_eq!(
+        s.exit()?,
+        Some(StartKind::ServerStopped.exit_status()),
+        "{}",
+        s.stderr()
+    );
     assert_eq!(
         s.stderr(),
-        "ConsensFlow could not open Codex: Codex server could not start: not logged in\n\n"
+        "ConsensFlow could not open Codex: Codex server could not start (it ended with status 1): not logged in\n\n"
     );
     let runs = s.runs();
     let kinds: Vec<&str> = runs.iter().filter_map(|run| run["run"].as_str()).collect();
@@ -352,8 +371,10 @@ fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behin
     // own words: Rust's, deliberately, where Node said `spawn <path> ENOENT`.
     // Its folder is still there, so Windows too says the file is missing (os
     // error 2), not its path (3).
+    // It ends with the status of why (70, the program was not found), which the engine reads from
+    // how the window ended to say that Codex never ran, without quoting this screen (T-1328).
     let mut missing = Supervised::start(&[], &[], Some(&|root| root.join("codex")))?;
-    assert_eq!(missing.exit()?, Some(1), "{}", missing.stderr());
+    assert_eq!(missing.exit()?, Some(70), "{}", missing.stderr());
     let gone = regex::escape(&missing.root.path().join("codex").to_string_lossy());
     let said = missing.stderr();
     assert!(
@@ -366,6 +387,78 @@ fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behin
     if !cfg!(windows) {
         let tmp = std::fs::read_dir(missing.root.path().join("tmp"))?.count();
         assert_eq!(tmp, 0);
+    }
+    Ok(())
+}
+
+/// Gives the socket folders of a home their write permission back when a case ends, so that the
+/// home can be removed whatever the case found.
+#[cfg(unix)]
+struct Unlocked(PathBuf);
+
+#[cfg(unix)]
+impl Drop for Unlocked {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+
+        for folder in std::fs::read_dir(&self.0).into_iter().flatten().flatten() {
+            let _ = std::fs::set_permissions(folder.path(), std::fs::Permissions::from_mode(0o700));
+        }
+    }
+}
+
+/// T-1337, the fourth reading of T-1322: Codex's server fails before it is ready, and the socket
+/// folder in the home cannot be removed after it (`EACCES`), the home having a credential's name in
+/// its path. The window's program ended with 1 and said `could not remove the Codex socket folder
+/// /…/hunter22/tmp/codex-…: Permission denied`, a path of the person's, which the engine quoted. The
+/// first failure wins: it ends with 79 (the server stopped before it was ready), shows the status the
+/// server ended with, and says no path (the log has it).
+#[test]
+fn a_server_that_failed_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path(
+) -> Outcome {
+    let _turn = serial::turn();
+    let mut s = Supervised::start_in(
+        "cf-hunter22-",
+        &[],
+        &[("CF_TEST_CODEX_BACKEND", "fail-locked".to_owned())],
+        None,
+    )?;
+    #[cfg(unix)]
+    let _unlocked = Unlocked(s.root.path().join("tmp"));
+    assert_eq!(
+        s.exit()?,
+        Some(StartKind::ServerStopped.exit_status()),
+        "{}",
+        s.stderr()
+    );
+    let said = s.stderr();
+    assert!(
+        said.ends_with(
+            "ConsensFlow could not open Codex: Codex server could not start (it ended with status 1): not logged in\n\n"
+        ),
+        "{said}"
+    );
+    for word in [
+        "hunter22",
+        &s.root.path().to_string_lossy(),
+        "codex-",
+        "Permission denied",
+        "os error",
+    ] {
+        assert!(!said.contains(word), "`{word}` is in: {said}");
+    }
+    if !cfg!(windows) {
+        assert!(
+            said.starts_with("ConsensFlow: the Codex socket folder could not be removed; its path and the cause are in ConsensFlow's log\n"),
+            "{said}"
+        );
+        let log = files::read_string(&s.root.path().join("daemon.log"))?;
+        assert!(
+            log.contains("could not remove the Codex socket folder ")
+                && log.contains(&*s.root.path().to_string_lossy())
+                && log.contains("Permission denied (os error 13)"),
+            "{log}"
+        );
     }
     Ok(())
 }

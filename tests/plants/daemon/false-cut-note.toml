@@ -135,7 +135,7 @@ replace = ""
 
 [[plant]]
 name = "false cut note: a cut turn names no message"
-meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
+meant = "a_cut_turn_is_told_by_the_time_and_the_delivery_that_began_it_and_no_word_of_the_message"
 runs = ["fcn-harness-contract"]
 
 [[plant.edit]]
@@ -164,28 +164,8 @@ find = '''            .find(|item| item.role == Role::User && !item.compaction)?
 replace = '''            .find(|item| item.role == Role::User)?;'''
 
 [[plant]]
-name = "false cut note: a cut turn's message is kept whole"
-meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
-runs = ["fcn-harness-contract"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/contract.rs"
-find = '''        let mut kept: String = words.chars().take(OPENING_WORDS).collect();'''
-replace = '''        let mut kept: String = words.chars().take(OPENING_WORDS * 10).collect();'''
-
-[[plant]]
-name = "false cut note: a cut turn's message keeps its line breaks and runs of spaces"
-meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
-runs = ["fcn-harness-contract"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/contract.rs"
-find = '''        let words = words.join(" ");'''
-replace = '''        let words = item.text.to_string() + &words.join("")[..0];'''
-
-[[plant]]
 name = "false cut note: a cut turn says no time"
-meant = "a_cut_turn_is_told_by_the_time_and_first_words_of_the_message_that_began_it"
+meant = "a_cut_turn_is_told_by_the_time_and_the_delivery_that_began_it_and_no_word_of_the_message"
 runs = ["fcn-harness-contract"]
 
 [[plant.edit]]
@@ -205,7 +185,7 @@ replace = '''                    Settlement::InFlight => Some(TurnLeft::Cut(None
 
 [[plant]]
 name = "false cut note: the chief's note does not name the turn"
-meant = "a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words"
+meant = "a_cut_note_names_the_turn_by_the_delivery_the_ledger_holds_and_quotes_none_of_its_words"
 runs = ["fcn-engine-resume"]
 
 [[plant.edit]]
@@ -215,7 +195,7 @@ replace = '''            (Coming::Chief, Some(_)) => format!("{CHIEF_CUT}. {RESU
 
 [[plant]]
 name = "false cut note: a member's continuation does not name the turn"
-meant = "a_cut_note_names_the_turn_by_when_its_message_came_and_its_first_words"
+meant = "a_cut_note_names_the_turn_by_the_delivery_the_ledger_holds_and_quotes_none_of_its_words"
 runs = ["fcn-engine-resume"]
 
 [[plant.edit]]

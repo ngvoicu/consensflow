@@ -1,0 +1,88 @@
+# A temporary folder is the last field of what owns it (T-1333): a struct drops its fields in the order
+# they are written, and a `TempDir` before the ledger, the log or the trace that has a file open in
+# it asks the system to remove a folder with files open. Unix does; Windows will not, and `TempDir` says
+# nothing of it: the folder stayed for good with its `consensflow.db` (zeewin2: 460 of the daemon's 717
+# tests, 163 of the evals', 128 of the harnesses' left theirs in one run, 2026-11-08). The rule test
+# (`tools/xtask/tests/temp_folders.rs`) reads the Rust of the workspace and refuses the next.
+#
+# Every name holds `temp folder last`, so `npm run plants:daemon -- "temp folder last"` runs them all.
+
+[run]
+engine-context-folder = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::context::tests::a_context_leaves_nothing"]
+daemon-scene-home = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "testing::tests::a_scene_leaves_nothing"]
+xtask-temp-folders = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "temp_folders"]
+
+[[plant]]
+name = "temp folder last: the rule lets a folder come before a field"
+meant = "a_temporary_folder_before_a_field_is_found_and_one_after_the_rest_is_not"
+runs = ["xtask-temp-folders"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/temp_folders.rs"
+find = ".is_some_and(|first| one.fields[first..].iter().any(|kind| !is_dir(kind)))"
+replace = ".is_some_and(|_first| false)"
+
+[[plant]]
+name = "temp folder last: a newtype of a folder is none"
+meant = "a_temporary_folder_before_a_field_is_found_and_one_after_the_rest_is_not"
+runs = ["xtask-temp-folders"]
+
+[[plant.edit]]
+file = "tools/xtask/tests/temp_folders.rs"
+find = "named.is_some_and(|word| owners.contains(&(krate.to_owned(), word.to_owned())))"
+replace = "named.is_some_and(|word| word == \"\" && owners.contains(&(krate.to_owned(), word.to_owned())))"
+
+[[plant]]
+name = "temp folder last: the daemon's scene has its home first"
+meant = "no_struct_of_the_workspace_has_a_temporary_folder_before_a_field_with_a_file_open_in_it"
+runs = ["xtask-temp-folders"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/testing.rs"
+find = "    /// The home, which holds the ledger, the log and the trace until the scene goes.\n    pub _home: tempfile::TempDir,\n}"
+replace = "}"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/testing.rs"
+find = "pub struct Scene {\n"
+replace = "pub struct Scene {\n    pub _home: tempfile::TempDir,\n"
+
+[[plant]]
+name = "temp folder last: the evals' scene has its folder first"
+meant = "no_struct_of_the_workspace_has_a_temporary_folder_before_a_field_with_a_file_open_in_it"
+runs = ["xtask-temp-folders"]
+
+[[plant.edit]]
+file = "crates/cf-evals/tests/long_run/scene.rs"
+find = "    // Last: the folder goes after the ledger file open in it, which Windows will not remove from under it.\n    _folder: Folder,\n}"
+replace = "}"
+
+[[plant.edit]]
+file = "crates/cf-evals/tests/long_run/scene.rs"
+find = "pub struct Scene {\n"
+replace = "pub struct Scene {\n    _folder: Folder,\n"
+
+# A fixture that something else still holds the ledger of (a task left in a local set, a closure) lets go
+# of the file as it goes, or the folder stays on Windows. These two are tried on Windows only: Unix
+# removes a folder with a file open in it.
+[[plant]]
+name = "temp folder last: the engine's context keeps its ledger's file open as it goes"
+meant = "a_context_leaves_nothing_of_its_folder_though_something_still_holds_its_ledger"
+runs = ["engine-context-folder"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/context.rs"
+find = "                ledger.let_go_of_its_file();"
+replace = "                let _ = &mut ledger;"
+
+[[plant]]
+name = "temp folder last: the daemon's scene keeps its ledger's file open as it goes"
+meant = "a_scene_leaves_nothing_of_its_home_though_something_still_holds_its_ledger"
+runs = ["daemon-scene-home"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/testing.rs"
+find = "            ledger.let_go_of_its_file();"
+replace = "            let _ = &mut ledger;"

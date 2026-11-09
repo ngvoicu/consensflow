@@ -292,8 +292,8 @@ runs = ["app-daemon-restart"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = "                &|| !fenced || !bridge.is_closed(),"
-replace = "                &|| true,"
+find = "            &|| !fenced || !bridge.is_closed(),"
+replace = "            &|| true,"
 
 [[plant]]
 name = "daemon keeps running: the table does not ask whether the opener still owns the window"

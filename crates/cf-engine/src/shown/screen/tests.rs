@@ -192,6 +192,45 @@ fn rows_of_base64_and_nothing_else_withhold_the_screen() {
             vec!["abcdefghijklmnop", "qrstuvwxyzabcdef", "ghijklmnopqrstuv"],
         ),
         ("a hash", vec![hash]),
+        // A row of digits is a number, and fortyness alone makes it a key: neither a word of
+        // letters nor a row that looks encoded.
+        (
+            "a run of forty-eight digits",
+            vec!["012345678901234567890123456789012345678901234567"],
+        ),
+        // Two rows or more of twelve, the last what is left, of digits: no row is a body by
+        // itself, and the last is shorter than the others.
+        (
+            "digits in rows of sixteen and a short ending",
+            vec![
+                "0123456789012345",
+                "6789012345678901",
+                "2345678901234567",
+                "890",
+            ],
+        ),
+        // Two rows only: the first thirty-six long, the second what is left.
+        (
+            "digits in two rows, the second what is left",
+            vec!["012345678901234567890123456789012345", "6789"],
+        ),
+        // Rows of letters from eight to eleven, widths that differ, the last what is left:
+        // three rows or more of eight, forty together.
+        (
+            "letters in rows of ten, eleven, nine and eleven and a short ending",
+            vec![
+                "abcdefghij",
+                "klmnopqrstu",
+                "vwxyzabcd",
+                "efghijklmno",
+                "qrs",
+            ],
+        ),
+        // A capital after a small letter is what two short rows in a row look encoded by.
+        (
+            "two short rows with capitals after small letters",
+            vec!["abCDef", "ghIJkl"],
+        ),
         // Rows narrower than twelve, with what is left of the body on the last.
         (
             "a body of small letters in rows of eleven",
@@ -853,6 +892,20 @@ fn a_value_in_groups_withholds_the_screen() {
         ),
         ("groups wrapped over rows", vec!["abcd efgh", "ijkl mnop"]),
         ("a group to a row", vec!["abcd", "efgh", "ijkl", "mnop"]),
+        // Hex, not letters: digits alone (hex, not a word, not one length).
+        (
+            "digit groups of differing lengths",
+            vec!["1234 56789 012345 6789012"],
+        ),
+        // A capital after a small letter in groups that are no words of letters alone.
+        (
+            "groups of differing lengths with a slash and a capital after a small letter",
+            vec!["aB/cDe fGh/IjKl mNo/PqRs tUv/WxYzA"],
+        ),
+        (
+            "groups parted by a dash and by a blank",
+            vec!["abcd-efgh ijkl-mnop"],
+        ),
         (
             "groups in a frame",
             vec!["│ YWJj-ZGVm-ZGhp-amts │", "│ bWpv-cHFy-cHRu-dndv │"],
@@ -865,36 +918,50 @@ fn a_value_in_groups_withholds_the_screen() {
     for rows in [
         vec!["abcd efgh ijkl"],
         vec!["abcd efgh ijkl and more"],
-        vec!["abcd  efgh  ijkl  mnop"],
-        // Groups parted by anything but a blank or a `-` are no run: snake_case names, paths,
-        // addresses (over 5,610 windows of real output, any one character withheld 4.8% of
-        // them, most of them `cargo test` names, and blanks and `-` alone 1.5%).
-        vec!["abcd_efgh_ijkl_mnop"],
+        // Groups parted by `::` or `, ` are no run: Rust paths and lists.
         vec!["test shown::tests::a_host_shut_down_with_windows_open_tells_the_exit ... ok"],
-        vec!["abcd:efgh:ijkl:mnop"],
-        vec!["abcd.efgh.ijkl.mnop"],
-        vec!["2001:0db8:85a3:0000:0000:8a2e:0370:7334"],
+        vec!["abcd::efgh::ijkl::mnop"],
+        vec!["abcd, efgh, ijkl, mnop"],
+        vec!["abcd,efgh,ijkl,mnop"],
+        // The snake_case names of ordinary output are not of one length, nor hex.
+        vec!["parse_failure_lexer_mismatch_found"],
         vec!["abcd efgh ijk lmno pqrs"],
         vec!["the and for are not"],
-        // The rest of a path the window wrapped is a row of base64's characters: slashes alone
-        // do not make it look encoded.
-        vec!["tests/dispatcher"],
-        vec!["upport/revisiond", "var/log/system/daemon"],
-        vec!["see the log in", "var/log/system/daemon", "for the cause"],
+        // Two paths the window wrapped: a `/` makes a row of twelve look encoded and not two
+        // rows of any length.
+        vec!["src/lib", "tests/it"],
+        vec!["see the log in", "var/log", "for the cause"],
         vec!["Compiling consensflow engine library for target platform"],
         vec!["the quick brown foxes jumped over lazy dogs"],
         vec!["PATH=/usr/bin HOME=/root LANG=C TERM=xterm"],
         vec!["src/foo tests/bar docs/baz crates/qux"],
-        vec!["twelve that looks encoded"],
         vec!["   Compiling cf-engine v3.0.7-alpha.2 (/Users/me/consensflow/crates/cf-engine)"],
     ] {
         let said = note(&rows);
         assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
     }
-    // The cost, stated: four words of one length, and a list of camel-case names, are a run.
+    // The cost, stated: four words of one length, a list of camel-case names, four words of
+    // four letters or more and nothing else, the same parted by any blanks, a name in four
+    // parts of one length, an IPv6 address, and a path the window wrapped from twelve characters
+    // of letters, digits and slashes.
     for rows in [
         vec!["this will work like that"],
         vec!["ParseFailure LexerMismatch SyntaxError TypeMismatch"],
+        vec!["abcd efghi jklmno pqrstuv"],
+        vec!["correct horse battery staple"],
+        vec!["twelve that looks encoded"],
+        vec!["correct horse", "battery staple"],
+        vec!["abcd  efgh  ijkl  mnop"],
+        vec!["abcd_efgh_ijkl_mnop"],
+        vec!["abcd:efgh:ijkl:mnop"],
+        vec!["abcd.efgh.ijkl.mnop"],
+        vec!["2001:0db8:85a3:0000:0000:8a2e:0370:7334"],
+        vec!["deadbeef\tcafebabe\tfeedface\tabcdefab"],
+        vec!["deadbeef  cafebabe  feedface  abcdefab"],
+        vec!["tests/dispatcher"],
+        vec!["upport/revisiond", "var/log/system/daemon"],
+        vec!["abcd/efghijkl"],
+        vec!["abcd/efghijkl", "mnopqrst/uvw"],
     ] {
         assert_eq!(note(&rows), KEY, "{rows:?}");
     }
@@ -1178,4 +1245,339 @@ fn a_url_whose_user_and_password_the_wrap_split_withholds_the_screen() {
     // A URL with no password in it is none.
     let said = note(&["see https://host.invalid/a", "then write to the owner"]);
     assert!(said.contains("its screen ended with"), "{said}");
+}
+
+/// What the note says of a window that ended with `screen` on it, whose conversation ran in
+/// `session` (ConsensFlow's own record of it).
+fn note_in(screen: &[&str], session: Option<&str>) -> String {
+    Shown {
+        code: Some(1),
+        tail: Some(screen.iter().map(|row| (*row).to_owned()).collect()),
+        ..Shown::default()
+    }
+    .with_own_session(session.map(str::to_owned))
+    .after("gone")
+}
+
+/// T-1227: a value in groups parted by `_`, `:` or `.` is a run when it is a word of its own
+/// whose parts are of one length, or each hex or looking encoded, and not when the four short
+/// parts are in the middle of a longer name: the names `cargo test` prints (5.5% of the windows
+/// of its output withheld when any four in a row counted).
+#[test]
+fn a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen() {
+    for rows in [
+        vec!["abcd_efgh_ijkl_mnop"],
+        vec!["abcd:efgh:ijkl:mnop"],
+        vec!["abcd.efgh.ijkl.mnop"],
+        vec!["abcd_efgh_ijkl_mnop_qrst"],
+        vec!["\"abcd_efgh_ijkl_mnop\","],
+        vec!["(abcd.efgh.ijkl.mnop)"],
+        vec!["key = abcd_efgh_ijkl_mnop;"],
+        // Each part hex or encoded, of any length.
+        vec!["2001:0db8:85a3:0000:0000:8a2e:0370:7334"],
+        vec!["deadbeef_cafe_feedface_abcdef"],
+        vec!["ab12cd_ef34gh56_ij78_kl90mn"],
+        // Mixed parting.
+        vec!["abcd_efgh-ijkl.mnop"],
+        // In a frame, and among other words.
+        vec!["│ abcd_efgh_ijkl_mnop │"],
+        vec!["the value abcd_efgh_ijkl_mnop is"],
+    ] {
+        assert_eq!(note(&rows), KEY, "{rows:?}");
+    }
+    for rows in [
+        vec!["test windows::a_pause_note_the_ledger_holds_says_none_of_a_value_in_groups ... ok"],
+        vec!["a_host_shut_down_with_windows_open_tells_the_exit"],
+        vec!["parse_failure_lexer_mismatch_found"],
+        vec!["java.util.concurrent.atomic.LongAdder"],
+        vec!["shown::tests::only_the_last_lines_are_quoted"],
+        vec!["abcd::efgh::ijkl::mnop"],
+        vec!["abcd_efgh_ijkl"],
+        vec!["abcd_efg_ijkl_mnop"],
+        vec!["abc_def_ghi_jkl"],
+        vec!["x_abcd_efgh_ijkl_mnop_y"],
+        vec!["cf-engine-v3.0.7-alpha.2"],
+        vec!["12:34:56.789"],
+        vec!["1.2.3.4"],
+        vec!["sha256:3e25960a79dbc69b674cd4ec67a72c62"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+}
+
+/// T-1227: hex groups parted by a tab or by two blanks or more are a run, as one blank parts
+/// them. (Plain letters in them are a row of words: see `bare_words`.)
+#[test]
+fn hex_groups_parted_by_a_tab_or_by_blanks_of_any_number_are_a_run() {
+    for rows in [
+        vec!["deadbeef\tcafebabe\tfeedface\tabcdefab"],
+        vec!["deadbeef  cafebabe  feedface  abcdefab"],
+        vec!["deadbeef     cafebabe  \t feedface abcdefab"],
+        vec!["deadbeef cafebabe\tfeedface  abcdefab"],
+        // With digits, as keys have: not words of letters, so `bare_words` does not take them.
+        vec!["d3adb33f\tc0ffee42\tfeed1234\tabcd5678"],
+        vec!["d3adb33f  c0ffee42  feed1234  abcd5678"],
+        vec!["YWJj  ZGVm\tZGhp   amts"],
+        vec!["deadbeef", "cafebabe", "feedface", "abcdefab"],
+    ] {
+        assert_eq!(note(&rows), KEY, "{rows:?}");
+    }
+    // A column of words that are none of them hex or encoded and are not one length.
+    for rows in [
+        vec!["main  test  doc  libs  extras"],
+        vec!["Compiling   consensflow   engine   library   for"],
+    ] {
+        // Words of letters and nothing else are `bare_words`' (four of four letters or more):
+        // these have a short word, or none of the four.
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+}
+
+/// T-1227: four words of four letters or more and nothing else in a row, or two or more in each
+/// of rows in a row, are a passphrase typed bare: it has no name, digit or length of its own.
+#[test]
+fn rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen() {
+    for rows in [
+        vec!["abcd efghi jklmno pqrstuv"],
+        vec!["correct horse battery staple"],
+        vec!["correct horse", "battery staple"],
+        vec!["ÉCOLE jardin maison fenêtre"],
+        vec!["│ correct horse battery staple │"],
+        vec!["pad one", "correct horse battery staple", "pad two"],
+        vec!["twelve that looks encoded"],
+    ] {
+        assert_eq!(note(&rows), KEY, "{rows:?}");
+    }
+    for rows in [
+        // A short word, a point, a comma, a digit or a symbol in the row is a sentence's.
+        vec!["see the manual for details"],
+        vec!["correct horse battery staple and more words here"],
+        vec!["correct horse battery, staple"],
+        vec!["correct horse battery staple."],
+        vec!["correct horse battery staple2"],
+        vec!["correct horse battery staple!"],
+        vec!["correct horse battery sta"],
+        // A row with a short word between two rows of long ones ends the run.
+        vec!["correct horse", "see the end", "battery staple"],
+        // A word to a row, three words, or two rows that are not each two words.
+        vec!["correct", "horse", "battery"],
+        vec!["correct horse battery"],
+        vec!["correct horse", "battery", "the end"],
+        // The boundary: a word to a row after the first two is not a run of rows of words.
+        vec!["correct horse", "battery", "staple"],
+        vec!["correct horse", "bat staple"],
+        // Words with a hyphen, an apostrophe or an underscore in them.
+        vec!["red-green-blue purple yellow orange"],
+        vec!["don't stop believing anything ever"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+}
+
+/// T-1227: a row of twelve characters or more with a `/` in it is a key's body cropped by the
+/// window as much as one with a digit in it; so is one word of letters (a value whose name
+/// scrolled out). A row of digits is a number, and two short rows with a `/` each are two
+/// paths the window wrapped.
+#[test]
+fn a_row_of_twelve_with_a_slash_in_it_or_one_word_of_letters_withholds_the_screen() {
+    for rows in [
+        vec!["abcd/efghijkl"],
+        vec!["abcd/efghijkl", "mnopqrst/uvw"],
+        vec!["tests/dispatcher"],
+        vec!["var/log/system/daemon"],
+        vec!["redgreenblue"],
+        vec!["REDGREENBLUE"],
+        vec!["Redgreenblue"],
+        vec!["internationalization"],
+        vec!["pad one", "redgreenblue", "pad two"],
+        vec!["│ abcd/efghijkl │"],
+    ] {
+        assert_eq!(note(&rows), KEY, "{rows:?}");
+    }
+    for rows in [
+        vec!["redgreenblu"],
+        vec!["abcd/efghij"],
+        vec!["123456789012"],
+        vec!["1234567890123456789"],
+        vec!["src/lib", "tests/it"],
+        vec!["see the log in", "var/log", "for the cause"],
+        vec!["red green blue"],
+        vec!["red-green-blue"],
+        vec!["red_green_blue"],
+        vec!["redgreenblue.rs"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+}
+
+/// T-1227: escapes spelled out again where the text has them again (`%252D`), as far as three
+/// passes; a word written in percent signs for no reason a URL has; and a printf's width is none.
+#[test]
+fn nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen() {
+    for rows in [
+        vec!["api%255Fkey%253Dredgreenblue"],
+        vec!["sk%252Dabcdefgh%2520ijklmnop"],
+        vec!["%2570assword%25253Dhunter22"],
+        vec!["https%253A%252F%252Falice%253Aswordfish%2540example.test"],
+        vec!["a", "pi%255Fkey%253Dredgreenblue"],
+    ] {
+        assert_eq!(note(&rows), NAMED, "{rows:?}");
+    }
+    for rows in [
+        vec!["cobalt%2Dviolet%2Dindigo"],
+        vec!["cobalt%2dviolet%2dindigo"],
+        vec!["red%5Fgreen%5Fblue"],
+        vec!["red%41green%62lue"],
+        vec!["red%2Egreen%7Eblue"],
+        vec!["a%2Fb%2Dc"],
+        vec!["100%252Dpercent"],
+        vec!["see cobalt%2Dviolet%2Dindigo now"],
+    ] {
+        assert_eq!(note(&rows), KEY, "{rows:?}");
+    }
+    // Four passes are not spelled out: it is no URL, and the name is not found.
+    let said = note(&["api%25252525Fkey%25252525Dredgreenblue"]);
+    assert!(said.contains("left out"), "{said}");
+    // What a URL, a printf and a file name have.
+    for rows in [
+        vec!["file:///My%20Folder/a%2Fb.txt"],
+        vec!["GET /a%20b?q=100%25 HTTP/1.1"],
+        vec!["caf%C3%A9 au lait"],
+        vec!["printf(\"%4d %6d\\n\", a, b)"],
+        vec!["100%25 done"],
+        vec!["%2D"],
+        vec!["a%2Db"],
+    ] {
+        let said = note(&rows);
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+}
+
+/// T-1228: the id a harness prints as its window quits is ConsensFlow's own record of the
+/// conversation, and no secret: the screen that shows it is quoted. Any other UUID, the same id
+/// as part of a longer word, and the id where ConsensFlow has none for the window still
+/// withhold it.
+#[test]
+fn a_windows_own_session_id_on_its_screen_is_no_value_in_groups() {
+    const OWN: &str = "123e4567-e89b-12d3-a456-426614174000";
+    const OTHER: &str = "9f2c1d3e-7a4b-4c5d-8e6f-0a1b2c3d4e5f";
+    let resume = format!("Resume this conversation with: claude --resume {OWN}");
+    let said = note_in(&["Goodbye!", &resume], Some(OWN));
+    assert!(said.contains("its screen ended with"), "{said}");
+    assert!(!said.contains("a456"), "{said}");
+    // In capitals, framed, alone on its row, and the session written in capitals.
+    for rows in [
+        vec![resume.to_uppercase()],
+        vec![format!("│ {resume} │")],
+        vec![OWN.to_owned()],
+        vec![format!("claude --resume {}", OWN.to_uppercase())],
+        vec![format!("(session {OWN})")],
+        vec![format!("{OWN}, and {OWN}")],
+    ] {
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let said = note_in(&rows, Some(OWN));
+        assert!(said.contains("its screen ended with"), "{rows:?}: {said}");
+    }
+    assert!(
+        note_in(&[&resume.to_uppercase()], Some(&OWN.to_uppercase()))
+            .contains("its screen ended with")
+    );
+    // Any other id withholds it, beside the window's own or alone.
+    let other = format!("claude --resume {OTHER}");
+    let both = format!("{OWN} {OTHER}");
+    for (rows, session) in [
+        (vec![other.as_str()], Some(OWN)),
+        (vec![resume.as_str(), other.as_str()], Some(OWN)),
+        (vec![both.as_str()], Some(OWN)),
+        // No session known, or another window's.
+        (vec![resume.as_str()], None),
+        (vec![resume.as_str()], Some(OTHER)),
+        // The id is part of a longer word: a longer value that holds it.
+        (vec!["x123e4567-e89b-12d3-a456-4266141740001"], Some(OWN)),
+        (vec!["abcd-123e4567-e89b-12d3-a456-426614174000"], Some(OWN)),
+        (
+            vec!["123e4567-e89b-12d3-a456-426614174000_abcd_efgh"],
+            Some(OWN),
+        ),
+        // A session that is no UUID takes nothing out (words with digits in them: the rule of
+        // a value in groups is the one that takes them, and no row of words).
+        (
+            vec!["ab12cd34 ef56gh78 ij90kl12 mn34op56"],
+            Some("ab12cd34 ef56gh78 ij90kl12 mn34op56"),
+        ),
+    ] {
+        assert_eq!(note_in(&rows, session), KEY, "{rows:?} {session:?}");
+    }
+    // The quote masks it as any long id: the screen is quoted, the id is not.
+    assert_eq!(
+        note_in(&[&resume], Some(OWN)),
+        "gone (exit code 1); its screen ended with: \"Resume this conversation with: claude --resume [masked]\" (1 key- or token-like string masked)"
+    );
+}
+
+/// The joint review T-1322, blocker 1: the window's own id is exempt from the rule of a value in
+/// groups and from no other check. The URL, the prefix, the name and the decoding look at the rows
+/// as they were drawn.
+#[test]
+fn the_windows_own_session_id_is_exempt_from_the_groups_alone() {
+    const OWN: &str = "01234567-89ab-4def-8123-456789abcdef";
+    let url = format!("https://{OWN}:swo");
+    let token = format!("sk-{OWN}");
+    let basic = format!("Basic {OWN}");
+    let slot = format!("password: {OWN}");
+    let escaped = format!("https%3A%2F%2F{OWN}%3Aswo");
+    for (rows, wanted) in [
+        (vec![url.as_str(), "rdfish@vault"], NAMED),
+        (vec!["pad", url.as_str(), "rdfish@vault", "pad"], NAMED),
+        (vec![token.as_str()], NAMED),
+        (vec![basic.as_str()], NAMED),
+        // The scheme on a row and the id on the next: a blank between them is the join of the rows.
+        (vec!["Basic", OWN], NAMED),
+        (vec![slot.as_str()], NAMED),
+        (vec![escaped.as_str(), "rdfish%40vault"], NAMED),
+    ] {
+        assert_eq!(note_in(&rows, Some(OWN)), wanted, "{rows:?}");
+    }
+    // The id beside another UUID, or beside the groups of a value, is still a value in groups.
+    let both = format!("{OWN} 9f2c1d3e-7a4b-4c5d-8e6f-0a1b2c3d4e5f");
+    assert_eq!(note_in(&[&both], Some(OWN)), KEY);
+    // The id alone passes, as before.
+    let resume = format!("Resume with: claude --resume {OWN}");
+    assert!(note_in(&[&resume], Some(OWN)).contains("its screen ended with"));
+}
+
+/// The joint review T-1322, blockers 2 and 3: a credential's name with a value after it, however
+/// short the value, is a credential, on the same row or the next, joined or not.
+#[test]
+fn a_credentials_name_with_any_value_after_it_is_a_labelled_value() {
+    for lines in [
+        vec!["key: abc"],
+        vec!["token: a b c"],
+        vec!["key: redgreenblue"],
+        vec!["key: abcdefgh ijklmnop"],
+        vec!["API_KEY=x"],
+        vec!["\"secret\": \"a b\""],
+        vec!["Authorization: Bearer abc"],
+        vec!["tok", "en: abc"],
+        vec!["key:", "abc"],
+        vec!["key%3Aabc"],
+        vec!["token%253Aabc"],
+        vec!["set the key: abc and go on"],
+    ] {
+        assert!(super::names_a_value(&lines), "{lines:?}");
+    }
+    for lines in [
+        vec!["OPENAI_API_KEY is not set"],
+        vec!["the key results"],
+        vec!["token"],
+        vec!["Unexpected end of input"],
+        vec!["key"],
+        vec!["see the keys section"],
+    ] {
+        assert!(!super::names_a_value(&lines), "{lines:?}");
+    }
 }

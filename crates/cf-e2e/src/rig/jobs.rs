@@ -8,8 +8,13 @@
 //! - `.released`: it was asked to end (a signal) and said so before it went, as a
 //!   tool that releases a lock does;
 //! - `.finished`: it ran to its end by itself;
+//! - `.lived`: a run of the stand-in's status line (`statusline`) says how long it lived, in
+//!   milliseconds, once it has ended ([`Job::lived`]);
 //! - `.monitor-may-end`: written by a case, it lets the monitor that watches the job end
-//!   (a `CLAUDE-MONITOR`'s, [`Job::let_its_monitor_end`]).
+//!   (a `CLAUDE-MONITOR`'s, [`Job::let_its_monitor_end`]);
+//! - `.agent-may-end`: written by a case, it lets the agent a `held` job stands for end
+//!   (a `CLAUDE-HELD`'s, [`Job::let_its_agent_end`]); the `held` job has no process of
+//!   its own: its `.pid` is the window's.
 //!
 //! A job that was killed outright wrote neither of the last two. That is every
 //! job of a window on Windows, which is ended at once with its window and never
@@ -54,11 +59,29 @@ impl Job {
         self.beside("finished").exists()
     }
 
+    /// How long a run of the stand-in's status line lived, once it has ended: its `.lived`,
+    /// counted from before it was started to the look that saw it gone (never shorter than it
+    /// was). None while it runs.
+    pub fn lived(&self) -> Option<std::time::Duration> {
+        files::read_string(&self.beside("lived"))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+            .map(std::time::Duration::from_millis)
+    }
+
     /// Lets the monitor that watches it end, as a `CLAUDE-MONITOR`'s stand-in waits to be
     /// let: the case has seen what the turn its end woke led to, which the monitor's end
     /// would otherwise race.
     pub fn let_its_monitor_end(&self) -> crate::Result {
         files::write(&self.beside("monitor-may-end"), "")
+    }
+
+    /// Lets the agent a `CLAUDE-HELD` left running end, as the stand-in waits to be let: the
+    /// case has seen what it looked for while the agent ran, which a clock would race.
+    pub fn let_its_agent_end(&self) -> crate::Result {
+        files::write(&self.beside("agent-may-end"), "")
     }
 
     /// Its file of the kind `kind`: `<file>.<kind>`.

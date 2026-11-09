@@ -501,7 +501,7 @@ fn unlisted() {
     let refused = spawn(&echo, None, &system_env(), Streams::Lines)
         .err()
         .expect("the program was started");
-    assert_eq!(refused, "spawn /bin/echo EPERM");
+    assert_eq!(refused.words(), "spawn /bin/echo EPERM");
 }
 
 /// What a start by fork and exec costs against one by `posix_spawn`, the way std starts a

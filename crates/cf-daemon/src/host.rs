@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::js;
+use cf_base::startup::{StartFailure, StartRefusal};
 use cf_bridge::local::{Bridge, BridgeBuilder, Subscription};
 use cf_bridge::BridgeError;
 use cf_engine::host::{EngineHost, Killed, OpenPane, Opened};
@@ -135,16 +136,9 @@ impl EngineHost for BridgeHost {
     fn open(&self, open: OpenPane) -> Work<'_, Result<Opened, HostError>> {
         let argv = match cf_process::pane_argv(&open.argv, &self.env) {
             Ok(argv) => argv,
-            // A window's program that cannot open as it is: the open fails
-            // with the sentence, as the JavaScript threw it, and nothing is sent.
-            Err(message) => {
-                return Box::pin(async move {
-                    Err(HostError {
-                        error: None,
-                        message,
-                    })
-                });
-            }
+            // A window's program that cannot open as it is: the open is refused with the
+            // person's words and the kind of failure a note says, and nothing is sent.
+            Err(refusal) => return Box::pin(async move { Ok(Opened::Unrunnable(refusal)) }),
         };
         let mut env = Map::new();
         for (name, value) in &open.env {
@@ -360,7 +354,17 @@ fn opened(answer: &Value) -> Opened {
     if error == DEADLINE {
         return Opened::Unanswered;
     }
-    Opened::Refused { error }
+    // The host named why the system would not start the program: a name of libuv's table (read
+    // back through it, so that no other word of the host's is taken for one), and the kind of
+    // failure a note says. The host's own words stay the person's (T-1328).
+    let code = answer
+        .get("code")
+        .and_then(Value::as_str)
+        .and_then(cf_base::file::known_code);
+    match code {
+        Some(code) => Opened::Unrunnable(StartRefusal::new(StartFailure::of_errno(code), error)),
+        None => Opened::Refused { error },
+    }
 }
 
 /// A kill's answer: taken (`ok: true`), or why not in the host's words.

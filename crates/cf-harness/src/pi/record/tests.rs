@@ -27,11 +27,11 @@ const WRITTEN: i64 = 1_790_000_000_000;
 
 /// A session file in a Pi home of its own, and the reader of its session.
 struct Stage {
-    home: TempDir,
     reader: Box<dyn Look + Send>,
     /// When the session file was last written: each write is a millisecond
     /// after the one before, so no write leaves the file's time as it was.
     written: i64,
+    home: TempDir,
 }
 
 impl Stage {

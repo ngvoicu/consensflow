@@ -99,3 +99,32 @@ fn a_word_a_secret_s_name_is_a_piece_of_names_none() {
         assert!(!names_a_secret(line), "{line}");
     }
 }
+
+/// T-1227: `Authentication failed`, and the value on the row below it, is a credential's
+/// prompt as much as `token:` is: the verb, the noun and the adjective name one, by the stem.
+#[test]
+fn authenticating_is_named_whatever_its_ending_and_an_author_is_not() {
+    for line in [
+        "Authentication failed",
+        "authentication required",
+        "authenticate with the registry",
+        "Unauthenticated: redgreenblue",
+        "unauthenticated",
+        "isAuthenticated",
+        "user.authenticated = false",
+        "the authenticator app",
+        "AUTHENTICATION_FAILED",
+        "authenticating…",
+    ] {
+        assert!(names_a_secret(line), "{line}");
+    }
+    for line in [
+        "authentic leather",
+        "authority",
+        "authoritative answer",
+        "author: Ada",
+        "the authors",
+    ] {
+        assert!(!names_a_secret(line), "{line}");
+    }
+}

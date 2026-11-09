@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 use std::process::Command;
 
 use cf_base::env::Env;
+use cf_base::startup::{StartFailure, StartKind, StartRefusal};
 
 use crate::search::on_path_as_program;
 
@@ -69,7 +70,7 @@ fn is_script(executable: &Path) -> bool {
 
 /// How to start `executable` with `args` here, or why it cannot be started:
 /// an npm shim that runs on a Node, when none is to be found for it.
-pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Result<Run, String> {
+pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Result<Run, StartRefusal> {
     let name = executable.to_string_lossy();
     if !is_script(executable) {
         return Ok(Run {
@@ -117,7 +118,7 @@ pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Result<Run, 
 /// an npm-installed harness on Windows (a `.cmd` shim) opens as the shim's own
 /// node and script; a script of any other shape cannot open a window, and a
 /// shim for which no Node is to be found is refused as [`runnable`] refuses it.
-pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
+pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, StartRefusal> {
     let Some((executable, args)) = argv.split_first() else {
         return Ok(Vec::new());
     };
@@ -128,15 +129,22 @@ pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
         Shim::Runs { program, script } => (program, script),
         Shim::NeedsNode { bare } => return Err(needs_node(Path::new(executable), bare)),
         Shim::Opaque => {
-            return Err(format!(
-                "{executable} is not an npm shim, and only cmd.exe could run it in a window"
-            ));
+            return Err(opaque_shim(executable));
         }
     };
     let mut opened = vec![program.to_string_lossy().into_owned()];
     opened.extend(script.map(|script| script.to_string_lossy().into_owned()));
     opened.extend(args.iter().cloned());
     Ok(opened)
+}
+
+/// Why a script that is no npm shim is refused: the words name the file, for the person's own
+/// screen, and a note says only that it is no shim (`cf_base::startup`).
+fn opaque_shim(executable: &str) -> StartRefusal {
+    StartRefusal::new(
+        StartFailure::of(StartKind::NotAnNpmShim),
+        format!("{executable} is not an npm shim, and only cmd.exe could run it in a window"),
+    )
 }
 
 /// `text` with each of cmd.exe's special characters escaped with a caret.
@@ -249,25 +257,32 @@ fn pi_node(env: &Env) -> Option<PathBuf> {
     node.is_file().then_some(node)
 }
 
-/// What is said of a shim that runs on a Node when none is to be found, for whoever has to
+/// Why a shim that runs on a Node is refused when none is to be found, for whoever has to
 /// do something about it: of an npm shim in npm's words; of Pi's own installer's (`bare`)
 /// with the three places looked in, in the order they are (beside it, Pi's installer's folder,
-/// the PATH), and what to do about it (T-141, P3-6; T-194, P3-7).
-fn needs_node(shim: &Path, bare: bool) -> String {
+/// the PATH), and what to do about it (T-141, P3-6; T-194, P3-7). The words name the shim, for
+/// the person's own screen; a note says only that no Node was found, for Pi or for the harness
+/// (`cf_base::startup`).
+fn needs_node(shim: &Path, bare: bool) -> StartRefusal {
+    let shim = shim.display();
     if bare {
-        return format!(
-            "{} runs on Node, and ConsensFlow finds no Node for it: none is beside it, none is \
-             in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, and none is on \
-             the PATH ConsensFlow runs with. Install Node 22.19 or newer, or run Pi's installer \
-             again.",
-            shim.display()
+        return StartRefusal::new(
+            StartFailure::of(StartKind::NoNodeForPi),
+            format!(
+                "{shim} runs on Node, and ConsensFlow finds no Node for it: none is beside it, none is \
+                 in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, and none is on \
+                 the PATH ConsensFlow runs with. Install Node 22.19 or newer, or run Pi's installer \
+                 again."
+            ),
         );
     }
-    format!(
-        "{} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
-         beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
-         visible to ConsensFlow, or install the harness's own build instead of the npm one.",
-        shim.display()
+    StartRefusal::new(
+        StartFailure::of(StartKind::NoNode),
+        format!(
+            "{shim} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
+             beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
+             visible to ConsensFlow, or install the harness's own build instead of the npm one."
+        ),
     )
 }
 
@@ -407,6 +422,45 @@ fn quoted_parts(line: &str) -> (Vec<Quoted<'_>>, &str) {
 
 #[cfg(test)]
 mod tests {
+    /// The refusals of a start are typed: a note says the kind (`StartFailure`), and the words
+    /// name the file only for the person's own screen (T-1328, after the joint review T-1322
+    /// found a secret in a note by one route after another).
+    #[test]
+    fn the_refusals_of_a_start_are_typed_and_their_words_name_the_file_for_the_person_alone() {
+        let shim = r"C:\tools\pi hunter22.cmd";
+        let opaque = opaque_shim(shim);
+        assert_eq!(
+            opaque.words(),
+            format!("{shim} is not an npm shim, and only cmd.exe could run it in a window")
+        );
+        assert_eq!(opaque.failure(), StartFailure::of(StartKind::NotAnNpmShim));
+        let npm = needs_node(Path::new(shim), false);
+        assert!(
+            npm.words()
+                .starts_with(&format!("{shim} is an npm shim that runs on Node")),
+            "{npm}"
+        );
+        assert_eq!(npm.failure(), StartFailure::of(StartKind::NoNode));
+        let pi = needs_node(Path::new(shim), true);
+        assert!(
+            pi.words().starts_with(&format!("{shim} runs on Node")),
+            "{pi}"
+        );
+        assert!(
+            pi.words()
+                .contains("none is in %LOCALAPPDATA%\\pi-node\\current, where"),
+            "{pi}"
+        );
+        assert_eq!(pi.failure(), StartFailure::of(StartKind::NoNodeForPi));
+        for refusal in [opaque, npm, pi] {
+            let said = refusal.failure().words("Pi");
+            assert!(
+                !said.contains("hunter22") && !said.contains("tools"),
+                "{said}"
+            );
+        }
+    }
+
     use super::*;
 
     fn args(words: &[&str]) -> Vec<OsString> {
@@ -567,24 +621,38 @@ mod tests {
 
         /// What a shim that runs on Node is refused with, whichever way it is
         /// asked to start: the shim, and both remedies.
-        fn refusal(shim: &Path) -> String {
+        fn refusal(shim: &Path) -> StartRefusal {
             let said = shim.display();
-            format!(
-                "{said} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
-                 beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
-                 visible to ConsensFlow, or install the harness's own build instead of the npm one."
+            StartRefusal::new(
+                StartFailure::of(StartKind::NoNode),
+                format!(
+                    "{said} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
+                     beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
+                     visible to ConsensFlow, or install the harness's own build instead of the npm one."
+                ),
             )
         }
 
         /// What Pi's own installer's shim is refused with when no Node is found for it: the three
         /// places looked in, and what to do (T-141, P3-6).
-        fn pi_refusal(shim: &Path) -> String {
+        fn pi_refusal(shim: &Path) -> StartRefusal {
             let said = shim.display();
-            format!(
-                "{said} runs on Node, and ConsensFlow finds no Node for it: none is beside it, \
-                 none is in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, \
-                 and none is on the PATH ConsensFlow runs with. Install Node 22.19 or newer, or \
-                 run Pi's installer again."
+            StartRefusal::new(
+                StartFailure::of(StartKind::NoNodeForPi),
+                format!(
+                    "{said} runs on Node, and ConsensFlow finds no Node for it: none is beside it, \
+                     none is in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, \
+                     and none is on the PATH ConsensFlow runs with. Install Node 22.19 or newer, or \
+                     run Pi's installer again."
+                ),
+            )
+        }
+
+        /// What a script that is no npm shim is refused with in a window.
+        fn refused_as_opaque(named: &str) -> StartRefusal {
+            StartRefusal::new(
+                StartFailure::of(StartKind::NotAnNpmShim),
+                format!("{named} is not an npm shim, and only cmd.exe could run it in a window"),
             )
         }
 
@@ -840,9 +908,7 @@ mod tests {
                 assert!(runnable(&shim, &[], &env).unwrap().verbatim, "{line}");
                 assert_eq!(
                     pane_argv(std::slice::from_ref(&named), &env),
-                    Err(format!(
-                        "{named} is not an npm shim, and only cmd.exe could run it in a window"
-                    )),
+                    Err(refused_as_opaque(&named)),
                     "{line}"
                 );
             };
@@ -987,9 +1053,7 @@ mod tests {
                 let named = shim.to_string_lossy().into_owned();
                 assert_eq!(
                     pane_argv(std::slice::from_ref(&named), &env),
-                    Err(format!(
-                        "{named} is not an npm shim, and only cmd.exe could run it in a window"
-                    )),
+                    Err(refused_as_opaque(&named)),
                     "{line}"
                 );
             }
@@ -1018,7 +1082,7 @@ mod tests {
             let named = text(&opaque);
             assert_eq!(
                 pane_argv(std::slice::from_ref(&named), &env).unwrap_err(),
-                format!("{named} is not an npm shim, and only cmd.exe could run it in a window")
+                refused_as_opaque(&named)
             );
             let program = words(&["/usr/local/bin/pi", "x"]);
             assert_eq!(pane_argv(&program, &env).unwrap(), program);
@@ -1088,7 +1152,7 @@ mod tests {
             let named = shim.to_string_lossy().into_owned();
             assert_eq!(
                 pane_argv(std::slice::from_ref(&named), &Env::default()).unwrap_err(),
-                format!("{named} is not an npm shim, and only cmd.exe could run it in a window")
+                refused_as_opaque(&named)
             );
             // A script named alone is cmd.exe's to run, whatever is there.
             let other = tempfile::tempdir().unwrap();

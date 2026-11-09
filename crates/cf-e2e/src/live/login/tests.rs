@@ -322,8 +322,8 @@ fn a_folder_a_killed_run_left_is_taken_away_and_a_folder_of_a_run_that_is_there_
 
 /// A person's home with a setup in it, and what `Owner` sees of it.
 struct Person {
-    home: tempfile::TempDir,
     owner: Owner,
+    home: tempfile::TempDir,
 }
 
 impl Person {

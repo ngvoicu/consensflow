@@ -132,11 +132,11 @@ impl Bundle {
 /// everything it did.
 pub struct Trial {
     pub bundle: Bundle,
-    /// The folder the run makes its own in: empty when it is done with it.
-    pub tmp: TempDir,
     pub fake: Fake,
     pub out: String,
     pub err: String,
+    /// The folder the run makes its own in: empty when it is done with it.
+    pub tmp: TempDir,
 }
 
 impl Trial {

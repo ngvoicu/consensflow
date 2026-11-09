@@ -145,6 +145,13 @@ pub enum PaneError {
     /// is started for it.
     Fenced(PaneKey),
     Pty(String),
+    /// The system would not start the window's program: its words, and, where the failure is an
+    /// I/O error, the system's name for it from libuv's table (`ENOENT`), which the daemon reads
+    /// back as the kind of failure a note says (T-1328).
+    Spawn {
+        message: String,
+        code: Option<&'static str>,
+    },
     Io(io::Error),
     InvalidBacklog,
     InvalidEnvironmentVariableName(String),
@@ -155,6 +162,17 @@ pub enum PaneError {
         highest_issued: u64,
     },
     LockPoisoned,
+}
+
+impl PaneError {
+    /// The system's name for the failure, where the window's program could not be started and
+    /// the system named why.
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            Self::Spawn { code, .. } => *code,
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for PaneError {
@@ -197,7 +215,9 @@ impl fmt::Display for PaneError {
                 "pane {} generation {} was not opened: the daemon that asked for it has stopped",
                 key.id, key.generation
             ),
-            Self::Pty(message) => write!(formatter, "PTY error: {message}"),
+            Self::Pty(message) | Self::Spawn { message, .. } => {
+                write!(formatter, "PTY error: {message}")
+            }
             Self::Io(error) => write!(formatter, "PTY I/O error: {error}"),
             Self::InvalidBacklog => write!(formatter, "backlogBytes must be greater than zero"),
             Self::InvalidEnvironmentVariableName(name) => write!(
@@ -805,7 +825,16 @@ impl PaneTable {
         let child = pair
             .slave
             .spawn_command(command)
-            .map_err(|error| PaneError::Pty(error.to_string()))?;
+            .map_err(|error| PaneError::Spawn {
+                message: error.to_string(),
+                // The spawner's own error is text with the program's path in it. The system's
+                // name for why the program's file cannot be reached is its own answer about that
+                // file, from the table of libuv's names.
+                code: std::fs::metadata(program_path)
+                    .err()
+                    .as_ref()
+                    .map(cf_base::file::error_code),
+            })?;
         drop(pair.slave);
 
         #[cfg(unix)]
@@ -1016,6 +1045,17 @@ impl PaneTable {
         writer.flush()?;
         *last_activity.lock().map_err(|_| PaneError::LockPoisoned)? = Instant::now();
         Ok(())
+    }
+
+    /// How many writes into the pane are in flight, counted from before the write waits for the
+    /// pane's writer: a test that must have a write in hand before it does the next thing waits
+    /// for this and not for a time (T-1332).
+    #[cfg(all(test, unix))]
+    pub(crate) fn writes_in_flight(&self, key: &PaneKey) -> Option<u64> {
+        let panes = self.lock_panes().ok()?;
+        panes
+            .get(key)
+            .map(|pane| pane.active_writes.load(Ordering::Acquire))
     }
 
     pub fn resize(&self, key: &PaneKey, rows: u16, cols: u16) -> Result<(), PaneError> {
@@ -1975,6 +2015,30 @@ mod tests {
         assert!(table.begin_update().is_ok());
     }
 
+    /// T-1328: a program the system cannot start says why by the system's name for it, from the
+    /// fixed table, beside its words; the daemon reads it back as the kind of failure a note says,
+    /// and the words (which name the program) stay the person's.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_the_system_cannot_start_names_why_by_its_code() {
+        let _serial = serial_pty_test();
+        let table = PaneTable::new();
+        let missing = table.open_at(
+            PaneKey::new("missing-program", 1),
+            Path::new("/tmp"),
+            &["/nonexistent/hunter22 program".to_owned()],
+            &HashMap::new(),
+            terminal_size(40, 120),
+        );
+        let Err(error) = missing else {
+            panic!("a program that is not there opened");
+        };
+        assert_eq!(error.code(), Some("ENOENT"), "{error}");
+        // Other failures of a table name none.
+        assert_eq!(PaneError::EmptyArgv.code(), None);
+        assert_eq!(PaneError::Pty("boom".to_owned()).code(), None);
+    }
+
     #[cfg(unix)]
     #[test]
     fn update_installation_and_real_spawn_share_one_atomic_boundary() {
@@ -2744,9 +2808,19 @@ mod tests {
         assert_eq!(hex.split_whitespace().collect::<String>(), "00090d1bff");
     }
 
+    /// A write into a pane whose program reads nothing blocks for good, and neither another
+    /// pane's write nor the kill of that pane waits for it. The test has the write in hand
+    /// before it goes on (the pane counts it before it waits for the writer, and a kill with a
+    /// write in hand ends the pane on a thread of its own), and then the other pane's write and
+    /// the kill each finish, and the blocked write is unblocked by the kill. There is no time
+    /// of the machine's in it but [`HANG`]: a write or a kill that has not finished in that long
+    /// is stuck, not slow, and the test ends the blocked program itself, so that it fails
+    /// instead of hanging, saying so.
     #[cfg(unix)]
     #[test]
     fn blocked_write_does_not_stall_other_panes_or_kill() {
+        /// Past anything a loaded machine takes for a write of a byte and a kill.
+        const HANG: Duration = Duration::from_secs(30);
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
         let OpenedPane {
@@ -2766,23 +2840,29 @@ mod tests {
             .expect("responsive pane ready");
         assert_eq!(&ready, b"ready");
 
-        let (started_sender, started_receiver) = std::sync::mpsc::channel();
         let (blocked_sender, blocked_receiver) = std::sync::mpsc::channel();
         let blocked_table = Arc::clone(&table);
         let writer_key = blocked_key.clone();
         let blocked_writer = thread::spawn(move || {
-            started_sender.send(()).expect("announce blocked write");
             let result = blocked_table.write(&writer_key, &vec![b'x'; 8 * 1024 * 1024]);
             let _ = blocked_sender.send(result);
         });
-        started_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("blocked writer started");
-        thread::sleep(Duration::from_millis(50));
-        assert!(matches!(
-            blocked_receiver.try_recv(),
-            Err(std::sync::mpsc::TryRecvError::Empty)
-        ));
+        // The write is in hand: the pane counts it before it waits for its writer, and the
+        // program reads nothing, so it blocks there until the pane is ended.
+        let deadline = Instant::now() + HANG;
+        while table.writes_in_flight(&blocked_key) != Some(1) {
+            assert!(Instant::now() < deadline, "the blocked write never began");
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        // What ends the blocked program if the test finds something stuck: the pane's
+        // program leads its group, a test's own emergency cleanup of it.
+        let mut emergency = false;
+        let mut cleanup = || {
+            emergency = true;
+            // SAFETY: kill takes two integers and touches no memory of ours.
+            let _ = unsafe { libc::kill(-blocked_process_group, libc::SIGKILL) };
+        };
 
         let (responsive_sender, responsive_receiver) = std::sync::mpsc::channel();
         let responsive_table = Arc::clone(&table);
@@ -2790,38 +2870,44 @@ mod tests {
         let responsive_writer = thread::spawn(move || {
             let _ = responsive_sender.send(responsive_table.write(&writer_key, b"R"));
         });
+        let responsive_result = responsive_receiver.recv_timeout(HANG).unwrap_or_else(|_| {
+            cleanup();
+            responsive_receiver
+                .recv_timeout(HANG)
+                .expect("responsive pane write eventually finishes")
+        });
+        // The other pane's write finished while the blocked one was still in hand.
+        let blocked_still_in_hand = matches!(
+            blocked_receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        );
+
         let (kill_sender, kill_receiver) = std::sync::mpsc::channel();
         let kill_table = Arc::clone(&table);
         let kill_key = blocked_key.clone();
         let killer = thread::spawn(move || {
             let _ = kill_sender.send(kill_table.kill(&kill_key));
         });
-
-        let responsive_result = responsive_receiver.recv_timeout(Duration::from_millis(500));
-        let kill_result = kill_receiver.recv_timeout(Duration::from_millis(500));
-        let completed_before_emergency_cleanup = responsive_result.is_ok() && kill_result.is_ok();
-        if responsive_result.is_err() || kill_result.is_err() {
-            // SAFETY: kill takes two integers and touches no memory of ours; the pane's
-            // program leads its group, a test's own emergency cleanup of it.
-            let _ = unsafe { libc::kill(-blocked_process_group, libc::SIGKILL) };
-        }
-
-        let responsive_result = responsive_result
-            .or_else(|_| responsive_receiver.recv_timeout(Duration::from_secs(2)))
-            .expect("responsive pane write eventually finishes");
-        let kill_result = kill_result
-            .or_else(|_| kill_receiver.recv_timeout(Duration::from_secs(2)))
-            .expect("blocked pane kill eventually finishes");
+        let kill_result = kill_receiver.recv_timeout(HANG).unwrap_or_else(|_| {
+            cleanup();
+            kill_receiver
+                .recv_timeout(HANG)
+                .expect("blocked pane kill eventually finishes")
+        });
         let _ = blocked_receiver
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(HANG)
             .expect("blocked write unblocked after kill");
         blocked_writer.join().expect("blocked writer thread");
         responsive_writer.join().expect("responsive writer thread");
         killer.join().expect("killer thread");
 
         assert!(
-            completed_before_emergency_cleanup,
+            !emergency,
             "responsiveness or kill completed only after emergency process-group cleanup"
+        );
+        assert!(
+            blocked_still_in_hand,
+            "the blocked write had finished by the time another pane's write did"
         );
         responsive_result.expect("unrelated pane remains writable");
         kill_result.expect("kill is independent of the blocked writer");

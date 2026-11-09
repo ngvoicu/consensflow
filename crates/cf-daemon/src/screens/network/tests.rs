@@ -210,16 +210,24 @@ async fn a_connection_that_closes_while_the_body_comes_is_terminated() {
     assert_eq!(ended, Err(TERMINATED.to_owned()));
 }
 
+/// How long a test waits for the server's side of a connection before it calls it a hang: the
+/// server is a thread of the test's own, and what it reports is an event of the request, not a
+/// time. A request given up at a fixed time (300 ms, T-1020: timed out at a load of 50) was given
+/// up before the server had accepted it, and its thread never read a head.
+const HANG: Duration = Duration::from_secs(30);
+
 #[tokio::test]
 async fn a_request_given_up_ends_its_connection() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     let (told, ended) = mpsc::channel();
+    let (read, head_read) = mpsc::channel();
     drop(thread::spawn(move || {
         let Ok((mut stream, _)) = listener.accept() else {
             return;
         };
         read_head(&mut stream);
+        read.send(()).ok();
         // It answers nothing, and waits for the client to go: its end of the
         // connection reads nothing more, or is reset (Windows says so), and is
         // not out of time.
@@ -236,10 +244,18 @@ async fn a_request_given_up_ends_its_connection() {
     let network = HttpsFeed::new();
     let url = format!("http://127.0.0.1:{port}/latest");
     let request = asked(&url);
-    let waited = tokio::time::timeout(Duration::from_millis(300), network.get(&request)).await;
-    assert!(waited.is_err(), "no head came");
+    {
+        // The request is given up once the server has its head, and answers nothing.
+        let sending = network.get(&request);
+        tokio::pin!(sending);
+        let head_in = tokio::task::spawn_blocking(move || head_read.recv_timeout(HANG));
+        tokio::select! {
+            answered = &mut sending => panic!("a head came: {}", answered.is_ok()),
+            read = head_in => read.unwrap().expect("the server never read the request's head"),
+        }
+    }
     // Gone from the client's side as soon as the request is let go of.
-    let closed = tokio::task::spawn_blocking(move || ended.recv_timeout(Duration::from_secs(15)))
+    let closed = tokio::task::spawn_blocking(move || ended.recv_timeout(HANG))
         .await
         .unwrap();
     assert_eq!(closed, Ok(true));

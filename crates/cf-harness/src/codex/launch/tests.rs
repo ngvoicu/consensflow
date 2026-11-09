@@ -13,7 +13,7 @@ use super::*;
 use crate::codex::fakes::Watching;
 use crate::contract::Work;
 use crate::seams::loopback::Request;
-use crate::seams::processes::{Child, Failed, Limits, Processes, Program, Streams};
+use crate::seams::processes::{Child, Failed, Limits, Processes, Program, StartRefusal, Streams};
 use crate::seams::{Entropy, Ports};
 use crate::testing::{fake_executable, finished, named, Fakes, ScriptedProcesses};
 
@@ -76,11 +76,11 @@ fn a_version_is_the_first_number_of_three_parts_and_what_sticks_to_it() {
 
 /// A CLI in a folder of its own, scripted programs, and the services of both.
 struct Stage {
-    _dir: TempDir,
     cli: String,
     fakes: Fakes,
     watching: Rc<Watching>,
     services: Services,
+    _dir: TempDir,
 }
 
 impl Stage {
@@ -278,7 +278,7 @@ impl Processes for Vanishing {
         answer
     }
 
-    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, StartRefusal> {
         self.scripted.spawn(program, streams)
     }
 }

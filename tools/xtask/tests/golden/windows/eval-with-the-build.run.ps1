@@ -41,7 +41,8 @@ Write-Output "== test machine: $env:CONSENSFLOW_TEST_MACHINE"
 $env:CARGO_BUILD_JOBS = '4'
 $env:RUST_TEST_THREADS = '4'
 Write-Output "== limits: CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 (what this machine takes at once)"
-foreach ($step in @('npm ci --no-audit --no-fund', 'npm ci --prefix app --no-audit --no-fund', 'npm --prefix app run bundle:ui', 'cargo xtask stage', 'npm run build:bridge', 'cargo xtask conpty --into app/src-tauri/target/release')) {
+$steps = @('npm ci --no-audit --no-fund', 'npm ci --prefix app --no-audit --no-fund', 'npm --prefix app run bundle:ui', 'cargo xtask stage', 'npm run build:bridge', 'cargo xtask conpty --into app/src-tauri/target/release')
+foreach ($step in $steps) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }

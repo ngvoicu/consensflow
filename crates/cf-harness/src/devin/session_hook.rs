@@ -120,9 +120,9 @@ mod tests {
     use crate::devin::wire::tests::shows;
 
     struct Launch {
-        _dir: tempfile::TempDir,
         wire: std::path::PathBuf,
         role: std::path::PathBuf,
+        _dir: tempfile::TempDir,
     }
 
     /// One launch's files: the wire log showing native-a, and the role text.

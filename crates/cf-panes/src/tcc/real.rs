@@ -119,7 +119,7 @@ fn read_to_the_end(
         let child = match spawn(run, None, &env, Streams::Lines) {
             Ok(child) => child,
             Err(why) => {
-                let _ = started.send(Err(why));
+                let _ = started.send(Err(why.into()));
                 return;
             }
         };

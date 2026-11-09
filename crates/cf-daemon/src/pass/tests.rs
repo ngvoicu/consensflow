@@ -18,10 +18,10 @@ mod throttle;
 /// A loop's surroundings: its home (the log and the trace), the engine's work
 /// as the daemon runs it, what it said on the error output.
 struct Rig {
-    home: tempfile::TempDir,
     spawn: Rc<DaemonSpawn>,
     said: Said,
     console: Rc<Console>,
+    home: tempfile::TempDir,
 }
 
 /// Called inside the local set the scene runs in: the executor's driver is

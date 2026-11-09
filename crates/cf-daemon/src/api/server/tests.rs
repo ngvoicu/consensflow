@@ -79,6 +79,29 @@ async fn serving_with(
     (api, Rig { home })
 }
 
+/// How long a test waits for something the other side of it does before it calls it a hang: no
+/// test here is quick or slow by it, and the wait that ends is the event's. The server's
+/// connections and handlers run when the executor gives them their turn, which on a loaded
+/// machine is later than any fixed pause of a test's (T-1332: the closing tests, "Connection
+/// reset by peer", at a load of 48 and more).
+const HANG: Duration = Duration::from_secs(30);
+
+/// Waits for `event`, which the handler or the client of a test makes when it has done what the
+/// test goes on from.
+async fn happens(event: &Notify, what: &str) {
+    tokio::time::timeout(HANG, event.notified())
+        .await
+        .expect(what);
+}
+
+/// Lets the executor run what is ready: a test's check that something did not happen is made
+/// after the server has had its turn, not after a time.
+async fn let_the_server_run() {
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+}
+
 fn answering(
     answer: Answer,
 ) -> impl Fn(Request) -> LocalBoxFuture<'static, Result<Answer, Failure>> {
@@ -301,12 +324,25 @@ async fn a_client_that_leaves_does_not_drop_its_handler() {
         .run_until(async {
             let reached = Rc::new(Cell::new(false));
             let gate = Rc::new(Notify::new());
+            // What the handler tells the test: it began, it was told its client left, it ended.
+            let (entered, left, finished) = (
+                Rc::new(Notify::new()),
+                Rc::new(Notify::new()),
+                Rc::new(Notify::new()),
+            );
             let (seen, held) = (Rc::clone(&reached), Rc::clone(&gate));
-            let (api, _rig) = serving(move |_| {
+            let (began, told, ended) =
+                (Rc::clone(&entered), Rc::clone(&left), Rc::clone(&finished));
+            let (api, _rig) = serving(move |request| {
                 let (seen, held) = (Rc::clone(&seen), Rc::clone(&held));
+                let (began, told, ended) = (Rc::clone(&began), Rc::clone(&told), Rc::clone(&ended));
                 Box::pin(async move {
+                    began.notify_one();
+                    request.consumer().left().await;
+                    told.notify_one();
                     held.notified().await;
                     seen.set(true);
+                    ended.notify_one();
                     Ok(Answer::ok(json!({})))
                 })
             })
@@ -316,12 +352,12 @@ async fn a_client_that_leaves_does_not_drop_its_handler() {
                 .write_all(b"POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n")
                 .await
                 .unwrap();
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            happens(&entered, "the handler never began").await;
             drop(stream);
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            happens(&left, "the handler was never told its client left").await;
             assert!(!reached.get());
             gate.notify_one();
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            happens(&finished, "the handler never ran to its end").await;
             assert!(reached.get(), "it ran to its end with nobody to hear it");
             api.close().await;
         })
@@ -337,16 +373,21 @@ async fn a_handler_is_told_when_its_client_leaves_and_not_before() {
         .run_until(async {
             let told = Rc::new(Cell::new(None));
             let gate = Rc::new(Notify::new());
+            let (entered, finished) = (Rc::new(Notify::new()), Rc::new(Notify::new()));
             let (seen, held) = (Rc::clone(&told), Rc::clone(&gate));
+            let (began, ended) = (Rc::clone(&entered), Rc::clone(&finished));
             let (api, _rig) = serving(move |request| {
                 let (seen, held) = (Rc::clone(&seen), Rc::clone(&held));
+                let (began, ended) = (Rc::clone(&began), Rc::clone(&ended));
                 Box::pin(async move {
+                    began.notify_one();
                     let at_first = request.consumer().has_left();
                     tokio::select! {
                         () = request.consumer().left() => {}
                         () = held.notified() => {}
                     }
                     seen.set(Some((at_first, request.consumer().has_left())));
+                    ended.notify_one();
                     Ok(Answer::ok(json!({})))
                 })
             })
@@ -356,10 +397,11 @@ async fn a_handler_is_told_when_its_client_leaves_and_not_before() {
                 .write_all(b"GET /x HTTP/1.1\r\nHost: t\r\n\r\n")
                 .await
                 .unwrap();
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            happens(&entered, "the handler never began").await;
+            let_the_server_run().await;
             assert_eq!(told.get(), None, "its client is there: it waits");
             drop(stream);
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            happens(&finished, "the handler was never told its client left").await;
             assert_eq!(
                 told.get(),
                 Some((false, true)),
@@ -443,6 +485,10 @@ async fn a_connection_that_waits_for_its_request_longer_than_its_idle_time_is_en
             .await
             .unwrap();
             let mut stream = TcpStream::connect(address(&api)).await.unwrap();
+            // The time is taken before the request: the server's wait for the next begins when
+            // it has answered this one, so it ends no sooner than its idle time after this,
+            // however late the test's read of the answer is on a loaded machine.
+            let asked = std::time::Instant::now();
             // One request is answered, and then the connection waits for the next.
             stream
                 .write_all(b"GET /x HTTP/1.1\r\nHost: t\r\n\r\n")
@@ -450,16 +496,16 @@ async fn a_connection_that_waits_for_its_request_longer_than_its_idle_time_is_en
                 .unwrap();
             let mut answered = vec![0; 1024];
             assert!(stream.read(&mut answered).await.unwrap() > 0);
-            let waited = std::time::Instant::now();
             let mut nothing = [0; 16];
-            let read = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut nothing))
+            // The server ends it: how soon is no thing a loaded machine decides, only whether.
+            let read = tokio::time::timeout(HANG, stream.read(&mut nothing))
                 .await
                 .expect("the server ended it");
             assert_eq!(read.unwrap(), 0);
-            let took = waited.elapsed();
+            let took = asked.elapsed();
             assert!(
-                took >= Duration::from_millis(250) && took < Duration::from_secs(3),
-                "{took:?}"
+                took >= Duration::from_millis(300),
+                "ended after {took:?}, before its idle time"
             );
             api.close().await;
         })
@@ -472,10 +518,14 @@ async fn closing_answers_a_door_that_waits_at_once_and_lets_the_listener_go() {
         .run_until(async {
             let closing = Closing::new();
             let door_closing = closing.clone();
+            let entered = Rc::new(Notify::new());
+            let began = Rc::clone(&entered);
             let (api, _rig) = serving_with(closing.clone(), move |_| {
                 let closing = door_closing.clone();
+                let began = Rc::clone(&began);
                 Box::pin(async move {
                     // A door: it waits until the daemon stops.
+                    began.notify_one();
                     closing.wait().await;
                     Ok(Answer::ok(json!({ "answer": null })))
                 })
@@ -493,7 +543,9 @@ async fn closing_answers_a_door_that_waits_at_once_and_lets_the_listener_go() {
                 stream.read_to_end(&mut answered).await.unwrap();
                 parse(&answered)
             });
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // The door has its request in hand: a close that came before the server read it
+            // would reset the connection, and no door would be answered.
+            happens(&entered, "the door never had its request").await;
             assert!(!door.is_finished(), "the door waits");
 
             // In the clock of the timers the close waits on, not the machine's.
@@ -553,9 +605,13 @@ async fn closing_waits_for_a_request_in_hand_and_the_answer_goes_out_first() {
         .run_until(async {
             let gate = Rc::new(Notify::new());
             let held = Rc::clone(&gate);
+            let entered = Rc::new(Notify::new());
+            let began = Rc::clone(&entered);
             let (api, _rig) = serving(move |_| {
                 let held = Rc::clone(&held);
+                let began = Rc::clone(&began);
                 Box::pin(async move {
+                    began.notify_one();
                     held.notified().await;
                     Ok(Answer::ok(json!({ "late": true })))
                 })
@@ -572,7 +628,7 @@ async fn closing_waits_for_a_request_in_hand_and_the_answer_goes_out_first() {
                 stream.read_to_end(&mut answered).await.unwrap();
                 parse(&answered)
             });
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            happens(&entered, "the handler never had its request").await;
             let closing = tokio::time::timeout(Duration::from_millis(100), api.close()).await;
             assert!(closing.is_err(), "a request in hand holds the close");
             gate.notify_one();
@@ -589,8 +645,12 @@ async fn closing_waits_for_a_request_in_hand_and_the_answer_goes_out_first() {
 async fn what_will_not_end_is_dropped_when_the_caller_says_so_a_body_half_sent_among_it() {
     LocalSet::new()
         .run_until(async {
-            let (api, _rig) = serving(|mut request| {
+            let entered = Rc::new(Notify::new());
+            let began = Rc::clone(&entered);
+            let (api, _rig) = serving(move |mut request| {
+                let began = Rc::clone(&began);
                 Box::pin(async move {
+                    began.notify_one();
                     request.json().await?;
                     Ok(Answer::ok(json!({})))
                 })
@@ -604,7 +664,7 @@ async fn what_will_not_end_is_dropped_when_the_caller_says_so_a_body_half_sent_a
                 )
                 .await
                 .unwrap();
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            happens(&entered, "the handler never had its request").await;
             let closing = tokio::time::timeout(Duration::from_millis(100), api.close()).await;
             assert!(closing.is_err(), "it does not end by itself");
             api.drop_connections();

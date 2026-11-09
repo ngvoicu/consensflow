@@ -64,8 +64,8 @@ pub fn crossed() -> Crossed {
 pub struct After {
     pub github: Github,
     pub files: Files,
-    pub dir: TempDir,
     version: String,
+    pub dir: TempDir,
 }
 
 /// `version` published; `edit` alters what was built before anything is.
@@ -122,10 +122,10 @@ impl After {
 pub struct Before {
     pub github: Github,
     pub files: Files,
-    pub dir: TempDir,
     version: String,
     members: Vec<String>,
     log: Arc<Mutex<Vec<String>>>,
+    pub dir: TempDir,
 }
 
 /// GitHub before `version` is published: `serving` is the release update-alpha
@@ -210,8 +210,8 @@ impl Before {
 /// bridge is published.
 pub struct Releasing {
     pub github: Github,
-    built: RefCell<BTreeMap<String, (Files, TempDir)>>,
     log: Arc<Mutex<Vec<String>>>,
+    built: RefCell<BTreeMap<String, (Files, TempDir)>>,
 }
 
 /// A world in which releases are published one after another.

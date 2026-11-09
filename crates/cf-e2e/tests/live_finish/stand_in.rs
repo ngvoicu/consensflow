@@ -336,12 +336,11 @@ fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_and_its_wi
         ),
         "{text}"
     );
-    // The host listed the job as running while the turn was watched, with the command line
-    // it was started with, which holds the number of seconds the check looks for.
-    assert!(
-        text.contains(&format!("--background-job {} ", leaving::SECONDS)),
-        "{text}"
-    );
+    // The chief's note names the work by its number: the stand-in's job is no program a note
+    // names, and what it was started with is never said (the command lines the host listed are
+    // the report's, cut to a line).
+    assert!(text.contains("which its close ended: process "), "{text}");
+    assert!(!text.contains("which its close ended: python"), "{text}");
     // The chief was told what the window closed with, in the note of its close: the turn's
     // end ended nothing, and the close found the job.
     assert!(

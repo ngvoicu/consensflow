@@ -755,6 +755,9 @@ impl Dispatcher {
             }
             return Ok(());
         }
+        // The conversation the window ran in: the id its harness may have printed as it quit is
+        // no secret in the window's own note (`Shown::with_own_session`).
+        let shown = shown.with_own_session(self.native_session_of(record.id));
         // Whether its program is gone, kept on the conversation it wrote to for the next
         // launch on it, after a restart too (`ownership`, `Launch::previous_gone`).
         if let (Some(gone), Some(conversation)) = (shown.gone(), conversation) {
@@ -821,6 +824,28 @@ impl Dispatcher {
             || delivering
                 .as_ref()
                 .is_some_and(|delivering| delivering.launch);
+        // A window whose program is ConsensFlow's own, standing in for its harness's, and which
+        // could not start the harness, ended with a status that says so (Codex's): its note says
+        // that, and not what its screen showed (`Adapter::never_ran`, `Shown::with_start`).
+        let harness = participant.harness.as_deref().unwrap_or_default();
+        let start = shown.exit_status().and_then(|status| {
+            self.seams
+                .adapters
+                .adapter(harness)
+                .and_then(|adapter| adapter.never_ran(status))
+        });
+        let who = crate::handoff::name_of(harness);
+        // The note says the kind and nothing the window showed; what it showed is in the log,
+        // masked, for whoever must find out why (T-1328).
+        if let Some(failure) = start {
+            self.seams.log.warn(&format!(
+                "@{}'s window never ran {who}: {}; {}",
+                participant.handle,
+                failure.words(who),
+                shown.in_the_log()
+            ));
+        }
+        let shown = shown.with_start(start, who);
         let closed = format!("@{}'s window closed", participant.handle);
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)
@@ -919,7 +944,7 @@ impl Dispatcher {
                 opened.is_some_and(|opened| self.now() - opened <= self.seams.limits.launch_ms);
             if project.state == "open" && !own && !up && at_its_launch && shown.ended_failing() {
                 let said = shown.clone().without_pastes(&pasted);
-                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))? {
+                if let Some(gone) = self.gone_model(&participant, &said.evidence())? {
                     self.reopen_without(&record, gone);
                     return Ok(());
                 }

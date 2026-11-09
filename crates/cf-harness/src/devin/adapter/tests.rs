@@ -284,9 +284,9 @@ fn append(wire: &Path, text: &str) {
 
 /// Devin's store of a window's sessions, under a root of its own: its env names it.
 struct Store {
-    _root: tempfile::TempDir,
     env: Env,
     db: rusqlite::Connection,
+    _root: tempfile::TempDir,
 }
 
 impl Store {

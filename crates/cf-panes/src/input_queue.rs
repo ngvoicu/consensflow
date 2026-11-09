@@ -581,8 +581,11 @@ mod tests {
     /// behind a human's paste (T-1048): Codex on Windows asks where the cursor is as a paste
     /// comes and reads none of it until it has the answer, and the answer waited behind the
     /// human's Enter, held until the window drew the paste, which it never could. Here the
-    /// program records what it reads: the answer, sent once the human's paste went in, is read
-    /// before their held Enter.
+    /// program reads the paste and says so by a file (the Enter is held behind it), reads the
+    /// answer, and draws only then: the answer sent once the program has the paste is read
+    /// before their held Enter, or the program never draws and the Enter waits for its cap.
+    /// No time of the machine's is in it: the events are the program's, and the cap is two
+    /// minutes, which only an answer held behind the Enter runs into.
     #[cfg(unix)]
     #[test]
     fn a_terminals_reply_goes_past_the_humans_keys_held_after_their_paste() {
@@ -593,20 +596,18 @@ mod tests {
         use cf_proto::panes::SilentPaste;
         use portable_pty::PtySize;
 
+        use crate::testing::{answered_within_liveness, hex, SilentReader, HELD_FOR_MS, LIVENESS};
+
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
         let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
-        let count = paste.len() + 2;
+        let program = SilentReader::new("reply-queue", paste.len());
         let opened = panes
             .open(
                 Path::new("/tmp"),
-                &[
-                    "/bin/sh".to_owned(),
-                    "-c".to_owned(),
-                    format!("stty raw -echo; printf ready; od -An -tx1 -N {count}"),
-                ],
+                &["/bin/sh".to_owned(), "-c".to_owned(), program.script()],
                 &HashMap::new(),
                 PtySize {
                     rows: 24,
@@ -623,45 +624,72 @@ mod tests {
             .read_exact(&mut ready)
             .expect("the recorder is ready");
         assert_eq!(&ready, b"ready");
-        // Held until the window draws the paste, which the recorder never does: at the most.
+        // Held until the window draws the paste, which the program does once it has read the
+        // answer: the cap is two minutes, which only a stuck answer waits for.
         let silent = SilentPaste {
             pace_us_per_character: 0,
             drawn_after_ms: 0,
             quiet_ms: 100,
-            most_ms: 1_500,
+            most_ms: HELD_FOR_MS,
             most_us_per_character: 0,
         };
         let output = arbiter
             .register_with(&key, Some(silent))
             .expect("register the pane");
-        drop(output);
         inputs.open(&key).expect("open the pane's input");
+        // What the pane prints is noted as the pane host's output thread notes it: the
+        // program's "drawn" is the window's draw of the paste.
+        let recorded = Arc::new(Mutex::new(String::new()));
+        let printing = {
+            let recorded = Arc::clone(&recorded);
+            thread::spawn(move || {
+                let mut chunk = [0_u8; 256];
+                while let Ok(read) = reader.read(&mut chunk) {
+                    if read == 0 {
+                        break;
+                    }
+                    output.note(true);
+                    recorded
+                        .lock()
+                        .expect("what the program printed")
+                        .push_str(&String::from_utf8_lossy(&chunk[..read]));
+                }
+            })
+        };
 
         let typed = inputs
             .typed(key.clone(), [paste, b"\r"].concat())
             .expect("the human's paste and Enter");
-        thread::sleep(Duration::from_millis(200));
+        // The paste is in the program: the human's Enter is held behind it.
+        program.wait_pasted();
         let replied = inputs
             .reply(key.clone(), b"R".to_vec())
             .expect("the terminal's answer");
-        let answered = Instant::now();
-        wait_for_input_blocking(replied).expect("the answer went in");
-        assert!(
-            answered.elapsed() < Duration::from_millis(1_000),
-            "{:?}: the answer waited behind the held Enter",
-            answered.elapsed()
-        );
-        wait_for_input_blocking(typed).expect("the paste and Enter went in");
+        answered_within_liveness(replied, "the answer waited behind the held Enter")
+            .expect("the answer went in");
+        answered_within_liveness(typed, "the Enter was never written after the window drew")
+            .expect("the paste and Enter went in");
 
-        let mut recorded = String::new();
-        reader
-            .read_to_string(&mut recorded)
-            .expect("what the recorder read");
-        let hex: String = recorded.split_whitespace().collect();
-        assert!(
-            hex.ends_with("520d"),
-            "the answer came after the Enter: {hex}"
-        );
+        // The program says what it read, in the order it read it.
+        let record = format!("drawn{}520d", hex(paste));
+        let deadline = Instant::now() + LIVENESS;
+        loop {
+            let said: String = recorded
+                .lock()
+                .expect("what the program printed")
+                .split_whitespace()
+                .collect();
+            if said.contains(&record) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the program's record is not the paste, the answer and then the Enter: {said}"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        panes.kill(&key).expect("kill the pane");
+        printing.join().expect("the pane's output thread");
         inputs.close_and_drain();
     }
 

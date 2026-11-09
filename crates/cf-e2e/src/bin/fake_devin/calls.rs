@@ -81,11 +81,11 @@ mod tests {
 
     /// The parts of a window in a folder of its own, its mode `bypass` or not.
     struct Parts {
-        folder: tempfile::TempDir,
         permission: Permission,
         wire: Wire,
         store: Store,
         screen: Vec<u8>,
+        folder: tempfile::TempDir,
     }
 
     fn parts(bypass: bool) -> Parts {

@@ -11,9 +11,9 @@ use crate::updater_smoke::say::Line;
 use crate::updater_smoke::testing::stand_in_for_the_app;
 
 struct Stand {
-    folder: tempfile::TempDir,
     say: Say,
     lines: std::sync::mpsc::Receiver<Line>,
+    folder: tempfile::TempDir,
 }
 
 impl Stand {
