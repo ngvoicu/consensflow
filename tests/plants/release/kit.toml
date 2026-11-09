@@ -63,6 +63,10 @@ smoke-app = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--l
 smoke-case = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::case::"]
 # The smoke's look at what the app started again holds of the installed app's.
 smoke-descriptors = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::descriptors"]
+# The list of what the migrations drop, held to the migrations (cf-ledger, T-1338).
+smoke-dropped = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-ledger", "--lib", "--", "schema::tests::the_list_of_what_the_migrations_drop"]
+# The machine a case runs on, and the stand-ins on its PATH (the stand-in Claude answers the daemon's read of the models).
+smoke-sandbox = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::sandbox"]
 # The app crate's tests of the portable app's collector, built as a worktree can build it.
 app-portable = ["cargo", "xtask", "app", "test", "portable::"]
 # The publisher, every state a run can be cut short in, and the workflow's steps run as written.

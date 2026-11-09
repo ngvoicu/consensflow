@@ -392,7 +392,9 @@ and the hash that names a bundle of an extension is `$HASH`.
   starts with `PI_HYPERLINKS=1` (its `detectCapabilities`), the last variable of its environment
   and for that launch alone: no settings file of the owner's is written, and Pi's own
   `terminal.hyperlinks` setting is read after the variable, so an owner's choice wins. Nothing else
-  in Pi's tree reads the variable, so the commands a window runs are not changed by it. **Claude
+  in Pi's tree reads the variable, but the commands a window runs inherit it, and one that imports
+  Pi's TUI library can write OSC 8 into piped output (T-1323 reproduced it); the general
+  `supports-hyperlinks` package ignores it, so the commands that use it are unchanged. **Claude
   Code is not given one** (taken out again, T-1323): `FORCE_HYPERLINK=1` is the switch of its
   check, but `supports-hyperlinks` answers it before it asks whether stdout is a terminal, so the
   commands the window runs inherited it and wrote OSC 8 into their output (ESLint's pretty

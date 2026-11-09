@@ -65,6 +65,7 @@ mod conpty {
     use std::time::{Duration, Instant};
 
     use super::{keys_read, KeyRead};
+    use crate::arbiter::{EnterTiming, InputArbiter};
     use crate::pty::conpty::host_library;
     use crate::pty::conpty_test::{open, powershell, read_until, take};
     use crate::pty::{serial_pty_test, PaneKey, PaneOutput, PaneTable};
@@ -354,6 +355,512 @@ mod conpty {
     /// code, and the character's code unit (8212).
     const EM_DASH_AS_A_KEY: &[u8] = b"\x1b[0;0;8212;1;0;1_\x1b[0;0;8212;0;0;1_";
 
+    /// The keys a program that reads key events reads of `bytes`, written to its pane at once:
+    /// up to `most` of them, read until none more comes for [`SETTLE`].
+    fn keys_of(bytes: &[u8], most: usize) -> (Vec<KeyRead>, String) {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let (key, output) = open(&table, &key_reader(most), &HashMap::new(), 1 << 20);
+        read_until(&table, &key, &output, "READY");
+        table.write(&key, bytes).expect("write the bytes");
+        let mut seen = String::new();
+        let settled = Instant::now() + SETTLE;
+        while keys_read(&seen).len() < most && Instant::now() < settled {
+            if let Ok(chunk) = output.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&take(&table, &key, &chunk));
+            }
+        }
+        table.kill(&key).expect("close the pane");
+        (keys_read(&seen), seen)
+    }
+
+    /// Where Node is on this machine: the first `node.exe` of the `PATH`.
+    #[allow(clippy::disallowed_methods)] // A test's own look at the machine's PATH.
+    fn node() -> Option<std::path::PathBuf> {
+        let path = std::env::var_os("PATH")?;
+        std::env::split_paths(&path)
+            .map(|folder| folder.join("node.exe"))
+            .find(|candidate| candidate.is_file())
+    }
+
+    /// What a Node program that reads its terminal raw (as Claude Code and Pi do, which set the
+    /// console's virtual-terminal input) is given of `bytes`, written to its pane at once: every
+    /// chunk it was handed, as hexadecimal, joined, and what the pane showed.
+    fn node_reads(bytes: &[u8]) -> (String, String) {
+        let node = node().expect("a node.exe on the PATH, which the app's own Windows tests need");
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let argv = vec![
+            node.to_string_lossy().into_owned(),
+            "-e".to_owned(),
+            "process.stdin.setRawMode(true); console.log('READY'); \
+             process.stdin.on('data', (d) => console.log('HEX=[' + d.toString('hex') + ']#'))"
+                .to_owned(),
+        ];
+        let (key, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
+        read_until(&table, &key, &output, "READY");
+        table.write(&key, bytes).expect("write the bytes");
+        let mut seen = String::new();
+        let settled = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < settled {
+            if let Ok(chunk) = output.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&take(&table, &key, &chunk));
+            }
+        }
+        table.kill(&key).expect("close the pane");
+        let hex = seen
+            .match_indices("HEX=[")
+            .filter_map(|(at, _)| {
+                let rest = &seen[at + "HEX=[".len()..];
+                Some(rest.split_once("]#")?.0.to_owned())
+            })
+            .collect::<String>();
+        (hex, seen)
+    }
+
+    /// What a terminal answers a program's questions with (xterm.js: an OSC colour ended by ST or
+    /// by BEL, a DCS name ended by ST) goes through the pane host's input like a key and reaches a
+    /// Node program whole, with the words typed after it: the console host gives the program the
+    /// report as it was written (measured on zeewin2, 2026-11-09: also a DCS report written in two
+    /// parts up to 1.5 s apart: it holds the part until its ST comes and gives the string whole).
+    /// The pane host writes a report as it is given: `field-recap-not-typed` on CI's Windows runner
+    /// found a `\`, the end of an ST, typed into the next words after reports that a write-cutting
+    /// guard (T-1336, taken out again, see the brain's issue page) had cut before their ST. Whatever
+    /// cuts a write has to keep a terminal string whole, and this holds the reports to it.
+    #[test]
+    fn a_terminals_reports_reach_a_node_program_whole_with_the_words_after_them() {
+        for (what, report) in [
+            (
+                "an OSC colour ended by ST",
+                &b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\"[..],
+            ),
+            (
+                "an OSC colour ended by BEL",
+                &b"\x1b]10;rgb:cccc/cccc/cccc\x07"[..],
+            ),
+            (
+                "a DCS name ended by ST",
+                &b"\x1bP>|xterm.js(6.0.0)\x1b\\"[..],
+            ),
+        ] {
+            let mut bytes = report.to_vec();
+            bytes.extend_from_slice(b"abc");
+            let wanted: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            let (hex, seen) = node_reads(&bytes);
+            assert_eq!(hex, wanted, "{what}; its screen: {seen:?}");
+        }
+    }
+
+    /// How many bytes the console host reads from a pane's input at once: the size of the
+    /// buffer of its input thread (`VtInputThread`, 4,096), so that a write which reaches past
+    /// it is read in two.
+    const CONSOLE_READ: usize = 4096;
+
+    /// A program that says READY, prints each key it reads that is not an `x` as
+    /// `KEY<n>=[<key>|<character>|<modifiers>]#` (`n` counting every key read), and says DONE
+    /// once no key has come for `quiet` seconds.
+    fn quiet_key_reader(quiet: u32) -> Vec<String> {
+        powershell(&format!(
+            "Write-Output 'READY'; $n = 0; $last = Get-Date; \
+             while (((Get-Date) - $last).TotalSeconds -lt {quiet}) {{ \
+               if ([Console]::KeyAvailable) {{ $k = [Console]::ReadKey($true); $n++; $last = Get-Date; \
+                 if ($k.KeyChar -ne 'x') {{ Write-Output (\"KEY{{0}}=[{{1}}|{{2}}|{{3}}]#\" -f $n, $k.Key, [int]$k.KeyChar, [int]$k.Modifiers) }} }} \
+               else {{ Start-Sleep -Milliseconds 20 }} }}; \
+             Write-Output 'DONE'"
+        ))
+    }
+
+    /// The keys, other than the `x`s, that a program which reads key events reads when `filler`
+    /// `x`s and then `key` are written to its pane in one write: through the pane host's human
+    /// path (the arbiter's typed write, as the page's keys are) where `human`, else straight to the
+    /// pane's input; and how long the write took.
+    fn keys_behind(
+        filler: usize,
+        key: &[u8],
+        human: bool,
+    ) -> (Vec<(String, u32, u32)>, String, Duration) {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let (pane, output) = open(&table, &quiet_key_reader(3), &HashMap::new(), 1 << 20);
+        read_until(&table, &pane, &output, "READY");
+        let mut bytes = vec![b'x'; filler];
+        bytes.extend_from_slice(key);
+        let started = Instant::now();
+        if human {
+            let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+            arbiter.register(&pane).expect("register the pane");
+            arbiter
+                .write_typed(&table, &pane, &bytes)
+                .expect("write the keys as the human's");
+        } else {
+            table.write(&pane, &bytes).expect("write the keys");
+        }
+        let waited = started.elapsed();
+        let seen = read_until(&table, &pane, &output, "DONE");
+        table.kill(&pane).expect("close the pane");
+        let keys = keys_read(&seen)
+            .into_iter()
+            .map(|read| (read.key, read.character, read.modifiers))
+            .collect();
+        (keys, seen, waited)
+    }
+
+    /// Why a pane's key does not start with Escape on Windows (T-1336), measured: the console host
+    /// reads a pane's input `CONSOLE_READ` bytes at a time and takes an Escape that ends a read for
+    /// the Escape key, whatever follows in the next (it holds one only after it has read a key
+    /// written in win32-input-mode, which holds every lone Escape the engine presses for good:
+    /// `after_one_key_in_win32_input_mode_the_console_host_holds_the_lone_escapes_the_engine_presses`).
+    /// So an `ESC CR` written where a read ends is the Escape key, then Enter: the key that stops
+    /// a harness's turn, then the one that sends its message. The pane host does nothing to
+    /// prevent it (a guard that waited for the pipe to be empty before an Escape-led write was
+    /// built and taken out again: it waits forever on a host whose pending read is smaller than the
+    /// pipe's quota, see the brain's issue page), which is why the page writes a single byte,
+    /// that no read can split, for Shift+Enter. If this fails the host reads whole what it read in
+    /// two, and the rule can be looked at again.
+    #[test]
+    fn an_escape_led_key_where_the_console_hosts_read_ends_is_read_as_the_escape_key_then_the_rest()
+    {
+        for human in [true, false] {
+            let (split, seen, _) = keys_behind(CONSOLE_READ - 1, b"\x1b\r", human);
+            assert_eq!(
+                split,
+                [("Escape".to_owned(), 27, 0), ("Enter".to_owned(), 13, 0)],
+                "ESC CR behind {} bytes, human {human}; its screen: {seen:?}",
+                CONSOLE_READ - 1
+            );
+            let (whole, seen, _) = keys_behind(0, b"\x1b\r", human);
+            assert_eq!(
+                whole,
+                [("Enter".to_owned(), 13, 1)],
+                "ESC CR behind nothing, human {human}; its screen: {seen:?}"
+            );
+        }
+    }
+
+    /// A line feed is one byte, which no read can split: it is the same key, Enter with Control,
+    /// wherever it falls.
+    #[test]
+    fn a_line_feed_is_the_same_key_wherever_the_console_hosts_read_ends() {
+        for filler in [CONSOLE_READ - 1, CONSOLE_READ - 100, 0] {
+            let (keys, seen, _) = keys_behind(filler, b"\n", true);
+            assert_eq!(
+                keys,
+                [("Enter".to_owned(), 10, 4)],
+                "a line feed after {filler} bytes; its screen: {seen:?}"
+            );
+        }
+    }
+
+    /// What the console host makes of the three bytes a pane could write for a new line, for the
+    /// harnesses that read the console's key events (Codex, Devin and Muse, through crossterm,
+    /// which reads the Enter key with the modifiers the console says): ESC CR is the Enter key
+    /// with Alt, the new line each lists, **which the page does not write** (a read can split it:
+    /// above); a line feed is the Enter key with Control, **which the page writes** (T-1348): none
+    /// lists it (their new-line keys are Shift+Enter, Alt+Enter and Ctrl+J), so Shift+Enter does
+    /// nothing in them on Windows, safely; and a plain Enter, the message sent, is the Enter key
+    /// alone.
+    #[test]
+    fn the_bytes_a_pane_could_write_for_a_new_line_reach_a_key_reader_as_enter_with_alt_control_or_none(
+    ) {
+        let key_of = |character: u32, modifiers: u32| KeyRead {
+            number: 1,
+            key: "Enter".to_owned(),
+            character,
+            modifiers,
+        };
+        for (what, bytes, wanted) in [
+            ("ESC CR (Alt+Enter)", &b"\x1b\r"[..], key_of(13, 1)),
+            ("a line feed (Ctrl+J)", &b"\n"[..], key_of(10, 4)),
+            ("a plain Enter", &b"\r"[..], key_of(13, 0)),
+        ] {
+            let (keys, seen) = keys_of(bytes, 1);
+            assert_eq!(keys, [wanted], "{what}; its screen: {seen:?}");
+        }
+    }
+
+    /// Why the page never writes the kitty protocol's Shift+Enter (`CSI 13;2u`) on Windows: the
+    /// console host knows no such sequence, and a program that reads key events is given its
+    /// seven characters as keys of typed text, into the message. Codex's own reader rebuilds
+    /// the seven as Shift+Enter, except where a read ends after `ESC [`
+    /// (`codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket`);
+    /// Devin and Muse are not known to. If this fails, the host reads it, and it is worth a look
+    /// whether it is the one key for every harness.
+    #[test]
+    fn a_csi_u_shift_enter_reaches_a_key_reader_as_seven_typed_characters() {
+        let (keys, seen) = keys_of(b"\x1b[13;2u", 8);
+        let characters: Vec<u32> = keys.iter().map(|read| read.character).collect();
+        assert_eq!(
+            characters,
+            [27, 91, 49, 51, 59, 50, 117],
+            "its screen: {seen:?}"
+        );
+        assert!(
+            keys.iter().all(|read| read.modifiers == 0),
+            "its keys: {keys:?}"
+        );
+    }
+
+    /// What reaches the harnesses that set the console's virtual-terminal input (Claude Code and
+    /// Pi: Node, in raw mode) of the new-line bytes: all of them, whole. A line feed is Pi's new
+    /// line (its Alt+Enter, ESC CR, queues a follow-up); ESC CR is Claude Code's.
+    #[test]
+    fn the_new_line_bytes_reach_a_node_program_in_virtual_terminal_input_whole() {
+        for (what, bytes, wanted) in [
+            ("a line feed", &b"\n"[..], "0a"),
+            ("ESC CR", &b"\x1b\r"[..], "1b0d"),
+            ("a plain Enter", &b"\r"[..], "0d"),
+        ] {
+            let (hex, seen) = node_reads(bytes);
+            assert_eq!(hex, wanted, "{what}; its screen: {seen:?}");
+        }
+    }
+
+    /// The probe that is Codex's own key reader on Windows (`tools/probes/key-reader`,
+    /// `codex-windows-keys`: crossterm's `EventStream` inside Codex 0.167.0's `WindowsKeySequence`),
+    /// built by `run-windows.cjs`, which says where it is.
+    #[allow(clippy::disallowed_methods)] // A test's own look at what its driver built.
+    fn codex_probe() -> std::path::PathBuf {
+        let path = std::env::var_os("CF_CODEX_KEY_PROBE").unwrap_or_else(|| {
+            panic!(
+                "CF_CODEX_KEY_PROBE names the built probe: `node tools/probes/key-reader/run-windows.cjs` builds it and runs this"
+            )
+        });
+        std::path::PathBuf::from(path)
+    }
+
+    /// What Codex's reader on Windows read of a write to its pane, as the keys other than `x`
+    /// (`<Code>/<Modifiers>`, in the order read), how many `x`s it read, and what the pane showed.
+    struct CodexRead {
+        keys: Vec<String>,
+        chars: usize,
+        seen: String,
+    }
+
+    /// The probe's `KEY<n>=[…]#` lines, and the `x`s counted in its `RESULT`.
+    fn codex_keys_read(seen: &str) -> (Vec<String>, usize) {
+        let keys = seen
+            .match_indices("KEY")
+            .filter_map(|(at, _)| {
+                let rest = &seen[at + "KEY".len()..];
+                let (_, rest) = rest.split_once("=[")?;
+                Some(rest.split_once("]#")?.0.to_owned())
+            })
+            .collect();
+        let chars = seen
+            .split_once("RESULT chars=")
+            .and_then(|(_, rest)| rest.split(' ').next())
+            .and_then(|count| count.parse().ok())
+            .unwrap_or(usize::MAX);
+        (keys, chars)
+    }
+
+    /// What Codex's reader reads when the probe waits `wait_ms` before it reads, and `filler`
+    /// `x`s and then `key` are written to its pane: in one write (through the human's path where
+    /// `human`, as the page's keys go, else straight to the pane), or, where `gap` says
+    /// `(at, pause)`, as two: the first `at` bytes, then, after `pause`, the rest. Printed as a
+    /// `CASE` line of JSON, which `tools/probes/key-reader/results-windows.json` records.
+    fn codex_reads(
+        filler: usize,
+        key: &[u8],
+        wait_ms: u32,
+        human: bool,
+        gap: Option<(usize, Duration)>,
+    ) -> CodexRead {
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let argv = vec![
+            codex_probe().to_string_lossy().into_owned(),
+            "--wait-ms".to_owned(),
+            wait_ms.to_string(),
+        ];
+        let (pane, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
+        read_until(&table, &pane, &output, "READY");
+        let mut bytes = vec![b'x'; filler];
+        bytes.extend_from_slice(key);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&pane).expect("register the pane");
+        let write = |part: &[u8]| {
+            if human {
+                arbiter
+                    .write_typed(&table, &pane, part)
+                    .expect("write the keys as the human's");
+            } else {
+                table.write(&pane, part).expect("write the keys");
+            }
+        };
+        match gap {
+            None => write(&bytes),
+            Some((at, pause)) => {
+                write(&bytes[..at]);
+                std::thread::sleep(pause);
+                write(&bytes[at..]);
+            }
+        }
+        let seen = read_until(&table, &pane, &output, "DONE");
+        table.kill(&pane).expect("close the pane");
+        let (keys, chars) = codex_keys_read(&seen);
+        println!(
+            "CASE {}",
+            serde_json::json!({
+                "key": key,
+                "behind": filler,
+                "wait_ms": wait_ms,
+                "human": human,
+                "gap_ms": gap.map(|(at, pause)| (at, pause.as_millis())),
+                "keys": keys,
+                "chars": chars,
+            })
+        );
+        CodexRead { keys, chars, seen }
+    }
+
+    /// The first read of the console host (`CONSOLE_READ`) can end after any byte of a key: no
+    /// byte, one, or any of the seven of the kitty protocol's Shift+Enter (`ESC [ 1 3 ; 2 u`),
+    /// when that many `x`s come before it; and the second read can end in it too.
+    const CODEX_FILLERS: [usize; 10] = [
+        0,
+        CONSOLE_READ - 7,
+        CONSOLE_READ - 6,
+        CONSOLE_READ - 5,
+        CONSOLE_READ - 4,
+        CONSOLE_READ - 3,
+        CONSOLE_READ - 2,
+        CONSOLE_READ - 1,
+        CONSOLE_READ,
+        2 * CONSOLE_READ - 3,
+    ];
+
+    /// Why Codex on Windows is not sent the kitty protocol's Shift+Enter (`ESC [ 1 3 ; 2 u`), though
+    /// its own reader rebuilds the seven key events as Shift+Enter (T-1348, measured through
+    /// Codex 0.167.0's `WindowsKeySequence` around the pinned crossterm, the shipped console host
+    /// and the pane host's write path): it does so wherever the console host's 4,096-byte read
+    /// ends in the sequence, before it or after any of its bytes, whether the window reads at
+    /// once or after 200 ms, through the human's path or straight to the pane, **but where the read
+    /// ends after `ESC [`**: the host takes the pair for Alt+[ and the rest, `1 3 ; 2 u`, is typed
+    /// into the message. That is not the message sent or a turn stopped, but it is not Shift+Enter
+    /// either, and a pane cannot choose where a read ends. If this fails, the host reads that
+    /// split whole, and it is worth a look whether the sequence is Codex's key on Windows.
+    #[test]
+    #[ignore = "needs the probe: node tools/probes/key-reader/run-windows.cjs"]
+    fn codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket(
+    ) {
+        let split = CONSOLE_READ - 2;
+        for filler in CODEX_FILLERS {
+            for wait_ms in [0, 200] {
+                for human in [false, true] {
+                    let read = codex_reads(filler, b"\x1b[13;2u", wait_ms, human, None);
+                    let wanted: &[&str] = if filler == split {
+                        &[
+                            "Char('[')/ALT",
+                            "Char('1')/NONE",
+                            "Char('3')/NONE",
+                            "Char(';')/NONE",
+                            "Char('2')/NONE",
+                            "Char('u')/NONE",
+                        ]
+                    } else {
+                        &["Enter/SHIFT"]
+                    };
+                    assert_eq!(
+                        (read.keys.as_slice(), read.chars),
+                        (
+                            wanted
+                                .iter()
+                                .map(|key| (*key).to_owned())
+                                .collect::<Vec<_>>()
+                                .as_slice(),
+                            filler
+                        ),
+                        "CSI u behind {filler} bytes, wait {wait_ms} ms, human {human}; its screen: {:?}",
+                        read.seen
+                    );
+                }
+            }
+        }
+    }
+
+    /// The same sequence written in two parts with a pause between that is longer than the adapter's
+    /// 50 ms is read as an Escape alone, then the rest typed: the stop of a turn. The host's two
+    /// reads of one write are not that far apart (above), and the pane host writes a key whole; this
+    /// is what a host starved for 50 ms between two reads would do, and a reason more for the
+    /// sequence not being Codex's key on Windows.
+    #[test]
+    #[ignore = "needs the probe: node tools/probes/key-reader/run-windows.cjs"]
+    fn codex_on_windows_reads_the_kitty_sequence_cut_by_more_than_fifty_milliseconds_as_a_lone_escape(
+    ) {
+        let read = codex_reads(
+            0,
+            b"\x1b[13;2u",
+            0,
+            false,
+            Some((1, Duration::from_millis(300))),
+        );
+        assert_eq!(
+            read.keys.first().map(String::as_str),
+            Some("Esc/NONE"),
+            "an Escape alone first; its screen: {:?}",
+            read.seen
+        );
+        assert!(
+            !read.keys.iter().any(|key| key == "Enter/SHIFT"),
+            "and no Shift+Enter: {:?}",
+            read.keys
+        );
+        // Under the deadline it is rebuilt whole.
+        let read = codex_reads(
+            0,
+            b"\x1b[13;2u",
+            0,
+            false,
+            Some((1, Duration::from_millis(10))),
+        );
+        assert_eq!(read.keys, ["Enter/SHIFT"], "its screen: {:?}", read.seen);
+    }
+
+    /// What the other bytes a pane could write for a new line are to Codex's reader on Windows:
+    /// ESC CR is Alt+Enter, its new line, and, where a read ends after the Escape, an Escape key
+    /// and then an Enter key (the stop of a turn and the message sent: the reason a pane's key
+    /// does not start with Escape); a line feed is Enter with Control, which Codex binds to
+    /// nothing, wherever a read ends; a plain Enter is the message sent.
+    #[test]
+    #[ignore = "needs the probe: node tools/probes/key-reader/run-windows.cjs"]
+    fn codex_on_windows_reads_the_other_new_line_bytes_as_these_keys() {
+        for (what, filler, key, wanted) in [
+            ("ESC CR", 0, &b"\x1b\r"[..], &["Enter/ALT"][..]),
+            (
+                "ESC CR where the read ends after its Escape",
+                CONSOLE_READ - 1,
+                &b"\x1b\r"[..],
+                &["Esc/NONE", "Enter/NONE"][..],
+            ),
+            ("a line feed", 0, &b"\n"[..], &["Enter/CONTROL"][..]),
+            (
+                "a line feed where the read ends before it",
+                CONSOLE_READ,
+                &b"\n"[..],
+                &["Enter/CONTROL"][..],
+            ),
+            (
+                "a line feed where the read ends after the x before it",
+                CONSOLE_READ - 1,
+                &b"\n"[..],
+                &["Enter/CONTROL"][..],
+            ),
+            ("a plain Enter", 0, &b"\r"[..], &["Enter/NONE"][..]),
+        ] {
+            let read = codex_reads(filler, key, 0, false, None);
+            assert_eq!(
+                read.keys, wanted,
+                "{what}, behind {filler} bytes; its screen: {:?}",
+                read.seen
+            );
+        }
+    }
+
     /// A mark no key of the layout types reaches a program that reads key events as
     /// itself, written as text or as a key, through the console host the app ships beside
     /// its pane host (Microsoft's own, which portable-pty loads, as `cargo test` finds it
@@ -377,6 +884,244 @@ mod conpty {
         );
         let (as_key, seen) = first_key(EM_DASH_AS_A_KEY);
         assert_eq!(as_key, [mark], "written as a key; its screen: {seen:?}");
+    }
+}
+
+/// What the page writes for Shift+Enter, from the fixture the page tests hold it to
+/// (`app/tests/fixtures/pane-keys/newline-cases.json`, `sends`), on every platform.
+///
+/// **A pane's key never starts with Escape** (T-1336): a program takes a lone Escape for "stop", and
+/// a read that ends between the two bytes of a write reads the Escape alone, then the rest: on a Mac
+/// a pty's input queue nearly full (`boundary`), on Windows the console host's 4,096-byte read
+/// (`conpty`, `a_line_feed_is_the_same_key_wherever_the_console_hosts_read_ends` and the tests of
+/// what splits). Only a single byte cannot be split, so it is one byte in every harness on both
+/// platforms (T-1348).
+#[cfg(test)]
+mod sends {
+    const FIXTURE: &str =
+        include_str!("../../../../app/tests/fixtures/pane-keys/newline-cases.json");
+
+    /// What the page writes for Shift+Enter on `platform` (`mac` or `windows`), by harness.
+    pub(super) fn sent_on(platform: &str) -> Vec<(String, Vec<u8>)> {
+        let fixture: serde_json::Value =
+            serde_json::from_str(FIXTURE).expect("the fixture is JSON");
+        let harnesses = fixture["harnesses"].as_object().expect("the harnesses");
+        assert!(
+            harnesses.len() >= 5,
+            "every harness: {:?}",
+            harnesses.keys()
+        );
+        harnesses
+            .iter()
+            .map(|(name, each)| {
+                let bytes = each["sends"][platform]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("what is sent on {platform}"))
+                    .iter()
+                    .map(|byte| u8::try_from(byte.as_u64().expect("a byte")).expect("a byte"))
+                    .collect();
+                (name.clone(), bytes)
+            })
+            .collect()
+    }
+
+    /// Shift+Enter is a line feed, one byte, in every harness on both platforms: no read of a pty
+    /// or of the console host can end in the middle of it, so it cannot reach a window as an
+    /// Escape alone (which stops a turn) and then an Enter (which sends the message).
+    #[test]
+    fn shift_enter_is_one_line_feed_in_every_harness_on_both_platforms() {
+        for platform in ["mac", "windows"] {
+            for (harness, key) in sent_on(platform) {
+                assert_eq!(key, [b'\n'], "{harness} on {platform}");
+            }
+        }
+    }
+}
+
+/// What a human's Shift+Enter becomes when the window's input is nearly full (T-1336), through
+/// a real pty: the bytes the page writes for it are `sends.mac` of the fixture the page tests hold the
+/// page to (`app/tests/fixtures/pane-keys/newline-cases.json`).
+///
+/// A program takes a lone Escape for "stop". A pty's input queue holds a limited number of bytes
+/// (a Mac's, 1,024, less what the line discipline keeps), and a write that reaches past it is taken
+/// in two parts, the second when the reader has read: so an `ESC CR` whose Escape is the last byte
+/// the queue takes is read as an Escape, and the Enter in the next read, whatever the reader's own
+/// buffer (a window that is slow to read, behind a long paste, in the shape the review T-1336 found
+/// with Codex's own reader: a 1,009-character bracketed paste, a reader that waits, Shift+Enter).
+#[cfg(all(test, unix))]
+mod boundary {
+    use std::collections::HashMap;
+    use std::io::Read;
+    use std::path::Path;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    use crate::pty::{serial_pty_test, OpenedPane, PaneTable};
+
+    use super::sends::sent_on;
+
+    fn size() -> PtySize {
+        PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        }
+    }
+
+    /// The program's output until it has printed `word`, read in a thread so that a program that
+    /// never does fails the test, not holds it.
+    fn spawn_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let mut buffer = [0_u8; 4096];
+            while let Ok(count) = reader.read(&mut buffer) {
+                if count == 0 || sender.send(buffer[..count].to_vec()).is_err() {
+                    return;
+                }
+            }
+        });
+        receiver
+    }
+
+    /// How many bytes this system's pty takes into its input queue of a program that reads none
+    /// of them: bytes are written one at a time to a pty whose program does not read, with the
+    /// master set not to block, until it refuses one.
+    fn queue_limit() -> usize {
+        let pair = native_pty_system().openpty(size()).expect("a pty");
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", "stty raw -echo; printf ready; sleep 5"]);
+        let mut child = pair.slave.spawn_command(command).expect("the program");
+        drop(pair.slave);
+        let output = spawn_reader(pair.master.try_clone_reader().expect("the pty's output"));
+        let mut seen = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !String::from_utf8_lossy(&seen).contains("ready") {
+            let left = deadline.saturating_duration_since(Instant::now());
+            seen.extend(output.recv_timeout(left).expect("the program says ready"));
+        }
+        let fd = pair.master.as_raw_fd().expect("the master's descriptor");
+        // SAFETY: `fd` is the open master of this pty, which lives to the end of the function.
+        let taken = unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            let mut taken = 0_usize;
+            while taken < (1 << 20) && libc::write(fd, b"x".as_ptr().cast(), 1) == 1 {
+                taken += 1;
+            }
+            taken
+        };
+        child.kill().expect("end the program");
+        child.wait().expect("the program ended");
+        assert!(taken > 16, "the pty took only {taken} bytes");
+        taken
+    }
+
+    /// What a program that reads its raw terminal in blocks, after it has waited a second, reads of
+    /// `filler` bytes and then `key` written to its pane in one write by the pane host: each read
+    /// as the bytes it was.
+    fn reads_of(filler: usize, key: &[u8]) -> Vec<Vec<u8>> {
+        let _pty_guard = serial_pty_test();
+        let table = PaneTable::new();
+        let script = "stty raw -echo; printf ready; sleep 1; i=0; \
+            while [ $i -lt 8 ]; do dd bs=4096 count=1 2>/dev/null | od -An -v -tx1 | tr -d ' \\n'; echo; i=$((i+1)); done";
+        let OpenedPane { key: pane, reader } = table
+            .open(
+                Path::new("/tmp"),
+                &["/bin/sh".to_owned(), "-c".to_owned(), script.to_owned()],
+                &HashMap::new(),
+                size(),
+            )
+            .expect("the program");
+        let output = spawn_reader(reader);
+        let mut seen = String::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !seen.contains("ready") {
+            let left = deadline.saturating_duration_since(Instant::now());
+            seen.push_str(&String::from_utf8_lossy(
+                &output.recv_timeout(left).expect("the program says ready"),
+            ));
+        }
+        let mut bytes = vec![b'x'; filler];
+        bytes.extend_from_slice(key);
+        // The write is one call, as the pane host's is; where the queue is full it waits for the
+        // program's first read, a second on.
+        table.write(&pane, &bytes).expect("write the keys");
+        let total = bytes.len();
+        let mut reads: Vec<Vec<u8>> = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while reads.iter().map(Vec::len).sum::<usize>() < total {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let Ok(chunk) = output.recv_timeout(left) else {
+                break;
+            };
+            seen.push_str(&String::from_utf8_lossy(&chunk));
+            reads = seen
+                .split("ready")
+                .nth(1)
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(|line| {
+                    (0..line.len() / 2)
+                        .map(|at| u8::from_str_radix(&line[at * 2..at * 2 + 2], 16).unwrap_or(0))
+                        .collect()
+                })
+                .collect();
+        }
+        table.kill(&pane).expect("close the pane");
+        reads
+    }
+
+    /// The reads, each as how many bytes it was and the last two.
+    fn shown(reads: &[Vec<u8>]) -> String {
+        reads
+            .iter()
+            .map(|read| {
+                format!(
+                    "{} bytes ending {:02x?}",
+                    read.len(),
+                    &read[read.len().saturating_sub(2)..]
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", then ")
+    }
+
+    /// The premise, measured on this system: an `ESC CR` that begins at the last byte the queue
+    /// takes is read as an Escape, and the Enter in the next read. If this fails, a read no longer
+    /// splits a key and the test below proves nothing.
+    #[test]
+    fn an_escape_led_key_at_the_end_of_a_full_queue_is_read_as_a_lone_escape() {
+        let limit = queue_limit();
+        let reads = reads_of(limit - 1, b"\x1b\r");
+        assert!(
+            reads.iter().any(|read| read.last() == Some(&0x1b)),
+            "with {} bytes waiting, ESC CR was read as {}",
+            limit - 1,
+            shown(&reads)
+        );
+        let whole = reads_of(0, b"\x1b\r");
+        assert_eq!(whole, [vec![0x1b, 0x0d]], "with nothing waiting");
+    }
+
+    /// What the page writes for Shift+Enter is never read as a lone Escape, in any harness, wherever
+    /// the queue's end falls: no read ends in an Escape.
+    #[test]
+    fn shift_enter_is_never_read_as_a_lone_escape_behind_a_full_queue() {
+        let limit = queue_limit();
+        for (harness, key) in sent_on("mac") {
+            for waiting in [limit - 1, limit - 2, limit - key.len().max(1)] {
+                let reads = reads_of(waiting, &key);
+                assert!(
+                    reads.iter().all(|read| read.last() != Some(&0x1b)),
+                    "{harness}: {key:?} written behind {waiting} bytes was read as {}",
+                    shown(&reads)
+                );
+            }
+        }
     }
 }
 

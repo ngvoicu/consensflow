@@ -25,6 +25,7 @@ fn project(harness: &str, model: Option<&str>) -> NewProject {
             harness: harness.to_owned(),
             model: model.map(str::to_owned),
             effort: None,
+            model_name: None,
         },
         staff: Vec::new(),
         gate: false,
@@ -61,6 +62,160 @@ fn switches(ledger: &Ledger, project: i64) -> Vec<Value> {
         .collect()
 }
 
+/// The id a chief's harness lists for its model (`model_name`, which its card says) goes with
+/// that model: when the model moves with no pick of the human's, because its harness no longer
+/// has it (`chief_gone`) or because the harness's record names the model it ran on
+/// (`chief_ran_on`), the name of the old model is not the new one's and is dropped (T-1345).
+#[test]
+fn a_chief_whose_model_moves_without_a_pick_keeps_no_name_of_the_old_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("consensflow.db");
+    {
+        // Two projects whose Devin chiefs hold the id their launch is given and the id Devin lists.
+        let db = Connection::open(&file).unwrap();
+        migrate(&db, &MIGRATIONS).unwrap();
+        db.execute_batch(
+            "INSERT INTO project (id, directory, name, state, created_at, updated_at)
+               VALUES (1, '/a', 'a', 'open', 't', 't'), (2, '/b', 'b', 'open', 't', 't');
+             INSERT INTO participant (id, project_id, handle, role, roles, harness, model, effort, model_name, created_at)
+               VALUES (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, NULL, 't'),
+                      (2, 1, 'chief', 'chief', '[]', 'devin', 'swe-2-high', 'high', 'swe-2', 't'),
+                      (3, 2, 'human', 'human', '[]', NULL, NULL, NULL, NULL, 't'),
+                      (4, 2, 'chief', 'chief', '[]', 'devin', 'swe-2-high', 'high', 'swe-2', 't');",
+        )
+        .unwrap();
+    }
+    let mut ledger = open_ledger(&file, Options::default()).unwrap();
+    let name_of = |ledger: &Ledger, project: i64| {
+        let chief = chief(ledger, project);
+        (chief.model, chief.model_name)
+    };
+    for project in [1, 2] {
+        assert_eq!(
+            name_of(&ledger, project),
+            (Some("swe-2-high".to_owned()), Some("swe-2".to_owned()))
+        );
+    }
+    ledger
+        .chief_gone(chief(&ledger, 1).id, "swe-2-high", Some("adaptive"))
+        .unwrap();
+    assert_eq!(
+        name_of(&ledger, 1),
+        (Some("adaptive".to_owned()), None),
+        "its harness no longer has the model: the name of the old one goes"
+    );
+    ledger
+        .chief_ran_on(chief(&ledger, 2).id, "swe-2-medium", None)
+        .unwrap();
+    assert_eq!(
+        name_of(&ledger, 2),
+        (Some("swe-2-medium".to_owned()), None),
+        "the record names another model: the name of the old one goes"
+    );
+}
+
+/// A chief holds the id its harness lists for its model beside the id it is launched on (T-1345):
+/// a new project's, as JSON gives it or typed, and a switch's, which replaces the last. A name goes
+/// with a model: a chief on its harness's own default holds none. A name that is no model's name is
+/// refused whole, by all three, and leaves no project and the chief as it was.
+#[test]
+fn a_chief_holds_the_name_its_harness_lists_for_its_model_from_a_new_project_and_a_switch() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = ledger_in(&dir);
+    let devin = |model_name: Option<&str>, model: Option<&str>| NewProject {
+        chief: NewChief {
+            harness: "devin".to_owned(),
+            model: model.map(str::to_owned),
+            effort: Some("high".to_owned()),
+            model_name: model_name.map(str::to_owned),
+        },
+        ..project("devin", None)
+    };
+    let name = |ledger: &Ledger, project: i64| {
+        let chief = chief(ledger, project);
+        (chief.model, chief.model_name)
+    };
+    // As JSON gives it, and as it is typed.
+    let request = NewProject::from_json(&json!({
+        "directory": "/work/site", "name": "site",
+        "chief": { "harness": "devin", "model": "swe-2-high", "effort": "high", "modelName": "swe-2" },
+    }))
+    .unwrap();
+    assert_eq!(request.chief.model_name.as_deref(), Some("swe-2"));
+    let opened = ledger.create_project(&request).unwrap();
+    let typed = ledger
+        .create_project(&devin(Some("swe-2"), Some("swe-2-high")))
+        .unwrap();
+    for project in [opened.id, typed.id] {
+        assert_eq!(
+            name(&ledger, project),
+            (Some("swe-2-high".to_owned()), Some("swe-2".to_owned()))
+        );
+    }
+    // A switch as JSON gives it.
+    let asked = ChiefSwitch::from_json(&json!({
+        "harness": "devin", "model": "swe-2-high", "effort": "high", "modelName": "swe-2",
+    }))
+    .unwrap();
+    assert_eq!(asked.model_name.as_deref(), Some("swe-2"));
+    // A name goes with a model: none on the harness's own default.
+    let default = ledger.create_project(&devin(Some("swe-2"), None)).unwrap();
+    assert_eq!(name(&ledger, default.id), (None, None));
+    // A switch replaces it with the new pick's, and with none where the pick has none.
+    let switch = |model: &str, model_name: Option<&str>| ChiefSwitch {
+        harness: "claude-code".to_owned(),
+        model: model.to_owned(),
+        effort: None,
+        model_name: model_name.map(str::to_owned),
+        cut: false,
+    };
+    ledger
+        .switch_chief(
+            opened.id,
+            &switch("claude-opus-5-5", Some("claude-opus-5-5")),
+        )
+        .unwrap();
+    assert_eq!(
+        name(&ledger, opened.id),
+        (
+            Some("claude-opus-5-5".to_owned()),
+            Some("claude-opus-5-5".to_owned())
+        )
+    );
+    ledger
+        .switch_chief(opened.id, &switch("claude-sonnet-5-5", None))
+        .unwrap();
+    assert_eq!(
+        name(&ledger, opened.id),
+        (Some("claude-sonnet-5-5".to_owned()), None),
+        "the name of the model it left does not stay"
+    );
+    // A name that is no model's name.
+    let before = ledger.projects().unwrap().len();
+    for bad in ["a\nb", ""] {
+        let refused = NewProject::from_json(&json!({
+            "directory": "/work/site", "name": "site",
+            "chief": { "harness": "devin", "model": "swe-2-high", "modelName": bad },
+        }))
+        .unwrap_err();
+        assert_eq!(refused.code(), Some("invalid-model-name"), "{bad:?}");
+        let refused = ledger
+            .create_project(&devin(Some(bad), Some("swe-2-high")))
+            .unwrap_err();
+        assert_eq!(refused.code(), Some("invalid-model-name"), "{bad:?}");
+        let refused = ledger
+            .switch_chief(opened.id, &switch("claude-opus-5-5", Some(bad)))
+            .unwrap_err();
+        assert_eq!(refused.code(), Some("invalid-model-name"), "{bad:?}");
+    }
+    assert_eq!(ledger.projects().unwrap().len(), before);
+    assert_eq!(
+        name(&ledger, opened.id),
+        (Some("claude-sonnet-5-5".to_owned()), None),
+        "a refused switch leaves the chief as it was"
+    );
+}
+
 #[test]
 fn a_new_chief_is_its_harness_and_the_model_picked_for_it_and_no_saved_agent() {
     let dir = tempfile::tempdir().unwrap();
@@ -93,6 +248,7 @@ fn a_new_project_as_json_names_its_chief_by_harness_and_model() {
             harness: "pi".to_owned(),
             model: Some(PI_MODEL.to_owned()),
             effort: None,
+            model_name: None,
         }
     );
 }

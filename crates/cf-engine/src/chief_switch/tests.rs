@@ -19,6 +19,7 @@ fn a_chief_whose_turn_reads_settled_is_not_switched_before_the_answer_to_its_not
         harness: "codex".to_owned(),
         model: "astraeus".to_owned(),
         effort: None,
+        model_name: None,
     };
     context
         .switch_chief(project.id, to, SwitchWhen::Now, true)

@@ -28,6 +28,7 @@ fn project(ledger: &mut Ledger) -> i64 {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,

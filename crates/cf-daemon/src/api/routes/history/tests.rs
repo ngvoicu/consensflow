@@ -65,6 +65,7 @@ fn switched(scene: &Scene) {
                 model: "other".to_owned(),
                 effort: None,
                 cut: false,
+                model_name: None,
             },
         )
         .unwrap();
@@ -107,6 +108,7 @@ async fn while_the_project_is_closed_a_page_reads_out_none_of_a_message_no_windo
                     model: "other".to_owned(),
                     effort: None,
                     cut: false,
+                    model_name: None,
                 },
             )
             .unwrap();
@@ -264,6 +266,7 @@ async fn a_line_may_name_any_message_number_and_only_this_project_s_are_read_out
                     harness: "codex".to_owned(),
                     model: Some("mybuilder".to_owned()),
                     effort: None,
+                    model_name: None,
                 },
                 staff: Vec::new(),
                 gate: false,
@@ -310,6 +313,7 @@ async fn a_line_may_name_any_message_number_and_only_this_project_s_are_read_out
                     model: "other".to_owned(),
                     effort: None,
                     cut: false,
+                    model_name: None,
                 },
             )
             .unwrap();
@@ -440,6 +444,7 @@ async fn a_page_names_its_commands_with_the_cf_of_the_window_that_reads_it() {
                     model: "other".to_owned(),
                     effort: None,
                     cut: false,
+                    model_name: None,
                 },
             )
             .unwrap();

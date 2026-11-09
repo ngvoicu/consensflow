@@ -5,8 +5,7 @@
 use cf_base::js;
 use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
-    parse_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
-    NewProject, NewWakeUp, SpecsChange,
+    parse_compaction, parse_description, parse_name, parse_staff_rules, NewMember, NewProject,
 };
 use serde_json::{json, Map, Value};
 
@@ -63,7 +62,12 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     request.insert("name".to_owned(), name);
     request.insert(
         "chief".to_owned(),
-        json!({ "harness": chief.harness, "model": chief.model, "effort": chief.effort }),
+        json!({
+            "harness": chief.harness,
+            "model": chief.model,
+            "effort": chief.effort,
+            "modelName": chief.model_name,
+        }),
     );
     for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {
         if let Some(said) = body.get(key) {
@@ -217,66 +221,12 @@ pub(super) async fn compaction(page: &Page, body: Body<'_>) -> Result<Fields, Sa
     one("project", project)
 }
 
-/// The request as the dispatcher takes it. Where the page sent what the ledger
-/// takes (text for the folder and the name, a flag or none for the gate, roles
-/// that are a list of words, calls and specs that read), it is typed as sent and
-/// left to the dispatcher and then the ledger to refuse in the order Node's did:
-/// a harness no adapter opens is refused before a role that does not fit. Where
-/// it did not, the ledger's own words for it, which are the same words.
+/// The request as the dispatcher takes it: read by the ledger (`NewProject::from_json`), whose
+/// words refuse what it cannot read. The page has already picked the chief and every member
+/// (`chief_asked`, `picked_member`), so the request holds what the ledger takes: a member with
+/// its harness, model, effort, the model's name, its roles and its tier.
 fn new_project(request: Map<String, Value>) -> Result<NewProject, Said> {
-    if let Some(typed) = typed(&request) {
-        return Ok(typed);
-    }
     Ok(NewProject::from_json(&Value::Object(request))?)
-}
-
-/// The request typed as sent, or none where something is not of the type the
-/// ledger takes.
-fn typed(request: &Map<String, Value>) -> Option<NewProject> {
-    let chief = request.get("chief")?;
-    let staff = request.get("staff")?.as_array()?;
-    Some(NewProject {
-        directory: request.get("directory")?.as_str()?.to_owned(),
-        name: request.get("name")?.as_str()?.to_owned(),
-        chief: NewChief {
-            harness: chief.get("harness")?.as_str()?.to_owned(),
-            model: Some(chief.get("model")?.as_str()?.to_owned()),
-            effort: match chief.get("effort") {
-                None | Some(Value::Null) => None,
-                Some(effort) => Some(effort.as_str()?.to_owned()),
-            },
-        },
-        staff: staff.iter().map(member).collect::<Option<Vec<_>>>()?,
-        gate: match request.get("gate") {
-            None => false,
-            Some(Value::Bool(gate)) => *gate,
-            Some(_) => return None,
-        },
-        wake_up: NewWakeUp::from_opening(request.get("wakeUp")).ok()?,
-        specs: SpecsChange::from_opening(request.get("specs")).ok()?,
-        staff_rules: parse_staff_rules(request.get("rules")).ok()?,
-        compaction: parse_compaction(request.get("compaction")).ok()?,
-    })
-}
-
-/// A member as the page-made value says it, none when its roles are not a
-/// list of words.
-fn member(member: &Value) -> Option<NewMember> {
-    let roles = member
-        .get("roles")?
-        .as_array()?
-        .iter()
-        .map(|role| role.as_str().map(str::to_owned))
-        .collect::<Option<Vec<_>>>()?;
-    Some(NewMember {
-        model: None,
-        effort: None,
-        model_name: Some(member.get("agent")?.as_str()?.to_owned()),
-        harness: member.get("harness")?.as_str()?.to_owned(),
-        designer: member.get("designer")?.as_bool()?,
-        roles,
-        tier: member.get("tier")?.as_str()?.to_owned(),
-    })
 }
 
 /// `path.basename(path)` of the system this is built for: the name Node gives a
@@ -334,6 +284,8 @@ fn received(value: Option<&Value>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use cf_ledger::NewChief;
+
     use super::*;
 
     /// What Node v26.8.1's `path.posix.basename` and `path.win32.basename` said
@@ -375,6 +327,120 @@ mod tests {
             let here = if cfg!(windows) { win32 } else { posix };
             assert_eq!(basename(Some(&json!(path))).unwrap(), here, "{path:?}");
         }
+    }
+
+    /// The request `open` builds: the chief as `chief_asked` answers, the staff as `member_json`
+    /// says each member (a member has no `agent`, only its harness, model, effort, the model's
+    /// name, its roles and its tier).
+    fn opened(chief_model: Value, staff: Vec<Value>) -> Map<String, Value> {
+        let Value::Object(request) = json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "model": chief_model, "effort": "high" },
+            "staff": staff,
+        }) else {
+            unreachable!("an object")
+        };
+        request
+    }
+
+    fn astra() -> Value {
+        json!({
+            "harness": "codex",
+            "model": "gpt-6-astra",
+            "effort": "high",
+            "modelName": "GPT-6 Astra",
+            "designer": false,
+            "roles": ["worker"],
+            "tier": "light",
+        })
+    }
+
+    fn astra_member() -> NewMember {
+        NewMember {
+            harness: "codex".to_owned(),
+            model: Some("gpt-6-astra".to_owned()),
+            effort: Some("high".to_owned()),
+            model_name: Some("GPT-6 Astra".to_owned()),
+            designer: false,
+            roles: vec!["worker".to_owned()],
+            tier: "light".to_owned(),
+        }
+    }
+
+    fn chief_on(model: Option<&str>) -> NewChief {
+        NewChief {
+            harness: "claude-code".to_owned(),
+            model: model.map(str::to_owned),
+            effort: Some("high".to_owned()),
+            model_name: None,
+        }
+    }
+
+    /// What the page sends is read as the ledger reads it, whatever the staff and whether or not the
+    /// chief has a model: a member with its model and effort, no member, a chief with no model.
+    #[test]
+    fn a_project_to_open_is_read_as_the_ledger_reads_it() {
+        for (what, request, chief, staff) in [
+            (
+                "a member",
+                opened(json!("claude-opus-5-5"), vec![astra()]),
+                chief_on(Some("claude-opus-5-5")),
+                vec![astra_member()],
+            ),
+            (
+                "no member, a chief with a model",
+                opened(json!("claude-opus-5-5"), Vec::new()),
+                chief_on(Some("claude-opus-5-5")),
+                Vec::new(),
+            ),
+            (
+                "a member, a chief with no model",
+                opened(Value::Null, vec![astra()]),
+                chief_on(None),
+                vec![astra_member()],
+            ),
+            (
+                "no member, a chief with no model",
+                opened(Value::Null, Vec::new()),
+                chief_on(None),
+                Vec::new(),
+            ),
+        ] {
+            let read =
+                new_project(request.clone()).unwrap_or_else(|said| panic!("{what}: {said:?}"));
+            assert_eq!(
+                read,
+                NewProject {
+                    directory: "/work/app".to_owned(),
+                    name: "app".to_owned(),
+                    chief,
+                    staff,
+                    gate: false,
+                    wake_up: None,
+                    specs: None,
+                    staff_rules: None,
+                    compaction: None,
+                },
+                "{what}"
+            );
+            assert_eq!(
+                read,
+                NewProject::from_json(&Value::Object(request)).unwrap(),
+                "{what}"
+            );
+        }
+    }
+
+    /// A member is read from the keys a member has now. One that also carries an `agent` (the
+    /// name a member had before it was named by its model) is the same member: its model, its
+    /// effort and the model's name are not dropped for the old name (T-1335, item 3).
+    #[test]
+    fn a_member_with_an_agent_key_keeps_its_model_and_effort() {
+        let mut old = astra();
+        old["agent"] = json!("old-name");
+        let read = new_project(opened(json!("claude-opus-5-5"), vec![old])).unwrap();
+        assert_eq!(read.staff, vec![astra_member()]);
     }
 
     #[test]

@@ -88,7 +88,7 @@ fn a_new_app_that_holds_none_of_the_old_ones_objects_has_no_fault_and_a_file_at_
             "default.metallib",
         ),
     ];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, None);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(notes.len(), 1, "{notes:?}");
 }
@@ -100,7 +100,7 @@ fn a_new_app_left_the_old_ones_descriptors_is_at_fault_for_each() {
     let old = old_with(&left);
     // Tauri's bare start, with nothing made close-on-exec: the new app holds them at their numbers.
     let new = old.clone();
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, None);
     // The file it was left is the fault; the pipe is the pipe's own check's
     // ([`Left::closed_everywhere`]).
     assert_eq!(
@@ -144,7 +144,7 @@ fn a_socket_at_an_address_the_old_app_had_with_another_peer_is_the_new_apps_own(
             "->0xa65099d04f5df15f",
         ),
     ];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, None);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(notes, Vec::<String>::new());
 }
@@ -164,7 +164,7 @@ fn a_socket_at_the_old_apps_address_with_its_peer_is_noted_with_both_numbers() {
         None,
         "->0x1e1b0426067da685",
     )];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, None);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(
         notes,
@@ -186,7 +186,7 @@ fn a_socket_at_the_old_apps_address_and_number_whose_peer_closed_is_noted() {
         None,
         "->(none)",
     )];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, None);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(
         notes,
@@ -201,7 +201,7 @@ fn a_pipe_is_left_to_the_pipe_the_case_left() {
     let left = Left::make(folder.path()).unwrap();
     let old = old_with(&left);
     let new = vec![held(left.pipe, "PIPE", Some("0xaaaa"), None, "->0xbbbb")];
-    let (faults, _) = compare(&old, &new, &left);
+    let (faults, _) = compare(&old, &new, &left, None);
     assert_eq!(faults, Vec::<String>::new());
 }
 
@@ -209,11 +209,108 @@ fn a_pipe_is_left_to_the_pipe_the_case_left() {
 fn an_installed_app_that_was_not_left_the_two_makes_the_check_prove_nothing() {
     let folder = tempfile::tempdir().unwrap();
     let left = Left::make(folder.path()).unwrap();
-    let (faults, _) = compare(&parse_held(SHOWN), &[], &left);
+    let (faults, _) = compare(&parse_held(SHOWN), &[], &left, None);
     assert_eq!(faults.len(), 2, "{faults:?}");
     assert!(faults
         .iter()
         .all(|fault| fault.ends_with("the check proves nothing")));
+}
+
+/// The installed bridge: what the case left it, and the two files its renderer opened (the
+/// numbers 901 and 904 stand for the 8 and 9 they have in the real one).
+fn bridge_with(left: &Left) -> Vec<Held> {
+    let mut held = old_with(left);
+    held.push(held_file(
+        904,
+        ("0x100000e", 78),
+        "/System/Library/Extensions/AppleMetalOpenGLRenderer.bundle/Contents/Resources/PixelConverter.metallib",
+    ));
+    held
+}
+
+fn held_file(fd: u32, file: (&str, u64), name: &str) -> Held {
+    held(fd, "REG", None, Some(file), name)
+}
+
+/// The update from the bridge: the new app is Tauri's bare start, which holds what the bridge
+/// held, and that is what the bridge is known to hand on. No fault, and the report says each.
+#[test]
+fn an_update_from_the_bridge_is_let_hold_what_the_bridge_is_known_to_hand_on_and_says_so() {
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let old = bridge_with(&left);
+    let new = old.clone();
+    let (faults, notes) = compare(&old, &new, &left, hands_on(Release::Bridge));
+    assert_eq!(faults, Vec::<String>::new(), "{notes:?}");
+    let said = notes.join("\n");
+    for named in [
+        "default.metallib",
+        "PixelConverter.metallib",
+        "left-to-the-app",
+    ] {
+        assert!(
+            said.contains(named),
+            "{named} is not in the report:\n{said}"
+        );
+    }
+}
+
+/// A file the bridge held and the new app holds at the same number that the bridge is not known
+/// to hand on is a fault, and says what is known.
+#[test]
+fn an_update_from_the_bridge_is_at_fault_for_a_file_it_is_not_known_to_hand_on() {
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let mut old = bridge_with(&left);
+    old.push(held_file(
+        905,
+        ("0x100000e", 99),
+        "/var/db/something-else.db",
+    ));
+    let new = old.clone();
+    let (faults, _) = compare(&old, &new, &left, hands_on(Release::Bridge));
+    assert_eq!(faults.len(), 1, "{faults:?}");
+    assert!(faults[0].contains("something-else.db"), "{faults:?}");
+    assert!(
+        faults[0].contains("default.metallib"),
+        "it names what is known: {faults:?}"
+    );
+}
+
+/// A descriptor the new app was left in an update from a release that marks them as it ends is
+/// at fault, whatever the bridge is let hand on: the files the bridge is known to hand on are no
+/// excuse for it, and what the smoke left the installed app is the fault it was.
+#[test]
+fn an_update_from_a_later_release_is_let_hold_nothing_of_the_installed_apps() {
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let old = bridge_with(&left);
+    let new = old.clone();
+    assert_eq!(hands_on(Release::Flip), None);
+    let (faults, _) = compare(&old, &new, &left, hands_on(Release::Flip));
+    assert!(
+        faults
+            .iter()
+            .any(|fault| fault.contains("the new app holds the file the installed app was left")),
+        "{faults:?}"
+    );
+}
+
+/// What is tolerated is named in one place, for the bridge alone, and says why.
+#[test]
+fn the_bridges_tolerance_is_named_with_its_why_and_is_no_other_releases() {
+    assert_eq!(hands_on(Release::Flip), None);
+    let bridge = hands_on(Release::Bridge).expect("the bridge");
+    assert_eq!(bridge.release, Release::Bridge);
+    assert_eq!(
+        bridge.files,
+        ["default.metallib", "PixelConverter.metallib"]
+    );
+    assert!(bridge.why.contains("v3.0.0-alpha.81"), "{}", bridge.why);
+    assert!(bridge.why.contains("close-on-exec"), "{}", bridge.why);
+    assert!(bridge.names("/System/x/default.metallib"));
+    assert!(!bridge.names("/System/x/my-default.metallib"));
+    assert!(!bridge.names("/System/x/default.metallib.bak"));
 }
 
 /// Only this process holds the writing end, and then none. Run in a process of its own: the
