@@ -343,13 +343,6 @@ export const HARNESS_NAMES = {
 }
 
 /**
- * The model the chief runs on, as its card says it (O7): the one its window last ran on
- * where the human switched it there, else the one picked for it.
- */
-const chiefModel = (participant) =>
-  participant.needsEdit ? 'no model: needs an edit' : (participant.ranOn ?? participant.model)
-
-/**
  * What a member's model is called (harness-models, HMD-12): its id as its harness's list
  * names it (`claude-opus-5-5`; Pi's `provider/id`; Devin's listed id), else its id as the
  * harness takes it, else its harness's default (the image designer from before, on Codex's).
@@ -359,6 +352,18 @@ export const modelShown = (participant) =>
   participant.modelName?.trim() ||
   participant.model ||
   `${HARNESS_NAMES[participant.harness] ?? participant.harness} default`
+
+/**
+ * The model the chief runs on, as its card says it (O7): the one its window last ran on
+ * where the human switched it there, else the one picked for it, said as every card says a
+ * model (`modelShown`): the id its harness lists (Devin's `swe-2`), not the one its launch
+ * passes (`swe-2-high`). A chief left to its harness's model says none. Display only: the
+ * launch and Switch chief take the chief's `model`.
+ */
+const chiefModel = (participant) =>
+  participant.needsEdit
+    ? 'no model: needs an edit'
+    : (participant.ranOn ?? (participant.model ? modelShown(participant) : null))
 
 /** A harness as the human knows it: `claude-code` is Claude Code. */
 export const harnessLabel = (participant) =>

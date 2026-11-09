@@ -3031,6 +3031,67 @@ test("says on the chief's card the model its window ran on, where the human swit
   ])
 })
 
+test("says on a Devin chief's card the id its harness lists for the model, not the id its launch passes", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  // As migration 0031 and 0033 leave a Devin chief: `model` is the joined id Devin's launch
+  // passes (`swe-2-high`), `modelName` the id Devin's list gives the model (`swe-2`), the card of
+  // every other participant says the second.
+  Object.assign(chief.participant, {
+    harness: 'devin',
+    model: 'swe-2-high',
+    effort: 'high',
+    modelName: 'swe-2',
+  })
+  await open(page, data)
+  const meta = page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta')
+  await expect(meta).toHaveText('Devin · swe-2')
+  // Where its window ran on another model, the card says that one, as it did (O7).
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    lane.participant.ranOn = 'swe-2-medium'
+  })
+  await expect(meta).toHaveText('Devin · swe-2-medium')
+  // And a chief left to its harness's model says no model, as it did.
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    Object.assign(lane.participant, { ranOn: undefined, model: null, modelName: null })
+  })
+  await expect(meta).toHaveText('Devin')
+})
+
+test("says on a Devin chief's card the id Devin lists after a switch to Devin, and the model it moved to after a switch away", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { harness: 'claude-code', model: 'claude-opus-5-5' })
+  await open(page, data)
+  const meta = page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta')
+  await expect(meta).toHaveText('Claude Code · claude-opus-5-5')
+  // The daemon holds the id Devin lists beside the id its launch is given (T-1345): picked in
+  // New project or switched to, the chief's row says `swe-2` beside `swe-2-max`.
+  const as = (fields) =>
+    changed(
+      page,
+      (fields) => {
+        const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+        Object.assign(lane.participant, { effort: null, modelName: null, ...fields })
+      },
+      fields,
+    )
+  await as({ harness: 'devin', model: 'swe-2-max', effort: 'max', modelName: 'swe-2' })
+  await expect(meta).toHaveText('Devin · swe-2')
+  // A switch away takes the name with it: the card says the model it moved to, whether the
+  // daemon named it or not.
+  await as({ harness: 'codex', model: 'gpt-6-astra', modelName: 'gpt-6-astra' })
+  await expect(meta).toHaveText('Codex · gpt-6-astra')
+  await as({ harness: 'claude-code', model: 'claude-sonnet-5-5' })
+  await expect(meta).toHaveText('Claude Code · claude-sonnet-5-5')
+})
+
 test("keeps the chief's card in the dock while its window is down, and Switch chief is the way on", async ({
   page,
 }) => {

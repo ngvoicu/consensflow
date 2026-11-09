@@ -334,6 +334,7 @@ fn a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_history
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,

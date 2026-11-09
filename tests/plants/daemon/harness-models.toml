@@ -467,12 +467,12 @@ meant = "a_chief_is_held_and_launched_on_the_model_and_effort_picked_on_each_har
 runs = ["hm-daemon-members"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/page/projects.rs"
+file = "crates/cf-ledger/src/projects.rs"
 find = '''
-                Some(effort) => Some(effort.as_str()?.to_owned()),
+                effort: chief_effort,
 '''
 replace = '''
-                Some(_) => None,
+                effort: None,
 '''
 
 [[plant]]
@@ -595,6 +595,10 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-participant.needsEdit ? 'no model: needs an edit''''
+  participant.needsEdit
+    ? 'no model: needs an edit'
+'''
 replace = '''
-false ? 'no model: needs an edit''''
+  false
+    ? 'no model: needs an edit'
+'''

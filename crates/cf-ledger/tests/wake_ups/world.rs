@@ -65,6 +65,7 @@ fn world_with(gate: bool) -> World {
                 harness: "claude-code".to_owned(),
                 model: Some("apollo".to_owned()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,

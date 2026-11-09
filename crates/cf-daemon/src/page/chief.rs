@@ -38,6 +38,7 @@ pub(super) async fn chief_asked(
             harness: kind,
             model: model.to_owned(),
             effort: effort.map(str::to_owned),
+            model_name: None,
         });
     };
     if installed && missing_harnesses(&page.env).contains(&harness) {
@@ -48,5 +49,6 @@ pub(super) async fn chief_asked(
         harness: kind,
         model: resolved.model,
         effort: resolved.effort,
+        model_name: resolved.model_name,
     })
 }
