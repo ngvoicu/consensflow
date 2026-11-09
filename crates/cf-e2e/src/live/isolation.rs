@@ -743,8 +743,8 @@ impl Isolation {
         let folder = shown(from, &self.owner_home);
         let missing = |what: &str| {
             Error::Daemon(format!(
-                "Pi's `{}` provider cannot be used for this run: {what}. Pi loads it as the package `{}`, which {folder}'s `settings.json` names in `packages` and `npm/node_modules` holds. Set it up in your own Pi (use pi, then /login), or run on a model of another provider (--models pi=…)",
-                provider.name, provider.spec,
+                "Pi's `{}` provider cannot be used for this run: {what}. Pi loads it as the package `{}`, which {folder}'s `settings.json` names in `packages` (`npm:{}`, held in `npm/node_modules`, or `git:<host>/<path>/{}`, held in `git/<host>/<path>`). Set it up in your own Pi (use pi, then /login), or run on a model of another provider (--models pi=…)",
+                provider.name, provider.package, provider.package, provider.repository,
             ))
         };
         let mut placed = vec![Placed::File {
@@ -764,25 +764,16 @@ impl Isolation {
                 Err(_) => return Err(missing(&format!("{file} is missing"))),
             }
         }
-        let named = files::read_string(&from.join("settings.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|settings| settings["packages"].as_array().cloned())
-            .is_some_and(|packages| {
-                packages
-                    .iter()
-                    .any(|package| package.as_str() == Some(provider.spec))
-            });
-        if !named {
+        let Some(source) = provider.source(from) else {
             return Err(missing(&format!(
                 "`settings.json`'s `packages` does not name `{}`",
-                provider.spec
+                provider.package
             )));
-        }
-        if !from.join(provider.package).join("package.json").is_file() {
+        };
+        if !from.join(&source.folder).join("package.json").is_file() {
             return Err(missing(&format!(
                 "{}/package.json is missing",
-                provider.package
+                source.folder.display()
             )));
         }
         let Placed::File { bytes: config, .. } = &placed[0] else {
@@ -796,12 +787,12 @@ impl Isolation {
             ))
         })?;
         placed.push(Placed::Tree {
-            from: from.join(provider.package),
-            to: to.join(provider.package),
+            from: from.join(&source.folder),
+            to: to.join(&source.folder),
         });
         placed.push(Placed::File {
             to: to.join("settings.json"),
-            bytes: serde_json::json!({ "packages": [provider.spec] })
+            bytes: serde_json::json!({ "packages": [source.spec] })
                 .to_string()
                 .into_bytes(),
             login: false,

@@ -166,10 +166,10 @@ runs = ["pi-lib"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''        placed.push(Placed::Tree {
-            from: from.join(provider.package),
-            to: to.join(provider.package),
+            from: from.join(&source.folder),
+            to: to.join(&source.folder),
         });'''
-replace = '''        let _ = (from.join(provider.package), to.join(provider.package));'''
+replace = '''        let _ = (from.join(&source.folder), to.join(&source.folder));'''
 
 [[plant]]
 name = "matrix: the run's settings.json names every package the owner's does"
@@ -178,8 +178,8 @@ runs = ["pi-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''            bytes: serde_json::json!({ "packages": [provider.spec] })'''
-replace = '''            bytes: serde_json::json!({ "packages": ["npm:pi-web-access", provider.spec] })'''
+find = '''            bytes: serde_json::json!({ "packages": [source.spec] })'''
+replace = '''            bytes: serde_json::json!({ "packages": ["npm:pi-web-access", source.spec] })'''
 
 [[plant]]
 name = "matrix: the provider's files are not hashed"
@@ -209,8 +209,8 @@ runs = ["pi-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''        if !named {'''
-replace = '''        if !named && false {'''
+find = '''        let Some(source) = provider.source(from) else {'''
+replace = '''        let Some(source) = provider.source(from).or_else(|| provider.source_in(&[Value::from("npm:@router-for-me/pi-cliproxyapi-provider")])) else {'''
 
 [[plant]]
 name = "matrix: the proxy is never asked whether it answers"
@@ -408,3 +408,78 @@ runs = ["login-lib"]
 file = "crates/cf-e2e/src/live/login.rs"
 find = '''                &[projects.as_path()],'''
 replace = '''                &[],'''
+
+# ---------------------------------------------------------------------------- the package's source (T-1358)
+# Pi loads a provider's package from the source `packages` names it by: an `npm:` spec, below
+# `npm/node_modules`, or a `git:` source, below `git/<host>/<path>` (the owner's Mac's since
+# 2026-11-09). The kit carries the package Pi has, names the same source, and hashes that folder.
+
+[[plant]]
+name = "matrix: a provider's package from git is not found"
+meant = "a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        let rest = spec.strip_prefix("git:")?;'''
+replace = '''        let rest = spec.strip_prefix("git-never:")?;'''
+
+[[plant]]
+name = "matrix: a git source's ref is taken into its folder"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        let path = path.split('@').next()?;'''
+replace = '''        let path = path.split('#').next()?;'''
+
+[[plant]]
+name = "matrix: a git repository of another name is taken for the provider's"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        if repository != self.repository {'''
+replace = '''        if repository.is_empty() && repository != self.repository {'''
+
+[[plant]]
+name = "matrix: a git source with no host, a folder's or a user's is taken"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        if host.is_empty() || host.starts_with('.') || host.contains([':', '@']) {'''
+replace = '''        if host.contains(':') {'''
+
+[[plant]]
+name = "matrix: an npm spec of another package is taken for the provider's"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''            return (name == self.package).then(|| Source {'''
+replace = '''            return (name.ends_with("pi-cliproxyapi-provider") || name.starts_with(self.package)).then(|| Source {'''
+
+[[plant]]
+name = "matrix: npm's manifests are watched for a package from git"
+meant = "a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''            if source.npm {'''
+replace = '''            if source.npm || !source.npm {'''
+
+[[plant]]
+name = "matrix: the package's files are not watched"
+meant = "a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''            files.extend(below(&agent.join(&source.folder)));'''
+replace = '''            let _ = below(&agent.join(&source.folder));'''

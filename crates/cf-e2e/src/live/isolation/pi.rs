@@ -220,18 +220,18 @@ pub fn renewal(
 }
 
 /// What a provider that the agent folder gives Pi, besides its `auth.json` entry, needs of a
-/// run's home ([`super::Seed::PiProvider`]): the `npm:` spec `settings.json`'s `packages`
-/// loads it by, the files of the folder it keeps, and the package folder below
-/// `npm/node_modules` Pi resolves the spec to. `cliproxyapi` is the only one the kit knows;
-/// a provider with no entry here (OpenRouter) is a login alone, which [`login`] copies.
+/// run's home ([`super::Seed::PiProvider`]): the package `settings.json`'s `packages` loads it
+/// by, under whichever source Pi installed it from ([`Source`]), and the files of the folder it
+/// keeps. `cliproxyapi` is the only one the kit knows; a provider with no entry here
+/// (OpenRouter) is a login alone, which [`login`] copies.
 #[derive(Debug)]
 pub struct Provider {
     /// The provider's name, as `auth.json` keys it and a model names it before its `/`.
     pub name: &'static str,
-    /// The `npm:` spec `packages` names the package by.
-    pub spec: &'static str,
-    /// The package's folder below the agent folder (`npm/node_modules/…`), copied whole.
+    /// The package's own name (its `package.json`'s `name`), which an `npm:` spec names it by.
     pub package: &'static str,
+    /// The repository a `git:` source of the package ends with (a fork's is named the same).
+    pub repository: &'static str,
     /// The file the connection is read from: required, and its `baseUrl` is the proxy a run
     /// asks whether it answers ([`answers`]).
     pub config: &'static str,
@@ -242,9 +242,83 @@ pub struct Provider {
     pub optional: &'static [&'static str],
 }
 
+/// Where Pi has a provider's package, as the agent folder's `packages` names it: the entry's
+/// source, as written (a run's `settings.json` names the same), and the folder below the agent
+/// folder Pi installs that source in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Source {
+    /// The source as `packages` names it (`npm:@scope/name`, `git:host/path@ref`).
+    pub spec: String,
+    /// The package's folder below the agent folder: `npm/node_modules/<name>` for an `npm:`
+    /// spec, `git/<host>/<path>` for a `git:` one (the ref is the checkout's, not the folder's).
+    pub folder: PathBuf,
+    /// Whether npm installed it, so that npm's manifests in the agent folder record it.
+    pub npm: bool,
+}
+
 impl Provider {
-    /// The files of `agent` a run on this provider is held not to change: its own, npm's
-    /// manifests (which the package's install records), and every file of the package.
+    /// The source of `packages` (the agent folder's `settings.json`'s, each a string or an
+    /// object's `source`) that names this provider's package: an `npm:` spec of its name, with or
+    /// without a version, or a `git:` source of a repository of its name, `host/path` with or
+    /// without `@ref`. None where no entry does, or only in a form the kit does not know where
+    /// Pi keeps (a URL, a local path): the run is then refused.
+    pub fn source_in(&self, packages: &[Value]) -> Option<Source> {
+        packages
+            .iter()
+            .filter_map(|entry| entry.as_str().or_else(|| entry["source"].as_str()))
+            .find_map(|spec| self.source_of(spec))
+    }
+
+    fn source_of(&self, spec: &str) -> Option<Source> {
+        if let Some(named) = spec.strip_prefix("npm:") {
+            let name = match named.strip_prefix('@') {
+                Some(scoped) => format!("@{}", scoped.split('@').next()?),
+                None => named.split('@').next()?.to_owned(),
+            };
+            return (name == self.package).then(|| Source {
+                spec: spec.to_owned(),
+                folder: Path::new("npm/node_modules").join(self.package),
+                npm: true,
+            });
+        }
+        let rest = spec.strip_prefix("git:")?;
+        // `host/path@ref`: the ref follows the first `@` after the host (a ref may hold `/`). A
+        // host that is none, a folder (`.`, `..`), a URL's scheme or holds a user is no form the
+        // kit knows Pi's folder of.
+        let (host, path) = rest.split_once('/')?;
+        if host.is_empty() || host.starts_with('.') || host.contains([':', '@']) {
+            return None;
+        }
+        let path = path.split('@').next()?;
+        let repository = path.rsplit('/').next()?.trim_end_matches(".git");
+        if repository != self.repository {
+            return None;
+        }
+        let mut folder = PathBuf::from("git").join(host);
+        for part in path.trim_end_matches(".git").split('/') {
+            if part.is_empty() || part == "." || part == ".." {
+                return None;
+            }
+            folder.push(part);
+        }
+        Some(Source {
+            spec: spec.to_owned(),
+            folder,
+            npm: false,
+        })
+    }
+
+    /// The source the agent folder `agent`'s `settings.json` names this provider's package by,
+    /// read as [`Provider::source_in`] reads it: none where the file or the entry is not there.
+    pub fn source(&self, agent: &Path) -> Option<Source> {
+        let settings: Value =
+            serde_json::from_slice(&fs::read(agent.join("settings.json")).ok()?).ok()?;
+        self.source_in(settings["packages"].as_array()?)
+    }
+
+    /// The files of `agent` a run on this provider is held not to change: its own, the
+    /// package's every file where `settings.json` names it, and npm's manifests where npm
+    /// installed it (they record the install).
     pub fn watched(&self, agent: &Path) -> Vec<PathBuf> {
         let mut files: Vec<PathBuf> = [self.config]
             .into_iter()
@@ -252,22 +326,29 @@ impl Provider {
             .chain(self.optional.iter().copied())
             .map(|name| agent.join(name))
             .collect();
-        files.extend(["npm/package.json", "npm/package-lock.json"].map(|name| agent.join(name)));
-        files.extend(below(&agent.join(self.package)));
+        if let Some(source) = self.source(agent) {
+            if source.npm {
+                files.extend(
+                    ["npm/package.json", "npm/package-lock.json"].map(|name| agent.join(name)),
+                );
+            }
+            files.extend(below(&agent.join(&source.folder)));
+        }
         files
     }
 }
 
 /// [`Provider`] of the provider `name`, where the kit knows the agent folder gives it to Pi:
-/// `cliproxyapi`, which Pi 1.5.0 loads as the npm extension package `settings.json`'s
-/// `packages` names (`@router-for-me/pi-cliproxyapi-provider`), whose extensions read
+/// `cliproxyapi`, which Pi 1.5.0 loads as the extension package `settings.json`'s `packages`
+/// names (`@router-for-me/pi-cliproxyapi-provider` from npm, T-1172, or a git checkout of a
+/// repository of that name, the owner's Mac's since 2026-11-09, T-1358), whose extensions read
 /// `cliproxyapi.json` for the proxy's base URL and key and `cliproxyapi-models.json` for the
-/// models it last served, with the login in `auth.json` (T-1172).
+/// models it last served, with the login in `auth.json`.
 pub fn provider(name: &str) -> Option<&'static Provider> {
     const CLIPROXYAPI: Provider = Provider {
         name: "cliproxyapi",
-        spec: "npm:@router-for-me/pi-cliproxyapi-provider",
-        package: "npm/node_modules/@router-for-me/pi-cliproxyapi-provider",
+        package: "@router-for-me/pi-cliproxyapi-provider",
+        repository: "pi-cliproxyapi-provider",
         config: "cliproxyapi.json",
         required: &[],
         optional: &["cliproxyapi-models.json"],

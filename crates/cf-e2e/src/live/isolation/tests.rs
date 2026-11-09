@@ -550,6 +550,138 @@ fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_lo
     assert!(isolation.finish().is_ok());
 }
 
+/// Pi installs a `git:` package below `git/<host>/<path>`, the ref left out, and loads it from
+/// there: the owner's Mac's Pi has named `cliproxyapi`'s package so since 2026-11-09 (a branch
+/// of a fork, as a string or as an object's `source`), and its npm copy, still there, is named no
+/// more. A run on the provider's model is given that package whole and a `settings.json` that
+/// names the same source, and the owner's copy of it is hashed; npm's is neither (T-1358).
+#[test]
+fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it() {
+    const SOURCE: &str = "git:github.com/ngvoicu/pi-cliproxyapi-provider@feat/claude-messages";
+    for named in [
+        json!(SOURCE),
+        json!({ "source": SOURCE, "extensions": ["extensions/index.ts"] }),
+    ] {
+        let owner = Owner::new();
+        owner.cliproxyapi(&proxy_answering());
+        let package = owner.path(".pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider");
+        write(
+            &package.join("package.json"),
+            &json!({
+                "name": "@router-for-me/pi-cliproxyapi-provider",
+                "version": "1.4.25",
+                "pi": { "extensions": ["./extensions/index.ts", "./extensions/tps.ts"] },
+            })
+            .to_string(),
+        );
+        write(&package.join("extensions/index.ts"), "the fork's extension");
+        write(
+            &package.join(".git/HEAD"),
+            "ref: refs/heads/feat/claude-messages",
+        );
+        write(
+            &owner.path(".pi/agent/settings.json"),
+            &json!({ "packages": ["npm:pi-web-access", named, "git:github.com/ngvoicu/pi-cached-compaction@main"] })
+                .to_string(),
+        );
+        let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+        let home = isolation.made_at(at(NOW)).unwrap();
+        assert_eq!(
+            files_below(&home),
+            [
+                "pi/agent/auth.json",
+                "pi/agent/cliproxyapi-models.json",
+                "pi/agent/cliproxyapi.json",
+                "pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/.git/HEAD",
+                "pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/extensions/index.ts",
+                "pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/package.json",
+                "pi/agent/settings.json",
+            ],
+            "{named}"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &fs::read_to_string(home.join("pi/agent/settings.json")).unwrap()
+            )
+            .unwrap(),
+            json!({ "packages": [SOURCE] })
+        );
+        let said = isolation.evidence().unwrap();
+        assert!(
+            said.contains(
+                "~/.pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/package.json"
+            ),
+            "{said}"
+        );
+        assert!(
+            !said.contains("npm/node_modules") && !said.contains("npm/package.json"),
+            "{said}"
+        );
+        assert!(isolation.finish().is_ok());
+    }
+}
+
+/// The forms of `packages` the kit finds the provider's package in, and where Pi keeps each:
+/// an `npm:` spec of its name (a version or not), a `git:` source of a repository of its name
+/// (a ref or not, a fork's or not), a string or an object's `source`. Not a package of another
+/// name, a repository of another name, a URL or a path, whose folder the kit does not know.
+#[test]
+fn the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else() {
+    let provider = pi::provider("cliproxyapi").unwrap();
+    let found = |entries: Value| provider.source_in(entries.as_array().unwrap());
+    let folder = |entries: Value| found(entries).map(|source| source.folder);
+    let npm = Path::new("npm/node_modules/@router-for-me/pi-cliproxyapi-provider");
+    assert_eq!(
+        folder(json!(["npm:@router-for-me/pi-cliproxyapi-provider"])).as_deref(),
+        Some(npm)
+    );
+    assert_eq!(
+        folder(json!(["npm:@router-for-me/pi-cliproxyapi-provider@1.4.24"])).as_deref(),
+        Some(npm)
+    );
+    let git = Path::new("git/github.com/ngvoicu/pi-cliproxyapi-provider");
+    for spec in [
+        "git:github.com/ngvoicu/pi-cliproxyapi-provider",
+        "git:github.com/ngvoicu/pi-cliproxyapi-provider@feat/claude-messages",
+        "git:github.com/ngvoicu/pi-cliproxyapi-provider.git@v1",
+    ] {
+        assert_eq!(folder(json!([spec])).as_deref(), Some(git), "{spec}");
+        assert_eq!(
+            folder(json!([{ "source": spec }])).as_deref(),
+            Some(git),
+            "{spec}"
+        );
+    }
+    let source = found(json!([
+        7,
+        null,
+        "npm:pi-web-access",
+        "git:github.com/router-for-me/pi-cliproxyapi-provider@main"
+    ]))
+    .unwrap();
+    assert_eq!(
+        source.spec,
+        "git:github.com/router-for-me/pi-cliproxyapi-provider@main"
+    );
+    assert!(!source.npm);
+    for none in [
+        "npm:@router-for-me/pi-cliproxyapi-providers",
+        "npm:pi-cliproxyapi-provider",
+        "git:github.com/ngvoicu/pi-cached-compaction@main",
+        "git:https://github.com/ngvoicu/pi-cliproxyapi-provider",
+        "git:TOKEN@github.com/ngvoicu/pi-cliproxyapi-provider",
+        "git:github.com/../pi-cliproxyapi-provider",
+        "git:/opt/pi-cliproxyapi-provider",
+        "git:./pi-cliproxyapi-provider",
+        "git:../forks/pi-cliproxyapi-provider",
+        "git:github.com:ngvoicu/pi-cliproxyapi-provider",
+        "./pi-cliproxyapi-provider",
+        "/opt/pi-cliproxyapi-provider",
+    ] {
+        assert_eq!(found(json!([none])), None, "{none}");
+    }
+}
+
 /// Refused before anything is made, in words naming what is missing and what the human can
 /// do: where the provider's config is missing, where its package is, where `settings.json`
 /// does not name it, and where the proxy it is set for does not answer.
