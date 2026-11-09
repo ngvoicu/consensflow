@@ -28,11 +28,12 @@
  * What is only read (no harness's input box can start without a login, and the closed-source ones
  * are binaries):
  *
- * - **Claude Code 2.1.319**: its key reader `Mr` of the binary's JavaScript (`\r` is `return`, `ESC CR`
- *   is `return` with `meta`, `\n` is `enter`, `CSI 13;2u` and `CSI 27;2;13~` are `return` with
- *   `shift`; `Ua` and `_c` are tried before any mode is asked) and its text input (`return` with
- *   `meta` or `shift`, and `enter`, insert a new line; `return` alone sends): no branch of it asks
- *   whether a turn runs, so the rows hold at rest and while a turn runs. Windows: virtual-terminal
+ * - **Claude Code 2.1.319**: **its key reader `Mr` is run**: sliced out of the installed binary's JavaScript when this
+ *   runs (from `var CE=`, the regexes `Ua` and `_c`, to the end of `Mr`; nothing of it is kept here), in a
+ *   sandbox that stubs nothing `Mr` asks for. `\r` is `return`, `ESC CR` is `return` with `meta`, `\n` is
+ *   `enter`, `CSI 13;2u` and `CSI 27;2;13~` are `return` with `shift`, `ESC` is `escape`. Its **text
+ *   input is read** (`return` with `meta` or `shift`, and `enter`, insert a new line; `return` alone
+ *   sends; no branch of it asks whether a turn runs; an `escape` stops a turn). Windows: virtual-terminal
  *   input hands it the bytes as they were written.
  * - **Codex 0.167.0**: `codex-rs/tui/src/keymap.rs` (`insert_newline` is Ctrl+J, Ctrl+M, Enter, Shift+Enter
  *   and Alt+Enter; the composer takes Enter for `submit` first), `textarea.rs`, `bottom_pane/mod.rs`
@@ -64,6 +65,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import vm from 'node:vm'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -149,6 +151,91 @@ async function piRows(windows) {
   }))
 }
 
+// --- Claude Code's key reader, run ----------------------------------------------------------------
+
+const CLAUDE_VERSION = process.env.CLAUDE_VERSION ?? '2.1.319'
+
+/** The end of the `{` block that opens at `start` in `source`: strings, templates and regex literals skipped. */
+function blockEnd(source, start) {
+  let depth = 0
+  for (let at = start; at < source.length; at += 1) {
+    const char = source[at]
+    if (char === '"' || char === "'" || char === '`') {
+      at += 1
+      while (source[at] !== char) at += source[at] === '\\' ? 2 : 1
+    } else if (char === '/' && source[at + 1] !== '/' && source[at + 1] !== '*') {
+      if ('(,=:[!&|?{};'.includes(source.slice(0, at).trimEnd().slice(-1))) {
+        let inClass = false
+        at += 1
+        while (inClass || source[at] !== '/') {
+          if (source[at] === '\\') at += 1
+          else if (source[at] === '[') inClass = true
+          else if (source[at] === ']') inClass = false
+          at += 1
+        }
+      }
+    } else if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return at + 1
+    }
+  }
+  throw new Error('no end of the block')
+}
+
+/** Claude Code's `Mr`, sliced from the installed binary and run with nothing stubbed. */
+function claudeReader() {
+  const binary = readFileSync(
+    join(homedir(), '.local', 'share', 'claude', 'versions', CLAUDE_VERSION),
+  )
+  const regexes = binary.indexOf(
+    Buffer.from(String.raw`Ua=/^\x1b\[(\d+)(?::(\d*)(?::(\d+))?)?(?:;(\d+))?u/`),
+  )
+  if (regexes < 0) {
+    throw new Error(`Claude Code ${CLAUDE_VERSION}: its key reader's regexes are not in the binary`)
+  }
+  const from = binary.lastIndexOf(Buffer.from('var CE=/'), regexes)
+  const text = binary.subarray(from, regexes + 16000).toString('utf8')
+  const reader = text.indexOf('function Mr(n="")')
+  const source = text.slice(0, blockEnd(text, text.indexOf('{', reader)))
+  const stubbed = new Set()
+  const outside = new Proxy(
+    {},
+    {
+      has: () => true,
+      get: (_target, key) => {
+        if (typeof key === 'symbol') return undefined
+        if (key in globalThis) return globalThis[key]
+        stubbed.add(key)
+        return () => false
+      },
+    },
+  )
+  const context = vm.createContext(Object.create(outside))
+  vm.runInContext(source, context)
+  return { read: vm.runInContext('Mr', context), stubbed }
+}
+
+/** What Claude Code's text input does with a key it read (read from its source): at rest, and while a turn runs. */
+function claudeDoes(key) {
+  if (key.name === 'return') {
+    if (key.ctrl) return ['nothing', 'nothing']
+    return key.meta || key.shift ? ['newline', 'newline'] : ['submit', 'submit']
+  }
+  if (key.name === 'enter') return ['newline', 'newline']
+  if (key.name === 'escape') return ['nothing', 'interrupt']
+  return ['nothing', 'nothing']
+}
+
+function claudeRows() {
+  const { read, stubbed } = claudeReader()
+  if (stubbed.size > 0) throw new Error(`Mr asked for ${[...stubbed]}: this stubs none`)
+  return CANDIDATES.map(({ id, bytes }) => {
+    const [does, whileBusy] = claudeDoes(read(String.fromCharCode(...bytes)))
+    return { id, bytes, does, whileBusy }
+  })
+}
+
 // --- The others: read ----------------------------------------------------------------------------
 
 /** `[does, whileBusy]` by candidate id, in CANDIDATES' order. */
@@ -156,16 +243,6 @@ const rows = (...each) =>
   CANDIDATES.map(({ id, bytes }, at) => ({ id, bytes, does: each[at][0], whileBusy: each[at][1] }))
 
 const same = (does) => [does, does]
-
-/** Claude Code: no branch of its text input asks whether a turn runs; a lone Escape stops it. */
-const CLAUDE = rows(
-  same('submit'),
-  same('newline'),
-  same('newline'),
-  same('newline'),
-  same('newline'),
-  ['nothing', 'interrupt'],
-)
 
 // --- Codex's reader, run ---------------------------------------------------------------------------
 
@@ -250,15 +327,15 @@ const WINDOWS_READINGS = {
 
 const HARNESSES = {
   'claude-code': {
-    version: '2.1.319',
+    version: CLAUDE_VERSION,
     source:
-      "Mr (key reader) and the text input's Return handler in the binary's JavaScript; default keybinding ctrl+j: chat:newline",
+      "Mr (key reader) of the binary's JavaScript, run; the text input's Return handler, read; default keybinding ctrl+j: chat:newline",
     evidence: {
-      ran: [],
-      read: ['rows', 'whileBusy'],
-      note: 'its text input has no busy branch; the binary was read, not run',
+      ran: ["the key reader Mr, sliced out of the installed binary's JavaScript"],
+      read: ["the text input's rules for return, enter and escape", 'whileBusy', 'windows'],
+      note: 'its text input has no busy branch; the input handler itself was not run',
     },
-    rows: { mac: CLAUDE, windows: CLAUDE },
+    rows: { mac: claudeRows(), windows: claudeRows() },
   },
   codex: {
     version: '0.167.0',

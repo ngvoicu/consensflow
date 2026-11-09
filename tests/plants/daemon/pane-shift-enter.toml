@@ -69,7 +69,7 @@ find = "WINDOWS && (harness === 'codex'"
 replace = "false && (harness === 'codex'"
 
 [[plant]]
-name = "pane shift enter: every harness is sent the kitty protocol's CSI u, which Windows types as text"
+name = "pane shift enter: every harness is sent the kitty protocol's CSI u, which Devin and Muse type as text on Windows"
 meant = "Shift+Enter in a window, on Windows › is a new line in a devin window, and Enter is still the message sent"
 runs = ["pse-page"]
 
@@ -253,8 +253,8 @@ find = "      entry.harness = pane.harness ?? lane.participant.harness\n"
 replace = "      entry.harness = lane.participant.harness\n"
 
 [[plant]]
-name = "pane shift enter: a window's harness is read from the board's configuration after a reload"
-meant = "A window keeps the keys of the harness it was launched with › a window of a member the ledger now says is on another harness keeps its launched harness after a reload"
+name = "pane shift enter: a window's harness is read from the board's configuration when the page is loaded afresh"
+meant = "A window keeps the keys of the harness it was launched with › a window of a member the ledger now says is on another harness keeps its launched harness when the page is loaded afresh"
 runs = ["pse-page"]
 
 [[plant.edit]]

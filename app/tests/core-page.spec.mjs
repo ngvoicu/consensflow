@@ -3742,13 +3742,15 @@ test.describe('A window keeps the keys of the harness it was launched with', () 
     ).toEqual(NEWLINE_CASES.harnesses.pi.sends.windows)
   })
 
-  test('a window of a member the ledger now says is on another harness keeps its launched harness after a reload', async ({
+  test('a window of a member the ledger now says is on another harness keeps its launched harness when the page is loaded afresh', async ({
     page,
   }) => {
     for (const [launched, configured] of [
       ['pi', 'codex'],
       ['codex', 'pi'],
     ]) {
+      // What the daemon answers once the member has been edited and the page is loaded again: the
+      // window's pane says what it was launched with, whatever the participant is set to run now.
       const data = model()
       data.realTerminals = true
       const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')

@@ -79,14 +79,17 @@
   "harnesses": {
     "claude-code": {
       "version": "2.1.319",
-      "source": "Mr (key reader) and the text input's Return handler in the binary's JavaScript; default keybinding ctrl+j: chat:newline",
+      "source": "Mr (key reader) of the binary's JavaScript, run; the text input's Return handler, read; default keybinding ctrl+j: chat:newline",
       "evidence": {
-        "ran": [],
-        "read": [
-          "rows",
-          "whileBusy"
+        "ran": [
+          "the key reader Mr, sliced out of the installed binary's JavaScript"
         ],
-        "note": "its text input has no busy branch; the binary was read, not run"
+        "read": [
+          "the text input's rules for return, enter and escape",
+          "whileBusy",
+          "windows"
+        ],
+        "note": "its text input has no busy branch; the input handler itself was not run"
       },
       "rows": {
         "mac": [
