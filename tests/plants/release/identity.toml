@@ -88,6 +88,49 @@ file = ".github/workflows/windows-build.yml"
 find = "- run: npm --prefix app run build -- --config src-tauri/tauri.release.conf.json"
 replace = "- run: npm --prefix app run build"
 
+# CI's packaged job builds the app of the smoke's identity, inline, and no other build of CI's is one (T-1362).
+[[plant]]
+name = "identity: CI's packaged job builds the app of the release's identifier"
+meant = "every_workflow_that_builds_the_app_builds_it_with_the_release_configuration"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''--config '{"identifier":"dev.ngvoicu.consensflow.smoke"}''''
+replace = '''--config '{"identifier":"dev.ngvoicu.consensflow"}''''
+
+[[plant]]
+name = "identity: CI's packaged job builds the app with the configuration every build starts from"
+meant = "every_workflow_that_builds_the_app_builds_it_with_the_release_configuration"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}''''
+replace = "npm --prefix app run build -- --bundles app"
+
+[[plant]]
+name = "identity: CI builds the app with the release configuration"
+meant = "every_workflow_that_builds_the_app_builds_it_with_the_release_configuration"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''--config '{"identifier":"dev.ngvoicu.consensflow.smoke"}''''
+replace = "--config src-tauri/tauri.release.conf.json"
+
+[[plant]]
+name = "identity: another job of CI builds the app too"
+meant = "every_workflow_that_builds_the_app_builds_it_with_the_release_configuration"
+runs = ["xtask-test-identity"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "      - run: npm test\n"
+replace = '''      - run: npm test
+      - run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
+'''
+
 [[plant]]
 name = "identity: the step lets the release's identifier through anywhere"
 meant = "a_build_that_would_carry_the_release_identifier_is_refused_off_github"
