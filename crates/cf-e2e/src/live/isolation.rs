@@ -155,7 +155,8 @@ enum Seed {
     /// link: a link was a way for every program of the rig to write in the owner's folder (the
     /// owner's `~/.local/share/claude`, where Claude Code's updater writes its versions, was a
     /// Devin run's `$XDG_DATA_HOME/claude`, T-1373), and before that the owner's Muse was the
-    /// rig's (T-1081).
+    /// rig's (T-1081). Devin's, on Unix.
+    #[cfg(unix)]
     Carry {
         from: PathBuf,
         to: PathBuf,
@@ -744,6 +745,7 @@ impl Isolation {
                 }])
             }
             Seed::PiProvider { from, to, provider } => self.pi_provider(from, to, provider),
+            #[cfg(unix)]
             Seed::Carry { from, to, only } => Ok(only
                 .iter()
                 .filter(|name| from.join(name).is_dir())
