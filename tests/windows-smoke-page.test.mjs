@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 /**
@@ -51,8 +54,42 @@ test('the smoke opens its project as the New project dialog does: the chief by i
 test('the harness the smoke opens its project on is one it has drawn, and lists the model it names', () => {
   const model = smoke.match(/const SMOKE_MODEL = '([^']+)'/)?.[1]
   assert.ok(model, "the smoke names the chief's model in `const SMOKE_MODEL`")
-  // The stand-in `claude` it puts on its own PATH lists that model (the daemon checks a pick
-  // against the list its harness gives), and no other program of the user's is on that PATH.
-  assert.match(smoke, /FAKE_CLAUDE[\s\S]*SMOKE_MODEL/)
-  assert.match(smoke, /claude\.cmd/)
+  const literal = smoke.match(/const FAKE_CLAUDE = (`[\s\S]*?\n`)/)?.[1]
+  assert.ok(literal, 'the smoke holds the stand-in claude in `const FAKE_CLAUDE`')
+  // The stand-in is the script the smoke writes, as the smoke evaluates it. It answers the
+  // read of the models (`claude -p`, an initialize control request, no turn) with the model the
+  // chief is opened on: the daemon checks a pick against the list its harness gives.
+  const folder = mkdtempSync(join(tmpdir(), 'cf-smoke-claude-'))
+  try {
+    const script = join(folder, 'fake-claude.mjs')
+    writeFileSync(script, new Function('SMOKE_MODEL', `return ${literal}`)(model))
+    const asked = {
+      type: 'control_request',
+      request_id: 'models',
+      request: { subtype: 'initialize' },
+    }
+    const read = spawnSync(process.execPath, [script, '-p', '--input-format', 'stream-json'], {
+      input: `${JSON.stringify(asked)}\n`,
+      encoding: 'utf8',
+      timeout: 20_000,
+    })
+    assert.equal(read.status, 0, read.stderr)
+    const answer = JSON.parse(read.stdout.trim().split('\n').at(-1))
+    assert.equal(answer.type, 'control_response')
+    assert.equal(answer.response.subtype, 'success')
+    assert.equal(answer.response.request_id, 'models')
+    assert.deepEqual(
+      answer.response.response.models.map((row) => row.resolvedModel),
+      [model],
+    )
+    const version = spawnSync(process.execPath, [script, '--version'], { encoding: 'utf8' })
+    assert.match(version.stdout, /^\d+\.\d+\.\d+ \(Claude Code\)/)
+  } finally {
+    rmSync(folder, { recursive: true, force: true })
+  }
+  // And it is the one harness found: a `claude.cmd` in the shape npm writes, which is the only
+  // shape the daemon opens a window on, in a folder put first on the app's PATH.
+  assert.match(smoke, /writeFileSync\(\s*join\(bin, 'claude\.cmd'\)/)
+  assert.match(smoke, /"\$\{process\.execPath\}" "\$\{join\(bin, 'fake-claude\.mjs'\)\}" %\*/)
+  assert.match(smoke, /const path = \[\s*bin,/)
 })
