@@ -7,7 +7,7 @@ use std::path::Path;
 use super::*;
 use crate::live::machine::Installed;
 
-impl Home {
+impl OwnerHome {
     /// An executable file at `below`.
     fn executable(&self, below: &str, text: &str) {
         self.write(below, text);
@@ -51,7 +51,7 @@ fn version_of(install: &Installed) -> String {
 fn a_version_probe_is_run_with_the_switches_of_its_harness() {
     // The probe runs the owner's launcher with the owner's environment: Muse's, run with
     // `--version`, ran its hourly check (T-1082), which may rewrite itself.
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.executable(
         ".local/bin/muse",
         "#!/bin/sh\necho \"muse-update-off-${MUSE_NO_AUTO_UPDATE:-unset}\"\n",
@@ -72,7 +72,7 @@ fn a_version_probe_is_run_with_the_switches_of_its_harness() {
 
 #[test]
 fn a_launcher_that_is_left_alone_is_no_change_and_the_summary_names_it_and_its_hash() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.claude();
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
     let seen = watch.look();
@@ -88,7 +88,7 @@ fn a_launcher_that_is_left_alone_is_no_change_and_the_summary_names_it_and_its_h
 
 #[test]
 fn a_link_taken_to_a_copy_of_the_same_binary_is_a_change_whatever_the_bytes_say() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.claude();
     let was = fs::read_link(&command).unwrap();
     let elsewhere = home.path("rig/claude/versions/2.1.316");
@@ -112,7 +112,7 @@ fn a_link_taken_to_a_copy_of_the_same_binary_is_a_change_whatever_the_bytes_say(
 
 #[test]
 fn a_binary_replaced_in_place_is_a_change_though_the_link_is_the_same() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.claude();
     let found = changes(
         &Watch::of(Harness::Claude, &command, home.0.path()),
@@ -127,7 +127,7 @@ fn a_binary_replaced_in_place_is_a_change_though_the_link_is_the_same() {
 
 #[test]
 fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_it_became() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.claude();
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
     // The run's folder was removed when it ended (T-1068): the link reads what it read, and
@@ -171,7 +171,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
         "{found:?}"
     );
     // And a link that became a file says the link it was.
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.claude();
     let was = fs::read_link(&command).unwrap();
     let found = changes(
@@ -194,7 +194,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
 
 #[test]
 fn a_version_installed_among_the_owners_is_named() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.claude();
     let found = changes(
         &Watch::of(Harness::Claude, &command, home.0.path()),
@@ -206,7 +206,7 @@ fn a_version_installed_among_the_owners_is_named() {
 
 #[test]
 fn devin_is_watched_through_its_current_link_and_its_versions() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write(
         ".local/share/devin/cli/_versions/3000.11.1/bin/devin",
         "devin",
@@ -250,7 +250,7 @@ fn devin_is_watched_through_its_current_link_and_its_versions() {
 
 #[test]
 fn muses_launcher_binaries_and_version_line_are_watched_beside_it() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write(".local/bin/muse", "#!/bin/sh\n# the launcher\n");
     home.write(".local/bin/muse-bin-1.4.14-R1", "binary");
     home.write(".local/bin/.muse-version", "1.4.14-R1\n");
@@ -290,7 +290,7 @@ fn muses_launcher_binaries_and_version_line_are_watched_beside_it() {
 
 #[test]
 fn codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_folder() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let watch = Watch::of(
         Harness::Codex,
         Path::new("/opt/homebrew/bin/codex"),
@@ -314,7 +314,7 @@ fn codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_
 
 #[test]
 fn the_guard_fails_what_ends_with_the_way_back_and_is_silent_before_it_looked() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.claude();
     let guard = Guard::new(Harness::Claude, &command, home.0.path());
     // A guard that was never asked for its variables looked at nothing, and has nothing to say.
@@ -339,7 +339,7 @@ fn the_guard_fails_what_ends_with_the_way_back_and_is_silent_before_it_looked() 
 
 #[test]
 fn a_launcher_made_by_a_guard_that_saw_none_is_named_made() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = home.path(".local/bin/claude");
     let guard = Guard::new(Harness::Claude, &command, home.0.path());
     guard.vars().unwrap();

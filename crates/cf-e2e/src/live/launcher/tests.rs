@@ -11,9 +11,9 @@ use super::*;
 mod links;
 
 /// A pretend owner's home.
-struct Home(tempfile::TempDir);
+struct OwnerHome(tempfile::TempDir);
 
-impl Home {
+impl OwnerHome {
     fn new() -> Self {
         Self(tempfile::tempdir().unwrap())
     }
@@ -39,12 +39,12 @@ fn program(harness: &str) -> String {
 }
 
 /// Where Claude Code's installer puts its launcher, here.
-fn claude_launcher(home: &Home) -> PathBuf {
+fn claude_launcher(home: &OwnerHome) -> PathBuf {
     home.path(&format!(".local/bin/{}", program("claude")))
 }
 
 /// What the watch of `watch` says differs after `act`, said below the owner's `home`.
-fn changes(watch: &Watch, home: &Home, act: impl FnOnce()) -> Vec<String> {
+fn changes(watch: &Watch, home: &OwnerHome, act: impl FnOnce()) -> Vec<String> {
     let before = watch.look();
     act();
     before.changes_to(&watch.look(), home.0.path())
@@ -76,7 +76,7 @@ fn the_switches_are_claude_codes_two_and_muses_one_and_every_window_has_all_thre
 
 #[test]
 fn a_launcher_that_is_a_file_is_hashed_and_named_in_the_summary_and_left_alone_it_is_no_change() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write(
         &format!(".local/bin/{}", program("claude")),
         "claude 2.1.316",
@@ -100,7 +100,7 @@ fn a_launcher_that_is_a_file_is_hashed_and_named_in_the_summary_and_left_alone_i
 
 #[test]
 fn a_launcher_that_is_a_file_and_is_overwritten_is_named_though_no_link_moved() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write(
         &format!(".local/bin/{}", program("claude")),
         "claude 2.1.316",
@@ -123,7 +123,7 @@ fn a_launcher_that_is_a_file_and_is_overwritten_is_named_though_no_link_moved() 
 
 #[test]
 fn a_launcher_that_is_a_file_and_is_removed_or_made_is_named_for_it() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let name = program("claude");
     let command = claude_launcher(&home);
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
@@ -147,7 +147,7 @@ fn a_launcher_that_is_a_file_and_is_removed_or_made_is_named_for_it() {
 
 #[test]
 fn a_version_installed_beside_a_launcher_that_is_a_file_is_named() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write(
         &format!(".local/bin/{}", program("claude")),
         "claude 2.1.316",
@@ -165,7 +165,7 @@ fn a_version_installed_beside_a_launcher_that_is_a_file_is_named() {
 
 #[test]
 fn devins_launcher_as_a_file_and_its_folder_of_versions_are_watched_too() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write(&format!(".local/bin/{}", program("devin")), "devin");
     home.write(".local/share/devin/cli/_versions/3000.11.1/devin", "devin");
     let command = home.path(&format!(".local/bin/{}", program("devin")));
@@ -192,7 +192,7 @@ fn devins_launcher_as_a_file_and_its_folder_of_versions_are_watched_too() {
 #[test]
 fn the_guard_of_a_launcher_that_is_a_file_fails_what_ends_and_names_it_and_is_silent_before_it_looked(
 ) {
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write(
         &format!(".local/bin/{}", program("claude")),
         "claude 2.1.316",
@@ -245,7 +245,7 @@ fn the_hash_of_a_big_file_reads_it_whole_and_tells_two_files_of_one_size_apart()
 fn a_path_followed_through_a_link_is_said_below_the_home_the_run_was_given() {
     // macOS spells its temporary folders through `/private/var`, and Windows its canonical paths
     // with a `\\?\` prefix: the home as it was given and as the system spells it are one.
-    let home = Home::new();
+    let home = OwnerHome::new();
     home.write("a/b", "x");
     let real = fs::canonicalize(home.path("a/b")).unwrap();
     let shown = shown(&real, home.0.path());
@@ -272,7 +272,7 @@ fn seen_with(watch: &Watch, names: Option<&[&str]>) -> Seen {
 }
 
 /// The watch of a pretend owner's Claude Code.
-fn claude_watch(home: &Home) -> Watch {
+fn claude_watch(home: &OwnerHome) -> Watch {
     home.write(
         &format!(".local/bin/{}", program("claude")),
         "claude 2.1.316",
@@ -283,7 +283,7 @@ fn claude_watch(home: &Home) -> Watch {
 #[test]
 fn a_keychain_item_a_run_gained_is_named_with_the_command_that_deletes_it_and_no_launcher_changed()
 {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let watch = claude_watch(&home);
     let before = seen_with(&watch, Some(&["Claude Code-credentials"]));
     let after = seen_with(
@@ -310,7 +310,7 @@ fn a_keychain_item_a_run_gained_is_named_with_the_command_that_deletes_it_and_no
 
 #[test]
 fn every_item_gained_is_named_and_what_was_there_before_or_went_is_not_one() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let watch = claude_watch(&home);
     let before = seen_with(
         &watch,
@@ -346,7 +346,7 @@ fn every_item_gained_is_named_and_what_was_there_before_or_went_is_not_one() {
 
 #[test]
 fn a_keychain_that_gained_nothing_or_was_not_listed_is_no_change() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let watch = claude_watch(&home);
     let names = [
         "Claude Code-credentials",
@@ -365,7 +365,7 @@ fn a_keychain_that_gained_nothing_or_was_not_listed_is_no_change() {
 
 #[test]
 fn a_guard_that_leaves_the_keychain_to_the_login_lists_none() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = claude_launcher(&home);
     let guard = Guard::new(Harness::Claude, &command, home.0.path());
     assert!(guard.watch.keychain.is_some());
@@ -378,7 +378,7 @@ fn a_guard_that_leaves_the_keychain_to_the_login_lists_none() {
 
 #[test]
 fn only_the_guard_of_claude_code_looks_at_the_keychain() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let command = claude_launcher(&home);
     let looks = |harness| {
         Guard::new(harness, &command, home.0.path())
@@ -414,7 +414,7 @@ fn list(names: &[&str]) {
 
 #[test]
 fn a_guard_whose_keychain_gained_an_item_fails_the_rig_that_ends_and_names_it() {
-    let home = Home::new();
+    let home = OwnerHome::new();
     let watch = claude_watch(&home).with_keychain(listed);
     list(&["Claude Code-credentials"]);
     let guard = Guard {

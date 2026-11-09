@@ -180,8 +180,10 @@ fn answer(mut stream: TcpStream, port: u16, count: &AtomicUsize) {
 /// The throwaway folders of a run, whose Keychain items are deleted (those, by name, that the
 /// controls made) when the run ends, however it ends.
 struct Folders {
-    parent: tempfile::TempDir,
     made: Vec<PathBuf>,
+    // Last, as every temporary folder goes in what owns it (Windows removes none from under
+    // a file still open in it).
+    parent: tempfile::TempDir,
 }
 
 impl Folders {
