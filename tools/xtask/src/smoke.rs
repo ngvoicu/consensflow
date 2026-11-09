@@ -12,8 +12,9 @@
 //! runs once. `CONSENSFLOW_SMOKE_APP` names the app as well, for a workflow's
 //! environment; `--app` wins, and a relative path is from the checkout's root.
 //! `CONSENSFLOW_SMOKE_TIMEOUT_MS` and `CONSENSFLOW_SMOKE_KEEP=1` are the test's,
-//! and reach it as they were set. The smoke's case is the one `cargo test`
-//! ignores, so the command asks for the ignored cases (of the smoke test alone),
+//! and reach it as they were set. `CONSENSFLOW_SMOKE_SKIP` is the command's: the names
+//! of cases to leave out (`SKIP_VARIABLE`), said when it does. The smoke's cases are the
+//! ones `cargo test` ignores, so the command asks for the ignored cases (of the smoke test alone),
 //! and for the test's own output, which says what the daemon that ran was; its
 //! cases run one at a time (`tests` says why). The
 //! packaged app is a macOS bundle: elsewhere the command refuses, in words, and so
@@ -21,6 +22,8 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+use cf_base::env::Env;
 
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
@@ -34,6 +37,13 @@ const APP_VARIABLE: &str = "CONSENSFLOW_SMOKE_APP";
 
 /// What the command says of an `--app` that has no path after it.
 const NO_PATH: &str = "--app takes a value (to start one with a dash: --app=-value)";
+
+/// The variable that names the cases the smoke leaves out, as the names of their test functions
+/// apart by commas: each is given to the test as `--skip`, which the test program matches by
+/// part of a case's path. A workflow sets it for a case it cannot hold yet, and the line goes
+/// when it can (CI's packaged job leaves out the hidden window's, until the host stops waiting on
+/// its page for what a window prints: alpha.5's host-display core). The release's run sets none.
+const SKIP_VARIABLE: &str = "CONSENSFLOW_SMOKE_SKIP";
 
 /// What the command says where there is no bundle to run: the Windows app is held by its own script.
 const NOT_A_BUNDLE: &str = "smoke: the packaged smoke runs a macOS app bundle (ConsensFlow.app); \
@@ -63,6 +73,9 @@ fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i3
     }
     if screen::locked("smoke", context, console.err)? {
         return Ok(1);
+    }
+    if let Some(said) = leaving_out(&left_out(&context.env)) {
+        writeln!(console.err, "{said}")?;
     }
     Ok(process::run(
         &invocation(context, app.as_deref()),
@@ -112,6 +125,29 @@ pub(crate) fn invocation(context: &Context, app: Option<&Path>) -> Invocation {
     tests(context, app, &["--nocapture".into()])
 }
 
+/// The cases the environment leaves out: the names `CONSENSFLOW_SMOKE_SKIP` gives, apart by
+/// commas. A name that is not a case leaves none out, and every other runs.
+fn left_out(env: &Env) -> Vec<String> {
+    env.text(SKIP_VARIABLE)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// What the command says of the cases it leaves out: nothing where there are none. A smoke
+/// that leaves a case out and says nothing passes for the whole.
+fn leaving_out(names: &[String]) -> Option<String> {
+    (!names.is_empty()).then(|| {
+        format!(
+            "smoke: leaving out {} ({SKIP_VARIABLE}): what they hold is not shown by this run",
+            names.join(", ")
+        )
+    })
+}
+
 /// The same `cargo test` without `--nocapture`, for a runner that reports each test
 /// itself: the plants run it under nextest, which keeps what the test wrote with its
 /// result and refuses a run without capture.
@@ -124,9 +160,13 @@ pub(crate) fn captured(context: &Context, app: Option<&Path>) -> Invocation {
 /// `DRAIN`) that a flood of the other case's beside it, on a release's runner of three
 /// cores, would take away (T-479).
 fn tests(context: &Context, app: Option<&Path>, args: &[OsString]) -> Invocation {
+    let skips = left_out(&context.env)
+        .into_iter()
+        .flat_map(|name| [OsString::from("--skip"), OsString::from(name)]);
     let args: Vec<OsString> = ["--".into(), "--test-threads=1".into()]
         .into_iter()
         .chain(args.iter().cloned())
+        .chain(skips)
         .collect();
     let invocation = cargo_test(context, SMOKE, &args);
     match app {
@@ -138,8 +178,6 @@ fn tests(context: &Context, app: Option<&Path>, args: &[OsString]) -> Invocation
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use cf_base::env::Env;
 
     fn context() -> Context {
         Context {
@@ -261,6 +299,75 @@ mod tests {
         ] {
             assert_eq!(app_of(&words(line)), Err(said.to_owned()), "{line}");
         }
+    }
+
+    fn env(vars: &[(&str, &str)]) -> Env {
+        Env::from_vars(vars.iter().copied())
+    }
+
+    fn with_env(vars: &[(&str, &str)]) -> Context {
+        Context {
+            root: PathBuf::from("checkout"),
+            env: env(vars),
+        }
+    }
+
+    #[test]
+    fn the_cases_the_environment_names_are_given_to_the_test_to_skip_and_the_rest_run() {
+        let left = with_env(&[(
+            "CONSENSFLOW_SMOKE_SKIP",
+            "the_built_app_reads_its_windows_while_it_is_hidden",
+        )]);
+        assert_eq!(
+            invocation(&left, None).display(),
+            "cargo test -p cf-e2e --test smoke -- --ignored --test-threads=1 --nocapture \
+             --skip the_built_app_reads_its_windows_while_it_is_hidden"
+        );
+        // The plants' run, which has no --nocapture, is told the same.
+        assert_eq!(
+            captured(&left, None).display(),
+            "cargo test -p cf-e2e --test smoke -- --ignored --test-threads=1 \
+             --skip the_built_app_reads_its_windows_while_it_is_hidden"
+        );
+        // Several are apart by commas, a name is what is between them, and what is between none
+        // names nothing.
+        let two = with_env(&[("CONSENSFLOW_SMOKE_SKIP", " one , two,, ")]);
+        assert_eq!(
+            invocation(&two, None).display(),
+            "cargo test -p cf-e2e --test smoke -- --ignored --test-threads=1 --nocapture \
+             --skip one --skip two"
+        );
+        // The app is the same variable it is without them.
+        assert_eq!(
+            invocation(&two, Some(Path::new("x.app"))).vars,
+            invocation(&context(), Some(Path::new("x.app"))).vars
+        );
+    }
+
+    #[test]
+    fn a_variable_that_is_not_set_or_names_nothing_leaves_every_case_in() {
+        for vars in [
+            &[][..],
+            &[("CONSENSFLOW_SMOKE_SKIP", "")],
+            &[("CONSENSFLOW_SMOKE_SKIP", " , ,")],
+        ] {
+            assert_eq!(
+                invocation(&with_env(vars), None).display(),
+                "cargo test -p cf-e2e --test smoke -- --ignored --test-threads=1 --nocapture",
+                "{vars:?}"
+            );
+            assert_eq!(left_out(&env(vars)), Vec::<String>::new(), "{vars:?}");
+            assert_eq!(leaving_out(&left_out(&env(vars))), None, "{vars:?}");
+        }
+    }
+
+    #[test]
+    fn a_run_that_leaves_a_case_out_says_which_and_by_what() {
+        let said = leaving_out(&left_out(&env(&[("CONSENSFLOW_SMOKE_SKIP", "one,two")])))
+            .expect("a run that leaves cases out says so");
+        assert!(said.starts_with("smoke: leaving out one, two"), "{said}");
+        assert!(said.contains("CONSENSFLOW_SMOKE_SKIP"), "{said}");
+        assert!(!said.contains('\n'), "{said}");
     }
 
     #[test]

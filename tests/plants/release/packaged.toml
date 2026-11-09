@@ -283,6 +283,68 @@ file = "tools/xtask/src/smoke.rs"
 find = "    tests(context, app, &[])"
 replace = "    tests(context, None, &[])"
 
+# The cases it leaves out (CONSENSFLOW_SMOKE_SKIP): CI's packaged job leaves out the hidden
+# window's until alpha.5's host-display core (T-1362).
+[[plant]]
+name = "packaged smoke: a case the environment names is run all the same"
+meant = "the_cases_the_environment_names_are_given_to_the_test_to_skip_and_the_rest_run"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "        .chain(skips)\n"
+replace = "        .chain(skips.take(0))\n"
+
+[[plant]]
+name = "packaged smoke: the cases the environment names are the only ones run"
+meant = "the_cases_the_environment_names_are_given_to_the_test_to_skip_and_the_rest_run"
+runs = ["smoke-command", "smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = '.flat_map(|name| [OsString::from("--skip"), OsString::from(name)]);'
+replace = ".flat_map(|name| [OsString::from(name)]);"
+
+[[plant]]
+name = "packaged smoke: a name with nothing in it is a name, which the test skips every case by"
+meant = "a_variable_that_is_not_set_or_names_nothing_leaves_every_case_in"
+runs = ["smoke-command"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "        .filter(|name| !name.is_empty())\n"
+replace = ""
+
+[[plant]]
+name = "packaged smoke: a name is taken with the spaces around it"
+meant = "the_cases_the_environment_names_are_given_to_the_test_to_skip_and_the_rest_run"
+runs = ["smoke-command"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "        .map(str::trim)\n"
+replace = ""
+
+[[plant]]
+name = "packaged smoke: a run that leaves cases out says nothing of them"
+meant = "a_run_that_leaves_a_case_out_says_which_and_by_what"
+runs = ["smoke-command"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "(!names.is_empty()).then(|| {"
+replace = "(names.is_empty() && !names.is_empty()).then(|| {"
+
+[[plant]]
+name = "packaged smoke: the command does not say which cases it leaves out"
+meant = "smoke_leaves_out_the_cases_its_variable_names_and_says_which_before_it_starts"
+runs = ["smoke-command-run"]
+
+[[plant.edit]]
+file = "tools/xtask/src/smoke.rs"
+find = "        writeln!(console.err, \"{said}\")?;\n"
+replace = "        let _ = &said;\n"
+
 [[plant]]
 name = "packaged smoke: the app it is given is not told to the test"
 meant = "the_app_it_is_given_is_the_one_variable_it_sets_and_a_relative_path_is_from_the_root"
