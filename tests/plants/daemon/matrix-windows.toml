@@ -7,8 +7,9 @@
 # else (`live/agents.rs`); a run on a provider the agent folder gives Pi carries its files, its
 # package, a `settings.json` that names it and its login with no refresh token, is refused before
 # a window where the provider or the proxy is missing, and holds every one of the provider's
-# owner files not to change (`live/isolation.rs`, `live/isolation/pi.rs`); a Pi window drops the
-# proxy's environment overrides (`cf-harness`' `shared/window_args.rs`); no two harness homes of
+# owner files not to change (`live/isolation.rs`, `live/isolation/pi.rs`); a person's Pi window keeps
+# the proxy's variables, which only the kit's rigs leave out (`cf-harness`' `shared/window_args.rs`,
+# T-1358); no two harness homes of
 # one rig set one variable to two values (`rig/homes.rs`), the five harnesses' homes together
 # among them (`live/isolation/windows.rs`); the shell of every harness on Windows is named with
 # where it is known from (`live/members/descent/tests.rs`); and a seat's reply is the word and
@@ -24,6 +25,7 @@ seat-offline = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_se
 login-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login::"]
 pi-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::tests::"]
 window-golden = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::window_args::tests::every_window_opens_and_resumes_as_node_built_it"]
+launch-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::launch::tests::a_members_pi_window_is_the_adapters_whole"]
 
 # ---------------------------------------------------------------------------- Pi on a test machine
 
@@ -227,14 +229,16 @@ find = '''        pi::answers(&base).map_err(|why| {
 replace = '''        let _ = pi::answers(&base);'''
 
 [[plant]]
-name = "matrix: a Pi window keeps the proxy's environment overrides"
-meant = "every_window_opens_and_resumes_as_node_built_it"
-runs = ["window-golden"]
+name = "matrix: a person's Pi window drops the proxy's variables"
+meant = "a_members_pi_window_is_the_adapters_whole_with_the_users_own_append_file_before_its_role"
+runs = ["launch-lib", "window-golden"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/window_args.rs"
-find = '''                drop_env: &["CLIPROXYAPI_BASE_URL", "CLIPROXYAPI_API_KEY"],'''
-replace = '''                drop_env: &[],'''
+find = '''                // as without every variable of the owner's its rig does not name.
+                drop_env: &[],'''
+replace = '''                // as without every variable of the owner's its rig does not name.
+                drop_env: &["CLIPROXYAPI_BASE_URL", "CLIPROXYAPI_API_KEY"],'''
 
 # ---------------------------------------------------------------------------- no clobbering
 

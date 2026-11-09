@@ -142,11 +142,11 @@ fn window(
                 command: "pi",
                 args,
                 prompt: None,
-                // As Claude's key: leftovers of the cliproxyapi provider's env
-                // overrides (`cliproxyapi.json` answers the same) would move the
-                // window off the copied config onto another endpoint and another
-                // key, with no word on the board (T-1172).
-                drop_env: &["CLIPROXYAPI_BASE_URL", "CLIPROXYAPI_API_KEY"],
+                // A person's Pi keeps its provider's variables: the cliproxyapi
+                // package reads `CLIPROXYAPI_*` before its own files, as the same
+                // Pi in their shell does. The live kit's windows run without them,
+                // as without every variable of the owner's its rig does not name.
+                drop_env: &[],
             }
         }
         // Codex announces no id: the broker names the thread once Codex starts it.
