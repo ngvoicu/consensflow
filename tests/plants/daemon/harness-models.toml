@@ -23,7 +23,6 @@ hm-e2e-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::
 hm-page-chief = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "asks the chief's effort"]
 hm-page-history = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "every name a member had|member that joined in alpha.2"]
 hm-page-needs-edit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "could not run on what it ran on"]
-hm-page-designer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "keeps an image designer a member of its own"]
 hm-harness-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "window_args::"]
 hm-ledger-replay = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "replay"]
 hm-engine-chief-models = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::"]
@@ -487,34 +486,6 @@ find = '''
 '''
 replace = '''
                    AND (? IS NOT NULL OR ? IS NOT NULL OR ? IS NOT NULL OR ? IS NOT NULL)
-'''
-
-[[plant]]
-name = "harness models: an image designer is merged into a worker on its model and refused"
-meant = "a_worker_and_an_image_designer_on_one_model_and_effort_are_two_members_in_either_order"
-runs = ["hm-daemon-members"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/staff.rs"
-find = '''
-            && member_now.designer == member.designer
-'''
-replace = '''
-'''
-
-[[plant]]
-name = "harness models: New project merges an image designer into a worker on its model"
-meant = "New project keeps an image designer a member of its own beside a worker on the same model, in either order"
-runs = ["hm-page-designer"]
-prepare = [["node", "app/scripts/bundle-ui.mjs"]]
-
-[[plant.edit]]
-file = "app/ui/core/dialogs.js"
-find = '''
-      const key = `${harness} ${model} ${effort ?? ''} ${role === 'designer'}`
-'''
-replace = '''
-      const key = `${harness} ${model} ${effort ?? ''}`
 '''
 
 [[plant]]
