@@ -178,8 +178,8 @@ runs = ["pi-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''            bytes: serde_json::json!({ "packages": [source.spec] })'''
-replace = '''            bytes: serde_json::json!({ "packages": ["npm:pi-web-access", source.spec] })'''
+find = '''            bytes: serde_json::json!({ "packages": [source.entry] })'''
+replace = '''            bytes: serde_json::json!({ "packages": ["npm:pi-web-access", source.entry] })'''
 
 [[plant]]
 name = "matrix: the provider's files are not hashed"
@@ -221,8 +221,9 @@ runs = ["pi-lib"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''        pi::answers(&base).map_err(|why| {
             Error::Daemon(format!(
-                "Pi's `{}` provider is set up, but the proxy it is set for does not answer at {base} ({why}): start it (the local CLIProxyAPI is a Homebrew install's service), or run on a model of another provider (--models pi=…)",
+                "Pi's `{}` provider is set up, but the proxy it is set for does not answer at {} ({why}): start it (the local CLIProxyAPI is a Homebrew install's service), or run on a model of another provider (--models pi=…)",
                 provider.name,
+                pi::shown_url(&base),
             ))
         })?;'''
 replace = '''        let _ = pi::answers(&base);'''

@@ -404,14 +404,18 @@ fn a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_els
     let owner = Owner::new();
     let isolation = owner.pi("openrouter/meta/muse-spark-1.3", Duration::from_secs(3600));
     let home = isolation.made_at(at(NOW)).unwrap();
-    // One variable, the one Pi reads its folder by, and it names the run's.
+    // The variable Pi reads its folder by, naming the run's, and the one that keeps Pi from
+    // installing at its start.
     let vars = isolation.vars_in(&home);
     assert_eq!(
         vars,
-        [(
-            "PI_CODING_AGENT_DIR".to_owned(),
-            home.join("pi/agent").display().to_string()
-        )]
+        [
+            (
+                "PI_CODING_AGENT_DIR".to_owned(),
+                home.join("pi/agent").display().to_string()
+            ),
+            ("PI_OFFLINE".to_owned(), "1".to_owned())
+        ]
     );
     assert!(!vars[0].1.contains(&owner.home.path().display().to_string()));
     // Only the login: not the settings, the models, the MCP logins, the extensions or the sessions.
@@ -559,8 +563,8 @@ fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_lo
 fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it() {
     const SOURCE: &str = "git:github.com/ngvoicu/pi-cliproxyapi-provider@feat/claude-messages";
     for named in [
-        json!(SOURCE),
         json!({ "source": SOURCE, "extensions": ["extensions/index.ts"] }),
+        json!(SOURCE),
     ] {
         let owner = Owner::new();
         owner.cliproxyapi(&proxy_answering());
@@ -575,10 +579,7 @@ fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and
             .to_string(),
         );
         write(&package.join("extensions/index.ts"), "the fork's extension");
-        write(
-            &package.join(".git/HEAD"),
-            "ref: refs/heads/feat/claude-messages",
-        );
+        let commit = git_checkout(&package);
         write(
             &owner.path(".pi/agent/settings.json"),
             &json!({ "packages": ["npm:pi-web-access", named, "git:github.com/ngvoicu/pi-cached-compaction@main"] })
@@ -586,8 +587,12 @@ fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and
         );
         let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
         let home = isolation.made_at(at(NOW)).unwrap();
+        let copied: Vec<String> = files_below(&home)
+            .into_iter()
+            .filter(|file| !file.contains("/.git/") || file.ends_with("/.git/HEAD"))
+            .collect();
         assert_eq!(
-            files_below(&home),
+            copied,
             [
                 "pi/agent/auth.json",
                 "pi/agent/cliproxyapi-models.json",
@@ -604,7 +609,14 @@ fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and
                 &fs::read_to_string(home.join("pi/agent/settings.json")).unwrap()
             )
             .unwrap(),
-            json!({ "packages": [SOURCE] })
+            // The entry as the owner wrote it: an object's filter of the package's resources is
+            // kept, or Pi would load every resource the package lists.
+            json!({ "packages": [named] })
+        );
+        let copy = isolation.said().join("\n");
+        assert!(
+            copy.contains(&commit) && copy.contains("clean"),
+            "the run says the checkout's commit: {copy}"
         );
         let said = isolation.evidence().unwrap();
         assert!(
@@ -619,6 +631,167 @@ fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and
         );
         assert!(isolation.finish().is_ok());
     }
+}
+
+/// A git checkout of `folder`'s files, committed, as Pi's install leaves one: its commit.
+fn git_checkout(folder: &Path) -> String {
+    let git = |args: &[&str]| {
+        let ran = Run::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args.iter().copied())
+            .cwd(folder)
+            .finding_programs()
+            .inheriting_env()
+            .run()
+            .unwrap();
+        assert_eq!(ran.code, Some(0), "git {args:?}: {}", ran.stderr);
+        ran.stdout.trim().to_owned()
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "the package"]);
+    git(&["rev-parse", "HEAD"])
+}
+
+/// A git checkout with a change of its own, or a file that is none of its commit's, is not what
+/// the source names: Pi would load bytes no commit holds. Refused before anything is made.
+#[test]
+fn a_pi_run_on_a_package_from_git_is_refused_where_its_checkout_is_not_clean() {
+    const SOURCE: &str = "git:github.com/ngvoicu/pi-cliproxyapi-provider@feat/claude-messages";
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let package = owner.path(".pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider");
+    write(
+        &package.join("package.json"),
+        &json!({ "name": "@router-for-me/pi-cliproxyapi-provider", "version": "1.4.25" })
+            .to_string(),
+    );
+    write(&package.join("extensions/index.ts"), "the fork's extension");
+    git_checkout(&package);
+    write(
+        &owner.path(".pi/agent/settings.json"),
+        &json!({ "packages": [SOURCE] }).to_string(),
+    );
+    for (dirty, how) in [
+        ("extensions/index.ts", "changed"),
+        ("extensions/extra.ts", "a file of no commit"),
+    ] {
+        write(&package.join(dirty), "code no commit holds");
+        let said = owner
+            .pi("cliproxyapi/muse-spark-1.3-contributor", hours(1))
+            .made_at(at(NOW))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            said.contains("not clean") && said.contains(dirty),
+            "{how}: {said}"
+        );
+        assert_eq!(owner.made(), 0, "{how}");
+        fs::remove_file(package.join(dirty)).ok();
+        git_checkout_reset(&package);
+    }
+}
+
+/// The checkout as its commit has it again.
+fn git_checkout_reset(folder: &Path) {
+    let ran = Run::new("git")
+        .args(["checkout", "-q", "--", "."])
+        .cwd(folder)
+        .finding_programs()
+        .inheriting_env()
+        .run()
+        .unwrap();
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+}
+
+/// An `npm:` spec that names a version Pi has not got on disk makes Pi install it at its start,
+/// from the network, into the run's home: refused before anything is made. A spec with no
+/// version is what is on disk; one with an exact version must be that version; a range or a
+/// tag, which the kit cannot hold to what is on disk, is refused too. The run says the version.
+#[test]
+fn a_pi_run_is_refused_where_the_npm_package_on_disk_is_not_the_version_its_spec_asks() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let settings = |spec: &str| {
+        write(
+            &owner.path(".pi/agent/settings.json"),
+            &json!({ "packages": [spec] }).to_string(),
+        );
+    };
+    let made = |owner: &Owner| {
+        let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+        isolation
+            .made_at(at(NOW))
+            .map(|_| isolation.said().join("\n"))
+    };
+    settings("npm:@router-for-me/pi-cliproxyapi-provider@1.4.24");
+    let said = made(&owner).unwrap();
+    assert!(said.contains("1.4.24"), "{said}");
+    for (spec, words) in [
+        (
+            "npm:@router-for-me/pi-cliproxyapi-provider@1.4.25",
+            "1.4.25",
+        ),
+        ("npm:@router-for-me/pi-cliproxyapi-provider@^1.4.0", "exact"),
+        ("npm:@router-for-me/pi-cliproxyapi-provider@latest", "exact"),
+    ] {
+        settings(spec);
+        let refused = made(&owner).unwrap_err().to_string();
+        assert!(
+            refused.contains(words) && refused.contains("1.4.24"),
+            "{spec}: {refused}"
+        );
+        assert_eq!(owner.made(), 0, "{spec}: refused before anything is made");
+    }
+}
+
+/// A proxy URL can carry a key (a user and password, a query, a fragment): the refusal of a
+/// proxy that does not answer says its scheme, host, port and path alone.
+#[test]
+fn a_proxy_that_does_not_answer_is_said_with_no_part_of_its_url_that_can_hold_a_secret() {
+    let owner = Owner::new();
+    let port = proxy_gone().rsplit(':').next().unwrap().to_owned();
+    owner.cliproxyapi(&format!(
+        "http://user:SECRET-PASSWORD@127.0.0.1:{port}/v1?key=SECRET-KEY#SECRET-FRAGMENT"
+    ));
+    let said = owner
+        .pi("cliproxyapi/muse-spark-1.3-contributor", hours(1))
+        .made_at(at(NOW))
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("does not answer"), "{said}");
+    assert!(
+        said.contains(&format!("http://127.0.0.1:{port}/v1")),
+        "{said}"
+    );
+    assert!(
+        !said.contains("SECRET") && !said.contains("user:"),
+        "{said}"
+    );
+}
+
+/// Pi installs a package its settings name and it has not got, and updates and downloads at its
+/// start (Pi 1.5.0, `dist/core/package-manager.js`: `installMissing` returns before installing
+/// when `PI_OFFLINE` is set): every window of the kit's Pi starts with it, so what runs is what
+/// the kit copied.
+#[test]
+fn a_pi_window_of_the_kit_starts_offline() {
+    let owner = Owner::new();
+    write(&owner.path(".pi/agent/auth.json"), &auth(hours(2)));
+    let isolation = owner.pi("openai/gpt-6-luna", hours(1));
+    let vars = HarnessHome::vars(&isolation).unwrap();
+    assert!(
+        vars.iter()
+            .any(|(name, value)| name == "PI_OFFLINE" && value == "1"),
+        "{vars:?}"
+    );
 }
 
 /// The forms of `packages` the kit finds the provider's package in, and where Pi keeps each:

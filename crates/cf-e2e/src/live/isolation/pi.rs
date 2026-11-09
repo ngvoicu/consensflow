@@ -254,6 +254,10 @@ pub struct Source {
     pub folder: PathBuf,
     /// Whether npm installed it, so that npm's manifests in the agent folder record it.
     pub npm: bool,
+    /// The entry of `packages` as the owner wrote it (a string, or an object with its `source`
+    /// and the resources it picks): the run's `settings.json` names the package by the same
+    /// entry, or Pi would load every resource the package lists.
+    pub entry: Value,
 }
 
 impl Provider {
@@ -263,10 +267,21 @@ impl Provider {
     /// without `@ref`. None where no entry does, or only in a form the kit does not know where
     /// Pi keeps (a URL, a local path): the run is then refused.
     pub fn source_in(&self, packages: &[Value]) -> Option<Source> {
-        packages
-            .iter()
-            .filter_map(|entry| entry.as_str().or_else(|| entry["source"].as_str()))
-            .find_map(|spec| self.source_of(spec))
+        packages.iter().find_map(|entry| {
+            let spec = entry.as_str().or_else(|| entry["source"].as_str())?;
+            let mut source = self.source_of(spec)?;
+            source.entry = entry.clone();
+            Some(source)
+        })
+    }
+
+    /// The version an `npm:` spec of this package asks, as written after its name: none where it
+    /// asks none (`npm:@scope/name`).
+    pub fn npm_version<'a>(&self, spec: &'a str) -> Option<&'a str> {
+        let named = spec.strip_prefix("npm:")?.strip_prefix(self.package)?;
+        named
+            .strip_prefix('@')
+            .filter(|version| !version.is_empty())
     }
 
     fn source_of(&self, spec: &str) -> Option<Source> {
@@ -279,6 +294,7 @@ impl Provider {
                 spec: spec.to_owned(),
                 folder: Path::new("npm/node_modules").join(self.package),
                 npm: true,
+                entry: Value::from(spec),
             });
         }
         let rest = spec.strip_prefix("git:")?;
@@ -305,6 +321,7 @@ impl Provider {
             spec: spec.to_owned(),
             folder,
             npm: false,
+            entry: Value::from(spec),
         })
     }
 
@@ -336,6 +353,82 @@ impl Provider {
         }
         files
     }
+}
+
+/// What the npm install `package` of `source` is, in words, where it is the version the spec
+/// asks: a spec with no version is what is on disk; one with an exact version must be that one.
+/// A range or a tag is refused, since Pi installs at its start when what is on disk does not
+/// satisfy it, and the kit holds to what it copied. `Err` is why, in words.
+pub fn npm_copy(
+    provider: &Provider,
+    source: &Source,
+    package: &Path,
+) -> std::result::Result<String, String> {
+    let on_disk = fs::read(package.join("package.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|manifest| manifest["version"].as_str().map(str::to_owned))
+        .ok_or_else(|| "has a package.json that names no version".to_owned())?;
+    match provider.npm_version(&source.spec) {
+        None => Ok(format!("npm, version {on_disk}")),
+        Some(asked) if asked == on_disk => Ok(format!("npm, version {on_disk}")),
+        Some(asked) if is_exact(asked) => Err(format!(
+            "is version {on_disk}, and `{}` asks {asked}",
+            source.spec
+        )),
+        Some(asked) => Err(format!(
+            "is version {on_disk}, and `{}` asks `{asked}`, not an exact version, which the kit \
+             cannot hold to what is on disk",
+            source.spec
+        )),
+    }
+}
+
+/// Whether `version` is an exact one (`1.4.24`, `1.5.0-beta.1`), not a range or a tag.
+fn is_exact(version: &str) -> bool {
+    let core = version.split(['-', '+']).next().unwrap_or_default();
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// What the git checkout `package` is, in words (its commit, clean), where nothing in it is
+/// changed or is a file of no commit: Pi loads the files as they are, and a checkout that is
+/// not its commit's is bytes no source names. Read with `--no-optional-locks`, which writes
+/// nothing in the owner's checkout. `Err` is why, in words.
+pub fn git_copy(package: &Path) -> std::result::Result<String, String> {
+    let git = |args: &[&str]| -> std::result::Result<String, String> {
+        let ran = crate::process::Run::new("git")
+            .arg("--no-optional-locks")
+            .arg("-C")
+            .arg(package)
+            .args(args.iter().copied())
+            .finding_programs()
+            .inheriting_env()
+            .run()
+            .map_err(|why| format!("could not be read with git ({why})"))?;
+        if ran.code != Some(0) {
+            return Err(format!(
+                "is no git checkout git can read ({})",
+                ran.stderr.trim()
+            ));
+        }
+        Ok(ran.stdout)
+    };
+    let commit = git(&["rev-parse", "HEAD"])?.trim().to_owned();
+    let changed: Vec<String> = git(&["status", "--porcelain=v1", "--untracked-files=all"])?
+        .lines()
+        .map(|line| line.get(3..).unwrap_or(line).to_owned())
+        .collect();
+    if !changed.is_empty() {
+        return Err(format!(
+            "is not clean at commit {commit}: {} differ from it",
+            changed.join(", ")
+        ));
+    }
+    Ok(format!("a git checkout at commit {commit}, clean"))
 }
 
 /// [`Provider`] of the provider `name`, where the kit knows the agent folder gives it to Pi:
@@ -383,6 +476,24 @@ pub fn base_url(config: &[u8]) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:8317".to_owned())
 }
 
+/// `url` as a run may say it: its scheme, host, port and path, and nothing of it that can hold a
+/// secret (a user and password, a query, a fragment).
+pub fn shown_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "a URL with no scheme".to_owned();
+    };
+    let rest = rest.split(['?', '#']).next().unwrap_or_default();
+    let (authority, path) = rest.find('/').map_or((rest, ""), |at| rest.split_at(at));
+    format!("{scheme}://{}{path}", without_user(authority))
+}
+
+/// The authority `authority` without the user and password before its `@`.
+fn without_user(authority: &str) -> &str {
+    authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host)
+}
+
 /// Whether the proxy `base_url` answers, asked before anything is made for a run on the
 /// provider: an `http` URL gets a `GET /v1/models`, which the proxy answers even a keyless
 /// request to (a `401` is an answer); a URL of another scheme is asked for a listener alone.
@@ -391,10 +502,10 @@ pub fn answers(base_url: &str) -> std::result::Result<(), String> {
     use std::io::{Read, Write};
     use std::net::{TcpStream, ToSocketAddrs};
 
-    let Some((scheme, authority)) = base_url.split_once("://") else {
-        return Err(format!("no scheme in {base_url}"));
+    let Some((scheme, rest)) = base_url.split_once("://") else {
+        return Err(format!("no scheme in {}", shown_url(base_url)));
     };
-    let authority = authority.split('/').next().unwrap_or_default();
+    let authority = without_user(rest.split(['/', '?', '#']).next().unwrap_or_default());
     let (host, port) = match authority.rsplit_once(':') {
         Some((host, port)) => (host, port.parse::<u16>().unwrap_or(0)),
         None => (
@@ -406,7 +517,7 @@ pub fn answers(base_url: &str) -> std::result::Result<(), String> {
         ),
     };
     if host.is_empty() || port == 0 {
-        return Err(format!("no host:port in {base_url}"));
+        return Err(format!("no host:port in {}", shown_url(base_url)));
     }
     let address = (host, port)
         .to_socket_addrs()

@@ -178,6 +178,8 @@ struct Plan {
     folders: Vec<PathBuf>,
     /// The variables the windows are given, each the folder below the run's home it names.
     vars: Vec<(&'static str, PathBuf)>,
+    /// The variables the windows are given, each with its value as it is.
+    set: Vec<(&'static str, &'static str)>,
     seeds: Vec<Seed>,
     /// The owner's files hashed before and after.
     watched: Vec<PathBuf>,
@@ -195,6 +197,7 @@ impl Plan {
         Self {
             folders: Vec::new(),
             vars: vec![("CODEX_HOME", "codex".into())],
+            set: Vec::new(),
             seeds: vec![Seed::Copy {
                 from: owner.join("auth.json"),
                 to: "codex/auth.json".into(),
@@ -237,6 +240,12 @@ impl Plan {
         Self {
             folders: Vec::new(),
             vars: vec![("PI_CODING_AGENT_DIR", "pi/agent".into())],
+            // Pi installs a package its settings name and it has not got, and updates and
+            // downloads, at its start unless told not to (Pi 1.5.0, `dist/core/package-manager.js`:
+            // `installMissing` returns before installing when `PI_OFFLINE` is set; `--offline` is
+            // the same): what the run's Pi loads is what the kit copied. It also keeps Pi from
+            // refreshing its built-in model catalogs from the network, and from its update check.
+            set: vec![("PI_OFFLINE", "1")],
             seeds,
             watched,
             records: vec![owner.join("sessions")],
@@ -270,6 +279,7 @@ impl Plan {
                 ("APPDATA", roaming.clone()),
                 ("LOCALAPPDATA", local),
             ],
+            set: Vec::new(),
             seeds: vec![
                 Seed::Copy {
                     from: owner.join("credentials.toml"),
@@ -300,6 +310,7 @@ impl Plan {
         Self {
             folders: Vec::new(),
             vars: Vec::new(),
+            set: Vec::new(),
             seeds: Vec::new(),
             watched: vec![
                 config.join("auth.json"),
@@ -329,6 +340,7 @@ impl Plan {
                 ("XDG_STATE_HOME", "state".into()),
                 ("XDG_CACHE_HOME", "cache".into()),
             ],
+            set: Vec::new(),
             seeds: vec![
                 Seed::Copy {
                     from: data.join("devin").join("credentials.toml"),
@@ -436,6 +448,8 @@ pub struct Isolation {
     /// What `finish` found, kept for the run's report in place of failing the rig, where the run
     /// keeps it ([`Isolation::keeping_what_it_finds`]); none where it fails the rig.
     kept: Option<Mutex<Found>>,
+    /// What making the home said of what it copied ([`Isolation::said`]).
+    said: Mutex<Vec<String>>,
 }
 
 /// What the ends of the rigs that used a home found, for a run that keeps it in its report
@@ -599,6 +613,7 @@ impl Isolation {
             renewed: Mutex::new(Vec::new()),
             made: Mutex::new(None),
             kept: None,
+            said: Mutex::new(Vec::new()),
         }
     }
 
@@ -624,6 +639,24 @@ impl Isolation {
     pub fn keeping_what_it_finds(mut self) -> Self {
         self.kept = Some(Mutex::new(Found::default()));
         self
+    }
+
+    /// What making the home said of what it copied, a line each (the version or the commit of a
+    /// package of Pi's), as the run's log has it.
+    pub fn said(&self) -> Vec<String> {
+        self.said
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Says `line` in the run's log and keeps it among what the making said.
+    fn say(&self, line: String) {
+        let _ = writeln!(std::io::stderr(), "{line}");
+        self.said
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(line);
     }
 
     /// The harness whose home this is.
@@ -776,23 +809,44 @@ impl Isolation {
                 source.folder.display()
             )));
         }
+        let package = from.join(&source.folder);
+        let copied = if source.npm {
+            pi::npm_copy(provider, &source, &package)
+        } else {
+            pi::git_copy(&package)
+        }
+        .map_err(|why| {
+            Error::Daemon(format!(
+                "Pi's `{}` provider cannot be used for this run: {folder}/{} {why}, and Pi would \
+                 install or load what the kit did not copy. Set the package up in your own Pi \
+                 again (pi install), or run on a model of another provider (--models pi=…)",
+                provider.name,
+                source.folder.display(),
+            ))
+        })?;
         let Placed::File { bytes: config, .. } = &placed[0] else {
             unreachable!()
         };
         let base = pi::base_url(config);
         pi::answers(&base).map_err(|why| {
             Error::Daemon(format!(
-                "Pi's `{}` provider is set up, but the proxy it is set for does not answer at {base} ({why}): start it (the local CLIProxyAPI is a Homebrew install's service), or run on a model of another provider (--models pi=…)",
+                "Pi's `{}` provider is set up, but the proxy it is set for does not answer at {} ({why}): start it (the local CLIProxyAPI is a Homebrew install's service), or run on a model of another provider (--models pi=…)",
                 provider.name,
+                pi::shown_url(&base),
             ))
         })?;
+        self.say(format!(
+            "Pi's `{}` package is copied from {folder}/{}: {copied}",
+            provider.name,
+            source.folder.display()
+        ));
         placed.push(Placed::Tree {
             from: from.join(&source.folder),
             to: to.join(&source.folder),
         });
         placed.push(Placed::File {
             to: to.join("settings.json"),
-            bytes: serde_json::json!({ "packages": [source.spec] })
+            bytes: serde_json::json!({ "packages": [source.entry] })
                 .to_string()
                 .into_bytes(),
             login: false,
@@ -1056,6 +1110,12 @@ impl Isolation {
                     home.join(below).to_string_lossy().into_owned(),
                 )
             })
+            .chain(
+                self.plan
+                    .set
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+            )
             .collect()
     }
 }
