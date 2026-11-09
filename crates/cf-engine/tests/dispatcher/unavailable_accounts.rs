@@ -182,6 +182,18 @@ fn the_human_saying_the_account_works_again_brings_the_member_back_and_its_task_
 #[test]
 fn an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_still_full_one_does_not(
 ) {
+    brought_back_by_a_count_of(Level::Ok, 3);
+}
+
+#[test]
+fn an_allowance_nearly_spent_brings_an_unavailable_member_back_too() {
+    // A count past 95 percent (`Level::Low`) holds no member (T-1356): it is an allowance.
+    brought_back_by_a_count_of(Level::Low, 96);
+}
+
+/// A member whose account refused for what no wait cures is back once the harness shows a count
+/// that is not used up (`level`, `used` percent), and not before.
+fn brought_back_by_a_count_of(level: Level, used: u64) {
     // Muse's `usage` says the account has an allowance (MUS-23): that is the harness's own word
     // that the refusal is over, and no human's is needed. A count that says used up is not.
     let context = Context::new();
@@ -209,7 +221,7 @@ fn an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_stil
         "a count used up is no allowance"
     );
     context.adapter.with("zeus-amber-pine", |agent| {
-        agent.quota = Some(Arc::new(usage(Level::Ok, 3)));
+        agent.quota = Some(Arc::new(usage(level, used)));
     });
     context.pass().unwrap();
     assert_eq!(tiers.out_until("zeus"), None, "its allowance is back");

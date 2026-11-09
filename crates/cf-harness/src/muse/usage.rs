@@ -5,7 +5,8 @@
 //! one-shot of `muse serve` always has: `{}`, 2026-10-27). Both name a `window` (the
 //! current block, five hours' worth) and a `weekly` one, each with `usedPercent` and
 //! `resetsAtMs`. Read as Codex's windows are: the fullest decides, from 95 percent used
-//! the quota is low, and a window used up is exhausted until its reset.
+//! the quota is called low (information only: it holds no member from work, T-1356), and a
+//! window used up is exhausted until its reset.
 //!
 //! An account with no plan answers `allowance: null, reason: "no_allowance"` (the account of
 //! 2026-10-26, T-705): it is unavailable before any turn is refused (MUS-23), with no reset.
@@ -27,7 +28,8 @@ use crate::shared::quota::{date, Level, Quota};
 /// What the human is told of an account that has no allowance (MUS-23).
 pub(crate) const NO_ALLOWANCE: &str = "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code";
 
-/// From this much of a window used, the quota is low (Codex's).
+/// From this much of a window used, the quota is called low (Codex's): information only,
+/// which holds no member from work (T-1356).
 const LOW_PERCENT: f64 = 95.0;
 
 /// What `muse usage --json` is given to answer in, and how much it may say.

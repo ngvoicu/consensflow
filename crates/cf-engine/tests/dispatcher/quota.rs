@@ -1,14 +1,14 @@
 //! The dispatcher watches quota: a member that runs out holds its work with
 //! its window (`quota_waits`), an old refusal in the record is history, a
-//! delivery in flight is queued again, and a member low on quota takes
-//! nothing new.
+//! delivery in flight is queued again, and a member nearly out of quota
+//! works on to the end of it.
 
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Made};
 use cf_engine::ActivityState;
 use cf_ledger::{NewNote, NewQuestion, NewTask};
 use serde_json::json;
 
-use crate::fixtures::{assert_match, exhausted, low, now, placed, soon, Tiers};
+use crate::fixtures::{after, assert_match, exhausted, low, now, participant, placed, soon, Tiers};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["the dispatcher watches quota"];
@@ -189,47 +189,113 @@ fn queues_a_delivery_in_flight_at_the_refusal_again_and_keeps_a_coordinators_own
     );
 }
 
+/// A member of `harness` is given work at 96 percent of its quota, runs out mid-task, and goes
+/// on after the reset. Codex and Muse report their usage ahead of a refusal (`Level::Low` from
+/// 95 percent) and the others only once they refuse: a member of the first two was the one the
+/// hold at 95 percent kept from work, and every harness is held for being out alone.
+fn works_to_the_end_of_its_quota(harness: &str) {
+    {
+        let context = Context::made(Made {
+            harnesses: vec!["claude-code", "pi", "codex", "muse"],
+            ..Made::default()
+        });
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+                "staff": [{ "agent": "zeus", "harness": harness, "role": "worker", "tier": "standard" }],
+            }))
+            .unwrap()
+            .unwrap();
+        let give = |body: &str| {
+            context
+                .create_task(
+                    project.id,
+                    NewTask {
+                        from: "chief".to_owned(),
+                        pool: Some("worker".to_owned()),
+                        tier: Some("standard".to_owned()),
+                        body: body.to_owned(),
+                        ..NewTask::default()
+                    },
+                )
+                .task
+                .number
+        };
+        let task = |number: i64| context.task(project.id, number).task;
+        let first = give("Write the parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(task(first).state, "working", "{harness}");
+
+        // 96 percent of its allowance is used, and the harness says so: nothing holds zeus.
+        context.adapter.quota("zeus", Some(low(96)));
+        context.pass().unwrap();
+        context.adapter.answer("zeus", "done");
+        context.pass().unwrap();
+        let second = give("Write the lexer");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let session = task(second)
+            .assignee
+            .unwrap_or_else(|| panic!("{harness}: T-{second} waits for a member at 96 percent"));
+        assert_match(&session, "^zeus-");
+        assert_eq!(task(second).state, "working", "{harness}");
+        assert_eq!(
+            participant(&context, project.id, "zeus").unwrap().out_until,
+            None,
+            "{harness}: a quota nearly spent is no quota out"
+        );
+
+        // The rest of the allowance goes mid-task: the work waits with its window, as it does
+        // for any harness, and goes on at the reset.
+        let resets_at = after(&context, 3 * 3_600_000);
+        context
+            .adapter
+            .refuse(&session, exhausted(Some(&now(&context)), Some(&resets_at)));
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let held = task(second);
+        assert_eq!(
+            (
+                held.state.as_str(),
+                held.assignee.as_deref(),
+                held.held_until.as_deref()
+            ),
+            ("paused", Some(session.as_str()), Some(resets_at.as_str())),
+            "{harness}: out of quota mid-task, the work waits with zeus"
+        );
+        assert_eq!(
+            participant(&context, project.id, "zeus").unwrap().out_until,
+            Some(resets_at.clone()),
+            "{harness}"
+        );
+        context.advance(3 * 3_600_000 + 60_000);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(
+            placed(&task(second)),
+            ("working", Some(session.as_str())),
+            "{harness}: it goes on after the reset"
+        );
+    }
+}
+
 #[test]
-fn gives_no_new_work_to_a_member_low_on_quota_keeps_one_out_for_an_hour_when_its_reset_is_unknown_and_takes_it_again_after(
+fn a_claude_code_member_is_given_work_runs_out_mid_task_and_goes_on_after_the_reset_as_codex_and_muse_do(
 ) {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus", "diana"]);
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    context.adapter.quota("zeus", Some(low(97)));
-    context.pass().unwrap();
-    context.adapter.answer("zeus", "done");
-    context.pass().unwrap();
-    tiers.open_body("Lexer");
-    context.pass().unwrap();
-    assert_match(&tiers.assignee(2), "^diana-");
-    tiers.open_body("Tests");
-    context.pass().unwrap();
-    assert_match(&tiers.assignee(3), "^diana-");
-    context.advance(2 * 3_600_000);
-    tiers.open_body("Docs");
-    context.pass().unwrap();
-    assert_match(&tiers.assignee(4), "^zeus-");
-    context.pass().unwrap();
-    context.adapter.quota("zeus", Some(exhausted(None, None)));
-    context.pass().unwrap();
-    assert_eq!(
-        (
-            tiers.task(4).task.state,
-            tiers.task(4).task.held_until,
-            tiers.out_until("zeus")
-        ),
-        (
-            "paused".to_owned(),
-            Some(soon(&context, 1)),
-            Some(soon(&context, 1))
-        ),
-        "out of quota mid-task: the work waits with zeus, out for an hour"
-    );
-    held_to(
-        context.close(),
-        SUITES,
-        "gives no new work to a member low on quota, keeps one out for an hour when its reset is unknown, and takes it again after",
-    );
+    works_to_the_end_of_its_quota("claude-code");
+}
+
+#[test]
+fn a_codex_member_at_96_percent_of_its_quota_is_given_work_runs_out_mid_task_and_goes_on_after_the_reset(
+) {
+    works_to_the_end_of_its_quota("codex");
+}
+
+#[test]
+fn a_muse_member_at_96_percent_of_its_quota_is_given_work_runs_out_mid_task_and_goes_on_after_the_reset(
+) {
+    works_to_the_end_of_its_quota("muse");
 }

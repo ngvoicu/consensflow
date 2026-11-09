@@ -1405,7 +1405,7 @@ impl Dispatcher {
             self.follow(participant, record, session)?;
             return self.greet_switched(project, participant, record, session);
         }
-        self.record_quota(record, &owner, observed.quota.clone());
+        self.record_quota(record, observed.quota.clone());
         self.tell_drift(project, participant, record, &observed)?;
         // A chief's turn its busy model refused is the human's to hear, as before (T-1112): the
         // chief has no task to hold and try again, and a hold would lose its turn unheard.
