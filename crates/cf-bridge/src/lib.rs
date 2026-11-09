@@ -893,13 +893,23 @@ impl Bridge {
 
     /// Queues a response. A full writer queue never ends the transport, and a response
     /// is never dropped for waiting: it waits for room for as long as the transport is open,
-    /// and the transport's end releases it. No bound of time or of number is right: a
-    /// request's own deadline is the only one that says when its answer is of no use, and it
-    /// is the daemon's to know (a paste into a Windows window of a hundred thousand
-    /// characters has 206 s); an answer that comes after it is ignored by the daemon, so a
-    /// long wait wastes nothing but the thread, which the handler had already. A peer that
-    /// reads nothing for ever is a wedge, which this does not decide (see the issue "a daemon
-    /// that is alive and reads nothing is not noticed"); the log says it is slow.
+    /// and the transport's end releases it. No bound of time or of number is right: only a
+    /// request's own deadline says when its caller has stopped waiting, and that is the
+    /// daemon's to know (a paste into a Windows window of a hundred thousand characters has
+    /// 206 s).
+    ///
+    /// What the daemon does with an answer that comes late is settle nothing: a request
+    /// settles once, by its id, and its caller was told `deadline` already. That undoes
+    /// nothing the host did. A request that timed out has an unknown outcome (the operation
+    /// may have happened, or may be running still), and an explicit retry is a new request,
+    /// which can repeat the work.
+    ///
+    /// What a long wait costs is the handler's thread, which it had already, and the reply
+    /// it holds. Nothing bounds either while a peer keeps asking and does not read (a probe
+    /// of 256 requests with 96 KiB replies held 228 threads and 63 MiB until the peer's end);
+    /// bounded admission and request-aware cancellation belong with the wedge watchdog (the
+    /// issue "a daemon that is alive and reads nothing is not noticed"). The log says a peer
+    /// is slow.
     fn write_response(&self, encoded: Vec<u8>) -> Result<(), BridgeError> {
         let inner = &self.inner;
         inner.responses_waiting.fetch_add(1, Ordering::AcqRel);

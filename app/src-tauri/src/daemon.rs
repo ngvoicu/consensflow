@@ -31,13 +31,18 @@ pub(crate) const DAEMON_RESTART: Backoff = Backoff {
     cleanup: SHUTDOWN_REAP,
 };
 const DAEMON_STOPPED: &str = "ConsensFlow's daemon stopped while the app was running";
-/// What the person is told once, plainly, while the app starts the daemon again: why the
-/// windows closed and what is paused, before anything else (the page adds that it is
-/// starting it again).
-const DAEMON_STOPPED_RESTARTING: &str = "ConsensFlow's daemon stopped while the app was running, so its windows were closed and your open projects are paused until you resume them";
-/// What the person is told when a window of the daemon that stopped is not proven gone in
-/// time: no other daemon is started beside what may still run.
-const DAEMON_NOT_CLEANED: &str = "ConsensFlow's daemon stopped while the app was running, and a window it started has not ended yet, so it is not started again while that window might still run";
+/// What the person is told while the daemon that stopped has its windows closed, before
+/// anything of them is known to be closed.
+const DAEMON_CLOSING_WINDOWS: &str = "ConsensFlow's daemon stopped; closing its windows…";
+/// What the person is told once every window of the daemon that stopped is proven gone, while
+/// the app starts the daemon again (the page adds that it is starting it).
+const DAEMON_WINDOWS_CLOSED: &str = "ConsensFlow's daemon stopped and its windows are closed.";
+/// What the person is told, once, when the daemon is up again: the new daemon has paused the
+/// projects that were open (its start does it, before it says it is ready).
+const DAEMON_STARTED_AGAIN: &str = "ConsensFlow's daemon was started again. Its windows were closed, and the projects that were open are paused until you resume them.";
+/// What the person is told when the end of a window of the daemon that stopped could not be
+/// confirmed in time: no other daemon is started beside what might still run.
+const DAEMON_NOT_CONFIRMED: &str = "ConsensFlow's daemon stopped, and the end of its windows could not be confirmed, so it was not started again while one of them might still run.";
 /// What the person is told when the app gave up: the restarts did not hold.
 const DAEMON_KEEPS_STOPPING: &str = "ConsensFlow's daemon keeps stopping: it was started again three times, and each time it stopped within a minute";
 /// How long a daemon has to say it is ready (its handle line) before its
@@ -56,6 +61,13 @@ pub(crate) struct DaemonStatus {
     available: bool,
     cause: Option<String>,
     retrying: bool,
+    /// The cause says what the app is doing and nothing follows it: the page does not add
+    /// that the app is starting the daemon again, which it is not yet.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    closing: bool,
+    /// Said once, in the page's status line, when the daemon is up.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notice: Option<String>,
 }
 
 impl DaemonStatus {
@@ -64,6 +76,8 @@ impl DaemonStatus {
             available: true,
             cause: None,
             retrying: false,
+            closing: false,
+            notice: None,
         }
     }
 
@@ -72,7 +86,35 @@ impl DaemonStatus {
             available: false,
             cause: Some(cause.to_string()),
             retrying,
+            closing: false,
+            notice: None,
         }
+    }
+
+    /// The daemon stopped and its windows are being closed.
+    fn closing_windows() -> Self {
+        Self {
+            closing: true,
+            ..Self::down(DAEMON_CLOSING_WINDOWS, true)
+        }
+    }
+
+    /// Every window of the daemon that stopped is proven gone: the daemon is started again.
+    fn windows_closed() -> Self {
+        Self::down(DAEMON_WINDOWS_CLOSED, true)
+    }
+
+    /// The daemon is up again after it stopped.
+    fn started_again() -> Self {
+        Self {
+            notice: Some(DAEMON_STARTED_AGAIN.to_string()),
+            ..Self::up()
+        }
+    }
+
+    /// The end of the old daemon's windows could not be confirmed: nothing is started.
+    fn not_confirmed() -> Self {
+        Self::down(DAEMON_NOT_CONFIRMED, false)
     }
 }
 
@@ -263,7 +305,7 @@ impl Daemon {
     fn run(self: &Arc<Self>, starter: &DaemonStarter, panes: &PaneTable, backoff: Backoff) {
         let mut wait = backoff.first;
         loop {
-            let Err(failure) = self.attempt(starter) else {
+            let Err(failure) = self.attempt(starter, false) else {
                 return;
             };
             self.fail(&failure);
@@ -291,7 +333,11 @@ impl Daemon {
 
     /// One start. What it starts is the daemon from then on, unless the app
     /// began to stop meanwhile, which stops it again.
-    fn attempt(self: &Arc<Self>, starter: &DaemonStarter) -> Result<(), DaemonFailure> {
+    fn attempt(
+        self: &Arc<Self>,
+        starter: &DaemonStarter,
+        again: bool,
+    ) -> Result<(), DaemonFailure> {
         let start = {
             let mut state = self.lock();
             state.starts += 1;
@@ -321,7 +367,14 @@ impl Daemon {
             self.stopped(state);
             return Ok(());
         }
-        self.change(&mut state, DaemonStatus::up());
+        // A daemon started again says what became of the windows and the projects once, when
+        // it is up: its start has paused the projects that were open by then.
+        let status = if again {
+            DaemonStatus::started_again()
+        } else {
+            DaemonStatus::up()
+        };
+        self.change(&mut state, status);
         Ok(())
     }
 
@@ -356,10 +409,8 @@ impl Daemon {
             self.change(&mut state, DaemonStatus::down(DAEMON_KEEPS_STOPPING, false));
             return;
         }
-        self.change(
-            &mut state,
-            DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
-        );
+        // Said as it is: the windows are being closed, and nothing is closed yet.
+        self.change(&mut state, DaemonStatus::closing_windows());
         let old = state.daemon.take();
         drop(state);
         let daemon = Arc::clone(self);
@@ -395,19 +446,22 @@ impl Daemon {
         match reap_until_clean(&restart.panes, restart.backoff.cleanup) {
             Reaped::Clean => {}
             Reaped::TooLate | Reaped::Unconfirmed => {
-                self.fail(&DaemonFailure {
-                    cause: DAEMON_NOT_CLEANED.to_string(),
-                    retry: false,
-                });
+                // The end of the windows is not confirmed: that is what is said, and the
+                // person is asked to quit.
+                eprintln!("consensflow: {DAEMON_NOT_CONFIRMED}");
+                self.tell(DaemonStatus::not_confirmed());
                 return;
             }
         }
+        // Every window is proven gone: now it is true to say they are closed, and that the
+        // daemon is being started.
+        self.tell(DaemonStatus::windows_closed());
         let mut wait = restart.backoff.first;
         loop {
             if self.lock().stopping {
                 return;
             }
-            let Err(failure) = self.attempt(&restart.starter) else {
+            let Err(failure) = self.attempt(&restart.starter, true) else {
                 return;
             };
             let spent = {
@@ -1049,15 +1103,16 @@ mod tests {
         daemon.start(starter, Arc::clone(&panes), QUICK);
 
         let mut told = Vec::new();
-        for _ in 0..3 {
-            told.push(heard.recv_timeout(Duration::from_secs(60)).expect("told"));
+        for _ in 0..4 {
+            told.push(heard.recv_timeout(Duration::from_secs(25)).expect("told"));
         }
         assert_eq!(
             told,
             [
                 DaemonStatus::up(),
-                DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
-                DaemonStatus::up(),
+                DaemonStatus::closing_windows(),
+                DaemonStatus::windows_closed(),
+                DaemonStatus::started_again(),
             ]
         );
         assert_eq!(starts.load(Ordering::SeqCst), 2, "started once more");
@@ -1274,14 +1329,20 @@ mod tests {
             heard
                 .recv_timeout(Duration::from_secs(30))
                 .expect("stopped"),
-            DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true)
+            DaemonStatus::closing_windows()
         );
         // The new daemon comes up while the launch is still held, and the launch is let go.
         assert_eq!(
             heard
                 .recv_timeout(Duration::from_secs(30))
+                .expect("windows closed"),
+            DaemonStatus::windows_closed()
+        );
+        assert_eq!(
+            heard
+                .recv_timeout(Duration::from_secs(30))
                 .expect("up again"),
-            DaemonStatus::up()
+            DaemonStatus::started_again()
         );
         held.release();
         thread::sleep(Duration::from_millis(500));
@@ -1337,15 +1398,16 @@ mod tests {
         daemon.start(starter, Arc::clone(&panes), QUICK);
 
         let mut told = Vec::new();
-        for _ in 0..3 {
-            told.push(heard.recv_timeout(Duration::from_secs(30)).expect("told"));
+        for _ in 0..4 {
+            told.push(heard.recv_timeout(Duration::from_secs(25)).expect("told"));
         }
         assert_eq!(
             told,
             [
                 DaemonStatus::up(),
-                DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
-                DaemonStatus::up(),
+                DaemonStatus::closing_windows(),
+                DaemonStatus::windows_closed(),
+                DaemonStatus::started_again(),
             ]
         );
         assert_eq!(
@@ -1402,15 +1464,15 @@ mod tests {
             told,
             [
                 DaemonStatus::up(),
-                DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
-                DaemonStatus::down(DAEMON_NOT_CLEANED, false),
+                DaemonStatus::closing_windows(),
+                DaemonStatus::not_confirmed(),
             ]
         );
         thread::sleep(Duration::from_millis(300));
         assert_eq!(starts.load(Ordering::SeqCst), 1, "started again");
         assert_eq!(
             daemon.connection().err().as_deref(),
-            Some(DAEMON_NOT_CLEANED)
+            Some(DAEMON_NOT_CONFIRMED)
         );
         wait_until_gone(pid);
     }
@@ -1432,26 +1494,20 @@ mod tests {
         daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
 
         let mut told = Vec::new();
-        for _ in 0..8 {
-            told.push(heard.recv_timeout(Duration::from_secs(10)).expect("told"));
+        for _ in 0..11 {
+            told.push(heard.recv_timeout(Duration::from_secs(20)).expect("told"));
         }
-        let (up, restarting) = (
-            DaemonStatus::up(),
-            DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
-        );
-        assert_eq!(
-            told,
-            [
-                up.clone(),
-                restarting.clone(),
-                up.clone(),
-                restarting.clone(),
-                up.clone(),
-                restarting,
-                up,
-                DaemonStatus::down(DAEMON_KEEPS_STOPPING, false),
-            ]
-        );
+        // The first start, then three times: closing, closed, up again; then the quit.
+        let mut every = vec![DaemonStatus::up()];
+        for _ in 0..3 {
+            every.extend([
+                DaemonStatus::closing_windows(),
+                DaemonStatus::windows_closed(),
+                DaemonStatus::started_again(),
+            ]);
+        }
+        every.push(DaemonStatus::down(DAEMON_KEEPS_STOPPING, false));
+        assert_eq!(told, every);
         thread::sleep(Duration::from_millis(300));
         assert_eq!(starts.load(Ordering::SeqCst), 4, "the first and three more");
         assert_eq!(
@@ -1481,8 +1537,8 @@ mod tests {
         daemon.start(starter, Arc::new(PaneTable::new()), backoff);
 
         // Three stops, each after more than `stable`: one restart allowed, and each is given.
-        for _ in 0..6 {
-            let told = heard.recv_timeout(Duration::from_secs(10)).expect("told");
+        for _ in 0..10 {
+            let told = heard.recv_timeout(Duration::from_secs(20)).expect("told");
             assert_ne!(told, DaemonStatus::down(DAEMON_KEEPS_STOPPING, false));
         }
         assert!(starts.load(Ordering::SeqCst) >= 3);
@@ -1563,6 +1619,48 @@ mod tests {
         );
         assert_eq!(starts.load(Ordering::SeqCst), 1);
         panes.kill(&opened.key).expect("kill the pane");
+    }
+
+    /// The page draws a restart from what it is told, in these words and these fields: the
+    /// steps are said as they are true (T-1363), and the page adds that the app is starting the
+    /// daemon only to a status that does not say `closing`.
+    #[test]
+    fn the_page_is_told_each_step_of_a_restart_in_the_words_it_draws() {
+        let said = |status: DaemonStatus| serde_json::to_value(status).expect("JSON");
+        assert_eq!(
+            said(DaemonStatus::closing_windows()),
+            json!({
+                "available": false,
+                "cause": "ConsensFlow's daemon stopped; closing its windows…",
+                "retrying": true,
+                "closing": true
+            })
+        );
+        assert_eq!(
+            said(DaemonStatus::windows_closed()),
+            json!({
+                "available": false,
+                "cause": "ConsensFlow's daemon stopped and its windows are closed.",
+                "retrying": true
+            })
+        );
+        assert_eq!(
+            said(DaemonStatus::started_again()),
+            json!({
+                "available": true,
+                "cause": null,
+                "retrying": false,
+                "notice": "ConsensFlow's daemon was started again. Its windows were closed, and the projects that were open are paused until you resume them."
+            })
+        );
+        assert_eq!(
+            said(DaemonStatus::not_confirmed()),
+            json!({
+                "available": false,
+                "cause": "ConsensFlow's daemon stopped, and the end of its windows could not be confirmed, so it was not started again while one of them might still run.",
+                "retrying": false
+            })
+        );
     }
 
     /// A page that loads after the daemon failed hears it when it subscribes,

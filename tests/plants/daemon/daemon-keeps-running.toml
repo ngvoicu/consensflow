@@ -24,6 +24,7 @@ daemon-input = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start
 panes-fence = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_window_its_opener", "pty::tests::what_is_left", "pty::tests::a_table_is_reaped"]
 engine-slow-window = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unknown_looks::a_window_a_pass_went_on_without"]
 app-daemon-restart = ["cargo", "xtask", "app", "test", "daemon::tests::"]
+page-restart-steps = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says a restart of the daemon in its steps"]
 
 [[plant]]
 name = "daemon keeps running: an event is refused when the writer queue is full"
@@ -339,11 +340,91 @@ runs = ["app-daemon-restart"]
 [[plant.edit]]
 file = "app/src-tauri/src/daemon.rs"
 find = '''
-                    cause: DAEMON_NOT_CLEANED.to_string(),
-                    retry: false,
-                });
+                self.tell(DaemonStatus::not_confirmed());
                 return;'''
 replace = '''
-                    cause: DAEMON_NOT_CLEANED.to_string(),
-                    retry: false,
-                });'''
+                self.tell(DaemonStatus::not_confirmed());'''
+
+[[plant]]
+name = "daemon keeps running: the restart says the windows are closed while they are being closed"
+meant = "a_daemon_that_stops_mid_session_is_started_again_after_its_windows_are_closed"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        self.change(&mut state, DaemonStatus::closing_windows());"
+replace = "        self.change(&mut state, DaemonStatus::windows_closed());"
+
+[[plant]]
+name = "daemon keeps running: the restart never says the windows are closed"
+meant = "a_daemon_that_stops_mid_session_is_started_again_after_its_windows_are_closed"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        self.tell(DaemonStatus::windows_closed());"
+replace = ""
+
+[[plant]]
+name = "daemon keeps running: the daemon started again says nothing of its windows and projects"
+meant = "a_daemon_that_stops_mid_session_is_started_again_after_its_windows_are_closed"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        let status = if again {"
+replace = "        let status = if again && false {"
+
+[[plant]]
+name = "daemon keeps running: a refusal says the windows are closed"
+meant = "a_daemon_is_not_started_again_beside_a_window_that_is_not_proven_gone"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "                self.tell(DaemonStatus::not_confirmed());"
+replace = "                self.tell(DaemonStatus::windows_closed());"
+
+[[plant]]
+name = "daemon keeps running: the words of the closing step are changed to say what is not yet true"
+meant = "the_page_is_told_each_step_of_a_restart_in_the_words_it_draws"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''const DAEMON_CLOSING_WINDOWS: &str = "ConsensFlow's daemon stopped; closing its windows…";'''
+replace = '''const DAEMON_CLOSING_WINDOWS: &str = "ConsensFlow's daemon stopped and its windows are closed.";'''
+
+[[plant]]
+name = "daemon keeps running: the closing step does not tell the page that nothing follows it"
+meant = "the_page_is_told_each_step_of_a_restart_in_the_words_it_draws"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "            closing: true,\n            ..Self::down(DAEMON_CLOSING_WINDOWS, true)"
+replace = "            closing: false,\n            ..Self::down(DAEMON_CLOSING_WINDOWS, true)"
+
+[[plant]]
+name = "daemon keeps running: the page says it is starting the daemon while it closes the windows"
+meant = "says a restart of the daemon in its steps, and each thing only once it is true"
+runs = ["page-restart-steps"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''
+    ? closing
+      ? []
+      : [' Starting it again…']'''
+replace = '''
+    ? [' Starting it again…']'''
+
+[[plant]]
+name = "daemon keeps running: the page does not say what became of the windows and the projects"
+meant = "says a restart of the daemon in its steps, and each thing only once it is true"
+runs = ["page-restart-steps"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "    if (notice) say(notice, 'info', RESTART_NOTE_MS)"
+replace = ""
