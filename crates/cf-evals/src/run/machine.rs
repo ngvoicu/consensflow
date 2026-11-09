@@ -280,8 +280,11 @@ fn isolation(harness: Harness, home: &Path, seated: &Seated) -> Support<Option<I
     if !seated.real(harness) {
         return Ok(None);
     }
-    let made =
-        Isolation::of_machine_for(harness, home, seated.planned, &seated.models(Harness::Pi))?;
+    // An eval's logins last its planned length and its own margin ([`super::login::MARGIN`], the
+    // half hour its Claude Code's login is held to); the kit adds its own, shorter one to what it
+    // is asked for, so it is asked for the rest.
+    let run = super::login::lasting(seated.planned).saturating_sub(cf_e2e::live::isolation::MARGIN);
+    let made = Isolation::of_machine_for(harness, home, run, &seated.models(Harness::Pi))?;
     Ok(made.map(Isolation::keeping_what_it_finds))
 }
 

@@ -2,7 +2,8 @@
 # `cf-evals/src/run/machine.rs` built its installs bare, so an eval's Pi, Codex and Devin windows
 # ran for hours on the owner's own login folders, and its rig gave every window the owner's
 # `CODEX_HOME`. Now each harness with a real window gets the kit's home (`live::isolation`), Pi's
-# with the logins of the run's own Pi models for the planned length and the kit's 30 minutes, and
+# with the logins of the run's own Pi models for the planned length and the evals' 30 minutes (the
+# kit's own margin is 10 since T-1067, so an eval asks it for the rest, T-1358), and
 # what the homes find at the end (the owner's hashes before and after, a file changed, a login
 # written again) is kept for the eval's report instead of failing a rig of hours at its end. The
 # guard (`tests/cli/live_homes.rs`) covers the evals now. One plant takes one rule out; a test of
@@ -176,3 +177,13 @@ runs = ["ei-kit-isolation"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''                (Some(provider), Some(held)) if !held.contains(&provider) => held.push(provider),'''
 replace = '''                (Some(provider), Some(held)) if held.is_empty() => held.push(provider),'''
+
+[[plant]]
+name = "evals isolation: an eval's Pi home is asked for the kit's margin alone"
+meant = "an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour"
+runs = ["ei-evals-machine"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''    let run = super::login::lasting(seated.planned).saturating_sub(cf_e2e::live::isolation::MARGIN);'''
+replace = '''    let run = seated.planned;'''
