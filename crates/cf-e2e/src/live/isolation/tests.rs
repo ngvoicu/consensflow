@@ -1387,11 +1387,12 @@ fn off_a_test_machine_an_ended_pi_entry_is_not_renewed_but_refused_as_it_always_
     assert_eq!(run.owner.made(), 0);
     // A home made for the machine renews only where the runner said it is on a test machine.
     let home = run.owner.home.path();
-    let on = |machine| Isolation::of_machine_on(machine, Harness::Pi, home, hours(1));
+    let models = ["openai/gpt-6-luna".to_owned()];
+    let on = |machine| Isolation::of_machine_on(machine, Harness::Pi, home, hours(1), &models);
     assert!(on(None).unwrap().unwrap().renewal.is_none());
     assert!(on(Some(zeewin2())).unwrap().unwrap().renewal.is_some());
     // Codex is not covered by the rule: its logins are not renewed anywhere.
-    let codex = Isolation::of_machine_on(Some(zeewin2()), Harness::Codex, home, hours(1));
+    let codex = Isolation::of_machine_on(Some(zeewin2()), Harness::Codex, home, hours(1), &[]);
     assert!(codex.unwrap().unwrap().renewal.is_none());
 }
 
