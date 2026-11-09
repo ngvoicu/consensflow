@@ -633,6 +633,22 @@ fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and
     }
 }
 
+/// A package's files keep their mode in the run's copy: a provider that runs an executable it
+/// bundles would else be refused by the system in the run (T-1373 item 8).
+#[cfg(unix)]
+#[test]
+fn a_copied_pi_package_keeps_each_files_mode() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let below = "npm/node_modules/@router-for-me/pi-cliproxyapi-provider/bin/helper";
+    let helper = owner.path(&format!(".pi/agent/{below}"));
+    write(&helper, "#!/bin/sh\necho helper\n");
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+    let isolation = owner.pi("cliproxyapi/muse-spark-1.3-contributor", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    assert_eq!(mode(&home.join(format!("pi/agent/{below}"))), 0o755);
+}
+
 /// A git checkout of `folder`'s files, committed, as Pi's install leaves one: its commit.
 fn git_checkout(folder: &Path) -> String {
     let git = |args: &[&str]| {

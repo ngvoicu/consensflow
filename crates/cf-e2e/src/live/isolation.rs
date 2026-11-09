@@ -1064,6 +1064,11 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
             copy_tree(&entry_from, &entry_to)?;
         } else {
             files::copy(&entry_from, &entry_to)?;
+            // With its mode: an executable the package bundles still runs (T-1373).
+            let permissions = fs::metadata(&entry_from)
+                .map_err(Error::file("read", &entry_from))?
+                .permissions();
+            fs::set_permissions(&entry_to, permissions).map_err(Error::file("write", &entry_to))?;
         }
     }
     Ok(())
