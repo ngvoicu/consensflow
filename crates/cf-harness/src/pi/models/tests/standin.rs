@@ -91,15 +91,9 @@ impl StandIn {
     /// The read, for a Pi that needs no clock.
     pub fn read(&self, fetch: bool) -> Result<ModelListing, String> {
         eventually(Box::pin(async {
-            listed(
-                &self.env,
-                &*self.processes,
-                &*self.time,
-                fetch,
-                Settle::No,
-            )
-            .await
-            .map_err(String::from)
+            listed(&self.env, &*self.processes, &*self.time, fetch, Settle::No)
+                .await
+                .map_err(String::from)
         }))
     }
 
