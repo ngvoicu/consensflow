@@ -66,7 +66,7 @@ fn a_process_that_began_when_its_note_says_is_the_windows() {
         window.id(),
         &process::started(window.id()).unwrap(),
     );
-    let left = left_behind(&file, Duration::from_millis(200)).expect("a window was left");
+    let left = left_behind(&file, Duration::from_millis(200), SLEEPER).expect("a window was left");
     assert!(left.starts_with(&window.id().to_string()), "{left}");
 }
 
@@ -83,7 +83,10 @@ fn a_program_that_took_an_ended_windows_number_is_none_of_the_windows() {
         squatter.id(),
         "a start that is not this process's",
     );
-    assert_eq!(left_behind(&file, Duration::from_millis(200)), None);
+    assert_eq!(
+        left_behind(&file, Duration::from_millis(200), SLEEPER),
+        None
+    );
 }
 
 #[cfg(unix)]
