@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use cf_bridge::{Bridge, BridgeBuilder, BridgeError};
-use cf_panes::headless::reap_all;
+use cf_panes::headless::{reap_until_clean, Reaped};
 use cf_panes::pty::PaneTable;
 
 use crate::daemon_command::LoginLookup;
-use crate::runtime::{finish_before_deadline, SHUTDOWN_DRAIN};
+use crate::runtime::SHUTDOWN_REAP;
 
 /// How long the daemon gets to stop on its own before it is killed.
 pub(crate) const DAEMON_STOP_GRACE: Duration = Duration::from_secs(2);
@@ -28,12 +28,16 @@ pub(crate) const DAEMON_RESTART: Backoff = Backoff {
     most: Duration::from_secs(30),
     restarts: 3,
     stable: Duration::from_secs(60),
+    cleanup: SHUTDOWN_REAP,
 };
 const DAEMON_STOPPED: &str = "ConsensFlow's daemon stopped while the app was running";
 /// What the person is told once, plainly, while the app starts the daemon again: why the
 /// windows closed and what is paused, before anything else (the page adds that it is
 /// starting it again).
 const DAEMON_STOPPED_RESTARTING: &str = "ConsensFlow's daemon stopped while the app was running, so its windows were closed and your open projects are paused until you resume them";
+/// What the person is told when a window of the daemon that stopped is not proven gone in
+/// time: no other daemon is started beside what may still run.
+const DAEMON_NOT_CLEANED: &str = "ConsensFlow's daemon stopped while the app was running, and a window it started has not ended yet, so it is not started again while that window might still run";
 /// What the person is told when the app gave up: the restarts did not hold.
 const DAEMON_KEEPS_STOPPING: &str = "ConsensFlow's daemon keeps stopping: it was started again three times, and each time it stopped within a minute";
 /// How long a daemon has to say it is ready (its handle line) before its
@@ -116,6 +120,9 @@ pub(crate) struct Backoff {
     most: Duration,
     restarts: u32,
     stable: Duration,
+    /// How long a start again waits for the windows of the daemon that stopped to be
+    /// proven gone ([`Daemon::restart`]).
+    cleanup: Duration,
 }
 
 /// The daemon as the app holds it, and what the page knows of it.
@@ -354,12 +361,11 @@ impl Daemon {
             DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
         );
         let old = state.daemon.take();
-        let bridge = state.bridge.clone();
         drop(state);
         let daemon = Arc::clone(self);
         let spawned = thread::Builder::new()
             .name("consensflow-daemon-restart".to_string())
-            .spawn(move || daemon.restart(&restart, old, bridge));
+            .spawn(move || daemon.restart(&restart, old));
         if let Err(error) = spawned {
             self.fail(&DaemonFailure {
                 cause: format!("ConsensFlow's daemon could not be started again: {error}"),
@@ -372,18 +378,30 @@ impl Daemon {
     /// as a quit closes them (no other daemon knows what they were told, or the token each
     /// holds), and a start follows, waiting longer after each that fails, until the
     /// restarts in a row are spent.
-    fn restart(self: &Arc<Self>, restart: &Restart, old: Option<Child>, bridge: Option<Bridge>) {
+    ///
+    /// **No daemon starts while a window of the old one can still run.** The windows are
+    /// closed and every close is waited for ([`reap_until_clean`]), those that had already
+    /// taken a pane out of the table (a `pane.kill` using its grace) and what came into it
+    /// meanwhile; a launch of the old daemon that reaches the table late is refused there
+    /// (`register_fenced_pane_handlers`), so nothing is left to wait for. The wait is
+    /// `Backoff::cleanup`, the time the quit gives the same work: a program is given its
+    /// grace and then killed. A window not proven gone by then (a program that cannot be
+    /// ended, a close that does not return) leaves the daemon down, and the person is told
+    /// to quit, which ends the app's processes.
+    fn restart(self: &Arc<Self>, restart: &Restart, old: Option<Child>) {
         if let Some(mut old) = old {
             stop_daemon(&mut old);
         }
-        // A launch the old daemon had asked for finishes first, as a quit's does: the pane it
-        // opens after the windows close would be a window of no daemon, running for good.
-        if let Some(bridge) = bridge {
-            finish_before_deadline(SHUTDOWN_DRAIN, move || {
-                let _ = bridge.wait_launches_closed();
-            });
+        match reap_until_clean(&restart.panes, restart.backoff.cleanup) {
+            Reaped::Clean => {}
+            Reaped::TooLate | Reaped::Unconfirmed => {
+                self.fail(&DaemonFailure {
+                    cause: DAEMON_NOT_CLEANED.to_string(),
+                    retry: false,
+                });
+                return;
+            }
         }
-        reap_all(&restart.panes);
         let mut wait = restart.backoff.first;
         loop {
             if self.lock().stopping {
@@ -660,15 +678,12 @@ impl Daemon {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
     use cf_proto::bridge::Role;
-    #[cfg(unix)]
     use std::collections::HashMap;
     #[cfg(unix)]
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[cfg(unix)]
     use portable_pty::PtySize;
     use serde_json::json;
     use tauri::ipc::Channel;
@@ -688,6 +703,7 @@ mod tests {
         most: Duration::from_millis(40),
         restarts: 3,
         stable: Duration::from_secs(30),
+        cleanup: Duration::from_secs(10),
     };
 
     /// What the page hears of the daemon, as a test hears it.
@@ -992,19 +1008,15 @@ mod tests {
     /// launched with is the old one's, and what it was told the board was is gone with it), so
     /// they are closed as a quit closes them first, the new daemon takes the board from the
     /// ledger as at any start, and the page is told, once, in plain words.
-    #[cfg(unix)]
     #[test]
     fn a_daemon_that_stops_mid_session_is_started_again_after_its_windows_are_closed() {
         let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
+        let (argv, folder) = a_program_that_runs_on();
         panes
             .open(
-                Path::new("/tmp"),
-                &[
-                    "/bin/sh".to_string(),
-                    "-c".to_string(),
-                    "sleep 30".to_string(),
-                ],
+                folder.path(),
+                &argv,
                 &HashMap::new(),
                 PtySize {
                     rows: 24,
@@ -1027,9 +1039,9 @@ mod tests {
                 .expect("seen")
                 .push(table.list().map_or(usize::MAX, |open| open.len()));
             if start == 0 {
-                stand_in_core(true, "sleep 0.3", closed)
+                stand_in_over(&table, &[], Then::StopAfter(300), closed)
             } else {
-                stand_in_core(true, "while read -r line; do :; done", closed)
+                stand_in_over(&table, &[], Then::StayUp, closed)
             }
         });
         let (report, heard) = listener();
@@ -1038,7 +1050,7 @@ mod tests {
 
         let mut told = Vec::new();
         for _ in 0..3 {
-            told.push(heard.recv_timeout(Duration::from_secs(10)).expect("told"));
+            told.push(heard.recv_timeout(Duration::from_secs(60)).expect("told"));
         }
         assert_eq!(
             told,
@@ -1069,89 +1081,277 @@ mod tests {
         }
     }
 
-    /// A launch the dead daemon had asked for is finished before the windows close: the pane it
-    /// opens after the close would be a window of no daemon, running for good. The quit waits for
-    /// its admitted launches as it reaps ([`AppRuntime::finish_shutdown`]); a start again does.
+    /// What a stand-in daemon does once it has said its handle line and its frames.
+    #[derive(Clone, Copy)]
+    enum Then {
+        /// Stops after this many milliseconds (its input is closed with it).
+        StopAfter(u64),
+        /// Reads its input to the end, and stops with it.
+        StayUp,
+    }
+
+    /// The command of a stand-in for `cf ui --json` on either system: a shell on a Mac, a
+    /// PowerShell on Windows. It prints its handle line, then each of `frames` (what the
+    /// daemon asks of the pane host), then does `then`.
+    fn stand_in_command(frames: &[String], then: Then) -> Command {
+        let handle = r#"{"url":"http://localhost:1/","token":"t"}"#;
+        #[cfg(unix)]
+        {
+            let mut script = format!("printf '%s\\n' '{handle}'; ");
+            for frame in frames {
+                script.push_str(&format!("printf '%s\\n' '{frame}'; "));
+            }
+            script.push_str(&match then {
+                Then::StopAfter(milliseconds) => format!("sleep {}", milliseconds as f64 / 1000.0),
+                Then::StayUp => "while read -r line; do :; done".to_string(),
+            });
+            let mut command = crate::testing::command("/bin/sh");
+            command.arg("-c").arg(script);
+            command
+        }
+        #[cfg(windows)]
+        {
+            let said = |text: &str| format!("$o.WriteLine('{}'); ", text.replace('\'', "''"));
+            let mut script = format!("$o=[Console]::Out; {}", said(handle));
+            for frame in frames {
+                script.push_str(&said(frame));
+            }
+            script.push_str("$o.Flush(); ");
+            script.push_str(&match then {
+                Then::StopAfter(milliseconds) => {
+                    format!("Start-Sleep -Milliseconds {milliseconds}")
+                }
+                Then::StayUp => "while ($null -ne [Console]::In.ReadLine()) {}".to_string(),
+            });
+            let mut command = crate::testing::command("powershell.exe");
+            command
+                .args(["-NoProfile", "-NonInteractive", "-Command"])
+                .arg(script);
+            command
+        }
+    }
+
+    /// A stand-in for `cf ui --json` whose bridge answers with the app's own pane handlers over
+    /// `panes` (what the app registers), saying `frames` and then doing `then`.
+    fn stand_in_over(
+        panes: &Arc<PaneTable>,
+        frames: &[String],
+        then: Then,
+        closed: Box<dyn Fn() + Send + Sync>,
+    ) -> Result<StartedDaemon, DaemonFailure> {
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        crate::runtime::register_handlers(
+            &mut builder,
+            Arc::clone(panes),
+            arbiter,
+            Arc::new(OutputHub::new()),
+            inputs,
+        );
+        builder.on_close(closed);
+        connect_daemon(
+            stand_in_command(frames, then),
+            builder,
+            Duration::from_secs(30),
+        )
+    }
+
+    /// A program that runs for a while on either system, and a folder to run it in.
+    fn a_program_that_runs_on() -> (Vec<String>, tempfile::TempDir) {
+        #[cfg(unix)]
+        let argv = ["/bin/sh", "-c", "sleep 30"];
+        #[cfg(windows)]
+        let argv = [
+            r"C:\Windows\System32\cmd.exe",
+            "/c",
+            "ping -n 30 127.0.0.1 >nul",
+        ];
+        (
+            argv.iter().map(|word| (*word).to_string()).collect(),
+            tempfile::tempdir().expect("a folder"),
+        )
+    }
+
+    /// A pane whose program ignores the request to end and says its number in `pid_file`,
+    /// and what the daemon says to have it closed: the program is given its grace, which is
+    /// the table's.
     #[cfg(unix)]
+    fn a_pane_that_ignores_the_request_to_end(
+        panes: &Arc<PaneTable>,
+        pid_file: &Path,
+    ) -> (String, i32) {
+        let opened = panes
+            .open(
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    cf_base::fixture::deaf(
+                        "TERM HUP",
+                        &format!("echo $$ > '{}'", pid_file.display()),
+                    ),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open a window");
+        let until = Instant::now() + Duration::from_secs(5);
+        let pid = loop {
+            if let Some(pid) = std::fs::read_to_string(pid_file)
+                .ok()
+                .and_then(|text| text.trim().parse::<i32>().ok())
+            {
+                break pid;
+            }
+            assert!(Instant::now() < until, "the program never said its number");
+            thread::sleep(Duration::from_millis(20));
+        };
+        let kill = format!(
+            r#"{{"v":1,"id":"n-kill","kind":"req","op":"pane.kill","body":{{"id":"{}","generation":{}}}}}"#,
+            opened.key.id, opened.key.generation
+        );
+        (kill, pid)
+    }
+
+    /// Waits until `pid` is gone, so that a test leaves no window behind.
+    #[cfg(unix)]
+    fn wait_until_gone(pid: i32) {
+        let until = Instant::now() + Duration::from_secs(20);
+        while process_exists(pid) && Instant::now() < until {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            !process_exists(pid),
+            "a window of the test is still running"
+        );
+    }
+
+    /// A launch the old daemon asked for and the pane host was slow to begin (a loaded Mac) can
+    /// never open a window once its daemon has stopped: the start again does not wait for it,
+    /// and it is refused where it would insert its pane (T-1349, the reviewer's first probe: the
+    /// new daemon was up at 5 s and the old handler then made a live pane on the closed bridge).
     #[test]
-    fn a_launch_admitted_when_the_daemon_stops_is_finished_before_the_windows_close() {
+    fn a_launch_the_old_daemon_asked_for_opens_no_window_after_it_stopped() {
         let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
-        let release = Arc::new(std::sync::Barrier::new(2));
-        let (entered, admitted) = mpsc::channel();
+        let held = panes.hold_opens();
+        let (argv, folder) = a_program_that_runs_on();
+        let open = json!({"v":1,"id":"n-open","kind":"req","op":"pane.open","body":{
+            "id":"late-pane","generation":1,"cwd":folder.path(),"argv":argv}})
+        .to_string();
         let starts = Arc::new(AtomicUsize::new(0));
-        let (counted, table, held) = (
-            Arc::clone(&starts),
-            Arc::clone(&panes),
-            Arc::clone(&release),
-        );
+        let (counted, table) = (Arc::clone(&starts), Arc::clone(&panes));
         let starter: DaemonStarter = Arc::new(move |closed| {
             if counted.fetch_add(1, Ordering::SeqCst) > 0 {
-                return stand_in_core(true, "while read -r line; do :; done", closed);
+                return stand_in_over(&table, &[], Then::StayUp, closed);
             }
-            let (opening, held, entered) = (Arc::clone(&table), Arc::clone(&held), entered.clone());
-            let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
-            builder.on_launch("pane.open", move |_bridge, _body| {
-                entered.send(()).expect("announce the launch");
-                held.wait();
-                let _reader = opening
-                    .open_at(
-                        cf_panes::pty::PaneKey::new("late-pane", 1),
-                        Path::new("/tmp"),
-                        &[
-                            "/bin/sh".to_string(),
-                            "-c".to_string(),
-                            "sleep 30".to_string(),
-                        ],
-                        &HashMap::new(),
-                        PtySize {
-                            rows: 24,
-                            cols: 80,
-                            pixel_width: 0,
-                            pixel_height: 0,
-                        },
-                    )
-                    .map_err(|error| error.to_string())?;
-                Ok(json!({"ok":true}))
-            });
-            builder.on_close(closed);
-            let mut command = crate::testing::command("/bin/sh");
-            command.arg("-c").arg(
-                r#"printf '%s\n' '{"url":"http://localhost:1/","token":"t"}'; printf '%s\n' '{"v":1,"id":"n-open","kind":"req","op":"pane.open","body":{}}'; sleep 0.3"#,
-            );
-            connect_daemon(command, builder, Duration::from_secs(5))
+            stand_in_over(
+                &table,
+                std::slice::from_ref(&open),
+                Then::StopAfter(300),
+                closed,
+            )
         });
         let (report, heard) = listener();
         let daemon = Daemon::new(report);
         daemon.start(starter, Arc::clone(&panes), QUICK);
 
         assert_eq!(
-            heard.recv_timeout(Duration::from_secs(10)).expect("up"),
+            heard.recv_timeout(Duration::from_secs(30)).expect("up"),
             DaemonStatus::up()
         );
-        admitted
-            .recv_timeout(Duration::from_secs(10))
-            .expect("the launch was admitted");
+        assert!(
+            held.wait_for_opens(1, Duration::from_secs(30)),
+            "the launch never reached the table"
+        );
         assert_eq!(
             heard
-                .recv_timeout(Duration::from_secs(10))
+                .recv_timeout(Duration::from_secs(30))
                 .expect("stopped"),
             DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true)
         );
-        // The launch is still held when the app begins to start the daemon again.
-        thread::sleep(Duration::from_millis(300));
-        release.wait();
+        // The new daemon comes up while the launch is still held, and the launch is let go.
         assert_eq!(
             heard
-                .recv_timeout(Duration::from_secs(10))
+                .recv_timeout(Duration::from_secs(30))
                 .expect("up again"),
             DaemonStatus::up()
         );
-        thread::sleep(Duration::from_millis(300));
+        held.release();
+        thread::sleep(Duration::from_millis(500));
+        let left = panes.list().map(|open| open.len()).ok();
+        let (child, bridge) = daemon.stop().expect("the app stops");
+        if let Some(bridge) = bridge {
+            bridge.close_input();
+        }
+        if let Some(mut child) = child {
+            stop_daemon(&mut child);
+        }
+        let _ = cf_panes::headless::reap_until_clean(&panes, Duration::from_secs(20));
         assert_eq!(
-            panes.list().map(|open| open.len()).ok(),
+            left,
             Some(0),
-            "the window a launch opened after the daemon stopped was left open"
+            "a window of the old daemon runs beside the new one"
+        );
+    }
+
+    /// A window the old daemon had asked to close, whose program is using its grace to end,
+    /// is out of the table and not yet gone: the new daemon does not start until it is
+    /// (T-1349, the reviewer's second probe: it was up with no pane listed and the old process
+    /// alive, its cleanup pending).
+    #[cfg(unix)]
+    #[test]
+    fn a_window_in_its_shutdown_grace_is_gone_before_the_new_daemon_starts() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let home = tempfile::tempdir().expect("home");
+        let panes = Arc::new(PaneTable::closing_within(Duration::from_millis(1500)));
+        let (kill, pid) = a_pane_that_ignores_the_request_to_end(&panes, &home.path().join("pid"));
+        let starts = Arc::new(AtomicUsize::new(0));
+        let alive_at_start = Arc::new(Mutex::new(Vec::new()));
+        let (counted, table, seen) = (
+            Arc::clone(&starts),
+            Arc::clone(&panes),
+            Arc::clone(&alive_at_start),
+        );
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            let start = counted.fetch_add(1, Ordering::SeqCst);
+            seen.lock().expect("seen").push(process_exists(pid));
+            if start > 0 {
+                return stand_in_core(true, "while read -r line; do :; done", closed);
+            }
+            stand_in_over(
+                &table,
+                std::slice::from_ref(&kill),
+                Then::StopAfter(300),
+                closed,
+            )
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+
+        let mut told = Vec::new();
+        for _ in 0..3 {
+            told.push(heard.recv_timeout(Duration::from_secs(30)).expect("told"));
+        }
+        assert_eq!(
+            told,
+            [
+                DaemonStatus::up(),
+                DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
+                DaemonStatus::up(),
+            ]
+        );
+        assert_eq!(
+            *alive_at_start.lock().expect("seen"),
+            [true, false],
+            "the new daemon started beside a window of the old one that still ran"
         );
         let (child, bridge) = daemon.stop().expect("the app stops");
         if let Some(bridge) = bridge {
@@ -1160,6 +1360,59 @@ mod tests {
         if let Some(mut child) = child {
             stop_daemon(&mut child);
         }
+        wait_until_gone(pid);
+    }
+
+    /// When a window of the old daemon is not proven gone in the time a close takes, the daemon
+    /// is not started again: the person is told so and asked to quit, which ends the app's
+    /// processes. What they see: the banner for the restart, then, when the time is out, the
+    /// daemon's stop with the quit it asks for.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_is_not_started_again_beside_a_window_that_is_not_proven_gone() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let home = tempfile::tempdir().expect("home");
+        // The program is given 4 s to end; the restart waits 300 ms for it.
+        let panes = Arc::new(PaneTable::closing_within(Duration::from_secs(4)));
+        let (kill, pid) = a_pane_that_ignores_the_request_to_end(&panes, &home.path().join("pid"));
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (counted, table) = (Arc::clone(&starts), Arc::clone(&panes));
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            stand_in_over(
+                &table,
+                std::slice::from_ref(&kill),
+                Then::StopAfter(300),
+                closed,
+            )
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let backoff = Backoff {
+            cleanup: Duration::from_millis(300),
+            ..QUICK
+        };
+        daemon.start(starter, Arc::clone(&panes), backoff);
+
+        let mut told = Vec::new();
+        for _ in 0..3 {
+            told.push(heard.recv_timeout(Duration::from_secs(30)).expect("told"));
+        }
+        assert_eq!(
+            told,
+            [
+                DaemonStatus::up(),
+                DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
+                DaemonStatus::down(DAEMON_NOT_CLEANED, false),
+            ]
+        );
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "started again");
+        assert_eq!(
+            daemon.connection().err().as_deref(),
+            Some(DAEMON_NOT_CLEANED)
+        );
+        wait_until_gone(pid);
     }
 
     /// A daemon that stops again and again is given up on: the person is asked to quit only

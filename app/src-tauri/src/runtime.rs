@@ -19,19 +19,33 @@ use cf_panes::arbiter::InputArbiter;
 use cf_panes::headless::{reap_all, ENTER, MAX_FRAME_BYTES};
 use cf_panes::input_queue::InputQueue;
 use cf_panes::output_hub::OutputHub;
-use cf_panes::pane_handlers::register_pane_handlers;
+use cf_panes::pane_handlers::register_fenced_pane_handlers;
 use cf_panes::privacy::{watch_privacy_dialogs, PrivacyWatch};
 use cf_panes::pty::{PaneTable, CLOSE_GRACE};
 use cf_proto::bridge::Role;
 
 /// How long quitting, or installing an update, waits for what was admitted
 /// before the daemon stopped to finish.
-pub(crate) const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// How long quitting waits for every window's programs, asked to end, to have:
 /// they are given [`CLOSE_GRACE`] before what is left is killed, and a moment
 /// more to be. (On Windows nothing is asked and nothing waits: they are ended
 /// at once.)
-const SHUTDOWN_REAP: Duration = CLOSE_GRACE.saturating_add(Duration::from_secs(5));
+pub(crate) const SHUTDOWN_REAP: Duration = CLOSE_GRACE.saturating_add(Duration::from_secs(5));
+/// The pane handlers the app answers its daemon's bridge with: one set a daemon, each over
+/// the app's panes, and fenced: a launch of a daemon that has stopped opens no window
+/// ([`register_fenced_pane_handlers`]). (The daemon's tests use this one: what they hold is
+/// what the app runs.)
+pub(crate) fn register_handlers(
+    builder: &mut BridgeBuilder,
+    panes: Arc<PaneTable>,
+    arbiter: Arc<InputArbiter>,
+    output: Arc<OutputHub>,
+    inputs: Arc<InputQueue>,
+) {
+    register_fenced_pane_handlers(builder, panes, arbiter, output, inputs);
+}
+
 /// The page-side name of the daemon's `state.changed`. No dot: Tauri rejects it.
 pub(crate) const PAGE_STATE_EVENT: &str = "state-changed";
 
@@ -78,7 +92,7 @@ impl AppRuntime {
                     }
                 });
                 register_page_events(&mut builder, page_events);
-                register_pane_handlers(
+                register_handlers(
                     &mut builder,
                     Arc::clone(&panes),
                     Arc::clone(&arbiter),

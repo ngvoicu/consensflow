@@ -1,8 +1,8 @@
 //! The writer queue's rule, on every platform: a full queue never ends the
 //! bridge. What the peer has not read waits in order, an event for as long as
-//! the transport is open, a response for [`RESPONSE_WAIT_MS`] at most (then it
-//! is dropped and told of, never the transport), and the reader goes on
-//! meanwhile. The peer here is a channel of bytes in and a gated writer out, so
+//! the transport is open, a response too (never dropped for waiting: only its
+//! request's own deadline says when it is of no use, and that is the peer's), and
+//! the reader goes on meanwhile. The peer here is a channel of bytes in and a gated writer out, so
 //! the cases are the same on the Mac and on Windows.
 
 use std::io::{Read, Write};
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use cf_proto::bridge::Role;
 use serde_json::{json, Value};
 
-use super::{Bridge, BridgeBuilder, BridgeError, MAX_WAITING_RESPONSES, WRITER_QUEUE_CAPACITY};
+use super::{Bridge, BridgeBuilder, BridgeError, WRITER_QUEUE_CAPACITY};
 
 /// What the writer has been given, and whether the peer reads it yet.
 struct GateState {
@@ -253,8 +253,8 @@ fn responses_wait_for_room_and_the_reader_goes_on() {
 }
 
 #[test]
-fn a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge() {
-    let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024).with_response_wait_ms(60));
+fn a_response_waits_for_a_peer_that_reads_late_and_is_never_dropped() {
+    let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024));
     assert_eq!(rig.bridge.event("occupy", json!(null)), Ok(true));
     rig.wait_until_the_writer_is_held();
 
@@ -262,43 +262,136 @@ fn a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge() {
     for index in 0..burst {
         rig.ask_the_unknown(format!("n-{index}"));
     }
-    let open = rig.open_for(Duration::from_millis(500));
-    let told = rig.told_of("dropped");
-
+    // Longer than any bound this once had in a test.
+    let open = rig.open_for(Duration::from_millis(600));
     rig.open_the_gate();
-    // The bridge is alive: a request after the stall is answered.
-    rig.ask_the_unknown("n-after".to_owned());
-    let frames = rig.written(WRITER_QUEUE_CAPACITY);
-    let answered_after = rig
-        .written(WRITER_QUEUE_CAPACITY + 1)
+    let frames = rig.written(burst + 1);
+    let mut answered: Vec<String> = frames
         .iter()
-        .chain(frames.iter())
-        .any(|frame| frame["id"] == "n-after");
+        .filter(|frame| frame["kind"] == "res")
+        .map(|frame| frame["id"].as_str().expect("id").to_owned())
+        .collect();
+    answered.sort();
+    let mut every: Vec<String> = (0..burst).map(|index| format!("n-{index}")).collect();
+    every.sort();
 
-    assert!(open, "a response that waited too long closed the bridge");
-    assert!(told, "the dropped responses were not told of");
-    assert!(answered_after, "the bridge did not answer after the stall");
+    assert!(open, "responses waiting for the peer closed the bridge");
+    assert_eq!(answered, every, "a response was dropped for waiting");
 }
 
 #[test]
-fn the_responses_waiting_for_room_are_capped() {
+fn a_burst_far_over_the_old_cap_loses_no_response() {
     let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024));
     assert_eq!(rig.bridge.event("occupy", json!(null)), Ok(true));
     rig.wait_until_the_writer_is_held();
 
-    let burst = WRITER_QUEUE_CAPACITY + 2 * MAX_WAITING_RESPONSES;
+    // Five times the 128 a cap once allowed to wait.
+    let burst = 5 * 4 * WRITER_QUEUE_CAPACITY;
     for index in 0..burst {
         rig.ask_the_unknown(format!("n-{index}"));
     }
     let open = rig.open_for(Duration::from_millis(500));
-    let waiting = rig.bridge.waiting_responses();
-    let told = rig.told_of("dropped");
+    rig.open_the_gate();
+    let frames = rig.written(burst + 1);
+    let mut answered: Vec<String> = frames
+        .iter()
+        .filter(|frame| frame["kind"] == "res")
+        .map(|frame| frame["id"].as_str().expect("id").to_owned())
+        .collect();
+    answered.sort();
+    answered.dedup();
+
+    assert!(open, "a burst of requests closed the bridge");
+    assert_eq!(answered.len(), burst, "a response of the burst was lost");
+}
+
+#[test]
+fn closing_the_bridge_ends_every_response_that_waits_for_room() {
+    let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024));
+    assert_eq!(rig.bridge.event("occupy", json!(null)), Ok(true));
+    rig.wait_until_the_writer_is_held();
+    for index in 0..(2 * WRITER_QUEUE_CAPACITY) {
+        rig.ask_the_unknown(format!("n-{index}"));
+    }
+    let until = Instant::now() + Duration::from_secs(5);
+    while rig.bridge.waiting_responses() == 0 && Instant::now() < until {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(rig.bridge.waiting_responses() > 0, "nothing waited");
+
+    rig.bridge.close_input();
+    let until = Instant::now() + Duration::from_secs(5);
+    while rig.bridge.waiting_responses() != 0 && Instant::now() < until {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        rig.bridge.waiting_responses(),
+        0,
+        "the transport's end left responses waiting"
+    );
+    rig.open_the_gate();
+}
+
+#[test]
+fn a_bridge_whose_input_ends_ends_every_response_that_waits_for_room() {
+    let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024));
+    assert_eq!(rig.bridge.event("occupy", json!(null)), Ok(true));
+    rig.wait_until_the_writer_is_held();
+    for index in 0..(2 * WRITER_QUEUE_CAPACITY) {
+        rig.ask_the_unknown(format!("n-{index}"));
+    }
+    let until = Instant::now() + Duration::from_secs(5);
+    while rig.bridge.waiting_responses() == 0 && Instant::now() < until {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(rig.bridge.waiting_responses() > 0, "nothing waited");
+
+    // The peer is gone: its input ends, which closes the transport.
+    let Rig {
+        bridge, peer, gate, ..
+    } = rig;
+    drop(peer);
+    let until = Instant::now() + Duration::from_secs(5);
+    while bridge.waiting_responses() != 0 && Instant::now() < until {
+        thread::sleep(Duration::from_millis(5));
+    }
+    let left = bridge.waiting_responses();
+    let (state, changed) = &*gate;
+    state.lock().expect("gate").open = true;
+    changed.notify_all();
+    assert!(
+        bridge.is_closed(),
+        "the end of the input did not close the bridge"
+    );
+    assert_eq!(left, 0, "the transport's end left responses waiting");
+}
+
+#[test]
+fn a_frame_that_waits_for_room_says_so_now_and_then_and_the_bridge_stays_open() {
+    let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024).with_stall_report_ms(100));
+    let sender = rig.bridge.clone();
+    let sending = thread::spawn(move || {
+        for seq in 0..(2 * WRITER_QUEUE_CAPACITY) {
+            sender
+                .event("pane.exit", json!({ "seq": seq }))
+                .expect("an event");
+        }
+    });
+    rig.wait_until_the_writer_is_held();
+    let open = rig.open_for(Duration::from_millis(600));
+    let told = rig.told_of("the peer has taken no frame");
+    let times = rig
+        .told
+        .lock()
+        .expect("told")
+        .iter()
+        .filter(|error| error.to_string().contains("the peer has taken no frame"))
+        .count();
 
     rig.open_the_gate();
-    assert!(open, "a burst of requests closed the bridge");
-    assert!(
-        waiting <= MAX_WAITING_RESPONSES,
-        "{waiting} responses waited at once"
-    );
-    assert!(told, "the responses past the cap were not told of");
+    sending.join().expect("the sender");
+
+    assert!(open, "a frame waiting for room closed the bridge");
+    assert!(told, "a frame that waited was never told of");
+    assert!(times <= 8, "it was told {times} times in 600 ms");
 }

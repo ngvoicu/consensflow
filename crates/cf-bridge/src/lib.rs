@@ -34,18 +34,14 @@ const WRITER_QUEUE_CAPACITY: usize = 32;
 /// room behind a burst of pane output.
 const STREAM_QUEUE_SHARE: usize = WRITER_QUEUE_CAPACITY / 2;
 const DEFAULT_REQUEST_DEADLINE_MS: u64 = 30_000;
-/// How long a response waits for room in the writer queue before it is dropped
-/// (never the transport): twice the longest wait the daemon gives a plain
-/// request (`pane.open`'s 60 s), so the request it answers has stopped waiting
-/// for it by then, and a late answer is dropped by the peer in any case.
-const RESPONSE_WAIT_MS: u64 = 120_000;
-/// How many responses may wait for room at once, each on the thread of its
-/// handler: four queues' worth, well above any burst of the daemon's passes. A
-/// response past it is dropped at once, as one that waited out its time is.
-const MAX_WAITING_RESPONSES: usize = 4 * WRITER_QUEUE_CAPACITY;
 /// How often a frame that waits for room says so, to `on_error`: a peer that
-/// takes nothing is a busy one until it is told of, and the log says it.
+/// takes nothing is a busy one until it is told of, and the log says it. Only a
+/// frame that is still trying to be queued says it: a writer held by one write
+/// with nothing queued behind it has nobody to.
 const STALL_REPORT_MS: u64 = 30_000;
+/// How long a frame that waits for room sleeps between its looks at the queue: a millisecond
+/// for the first hundred, then ten, so that a long wait costs little.
+const FIRST_LOOKS: u32 = 100;
 
 type RequestHandler = dyn Fn(Bridge, Value) -> Result<Value, String> + Send + Sync;
 type EventHandler = dyn Fn(Value) + Send + Sync;
@@ -134,12 +130,12 @@ struct BridgeInner {
     transport_shutdown: Arc<TransportShutdown>,
     max_frame_bytes: usize,
     default_request_deadline: Duration,
-    /// How long a response waits for room ([`RESPONSE_WAIT_MS`]).
-    response_wait: Duration,
-    /// The responses waiting for room now ([`MAX_WAITING_RESPONSES`]).
+    /// The responses waiting for room now.
     responses_waiting: AtomicUsize,
-    /// When a frame that waited for room last said so ([`STALL_REPORT_MS`]), in
-    /// milliseconds since the bridge was built: 0 before any did.
+    /// How often a frame that waits for room says so ([`STALL_REPORT_MS`]).
+    stall_report: Duration,
+    /// When a frame that waited for room last said so, in milliseconds since the
+    /// bridge was built: 0 before any did.
     stalled_told: AtomicU64,
     built: Instant,
 }
@@ -173,7 +169,7 @@ pub struct BridgeBuilder {
     keeps_output: bool,
     max_frame_bytes: usize,
     default_request_deadline: Duration,
-    response_wait: Duration,
+    stall_report: Duration,
 }
 
 impl BridgeBuilder {
@@ -188,13 +184,13 @@ impl BridgeBuilder {
             keeps_output: false,
             max_frame_bytes,
             default_request_deadline: Duration::from_millis(DEFAULT_REQUEST_DEADLINE_MS),
-            response_wait: Duration::from_millis(RESPONSE_WAIT_MS),
+            stall_report: Duration::from_millis(STALL_REPORT_MS),
         }
     }
 
     #[cfg(test)]
-    fn with_response_wait_ms(mut self, milliseconds: u64) -> Self {
-        self.response_wait = Duration::from_millis(milliseconds);
+    fn with_stall_report_ms(mut self, milliseconds: u64) -> Self {
+        self.stall_report = Duration::from_millis(milliseconds);
         self
     }
 
@@ -420,8 +416,8 @@ impl BridgeBuilder {
                 transport_shutdown: shutdown,
                 max_frame_bytes: self.max_frame_bytes,
                 default_request_deadline: self.default_request_deadline,
-                response_wait: self.response_wait,
                 responses_waiting: AtomicUsize::new(0),
+                stall_report: self.stall_report,
                 stalled_told: AtomicU64::new(0),
                 built: Instant::now(),
             }),
@@ -895,32 +891,25 @@ impl Bridge {
         serde_json::to_vec(frame).map_err(|error| BridgeError::MalformedFrame(error.to_string()))
     }
 
-    /// Queues a response. A full writer queue never ends the transport: the
-    /// response waits for room, at most [`RESPONSE_WAIT_MS`] (the peer has stopped
-    /// waiting for it by then, and drops a late one anyway), and no more than
-    /// [`MAX_WAITING_RESPONSES`] wait at once, one thread each. A response that
-    /// does not get in is dropped and told of (`on_error`, at most once in
-    /// [`STALL_REPORT_MS`]): its request ends at its own deadline.
+    /// Queues a response. A full writer queue never ends the transport, and a response
+    /// is never dropped for waiting: it waits for room for as long as the transport is open,
+    /// and the transport's end releases it. No bound of time or of number is right: a
+    /// request's own deadline is the only one that says when its answer is of no use, and it
+    /// is the daemon's to know (a paste into a Windows window of a hundred thousand
+    /// characters has 206 s); an answer that comes after it is ignored by the daemon, so a
+    /// long wait wastes nothing but the thread, which the handler had already. A peer that
+    /// reads nothing for ever is a wedge, which this does not decide (see the issue "a daemon
+    /// that is alive and reads nothing is not noticed"); the log says it is slow.
     fn write_response(&self, encoded: Vec<u8>) -> Result<(), BridgeError> {
         let inner = &self.inner;
-        let waiting = inner.responses_waiting.fetch_add(1, Ordering::AcqRel) + 1;
+        inner.responses_waiting.fetch_add(1, Ordering::AcqRel);
         let _counted = WaitingResponse(&inner.responses_waiting);
-        let wait = if waiting > MAX_WAITING_RESPONSES {
-            Duration::ZERO
-        } else {
-            inner.response_wait
-        };
-        let admitted = self.enqueue_encoded(
+        self.enqueue_encoded(
             encoded,
             Arc::new(AtomicBool::new(false)),
-            Some(Instant::now() + wait),
+            None,
             WRITER_QUEUE_CAPACITY,
         )?;
-        if !admitted {
-            self.tell_stall(&format!(
-                "a response was dropped: the writer queue stayed full ({waiting} responses were waiting)"
-            ));
-        }
         Ok(())
     }
 
@@ -932,7 +921,8 @@ impl Bridge {
             .unwrap_or(u64::MAX)
             .saturating_add(1);
         let told = inner.stalled_told.load(Ordering::Acquire);
-        if told != 0 && now.saturating_sub(told) < STALL_REPORT_MS {
+        let every = u64::try_from(inner.stall_report.as_millis()).unwrap_or(u64::MAX);
+        if told != 0 && now.saturating_sub(told) < every {
             return;
         }
         if inner
@@ -960,6 +950,7 @@ impl Bridge {
             canceled,
         };
         let waiting_since = Instant::now();
+        let mut looks = 0_u32;
         loop {
             if self.inner.output_closed() {
                 return Err(BridgeError::Eof);
@@ -995,14 +986,19 @@ impl Bridge {
                     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         return Ok(false);
                     }
-                    if waiting_since.elapsed() >= Duration::from_millis(STALL_REPORT_MS) {
+                    if waiting_since.elapsed() >= self.inner.stall_report {
                         self.tell_stall(&format!(
                             "the peer has taken no frame for {} s",
                             waiting_since.elapsed().as_secs()
                         ));
                     }
                     job = returned;
-                    thread::sleep(Duration::from_millis(1));
+                    looks = looks.saturating_add(1);
+                    thread::sleep(Duration::from_millis(if looks <= FIRST_LOOKS {
+                        1
+                    } else {
+                        10
+                    }));
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => {
                     let error = BridgeError::Io("bridge writer queue is closed".to_string());

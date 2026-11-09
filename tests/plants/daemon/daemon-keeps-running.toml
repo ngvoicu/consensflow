@@ -21,23 +21,9 @@
 bridge-queue = ["cargo", "test", "--offline", "-p", "cf-bridge", "--lib", "queue_tests::"]
 bridge-read-ahead = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::tests::read_ahead::"]
 daemon-input = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::input::"]
+panes-fence = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_window_its_opener", "pty::tests::what_is_left", "pty::tests::a_table_is_reaped"]
 engine-slow-window = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unknown_looks::a_window_a_pass_went_on_without"]
 app-daemon-restart = ["cargo", "xtask", "app", "test", "daemon::tests::"]
-
-[[plant]]
-name = "daemon keeps running: a response that does not get into the writer queue closes the transport"
-meant = "a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge"
-runs = ["bridge-queue"]
-
-[[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
-find = '''
-        if !admitted {
-            self.tell_stall(&format!('''
-replace = '''
-        if !admitted {
-            self.fail_transport(BridgeError::Io("bridge writer queue is full".to_string()));
-            self.tell_stall(&format!('''
 
 [[plant]]
 name = "daemon keeps running: an event is refused when the writer queue is full"
@@ -76,28 +62,8 @@ replace = '''
             bridge.respond_or_report(frame.id, frame.op, unknown_op_body());'''
 
 [[plant]]
-name = "daemon keeps running: the responses that wait for room are not capped"
-meant = "the_responses_waiting_for_room_are_capped"
-runs = ["bridge-queue"]
-
-[[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
-find = "        let wait = if waiting > MAX_WAITING_RESPONSES {"
-replace = "        let wait = if false && waiting > MAX_WAITING_RESPONSES {"
-
-[[plant]]
-name = "daemon keeps running: a response waits for room for ever"
-meant = "a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge"
-runs = ["bridge-queue"]
-
-[[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
-find = "            Some(Instant::now() + wait),"
-replace = "            None,"
-
-[[plant]]
 name = "daemon keeps running: a peer that takes no frame is never told of"
-meant = "a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge"
+meant = "a_frame_that_waits_for_room_says_so_now_and_then_and_the_bridge_stays_open"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
@@ -176,8 +142,8 @@ runs = ["app-daemon-restart"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon.rs"
-find = "        reap_all(&restart.panes);"
-replace = "        let _ = &restart.panes;"
+find = "        match reap_until_clean(&restart.panes, restart.backoff.cleanup) {"
+replace = "        match Reaped::Clean {"
 
 [[plant]]
 name = "daemon keeps running: a daemon is started again for ever"
@@ -220,14 +186,164 @@ find = "                this.tell_slow(&handle, took / 1000);"
 replace = "                let _ = (&handle, took);"
 
 [[plant]]
-name = "daemon keeps running: a start again does not wait for a launch the old daemon had asked for"
-meant = "a_launch_admitted_when_the_daemon_stops_is_finished_before_the_windows_close"
+name = "daemon keeps running: a response that finds the writer queue full closes the transport"
+meant = "a_burst_far_over_the_old_cap_loses_no_response"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+        self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            WRITER_QUEUE_CAPACITY,
+        )?;
+        Ok(())'''
+replace = '''
+        let admitted = self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            Some(Instant::now()),
+            WRITER_QUEUE_CAPACITY,
+        )?;
+        if !admitted {
+            let error = BridgeError::Io("bridge writer queue is full".to_string());
+            self.fail_transport(error.clone());
+            return Err(error);
+        }
+        Ok(())'''
+
+[[plant]]
+name = "daemon keeps running: no more than 128 responses wait for room, and the rest are dropped"
+meant = "a_burst_far_over_the_old_cap_loses_no_response"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+        self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            WRITER_QUEUE_CAPACITY,
+        )?;
+        Ok(())'''
+replace = '''
+        let waiting = inner.responses_waiting.load(Ordering::Acquire);
+        let wait = if waiting > 128 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs(3600)
+        };
+        self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            Some(Instant::now() + wait),
+            WRITER_QUEUE_CAPACITY,
+        )?;
+        Ok(())'''
+
+[[plant]]
+name = "daemon keeps running: a response that waits a while for room is dropped"
+meant = "a_response_waits_for_a_peer_that_reads_late_and_is_never_dropped"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+        self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            WRITER_QUEUE_CAPACITY,
+        )?;
+        Ok(())'''
+replace = '''
+        self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            Some(Instant::now() + Duration::from_millis(50)),
+            WRITER_QUEUE_CAPACITY,
+        )?;
+        Ok(())'''
+
+[[plant]]
+name = "daemon keeps running: a bridge that is closed leaves the responses that wait for room waiting"
+meant = "closing_the_bridge_ends_every_response_that_waits_for_room"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+                let Some(writer) = writer.as_ref() else {
+                    return Err(BridgeError::Eof);
+                };'''
+replace = '''
+                let Some(writer) = writer.as_ref() else {
+                    thread::sleep(Duration::from_millis(1));
+                    continue;
+                };'''
+
+[[plant]]
+name = "daemon keeps running: a launch of a daemon that has stopped is let into the table"
+meant = "a_launch_the_old_daemon_asked_for_opens_no_window_after_it_stopped"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "                &|| !fenced || !bridge.is_closed(),"
+replace = "                &|| true,"
+
+[[plant]]
+name = "daemon keeps running: the table does not ask whether the opener still owns the window"
+meant = "a_window_its_opener_no_longer_owns_is_not_opened_and_starts_no_program"
+runs = ["panes-fence"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''
+        if !owns() {
+            return Err(PaneError::Fenced(key));
+        }'''
+replace = ""
+
+[[plant]]
+name = "daemon keeps running: a close that took its pane out of the table is not waited for"
+meant = "a_window_in_its_shutdown_grace_is_gone_before_the_new_daemon_starts"
+runs = ["app-daemon-restart", "panes-fence"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = "            if pending.is_clean() {"
+replace = "            if pending.open == 0 && pending.unconfirmed == 0 {"
+
+[[plant]]
+name = "daemon keeps running: a program whose end was never proven does not stop the start again"
+meant = "a_table_is_reaped_until_no_program_of_its_windows_can_still_run_and_not_for_ever"
+runs = ["panes-fence"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = '''
+            if pending.unconfirmed != 0 {
+                return Reaped::Unconfirmed;
+            }'''
+replace = ""
+
+[[plant]]
+name = "daemon keeps running: a daemon is started again beside a window that is not proven gone"
+meant = "a_daemon_is_not_started_again_beside_a_window_that_is_not_proven_gone"
 runs = ["app-daemon-restart"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon.rs"
 find = '''
-            finish_before_deadline(SHUTDOWN_DRAIN, move || {
-                let _ = bridge.wait_launches_closed();
-            });'''
-replace = "            let _ = bridge;"
+                    cause: DAEMON_NOT_CLEANED.to_string(),
+                    retry: false,
+                });
+                return;'''
+replace = '''
+                    cause: DAEMON_NOT_CLEANED.to_string(),
+                    retry: false,
+                });'''

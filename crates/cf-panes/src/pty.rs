@@ -141,6 +141,9 @@ pub enum PaneError {
     Cancelled(PaneKey),
     /// The window is still being ended by a close before this one.
     Ending(PaneKey),
+    /// The daemon that asked for the window has stopped: it is not opened, and no program
+    /// is started for it.
+    Fenced(PaneKey),
     Pty(String),
     Io(io::Error),
     InvalidBacklog,
@@ -187,6 +190,11 @@ impl fmt::Display for PaneError {
             Self::Ending(key) => write!(
                 formatter,
                 "pane {} generation {} is still being ended",
+                key.id, key.generation
+            ),
+            Self::Fenced(key) => write!(
+                formatter,
+                "pane {} generation {} was not opened: the daemon that asked for it has stopped",
                 key.id, key.generation
             ),
             Self::Pty(message) => write!(formatter, "PTY error: {message}"),
@@ -420,6 +428,78 @@ pub struct PaneTable {
     /// How long a closed window's programs are given to end once asked to
     /// ([`CLOSE_GRACE`]): a test gives less.
     close_grace: Duration,
+    /// A test's hold on the opens that reach the table ([`PaneTable::hold_opens`]).
+    #[cfg(any(test, feature = "test-support"))]
+    open_hold: Mutex<Option<Arc<HoldState>>>,
+}
+
+/// What a test holds of the opens that reach the table: each waits before it takes the
+/// table's lock until the test lets it go, as an open that a loaded Mac is slow to begin
+/// waits.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Default)]
+struct HoldState {
+    released: Mutex<bool>,
+    changed: Condvar,
+    waiting: std::sync::atomic::AtomicUsize,
+}
+
+/// The hold a test put on the table's opens ([`PaneTable::hold_opens`]): opens that begin
+/// while it is on wait for [`OpenHold::release`], or for it to be dropped.
+#[cfg(any(test, feature = "test-support"))]
+pub struct OpenHold(Arc<HoldState>);
+
+#[cfg(any(test, feature = "test-support"))]
+impl OpenHold {
+    /// Waits until `count` opens wait on the hold: whether they did within `within`.
+    pub fn wait_for_opens(&self, count: usize, within: Duration) -> bool {
+        let until = Instant::now() + within;
+        while self.0.waiting.load(Ordering::Acquire) < count {
+            if Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
+    }
+
+    /// Lets the opens that wait go, and every one that comes after.
+    pub fn release(&self) {
+        *self
+            .0
+            .released
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = true;
+        self.0.changed.notify_all();
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for OpenHold {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// What is left of the windows a table has held: the panes in it, the closes that took a pane
+/// out and have not read its program's end, and the programs whose end could not be proven.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Pending {
+    /// Panes in the table.
+    pub open: usize,
+    /// Closes that took a pane out of the table and are still ending its program (a kill that
+    /// is waiting out its grace, a detached close).
+    pub finishing: u64,
+    /// Programs whose end no close could prove: they may still run, and nothing clears this
+    /// but the app's quit.
+    pub unconfirmed: u64,
+}
+
+impl Pending {
+    /// Whether no program of the table's windows can still run.
+    pub fn is_clean(&self) -> bool {
+        self.open == 0 && self.finishing == 0 && self.unconfirmed == 0
+    }
 }
 
 /// Panes whose child is still being torn down. A pane leaves `finishing` only
@@ -530,6 +610,40 @@ impl PaneTable {
             ending: Arc::new(Ending::default()),
             exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
+            #[cfg(any(test, feature = "test-support"))]
+            open_hold: Mutex::new(None),
+        }
+    }
+
+    /// Holds every open that reaches the table from now until the hold is released or
+    /// dropped: a test's way to have an open that is slow to begin.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn hold_opens(&self) -> OpenHold {
+        let state = Arc::new(HoldState::default());
+        *self
+            .open_hold
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&state));
+        OpenHold(state)
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn wait_while_held(&self) {
+        let held = self
+            .open_hold
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let Some(held) = held else {
+            return;
+        };
+        held.waiting.fetch_add(1, Ordering::AcqRel);
+        let mut released = held.released.lock().unwrap_or_else(PoisonError::into_inner);
+        while !*released {
+            released = held
+                .changed
+                .wait(released)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 
@@ -543,6 +657,18 @@ impl PaneTable {
             return Err(PaneError::Updating);
         }
         Ok(UpdatePermit(Arc::clone(self)))
+    }
+
+    /// What is left of the windows the table has held, for whoever must know that no
+    /// program of theirs can still run ([`Pending::is_clean`]).
+    pub fn pending(&self) -> Result<Pending, PaneError> {
+        let panes = self.lock_panes()?;
+        let (finishing, unconfirmed) = self.teardown.counts();
+        Ok(Pending {
+            open: panes.len(),
+            finishing,
+            unconfirmed,
+        })
     }
 
     pub fn update_blockers(&self) -> Result<Vec<PaneKey>, PaneError> {
@@ -591,7 +717,14 @@ impl PaneTable {
         env: &HashMap<String, String>,
         size: PtySize,
     ) -> Result<Box<dyn Read + Send>, PaneError> {
-        self.open_at_with_drop_env(key, cwd, argv, env, &[], size)
+        self.open_at_with_drop_env(
+            key,
+            cwd,
+            argv,
+            PaneEnvironment::new(env, &[]),
+            size,
+            &|| true,
+        )
     }
 
     fn open_at_with_drop_env(
@@ -599,10 +732,11 @@ impl PaneTable {
         key: PaneKey,
         cwd: &Path,
         argv: &[String],
-        env: &HashMap<String, String>,
-        drop_env: &[String],
+        environment: PaneEnvironment<'_>,
         size: PtySize,
+        owns: &dyn Fn() -> bool,
     ) -> Result<Box<dyn Read + Send>, PaneError> {
+        let (env, drop_env) = (environment.overlay, environment.drop);
         validate_drop_env(drop_env)?;
         let program = argv.first().ok_or(PaneError::EmptyArgv)?;
         let program_path = Path::new(program);
@@ -610,9 +744,14 @@ impl PaneTable {
             return Err(PaneError::ProgramNotAbsolute(program_path.to_path_buf()));
         }
 
+        #[cfg(any(test, feature = "test-support"))]
+        self.wait_while_held();
         let mut panes = self.lock_panes()?;
         if self.updating.load(Ordering::Acquire) {
             return Err(PaneError::Updating);
+        }
+        if !owns() {
+            return Err(PaneError::Fenced(key));
         }
         if panes.contains_key(&key) {
             return Err(PaneError::AlreadyOpen(key));
@@ -731,18 +870,33 @@ impl PaneTable {
         size: PtySize,
         backlog_bytes: usize,
     ) -> Result<StreamedPane, PaneError> {
+        self.open_streamed_at_while(&|| true, key, cwd, argv, environment, size, backlog_bytes)
+    }
+
+    /// [`PaneTable::open_streamed_at`] for a window whose opener may stop owning it: `owns` is
+    /// asked at the table's insertion, with the table's lock held, and a window it refuses is
+    /// not opened and has no program started ([`PaneError::Fenced`]). The daemon's launch
+    /// that is slow to reach the table (a loaded Mac) is refused where it would have
+    /// inserted a pane of a daemon that has stopped. Since the lock is held from this look to
+    /// the insertion, whoever then lists the table, a close of everything that daemon had
+    /// among them, sees a window this let in, and one that comes after is refused.
+    // The arguments of `open_streamed_at`, and who still owns the window.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_streamed_at_while(
+        self: &Arc<Self>,
+        owns: &dyn Fn() -> bool,
+        key: PaneKey,
+        cwd: &Path,
+        argv: &[String],
+        environment: PaneEnvironment<'_>,
+        size: PtySize,
+        backlog_bytes: usize,
+    ) -> Result<StreamedPane, PaneError> {
         if backlog_bytes == 0 {
             return Err(PaneError::InvalidBacklog);
         }
 
-        let reader = self.open_at_with_drop_env(
-            key.clone(),
-            cwd,
-            argv,
-            environment.overlay,
-            environment.drop,
-            size,
-        )?;
+        let reader = self.open_at_with_drop_env(key.clone(), cwd, argv, environment, size, owns)?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
         #[cfg(target_os = "macos")]
         let tree;
@@ -1665,6 +1819,107 @@ mod tests {
             table.begin_update().is_ok(),
             "update admission reopens once every child is gone"
         );
+    }
+
+    /// A window whose opener no longer owns it is refused at the insertion, with no program
+    /// started: the daemon's launch that reaches the table after the daemon has stopped.
+    #[test]
+    fn a_window_its_opener_no_longer_owns_is_not_opened_and_starts_no_program() {
+        use super::{PaneEnvironment, PaneKey};
+
+        let table = Arc::new(PaneTable::new());
+        // A program that is never started here: the open is refused before any is.
+        #[cfg(unix)]
+        let program = std::path::PathBuf::from("/bin/sh");
+        #[cfg(windows)]
+        let program = std::path::PathBuf::from(r"C:\Windows\System32\cmd.exe");
+        let key = PaneKey::new("late-pane", 1);
+        let refused = table.open_streamed_at_while(
+            &|| false,
+            key.clone(),
+            Path::new("."),
+            &[program.to_string_lossy().into_owned()],
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+            1024,
+        );
+        if let Ok(streamed) = &refused {
+            let _ = table.kill(&streamed.key);
+        }
+        assert!(
+            matches!(&refused, Err(PaneError::Fenced(refused)) if *refused == key),
+            "an open its opener no longer owns was let in"
+        );
+        assert!(
+            table.pending().expect("what is left").is_clean(),
+            "a refused open left something of a window behind"
+        );
+    }
+
+    #[test]
+    fn what_is_left_of_the_windows_says_when_no_program_of_theirs_can_still_run() {
+        let table = PaneTable::new();
+        assert!(table.pending().unwrap().is_clean());
+        table.teardown.begin();
+        let ending = table.pending().unwrap();
+        assert_eq!((ending.finishing, ending.is_clean()), (1, false));
+        table.teardown.resolve(true);
+        assert!(table.pending().unwrap().is_clean());
+        table.teardown.begin();
+        table.teardown.resolve(false);
+        let unproven = table.pending().unwrap();
+        assert_eq!((unproven.unconfirmed, unproven.is_clean()), (1, false));
+    }
+
+    #[test]
+    fn a_table_is_reaped_until_no_program_of_its_windows_can_still_run_and_not_for_ever() {
+        use std::time::{Duration, Instant};
+
+        use crate::headless::{reap_until_clean, Reaped};
+
+        let patience = Duration::from_secs(5);
+        let clean = Arc::new(PaneTable::new());
+        assert_eq!(reap_until_clean(&clean, patience), Reaped::Clean);
+
+        // A close that has taken its pane out and not read its program's end: waited for, and
+        // clean once it has.
+        let ending = Arc::new(PaneTable::new());
+        ending.teardown.begin();
+        let late = {
+            let table = Arc::clone(&ending);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                table.teardown.resolve(true);
+            })
+        };
+        let began = Instant::now();
+        assert_eq!(reap_until_clean(&ending, patience), Reaped::Clean);
+        assert!(
+            began.elapsed() >= Duration::from_millis(150),
+            "a close under way was not waited for"
+        );
+        late.join().expect("the close");
+
+        // One that does not end in the time given: told so, in that time.
+        let stuck = Arc::new(PaneTable::new());
+        stuck.teardown.begin();
+        let began = Instant::now();
+        assert_eq!(
+            reap_until_clean(&stuck, Duration::from_millis(150)),
+            Reaped::TooLate
+        );
+        assert!(began.elapsed() < Duration::from_secs(3));
+
+        // One whose program's end was never proven.
+        let unproven = Arc::new(PaneTable::new());
+        unproven.teardown.begin();
+        unproven.teardown.resolve(false);
+        assert_eq!(reap_until_clean(&unproven, patience), Reaped::Unconfirmed);
     }
 
     #[test]
