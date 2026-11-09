@@ -56,7 +56,6 @@ use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
 use cf_e2e::process::{is_alive, Run};
 use cf_e2e::Result as Fallible;
-use looks::Looks;
 
 use crate::check::{
     agent, failure, progress_line, Finished, Progress, CLOSES, DELIVERS, LOOK, WORK,
@@ -196,17 +195,6 @@ pub struct Left {
     /// The processes of `listed` that were still there when the run last looked, once
     /// the task was done, the window closed and the chief told.
     pub alive: Vec<u64>,
-    /// The processes of `listed` that were gone when the run looked at the machine once it saw
-    /// the task over: a process the turn itself ended (Codex's PowerShell wrapper of a tool
-    /// call lives under a second, and the host's look, once a second, may fall on it), which
-    /// the close has nothing of to end and the chief is owed no note of. The task may be seen
-    /// over after its window has closed, so this alone does not tell a process the turn ended
-    /// from one the close ended: `at_exit` does (what the pane host found in the window at the
-    /// close). Empty where the run did not look, which holds the run to the note.
-    pub gone_in_the_turn: Vec<u64>,
-    /// The processes of the command the pane host said the window left running when it
-    /// closed (its `pane.exit`): what a close ended, whatever came of the listed ones.
-    pub at_exit: Vec<Proc>,
     /// The command lines of the machine's processes that run the command, looked at once
     /// the task was done and the chief told: what escaped the ending, where the host
     /// listed none, each with where it stands on a Unix machine ([`standing`]).
@@ -320,16 +308,8 @@ pub fn judge(left: &Left, expect: Expect) -> Result<(), Vec<String>> {
                     without_a_terminal(&unlisted)
                 ));
             }
-            // A process the turn itself ended, before the task did, leaves the window's close
-            // nothing to end and the chief nothing to be told (Codex's PowerShell wrapper of a
-            // tool call, which the host's look may fall on: T-404, 4 runs of 12). What was still
-            // there when the run saw the task over, what the pane host found in the window at
-            // its close, and a command that ran on are held to the note as they always were.
-            if !ended_in_the_turn(left) {
-                problems.push(
-                    "the chief was told nothing of the work the window closed with".to_owned(),
-                );
-            }
+            problems
+                .push("the chief was told nothing of the work the window closed with".to_owned());
         }
     }
     if problems.is_empty() {
@@ -386,22 +366,6 @@ fn unlisted_but_running(left: &Left) -> Vec<String> {
         })
         .cloned()
         .collect()
-}
-
-/// Whether everything the host listed of the command ended in the turn, before the task did,
-/// and the chief was told nothing, as it should be: nothing escaped, the pane host found none of
-/// the command in the window when it closed, and each process listed was gone when the run looked
-/// once it saw the task over ([`gone_of`]). A run that did not look has none gone, so it is held
-/// to the note.
-fn ended_in_the_turn(left: &Left) -> bool {
-    !left.listed.is_empty()
-        && left.notes.is_empty()
-        && left.escaped.is_empty()
-        && left.at_exit.is_empty()
-        && left
-            .listed
-            .iter()
-            .all(|process| left.gone_in_the_turn.contains(&process.pid))
 }
 
 /// The numbers of the processes the host listed, for a line of the verdict.
@@ -477,11 +441,6 @@ pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
             secs(left.took),
             left.escaped.join("; ")
         ),
-        Ok(()) if ended_in_the_turn(left) => format!(
-            "T-1 done after {} s; the host listed the command's process ({}), which ended in the turn, before the task did: nothing of it was left for the window's close, and the chief was owed no note",
-            secs(left.took),
-            listed_pids(&left.listed)
-        ),
         Ok(()) => format!(
             "T-1 done after {} s{}; the command ({}) was ended by the window's close and the chief told: {}",
             secs(left.took),
@@ -502,17 +461,15 @@ pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
 }
 
 /// What a run that passed is said to have shown, as the name of its check: that the command ran on in
-/// a session of its own, the known limit on a Mac, that it ended in the turn and the chief was owed no
-/// note, or that the window's close ended it and the chief was told. The one [`summary`] tells, by the
-/// same shapes: a process of the machine that holds the command's words and is none of this run's
-/// (another tree's run of the stand-in, which the run cannot tell from its own) changes neither.
+/// a session of its own, the known limit on a Mac, or that the window's close ended it and the chief
+/// was told. The one [`summary`] tells, by the same shapes: a process of the machine that holds the
+/// command's words and is none of this run's (another tree's run of the stand-in, which the run
+/// cannot tell from its own) changes neither.
 fn passed_as(left: &Left) -> &'static str {
     if (left.listed.is_empty() && !left.escaped.is_empty())
         || listed_then_left_for_a_session_of_its_own(left)
     {
         "the command ran on in a session of its own, as the known limit on a Mac says it may, and the chief was told nothing"
-    } else if ended_in_the_turn(left) {
-        "the command ended in the turn, before the task did, and the chief was owed no note"
     } else {
         "the command was ended by the window's close after the result, and the chief told"
     }
@@ -602,44 +559,22 @@ fn observe(
 
     let mark = SECONDS.to_string();
     let mut left = Left::default();
-    let mut looks = Looks::default();
     let mut began: Option<Duration> = None;
     let mut pane: Option<String> = None;
     let mut progress = Progress::default();
     let ended = find(log, "the worker's task to end", WORK, LOOK, || {
+        let thread = members.task(number)?;
         let lane = members.lane(agent)?;
         let own = members
             .window_in(lane.clone())
             .and_then(|window| members.window_process(&window));
         // The jobs first: a listing made after a job wrote its process has the job, if it runs.
         let jobs = running_jobs(members);
-        // The machine twice, the pane host's look between the two, and the task last: a task
-        // read as not over after them says the turn still ran when they were taken, which
-        // `Looks` holds what it takes from them to (the window closes after the task is over).
-        let before = ThisMachine.processes();
-        match &before {
-            Ok(all) => chosen.choose(all, own, &jobs, wanted),
+        match ThisMachine.processes() {
+            Ok(all) => chosen.choose(&all, own, &jobs, wanted),
             Err(failed) => chosen.failed.push(failed.to_string()),
         }
         let listing = (!lane["pane"].is_null()).then(|| tree::read(members.rig(), &lane["pane"]));
-        let after = ThisMachine.processes();
-        let thread = members.task(number)?;
-        let over = is_over(&thread) || goes_on(members, number)?;
-        let host: Vec<u64> = match &listing {
-            Some(Ok(tree)) => tree
-                .holding(&mark)
-                .iter()
-                .map(|process| process.pid)
-                .collect(),
-            _ => Vec::new(),
-        };
-        looks.look(
-            before.as_deref().ok(),
-            &host,
-            after.as_deref().ok(),
-            !over,
-            &mark,
-        );
         progress.say(log, progress_line(number, &thread, &lane, listing.as_ref()));
         left.state = text(&thread["state"]);
         let now = log.elapsed();
@@ -654,13 +589,9 @@ fn observe(
                 }
             }
         }
-        Ok(over.then_some(()))
+        Ok((is_over(&thread) || goes_on(members, number)?).then_some(()))
     })?
     .is_some();
-    // Which of the listed processes the looks showed ending while the turn ran: what the turn
-    // ended needs no note. What the window's close ended is told by `at_exit` (below), and what
-    // neither shows is held to the note.
-    left.gone_in_the_turn = looks.gone_of(&left.listed);
     // Held for the command, which never ends within the run: the chief finishes the task.
     if ended && left.state == "working" {
         let finish = format!("T-{number}");
@@ -699,15 +630,11 @@ fn observe(
             },
         )?;
         find(log, "the command to be gone", waits.gone, LOOK, || {
-            left.alive = alive_listed(&looks, &left.listed, &mark);
+            left.alive = still_there(&left.listed);
             Ok(left.alive.is_empty().then_some(()))
         })?;
     }
-    look_for_leftovers(
-        &mut left,
-        |listed| alive_listed(&looks, listed, &mark),
-        || on_the_machine(wanted),
-    );
+    look_for_leftovers(&mut left, still_there, || on_the_machine(wanted));
     let mut exit: Option<Tree> = None;
     if let (true, Some(pane)) = (ended, pane.clone()) {
         find(
@@ -721,7 +648,6 @@ fn observe(
             },
         )?;
     }
-    left.at_exit = held_at_exit(exit.as_ref(), &mark);
     // A command that escaped the ending is the window's close's to find, or nobody's: what
     // still runs once the window has closed is said, and then what the run saw of it in the
     // window is ended, so that a run leaves nothing it can tell its own on the machine. A
@@ -1021,23 +947,7 @@ fn standing(line: &str) -> Option<String> {
     ))
 }
 
-/// What of the command the pane host said the window left running when it closed: the processes
-/// of `exit` whose command line holds `mark`, none where the host said nothing.
-fn held_at_exit(exit: Option<&Tree>, mark: &str) -> Vec<Proc> {
-    exit.map(|tree| tree.holding(mark).into_iter().cloned().collect())
-        .unwrap_or_default()
-}
-
-/// The processes of `listed` that are still on the machine, each told by when it began where the
-/// run saw it ([`Looks::alive_of`]); by its number alone where the machine does not answer.
-fn alive_listed(looks: &Looks, listed: &[Proc], mark: &str) -> Vec<u64> {
-    match ThisMachine.processes() {
-        Ok(all) => looks.alive_of(listed, &all, mark),
-        Err(_) => still_there(listed),
-    }
-}
-
-/// The processes of `listed` that are still running, by their numbers.
+/// The processes of `listed` that are still running.
 fn still_there(listed: &[Proc]) -> Vec<u64> {
     listed
         .iter()
@@ -1072,10 +982,8 @@ pub fn plan(who: Who) -> Plan {
     .with(worker)
 }
 
-// What the looks show of the command's processes, and the tests, are in `leaving/`: a module
-// that a path names looks for its own parts beside it, so these are named as well.
-#[path = "leaving/looks.rs"]
-mod looks;
+// The tests are in `leaving/`: a module that a path names looks for its own parts
+// beside it, so these are named as well.
 #[cfg(test)]
 #[path = "leaving/tests.rs"]
 mod tests;
