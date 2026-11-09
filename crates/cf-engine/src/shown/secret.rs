@@ -52,6 +52,11 @@ const WORDS: [&str; 8] = [
     "bearer",
 ];
 
+/// The beginnings of the words that name a secret as a word of its own, whatever follows
+/// them: to authenticate, authenticated, authentication, authenticator, and their `un` forms
+/// (`Authentication failed`, then the value below it).
+const STEMS: [&str; 2] = ["authenticat", "unauthenticat"];
+
 /// The words that name a secret one after the other: an API key, a private key, one or
 /// more.
 const PAIRS: [(&str, &str); 4] = [
@@ -66,6 +71,9 @@ pub(crate) fn names_a_secret(line: &str) -> bool {
     let words = words_of(line);
     names_of(line).any(|name| ANYWHERE.iter().any(|word| name.contains(word)))
         || words.iter().any(|word| WORDS.contains(&word.as_str()))
+        || words
+            .iter()
+            .any(|word| STEMS.iter().any(|stem| word.starts_with(stem)))
         || words
             .windows(2)
             .any(|pair| PAIRS.contains(&(pair[0].as_str(), pair[1].as_str())))

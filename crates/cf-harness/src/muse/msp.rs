@@ -52,6 +52,7 @@ pub(crate) async fn conversation(
         async |child| talk(child, requests).await,
     )
     .await
+    .map_err(String::from)
 }
 
 async fn talk(child: &dyn Child, requests: &[(&str, Value)]) -> Result<Vec<Value>, String> {

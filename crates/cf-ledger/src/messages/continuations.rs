@@ -58,13 +58,41 @@ pub fn continuation_in(number: i64, turn: &str) -> String {
     )
 }
 
-/// The turn a window was cut in, as ConsensFlow's notes name it: when the message
-/// that began it came, where its record says, and its words (T-814: a chief told
-/// only that its turn was cut could not tell a false note from a true one).
-pub fn cut_turn(at: Option<&str>, words: &str) -> String {
+/// The turn a window was cut in, as ConsensFlow's notes name it where a delivery of ConsensFlow's
+/// began it: when it came, where its record says, and the ledger's record of that delivery, its
+/// id, what it was, whom it was from and the task it is about (T-814: a chief told only that its
+/// turn was cut could not tell a false note from a true one). **Nothing the window showed is in
+/// it** (T-1328): it is written from `delivery`, the row of the ledger, never from the words the
+/// record of the window holds, since a quote of free text kept leaking a secret (the joint
+/// review T-1322, twice).
+pub fn cut_turn(at: Option<&str>, delivery: &MessageView) -> String {
+    let from = delivery
+        .sender
+        .as_ref()
+        .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
+    let task = delivery
+        .task_number
+        .map_or_else(String::new, |number| format!(", T-{number}"));
+    let of = format!(
+        "delivery m-{} ({} from {from}{task})",
+        delivery.id, delivery.kind
+    );
     match at {
-        Some(at) => format!("the turn that began at {at} with \"{words}\""),
-        None => format!("the turn that began with \"{words}\""),
+        Some(at) => format!("the turn that began at {at} with {of}"),
+        None => format!("the turn that began with {of}"),
+    }
+}
+
+/// The turn of any other opening: a human's typed words, a first line that names no delivery of
+/// the ledger's, an id it does not hold. It names the turn by when it began, and says why it
+/// quotes none (T-830, item 1; T-1328: no opening is quoted).
+pub fn cut_turn_unquoted(at: Option<&str>) -> String {
+    match at {
+        Some(at) => format!(
+            "the turn that began at {at} with words that may hold a secret, so they are not quoted"
+        ),
+        None => "the turn that began with words that may hold a secret, so they are not quoted"
+            .to_owned(),
     }
 }
 
@@ -341,6 +369,31 @@ pub(crate) fn withdraw_stale(store: &mut Store, project_id: i64) -> Result<(), L
 mod tests {
     use super::*;
 
+    /// The ledger's row of a delivery, as far as a cut turn's name reads it.
+    fn delivery(id: i64, kind: &str, sender: Option<&str>, task: Option<i64>) -> MessageView {
+        MessageView {
+            id,
+            project_id: 1,
+            recipient: "zeus".to_owned(),
+            recipient_id: 2,
+            recipient_role: "worker".to_owned(),
+            sender: sender.map(str::to_owned),
+            kind: kind.to_owned(),
+            task_number: task,
+            reply_to: None,
+            body: "a body that is never named".to_owned(),
+            state: "delivered".to_owned(),
+            attempts: 1,
+            reason: None,
+            receipt: serde_json::Value::Null,
+            questions: serde_json::Value::Null,
+            choices: serde_json::Value::Null,
+            urgent: false,
+            created_at: String::new(),
+            delivered_at: None,
+        }
+    }
+
     #[test]
     fn what_is_written_reads_back_and_the_words_of_older_builds_are_read_too() {
         assert_eq!(continuation_tasks(&continuation(7)), Some(vec![7]));
@@ -355,19 +408,41 @@ mod tests {
     #[test]
     fn a_continuation_that_names_the_turn_it_was_cut_in_reads_back_whatever_that_turn_s_words() {
         for turn in [
-            cut_turn(Some("2026-10-15 20:41 UTC"), "Write the parser"),
             cut_turn(
-                None,
-                "[ConsensFlow m-3 · T-9 · task from @chief] Go on, in T-9, with \"x\".",
+                Some("2026-10-15 20:41 UTC"),
+                &delivery(3, "task", Some("chief"), Some(9)),
             ),
+            cut_turn(None, &delivery(3, "note", None, None)),
+            cut_turn_unquoted(Some("2026-10-15 20:41 UTC")),
+            cut_turn_unquoted(None),
         ] {
             let body = continuation_in(7, &turn);
             assert_eq!(continuation_tasks(&body), Some(vec![7]), "{body}");
         }
         assert_eq!(
-            continuation_in(7, &cut_turn(Some("2026-10-15 20:41 UTC"), "Write the parser")),
-            "ConsensFlow stopped while you were working on T-7, in the turn that began at 2026-10-15 20:41 UTC with \"Write the parser\". Go on where you stopped."
+            continuation_in(
+                7,
+                &cut_turn(Some("2026-10-15 20:41 UTC"), &delivery(3, "task", Some("chief"), Some(7)))
+            ),
+            "ConsensFlow stopped while you were working on T-7, in the turn that began at 2026-10-15 20:41 UTC with delivery m-3 (task from @chief, T-7). Go on where you stopped."
         );
+        assert_eq!(
+            cut_turn(None, &delivery(12, "note", None, None)),
+            "the turn that began with delivery m-12 (note from ConsensFlow)"
+        );
+    }
+
+    #[test]
+    fn a_cut_turn_is_named_from_the_row_alone_and_never_from_its_body() {
+        let said = cut_turn(
+            None,
+            &delivery(3, "result", Some("zeus-amber-pine"), Some(4)),
+        );
+        assert_eq!(
+            said,
+            "the turn that began with delivery m-3 (result from @zeus-amber-pine, T-4)"
+        );
+        assert!(!said.contains("never named"), "{said}");
     }
 
     #[test]

@@ -205,10 +205,6 @@ const RESUMED_COPY: &str = "the window the session opens again resumes a record 
 /// A follow-up of a task whose result is in waits for the acceptance (T-1118), and its
 /// window resumes its record.
 const FOLLOW_UP_DECIDED_RESUMED: &str = "the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them";
-/// A follow-up of a task whose result is in waits for the acceptance (T-1118), and the note
-/// of a failure offers the accept as well as the reopen (T-1111): one test has both.
-const FOLLOW_UP_DECIDED_ACCEPT_IN_THE_FAIL_NOTE: &str = "the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the note that T-2 failed says how to reopen it and then `, or accept it with what you checked`, where Node's ends at the reopen (T-1111)";
-
 /// What waits for a chief out of quota is said to the human (the field report of
 /// 2026-10-22, T-254).
 const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queued for it: the human is told once that it waits (`@chief is out of quota until …, and m-2 (the words of T-1) waits for it`), where Node says nothing and the task waits for the reset";
@@ -243,14 +239,40 @@ const NO_CHIEF_MODEL: &str = "a chief asked for with no model is refused with `p
 /// A chief runs on no saved agent (CHF-04, T-729): the roster is never read for it.
 const CHIEF_ON_NO_AGENT: &str = "the chief's saved agent is deleted after a Switch chief to it: the chief opens on its model when the project is resumed, and the human is told nothing, where Node kept the chief closed and told the human its agent was no longer among theirs";
 
-/// A member holds its own harness, model and effort (harness-models): it has no saved agent
-/// the human could delete, so nothing waits or fails for one.
-const NO_AGENT_TO_LOSE: &str = "a member runs on its own model, with no saved agent the human could delete: the member that is never free runs on a harness no window opens on, and is said so, where Node's had lost its agent; a session's window opened again opens, where Node's said its agent was gone";
+/// A launch that did not start is told by its stage and the kind of failure its producer typed,
+/// never by the words of an adapter, a host or a program (T-1328, after the joint review T-1322
+/// found a secret in them by one route after another): a reason says `the launch failed`, `the
+/// window did not open` or `the window never came up`, with the kind and its code beside it where
+/// there is one, and `(its cause is in ConsensFlow's log)` where there is none, where Node's reason
+/// quoted what the adapter or the host said. The words go to the log, masked, one line more than
+/// Node wrote.
+const NO_CAUSE_QUOTED: &str = "a launch that did not start is told by its stage (`the launch failed`, `the window did not open`, `the window never came up`) and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own; where Node's reason quoted them";
+
+/// [`NO_CAUSE_QUOTED`] in a test that [`ACCEPT_IN_THE_FAIL_NOTE`] already departs in.
+const ACCEPT_AND_NO_CAUSE: &str = "the note that T-1 failed says how to reopen it and then `, or accept it with what you checked: cf task accept T-1 \"…\"`, where Node's ends at the reopen (a failed task whose work is done is accepted by the chief on its word); and the reason of the launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
+
+/// [`NO_CAUSE_QUOTED`] in a test that already departs from Node's trace because a member runs on
+/// its own model, with no saved agent to lose (harness-models).
+const NO_AGENT_AND_NO_CAUSE: &str = "a member runs on its own model, with no saved agent the human could delete: a session's window opened again opens, where Node's said its agent was gone; and the reason of a window that did not open says its stage and the kind of failure, and no word of the host's, which the log holds, masked, where Node's reason quoted them (T-1328)";
+
+/// [`NO_CAUSE_QUOTED`] in the test that already departs from Node's trace in the follow-up it
+/// waits to give and in the note that T-2 failed.
+const FOLLOW_UP_AND_NO_CAUSE: &str = "the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; the note that T-2 failed says how to reopen it and then `, or accept it with what you checked`, where Node's ends at the reopen (T-1111); and the reason of a launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
+
+/// [`NO_CAUSE_QUOTED`] in the tests that depart in asking the pane host what a window shows
+/// before it is closed.
+const SNAPSHOT_AND_NO_CAUSE: &str = "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, to tell it in the failure, where Node closes it unasked; and the reason of a launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
+
+/// The same, where the handoff is read back before it is given again.
+const HANDOFF_AND_NO_CAUSE: &str = "before it closes the chief's window, whose harness could not take its handoff, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked; before it gives the handoff back it reads the conversation's record (`record`), where one the window took is confirmed and not given again (the reviews of round 1 of the chief's restart), where Node gives it back unread; and the reason of a launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
+
+/// The same, where the note falls among other effects.
+const NOTE_TURNS_AND_NO_CAUSE: &str = "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, which takes the turns the host's answer takes: the note falls among other effects than in Node's trace; and the reason of a launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
 
 const DEPARTED: &[(&str, &str)] = &[
     (
         "tells the human why a session's window they opened did not start",
-        NO_AGENT_TO_LOSE,
+        NO_AGENT_AND_NO_CAUSE,
     ),
     (
         "switches no chief to a harness's own default model: it names a saved agent",
@@ -338,7 +360,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "fails a deleted session's follow-up as any launch fails when its harness has lost the conversation, and the task goes to its tier instead",
-        FOLLOW_UP_DECIDED_ACCEPT_IN_THE_FAIL_NOTE,
+        FOLLOW_UP_AND_NO_CAUSE,
     ),
     (
         "continues a finished task's session with --after: the same window comes back on its conversation",
@@ -394,15 +416,15 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "fails the first message at once when the harness cannot take it after the window opens",
-        "before it closes a window whose harness could not take its first message, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked",
+        SNAPSHOT_AND_NO_CAUSE,
     ),
     (
         "keeps the project open when the new chief cannot take its handoff, and opens it again with it",
-        "before it closes the chief's window, whose harness could not take its handoff, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked; and before it gives the handoff back it reads the conversation's record (`record`), where one the window took is confirmed and not given again (the reviews of round 1 of the chief's restart), where Node gives it back unread",
+        HANDOFF_AND_NO_CAUSE,
     ),
     (
         "a note written 5 turns after a pass whose launch cannot take its first message",
-        "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, which takes the turns the host's answer takes: the note falls among other effects than in Node's trace",
+        NOTE_TURNS_AND_NO_CAUSE,
     ),
     (
         "a note written 6 turns after a pass whose launch cannot take its first message",
@@ -448,7 +470,7 @@ const DEPARTED: &[(&str, &str)] = &[
         "a note written 3 turns after a restart that finds a message in its harness's record",
         SUSPENDED_AT_START,
     ),
-    // And its member is never free on a harness no window opens on (NO_AGENT_TO_LOSE).
+    // And its member is never free on a harness no window opens on (a member has no saved agent to lose).
     (
         "tells the requester of a waiting task, though a deleted project's waiting task was told before it",
         TAKEN_AS_IT_WENT,
@@ -495,11 +517,11 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "begins the preparation of every launch of a pass before it writes the failure of the first",
-        ACCEPT_IN_THE_FAIL_NOTE,
+        ACCEPT_AND_NO_CAUSE,
     ),
     (
         "fails what was given to a member on it by name, and its requester hears why",
-        ACCEPT_IN_THE_FAIL_NOTE,
+        ACCEPT_AND_NO_CAUSE,
     ),
     (
         "tells the human once when a task they gave fails",
@@ -507,11 +529,23 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "fails the task when the worker window cannot open",
-        ACCEPT_IN_THE_FAIL_NOTE,
+        ACCEPT_AND_NO_CAUSE,
     ),
     (
         "forgets the files a launch wrote when its window never opens: refused by the host, or its adapter failed",
-        ACCEPT_IN_THE_FAIL_NOTE,
+        ACCEPT_AND_NO_CAUSE,
+    ),
+    (
+        "a chief whose launch keeps failing: its handoff waits, no other is written, it is tried ever more slowly, and the human hears once",
+        NO_CAUSE_QUOTED,
+    ),
+    (
+        "keeps what was queued for a first chief whose window does not open",
+        NO_CAUSE_QUOTED,
+    ),
+    (
+        "tells nobody of a launch that failed once its project was deleted, not a project created meanwhile",
+        NO_CAUSE_QUOTED,
     ),
 ];
 

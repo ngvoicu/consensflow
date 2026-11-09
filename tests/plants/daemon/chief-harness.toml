@@ -638,8 +638,8 @@ runs = ["chm-dispatcher", "chm-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '        if let Some(gone) = self.gone_model(participant, refused)? {'
-replace = '        if let Some(gone) = self.gone_model(participant, refused)?.filter(|_| false) {'
+find = '        if let Some(gone) = self.gone_model(participant, &Evidence::of_record(refused))? {'
+replace = '        if let Some(gone) = self.gone_model(participant, &Evidence::of_record(refused))?.filter(|_| false) {'
 
 [[plant]]
 name = 'chief: a window gone on a gone model closes the project'
@@ -648,8 +648,8 @@ runs = ["chm-dispatcher", "chm-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))? {'
-replace = '                if let Some(gone) = self.gone_model(&participant, &said.after(&closed))?.filter(|_| false) {'
+find = '                if let Some(gone) = self.gone_model(&participant, &said.evidence())? {'
+replace = '                if let Some(gone) = self.gone_model(&participant, &said.evidence())?.filter(|_| false) {'
 
 [[plant]]
 name = 'chief: what waited for a held chief is not given back'
@@ -790,15 +790,13 @@ meant = "a_window_given_up_on_with_a_gone_models_words_is_tried_again_and_keeps_
 runs = ["chm-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = '''        let before = record.window.borrow().relaunch;
-        let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;'''
-replace = '''        if let Some(gone) = self.gone_model(participant, because)? {
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''        record.window.borrow_mut().starts_given_up += 1;'''
+replace = '''        record.window.borrow_mut().starts_given_up += 1;
+        if let Some(gone) = self.gone_model(participant, &crate::shown::Evidence::of_record(&error))? {
             self.reopen_without(record, gone);
             return Ok(());
-        }
-        let before = record.window.borrow().relaunch;
-        let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;'''
+        }'''
 
 [[plant]]
 name = "chief: a failed turn is read for a gone model in its screen's words"
@@ -817,8 +815,8 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_model.rs"
-find = '        Ok(adapter.model_gone(words, &asked).then_some(asked))'
-replace = '        Ok(adapter.model_gone(words, "").then_some(asked))'
+find = '        Ok(adapter.model_gone(words.as_str(), &asked).then_some(asked))'
+replace = '        Ok(adapter.model_gone(words.as_str(), "").then_some(asked))'
 
 [[plant]]
 name = "chief: Pi's catalog warning is taken for a gone model"
@@ -948,8 +946,8 @@ runs = ["chm-muse-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/models.rs"
-find = '        return Err(why.clone());'
-replace = '        let _ = why;'
+find = '        return Err(NoDefault::Unread(None));'
+replace = '        let _ = ();'
 
 [[plant]]
 name = "chief: Muse with no model but contributor ones is left to its own default"
@@ -958,7 +956,9 @@ runs = ["chm-muse-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/models.rs"
-find = '        .ok_or_else(|| "Muse Code offers no model that is not a contributor model".to_owned())'
+find = '''        .ok_or(NoDefault::NoneOffered(
+            "Muse Code offers no model that is not a contributor model",
+        ))'''
 replace = '        .map_or(Ok(None), Ok)'
 
 [[plant]]
@@ -1234,8 +1234,8 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_model.rs"
-find = "            Ok(Some(model)) if model == gone => {"
-replace = "            Ok(Some(model)) if model == gone && model.is_empty() => {"
+find = "            Ok(Some(model)) if model == gone => Err(NoDefault::NoneOffered("
+replace = "            Ok(Some(model)) if model == gone && model.is_empty() => Err(NoDefault::NoneOffered("
 
 [[plant]]
 name = "gone: the exit's screen is read with ConsensFlow's own pastes on it"
@@ -2034,3 +2034,108 @@ runs = ["tl-ui-drawer"]
 file = "app/ui/page.css"
 find = '''.transcript-item[data-compaction="true"] { border-color: var(--amber); }'''
 replace = ""
+
+# T-1328, the third reading of T-1322: recovery reads what the window showed (`Shown::evidence`),
+# never the text made for its note, which a screen that names a secret-like word leaves out whole
+# and a start that failed replaces with its kind.
+
+[[plant]]
+name = "gone: recovery reads the note made of the window's end"
+meant = "a_retired_model_is_recovered_though_its_screen_also_names_a_secret_like_word"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''self.gone_model(&participant, &said.evidence())?'''
+replace = '''self.gone_model(&participant, &crate::shown::Evidence::of_record(&said.after(&closed)))?'''
+
+[[plant]]
+name = "gone: recovery reads the note, a start that failed replaces"
+meant = "a_retired_model_is_recovered_whatever_status_the_codex_window_ended_with"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''self.gone_model(&participant, &said.evidence())?'''
+replace = '''self.gone_model(&participant, &crate::shown::Evidence::of_record(&said.after(&closed)))?'''
+
+[[plant]]
+name = "gone: a model is gone for any window"
+meant = "a_chief_whose_window_showed_nothing_of_a_gone_model_is_not_recovered_whatever_the_note_says"
+runs = ["chm-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_model.rs"
+find = '''        Ok(adapter.model_gone(words.as_str(), &asked).then_some(asked))'''
+replace = '''        Ok(adapter.model_gone(&format!("model is not supported {asked}"), &asked).then_some(asked))'''
+
+[[plant]]
+name = "gone: the evidence of a window is the note made of it"
+meant = "the_evidence_of_a_window_is_what_it_showed_and_never_the_note_made_of_it"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        Evidence(lines[from..].join("\n"))'''
+replace = '''        Evidence(self.after("") + &lines[from..].join("\n").replace(" is not supported", ""))'''
+
+[[plant]]
+name = "gone: the evidence is masked"
+meant = "the_evidence_of_a_window_is_what_it_showed_and_never_the_note_made_of_it"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            .collect();
+        let from = lines.len().saturating_sub(QUOTE_LINES);'''
+replace = '''            .map(|line| mask(&line).text)
+            .collect();
+        let from = lines.len().saturating_sub(QUOTE_LINES);'''
+
+[[plant]]
+name = "gone: the evidence keeps every line"
+meant = "the_evidence_is_the_last_lines_with_a_word_in_them_and_is_not_cut_as_a_quote_is"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        let from = lines.len().saturating_sub(QUOTE_LINES);
+        Evidence('''
+replace = '''        let from = 0;
+        Evidence('''
+
+[[plant]]
+name = "gone: the evidence is cut as a quote is"
+meant = "the_evidence_is_the_last_lines_with_a_word_in_them_and_is_not_cut_as_a_quote_is"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        Evidence(lines[from..].join("\n"))'''
+replace = '''        Evidence(cut_to(&lines[from..].join("\n"), QUOTE_CHARS))'''
+
+[[plant]]
+name = "gone: the evidence takes a screen's chrome for a line"
+meant = "the_evidence_is_the_last_lines_with_a_word_in_them_and_is_not_cut_as_a_quote_is"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        let lines: Vec<String> = self
+            .lines()
+            .iter()
+            .filter(|line| line.chars().any(char::is_alphanumeric))'''
+replace = '''        let lines: Vec<String> = self
+            .lines()
+            .iter()
+            .filter(|line| !line.trim().is_empty())'''
+
+[[plant]]
+name = "gone: the evidence of a window the host said nothing of holds a line"
+meant = "words_in_a_note_that_no_window_showed_are_no_evidence"
+runs = ["gn-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        Evidence(lines[from..].join("\n"))'''
+replace = '''        Evidence(if lines.is_empty() { "closed".to_owned() } else { lines[from..].join("\n") })'''

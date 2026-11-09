@@ -217,6 +217,7 @@ fn listed_with(
             Settle::No,
         )
         .await
+        .map_err(String::from)
     });
     let listed = driver.run().remove(0).1;
     let ran = processes
@@ -319,7 +320,7 @@ fn a_pi_update_whose_front_was_let_go_hands_on_none_of_its_words() {
 fn default_with(
     settings: Option<Value>,
     listed: &[(&str, &str)],
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, crate::contract::NoDefault> {
     let folder = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(folder.path().join("bin")).unwrap();
     let pi = crate::testing::fake_executable(&folder.path().join("bin").join("pi"));
@@ -376,7 +377,9 @@ fn pi_starts_on_its_settings_default_and_never_on_a_contributor_model() {
     // Nothing but contributor models: none, and why.
     assert_eq!(
         default_with(None, &[("meta", "muse-spark-1.3-contributor")]),
-        Err("Pi offers no model that is not a contributor model".to_owned())
+        Err(crate::contract::NoDefault::NoneOffered(
+            "Pi offers no model that is not a contributor model"
+        ))
     );
 }
 
@@ -436,4 +439,97 @@ fn a_pi_window_on_a_model_its_provider_lacks_fails_in_that_providers_words() {
     assert!(!gone(codex, "openai-codex/gpt-6-luna"));
     let anthropic = r#"404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-gone-9"},"request_id":"req_0"}"#;
     assert!(gone(anthropic, "anthropic/claude-gone-9"));
+}
+
+/// T-1328, the second reading of T-1322: Pi's own installer's shim at a path with a key's look and
+/// blanks in it (`sk-abc defg hijk lmno\pi.cmd`), its launcher there and no Node anywhere. The
+/// lookup of the default model for a chief whose model is gone failed with the shim's path in its
+/// words, and the note to the human quoted them. The kind of failure rides beside the words
+/// (`Said`, `NoDefault`): the page keeps the words and the chief's note has the kind alone.
+#[test]
+fn a_pi_shim_with_no_node_says_its_kind_to_the_chiefs_note_and_its_path_to_the_page_alone() {
+    let folder = tempfile::tempdir().unwrap();
+    let bin = folder.path().join("sk-abc defg hijk lmno");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(
+        bin.join("pi.cmd"),
+        "@echo off\r\nnode \"%~dp0pi-launcher.js\" %*\r\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        // A file the machine would start, as the detection looks for one.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("pi.cmd"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    std::fs::write(bin.join("pi-launcher.js"), "").unwrap();
+    let agent = folder.path().join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    let env = Env::from_vars([
+        ("OS", "Windows_NT"),
+        ("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+        ("PATH", bin.to_str().unwrap()),
+        ("PI_CODING_AGENT_DIR", agent.to_str().unwrap()),
+    ]);
+    let processes = crate::seams::processes::SystemProcesses::new(env.clone());
+    let time = ManualTime::new(0);
+
+    let said = finished(Box::pin(listed(&env, &processes, &time, false, Settle::No))).unwrap_err();
+    assert!(
+        said.words.contains("sk-abc defg hijk lmno") && said.words.contains("runs on Node"),
+        "the page keeps the person's words: {said}"
+    );
+    let kind = cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NoNodeForPi);
+    assert_eq!(said.failure, Some(kind));
+
+    let why = finished(Box::pin(default_model(&env, &processes, &time))).unwrap_err();
+    assert_eq!(why, crate::contract::NoDefault::Unread(Some(kind)));
+    let told = format!("{why:?} {}", kind.words("Pi"));
+    assert!(!told.contains("sk-abc") && !told.contains("lmno"), "{told}");
+    assert_eq!(
+        kind.words("Pi"),
+        "Node.js was not found for Pi; install Node 22.19 or newer, or run Pi's installer again"
+    );
+}
+
+/// A Pi that is not there says `ENOENT` to the chief's note and not the file: the system's name for
+/// it is a kind and a code, from a fixed table (T-1328: `spawn pi hunter22.cmd ENOENT` lost the
+/// code with the path).
+#[test]
+fn a_pi_the_system_cannot_start_says_its_code_to_the_chiefs_note_and_not_its_file() {
+    let folder = tempfile::tempdir().unwrap();
+    let bin = folder.path().join("hunter22");
+    std::fs::create_dir_all(&bin).unwrap();
+    // A program of that name whose file the system cannot run: not an executable.
+    std::fs::write(bin.join("pi"), "").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("pi"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let agent = folder.path().join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    let env = Env::from_vars([
+        ("PATH", bin.to_str().unwrap()),
+        ("PI_CODING_AGENT_DIR", agent.to_str().unwrap()),
+    ]);
+    let processes = crate::seams::processes::SystemProcesses::new(env.clone());
+    let time = ManualTime::new(0);
+    // The empty file is no program the system can run (ENOEXEC): whichever code the system names,
+    // the note has the kind and the code and no word of the folder.
+    // The system starts a child under a runtime of Tokio's.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let why = runtime
+        .block_on(default_model(&env, &processes, &time))
+        .unwrap_err();
+    let crate::contract::NoDefault::Unread(Some(failure)) = why else {
+        panic!("a failure typed by its producer: {why:?}");
+    };
+    let told = failure.words("Pi");
+    assert!(!told.contains("hunter22") && !told.contains('/'), "{told}");
+    assert!(told.starts_with("Pi's program "), "{told}");
 }

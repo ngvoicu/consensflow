@@ -9,6 +9,7 @@
 //! the engine where it is read (`Dispatcher::pane_exited`), before the next frame, so an exit
 //! that came before its open's answer is known by the time the answer is.
 
+use cf_base::startup::StartRefusal;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::panes::SilentPaste;
 use serde_json::Value;
@@ -33,8 +34,13 @@ pub struct OpenPane {
 pub enum Opened {
     /// The pane is open, its program's process id when the host knows it.
     Open { pid: Option<u32> },
-    /// The host would not open it, in its own words: nothing of it ran.
+    /// The host would not open it, in its own words: nothing of it ran. The words are the
+    /// host's and no note carries them (T-1328).
     Refused { error: String },
+    /// The window's program cannot be run as it is (an npm shim with no Node to run on, a script
+    /// only cmd.exe could run): nothing of it ran. The person's words name the file; a note says
+    /// the kind of failure.
+    Unrunnable(StartRefusal),
     /// The host did not answer by the open's deadline. It goes on with an open it was
     /// asked for, so the window's program may have started, or may start later
     /// (kluris, 2026-10-26): the engine ends it ([`EngineHost::kill`]).

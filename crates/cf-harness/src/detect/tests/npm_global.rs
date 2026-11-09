@@ -269,11 +269,20 @@ mod started {
         let (on_path, _) = install_pi(&machine.bin());
         for which in [&shim, &on_path] {
             let said = runnable(which, &args, &env).unwrap_err();
-            assert!(said.starts_with(&text(which)), "{said}");
+            // The words name the shim, for the person's own screen; a note says the kind.
             assert!(
-                said.contains("Make the harness's Node visible to ConsensFlow")
-                    && said.contains("install the harness's own build"),
+                said.words().starts_with(&which.display().to_string()),
                 "{said}"
+            );
+            assert!(
+                said.words()
+                    .contains("Make the harness's Node visible to ConsensFlow")
+                    && said.words().contains("install the harness's own build"),
+                "{said}"
+            );
+            assert_eq!(
+                said.failure(),
+                cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NoNode)
             );
         }
         // A node on PATH: both shims run on it.
@@ -332,7 +341,7 @@ mod started {
         let (env, shim, script) = found(&machine);
         let argv = [text(&shim), "--model".to_owned(), "a b".to_owned()];
         let said = pane_argv(&argv, &env).unwrap_err();
-        assert!(said.contains("finds no Node for it"), "{said}");
+        assert!(said.words().contains("finds no Node for it"), "{said}");
         let node = machine.npm().join("node.exe");
         startable(&node);
         assert_eq!(

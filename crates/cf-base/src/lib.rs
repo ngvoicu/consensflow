@@ -21,5 +21,6 @@ pub mod json;
 pub mod path;
 pub mod refusal;
 pub mod role_read;
+pub mod startup;
 pub mod text;
 pub mod time;

@@ -405,6 +405,19 @@ impl Dispatcher {
         self.seams.records.last_call(harness, &session).await
     }
 
+    /// The harness's own session a participant's current conversation runs in, as the ledger
+    /// has it: none when it has no conversation or no session yet. A window that quit may have
+    /// printed it (`claude --resume <id>`), which its note does not take for a secret.
+    pub(crate) fn native_session_of(&self, participant: i64) -> Option<String> {
+        self.seams
+            .ledger
+            .borrow()
+            .current_conversation(participant)
+            .ok()??
+            .native_session
+            .filter(|session| !session.is_empty())
+    }
+
     /// The harness and the session a participant's current conversation is on,
     /// where its record can be read with no window open: none when it has no
     /// conversation, no session yet, or a harness no adapter opens.

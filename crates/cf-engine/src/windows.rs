@@ -38,6 +38,7 @@ use crate::runtime::{begin, caught, returning};
 use crate::seams::EngineError;
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
+use crate::startup::{Stage, Startup, Why};
 use crate::stops::{Interrupted, Unstopped};
 use crate::trust::Trusting;
 use crate::turn_end::HeldPart;
@@ -771,13 +772,18 @@ impl Dispatcher {
             Err(cause) => {
                 // An adapter may fail after writing the launch's files; no window will read them.
                 self.seams.launch_files.forget(&launch_id);
-                return self.launch_failed(
-                    record,
-                    project,
+                // What the adapter said is its own: the log has it, and a note says the stage.
+                let why = if cause.refusal().code == "no-adapter" {
+                    Why::NoAdapter
+                } else {
+                    Why::Unsaid
+                };
+                let said = self.startup_words(
                     participant,
-                    failing,
-                    &format!("the launch failed: {cause}"),
+                    Startup::new(Stage::Prepare, why),
+                    &cause.to_string(),
                 );
+                return self.launch_failed(record, project, participant, failing, &said);
             }
         };
         // A member's role was compared once its harness had said which conversation
@@ -869,10 +875,20 @@ impl Dispatcher {
             .and_then(|opening| opening.exited);
         let pid = match opened {
             Ok(Opened::Open { pid }) => pid,
-            Ok(Opened::Refused { error }) => {
+            // The host would not open it, in words of its own that no note carries; or the
+            // window's program cannot be run as it is (an npm shim with no Node to run on), and
+            // the person's own screen has the words, a note the kind of failure.
+            Ok(refused @ (Opened::Refused { .. } | Opened::Unrunnable(_))) => {
                 if let Some(id) = resumed_on.filter(|_| proven) {
                     self.seams.ledger.borrow_mut().set_program_gone(id, true)?;
                 }
+                let (why, said) = match &refused {
+                    Opened::Unrunnable(refusal) => {
+                        (Why::Program(refusal.failure()), refusal.words())
+                    }
+                    Opened::Refused { error } => (Why::HostRefused, error.as_str()),
+                    _ => (Why::HostRefused, ""),
+                };
                 return self.not_opened(
                     record,
                     project,
@@ -880,7 +896,7 @@ impl Dispatcher {
                     failing,
                     &token,
                     &launch_id,
-                    &error,
+                    (why, said),
                 );
             }
             // The host goes on with an open it did not answer in time: the window's
@@ -899,7 +915,7 @@ impl Dispatcher {
                     failing,
                     &token,
                     &launch_id,
-                    DEADLINE,
+                    (Why::HostSilent, DEADLINE),
                 );
                 self.end_abandoned(record).await?;
                 return failed;
@@ -912,7 +928,7 @@ impl Dispatcher {
                     failing,
                     &token,
                     &launch_id,
-                    &error.message,
+                    (Why::Unsaid, &error.message),
                 );
             }
         };
@@ -1371,17 +1387,13 @@ impl Dispatcher {
         delivering: Option<Delivering>,
         token: &str,
         launch_id: &LaunchId,
-        error: &str,
+        (why, said): (Why, &str),
     ) -> Result<(), EngineError> {
         self.seams.credentials.revoke(token);
         self.seams.launch_files.forget(launch_id);
-        self.launch_failed(
-            record,
-            project,
-            participant,
-            delivering,
-            &format!("the window did not open: {error}"),
-        )
+        // What the host said is its own: the log has it, and a note says the kind (T-1328).
+        let said = self.startup_words(participant, Startup::new(Stage::Open, why), said);
+        self.launch_failed(record, project, participant, delivering, &said)
     }
 
     /// Whether a launch that waited is over, with no window to open. A

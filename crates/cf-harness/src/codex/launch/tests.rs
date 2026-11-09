@@ -13,7 +13,7 @@ use super::*;
 use crate::codex::fakes::Watching;
 use crate::contract::Work;
 use crate::seams::loopback::Request;
-use crate::seams::processes::{Child, Failed, Limits, Processes, Program, Streams};
+use crate::seams::processes::{Child, Failed, Limits, Processes, Program, StartRefusal, Streams};
 use crate::seams::{Entropy, Ports};
 use crate::testing::{fake_executable, finished, named, Fakes, ScriptedProcesses};
 
@@ -278,7 +278,7 @@ impl Processes for Vanishing {
         answer
     }
 
-    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, StartRefusal> {
         self.scripted.spawn(program, streams)
     }
 }

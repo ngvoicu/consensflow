@@ -40,7 +40,7 @@ use crate::{config_with_codex, secs, Outcome};
 
 /// What the note to the human begins with when the chief's window does not come up.
 const NOT_UP: &str =
-    "The chief could not start: the window never came up: the Codex broker never named the thread";
+    "The chief could not start: the window never came up (its cause is in ConsensFlow's log)";
 
 /// The rig, its launches given 10 s.
 fn config() -> Config {

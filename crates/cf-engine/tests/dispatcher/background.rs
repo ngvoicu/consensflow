@@ -16,10 +16,13 @@ use cf_proto::panes::{Servers, SilentPaste};
 
 pub(crate) const LOCK: &str = "python3 lock.py record --run 7";
 pub(crate) const LOG: &str = "tail -f run.log";
+/// What a note says of them: the program and `…`, never the arguments.
+pub(crate) const LOCK_SAID: &str = "python3 …";
+const LOG_SAID: &str = "tail …";
 
 /// What the requester is told when the window of T-1 closed with `LOCK` running.
 const LOCK_CLOSED: &str =
-    "T-1's window closed with background work running, which its close ended: python3 lock.py record --run 7";
+    "T-1's window closed with background work running, which its close ended: python3 …";
 
 /// T-1 given to zeus, whose agent starts a run, answers that it did and ends its
 /// turn: the pass that looks at it is made.
@@ -287,9 +290,96 @@ fn a_cancelled_task_closes_its_window_with_the_work_still_running_and_whoever_ga
     assert!(closed(&context, &pane), "cancelling closes the window");
     let told = tiers.notes("chief");
     let said = format!(
-        "T-1's window closed with background work running, which its close ended: {LOCK}; {LOG}"
+        "T-1's window closed with background work running, which its close ended: {LOCK_SAID}; {LOG_SAID}"
     );
     assert!(told.contains(&said), "{told:?}");
+}
+
+/// The commands a window left running, as the host lists them: each carries something a note
+/// must not say (a token, a password, a header, a path into someone's folder).
+const WITH_ARGUMENTS: [&str; 5] = [
+    "python3 lock.py record --run 7 --token redgreenblue",
+    "/Users/me/secret-project/bin/node server.mjs --password hunter22",
+    "bash -c 'export TOKEN=redgreenblue; ./serve'",
+    "/Users/me/my secret/bin/node server.mjs",
+    "sleep 600",
+];
+
+/// What a note says of [`WITH_ARGUMENTS`]: the program the list names and `…` where the command
+/// goes on after it, and the process's number for the rest (the host numbers them from 1001).
+const WITH_ARGUMENTS_SAID: &str = "python3 …; node …; process 1003; process 1004; sleep …";
+
+/// Alpha.3's known issue (T-1178, `paused-background-notes-still-quote-command-arguments`): a
+/// note about a window's background work quoted the commands whole, masked and cut short, with
+/// their arguments and the paths in them. It names the program, as the note of a last tool call
+/// does, and nothing after it: a close's note, a pause's, and the human's note of a chief's.
+#[test]
+fn a_note_of_the_work_a_window_left_running_names_a_program_and_never_an_argument() {
+    let leaked = |note: &str| {
+        [
+            "redgreenblue",
+            "hunter22",
+            "secret",
+            "/Users",
+            "lock.py",
+            "server.mjs",
+            "600",
+        ]
+        .iter()
+        .filter(|piece| note.contains(**piece))
+        .map(|piece| (*piece).to_owned())
+        .collect::<Vec<_>>()
+    };
+    // A close to whoever gave the task.
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_leaving(&WITH_ARGUMENTS);
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 1, "human")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let told = tiers.notes("chief");
+    let said = format!(
+        "T-1's window closed with background work running, which its close ended: {WITH_ARGUMENTS_SAID}"
+    );
+    assert!(told.contains(&said), "{told:?}");
+    assert!(told.iter().all(|note| leaked(note).is_empty()), "{told:?}");
+    drop(tiers);
+    context.close();
+
+    // A window that went by itself, in its pause note.
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_leaving(&WITH_ARGUMENTS);
+    context.exit("zeus");
+    let session = tiers.assignee(1);
+    let paused = tiers.notes("chief").last().cloned().unwrap();
+    assert_eq!(
+        paused,
+        format!(
+            "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {WITH_ARGUMENTS_SAID}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+        )
+    );
+    assert!(leaked(&paused).is_empty(), "{paused}");
+    drop(tiers);
+    context.close();
+
+    // A chief's, to the human.
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_leaving(&WITH_ARGUMENTS);
+    context.exit("chief");
+    let told = tiers.notes("human");
+    assert!(
+        told.contains(&format!(
+            "@chief's window closed with background work running, which its close ended: {WITH_ARGUMENTS_SAID}"
+        )),
+        "{told:?}"
+    );
+    assert!(told.iter().all(|note| leaked(note).is_empty()), "{told:?}");
 }
 
 #[test]
@@ -305,7 +395,7 @@ fn a_window_closed_after_its_result_with_work_the_host_did_not_end_says_so_too()
     assert_eq!(tiers.task(1).task.state, "done");
     assert!(
         tiers.notes("chief").contains(&format!(
-            "T-1's window closed with background work running, which its close ended: {LOCK}"
+            "T-1's window closed with background work running, which its close ended: {LOCK_SAID}"
         )),
         "{:?}",
         tiers.notes("chief")
@@ -326,7 +416,7 @@ fn a_window_that_goes_by_itself_with_the_work_running_says_so_in_the_pause_note(
         tiers.notes("chief").last().map(String::as_str),
         Some(
             format!(
-                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK_SAID}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
             )
             .as_str()
         )
@@ -359,6 +449,38 @@ fn a_window_closed_with_a_process_that_may_be_its_own_names_it_to_whoever_gave_t
     );
 }
 
+/// The joint review T-1322, blocker 5: what may be the window's and was not ended is named by a
+/// program the list of the last tool call names, and by its number where it does not: a program's
+/// name is a file's, and can hold what a secret is made of.
+#[test]
+fn a_process_that_may_be_the_windows_own_is_named_by_a_listed_program_and_its_number_alone_otherwise(
+) {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.exits_possibly_leaving(&[
+        "sk-abc defg hijk lmno",
+        "node",
+        "Python",
+        "my secret tool hunter22",
+        "sleep",
+    ]);
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 1, "human")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let told = tiers.notes("chief");
+    let said = "T-1's window closed; pid 4001, pid 4002 (node), pid 4003, pid 4004, pid 4005 (sleep) may be this window's and were not ended";
+    assert!(told.contains(&said.to_owned()), "{told:?}");
+    assert!(
+        told.iter()
+            .all(|note| !note.contains("defg") && !note.contains("hunter22")),
+        "{told:?}"
+    );
+}
+
 #[test]
 fn a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_after_its_work() {
     let context = Context::new();
@@ -373,7 +495,7 @@ fn a_window_that_goes_by_itself_names_in_its_pause_note_what_may_be_its_own_afte
         tiers.notes("chief").last().map(String::as_str),
         Some(
             format!(
-                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK}; pid 4001 (node), pid 4002 (Python) may be this window's and were not ended. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+                "T-1 is paused: @{session}'s window closed with background work running, which its close ended: {LOCK_SAID}; pid 4001 (node), pid 4002 may be this window's and were not ended. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
             )
             .as_str()
         )
@@ -394,7 +516,7 @@ fn a_chiefs_window_that_closes_tells_the_human_what_it_left_and_what_may_be_its_
     let told = tiers.notes("human");
     assert!(
         told.contains(&format!(
-            "@chief's window closed with background work running, which its close ended: {LOCK}; pid 4001 (node) may be this window's and was not ended"
+            "@chief's window closed with background work running, which its close ended: {LOCK_SAID}; pid 4001 (node) may be this window's and was not ended"
         )),
         "{told:?}"
     );
@@ -429,7 +551,7 @@ fn a_window_that_closes_with_nothing_running_says_nothing_of_it() {
 }
 
 #[test]
-fn what_a_close_note_quotes_of_the_work_has_its_secrets_hidden_and_is_held_to_a_line() {
+fn what_a_close_note_quotes_of_the_work_is_the_program_and_never_the_header_it_was_given() {
     let context = Context::new();
     let tiers = working(&context);
     let secret = "curl -H 'Authorization: Bearer sk-live-0123456789abcdefABCDEF' https://example.test/upload";
@@ -448,10 +570,10 @@ fn what_a_close_note_quotes_of_the_work_has_its_secrets_hidden_and_is_held_to_a_
         .iter()
         .find(|note| note.contains("background work running, which its close ended"))
         .unwrap_or_else(|| panic!("{told:?}"));
-    assert!(!note.contains("sk-live-0123456789abcdefABCDEF"), "{note}");
-    assert!(note.contains("[masked]"), "{note}");
-    assert!(
-        note.contains("(1 key- or token-like string masked)"),
-        "{note}"
+    // `curl` is no program the list names: the process is named by its number, and the header,
+    // the masker's `[masked]` and the address are nowhere (masking was once all there was).
+    assert_eq!(
+        note,
+        "T-1's window closed with background work running, which its close ended: process 1001"
     );
 }

@@ -12,7 +12,10 @@ use std::rc::Rc;
 
 use super::Latch;
 use crate::contract::Work;
-use crate::seams::processes::{Child, Ending, Failed, Limits, Processes, Program, Streams};
+use crate::seams::processes::{
+    Child, Ending, Failed, Limits, Processes, Program, StartRefusal, Streams,
+};
+use cf_base::startup::{StartFailure, StartKind};
 
 /// A program's name as a test names it: its executable's file name, the
 /// extension a Windows stand-in has taken off (`codex.cmd` is `codex`).
@@ -193,7 +196,7 @@ impl Processes for ScriptedProcesses {
         Box::pin(async move { answer })
     }
 
-    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, String> {
+    fn spawn(&self, program: Program, streams: Streams) -> Result<Box<dyn Child>, StartRefusal> {
         let (named, name) = (named(&program), name(&program));
         // Written down whether it starts or not, as Node's recorder writes
         // down every `spawn`.
@@ -203,7 +206,12 @@ impl Processes for ScriptedProcesses {
             .borrow_mut()
             .get_mut(&name)
             .and_then(VecDeque::pop_front)
-            .ok_or_else(|| missing(&named))?;
+            .ok_or_else(|| {
+                StartRefusal::new(
+                    StartFailure::of(StartKind::NotFound).with_errno("ENOENT"),
+                    missing(&named),
+                )
+            })?;
         // One that ends by itself and says nothing has ended once started.
         let ended = Latch::default();
         if script.ends == Ends::Itself && script.lines.is_empty() {
@@ -376,7 +384,8 @@ mod tests {
             scripted
                 .spawn(program("/bin/server", &["serve"]), Streams::Quiet)
                 .err()
-                .as_deref(),
+                .as_ref()
+                .map(StartRefusal::words),
             Some("spawn server serve ENOENT"),
             "no child is left scripted"
         );

@@ -142,6 +142,13 @@ pub enum PaneError {
     /// The window is still being ended by a close before this one.
     Ending(PaneKey),
     Pty(String),
+    /// The system would not start the window's program: its words, and, where the failure is an
+    /// I/O error, the system's name for it from libuv's table (`ENOENT`), which the daemon reads
+    /// back as the kind of failure a note says (T-1328).
+    Spawn {
+        message: String,
+        code: Option<&'static str>,
+    },
     Io(io::Error),
     InvalidBacklog,
     InvalidEnvironmentVariableName(String),
@@ -152,6 +159,17 @@ pub enum PaneError {
         highest_issued: u64,
     },
     LockPoisoned,
+}
+
+impl PaneError {
+    /// The system's name for the failure, where the window's program could not be started and
+    /// the system named why.
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            Self::Spawn { code, .. } => *code,
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for PaneError {
@@ -189,7 +207,9 @@ impl fmt::Display for PaneError {
                 "pane {} generation {} is still being ended",
                 key.id, key.generation
             ),
-            Self::Pty(message) => write!(formatter, "PTY error: {message}"),
+            Self::Pty(message) | Self::Spawn { message, .. } => {
+                write!(formatter, "PTY error: {message}")
+            }
             Self::Io(error) => write!(formatter, "PTY I/O error: {error}"),
             Self::InvalidBacklog => write!(formatter, "backlogBytes must be greater than zero"),
             Self::InvalidEnvironmentVariableName(name) => write!(
@@ -666,7 +686,16 @@ impl PaneTable {
         let child = pair
             .slave
             .spawn_command(command)
-            .map_err(|error| PaneError::Pty(error.to_string()))?;
+            .map_err(|error| PaneError::Spawn {
+                message: error.to_string(),
+                // The spawner's own error is text with the program's path in it. The system's
+                // name for why the program's file cannot be reached is its own answer about that
+                // file, from the table of libuv's names.
+                code: std::fs::metadata(program_path)
+                    .err()
+                    .as_ref()
+                    .map(cf_base::file::error_code),
+            })?;
         drop(pair.slave);
 
         #[cfg(unix)]
@@ -1718,6 +1747,30 @@ mod tests {
         let pane = open_shell(&table, "exec /bin/cat");
         table.kill(&pane.key).unwrap();
         assert!(table.begin_update().is_ok());
+    }
+
+    /// T-1328: a program the system cannot start says why by the system's name for it, from the
+    /// fixed table, beside its words; the daemon reads it back as the kind of failure a note says,
+    /// and the words (which name the program) stay the person's.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_the_system_cannot_start_names_why_by_its_code() {
+        let _serial = serial_pty_test();
+        let table = PaneTable::new();
+        let missing = table.open_at(
+            PaneKey::new("missing-program", 1),
+            Path::new("/tmp"),
+            &["/nonexistent/hunter22 program".to_owned()],
+            &HashMap::new(),
+            terminal_size(40, 120),
+        );
+        let Err(error) = missing else {
+            panic!("a program that is not there opened");
+        };
+        assert_eq!(error.code(), Some("ENOENT"), "{error}");
+        // Other failures of a table name none.
+        assert_eq!(PaneError::EmptyArgv.code(), None);
+        assert_eq!(PaneError::Pty("boom".to_owned()).code(), None);
     }
 
     #[cfg(unix)]

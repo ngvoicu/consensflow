@@ -133,8 +133,12 @@ pub const IT_SAID: &str = "; it said:\n";
 /// the words are not quoted, and this is told instead. `cf_engine::quotable` puts it there for
 /// words it screened and withheld; a read that kept only the end of what the program said (its
 /// error stream is kept to its last bytes) puts it there itself, for the front it lost may have
-/// held the label of a value that is in what is left.
-pub const WORDS_WITHHELD: &str = "(Pi's words withheld: they may hold a credential)";
+/// held the label of a value that is in what is left. It points to where the words can be
+/// read, for a line that only names a credential's word (`OPENAI_API_KEY is not set`, `OAuth
+/// login expired`, `Unexpected token: }`) is withheld with the rest, and no list of the lines
+/// that are harmless is kept (T-1276, item d: every list reopens the case of `token: expired`).
+pub const WORDS_WITHHELD: &str =
+    "(Pi's words withheld: they may hold a credential; run Pi in a terminal to read what it says)";
 
 /// Whether a listing is the account's own as of when it was read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -19,6 +19,7 @@ use cf_proto::agents::Harness;
 use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::Value;
 
+use crate::contract::NoDefault;
 use crate::detect::executable;
 use crate::seams::processes::{Limits, Processes, Program};
 use crate::seams::Time;
@@ -191,8 +192,8 @@ pub(crate) fn gone(words: &str, asked: &str) -> bool {
 /// launch with no `--model` runs; where it names none, Devin's own choice is left to it, as
 /// it differs by machine (`swe-2-high` on the Mac, `swe-2-max` on zeewin2, CHF-02), and
 /// Devin lists no contributor model (CHF-06).
-pub(crate) fn default_model(env: &Env) -> Result<Option<String>, String> {
-    let config = super::paths::config(env)?;
+pub(crate) fn default_model(env: &Env) -> Result<Option<String>, NoDefault> {
+    let config = super::paths::config(env).map_err(|_| NoDefault::Unread(None))?;
     Ok(
         std::fs::read_to_string(cf_base::path::join(&[&config, "config.json"]))
             .ok()

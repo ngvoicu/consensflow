@@ -81,6 +81,24 @@
 
 [run]
 engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+quote-less-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "background::"]
+quote-less-paused = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
+quote-less-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_cut_note"]
+quote-less-engine-startup = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "startup::"]
+quote-less-codex-session = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "supervisor::"]
+quote-less-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests::"]
+quote-less-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::tests::a_program_the_system_cannot_start"]
+quote-less-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::a_program_the_system_cannot_start"]
+quote-less-errno = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::errno::"]
+quote-less-child = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "child::"]
+quote-less-no-adapter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "no_adapter::"]
+quote-less-opening = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::tests::"]
+quote-less-ledger-turn = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "continuations::"]
+quote-less-parity = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::tests::the_harness_reads"]
+quote-less-chief-not-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_not_up::"]
+quote-less-process = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "runnable::"]
+quote-less-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "startup::"]
+quote-less-background-notes = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "background::"]
 engine-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
 engine-assigning = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "assigning::"]
 engine-closing = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closing::"]
@@ -756,8 +774,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        .any(|row| row.len() >= BODY_ROW && looks_encoded(row))'''
-replace = '''        .any(|row| row.len() >= BODY_ROW && looks_encoded(row) && false)'''
+find = '''        && (looks_encoded(row) || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+replace = '''        && (false || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
 
 [[plant]]
 name = "windows close: two rows that look encoded are no key"
@@ -1069,8 +1087,11 @@ runs = ["engine-shown", "engine-windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if holds_a_key(&rows) || grouped(&spaced) {'''
-replace = '''    if grouped(&spaced) {'''
+find = '''    if holds_a_key(&rows)
+        || grouped(&without_own_session(&spaced, own_session))
+'''
+replace = '''    if grouped(&without_own_session(&spaced, own_session))
+'''
 
 [[plant]]
 name = "windows close: a padding row survives as a row"
@@ -1143,14 +1164,14 @@ find = '''const GROUP: usize = 4;'''
 replace = '''const GROUP: usize = 3;'''
 
 [[plant]]
-name = "windows close: two blanks part a run no more than one"
-meant = "a_value_in_groups_withholds_the_screen"
+name = "windows close: a tab or blanks of any number part nothing"
+meant = "hex_groups_parted_by_a_tab_or_by_blanks_of_any_number_are_a_run"
 runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if false {'''
+find = '''                    (count, _) if count >= 1 && blank => Some(Gap::Blanks),'''
+replace = '''                    (count, _) if count >= 1 && blank => None,'''
 
 [[plant]]
 name = "windows close: a short token does not part a run"
@@ -1174,8 +1195,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''            if last.iter().all(|group| group.len() == last[0].len())'''
-replace = '''            if false && last.iter().all(|group| group.len() == last[0].len())'''
+find = '''                || (one_each && last.iter().all(|(group, _)| group.len() == last[0].0.len()))'''
+replace = '''                || (false && one_each && last.iter().all(|(group, _)| group.len() == last[0].0.len()))'''
 
 [[plant]]
 name = "windows close: groups that look encoded are no run"
@@ -1184,8 +1205,10 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''                || last.iter().all(|group| is_grouped_value(group))'''
-replace = '''                || false'''
+find = '''            if last.iter().all(|(group, _)| is_grouped_value(group))
+'''
+replace = '''            if false
+'''
 
 [[plant]]
 name = "windows close: a hex group is no value"
@@ -1260,8 +1283,12 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''    if holds_a_key(&rows) || grouped(&spaced) {'''
-replace = '''    if holds_a_key(&rows) || rows.iter().any(|row| grouped(row)) {'''
+find = '''    if holds_a_key(&rows)
+        || grouped(&without_own_session(&spaced, own_session))
+'''
+replace = '''    if holds_a_key(&rows)
+        || rows.iter().any(|row| grouped(&without_own_session(row, own_session)))
+'''
 
 [[plant]]
 name = "windows close: no token's beginning withholds a screen"
@@ -1322,8 +1349,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''|xox[abprs]-)(?:[A-Za-z0-9]{4}'''
-replace = '''|xox[abprs]-X)(?:[A-Za-z0-9]{4}'''
+find = '''|xox[abprs]-)(?:[A-Za-z0-9_-]{4}'''
+replace = '''|xox[abprs]-X)(?:[A-Za-z0-9_-]{4}'''
 
 [[plant]]
 name = "windows close: the AKIA kind is not found"
@@ -1418,8 +1445,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''(?:[A-Za-z0-9]{4}|\s|$)'''
-replace = '''(?:[A-Za-z0-9]{8}|\s|$)'''
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{8}|\S{0,3}(?:\s|$))'''
 
 [[plant]]
 name = "windows close: a prefix at the end of the text is no token's beginning"
@@ -1428,8 +1455,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''(?:[A-Za-z0-9]{4}|\s|$)'''
-replace = '''(?:[A-Za-z0-9]{4}|\s)'''
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s))'''
 
 [[plant]]
 name = "windows close: a prefix before a blank is no token's beginning"
@@ -1438,8 +1465,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/mask.rs"
-find = '''(?:[A-Za-z0-9]{4}|\s|$)'''
-replace = '''(?:[A-Za-z0-9]{4}|$)'''
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:$))'''
 
 [[plant]]
 name = "windows close: a name that begins like the npm kind is a token"
@@ -1665,9 +1692,9 @@ runs = ["engine-shown"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''        count += 1;
-        between = Some(c);'''
+        last = c;'''
 replace = '''        count = 1;
-        between = Some(c);'''
+        last = c;'''
 
 [[plant]]
 name = "windows close: a blank does not part groups"
@@ -1676,8 +1703,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if !matches!(parted_by, Some('-')) {'''
+find = '''                    (1, ' ' | '-') => Some(Gap::One),'''
+replace = '''                    (1, '-') => Some(Gap::One),'''
 
 [[plant]]
 name = "windows close: a dash does not part groups"
@@ -1686,8 +1713,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if !matches!(parted_by, Some(' ')) {'''
+find = '''                    (1, ' ' | '-') => Some(Gap::One),'''
+replace = '''                    (1, ' ') => Some(Gap::One),'''
 
 [[plant]]
 name = "windows close: any one character parts groups"
@@ -1696,8 +1723,8 @@ runs = ["engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/screen.rs"
-find = '''        if !matches!(parted_by, Some(' ' | '-')) {'''
-replace = '''        if parted_by.is_none() {'''
+find = '''                    (1, ' ' | '-') => Some(Gap::One),'''
+replace = '''                    (1, _) => Some(Gap::One),'''
 
 [[plant]]
 name = "windows close: a slash alone makes a row look encoded"
@@ -1708,3 +1735,1331 @@ runs = ["engine-shown"]
 file = "crates/cf-engine/src/shown/screen.rs"
 find = '''    if row.contains(['+', '=']) {'''
 replace = '''    if row.contains(['+', '/', '=']) {'''
+
+[[plant]]
+name = "windows close: quote less: the window's own id is looked at as any value in groups"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if word_edge(row[..start].chars().next_back()) && word_edge(row[end..].chars().next()) {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "windows close: quote less: the id inside a longer word is the window's own too"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if word_edge(row[..start].chars().next_back()) && word_edge(row[end..].chars().next()) {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "windows close: quote less: the window's own id is looked for in the case it was printed in only"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let (lower_row, lower_id) = (row.to_ascii_lowercase(), id.to_ascii_lowercase());'''
+replace = '''    let (lower_row, lower_id) = (row.to_owned(), id.to_owned());'''
+
+[[plant]]
+name = "windows close: quote less: any session is taken out of the screen, a UUID or not"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let Some(id) = own_session.filter(|id| is_uuid(id)) else {'''
+replace = '''    let Some(id) = own_session else {'''
+
+[[plant]]
+name = "windows close: quote less: the screen is looked at with the session of none"
+meant = "a_windows_own_session_id_on_its_screen_is_no_value_in_groups"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''match screen::withheld(tail, self.own_session.as_deref()) {'''
+replace = '''match screen::withheld(tail, None) {'''
+
+[[plant]]
+name = "windows close: quote less: the exit of a window is told no session of its own"
+meant = "a_pause_note_the_ledger_holds_quotes_the_screen_of_a_claude_window_that_quit_with_its_own_resume_line"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let shown = shown.with_own_session(self.native_session_of(record.id));'''
+replace = '''        let shown = shown.with_own_session(None);'''
+
+[[plant]]
+name = "windows close: quote less: escapes are spelled out once only"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''const PERCENT_LEVELS: usize = 3;'''
+replace = '''const PERCENT_LEVELS: usize = 1;'''
+
+[[plant]]
+name = "windows close: quote less: an escaped sign with two hex digits after it is an ordinary one"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        nested
+            || (escapes.len() >= 2'''
+replace = '''        false
+            || (escapes.len() >= 2'''
+
+[[plant]]
+name = "windows close: quote less: an escape for a letter or a digit is an ordinary one"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                    .any(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(byte)))'''
+replace = '''                    .any(|byte| b"-._~".contains(byte)))'''
+
+[[plant]]
+name = "windows close: quote less: one escape alone is a word written in percent signs"
+meant = "nested_percent_signs_and_a_word_escaped_for_no_reason_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            || (escapes.len() >= 2
+'''
+replace = '''            || (escapes.len() >= 1
+'''
+
+[[plant]]
+name = "windows close: quote less: a word of three parts is a value in groups"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    parts.len() >= GROUPS
+        && parts'''
+replace = '''    parts.len() >= 3
+        && parts'''
+
+[[plant]]
+name = "windows close: quote less: a part of three characters is a group"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            .all(|part| part.len() >= GROUP && part.chars().all(is_base64_char))'''
+replace = '''            .all(|part| part.len() >= 3 && part.chars().all(is_base64_char))'''
+
+[[plant]]
+name = "windows close: quote less: parts of one length are no value in groups"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        && (parts.iter().all(|part| part.len() == parts[0].len())
+'''
+replace = '''        && (false
+'''
+
+[[plant]]
+name = "windows close: quote less: hex or encoded parts are no value in groups"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            || parts.iter().all(|part| is_grouped_value(part)))'''
+replace = '''            || false)'''
+
+[[plant]]
+name = "windows close: quote less: the quotes and brackets round a word of groups are part of it"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    let word = word.trim_matches(|c: char| !(is_base64_char(c) || "_:.-".contains(c)));
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: a word of groups is looked for in no word"
+meant = "a_word_of_groups_parted_by_an_underscore_a_colon_or_a_point_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    text.split_whitespace().any(parted_word)'''
+replace = '''    false'''
+
+[[plant]]
+name = "windows close: quote less: hex groups parted by blanks of any number are no run"
+meant = "hex_groups_parted_by_a_tab_or_by_blanks_of_any_number_are_a_run"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                    (count, _) if count >= 1 && blank => Some(Gap::Blanks),'''
+replace = '''                    (count, _) if count >= 1 && blank && false => Some(Gap::Blanks),'''
+
+[[plant]]
+name = "windows close: quote less: a word to a row is a row of words"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        if row_words.len() >= 2
+'''
+replace = '''        if row_words.len() >= 1
+'''
+
+[[plant]]
+name = "windows close: quote less: a word of three letters is a long one"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''.all(|word| word.chars().count() >= GROUP && word.chars().all(char::is_alphabetic))'''
+replace = '''.all(|word| word.chars().count() >= 3 && word.chars().all(char::is_alphabetic))'''
+
+[[plant]]
+name = "windows close: quote less: a digit or a point in a word is a letter"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''.all(|word| word.chars().count() >= GROUP && word.chars().all(char::is_alphabetic))'''
+replace = '''.all(|word| word.chars().count() >= GROUP)'''
+
+[[plant]]
+name = "windows close: quote less: three words are a run of words"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''            if words >= GROUPS {
+                return true;'''
+replace = '''            if words >= 3 {
+                return true;'''
+
+[[plant]]
+name = "windows close: quote less: a row that is no row of words does not end the run"
+meant = "rows_of_four_words_of_four_letters_and_nothing_else_withhold_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        } else {
+            words = 0;
+        }'''
+replace = '''        } else {
+        }'''
+
+[[plant]]
+name = "windows close: quote less: a slash in a row of twelve is a path's"
+meant = "a_row_of_twelve_with_a_slash_in_it_or_one_word_of_letters_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        && (looks_encoded(row) || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+replace = '''        && (looks_encoded(row) || false || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+
+[[plant]]
+name = "windows close: quote less: one word of letters is a word"
+meant = "a_row_of_twelve_with_a_slash_in_it_or_one_word_of_letters_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        && (looks_encoded(row) || row.contains('/') || row.chars().all(|c| c.is_ascii_alphabetic()))'''
+replace = '''        && (looks_encoded(row) || row.contains('/') || false)'''
+
+[[plant]]
+name = "windows close: quote less: a body is a row of any length"
+meant = "a_row_of_twelve_with_a_slash_in_it_or_one_word_of_letters_withholds_the_screen"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''    row.len() >= BODY_ROW
+        && (looks_encoded(row)'''
+replace = '''    row.len() >= 1
+        && (looks_encoded(row)'''
+
+[[plant]]
+name = "windows close: quote less: a prefix with three characters and a blank after it is no token's beginning"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9_-]{4}|(?:\s|$))'''
+
+[[plant]]
+name = "windows close: quote less: a dash or an underscore among the four characters after a prefix is no body"
+meant = "the_beginning_of_a_token_of_a_known_kind_is_found_with_a_few_characters_of_its_body"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''(?:[A-Za-z0-9_-]{4}|\S{0,3}(?:\s|$))'''
+replace = '''(?:[A-Za-z0-9]{4}|\S{0,3}(?:\s|$))'''
+
+[[plant]]
+name = "windows close: quote less: the user of a URL with no password is hidden by no rule"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    let mut users: Vec<(usize, usize)> = url_user_spans(text);
+    spans.extend(users.iter().copied());'''
+replace = '''    let mut users: Vec<(usize, usize)> = Vec::new();'''
+
+[[plant]]
+name = "windows close: quote less: the user of a URL with no password is no credential to the screen's look"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    URL_CREDENTIALS.is_match(text) || !url_user_spans(text).is_empty()'''
+replace = '''    URL_CREDENTIALS.is_match(text)'''
+
+[[plant]]
+name = "windows close: quote less: the user of a URL with no password has no span for the wrap to cut"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''        .chain(url_user_spans(text))
+'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: ssh names no account"
+meant = "the_user_of_a_url_with_no_password_is_hidden_unless_its_scheme_names_an_account"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''    "ssh", "sftp", "scp"'''
+replace = '''    "ssx", "sftp", "scp"'''
+
+[[plant]]
+name = "windows close: quote less: authenticating names no secret"
+meant = "authenticating_is_named_whatever_its_ending_and_an_author_is_not"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '''            .any(|word| STEMS.iter().any(|stem| word.starts_with(stem)))'''
+replace = '''            .any(|word| STEMS.iter().any(|stem| word == stem))'''
+
+[[plant]]
+name = "windows close: quote less: unauthenticated names no secret"
+meant = "authenticating_is_named_whatever_its_ending_and_an_author_is_not"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '''const STEMS: [&str; 2] = ["authenticat", "unauthenticat"];'''
+replace = '''const STEMS: [&str; 2] = ["authenticat", "unauthenticax"];'''
+
+[[plant]]
+name = "windows close: quote less: a command is told with what follows its program"
+meant = "a_note_of_the_work_a_window_left_running_names_a_program_and_never_an_argument"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        Some((program, true)) => format!("{program} …"),'''
+replace = '''        Some((program, true)) => process.command.clone(),'''
+
+[[plant]]
+name = "windows close: quote less: a command the list does not name is told whole"
+meant = "a_note_of_the_work_a_window_left_running_names_a_program_and_never_an_argument"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        None => format!("process {}", process.pid),'''
+replace = '''        None => process.command.clone(),'''
+
+[[plant]]
+name = "windows close: quote less: a pause's note names the commands the turn left in words of their own"
+meant = "a_pause_names_the_programs_of_what_its_turn_left_running_and_never_an_argument"
+runs = ["quote-less-paused"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''    let mut commands: Vec<String> = listed.iter().take(QUOTED).map(line).collect();'''
+replace = '''    let mut commands: Vec<String> = listed.iter().take(QUOTED).map(|process| process.command.clone()).collect();'''
+
+[[plant]]
+name = "windows close: quote less: a command with no number is told as process 0"
+meant = "a_command_is_its_program_and_never_an_argument_nor_a_path"
+runs = ["quote-less-background-notes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        None if process.pid == 0 => "a command".to_owned(),'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: sleep is no program of the list"
+meant = "a_note_of_the_work_a_window_left_running_names_a_program_and_never_an_argument"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/call.rs"
+find = '''"sleep", "ping",'''
+replace = '''"ping",'''
+
+[[plant]]
+name = "windows close: quote less: a cut turn is named by a delivery sent to another window"
+meant = "a_cut_note_names_no_delivery_that_was_not_sent_to_that_window_or_that_words_quote"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''.filter(|message| message.recipient_id == participant.id),'''
+replace = '''.filter(|_| true),'''
+
+[[plant]]
+name = "windows close: quote less: a cut turn is never named by its delivery"
+meant = "a_cut_note_names_the_turn_by_the_delivery_the_ledger_holds_and_quotes_none_of_its_words"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''            Some(delivery) => cut_turn(turn.at.as_deref(), delivery),'''
+replace = '''            Some(_) => cut_turn_unquoted(turn.at.as_deref()),'''
+
+[[plant]]
+name = "windows close: quote less: a delivery's header the record held is named though the ledger does not hold it"
+meant = "a_cut_note_quotes_nothing_a_window_showed"
+runs = ["quote-less-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''                .message(id)?
+                .filter(|message| message.recipient_id == participant.id),'''
+replace = '''                .message(id)?
+                .or_else(|| self.seams.ledger.borrow().message(1).ok().flatten()),'''
+
+[[plant]]
+name = "windows close: quote less: a header anywhere in the first words names the delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    let after = rest.strip_prefix(HEADER)?;'''
+replace = '''    let after = &rest[rest.find(HEADER)? + HEADER.len()..];'''
+
+[[plant]]
+name = "windows close: quote less: the placeholders of the images Claude attached hide the delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    while let Some(after) = rest.strip_prefix(IMAGE) {'''
+replace = '''    while let Some(after) = rest.strip_prefix("[Image #x") {'''
+
+[[plant]]
+name = "windows close: quote less: Claude's wrapper of a paste hides the delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    if let Some(tag) = rest.strip_prefix('<').and_then(|r| r.strip_prefix(PASTED)) {'''
+replace = '''    if let Some(tag) = rest.strip_prefix('<').and_then(|r| r.strip_prefix("pasted_x")) {'''
+
+[[plant]]
+name = "windows close: quote less: a wrapper with words in its tag is the paste's"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        if !whole {
+            return None;
+        }'''
+replace = '''        let _ = whole;'''
+
+[[plant]]
+name = "windows close: quote less: an id with a letter after its digits names a delivery"
+meant = "only_a_header_that_begins_the_text_names_a_delivery"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    after[digits..].starts_with(' ').then_some(())?;'''
+replace = ''''''
+
+[[plant]]
+name = "windows close: quote less: the harness keeps the delivery of a turn from an item it does not begin"
+meant = "a_cut_turn_is_told_by_the_time_and_the_delivery_that_began_it_and_no_word_of_the_message"
+runs = ["quote-less-opening"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''            delivery: delivery_of(text),'''
+replace = '''            delivery: None,'''
+
+[[plant]]
+name = "windows close: quote less: a cut turn's name leaves out whom the delivery was from"
+meant = "a_cut_turn_is_named_from_the_row_alone_and_never_from_its_body"
+runs = ["quote-less-ledger-turn"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        "delivery m-{} ({} from {from}{task})",'''
+replace = '''        "delivery m-{} ({}{task})",'''
+
+[[plant]]
+name = "windows close: quote less: a cut turn's name quotes the delivery's body"
+meant = "a_cut_turn_is_named_from_the_row_alone_and_never_from_its_body"
+runs = ["quote-less-ledger-turn"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''        delivery.id, delivery.kind
+    );'''
+replace = '''        delivery.id, delivery.body
+    );'''
+
+[[plant]]
+name = "windows close: quote less: the harness reads a delivery's header otherwise than the proof of an arrival does"
+meant = "the_harness_reads_the_delivery_an_item_began_with_as_the_proof_of_an_arrival_does"
+runs = ["quote-less-parity"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''        rest = next.trim_start();
+    }'''
+replace = '''        rest = next;
+    }'''
+
+[[plant]]
+name = "windows close: quote less: a launch's cause is quoted in the note"
+meant = "a_launch_that_failed_with_words_of_an_adapter_or_a_host_quotes_no_word_of_them"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''        let words = startup.words(who);'''
+replace = '''        let words = format!("{}: {said}", startup.words(who));'''
+
+[[plant]]
+name = "windows close: quote less: a launch's cause is told when the engine has none to type"
+meant = "a_launch_that_failed_with_words_of_an_adapter_or_a_host_quotes_no_word_of_them"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/startup.rs"
+find = '''            Why::Unsaid => format!("{stage} (its cause is in ConsensFlow's log)"),'''
+replace = '''            Why::Unsaid => format!("{stage}: the harness said no"),'''
+
+[[plant]]
+name = "windows close: quote less: the host's words are taken for a refusal it typed"
+meant = "a_launch_that_failed_with_words_of_an_adapter_or_a_host_quotes_no_word_of_them"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    Opened::Refused { error } => (Why::HostRefused, error.as_str()),'''
+replace = '''                    Opened::Refused { error } => (Why::Program(cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NotStarted)), error.as_str()),'''
+
+[[plant]]
+name = "windows close: quote less: a window refused as a program that cannot be run loses its kind"
+meant = "a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and_no_path"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                        (Why::Program(refusal.failure()), refusal.words())'''
+replace = '''                        (Why::HostRefused, refusal.words())'''
+
+[[plant]]
+name = "windows close: quote less: a window refused as a program that cannot be run loses its advice"
+meant = "a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and_no_path"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/startup.rs"
+find = '''            Why::Program(failure) => format!("{stage}: {}", failure.words(who)),'''
+replace = '''            Why::Program(failure) => format!("{stage}: {}", failure.what(who)),'''
+
+[[plant]]
+name = "windows close: quote less: a window refused as a program that cannot be run says the file"
+meant = "a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and_no_path"
+runs = ["quote-less-chief-not-up"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''        let words = startup.words(who);'''
+replace = '''        let words = format!("{} ({said})", startup.words(who));'''
+
+[[plant]]
+name = "windows close: quote less: a harness ConsensFlow cannot open is not named"
+meant = "fails_what_was_given_to_a_member_on_it_by_name_and_its_requester_hears_why"
+runs = ["quote-less-no-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    Why::NoAdapter'''
+replace = '''                    Why::Unsaid'''
+
+[[plant]]
+name = "windows close: quote less: a failure is said without its advice"
+meant = "a_failure_is_said_by_its_kind_and_its_code_and_its_advice_and_nothing_else"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''        match self.advice(who) {
+            Some(advice) => format!("{}; {advice}", self.what(who)),
+            None => self.what(who),
+        }'''
+replace = '''        self.what(who)'''
+
+[[plant]]
+name = "windows close: quote less: a failure is said without its code"
+meant = "a_failure_is_said_by_its_kind_and_its_code_and_its_advice_and_nothing_else"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            Some(StartCode::Errno(name)) => format!("{said} ({name})"),'''
+replace = '''            Some(StartCode::Errno(_)) => said,'''
+
+[[plant]]
+name = "windows close: quote less: a failure is said without its exit status"
+meant = "a_failure_is_said_by_its_kind_and_its_code_and_its_advice_and_nothing_else"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            Some(StartCode::Exit(status)) => format!("{said} (exit code {})", exit_words(status)),'''
+replace = '''            Some(StartCode::Exit(_)) => said,'''
+
+[[plant]]
+name = "windows close: quote less: a system's name for a failed start is no kind"
+meant = "the_systems_name_for_a_failed_start_says_a_kind_and_a_code_but_for_unknown"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            b"ENOENT" => StartKind::NotFound,'''
+replace = '''            b"ENOENT" => StartKind::NotStarted,'''
+
+[[plant]]
+name = "windows close: quote less: unknown is a code a note names"
+meant = "the_systems_name_for_a_failed_start_says_a_kind_and_a_code_but_for_unknown"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            b"UNKNOWN" => failure,'''
+replace = '''            b"UNKNOWN" => failure.with_errno("UNKNOWN"),'''
+
+[[plant]]
+name = "windows close: quote less: two kinds end a window with one status"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_of_consensflows_and_reads_back"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''        i32::try_from(START_STATUS_BASE).unwrap_or(70) + i32::try_from(at).unwrap_or(0)'''
+replace = '''        i32::try_from(START_STATUS_BASE).unwrap_or(70) + i32::try_from(at.min(1)).unwrap_or(0)'''
+
+[[plant]]
+name = "windows close: quote less: a status above the range reads as a kind"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_of_consensflows_and_reads_back"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''        Self::ALL.get(at).copied()'''
+replace = '''        Self::ALL.get(at % Self::ALL.len()).copied()'''
+
+[[plant]]
+name = "windows close: quote less: a name read back from text is any word"
+meant = "a_name_read_back_from_text_is_one_of_the_tables_and_no_other_word"
+runs = ["quote-less-errno"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/errno.rs"
+find = '''        .find(|code| *code == name)
+}'''
+replace = '''        .find(|code| name.starts_with(*code))
+}'''
+
+[[plant]]
+name = "windows close: quote less: a script that is no npm shim is refused as another kind"
+meant = "the_refusals_of_a_start_are_typed_and_their_words_name_the_file_for_the_person_alone"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''        StartFailure::of(StartKind::NotAnNpmShim),
+        format!("{executable} is not an npm shim'''
+replace = '''        StartFailure::of(StartKind::NotStarted),
+        format!("{executable} is not an npm shim'''
+
+[[plant]]
+name = "windows close: quote less: Pi's shim with no Node is refused as an npm shim's"
+meant = "the_refusals_of_a_start_are_typed_and_their_words_name_the_file_for_the_person_alone"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''            StartFailure::of(StartKind::NoNodeForPi),
+            format!(
+                "{shim} runs on Node'''
+replace = '''            StartFailure::of(StartKind::NoNode),
+            format!(
+                "{shim} runs on Node'''
+
+[[plant]]
+name = "windows close: quote less: an npm shim with no Node is refused as Pi's"
+meant = "the_refusals_of_a_start_are_typed_and_their_words_name_the_file_for_the_person_alone"
+runs = ["quote-less-process"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''        StartFailure::of(StartKind::NoNode),
+        format!(
+            "{shim} is an npm shim'''
+replace = '''        StartFailure::of(StartKind::NoNodeForPi),
+        format!(
+            "{shim} is an npm shim'''
+
+[[plant]]
+name = "windows close: quote less: a program the system could not start loses its code"
+meant = "a_start_the_system_refused_says_the_kind_and_the_code_a_note_says_and_not_the_file"
+runs = ["quote-less-child"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '''        StartFailure::of_errno(code),'''
+replace = '''        StartFailure::of(StartKind::NotStarted),'''
+
+[[plant]]
+name = "windows close: quote less: a program the system could not start is told with its file"
+meant = "a_start_the_system_refused_says_the_kind_and_the_code_a_note_says_and_not_the_file"
+runs = ["quote-less-child"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '''        StartFailure::of_errno(code),'''
+replace = '''        StartFailure::of(StartKind::NotFound).with_errno("ENOENT").with_exit(0),'''
+
+[[plant]]
+name = "windows close: quote less: a Codex window that could not start Codex ends with 1"
+meant = "a_window_that_could_not_start_codex_ends_with_the_status_of_why"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/lib.rs"
+find = '''    startup.exit_status()'''
+replace = '''    let _ = startup;
+    1'''
+
+[[plant]]
+name = "windows close: quote less: a Codex shim with no Node is no kind of start"
+meant = "a_codex_that_is_an_npm_shim_with_no_node_to_run_on_is_refused_saying_what_to_do"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Unrunnable(refusal) => refusal.failure().kind(),'''
+replace = '''            Self::Unrunnable(_) => StartKind::NotSetUp,'''
+
+[[plant]]
+name = "windows close: quote less: a Codex that was not found is no kind of start"
+meant = "a_program_that_is_not_there_is_said_by_its_path_and_the_systems_words"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                not_spawned(Path::new(program), cause).failure().kind()'''
+replace = '''                { let _ = not_spawned(Path::new(program), cause); StartKind::NotStarted }'''
+
+[[plant]]
+name = "windows close: quote less: a Codex window's status of why is read as the screen's"
+meant = "a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quotes_no_screen"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        if let Some(words) = &self.start {'''
+replace = '''        if let Some(words) = self.start.as_ref().filter(|_| false) {'''
+
+[[plant]]
+name = "windows close: quote less: a window's status of why is not read"
+meant = "a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quotes_no_screen"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let shown = shown.with_start(start, who);'''
+replace = '''        let shown = shown.with_start(None, who);'''
+
+[[plant]]
+name = "windows close: quote less: a status of why is read of any harness"
+meant = "a_status_of_why_is_read_only_of_a_codex_window"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/adapter.rs"
+find = '''        (self.harness == "codex")'''
+replace = '''        (true)'''
+
+[[plant]]
+name = "windows close: quote less: a status of why is read of a window a signal ended"
+meant = "a_status_of_why_is_not_read_of_a_window_a_signal_ended"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        self.code.filter(|_| self.signal.is_none())'''
+replace = '''        self.code'''
+
+[[plant]]
+name = "windows close: quote less: the daemon takes a word of the host's for a code"
+meant = "an_open_s_answer_is_read_as_the_dispatcher_read_it"
+runs = ["quote-less-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''        .and_then(cf_base::file::known_code);'''
+replace = '''        .and_then(|code| Some(Box::leak(code.to_owned().into_boxed_str()) as &'static str));'''
+
+[[plant]]
+name = "windows close: quote less: the daemon ignores the code the host named"
+meant = "an_open_s_answer_is_read_as_the_dispatcher_read_it"
+runs = ["quote-less-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''        .and_then(cf_base::file::known_code);'''
+replace = '''        .and_then(|_| None);'''
+
+[[plant]]
+name = "windows close: quote less: a program that cannot open in a window is refused as the host's words"
+meant = "a_program_that_cannot_open_in_a_window_fails_the_open_with_the_sentence_and_sends_nothing"
+runs = ["quote-less-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''            Err(refusal) => return Box::pin(async move { Ok(Opened::Unrunnable(refusal)) }),'''
+replace = '''            Err(refusal) => {
+                return Box::pin(async move {
+                    Ok(Opened::Refused {
+                        error: refusal.to_string(),
+                    })
+                })
+            }'''
+
+[[plant]]
+name = "windows close: quote less: the pane host does not name why a program did not start"
+meant = "a_program_the_system_cannot_start_names_why_by_its_code"
+runs = ["quote-less-pty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = '''                code: std::fs::metadata(program_path)
+                    .err()
+                    .as_ref()
+                    .map(cf_base::file::error_code),'''
+replace = '''                code: None,'''
+
+[[plant]]
+name = "windows close: quote less: the pane host answers a failed open with the code of why in its words alone"
+meant = "a_program_the_system_cannot_start_answers_with_its_code"
+runs = ["quote-less-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''            Err(error) if error.code().is_some() => {'''
+replace = '''            Err(error) if false && error.code().is_some() => {'''
+
+[[plant]]
+name = "windows close: quote less: the words of Pi that were withheld point nowhere"
+meant = "a_hint_that_only_names_a_credential_is_withheld_with_a_pointer_to_where_to_read_it"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '''    "(Pi's words withheld: they may hold a credential; run Pi in a terminal to read what it says)";'''
+replace = '''    "(Pi's words withheld: they may hold a credential)";'''
+
+[[plant]]
+name = "windows close: quote less: the URL check looks at the rows with the window's own id taken out"
+meant = "the_windows_own_session_id_is_exempt_from_the_groups_alone"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''splits_url_credentials(&rows, &joined)'''
+replace = '''splits_url_credentials(&rows, &without_own_session(&joined, own_session))'''
+
+[[plant]]
+name = "windows close: quote less: the token check looks at the rows with the window's own id taken out"
+meant = "the_windows_own_session_id_is_exempt_from_the_groups_alone"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''        || begins_a_token(&spaced)
+'''
+replace = '''        || begins_a_token(&without_own_session(&spaced, own_session))
+'''
+
+[[plant]]
+name = "windows close: quote less: the screen's own id is persisted exempt from every check"
+meant = "a_pause_note_the_ledger_holds_says_none_of_a_credential_the_windows_own_id_sits_beside"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''splits_url_credentials(&rows, &joined)'''
+replace = '''splits_url_credentials(&rows, &without_own_session(&joined, own_session))'''
+
+[[plant]]
+name = "windows close: quote less: a name with a value is looked for in the lines joined by lines only"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''[lines.join("\n"), lines.concat(), lines.join(" ")]'''
+replace = '''[lines.join("\n")]'''
+
+[[plant]]
+name = "windows close: quote less: a name with a value is looked for as written only"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''                .chain(percent_levels(text))
+                .any(|text| NAMED_VALUE.is_match(&text))'''
+replace = '''                .any(|text| NAMED_VALUE.is_match(&text))'''
+
+[[plant]]
+name = "windows close: quote less: key is no credential's name"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''(?i)(?:key|token|secret|passw(?:or)?d|authorization|bearer)'''
+replace = '''(?i)(?:token|secret|passw(?:or)?d|authorization|bearer)'''
+
+[[plant]]
+name = "windows close: quote less: a credential's name needs no delimiter to have a value"
+meant = "a_credentials_name_with_any_value_after_it_is_a_labelled_value"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/screen.rs"
+find = '''s?["']?\s*[:=]\s*["']?[^\s"']"#,'''
+replace = '''s?["']?\s*[:=]?\s*["']?[^\s"']"#,'''
+
+[[plant]]
+name = "windows close: quote less: a block of Pi's words is quoted beside a credential's name and any value"
+meant = "the_labelled_values_a_policy_of_leaving_short_ones_to_the_masker_quoted_are_withheld"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/quotable.rs"
+find = '''screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)'''
+replace = '''screen::withheld(&rows, None).is_some()'''
+
+[[plant]]
+name = "windows close: quote less: a process that may be the window's is named by its program, whatever it is"
+meant = "a_process_that_may_be_the_windows_own_is_named_by_a_listed_program_and_its_number_alone_otherwise"
+runs = ["quote-less-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''            None => format!("pid {}", process.pid),'''
+replace = '''            None => format!("pid {} ({})", process.pid, process.program),'''
+
+[[plant]]
+name = "windows close: quote less: a process whose name goes on after a listed program is that program"
+meant = "a_process_that_may_be_the_windows_own_is_named_by_a_listed_program_or_by_its_number"
+runs = ["quote-less-background-notes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''        Some((program, false)) => Some(program),'''
+replace = '''        Some((program, _)) => Some(program),'''
+
+# T-1328, the third reading of T-1322: every failure of `cf codex-session` before Codex's TUI ran
+# ends the window with the status of its kind, and a status Codex returned in that range is
+# reported as 1, so that ConsensFlow's verdict is never a harness's.
+
+[[plant]]
+name = "windows close: quote less: a server that ended before it was ready is no kind of start"
+meant = "a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_wrote"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            } => StartKind::ServerStopped,'''
+replace = '''            } => StartKind::NotSetUp,'''
+
+[[plant]]
+name = "windows close: quote less: a server that was not ready in time is the kind of one that ended"
+meant = "a_server_that_is_not_ready_ends_the_window_with_a_status_of_why_whatever_it_wrote"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            } => StartKind::ServerSilent,'''
+replace = '''            } => StartKind::ServerStopped,'''
+
+[[plant]]
+name = "windows close: quote less: a window ConsensFlow could not set up is another kind of start"
+meant = "a_flag_that_wants_a_value_and_has_none_is_refused_before_anything_starts"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            | Self::Signals(_) => StartKind::NotSetUp,'''
+replace = '''            | Self::Signals(_) => StartKind::NotStarted,'''
+
+[[plant]]
+name = "windows close: quote less: a socket folder that could not go is a start that failed"
+meant = "a_server_that_ended_before_it_was_ready_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''    session.say_what_ran_in_no_job(setup.say);
+    outcome
+}'''
+replace = '''    session.say_what_ran_in_no_job(setup.say);
+    if session.notes.iter().any(|note| note == SOCKET_FOLDER_LEFT) {
+        return Err(SessionError::Signals(io::Error::from(
+            io::ErrorKind::PermissionDenied,
+        )));
+    }
+    outcome
+}'''
+
+[[plant]]
+name = "windows close: quote less: a runtime that could not start is no kind of start"
+meant = "only_a_failure_before_the_tui_ran_is_a_status_of_why"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/lib.rs"
+find = '''            StartKind::NotSetUp,
+        ),'''
+replace = '''            StartKind::Failed,
+        ),'''
+
+[[plant]]
+name = "windows close: quote less: a TUI's status in the range of why is the window's"
+meant = "a_tui_that_ends_with_a_status_of_whys_number_is_reported_as_a_failure_and_no_start_that_failed"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        Ok(reported)'''
+replace = '''        Ok(code)'''
+
+[[plant]]
+name = "windows close: quote less: a window does not say it reported a Codex status as 1"
+meant = "a_tui_that_ends_with_a_status_of_whys_number_is_reported_as_a_failure_and_no_start_that_failed"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''        if reported != code {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "windows close: quote less: a harness's status in the range of why is kept"
+meant = "a_status_a_harness_ended_with_is_reported_as_itself_but_for_those_of_the_range_which_are_1"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        1
+    } else {
+        code
+    }'''
+replace = '''    code'''
+
+[[plant]]
+name = "windows close: quote less: a harness's status in the range of why is reported as success"
+meant = "a_status_a_harness_ended_with_is_reported_as_itself_but_for_those_of_the_range_which_are_1"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        1
+    } else {'''
+replace = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        0
+    } else {'''
+
+[[plant]]
+name = "windows close: quote less: every failing status of a harness is reported as 1"
+meant = "a_status_a_harness_ended_with_is_reported_as_itself_but_for_those_of_the_range_which_are_1"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if StartKind::of_exit_status(i64::from(code)).is_some() {
+        1
+    } else {'''
+replace = '''    if code != 0 {
+        1
+    } else {'''
+
+[[plant]]
+name = "windows close: quote less: the range of why ends one status late"
+meant = "every_kind_has_a_status_of_its_own_in_a_range_of_consensflows_and_reads_back"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            first + i32::try_from(Self::ALL.len() - 1).unwrap_or(0),'''
+replace = '''            first + i32::try_from(Self::ALL.len()).unwrap_or(0),'''
+
+[[plant]]
+name = "windows close: quote less: a session that did not get its harness ready has no advice"
+meant = "a_session_that_did_not_get_the_harness_ready_says_so_in_consensflows_words_and_the_exit_as_windows_writes_it"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''            StartKind::NotSetUp | StartKind::ServerStopped | StartKind::ServerSilent => {
+                "its cause is in ConsensFlow's log".to_owned()
+            }'''
+replace = '''            StartKind::NotSetUp | StartKind::ServerStopped | StartKind::ServerSilent => {
+                return None
+            }'''
+
+[[plant]]
+name = "windows close: quote less: a Windows status is said in decimal"
+meant = "a_session_that_did_not_get_the_harness_ready_says_so_in_consensflows_words_and_the_exit_as_windows_writes_it"
+runs = ["quote-less-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''    if status < 0 {
+        format!('''
+replace = '''    if status < -(1 << 40) {
+        format!('''
+
+[[plant]]
+name = "windows close: quote less: the log of a window that never ran its harness is not written"
+meant = "the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if let Some(failure) = start {
+            self.seams.log.warn(&format!('''
+replace = '''        if let Some(failure) = start.filter(|_| false) {
+            self.seams.log.warn(&format!('''
+
+[[plant]]
+name = "windows close: quote less: the log of a window that never ran its harness holds the screen unmasked"
+meant = "the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            Some(tail) => Quote::of(tail, Keep::Last).map_or_else(
+                || "its screen was empty".to_owned(),
+                |quote| quote.after("its screen ended with"),
+            ),'''
+replace = '''            Some(tail) => format!("its screen ended with: \"{}\"", tail.join(BETWEEN)),'''
+
+[[plant]]
+name = "windows close: quote less: the log of a window that never ran its harness holds nothing of the screen"
+meant = "the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            None => "the host sent no screen".to_owned(),
+            Some(tail) => Quote::of(tail, Keep::Last).map_or_else('''
+replace = '''            None => "the host sent no screen".to_owned(),
+            Some(_) => Quote::of(&[], Keep::Last).map_or_else('''
+
+# T-1337, the fourth reading of T-1322: the first failure of a window wins. A socket folder that
+# cannot be removed (`EACCES`) comes after the window did its work and replaces no outcome of it
+# (the server that was not ready keeps its kind, a window that ran keeps the TUI's status); the
+# window says on its terminal that the folder is left, with no path and no cause, and ConsensFlow's
+# log has both. The status the server ended with is on the terminal as a number.
+
+[[plant]]
+name = "windows close: quote less: a socket folder that could not go replaces the status of a window that ran"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''    session.say_what_ran_in_no_job(setup.say);
+    outcome
+}'''
+replace = '''    session.say_what_ran_in_no_job(setup.say);
+    if session.notes.iter().any(|note| note == SOCKET_FOLDER_LEFT) && outcome.is_ok() {
+        return Ok(1);
+    }
+    outcome
+}'''
+
+[[plant]]
+name = "windows close: quote less: the window names the socket folder it could not remove"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                self.notes.push(SOCKET_FOLDER_LEFT.to_owned());'''
+replace = '''                self.notes
+                    .push(format!("{SOCKET_FOLDER_LEFT} ({})", directory.display()));'''
+
+[[plant]]
+name = "windows close: quote less: the window names the system's cause of a socket folder it could not remove"
+meant = "a_server_that_ended_before_it_was_ready_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                self.notes.push(SOCKET_FOLDER_LEFT.to_owned());'''
+replace = '''                self.notes.push(format!("{SOCKET_FOLDER_LEFT}: {cause}"));'''
+
+[[plant]]
+name = "windows close: quote less: the window says nothing of a socket folder it could not remove"
+meant = "a_server_that_was_not_ready_in_time_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_80_and_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                self.notes.push(SOCKET_FOLDER_LEFT.to_owned());'''
+replace = '''                let _ = SOCKET_FOLDER_LEFT;'''
+
+[[plant]]
+name = "windows close: quote less: the log is not written for a socket folder that could not go"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/log.rs"
+find = '''    let Some(home) = config_root(env) else {'''
+replace = '''    let Some(home) = config_root(env).filter(|_| false) else {'''
+
+[[plant]]
+name = "windows close: quote less: the log has a socket folder's path and not the system's cause"
+meant = "a_server_that_ended_before_it_was_ready_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                    &cause.to_string(),
+                );'''
+replace = '''                    "",
+                );'''
+
+[[plant]]
+name = "windows close: quote less: the log has no path of the socket folder it could not remove"
+meant = "a_window_that_ran_and_a_socket_folder_that_cannot_be_removed_ends_with_the_tuis_status_and_names_no_path"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                        "cf codex-session could not remove the Codex socket folder {}",
+                        directory.display()'''
+replace = '''                        "cf codex-session could not remove the Codex socket folder {}",
+                        "(a folder)"'''
+
+[[plant]]
+name = "windows close: quote less: the status a server ended with is dropped as it is read"
+meant = "a_server_that_ended_before_it_was_ready_shows_the_status_or_the_signal_it_ended_with"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''                        ServerEnd::Ended(Exit::of(status))'''
+replace = '''                        ServerEnd::Ended({
+                            let _ = status;
+                            Exit::Unknown
+                        })'''
+
+[[plant]]
+name = "windows close: quote less: the window does not say the status its server ended with"
+meant = "a_server_that_ended_before_it_was_ready_shows_the_status_or_the_signal_it_ended_with"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Ended(Exit::Status(code)) => format!(" (it ended with status {code})"),'''
+replace = '''            Self::Ended(Exit::Status(_)) => String::new(),'''
+
+[[plant]]
+name = "windows close: quote less: a signal that ended the server is said as a status"
+meant = "a_server_that_ended_before_it_was_ready_shows_the_status_or_the_signal_it_ended_with"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Ended(Exit::Signal(signal)) => format!(" (it was ended by signal {signal})"),'''
+replace = '''            Self::Ended(Exit::Signal(signal)) => format!(" (it ended with status {signal})"),'''
+
+[[plant]]
+name = "windows close: quote less: a server that was not ready in time is said to have ended with a status"
+meant = "a_server_that_does_not_come_up_in_time_is_ended_and_said_with_what_it_wrote"
+runs = ["quote-less-codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = '''            Self::Ended(Exit::Unknown) | Self::Silent => String::new(),'''
+replace = '''            Self::Ended(Exit::Unknown) => String::new(),
+            Self::Silent => " (it ended with status 0)".to_owned(),'''
+
+[[plant]]
+name = "windows close: quote less: the words of a socket folder left name a path"
+meant = "a_codex_window_that_left_its_socket_folder_says_so_in_the_note_with_no_path_at_every_width"
+runs = ["engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/startup.rs"
+find = '''ConsensFlow: the Codex socket folder could not be removed; its path and the cause are in ConsensFlow's log'''
+replace = '''ConsensFlow: the Codex socket folder /opt/hunter22/tmp could not be removed; its path and the cause are in ConsensFlow's log'''

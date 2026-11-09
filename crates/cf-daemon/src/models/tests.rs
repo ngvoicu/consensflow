@@ -687,7 +687,7 @@ fn a_harness_not_read_yet_is_read_while_another_harness_is_being_read() {
 /// None reaches the ledger, which the page reads, or the caller.
 const BEARER: &str = "SYNTHETICSTDERRTOKEN0123456789";
 const URL_TOKEN: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
-const WITHHELD: &str = "(Pi's words withheld: they may hold a credential)";
+const WITHHELD: &str = cf_proto::models::WORDS_WITHHELD;
 /// What a read of Pi that ended says before the words of Pi.
 const ENDED: &str = "pi --mode rpc ended before it answered (exit 1); it said:\n";
 
@@ -866,6 +866,13 @@ fn a_credential_word_on_any_line_withholds_the_words_before_it_and_after_it() {
         "one\ntwo\nauthorization bearer zzzz yyyy",
         "Password=hunter two\nthree",
         "key:\nvalue on the next line",
+        // A key and a token as short as a message are not left to the masker (A4-08's review).
+        "key: abc",
+        "token: a b c",
+        "Bearer abc",
+        "password\nhunter22",
+        "OPENAI_API_KEY is not set\nhunter22",
+        "Authentication failed\nhunter22",
     ] {
         let (told, _) = failed_with(&format!("{ENDED}{words}"));
         assert!(told.contains(WITHHELD), "{words} was quoted: {told}");
@@ -1127,6 +1134,27 @@ mod from_pi_to_the_ledger {
                  extensions using \"pi -ne\"."
             )
         );
+    }
+
+    /// A4-08: Pi's failures that only name a credential are withheld with the rest of Pi's words,
+    /// and what stands in their place points to where to read them: no list of harmless hints is
+    /// kept, for each list reopens `token: expired` (the joint review T-1322, decision of the
+    /// chief). The exit code stays.
+    #[test]
+    fn what_pi_says_that_only_names_a_credential_is_withheld_and_the_sentence_points_to_a_terminal()
+    {
+        for said in [
+            "Error: Failed to load extension \"/home/h/.pi/agent/extensions/oauth.ts\": OAuth \
+             login expired. Run /login\nHint: Start without extensions using \"pi -ne\".",
+            "Error: Failed to load extension \"/x/e.ts\": Invalid key: expected string",
+            "Error: Failed to load extension \"/x/e.ts\": OPENAI_API_KEY is not set",
+            "Error: Failed to load extension \"/x/e.ts\": Cannot find module 'oauth-helper'",
+            "SyntaxError: Unexpected token: }",
+        ] {
+            let why = pi_ends_saying(&format!("{said}\n"));
+            assert_eq!(why, format!("{ENDED}{WITHHELD}"), "{said}");
+            assert!(WITHHELD.contains("run Pi in a terminal"), "{WITHHELD}");
+        }
     }
 
     /// What `pi update --models` said is Pi's words too: a credential on a line before its last

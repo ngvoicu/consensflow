@@ -24,10 +24,18 @@
 //! network mount) held all of them for as long as it stalled: a 3 s stall was a 3.035 s gap in
 //! the heartbeat, with a bound of 1 s on the read. [`inspect`] reads the folder on a thread
 //! made for the one read, waits [`WAIT_MS`] for its answer, and says "Pi's folder could not be
-//! read in time" where it has none. One read at a time: while a read is stalled on its thread no
-//! other is started beside it, so a mount that never answers holds one thread, not one for every
-//! list; the next asks are told the same, at once. The records' reads are on a thread of
-//! their own too (`records/thread.rs`).
+//! read in time" where it has none. The records' reads are on a thread of their own too
+//! (`records/thread.rs`).
+//!
+//! **One read at a time, and an ask that overlaps it takes its answer** (T-1281). While a read
+//! is on its thread no other is started beside it, so a mount that never answers holds one
+//! thread, not one for every list. An ask for the same folder that comes meanwhile waits for
+//! that read and is handed what it found, for a bound of its own: the lookup of the default
+//! model reads outside the daemon's turn for the harness, so it can overlap a listing, and it
+//! was told the folder was late in 14 ms when the folder answers in 2. "Late" is said only when
+//! an ask's own [`WAIT_MS`] has passed. An ask for another folder (another agent folder, or
+//! another set of provider variables, as the tests of one process make) takes no answer that is
+//! not its own: it waits for the read in flight to end and reads its own.
 //!
 //! **Words that are no credential's** (the second reading, F2). The words of a setup reach the
 //! ledger and the page, where the engine withholds a line that may hold a credential
@@ -54,16 +62,18 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 #[cfg(not(test))]
 use std::sync::LazyLock;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::Poll;
 
 use cf_base::env::Env;
 use cf_base::path;
 use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::Deserialize;
-use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 use super::paths::agent_dir;
 use crate::seams::{arm, Time};
@@ -157,7 +167,7 @@ fn provider_of(name: &str) -> String {
 
 /// What the Pi folder and the environment name as the sources of Pi's providers: each list the
 /// names of one source, empty where it has none.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Setup {
     /// The providers `auth.json` holds an entry for.
     pub logins: Vec<String>,
@@ -175,8 +185,8 @@ pub(crate) struct Setup {
     /// The files that are there and could not be read: not a regular file, larger than a setup
     /// is, or not what Pi's files are. By name.
     pub unread: Vec<String>,
-    /// The folder was not read in time: a file did not open, or an earlier read is still
-    /// stalled on its thread ([`inspect`]). Nothing is known of it.
+    /// The folder was not read in time: a file did not open and the ask's bound passed
+    /// ([`inspect`]). Nothing is known of it.
     pub late: bool,
 }
 
@@ -186,7 +196,7 @@ pub(crate) struct Setup {
 #[cfg(test)]
 mod probe {
     use std::cell::RefCell;
-    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
     pub(super) type Hook = Arc<dyn Fn() + Send + Sync>;
@@ -197,8 +207,11 @@ mod probe {
         pub before: Option<Hook>,
         /// How many setups were read: a read that lists models reads none.
         pub reads: Arc<AtomicUsize>,
-        /// Whether a read is on its thread (each test has its own, as it has its own thread).
-        pub reading: Arc<AtomicBool>,
+        /// How many times the folder was asked for ([`super::inspect`]), whether a read was
+        /// begun for the ask or not.
+        pub asks: Arc<AtomicUsize>,
+        /// The read in flight (each test has its own, as it has its own thread).
+        pub flight: super::Flight,
     }
 
     thread_local! {
@@ -222,11 +235,20 @@ pub(crate) fn reads() -> usize {
         .load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// How many times the asking thread's reads asked for the folder (a test's): a read that is held
+/// until the second ask is in sees the asks overlap.
+#[cfg(test)]
+pub(crate) fn asks() -> usize {
+    probe::current()
+        .asks
+        .load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Whether a read of the folder asked for by the asking thread's reads is still on its thread (a
 /// test's).
 #[cfg(test)]
 pub(crate) fn reading_now() -> bool {
-    probe::current().reading.load(Ordering::SeqCst)
+    occupied(&probe::current().flight)
 }
 
 /// Has `hook` run where a read of the folder begins, on the thread that reads it.
@@ -237,59 +259,176 @@ pub(crate) fn before_read(hook: impl Fn() + Send + Sync + 'static) {
     probe::adopt(current);
 }
 
-/// Whether a read of the folder is on its thread: the process's one.
-fn reading() -> Arc<AtomicBool> {
-    #[cfg(not(test))]
-    {
-        static READING: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
-        Arc::clone(&READING)
-    }
-    #[cfg(test)]
-    {
-        probe::current().reading
+/// What a read of the folder is for: the agent folder it reads and the provider variables the
+/// environment has set, which are all that [`Setup::read`] takes from `env`. A read answers an
+/// ask for the same.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Question {
+    agent: Option<String>,
+    keys: Vec<String>,
+}
+
+impl Question {
+    fn of(env: &Env) -> Self {
+        Self {
+            agent: agent_dir(env).ok(),
+            keys: keys_of(env),
+        }
     }
 }
 
-/// Clears the flag of a read that ends, however it ends.
-struct Done(Arc<AtomicBool>);
+/// The answer of a read: nothing until the reading thread has one, then the setup. A thread that
+/// ends with none (it panicked) drops its end, which the asks waiting for it see.
+type Answer = watch::Receiver<Option<Setup>>;
+
+/// A read on its thread: what it was asked, and where its answer will be.
+struct Reading {
+    asked: Question,
+    answer: Answer,
+}
+
+/// Where the one read there is stands: none, or the read on its thread. A process has one
+/// ([`flight`]); a test has one of its own.
+type Flight = Arc<Mutex<Option<Reading>>>;
+
+/// The read in flight: the process's one.
+fn flight() -> Flight {
+    #[cfg(not(test))]
+    {
+        static FLIGHT: LazyLock<Flight> = LazyLock::new(Flight::default);
+        Arc::clone(&FLIGHT)
+    }
+    #[cfg(test)]
+    {
+        probe::current().flight
+    }
+}
+
+/// Whether a read is on its thread.
+#[cfg(test)]
+fn occupied(flight: &Flight) -> bool {
+    flight
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_some()
+}
+
+/// Clears the read in flight when its thread ends, however it ends.
+struct Done(Flight);
 
 impl Drop for Done {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
+}
+
+/// What an ask is to do about the read in flight.
+enum Turn {
+    /// None is: this ask begins it, and sends its answer.
+    Begin(watch::Sender<Option<Setup>>, Answer),
+    /// One is, of the same question: wait for its answer.
+    Share(Answer),
+    /// One is, of another question: wait for it to end, and ask again.
+    Wait(Answer),
+}
+
+/// Gives the executor a turn before the caller goes on.
+async fn give_a_turn() {
+    let mut given = false;
+    std::future::poll_fn(|context| {
+        if given {
+            return Poll::Ready(());
+        }
+        given = true;
+        context.waker().wake_by_ref();
+        Poll::Pending
+    })
+    .await;
 }
 
 /// The setup of the Pi `env` names, read on a thread of its own and waited for [`WAIT_MS`]:
 /// the thread that asks is the daemon's, which runs every project's requests, timers and
-/// deliveries, and is not held by a file that does not open. Where the folder does not answer in
-/// time, or an earlier read of it is still stalled on its thread (one at a time, so that a
-/// mount that never answers holds one thread and no more), the setup is [`Setup::late`].
+/// deliveries, and is not held by a file that does not open. One read at a time, so that a
+/// mount that never answers holds one thread and no more: an ask that comes while a read of the
+/// same folder is on its thread waits for that read and takes its answer, for a bound of its own.
+/// Where the folder does not answer in time, the setup is [`Setup::late`].
 pub(crate) async fn inspect(time: &dyn Time, env: &Env) -> Setup {
-    let reading = reading();
-    if reading.swap(true, Ordering::SeqCst) {
-        return Setup::late();
-    }
-    let (answer, answered) = oneshot::channel();
-    let env = env.clone();
     #[cfg(test)]
-    let probe = probe::current();
-    let done = Done(Arc::clone(&reading));
-    let worker = std::thread::Builder::new()
-        .name("pi-setup".to_owned())
-        .spawn(move || {
-            let _done = done;
-            #[cfg(test)]
-            probe::adopt(probe);
-            let _ = answer.send(Setup::read(&env));
-        });
-    if worker.is_err() {
-        // The closure, and the flag it held, went with the thread that did not start.
-        return Setup::late();
+    probe::current().asks.fetch_add(1, Ordering::SeqCst);
+    let asked = Question::of(env);
+    let flight = flight();
+    let waited = arm(time, WAIT_MS);
+    loop {
+        let turn = {
+            let mut reading = flight.lock().unwrap_or_else(PoisonError::into_inner);
+            match reading.as_ref() {
+                Some(going) if going.asked == asked => Turn::Share(going.answer.clone()),
+                Some(going) => Turn::Wait(going.answer.clone()),
+                None => {
+                    let (sender, answer) = watch::channel(None);
+                    *reading = Some(Reading {
+                        asked: asked.clone(),
+                        answer: answer.clone(),
+                    });
+                    Turn::Begin(sender, answer)
+                }
+            }
+        };
+        let (mut answered, same) = match turn {
+            Turn::Begin(sender, answer) => {
+                let env = env.clone();
+                #[cfg(test)]
+                let probe = probe::current();
+                let done = Done(Arc::clone(&flight));
+                let worker = std::thread::Builder::new()
+                    .name("pi-setup".to_owned())
+                    .spawn(move || {
+                        #[cfg(test)]
+                        probe::adopt(probe);
+                        let setup = Setup::read(&env);
+                        // The read is over before its answer is sent: whoever sees the answer
+                        // finds the folder free for the next read.
+                        drop(done);
+                        let _ = sender.send(Some(setup));
+                    });
+                if worker.is_err() {
+                    // The closure, and the read it held, went with the thread that did not start.
+                    return Setup::late();
+                }
+                (answer, true)
+            }
+            Turn::Share(answer) => (answer, true),
+            Turn::Wait(answer) => (answer, false),
+        };
+        let got = waited
+            .bound(async {
+                answered
+                    .wait_for(Option::is_some)
+                    .await
+                    .ok()
+                    .and_then(|got| got.clone())
+            })
+            .await;
+        match (got, same) {
+            (Some(Some(setup)), true) => return setup,
+            // The read of another folder has ended: ask again, after a turn of the executor's, so
+            // that an ask never spins on a read that is over and is still shown as in flight.
+            (Some(_), false) => give_a_turn().await,
+            _ => return Setup::late(),
+        }
     }
-    match arm(time, WAIT_MS).bound(answered).await {
-        Some(Ok(setup)) => setup,
-        _ => Setup::late(),
-    }
+}
+
+/// The providers whose credential variable `env` sets to something, by name ([`provider_of`]).
+fn keys_of(env: &Env) -> Vec<String> {
+    sorted(
+        CREDENTIALS
+            .into_iter()
+            .filter(|name| env.os(name).is_some_and(|value| !value.is_empty()))
+            .map(provider_of)
+            .collect::<BTreeSet<_>>()
+            .into_iter(),
+    )
 }
 
 impl Setup {
@@ -305,14 +444,7 @@ impl Setup {
                 hook();
             }
         }
-        let keys = sorted(
-            CREDENTIALS
-                .into_iter()
-                .filter(|name| env.os(name).is_some_and(|value| !value.is_empty()))
-                .map(provider_of)
-                .collect::<BTreeSet<_>>()
-                .into_iter(),
-        );
+        let keys = keys_of(env);
         let Ok(agent) = agent_dir(env) else {
             return Self {
                 keys,
@@ -406,8 +538,7 @@ impl Setup {
     pub(crate) fn unlisted(&self) -> String {
         if self.late {
             return "Pi lists no model, and Pi's folder could not be read in time: it cannot say \
-                    whether a provider is set up there (a file of it did not open, or an earlier \
-                    read of it is still waiting for one)"
+                    whether a provider is set up there (a file of it did not open)"
                 .to_owned();
         }
         if self.is_empty() {

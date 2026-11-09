@@ -48,6 +48,7 @@ fn asked(
             },
         )
         .await
+        .map_err(String::from)
     });
     driver
 }
@@ -114,7 +115,16 @@ fn a_program_that_does_not_start_says_why() {
         BOUND_MS,
         async |_child| Ok(()),
     )));
-    assert_eq!(answer, Err("spawn harness ENOENT".to_owned()));
+    // The words are Node's; what a note says is the kind and the code (T-1328).
+    let said = answer.unwrap_err();
+    assert_eq!(said.words, "spawn harness ENOENT");
+    assert_eq!(
+        said.failure,
+        Some(
+            cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NotFound)
+                .with_errno("ENOENT")
+        )
+    );
 }
 
 /// What a conversation of one question, started as `streams` says, came to.
@@ -149,6 +159,7 @@ fn asked_as(
             },
         )
         .await
+        .map_err(String::from)
     });
     driver
 }
@@ -177,6 +188,67 @@ fn a_conversation_that_ended_says_the_code_and_what_the_one_start_said_whole() {
         assert_eq!(driver.run(), [(0, Err(said.to_owned()))], "{streams:?}");
         assert_eq!(processes.take_spawned().len(), 1, "started once");
     }
+}
+
+/// What a note may say of a conversation that failed is the kind of failure and the status the
+/// program ended with, beside the words for the page (T-1328): none of what the program wrote.
+#[test]
+fn a_conversation_that_failed_carries_its_kind_and_its_status_beside_its_words() {
+    use cf_base::startup::{StartFailure, StartKind};
+    let (processes, time) = (
+        Rc::new(ScriptedProcesses::default()),
+        Rc::new(ManualTime::new(0)),
+    );
+    processes.child_said("harness", "password: hunter22\n", Some(2));
+    processes.child(
+        "harness",
+        ChildScript {
+            lines: Vec::new(),
+            ends: Ends::Itself,
+        },
+    );
+    let mut driver: Driver<Result<Value, Said>> = Driver::default();
+    let (shared, clock) = (Rc::clone(&processes), Rc::clone(&time));
+    driver.begin(0, async move {
+        conversation_as(
+            &*shared,
+            &*clock,
+            program(),
+            Streams::Conversation,
+            "the harness",
+            BOUND_MS,
+            async |child| {
+                ask(child, "the harness", &json!({ "id": 2 }), |line| {
+                    line["id"] == 2
+                })
+                .await
+            },
+        )
+        .await
+    });
+    let (_, ended) = driver.run().remove(0);
+    let said = ended.unwrap_err();
+    assert!(said.words.contains("hunter22"), "the page has the words");
+    let failure = said.failure.expect("a kind");
+    assert_eq!(failure, StartFailure::of(StartKind::Failed).with_exit(2));
+    assert_eq!(
+        failure.words("Pi"),
+        "Pi's program ended with an error (exit code 2)"
+    );
+
+    // One that waited in vain says so, and no status.
+    let (processes, time) = (
+        Rc::new(ScriptedProcesses::default()),
+        Rc::new(ManualTime::new(0)),
+    );
+    processes.child_said("harness", "password: hunter22\n", None);
+    let mut driver = asked_as(Streams::Conversation, Ends::Asked, &processes, &time);
+    assert!(driver.run().is_empty());
+    assert!(time.fire_next(i64::MAX));
+    let [(_, Err(words))] = &driver.run()[..] else {
+        panic!("the conversation was given up on");
+    };
+    assert!(words.contains("did not answer within 30 s"), "{words}");
 }
 
 #[test]

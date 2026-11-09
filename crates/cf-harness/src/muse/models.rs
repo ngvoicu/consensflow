@@ -23,6 +23,7 @@ use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
 use super::msp;
+use crate::contract::NoDefault;
 use crate::seams::processes::{Processes, Program};
 use crate::seams::Time;
 
@@ -153,20 +154,24 @@ pub(crate) async fn default_model(
     env: &Env,
     processes: &dyn Processes,
     time: &dyn Time,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, NoDefault> {
     default_of(listed(env, processes, time).await)
 }
 
-/// [`default_model`] of what a read of the list answered.
-fn default_of(listed: Result<ModelListing, String>) -> Result<Option<String>, String> {
-    let listing = listed?;
-    if let cf_proto::models::Freshness::Stale { why } = &listing.freshness {
-        return Err(why.clone());
+/// [`default_model`] of what a read of the list answered. The words of a read that failed, or
+/// of a stale list's reason, are Muse's and the page's: the chief's note says only that the list
+/// could not be read (T-1328).
+fn default_of(listed: Result<ModelListing, String>) -> Result<Option<String>, NoDefault> {
+    let listing = listed.map_err(|_| NoDefault::Unread(None))?;
+    if matches!(listing.freshness, cf_proto::models::Freshness::Stale { .. }) {
+        return Err(NoDefault::Unread(None));
     }
     listing
         .default_model()
         .map(|model| Some(model.model()))
-        .ok_or_else(|| "Muse Code offers no model that is not a contributor model".to_owned())
+        .ok_or(NoDefault::NoneOffered(
+            "Muse Code offers no model that is not a contributor model",
+        ))
 }
 
 #[cfg(test)]

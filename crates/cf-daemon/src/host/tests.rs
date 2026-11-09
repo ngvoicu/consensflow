@@ -285,6 +285,26 @@ fn an_open_s_answer_is_read_as_the_dispatcher_read_it() {
     let refused = |error: &str| Opened::Refused {
         error: error.to_owned(),
     };
+    // The host named why the system would not start the program: a name of libuv's table is read
+    // back as the kind of failure a note says; any other word of the host's is no code (T-1328).
+    let Opened::Unrunnable(refusal) = opened(
+        &json!({ "ok": false, "error": "PTY error: Unable to spawn /x/hunter22 y", "code": "ENOENT" }),
+    ) else {
+        panic!("a code of the table is a program that cannot be run");
+    };
+    assert_eq!(
+        refusal.failure(),
+        cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NotFound)
+            .with_errno("ENOENT")
+    );
+    assert_eq!(refusal.words(), "PTY error: Unable to spawn /x/hunter22 y");
+    for code in [json!("hunter22"), json!("enoent"), json!(7), json!(null)] {
+        assert_eq!(
+            opened(&json!({ "ok": false, "error": "no", "code": code })),
+            refused("no"),
+            "{code}"
+        );
+    }
     assert_eq!(opened(&json!({ "ok": true })), Opened::Open { pid: None });
     assert_eq!(
         opened(&json!({ "ok": true, "pid": 12 })),
@@ -422,11 +442,16 @@ async fn a_program_that_cannot_open_in_a_window_fails_the_open_with_the_sentence
             let host = host_over(&daemon);
             let mut shim = open(&[]);
             shim.argv = vec!["/nowhere/claude.cmd".to_owned()];
-            let failed = host.open(shim).await.unwrap_err();
-            assert_eq!(failed.error, None);
+            let Ok(Opened::Unrunnable(refusal)) = host.open(shim).await else {
+                panic!("the open was not refused as a program that cannot be run");
+            };
             assert_eq!(
-                failed.message,
+                refusal.words(),
                 "/nowhere/claude.cmd is not an npm shim, and only cmd.exe could run it in a window"
+            );
+            assert_eq!(
+                refusal.failure(),
+                cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NotAnNpmShim)
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
             assert_eq!(sent.get(), 0);
@@ -468,8 +493,10 @@ async fn a_window_opens_on_an_npm_shim_with_its_node_beside_it_and_is_refused_wi
             // Its Node taken away, the same shim is a limit, said so that
             // whoever meets it knows what to do, and nothing is sent.
             std::fs::remove_file(folder.join("node.exe")).unwrap();
-            let failed = host.open(window()).await.unwrap_err();
-            assert_eq!(failed.error, None);
+            let Ok(Opened::Unrunnable(refusal)) = host.open(window()).await else {
+                panic!("a shim with no Node is refused as a program that cannot be run");
+            };
+            // The person's words name the shim; a note says the kind (T-1328).
             for said in [
                 shim.to_string_lossy().as_ref(),
                 "finds no Node for it",
@@ -477,11 +504,15 @@ async fn a_window_opens_on_an_npm_shim_with_its_node_beside_it_and_is_refused_wi
                 "install the harness's own build",
             ] {
                 assert!(
-                    failed.message.contains(said),
+                    refusal.words().contains(said),
                     "{said:?}: {}",
-                    failed.message
+                    refusal.words()
                 );
             }
+            assert_eq!(
+                refusal.failure(),
+                cf_base::startup::StartFailure::of(cf_base::startup::StartKind::NoNode)
+            );
             tokio::time::sleep(Duration::from_millis(20)).await;
             assert_eq!(seen.borrow().len(), 1);
         })

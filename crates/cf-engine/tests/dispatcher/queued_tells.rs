@@ -641,7 +641,7 @@ fn words_told_before_a_window_that_never_comes_up_are_said_to_wait_for_the_reope
     assert_eq!(
         failed,
         [format!(
-            "T-1 failed: the window could not take its first message: Devin never said which session it opened; the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
+            "T-1 failed: the window could not take its first message (its cause is in ConsensFlow's log); the words told its window wait for the reopen: m-{told}. Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )]
     );
 }

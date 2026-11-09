@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use crate::contract::NoDefault;
 use cf_base::env::Env;
 use serde_json::{json, Value};
 
@@ -288,15 +289,19 @@ fn a_chief_starts_on_the_accounts_default_and_on_none_where_the_list_is_bundled_
     let account = parse(&recorded("account")["result"], 0);
     assert_eq!(default_of(account), Ok(Some("muse-spark-1.3".to_owned())));
     let bundled = parse(&recorded("bundled")["result"], 0);
-    assert_eq!(default_of(bundled), Err(BUNDLED.to_owned()));
+    // A stale list and a read that failed are the page's to tell, in Muse's words; the chief's note
+    // says the list could not be read (T-1328).
+    assert_eq!(default_of(bundled), Err(NoDefault::Unread(None)));
     assert_eq!(
         default_of(Err("muse serve did not answer within 30 s".to_owned())),
-        Err("muse serve did not answer within 30 s".to_owned())
+        Err(NoDefault::Unread(None))
     );
     let mut contributors = parse(&recorded("account")["result"], 0).unwrap();
     contributors.models.retain(|model| model.contributor);
     assert_eq!(
         default_of(Ok(contributors)),
-        Err("Muse Code offers no model that is not a contributor model".to_owned())
+        Err(NoDefault::NoneOffered(
+            "Muse Code offers no model that is not a contributor model"
+        ))
     );
 }

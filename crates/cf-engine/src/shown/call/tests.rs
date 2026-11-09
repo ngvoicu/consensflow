@@ -254,3 +254,48 @@ fn a_tool_without_a_command_is_its_name_and_a_file_is_never_said() {
         "; its last tool call was a command"
     );
 }
+
+/// T-1328, found by the Windows jobs of the CI: a process the system lists on Windows has its
+/// program as a quoted path, with blanks in it. The note names the program the list names and
+/// not one word of the path or of what follows.
+#[test]
+fn a_windows_process_is_named_by_its_program_and_not_by_its_path() {
+    for (command, want) in [
+        (
+            r#""C:\Program Files\Git\usr\bin\sleep.exe" 600"#,
+            Some(("sleep", true)),
+        ),
+        (
+            r#""C:\Program Files\Git\usr\bin\SLEEP.EXE""#,
+            Some(("sleep", false)),
+        ),
+        (
+            r#"  "C:\tools\pi hunter22.cmd\cargo.exe" test -- --token abc"#,
+            Some(("cargo", true)),
+        ),
+        (r#""/usr/bin/git" status"#, Some(("git", true))),
+        (
+            r#""C:\Program Files\nodejs\node.exe""#,
+            Some(("node", false)),
+        ),
+        // Not a listed program, or no name at all.
+        (
+            r#""C:\Program Files\Git\bin\bash.exe" -c "sleep 600; true""#,
+            None,
+        ),
+        (r#""C:\tools\sk-abc defg hijk lmno.exe""#, None),
+        (r#""C:\tools\sleep.exe.evil" 1"#, None),
+        (r#""C:\tools\sleep;rm.exe" 1"#, None),
+        (r#""C:\tools\.exe""#, None),
+        (r#""unclosed\sleep.exe 600"#, None),
+        (r#""""#, None),
+    ] {
+        assert_eq!(command_line_program(command), want, "{command}");
+    }
+    // An unquoted command line is read as any command is.
+    assert_eq!(command_line_program("sleep 600"), Some(("sleep", true)));
+    assert_eq!(
+        command_line_program(r"C:\Program Files\sleep.exe 600"),
+        None
+    );
+}

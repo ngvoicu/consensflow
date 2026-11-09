@@ -18,6 +18,7 @@ use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
 use super::paths::codex_home;
+use crate::contract::NoDefault;
 use crate::detect::executable;
 use crate::seams::processes::{Processes, Program};
 use crate::seams::Time;
@@ -149,6 +150,7 @@ pub(crate) async fn pages(
         Ok(pages)
     })
     .await
+    .map_err(String::from)
 }
 
 /// The `result` of an answer to `method`, or the app-server's refusal.
@@ -193,7 +195,7 @@ pub(crate) async fn default_model(
     env: &Env,
     processes: &dyn Processes,
     time: &dyn Time,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, NoDefault> {
     Ok(listed(env, processes, time)
         .await
         .ok()

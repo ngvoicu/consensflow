@@ -39,9 +39,12 @@ fn until_the_chief_is_told(rig: &Rig, project: &Project) -> Outcome {
     })?;
     let told = notes(project, &closed)?;
     let body = told[0]["body"].as_str().unwrap_or_default();
+    // The work is named by its number: its program is no program a note names, and its
+    // arguments are never said (T-1178's known issue).
     assert!(
-        body.contains("--background-job"),
-        "the note names the work: {body}"
+        Regex::new(r"which its close ended: process \d+")?.is_match(body)
+            && !body.contains("--background-job"),
+        "the note names the work by its number and says no argument of it: {body}"
     );
     Ok(())
 }
