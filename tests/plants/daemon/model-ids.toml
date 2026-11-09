@@ -15,6 +15,8 @@ mi-ledger-links = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "r
 mi-daemon-token = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::task::tests::verbs::a_window_at_work_keeps_running_cf"]
 mi-daemon-projects = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::projects::tests"]
 mi-page-chief-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Devin chief's card"]
+mi-ledger-chief-model = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chief_model"]
+mi-daemon-chief-names = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::a_chief_"]
 mi-ledger-members = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "members_by_model"]
 mi-engine-named = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "named_by_model::"]
 mi-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::"]
@@ -766,4 +768,181 @@ replace = '''
         }
     }
     Ok(project)
+'''
+
+# A chief holds the id its harness lists for its model beside the id it is launched on (T-1345): a
+# Devin chief picked in New project, or switched to, says `swe-2` on its card where its launch is
+# given `swe-2-max`. Its name goes with its model: a switch replaces it, a model that moves with no
+# pick (gone from its harness, named by the record) takes it away.
+
+[[plant]]
+name = "model ids: a new chief is given no name for its model"
+meant = "a_chief_holds_the_name_its_harness_lists_for_its_model_from_a_new_project_and_a_switch"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+                // A name goes with a model: none for the harness's own default.
+                request
+                    .chief
+                    .model
+                    .as_ref()
+                    .and(request.chief.model_name.as_ref()),
+'''
+replace = '''
+                None::<&String>,
+'''
+
+[[plant]]
+name = "model ids: a chief on its harness's default is given the name of a model"
+meant = "a_chief_holds_the_name_its_harness_lists_for_its_model_from_a_new_project_and_a_switch"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+                request
+                    .chief
+                    .model
+                    .as_ref()
+                    .and(request.chief.model_name.as_ref()),
+'''
+replace = '''
+                request.chief.model_name.as_ref(),
+'''
+
+[[plant]]
+name = "model ids: a new project as JSON drops its chief's name"
+meant = "a_chief_holds_the_name_its_harness_lists_for_its_model_from_a_new_project_and_a_switch"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+                model_name: chief_model_name,
+'''
+replace = '''
+                model_name: None,
+'''
+
+[[plant]]
+name = "model ids: a switch as JSON drops the name of the model it takes"
+meant = "a_chief_holds_the_name_its_harness_lists_for_its_model_from_a_new_project_and_a_switch"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+        let model_name = model::parse_model_name(value.get("modelName"))?;
+'''
+replace = '''
+        let model_name = None;
+'''
+
+[[plant]]
+name = "model ids: a switch gives the chief no name for the model it takes"
+meant = "a_chief_holds_the_name_its_harness_lists_for_its_model_from_a_new_project_and_a_switch"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+                switch.model_name,
+'''
+replace = '''
+                None::<String>,
+'''
+
+[[plant]]
+name = "model ids: a switch leaves the chief the name of the model it left"
+meant = "a_chief_holds_the_name_its_harness_lists_for_its_model_from_a_new_project_and_a_switch"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+model = ?, effort = ?, model_name = ?, agent = NULL,'''
+replace = '''
+model = ?, effort = ?, model_name = CASE WHEN ? IS NULL THEN model_name ELSE model_name END, agent = NULL,'''
+
+[[plant]]
+name = "model ids: a chief whose model its harness lost keeps the name of the old one"
+meant = "a_chief_whose_model_moves_without_a_pick_keeps_no_name_of_the_old_model"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+SET model = ?, model_name = NULL, gone_model = ?'''
+replace = '''
+SET model = ?, gone_model = ?'''
+
+[[plant]]
+name = "model ids: a chief the record names a model for keeps the name of the old one"
+meant = "a_chief_whose_model_moves_without_a_pick_keeps_no_name_of_the_old_model"
+runs = ["mi-ledger-chief-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+SET model = ?, effort = ?, model_name = NULL, needs_edit = 0'''
+replace = '''
+SET model = ?, effort = ?, needs_edit = 0'''
+
+[[plant]]
+name = "model ids: New project gives the ledger no name for the chief's model"
+meant = "a_chief_picked_in_new_project_keeps_the_id_its_harness_lists_beside_its_launch_id"
+runs = ["mi-daemon-chief-names"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''
+            "modelName": chief.model_name,
+'''
+replace = '''
+            "modelName": null,
+'''
+
+[[plant]]
+name = "model ids: Switch chief and New project take no name from the read of the pick"
+meant = "a_chief_switched_to_keeps_the_id_its_harness_lists_beside_its_launch_id"
+runs = ["mi-daemon-chief-names"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/chief.rs"
+find = '''
+        model_name: resolved.model_name,
+'''
+replace = '''
+        model_name: None,
+'''
+
+[[plant]]
+name = "model ids: the engine hands the ledger no name for the chief it switches to"
+meant = "a_chief_switched_to_keeps_the_id_its_harness_lists_beside_its_launch_id"
+runs = ["mi-daemon-chief-names"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = '''
+                model_name: to.model_name,
+'''
+replace = '''
+                model_name: None,
+'''
+
+[[plant]]
+name = "model ids: a chief's card says only the id the daemon named"
+meant = "says on a Devin chief's card the id Devin lists after a switch to Devin, and the model it moved to after a switch away"
+runs = ["mi-page-chief-card"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+    : (participant.ranOn ?? (participant.model ? modelShown(participant) : null))
+'''
+replace = '''
+    : (participant.ranOn ?? (participant.model ? participant.modelName : null))
 '''
