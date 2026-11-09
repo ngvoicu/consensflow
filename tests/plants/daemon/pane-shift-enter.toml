@@ -35,6 +35,7 @@ pse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tes
 pse-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::"]
 pse-boundary = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::boundary"]
 pse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launched_harness"]
+pse-win-wait = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::conpty::unread"]
 pse-win-keys = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::conpty"]
 pse-escapes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::escapes"]
 pse-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::engine::tests"]
@@ -365,8 +366,8 @@ replace = "        io::Write::write_all(&mut self.file, bytes)"
 
 [[plant]]
 name = "pane shift enter windows-guard: a part that begins with Escape is written without a wait"
-meant = "an_escape_led_key_behind_a_full_read_reaches_a_key_reader_whole_through_the_hosts_human_path"
-runs = ["pse-win-keys"]
+meant = "an_escape_led_key_waits_for_a_pipe_nothing_reads_and_nothing_is_lost_or_held_elsewhere"
+runs = ["pse-win-wait"]
 platforms = ["windows"]
 
 [[plant.edit]]
@@ -376,8 +377,8 @@ replace = "        if part.first() == Some(&0xff) {"
 
 [[plant]]
 name = "pane shift enter windows-guard: the wait does not wait for the unread bytes"
-meant = "an_escape_led_key_waits_for_a_console_host_that_reads_nothing_and_nothing_is_lost_or_held_elsewhere"
-runs = ["pse-win-keys"]
+meant = "an_escape_led_key_waits_for_a_pipe_nothing_reads_and_nothing_is_lost_or_held_elsewhere"
+runs = ["pse-win-wait"]
 platforms = ["windows"]
 
 [[plant.edit]]
