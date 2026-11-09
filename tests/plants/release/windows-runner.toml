@@ -2464,111 +2464,43 @@ file = "tools/xtask/src/windows/script.rs"
 find = '''    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci")) {'''
 replace = '''    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci-never")) {'''
 
-# The sweep takes the test families a day old out of the user's Temp (T-1333): the whole of their names,
-# a `.tmp` folder by what is in it, and none that a program runs from; at most 3000 a run; none where the
-# programs cannot be listed; what it cannot take never ends the run. Windows will not remove a folder from
-# under a file a program has open, so the tests that kept a ledger open past their `TempDir`, and the runs
-# that were killed, left their folders for good (zeewin and zeewin2: 45,000 on 2026-11-07).
+# The runner takes nothing from the user's Temp (T-1368). Its sweep once took the test families a day
+# old out of it by their names (T-1333), and the review of that landing (T-1367) showed what a name
+# cannot tell: another program's `.tmpA1b2C3` that holds a `data` folder, a person's `T-42-holiday`,
+# a Temp that is a link to a folder outside the profile. zeewin2 is Gabriel's laptop. The plants put a
+# deletion in Temp back (the two first by the profile's `Temp`, which is where a case puts its folders,
+# so that the static pin of the third does not stand in for the case), each naming only a literal folder
+# of the case, so that one that is not caught still cannot reach a Temp that is the machine's.
 
 [[plant]]
-name = "windows runner: the sweep of Temp takes a folder younger than a day"
-meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+name = "windows runner: the sweep takes a stranger's old folder out of Temp"
+meant = "a_run_leaves_every_folder_in_the_users_temp_where_it_is_whatever_its_name_and_age"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "  $cutoff = $Now.ToUniversalTime().AddDays(-«days»)"
-replace = "  $cutoff = $Now.ToUniversalTime().AddDays(1)"
+find = "$beside = $root.Parent.FullName\n"
+replace = "foreach ($old in @('T-42-holiday', '.tmpA1b2C3')) { $gone = Join-Path (Join-Path $env:USERPROFILE 'Temp') $old; if (Test-Path -LiteralPath $gone) { [IO.Directory]::Delete($gone, $true) } }\n$beside = $root.Parent.FullName\n"
 
 [[plant]]
-name = "windows runner: the sweep of Temp takes a .tmp folder with a stranger's file in it"
-meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+name = "windows runner: the sweep takes what a link in the place of Temp leads to"
+meant = "a_run_whose_users_temp_is_a_link_to_a_folder_outside_the_profile_leaves_that_folder_whole"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "if ($made -notcontains $inside.Name.ToLowerInvariant()) { $ours = $false; break }"
-replace = "if ($false) { $ours = $false; break }"
+find = "$beside = $root.Parent.FullName\n"
+replace = "foreach ($old in @(Get-ChildItem -LiteralPath (Join-Path $env:USERPROFILE 'Temp') -Force -Filter '.tmpN1o2P3' -ErrorAction SilentlyContinue)) { [IO.Directory]::Delete($old.FullName, $true) }\n$beside = $root.Parent.FullName\n"
 
 [[plant]]
-name = "windows runner: the sweep of Temp takes a name that only begins like a family's"
-meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
+name = "windows runner: a script looks the user's Temp up"
+meant = "no_script_of_the_runner_names_the_users_temp"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "'^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$'"
-replace = "'^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}'"
-
-[[plant]]
-name = "windows runner: the sweep of Temp takes a file with a family's name"
-meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "    if ($folder -and $name -cmatch '^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$') { $ours = $true }"
-replace = "    if ($name -cmatch '^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$') { $ours = $true }"
-
-[[plant]]
-name = "windows runner: the sweep of Temp takes a folder a program runs from"
-meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "    if ($holds.Count) { $result.Held++; continue }"
-replace = "    if ($false) { $result.Held++; continue }"
-
-[[plant]]
-name = "windows runner: the sweep of Temp takes folders where the programs cannot be listed"
-meant = "where_the_programs_cannot_be_listed_nothing_is_taken_and_a_sweep_takes_at_most_its_cap"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "  if ($null -eq $Processes) { $result.Skipped = $true; return $result }\n"
-replace = ""
-
-[[plant]]
-name = "windows runner: the sweep of Temp has no cap"
-meant = "where_the_programs_cannot_be_listed_nothing_is_taken_and_a_sweep_takes_at_most_its_cap"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "  foreach ($item in ($order | Select-Object -First $Cap)) {"
-replace = "  foreach ($item in $order) {"
-
-[[plant]]
-name = "windows runner: the sweep of Temp takes any task's folder named T- and a number"
-meant = "only_the_named_families_a_day_old_that_no_program_holds_are_taken_and_everything_else_stays"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "'^T-[0-9]{2,5}-[A-Za-z0-9._-]+$'"
-replace = "'^T-.*'"
-
-[[plant]]
-name = "windows runner: the sweep of Temp is given more than its cap"
-meant = "the_sweep_takes_the_test_families_a_day_old_and_ends_with_them_and_never_fails_the_run"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "pub const TEMP_SWEPT_AT_MOST: u32 = 3000;"
-replace = "pub const TEMP_SWEPT_AT_MOST: u32 = 300000;"
-
-[[plant]]
-name = "windows runner: the sweep of Temp takes a Temp that is not under the profile"
-meant = "the_sweep_takes_the_test_families_a_day_old_and_ends_with_them_and_never_fails_the_run"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "if ([IO.Path]::GetTempPath().StartsWith($env:USERPROFILE.TrimEnd('\\') + '\\', [StringComparison]::OrdinalIgnoreCase)) {"
-replace = "if ($true) {"
+find = "$beside = $root.Parent.FullName\n"
+replace = "$here = [IO.Path]::GetTempPath()\n$beside = $root.Parent.FullName\n"
 
 # The logs of the tasks, `.runs/<task>`, are kept in the copy (T-1342): the copy is one folder that every
 # tree's runs share and cannot tell which tree wrote a file that is no tree's, so a run's sweep took nine
