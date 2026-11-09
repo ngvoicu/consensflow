@@ -1,0 +1,21 @@
+[
+  {
+    "migration": 13,
+    "table": "project",
+    "column": "resume_on_start",
+    "why": "The daemon suspends what was open when it starts and the human's Resume brings it back, so nothing reads the mark that a project comes back by itself."
+  },
+  {
+    "migration": 31,
+    "table": "participant",
+    "column": "tier_chosen",
+    "why": "The tier is the human's, always: nothing follows it, so 0028's mark of a tier the human chose goes."
+  },
+  {
+    "migration": 34,
+    "table": "project",
+    "column": "claude_compaction",
+    "renamed_to": "compaction",
+    "why": "The compaction size applies to every harness, not Claude's alone: the column is renamed in place and every project keeps its value."
+  }
+]

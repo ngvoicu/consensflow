@@ -4,35 +4,26 @@ use std::fs;
 
 use serde_json::json;
 
-use super::{ledger_of, offer_update, projects_of, quit, BRIDGE_SCHEMA};
-use crate::updater_smoke::bundle::{cf_of, digest_manifest, verify_seal};
+use super::{ledger_of, live_ledger_of, offer_update, projects_of, quit, BRIDGE_SCHEMA};
+use crate::updater_smoke::bundle::{cf_of, digest_manifest, inspect_bundle, verify_seal};
 use crate::updater_smoke::case::{
     blocked_evidence, boot_evidence, held_evidence, release_panes, staging_left, Case,
 };
 #[cfg(unix)]
-use crate::updater_smoke::descriptors::{compare, held_by, Left, NOT_MARKED};
-use crate::updater_smoke::evidence::{app_log, assert_started_daemon, Kind};
+use crate::updater_smoke::descriptors::{compare, hands_on, held_by, Left, NOT_MARKED};
+use crate::updater_smoke::evidence::{
+    app_log, assert_daemon_is, assert_started_daemon_since, mark, Kind,
+};
 use crate::updater_smoke::launchers::{assert_repaired, plant_commands, Repaired};
-use crate::updater_smoke::ledger::{assert_projects, assert_sound, assert_traced, traced_events};
-use crate::updater_smoke::processes::{alive, gone, Watch};
+use crate::updater_smoke::ledger::{
+    assert_kept, assert_projects, assert_sound, assert_traced, dropped_in, traced_events,
+    WINDOWS_CLOSED,
+};
+use crate::updater_smoke::processes::{alive, gone, programs_of, Watch};
 use crate::updater_smoke::{files, Result};
 
 /// How long after the installed app has exited a second start of the update is looked for.
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// The folders whose programs are the installed app's at `bundle`, as the process table names
-/// them: its `Contents/MacOS/`, by its path and by the path the system resolves it to (a
-/// temporary folder's `/var` is `/private/var`).
-fn programs_of(bundle: &std::path::Path) -> Vec<String> {
-    let mut folders = vec![format!("{}/Contents/MacOS/", bundle.display())];
-    if let Ok(real) = fs::canonicalize(bundle) {
-        let real = format!("{}/Contents/MacOS/", real.display());
-        if !folders.contains(&real) {
-            folders.push(real);
-        }
-    }
-    folders
-}
 
 /// The update from the installed app, install and restart, and what it leaves:
 /// the update's app on the bundle's `cf`, the ledger whole, and the terminal
@@ -97,9 +88,21 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         "the daemon traced no ledger event before the update"
     );
 
-    // Every program started from the installed bundle from here on: the update's app is started
-    // once, by the installed app, and by nothing else (T-941).
-    let watch = Watch::start(programs_of(&kase.sandbox.copy));
+    // What the ledger holds now, with the installed daemon on it: the update must keep every
+    // row and every value of it (T-1338: a live update was only looked at for its soundness, the
+    // projects it has and the events it traced, and let a project lose its name).
+    let held_before = live_ledger_of(kase)?;
+    assert_projects(&held_before, &projects_of(kase))?;
+
+    // Every start of the bundle's app from here on: the update's app is started once, by the
+    // installed app, and by nothing else (T-941). The app, not the programs beside it: a bridge's
+    // bundle holds the Node its daemon runs on in the same folder, and that daemon runs already.
+    let watch = Watch::start(programs_of(
+        &inspect_bundle(&kase.sandbox.copy, "the app in place")?.binary,
+    ));
+    // What the app's log holds now is the installed app's: the line of the update's app that says
+    // which cf it started is the one written past it (the installed app's says the same).
+    let log_mark = mark(&app_log(&kase.sandbox));
     // Both windows close, the install goes through, and the app starts again as the update.
     release_panes(kase, &app, &chiefs)?;
     let second = boot_evidence(kase, &app, &inputs.to.version, Some(first.app))?;
@@ -148,10 +151,13 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         started.len(),
         second.app
     );
-    // The new app holds nothing of the old one's but its streams.
+    // The new app holds nothing of the old one's but its streams: the bridge release's update is
+    // let hold what the bridge is known to hand on (it never marks a descriptor close-on-exec,
+    // and is a shipped release), which the report lists, and nothing beyond that.
     #[cfg(unix)]
     {
-        let (faults, notes) = compare(&first_held, &held_by(second.app)?, &left);
+        let tolerated = hands_on(inputs.release);
+        let (faults, notes) = compare(&first_held, &held_by(second.app)?, &left, tolerated);
         for note in notes {
             kase.note(note);
         }
@@ -160,7 +166,12 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
             "the app started again holds what the installed app held:\n{}",
             faults.join("\n")
         );
-        left.closed_everywhere(&kase.waits)?;
+        // The pipe the case left reaches its end once the old app has gone, unless a release
+        // that hands on every descriptor it holds gave it to the new app, which holds its
+        // writing end as long as it runs.
+        if tolerated.is_none() {
+            left.closed_everywhere(&kase.waits)?;
+        }
         let log = app_log(&kase.sandbox);
         ensure!(
             !log.contains(NOT_MARKED),
@@ -170,10 +181,20 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
-        kase.note(format!(
-            "the app started again holds nothing of the installed app's: neither the file it was left at fd {1} nor the pipe at fd {0}, which no process holds, and nothing it could not mark",
-            left.pipe, left.file_fd
-        ));
+        match tolerated {
+            None => kase.note(format!(
+                "the app started again holds nothing of the installed app's: neither the file it was left at fd {1} nor the pipe at fd {0}, which no process holds, and nothing it could not mark",
+                left.pipe, left.file_fd
+            )),
+            Some(known) => kase.note(format!(
+                "the app started again holds only what the {} release is known to hand on, the file the case left at fd {} and the pipe at fd {} among it, and nothing it could not mark ({}: {})",
+                known.release.name(),
+                left.file_fd,
+                left.pipe,
+                known.files.join(", "),
+                known.why
+            )),
+        }
     }
     // The page read the board of the update's daemon: it is ready, and has the ledger.
     held_evidence(kase)?;
@@ -190,7 +211,8 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         second.daemon.pid != first.daemon.pid,
         "the update's daemon is the installed app's"
     );
-    assert_started_daemon(&app_log(&kase.sandbox), &cf)?;
+    assert_started_daemon_since(&app_log(&kase.sandbox), log_mark, &cf)?;
+    assert_daemon_is(&second.daemon, &cf, inputs.daemon_version.as_deref())?;
     ensure!(
         way_back_file.exists() == way_back,
         "the way back to Node was taken or given back"
@@ -250,6 +272,12 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
     assert_sound(&ledger, BRIDGE_SCHEMA)?;
     assert_projects(&ledger, &projects_of(kase))?;
     assert_traced(&traced, &ledger)?;
+    assert_kept(
+        &held_before,
+        &ledger,
+        &dropped_in(&inputs.checkout)?,
+        &WINDOWS_CLOSED,
+    )?;
     kase.note(format!(
         "the ledger: schema {}, sound, the {} events traced before the update are in it",
         ledger.version,
