@@ -10,7 +10,7 @@ use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 
 use super::*;
-use crate::admin::tests::npm_windows::{lay_npm, lay_npm_cmd, windows_env};
+use crate::admin::tests::npm_windows::{canonical, lay_npm, lay_npm_cmd, windows_env};
 use crate::admin::tests::standalone::{lay_down, Layout};
 use crate::admin::tests::{says, Fixture};
 use crate::admin::Row;
@@ -131,7 +131,7 @@ fn updates_codex_s_standalone_install_by_its_own_update_through_the_link_the_per
 #[test]
 fn updates_an_npm_install_laid_out_as_windows_does_by_the_npm_found_told_its_prefix() {
     let fixture = Fixture::in_env(|root| {
-        let root = std::fs::canonicalize(root).unwrap();
+        let root = canonical(root);
         windows_env(
             &[
                 &root
@@ -145,7 +145,7 @@ fn updates_an_npm_install_laid_out_as_windows_does_by_the_npm_found_told_its_pre
             &root.join("home"),
         )
     });
-    let root = std::fs::canonicalize(fixture.root.path()).unwrap();
+    let root = canonical(fixture.root.path());
     let prefix = root
         .join("Users")
         .join("A B")

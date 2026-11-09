@@ -5,7 +5,9 @@
 use std::fs;
 
 use super::*;
-use crate::admin::tests::npm_windows::{executable, lay_npm, lay_npm_cmd, package_of, windows_env};
+use crate::admin::tests::npm_windows::{
+    canonical, executable, lay_npm, lay_npm_cmd, package_of, windows_env,
+};
 use crate::admin::tests::standalone::{lay_down, lay_down_in, link_dir, release_in, Layout};
 
 /// What `path.join` makes of `parts` on this system.
@@ -705,7 +707,7 @@ fn what_codex_keeps_beside_its_standalone_cli_is_no_install_to_update() {
 /// The folder a test lays its Windows files in, where links are not what `canonicalize` would
 /// change the spelling of.
 fn root_of(temp: &tempfile::TempDir) -> std::path::PathBuf {
-    fs::canonicalize(temp.path()).unwrap()
+    canonical(temp.path())
 }
 
 /// npm's global install on Windows: the prefix holds the shims and `node_modules` beside them, the

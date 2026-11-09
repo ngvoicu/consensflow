@@ -74,3 +74,16 @@ pub(in crate::admin) fn windows_env(path: &[&Path], home: &Path) -> Env {
         ("USERPROFILE", home.to_string_lossy().into_owned()),
     ])
 }
+
+/// `path` where it leads, spelled as the admin spells a real path: without the `\\?\` prefix
+/// Windows gives a resolved one.
+pub(in crate::admin) fn canonical(path: &Path) -> PathBuf {
+    let real = fs::canonicalize(path)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    PathBuf::from(
+        real.strip_prefix(r"\\?\")
+            .map_or(real.as_str(), |plain| plain),
+    )
+}

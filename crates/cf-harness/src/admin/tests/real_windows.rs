@@ -17,16 +17,22 @@ use crate::testing::ScriptedLatest;
 /// The shim: it prints the version a file beside it holds.
 const SHIM: &str = "@echo off\r\nset /p V=<\"%~dp0VERSION\"\r\necho codex-cli %V%\r\n";
 
-/// npm: it writes the arguments it was given, the prefix (the fourth) read as `%~4` reads one with
-/// a space in it, and the new version beside the shim.
+/// npm: like npm's own shim it hands `%*` on to what runs (here a label, by `call`), which is where
+/// the second layer of cmd.exe escaping the admin puts on every argument is read; that writes the
+/// arguments it was given, the prefix (the fourth) read as `%~4` reads one with a space in it, and
+/// the new version beside the shim.
 const NPM: &str = "@echo off\r\n\
+call :record %*\r\n\
+echo added 1 package\r\n\
+exit /b 0\r\n\
+:record\r\n\
 echo %1> \"%~4\\npm-args.txt\"\r\n\
 echo %2>> \"%~4\\npm-args.txt\"\r\n\
 echo %3>> \"%~4\\npm-args.txt\"\r\n\
 echo %~4>> \"%~4\\npm-args.txt\"\r\n\
 echo %5>> \"%~4\\npm-args.txt\"\r\n\
 echo 0.167.1> \"%~4\\VERSION\"\r\n\
-echo added 1 package\r\n";
+exit /b 0\r\n";
 
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
