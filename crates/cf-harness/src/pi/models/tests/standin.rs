@@ -95,6 +95,7 @@ impl StandIn {
             &*self.processes,
             &*self.time,
             fetch,
+            Settle::No,
         )))
     }
 
@@ -106,10 +107,9 @@ impl StandIn {
             Rc::clone(&self.time),
         );
         let mut driver = Driver::default();
-        driver.begin(
-            0,
-            async move { listed(&env, &*processes, &*time, fetch).await },
-        );
+        driver.begin(0, async move {
+            listed(&env, &*processes, &*time, fetch, Settle::No).await
+        });
         driver
     }
 }

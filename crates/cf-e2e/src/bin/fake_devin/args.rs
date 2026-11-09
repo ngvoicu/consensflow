@@ -26,6 +26,8 @@ const VALUE_FLAGS: [&str; 6] = [
 pub enum Asked {
     /// Its version, which the daemon asks before it launches a window.
     Version,
+    /// Its models (`models list --format json`), which the daemon reads as a dialog opens.
+    Models,
     /// A window.
     Window(Launch),
 }
@@ -62,6 +64,10 @@ pub fn parse(args: &[String], own: Option<&Path>) -> Asked {
     // The daemon asks for the version with that word alone.
     if matches!(args, [only] if only == "--version") {
         return Asked::Version;
+    }
+    // And the models, which it reads as a dialog opens, with these words alone.
+    if args == ["models", "list", "--format", "json"] {
+        return Asked::Models;
     }
     let mut launch = Launch::default();
     let mut at = 0;
@@ -101,6 +107,15 @@ mod tests {
     fn the_daemons_question_of_the_version_is_answered_before_any_window() {
         assert_eq!(parse("--version"), Asked::Version);
         assert_eq!(parse("/x/y/fake-devin --version"), Asked::Version);
+    }
+
+    #[test]
+    fn the_daemons_read_of_the_models_is_answered_with_no_window() {
+        assert_eq!(parse("models list --format json"), Asked::Models);
+        assert_eq!(
+            parse("/x/y/fake-devin models list --format json"),
+            Asked::Models
+        );
     }
 
     #[test]

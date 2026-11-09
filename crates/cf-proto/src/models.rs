@@ -101,7 +101,8 @@ impl ModelChoice {
 }
 
 /// A harness's models, as one read of the harness listed them: what an adapter answers,
-/// what the home ledger keeps of each harness, and what the pickers choose from (the
+/// what the home ledger keeps of the last read of each harness (the record a submission is
+/// checked against, forgotten when the daemon starts), and what the pickers choose from (the
 /// chief's, the staff chains' editor's, Muse's). The one model listing there is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,8 +143,8 @@ pub enum Freshness {
     /// The account's list, as the harness fetched or holds it now.
     Fresh,
     /// Not the account's as of now, and never a default's source: what the harness ships,
-    /// a copy it could not fetch again, or the list of an earlier read kept after a read
-    /// that failed. `why` says which, in words a picker shows.
+    /// a copy it could not fetch again, or no list at all where a read failed
+    /// ([`ModelListing::failed`]). `why` says which, in words a picker shows.
     Stale { why: String },
 }
 
@@ -172,19 +173,17 @@ impl ModelListing {
         matches!(self.freshness, Freshness::Stale { .. })
     }
 
-    /// What is kept now that a read answered `read`: the answer, whole; or, where it
-    /// failed, the listing kept before (an empty one where there was none), stale for the
-    /// failure's reason.
-    pub fn after(kept: Option<ModelListing>, read: Result<ModelListing, String>) -> Self {
-        read.unwrap_or_else(|failure| {
-            kept.unwrap_or(Self {
-                models: Vec::new(),
-                read_at: None,
-                freshness: Freshness::Fresh,
-                how: String::new(),
-            })
-            .stale(failure)
-        })
+    /// What a read that failed lists: no model, and `why`. A list read before is never put in
+    /// its place: what a harness offered an hour ago is not what it offers now, and a picker
+    /// that showed it would show a model the harness may not run (A4-28, T-1321).
+    pub fn failed(why: impl Into<String>) -> Self {
+        Self {
+            models: Vec::new(),
+            read_at: None,
+            freshness: Freshness::Fresh,
+            how: String::new(),
+        }
+        .stale(why)
     }
 
     /// The model a harness is started on where nothing names one: the one the harness

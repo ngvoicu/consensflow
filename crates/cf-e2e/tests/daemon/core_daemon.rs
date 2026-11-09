@@ -265,6 +265,57 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
     Ok(())
 }
 
+/// The daemon the rig starts checks a model against what its harness lists, as any daemon does
+/// (A4-28, T-1329): the stand-in Claude Code lists `fake`, `fake-2`, `fake-chief` and the
+/// members a case seats, and a model nobody lists is refused, as a person's daemon refuses it.
+/// No variable, flag or id has the rig's daemon take a model on its harness's word.
+#[test]
+fn checks_a_model_against_what_the_stand_in_lists_as_any_daemon_does() -> Outcome {
+    let d = OverBridge::start()?;
+    let open = |model: &str, read: Option<&str>| {
+        let mut body = json!({
+            "directory": d.home.workspace(),
+            "harness": "claude-code",
+            "model": model,
+        });
+        if let Some(read) = read {
+            body["read"] = json!(read);
+        }
+        d.request("project.open", body)
+    };
+    // The stand-in lists `fake`, and names the read the picker was shown.
+    let listed = d.request("models.get", json!({ "harness": "claude" }))?;
+    assert_eq!(listed["ok"], true, "{listed}");
+    let ids: Vec<&str> = listed["listing"]["models"]
+        .as_array()
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model["id"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        ids.contains(&"fake") && ids.contains(&"mybuilder"),
+        "{listed}"
+    );
+    let read = listed["read"].as_str().unwrap_or_default().to_owned();
+    // A model nobody lists is refused, whether it names a read, names none, or names one the
+    // daemon never made.
+    for named in [Some(read.as_str()), None, Some("0000000000000000.1")] {
+        let refused = open("nobody-lists-this", named)?;
+        assert_eq!(
+            refused,
+            json!({ "ok": false, "error": "claude-code does not list nobody-lists-this: pick one of its models" }),
+            "read {named:?}"
+        );
+    }
+    // And the model the stand-in lists goes through.
+    let opened = open("fake", Some(&read))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    Ok(())
+}
+
 #[test]
 fn tells_the_page_when_the_board_changes() -> Outcome {
     let d = OverBridge::start()?;

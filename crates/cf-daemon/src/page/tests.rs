@@ -51,6 +51,23 @@ fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
 
 /// A rig as [`rig_with`] makes one, over the engine kit `kit`.
 fn rig_of(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs, kit: Context) -> Rig {
+    rig_listing(
+        env,
+        engine,
+        specs,
+        kit,
+        Rc::new(crate::models::tests_support::NoAdapters),
+    )
+}
+
+/// A rig as [`rig_of`] makes one, the page's model lists read through `adapters`.
+fn rig_listing(
+    env: Env,
+    engine: Option<Rc<dyn Engine>>,
+    specs: Specs,
+    kit: Context,
+    adapters: Rc<dyn cf_engine::seams::Adapters>,
+) -> Rig {
     let Worked { home, spawn } = worked();
     let kicks = Rc::new(Cell::new(0));
     let counted = Rc::clone(&kicks);
@@ -72,10 +89,7 @@ fn rig_of(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs, kit: Context) 
             }),
             grants_of,
         },
-        models: Rc::new(crate::models::ModelLists::new(
-            Rc::new(crate::models::tests_support::NoAdapters),
-            env_of_models,
-        )),
+        models: Rc::new(crate::models::ModelLists::new(adapters, env_of_models)),
     });
     Rig {
         home,

@@ -229,6 +229,9 @@ async fn run(
         ));
     }
     ledger.borrow_mut().suspend_for_restart()?;
+    // What a harness listed in an earlier life of this daemon is no record of what it lists
+    // now: a submission is checked against a list read in this one (A4-28).
+    ledger.borrow_mut().forget_model_listings()?;
     // What the app says, which a chief's launch reads afresh: a file that cannot be read
     // stops no start, and says nothing.
     let settings = Rc::new(SettingsFile::new(

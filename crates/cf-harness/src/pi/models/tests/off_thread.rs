@@ -106,7 +106,7 @@ fn the_heartbeat_of_the_thread_that_asked_stays_on_time_while_the_folder_stalls(
             }
         });
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let read = listed(&pi.env, &*pi.processes, &SystemTime, false).await;
+        let read = listed(&pi.env, &*pi.processes, &SystemTime, false, Settle::No).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         heart.abort();
         read.unwrap_err()

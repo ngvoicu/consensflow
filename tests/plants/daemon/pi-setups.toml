@@ -12,8 +12,8 @@
 # of what Pi said was let go (cf-process keeps the last 4 KiB; `pi update --models` is held to the
 # same), none of it is handed on; every other
 # reason is only masked (crates/cf-engine/src/shown/quotable.rs, used in crates/cf-daemon/src/models.rs and
-# crates/cf-engine/src/chief_model.rs); the daemon reads each harness on a turn of its own and
-# answers a list the home kept with no turn (crates/cf-daemon/src/models.rs).
+# crates/cf-engine/src/chief_model.rs); the daemon reads each harness on a turn of its own
+# (crates/cf-daemon/src/models.rs; the plants of what an ask is answered from are `live models:`).
 # `npm run plants:daemon -- "pi-setups:"` runs them.
 
 [run]
@@ -64,8 +64,8 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '        Err(Unlisted::NoModel) => Err(inspect(time, &env).await.unlisted()),'
-replace = '        Err(Unlisted::NoModel) => Err("Pi lists no model: it holds no login for any provider".to_owned()),'
+find = '            let unlisted = inspect(time, &env).await.unlisted();'
+replace = '            let unlisted = "Pi lists no model: it holds no login for any provider".to_owned();'
 
 [[plant]]
 name = "pi-setups: the setup is read from no folder"
@@ -74,8 +74,8 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '        Err(Unlisted::NoModel) => Err(inspect(time, &env).await.unlisted()),'
-replace = '        Err(Unlisted::NoModel) => Err(super::setup::Setup::default().unlisted()),'
+find = '            let unlisted = inspect(time, &env).await.unlisted();'
+replace = '            let unlisted = super::setup::Setup::default().unlisted();'
 
 [[plant]]
 name = "pi-setups: the setup is read though the list names models"
@@ -467,27 +467,17 @@ find = '            why: cf_engine::quotable(why),'
 replace = '            why: why.clone(),'
 
 [[plant]]
-name = "pi-setups: a listing kept is told with a credential in its reason"
-meant = "a_listing_kept_by_an_older_build_is_told_without_the_credential_in_its_reason"
-runs = ["ps-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/models.rs"
-find = '        Ok(Self::kept(ledger, harness)?.map(without_credentials))'
-replace = '        Ok(Self::kept(ledger, harness)?)'
-
-[[plant]]
 name = "pi-setups: a Refresh holds Pi"
 meant = "a_refresh_runs_the_update_then_asks_pi_once_and_holds_nothing"
 runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = '    let listing = read(processes, time, program(executable, env)).await?;'
+find = '    let listing = read(processes, time, program(executable, env), settle).await?;'
 replace = '''    if fetch {
         time.sleep(Duration::from_secs(10)).await;
     }
-    let listing = read(processes, time, program(executable, env)).await?;'''
+    let listing = read(processes, time, program(executable, env), settle).await?;'''
 
 [[plant]]
 name = "pi-setups: the folder is read on the thread that asked"
@@ -568,41 +558,14 @@ find = 'Got::Unread => unread.push("the file of logins".to_owned()),'
 replace = 'Got::Unread => unread.push("auth.json".to_owned()),'
 
 [[plant]]
-name = "pi-setups: a cached list waits for the turn of a read"
-meant = "a_cached_list_is_answered_at_once_while_another_harness_is_being_refreshed"
-runs = ["ps-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/models.rs"
-find = '''        if let Some(kept) = self.cached(ledger, harness, refresh)? {
-            return Ok(kept);
-        }
-        let turn'''
-replace = '        let turn'
-
-[[plant]]
 name = "pi-setups: every harness waits for one turn"
 meant = "a_harness_not_read_yet_is_read_while_another_harness_is_being_read"
 runs = ["ps-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '.entry(harness).or_default()'
-replace = '.entry(Harness::Pi).or_default()'
-
-[[plant]]
-name = "pi-setups: an ask that waited reads the harness again"
-meant = "an_ask_that_waited_for_the_read_before_it_is_answered_from_what_that_read_kept"
-runs = ["ps-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/models.rs"
-find = '''        // The read this ask waited for may have kept the list it wants.
-        if let Some(kept) = self.cached(ledger, harness, refresh)? {
-            return Ok(kept);
-        }
-'''
-replace = ''
+find = 'self.reading.borrow_mut().entry(harness).or_default()'
+replace = 'self.reading.borrow_mut().entry(Harness::Pi).or_default()'
 
 [[plant]]
 name = "pi-setups: the guard of the real-Pi helper does not expand a tilde"

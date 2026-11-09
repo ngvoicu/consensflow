@@ -775,3 +775,39 @@ async fn a_privacy_dialog_the_host_tells_reaches_the_engine_and_the_human_is_tol
         })
         .await;
 }
+
+/// What a harness listed in an earlier life of the daemon is no record of what it lists now
+/// (A4-28, T-1321): a start forgets the lists the ledger kept, and a submission is checked only
+/// against a list read since.
+#[tokio::test]
+async fn a_start_forgets_the_model_lists_an_earlier_daemon_kept() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let (ledger, _project) = ledger_before_the_start(root.path());
+            ledger.close().unwrap();
+            let db = rusqlite::Connection::open(root.path().join("consensflow").join("consensflow.db"))
+                .unwrap();
+            for harness in ["devin", "pi"] {
+                db.execute(
+                    "INSERT INTO model_list (harness, models, read_at, how) VALUES (?, '[]', 1000, 'a test')",
+                    [harness],
+                )
+                .unwrap();
+            }
+            drop(db);
+
+            let (options, _app, _opened) = app_that_opens_windows(root.path());
+            let daemon = start(environment(root.path()), options).await.unwrap();
+            let home = daemon.parts.home.clone();
+            daemon.stop("SIGTERM");
+            daemon.finished().await;
+            // The ledger holds its file while the daemon runs: read it once the daemon is gone.
+            let db = rusqlite::Connection::open(home.join("consensflow.db")).unwrap();
+            let rows: i64 = db
+                .query_row("SELECT count(*) FROM model_list", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(rows, 0, "the lists of the earlier life");
+        })
+        .await;
+}

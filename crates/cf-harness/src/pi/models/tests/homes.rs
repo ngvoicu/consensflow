@@ -178,7 +178,7 @@ fn listing_of(home: &Home) -> Result<Vec<String>, String> {
     let env = Env::from_vars(vars);
     let processes = RecordedPi::new(&home.name);
     let time = ManualTime::new(0);
-    let listed = eventually(Box::pin(listed(&env, &processes, &time, false)));
+    let listed = eventually(Box::pin(listed(&env, &processes, &time, false, Settle::No)));
     assert_eq!(
         contents(&agent),
         before,
@@ -294,25 +294,131 @@ const KEPT: [&str; 17] = [
 ];
 
 /// The environment a real Pi is read in: `process`'s, but what [`KEPT`] names, and `agent` as
-/// Pi's folder. `CF_PI` names the `pi` to run, and its folder goes first on the PATH.
+/// Pi's folder. `CF_PI` names the `pi` to run, and its folder goes first on the PATH **as the
+/// environment is built**: a harness's CLI is looked for on the PATH an `Env` was given
+/// ([`Env::search_path`]), which `Env::with_var("PATH", …)` leaves as it was, so that a `pi`
+/// the PATH held before `CF_PI`'s folder was the one that ran (the review T-1325).
 fn real_env(process: &Env, agent: &Path) -> (Env, PathBuf) {
     let base = process
         .clone()
-        .without_vars(|name| !KEPT.iter().any(|kept| kept.eq_ignore_ascii_case(name)));
+        .without_vars(|name| !KEPT.iter().any(|kept| kept.eq_ignore_ascii_case(name)))
+        .with_var("PI_CODING_AGENT_DIR", &agent.to_string_lossy());
     let pi = PathBuf::from(process.text("CF_PI").unwrap_or("pi"));
-    let mut env = base.with_var("PI_CODING_AGENT_DIR", &agent.to_string_lossy());
-    if let Some(bin) = pi.parent().filter(|bin| !bin.as_os_str().is_empty()) {
-        let rest = env
-            .search_path()
-            .map(std::ffi::OsStr::to_owned)
-            .unwrap_or_default();
-        let joined = std::env::join_paths(
-            std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&rest)),
-        )
-        .unwrap();
-        env = env.with_var("PATH", &joined.to_string_lossy());
+    let Some(bin) = pi.parent().filter(|bin| !bin.as_os_str().is_empty()) else {
+        return (base, pi);
+    };
+    let rest = base
+        .search_path()
+        .map(std::ffi::OsStr::to_owned)
+        .unwrap_or_default();
+    let joined = std::env::join_paths(
+        std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&rest)),
+    )
+    .unwrap();
+    let vars = base
+        .iter()
+        .filter(|(name, _)| !name.eq_ignore_ascii_case("PATH"))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .chain(std::iter::once(("PATH".into(), joined)));
+    (Env::from_vars(vars), pi)
+}
+
+#[test]
+fn the_real_pi_helper_runs_the_pi_cf_pi_names_and_no_other_on_the_path() {
+    let folder = tempfile::tempdir().unwrap();
+    let pi = crate::testing::fake_executable(&folder.path().join("pi"));
+    let elsewhere = tempfile::tempdir().unwrap();
+    let other = crate::testing::fake_executable(&elsewhere.path().join("pi"));
+    let path = std::env::join_paths([elsewhere.path()]).unwrap();
+    let process = Env::from_vars([
+        ("CF_PI", pi.to_string_lossy().into_owned()),
+        ("PATH", path.to_string_lossy().into_owned()),
+    ]);
+    let (env, named) = real_env(&process, &folder.path().join("agent"));
+    assert_eq!(named, pi);
+    let run = executable(Harness::Pi, &env).unwrap();
+    assert_eq!(
+        PathBuf::from(&run),
+        pi,
+        "CF_PI's, not the PATH's ({other:?})"
+    );
+}
+
+/// The files a read of a copy may change, add or take away: Pi's own catalog caches, by their
+/// exact names at the top of Pi's folder, and nothing else (the review T-1325). A catalog is a
+/// cache a package or Pi keeps for itself (`Decisions F1a`); a login, a setting, a configured
+/// model (`models.json`), a package or an extension is not, and a read that changes one is a
+/// failure, whatever its name holds.
+const CATALOG_FILES: &[&str] = &["models-store.json", "cliproxyapi-models.json"];
+
+/// The paths a read changed that it may not have: every one added, taken away or changed
+/// between `before` and `after` that is not one of [`CATALOG_FILES`].
+fn unexpected_changes(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+) -> Vec<String> {
+    before
+        .keys()
+        .chain(after.keys())
+        .filter(|name| before.get(*name) != after.get(*name))
+        .filter(|name| !CATALOG_FILES.contains(&name.as_str()))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn digest_of(files: &[(&str, &str)]) -> BTreeMap<String, String> {
+    files
+        .iter()
+        .map(|(name, text)| ((*name).to_owned(), (*text).to_owned()))
+        .collect()
+}
+
+#[test]
+fn only_pi_s_catalog_files_may_change_in_a_copy_and_nothing_else_may_be_added_or_taken() {
+    let before = digest_of(&[
+        ("auth.json", "a"),
+        ("settings.json", "s"),
+        ("models.json", "m"),
+        ("models-store.json", "1"),
+        ("cliproxyapi-models.json", "1"),
+        ("git/x/index.ts", "g"),
+    ]);
+    // A catalog rewritten, one that was not there, one taken away: all Pi's own business.
+    let mut catalogs = before.clone();
+    catalogs.insert("models-store.json".to_owned(), "2".to_owned());
+    catalogs.remove("cliproxyapi-models.json");
+    assert_eq!(unexpected_changes(&before, &catalogs), Vec::<String>::new());
+    assert_eq!(unexpected_changes(&digest_of(&[]), &catalogs).len(), 4);
+    // A login or a setting changed, a file added, one taken away: each is named.
+    for (name, text) in [
+        ("auth.json", "rotated"),
+        ("settings.json", "x"),
+        ("models.json", "x"),
+    ] {
+        let mut changed = before.clone();
+        changed.insert(name.to_owned(), text.to_owned());
+        assert_eq!(
+            unexpected_changes(&before, &changed),
+            [name],
+            "{name} changed"
+        );
     }
-    (env, pi)
+    let mut added = before.clone();
+    added.insert("trust.json".to_owned(), "t".to_owned());
+    assert_eq!(unexpected_changes(&before, &added), ["trust.json"]);
+    let mut taken = before.clone();
+    taken.remove("git/x/index.ts");
+    assert_eq!(unexpected_changes(&before, &taken), ["git/x/index.ts"]);
+    // A catalog's name deeper in the folder is not Pi's catalog; nor is one that holds "model".
+    let mut deeper = before.clone();
+    deeper.insert("npm/models-store.json".to_owned(), "n".to_owned());
+    deeper.insert("my-models-cache.json".to_owned(), "n".to_owned());
+    assert_eq!(
+        unexpected_changes(&before, &deeper),
+        ["my-models-cache.json", "npm/models-store.json"]
+    );
 }
 
 /// The digest of every file under `root`, by name: what a read of a copy must leave as it
@@ -372,7 +478,12 @@ fn recorded_homes_answer_as_the_installed_pi_does() {
             let mut program = program(pi.clone(), &env);
             program.cwd = Some(folder.path().to_path_buf());
             program.args.extend(extra.map(str::to_owned));
-            let read = block_on(read(&processes, &SystemTime, program));
+            let read = block_on(read(
+                &processes,
+                &SystemTime,
+                program,
+                Settle::WaitForProviders,
+            ));
             let kept = &recorded(&home.name)[way];
             let at = format!("{} {way}", home.name);
             match (read, kept["exit"].is_null()) {
@@ -544,17 +655,19 @@ fn the_app_reads_a_copy_of_the_human_s_pi_folder_as_a_window_would_start() {
     let before = digests(&copy);
     let processes = SystemProcesses::new(env.clone());
     let started = std::time::Instant::now();
-    let listed = block_on(listed(&env, &processes, &SystemTime, false));
+    let listed = block_on(listed(
+        &env,
+        &processes,
+        &SystemTime,
+        false,
+        Settle::WaitForProviders,
+    ));
     let took = started.elapsed();
     let after = digests(&copy);
-    let changed: Vec<&String> = before
-        .keys()
-        .chain(after.keys())
-        .filter(|name| before.get(*name) != after.get(*name))
-        .collect();
+    let changed = unexpected_changes(&before, &after);
     assert!(
         changed.is_empty(),
-        "the read left the copy changed: {changed:?}"
+        "the read changed the copy beyond Pi's catalog files ({CATALOG_FILES:?}): {changed:?}"
     );
     let listing = listed.unwrap_or_else(|why| panic!("the read failed after {took:?}: {why}"));
     let models: Vec<String> = listing.models.iter().map(ModelChoice::model).collect();
@@ -591,25 +704,30 @@ fn a_refresh_of_the_installed_pi_on_a_copy_is_its_update_and_one_read() {
     let before = digests(&copy);
     let processes = SystemProcesses::new(env.clone());
     let started = std::time::Instant::now();
-    let listed = block_on(listed(&env, &processes, &SystemTime, true));
+    let listed = block_on(listed(
+        &env,
+        &processes,
+        &SystemTime,
+        true,
+        Settle::WaitForProviders,
+    ));
     let took = started.elapsed();
     let after = digests(&copy);
-    let changed: Vec<&String> = before
-        .keys()
-        .chain(after.keys())
-        .filter(|name| before.get(*name) != after.get(*name))
-        .collect();
+    let changed = unexpected_changes(&before, &after);
+    assert!(
+        changed.is_empty(),
+        "the Refresh changed the copy beyond Pi's catalog files ({CATALOG_FILES:?}): {changed:?}"
+    );
     let listing = listed.unwrap_or_else(|why| panic!("the Refresh failed after {took:?}: {why}"));
     let models: Vec<String> = listing.models.iter().map(ModelChoice::model).collect();
     println!(
-        "Refresh: {} models from {:?} in {took:?}; {}; {} of the copy's {} files changed: {changed:?}",
+        "Refresh: {} models from {:?} in {took:?}; {}; the copy's {} files held, but its catalogs",
         models.len(),
         providers(&models),
         match &listing.freshness {
             cf_proto::models::Freshness::Fresh => "fresh".to_owned(),
             cf_proto::models::Freshness::Stale { why } => format!("stale: {why}"),
         },
-        changed.len(),
         after.len()
     );
     assert!(

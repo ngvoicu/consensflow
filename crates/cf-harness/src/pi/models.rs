@@ -15,19 +15,30 @@
 //! such as this Mac's only one, `@router-for-me/pi-cliproxyapi-provider`. A model is a
 //! provider and an id, kept apart (an OpenRouter id holds a `/` of its own): `--model`
 //! takes them joined.
+//!
+//! **What the page shows is what a Pi window shows its human** (A4-28, T-1321), who opens
+//! `/model` seconds after Pi started, not what Pi lists in its first moment: a package's
+//! provider answers from its own cache at once and asks its server a moment later (measured
+//! on Pi 1.5.0: the cache at 0.3 s, the server's list at 1.8 s, with `--offline` and
+//! without: a package decides what it asks for itself). Pi tells of no such moment, so the
+//! page's read asks again until the list has stood still ([`SETTLE_MS`]), which is the only
+//! confirmation there is (Pi 1.5.0's rpc has no event, state field or command for "my providers
+//! have loaded"); a list the wait could not confirm (a refusal, an ask left unanswered, Pi
+//! ending, the cap reached while the list still changed) comes back stale, with why, never
+//! fresh. A window's launch does not wait ([`default_model`]).
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
-use cf_proto::models::{ModelChoice, ModelListing, IT_SAID, WORDS_WITHHELD};
+use cf_proto::models::{Freshness, ModelChoice, ModelListing, IT_SAID, WORDS_WITHHELD};
 use serde_json::{json, Value};
 
 use super::setup::inspect;
 use crate::detect::executable;
-use crate::seams::processes::{Limits, Processes, Program, Streams};
-use crate::seams::Time;
+use crate::seams::processes::{Child, Limits, Processes, Program, Streams};
+use crate::seams::{arm, Time};
 use crate::shared::one_shot::{ask, conversation_as, BOUND_MS};
 
 /// How the list is read, as the human could run it.
@@ -41,6 +52,26 @@ pub(crate) const UPDATE_LIMITS: Limits = Limits {
     timeout: Duration::from_secs(60),
     max_buffer: 1 << 20,
 };
+
+/// How often a read that waits for Pi's providers asks again.
+const POLL_MS: u64 = 250;
+
+/// How long the list must stand still before it is the list: a provider that asks its server
+/// on loopback has answered within a second or two (1.5 s of a server's own delay, measured).
+/// A provider slower than this shows its models at the next read.
+const SETTLE_MS: u64 = 2_500;
+
+/// The most a read waits for the list to stand still, from Pi's first answer, however it
+/// changes: the page is waiting, and an extension that never stops changing it is Pi's.
+const SETTLE_CAP_MS: u64 = 12_000;
+
+/// How long one more ask is given, once Pi has answered: one that goes unanswered ends the
+/// wait, and the list Pi gave is the list.
+const ASK_MS: u64 = 5_000;
+
+/// What a read leaves of [`BOUND_MS`] after Pi's first answer: the wait never takes the answer
+/// Pi gave from a read that began slowly.
+const KEEP_MS: u64 = 3_000;
 
 /// Pi's thinking levels, from the lowest (`ThinkingLevel` of `pi-ai`).
 const LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -128,22 +159,139 @@ pub(crate) fn parse(answer: &Value, at: i64) -> Result<ModelListing, Unlisted> {
     Ok(ModelListing::read(models, at, HOW))
 }
 
+/// Whether a read waits for Pi's providers to load: the page's read does, as a window shows its
+/// human a list some seconds after Pi started; a window's launch, which asks for a default
+/// model, does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Settle {
+    No,
+    WaitForProviders,
+}
+
+/// The request for `models`: `models` the first time, `models-2`, `models-3` after.
+fn request(asks: u32) -> (String, Value) {
+    let id = if asks == 1 {
+        "models".to_owned()
+    } else {
+        format!("models-{asks}")
+    };
+    let line = json!({ "id": id, "type": "get_available_models" });
+    (id, line)
+}
+
+/// The models an answer lists, as Pi gave them: what a later answer is compared with.
+fn listed_in(answer: &Value) -> &Value {
+    &answer["data"]["models"]
+}
+
+/// How long the wait for the list to stand still may last, `spent` milliseconds into a read
+/// that has [`BOUND_MS`]: [`SETTLE_CAP_MS`], less than what is left of the bound.
+fn wait_allowed(spent: u64) -> u64 {
+    SETTLE_CAP_MS.min(BOUND_MS.saturating_sub(spent).saturating_sub(KEEP_MS))
+}
+
+/// Why a list was not confirmed, in the words a picker shows beside it (it is what a Pi window
+/// would still have been loading): said of the list Pi gave, which stays, stale.
+const REFUSED: &str = "Pi was still loading its models: it refused to list them a second time";
+const NO_ANSWER: &str = "Pi was still loading its models: it did not answer a second ask in time";
+const ENDED: &str = "Pi was still loading its models: it ended before it answered a second ask";
+const CHANGING: &str =
+    "Pi was still loading its models: its list was still changing when the wait ended";
+const LATE: &str = "Pi was still loading its models: its first answer came too late to look again";
+
+/// What a wait for Pi's providers came to: the last answer Pi gave, and why it is not a confirmed
+/// list, if it is not.
+struct Settled {
+    answer: Value,
+    unconfirmed: Option<&'static str>,
+}
+
+/// Pi's answer to `get_available_models`, asked again until what it lists has stood still for
+/// [`SETTLE_MS`], every ask answered: that list is **confirmed**. Pi has no signal that its
+/// extensions and providers have loaded (Pi 1.5.0's rpc: no event, no state field, no command),
+/// so standing still is the only confirmation there is. The wait ends otherwise at the first
+/// ask Pi refuses, leaves unanswered or ends on, or where [`wait_allowed`] runs out while the
+/// list still changes: the last list Pi gave then comes back with why it is unconfirmed, for the
+/// read to mark it stale. An answer that lists no model is waited on like any other.
+async fn settled(child: &dyn Child, time: &dyn Time, first: Value, spent: u64) -> Settled {
+    // A refusal of the first ask is the read's failure, not a list to confirm.
+    if first.get("success") != Some(&Value::Bool(true)) {
+        return Settled {
+            answer: first,
+            unconfirmed: None,
+        };
+    }
+    let allowed = wait_allowed(spent);
+    if allowed == 0 {
+        return Settled {
+            answer: first,
+            unconfirmed: Some(LATE),
+        };
+    }
+    // By the clock, not by the waits counted: each ask takes its own time on top of them.
+    let until = time.wall_ms() + i64::try_from(allowed).unwrap_or(0);
+    let (mut latest, mut still, mut asks) = (first, 0, 1);
+    while still < SETTLE_MS {
+        if time.wall_ms() >= until {
+            return Settled {
+                answer: latest,
+                unconfirmed: Some(CHANGING),
+            };
+        }
+        time.sleep(Duration::from_millis(POLL_MS)).await;
+        still += POLL_MS;
+        asks += 1;
+        let (id, line) = request(asks);
+        let asked = ask(child, "pi --mode rpc", &line, |answer| {
+            answer["type"] == "response" && answer["id"] == id.as_str()
+        });
+        // An ask is given what the wait has left (a quarter of a second at the least), so that
+        // the last of them ends within what [`KEEP_MS`] keeps of the read's bound.
+        let left = u64::try_from(until - time.wall_ms()).unwrap_or(0);
+        let next = match arm(time, ASK_MS.min(left).max(POLL_MS)).bound(asked).await {
+            None => return unconfirmed(latest, NO_ANSWER),
+            Some(Err(_)) => return unconfirmed(latest, ENDED),
+            Some(Ok(next)) if next.get("success") != Some(&Value::Bool(true)) => {
+                return unconfirmed(latest, REFUSED)
+            }
+            Some(Ok(next)) => next,
+        };
+        if listed_in(&next) != listed_in(&latest) {
+            still = 0;
+        }
+        latest = next;
+    }
+    Settled {
+        answer: latest,
+        unconfirmed: None,
+    }
+}
+
+fn unconfirmed(answer: Value, why: &'static str) -> Settled {
+    Settled {
+        answer,
+        unconfirmed: Some(why),
+    }
+}
+
 /// The models `program` lists: one bounded conversation, no turn, one start of Pi.
 ///
 /// A read that fails says what Pi said (its error stream and its exit code are kept from the
 /// one start, and nothing is started again to find out); one that waited for Pi in vain says
 /// which packages and extensions it was loading. One that finds no model says whether Pi has a
 /// provider set up ([`super::setup::Setup`]), reading its folder only then, and on a thread of its own
-/// ([`inspect`]).
+/// ([`inspect`]). Where `settle` says so, the list is the one Pi has once its providers have
+/// loaded ([`settled`]); where that was not confirmed the list comes back stale, with why.
 pub(crate) async fn read(
     processes: &dyn Processes,
     time: &dyn Time,
     program: Program,
+    settle: Settle,
 ) -> Result<ModelListing, String> {
     let at = time.wall_ms();
     let env = program.env.clone();
-    let asked = json!({ "id": "models", "type": "get_available_models" });
-    let answer = match conversation_as(
+    let (id, asked) = request(1);
+    let (answer, unconfirmed) = match conversation_as(
         processes,
         time,
         program,
@@ -151,21 +299,41 @@ pub(crate) async fn read(
         "pi --mode rpc",
         BOUND_MS,
         async |child| {
-            ask(child, "pi --mode rpc", &asked, |line| {
-                line["type"] == "response" && line["id"] == "models"
+            let first = ask(child, "pi --mode rpc", &asked, |line| {
+                line["type"] == "response" && line["id"] == id.as_str()
             })
-            .await
+            .await?;
+            Ok(match settle {
+                Settle::No => (first, None),
+                Settle::WaitForProviders => {
+                    let spent = u64::try_from(time.wall_ms() - at).unwrap_or(0);
+                    let Settled {
+                        answer,
+                        unconfirmed,
+                    } = settled(child, time, first, spent).await;
+                    (answer, unconfirmed)
+                }
+            })
         },
     )
     .await
     {
-        Ok(answer) => answer,
+        Ok(read) => read,
         Err(failed) => return Err(waiting_on(failed, time, &env).await),
     };
     match parse(&answer, at) {
-        Ok(listing) => Ok(listing),
+        Ok(listing) => Ok(match unconfirmed {
+            Some(why) => listing.stale(why),
+            None => listing,
+        }),
         Err(Unlisted::Said(why)) => Err(why),
-        Err(Unlisted::NoModel) => Err(inspect(time, &env).await.unlisted()),
+        Err(Unlisted::NoModel) => {
+            let unlisted = inspect(time, &env).await.unlisted();
+            Err(match unconfirmed {
+                Some(why) => format!("{why}; {unlisted}"),
+                None => unlisted,
+            })
+        }
     }
 }
 
@@ -231,6 +399,7 @@ pub(crate) async fn listed(
     processes: &dyn Processes,
     time: &dyn Time,
     fetch: bool,
+    settle: Settle,
 ) -> Result<ModelListing, String> {
     let executable = PathBuf::from(executable(Harness::Pi, env)?);
     let mut fetched = Ok(());
@@ -243,13 +412,23 @@ pub(crate) async fn listed(
         };
         fetched = processes.run(update, UPDATE_LIMITS).await.map(|_| ());
     }
-    let listing = read(processes, time, program(executable, env)).await?;
+    let listing = read(processes, time, program(executable, env), settle).await?;
     Ok(match fetched {
         Ok(()) => listing,
-        Err(failed) => listing.stale(format!(
-            "Pi's own catalog: pi update --models {}",
-            update_failure(&failed)
-        )),
+        Err(failed) => {
+            let catalog = format!(
+                "Pi's own catalog: pi update --models {}",
+                update_failure(&failed)
+            );
+            // ConsensFlow's own words about the list stand before the mark where Pi's begin.
+            match &listing.freshness {
+                Freshness::Stale { why } => {
+                    let why = format!("{why}; {catalog}");
+                    listing.stale(why)
+                }
+                Freshness::Fresh => listing.stale(catalog),
+            }
+        }
     })
 }
 
@@ -299,7 +478,7 @@ pub(crate) async fn default_model(
     if let Some(named) = named.filter(|named| !cf_proto::models::is_contributor(named)) {
         return Ok(Some(named));
     }
-    let listing = listed(env, processes, time, false).await?;
+    let listing = listed(env, processes, time, false, Settle::No).await?;
     listing
         .default_model()
         .map(|model| Some(model.model()))
