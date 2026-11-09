@@ -27,7 +27,7 @@ pub(super) fn write(root: &Path, name: &str) {
 /// The file `name` of `root`, last written `days` ago.
 // The time of day is read in one place of the product; a test says an age against the clock the files are stamped by.
 #[allow(clippy::disallowed_methods)]
-fn aged(root: &Path, name: &str, days: u64) {
+pub(super) fn aged(root: &Path, name: &str, days: u64) {
     write(root, name);
     let file = fs::OpenOptions::new()
         .write(true)
@@ -55,6 +55,21 @@ pub(super) fn sweep_as(
     before: &str,
     after: &str,
 ) -> String {
+    let out = sweep_raw(shell, dir, listed, profile, before, after);
+    assert!(out.contains("FAILED=0"), "the sweep failed: {out}");
+    out
+}
+
+/// [`sweep_as`] for a case that expects the sweep to fail the run: what the session said, whatever
+/// the count of what failed.
+pub(super) fn sweep_raw(
+    shell: &str,
+    dir: &Path,
+    listed: &[&str],
+    profile: &Path,
+    before: &str,
+    after: &str,
+) -> String {
     fs::write(dir.join(SYNCED), listed.join("\n") + "\n").unwrap();
     let context = Context {
         root: dir.to_path_buf(),
@@ -64,7 +79,7 @@ pub(super) fn sweep_as(
     let hash = tree::content(&context, &names).unwrap();
     fs::write(dir.join(TREE), format!("none {hash}\n")).unwrap();
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
-    let out = powershell::run(
+    powershell::run(
         shell,
         profile,
         &format!(
@@ -72,9 +87,7 @@ pub(super) fn sweep_as(
             profile.display(),
             dir.display()
         ),
-    );
-    assert!(out.contains("FAILED=0"), "the sweep failed: {out}");
-    out
+    )
 }
 
 #[test]

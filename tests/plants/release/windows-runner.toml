@@ -24,7 +24,7 @@
 #   it is named in a file beside it, which a stop reads: a stop ends only its own run. The machine
 #   says the tree it unpacked (`== tree <commit> <hash>`, from a file the tarball holds), which
 #   must be the one sent: another ends the run there, and a 0 with no tree said is a failure.
-#   What runs that never got so far left is taken away by the next sweep, an hour after.
+#   What a run that never got so far leaves is no sweep's to take (T-1368): a person removes it.
 # - The lock is one act of the system (T-253): a file the script opens for itself alone, as its
 #   first act in the folder (`FileShare.None`), so of two runs that start within a millisecond one is
 #   refused; a run that ended any way has closed it, so a lock a dead run left is no lock. The
@@ -342,26 +342,6 @@ find = "stop: powershell(&stop_script(&options.dir, id))?,"
 replace = "stop: powershell(&stop_script(&options.dir, &run_id()))?,"
 
 # Runs that never got so far.
-
-[[plant]]
-name = "windows runner: the sweep takes a tarball that is not an hour old"
-meant = "the_tarballs_runs_left_beside_the_copy_are_taken_away_an_hour_after_they_were_written"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "$_.LastWriteTime -lt (Get-Date).AddHours(-1)"
-replace = "$_.LastWriteTime -lt (Get-Date)"
-
-[[plant]]
-name = "windows runner: the sweep takes the tarballs of other folders"
-meant = "the_tarballs_runs_left_beside_the_copy_are_taken_away_an_hour_after_they_were_written"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "[regex]::Escape($root.Name)"
-replace = "'.*'"
 
 # The tree the machine says it unpacked.
 
@@ -740,26 +720,6 @@ find = " -and $_.StartTime -le (Get-Item $running).LastWriteTime"
 replace = ""
 
 # The uploads of a folder that is gone (T-263).
-
-[[plant]]
-name = "windows runner: the uploads of a folder that is gone are taken away within the hour"
-meant = "the_uploads_of_a_folder_that_is_gone_are_taken_away_a_day_after_they_were_written"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "$_.LastWriteTime -lt (Get-Date).AddDays(-1)"
-replace = "$_.LastWriteTime -lt (Get-Date).AddHours(-1)"
-
-[[plant]]
-name = "windows runner: the uploads of a folder that is there are taken away by the runs of another"
-meant = "the_uploads_of_a_folder_that_is_gone_are_taken_away_a_day_after_they_were_written"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "-and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) "
-replace = ""
 
 # A stop ends everything the run started (T-322).
 
@@ -2479,8 +2439,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "$beside = $root.Parent.FullName\n"
-replace = "foreach ($old in @('T-42-holiday', '.tmpA1b2C3')) { $gone = Join-Path (Join-Path $env:USERPROFILE 'Temp') $old; if (Test-Path -LiteralPath $gone) { [IO.Directory]::Delete($gone, $true) } }\n$beside = $root.Parent.FullName\n"
+find = "foreach ($name in $removed) { Write-Output \"== removed $name\" }\n"
+replace = "foreach ($old in @('T-42-holiday', '.tmpA1b2C3')) { $gone = Join-Path (Join-Path $env:USERPROFILE 'Temp') $old; if (Test-Path -LiteralPath $gone) { [IO.Directory]::Delete($gone, $true) } }\nforeach ($name in $removed) { Write-Output \"== removed $name\" }\n"
 
 [[plant]]
 name = "windows runner: the sweep takes what a link in the place of Temp leads to"
@@ -2489,8 +2449,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "$beside = $root.Parent.FullName\n"
-replace = "foreach ($old in @(Get-ChildItem -LiteralPath (Join-Path $env:USERPROFILE 'Temp') -Force -Filter '.tmpN1o2P3' -ErrorAction SilentlyContinue)) { [IO.Directory]::Delete($old.FullName, $true) }\n$beside = $root.Parent.FullName\n"
+find = "foreach ($name in $removed) { Write-Output \"== removed $name\" }\n"
+replace = "foreach ($old in @(Get-ChildItem -LiteralPath (Join-Path $env:USERPROFILE 'Temp') -Force -Filter '.tmpN1o2P3' -ErrorAction SilentlyContinue)) { [IO.Directory]::Delete($old.FullName, $true) }\nforeach ($name in $removed) { Write-Output \"== removed $name\" }\n"
 
 [[plant]]
 name = "windows runner: a script looks the user's Temp up"
@@ -2499,8 +2459,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "$beside = $root.Parent.FullName\n"
-replace = "$here = [IO.Path]::GetTempPath()\n$beside = $root.Parent.FullName\n"
+find = "foreach ($name in $removed) { Write-Output \"== removed $name\" }\n"
+replace = "$here = [IO.Path]::GetTempPath()\nforeach ($name in $removed) { Write-Output \"== removed $name\" }\n"
 
 # The logs of the tasks, `.runs/<task>`, are kept in the copy (T-1342): the copy is one folder that every
 # tree's runs share and cannot tell which tree wrote a file that is no tree's, so a run's sweep took nine

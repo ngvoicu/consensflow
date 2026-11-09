@@ -9,6 +9,7 @@ mod lock;
 mod packages;
 mod powershell;
 mod reports;
+mod root;
 mod runs;
 #[cfg(windows)]
 mod stage;
@@ -649,10 +650,10 @@ fn a_run_is_named_to_the_width_a_script_is_made_for_and_no_two_runs_are_named_al
     );
     // The run's process is the first of its name.
     assert!(ids[0].starts_with(&format!("{:08x}-", std::process::id())));
-    // The sweep that takes the tarballs of runs that never got so far away knows the shape.
+    // The sweep reads no such name: it removes no tarball by the shape of its name (T-1368).
     assert!(
-        sweep_script().contains(r"(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$"),
-        "the sweep does not read the names runs are given"
+        !sweep_script().contains(".tgz"),
+        "the sweep reads the names runs are given"
     );
 }
 

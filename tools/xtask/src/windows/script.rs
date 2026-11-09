@@ -486,6 +486,14 @@ fn limits_of(limits: Option<Limits>) -> String {
 /// (`== removed <name>`), and what could not be removed is said and left in `$failed`,
 /// which ends the run.
 ///
+/// - First of all (T-1368, the second review), before it removes or writes anything, it looks at
+///   the profile (`%USERPROFILE%`) and at the copy: if either is a link (a junction, a symbolic
+///   link), it names it, removes nothing (not the tree's strays, not the reports', not the
+///   tasks' logs) and fails the run. A link leads to a folder that is not the copy's, and a file
+///   the tree does not list is not the copy's to remove there. A person who moves the build to
+///   another disk with a junction has the runs refused with that line until the copy is a real
+///   folder again. (The unpack and the lock come before the sweep and are not held to this: they
+///   write the tree where the run was told to put it.)
 /// - The list is read as UTF-8, as it was written, and names are compared in any case,
 ///   as Windows finds a file: a file renamed by its case alone is the tree's.
 /// - A folder that is a link (a junction, a symbolic link) is not looked into, and only
@@ -524,15 +532,6 @@ fn limits_of(limits: Option<Limits>) -> String {
 ///   committed. What [`KEPT`] names is left out of what git says of the copy
 ///   (`.git/info/exclude`): the run's own files and the build's, which a run writes. A
 ///   git that is not there, or fails, is said in `$failed`, which ends the run.
-/// - Last, the tarballs runs left beside the copy: this folder's own (`<folder>.<id>.tgz`,
-///   [`upload_name`], and the `<folder>.tgz` the runs sent before each had its own) that
-///   were written to more than an hour ago, and those of folders that are gone
-///   (`<gone>.<id>.tgz`, no folder of that name beside it) written to more than a day
-///   ago. A run removes its own, so these are of runs that never got so far (this
-///   program killed, the connection lost, an upload cut short). The hour is safe for a
-///   folder that is in use: a run's tarball is written seconds before its script asks
-///   for the lock. It never fails the run, and it runs with the lock held, which no run
-///   is waiting on.
 ///
 /// It takes nothing from the user's Temp, and no part of a run does (T-1368). It once took
 /// the test families out of it by their names (T-1333), and that cannot be done safely from
@@ -542,6 +541,12 @@ fn limits_of(limits: Option<Limits>) -> String {
 /// time is not the age of what is in it. zeewin2 is Gabriel's laptop. What the tests leave in
 /// Temp is the tests' to drop (each test struct drops its folder last, a ledger lets go of its
 /// file), and the folders of earlier days are cleaned by a person, by hand, after a review.
+///
+/// Nor does it remove anything beside the copy (T-1368, the second review). It once took the tarballs
+/// runs left in the profile by the shape of their names (`<folder>.<id>.tgz`) and their age, and any
+/// program's file can have that shape. A run removes its own tarball by its exact name, in the script
+/// that made it ([`REMOTE`]) and in the stop ([`stop_script`]); what a run that was killed leaves
+/// beside the copy stays until a person removes it.
 pub fn sweep_script() -> String {
     let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
     let excluded: Vec<String> = KEPT
@@ -915,10 +920,17 @@ public static class CfJob {
 /// things it left in the folder it was given, and says nothing else, so what it
 /// removed and could not are kept in lists and said once it is done.
 const SWEEP_TEMPLATE: &str = r##"
+$failed = [Collections.Generic.List[string]]::new()
+foreach ($folder in @($env:USERPROFILE, $dir)) {
+  if ((Get-Item -LiteralPath $folder -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    Write-Output "$folder is a link, so the copy is not swept and nothing is removed from it: what a link leads to is none of the copy's. Make the profile and the copy real folders."
+    $failed.Add("$folder is a link")
+    return
+  }
+}
 $now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content -Encoding UTF8 (Join-Path $dir '«synced»')), [StringComparer]::OrdinalIgnoreCase)
 $kept = @(«kept»)
 $removed = [Collections.Generic.List[string]]::new()
-$failed = [Collections.Generic.List[string]]::new()
 function Clear-Stale([IO.DirectoryInfo]$folder) {
   $left = 0
   try { $items = $folder.GetFileSystemInfos() } catch { $failed.Add("$($folder.FullName): $($_.Exception.Message)"); return 1 }
@@ -1015,11 +1027,6 @@ if (-not $failed.Count) {
   if (Get-Command git -ErrorAction SilentlyContinue) { Save-Tree } else { $failed.Add('git is not on the PATH, so the copy cannot be made a checkout of what went over') }
   if ($failed.Count) { Write-Output "The copy could not be made a checkout of what went over: $($failed -join '; ')" }
 }
-$beside = $root.Parent.FullName
-$own = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'
-$left = '^(?<folder>.+)\.[0-9a-f]{8}-[0-9a-f]{8}\.tgz$'
-try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $own -and $_.LastWriteTime -lt (Get-Date).AddHours(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
-try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $left -and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) -and $_.LastWriteTime -lt (Get-Date).AddDays(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
 "##;
 
 /// The script that lists the reports, with a mark where the copy's folder goes.
