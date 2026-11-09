@@ -8,6 +8,8 @@
 //! - `.released`: it was asked to end (a signal) and said so before it went, as a
 //!   tool that releases a lock does;
 //! - `.finished`: it ran to its end by itself;
+//! - `.lived`: a run of the stand-in's status line (`statusline`) says how long it lived, in
+//!   milliseconds, once it has ended ([`Job::lived`]);
 //! - `.monitor-may-end`: written by a case, it lets the monitor that watches the job end
 //!   (a `CLAUDE-MONITOR`'s, [`Job::let_its_monitor_end`]);
 //! - `.agent-may-end`: written by a case, it lets the agent a `held` job stands for end
@@ -55,6 +57,18 @@ impl Job {
     /// Whether it ran to its end by itself.
     pub fn finished(&self) -> bool {
         self.beside("finished").exists()
+    }
+
+    /// How long a run of the stand-in's status line lived, once it has ended: its `.lived`,
+    /// counted from before it was started to the look that saw it gone (never shorter than it
+    /// was). None while it runs.
+    pub fn lived(&self) -> Option<std::time::Duration> {
+        files::read_string(&self.beside("lived"))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+            .map(std::time::Duration::from_millis)
     }
 
     /// Lets the monitor that watches it end, as a `CLAUDE-MONITOR`'s stand-in waits to be

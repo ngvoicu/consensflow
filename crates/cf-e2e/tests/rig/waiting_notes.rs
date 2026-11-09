@@ -86,6 +86,18 @@ fn notes(project: &Project, pattern: &Regex) -> Result<Vec<Value>> {
     Ok(notes)
 }
 
+/// Whether the daemon wrote that T-1 was paused for its member's quota (`task.state` to
+/// `paused`, because "out of quota"): an event of the run, true however late the case looks at
+/// the task, which the state is not.
+fn held_for_quota(rig: &Rig) -> bool {
+    rig.events().iter().any(|event| {
+        event["kind"] == "task.state"
+            && event["data"]["task"] == 1
+            && event["data"]["to"] == "paused"
+            && event["data"]["because"] == "out of quota"
+    })
+}
+
 /// The conversation of the chief's window.
 fn chief_session(rig: &Rig, project: &Project) -> Result<String> {
     Ok(session_of(
@@ -217,7 +229,17 @@ fn a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_accoun
     rig.wait_for("the chief to be given the hold note", secs(60), || {
         Ok(notes(&p, &waits)?[0]["state"] == "delivered")
     })?;
-    assert_eq!(p.task(1)?["state"], "paused");
+    // The task was held for the quota when the note was written, and the daemon wrote it. That
+    // it is still paused is not asked: the chief answers the note it is given, and a window's
+    // answer that gets through is news that the account has quota, since Claude Code's windows
+    // are on one (`back_on_its_account`, T-254): the worker is taken back a pass after the
+    // chief's answer and its task goes on a pass after that, whether or not the human has said
+    // anything (the rig's refusal is the worker's alone). A case that looked a second late, as a
+    // loaded runner makes it, saw the task `queued` (CI runs 41781145403, 42242249906,
+    // 42492627683, 42515752276); the events of a late run: the pause, the note, `member.back`
+    // "@chief has quota again on the same account" in the pass that confirmed the note, the
+    // task queued a pass later (T-1343).
+    assert!(held_for_quota(&rig), "{:?}", rig.events());
 
     // The human logs the harness into another account and says so.
     account.switched();

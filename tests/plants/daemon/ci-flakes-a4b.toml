@@ -11,7 +11,13 @@
 # - a request given up ends its connection (`screens/network/tests.rs`, T-1020): given up once the server
 #   has read its head;
 # - the stand-in's agents, absorbed notification and `CLAUDE-HELD` line that the T-678 case rests on
-#   (`crates/cf-e2e/src/bin/fake_agent/`).
+#   (`crates/cf-e2e/src/bin/fake_agent/`);
+# - part 3 (T-1343): a run of the stand-in's status line says how long it lived, so that the cases of
+#   the status line in a group of its own judge what the host named by the host's rule and not by a
+#   loaded machine's speed (`regressions/claude_status_line_taken_for_background_work.rs`, held
+#   by `background.toml`'s plants); and the waiting-notes case asks the daemon's pause event and
+#   not the task's state, which the chief's own answer changes a pass later
+#   (`crates/cf-e2e/tests/rig/waiting_notes.rs`).
 #
 # The reply tests (`…reply_goes_past…`) are held by `paste-enter.toml`'s plants; the approval case by
 # `approval.toml`'s; the T-678 case by `turn-end-min.toml`'s.
@@ -24,6 +30,8 @@ a4b-api-server = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api
 a4b-network = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::network::tests::a_request_given_up_ends_its_connection"]
 a4b-agents = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "agents::"]
 a4b-steps = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "steps::"]
+a4b-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "status_line::"]
+a4b-rig-waiting = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "waiting_notes::a_chief_given_the_note_that_a_task_is_held"]
 
 [[plant]]
 name = "ci flakes a4b: the kill of a pane waits for the write its blocked program left in hand"
@@ -221,3 +229,32 @@ runs = ["a4b-steps"]
 file = "crates/cf-e2e/src/bin/fake_agent/steps.rs"
 find = '    let pending = if agent_only {'
 replace = '    let pending = if !agent_only {'
+
+[[plant]]
+name = "ci flakes a4b: a run of the status line says it lived no time"
+meant = "a_run_says_how_long_it_lived_beside_its_pid_once_it_has_ended"
+runs = ["a4b-status-line"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/status_line.rs"
+find = "            let lived = began.elapsed().as_millis();"
+replace = "            let lived = 0;"
+
+[[plant]]
+name = "ci flakes a4b rig: a task held for the quota is not paused for it"
+meant = "a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_account_is_switched"
+runs = ["a4b-rig-waiting"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''        detail.insert("because".into(), json!(because));
+        detail.insert("until".into(), json!(until));
+        pause(store, &task, detail, false, Stops::NotAsked)?;
+        store.db.execute(
+            "UPDATE task SET held_until = ? WHERE id = ?",'''
+replace = '''        detail.insert("because".into(), json!("held"));
+        detail.insert("until".into(), json!(until));
+        pause(store, &task, detail, false, Stops::NotAsked)?;
+        store.db.execute(
+            "UPDATE task SET held_until = ? WHERE id = ?",'''

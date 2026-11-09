@@ -95,7 +95,7 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/status_line.rs"
-find = '''\"$(dirname \"$0\")/{GIT}\" -C'''
+find = '''\"${{0%/*}}/{GIT}\" -C'''
 replace = '''git -C'''
 
 [[plant]]

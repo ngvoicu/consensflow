@@ -19,17 +19,33 @@
 //!
 //! What the owner should have seen: nothing of it. A harness's own processes are never told
 //! as work the window left: those in the window's group never are, and what the host finds
-//! when it looks is told only if it is still there a moment later, which a script of a
-//! second is not.
+//! when it looks is told only if it is still there a moment later (`background::SETTLE`, 2
+//! s), which a script of a second is not.
+//!
+//! That is a rule about a moment, and a machine can stretch a script's moment: at a load of 83
+//! (T-1328's suite) four tenths of a second of sleeps, and the processes started for them, took
+//! more than the host's two seconds, and the close named five runs of the status line as work
+//! the window left. The host did what it does of any process that lasts. So the cases of the
+//! status line in a group of its own do not say "the note names nothing"; they say what the
+//! rule says: **the note names no run that lived less than the host's second look**. Each run
+//! of the stand-in says how long it lived (`Job::lived`), and a run the note names that lived
+//! two seconds or more is the rule at work on a loaded machine, and no status line taken for
+//! work. (Whether a real status line that a loaded machine stretches past two seconds should
+//! be named at a close is the product's question, T-1343's report; the stand-in's cannot
+//! make the machine less loaded.) The helper in the window's group stays strict: it is never
+//! told, however long it runs.
 //!
 //! The stand-in Claude (`fake-agent`) runs a status line as the harness does, for as long as
 //! it lives (`CF_TEST_STATUS_LINE`): the user's script, in a group of its own, that runs the
 //! `git` and ends a second later, a new run beginning before the last has ended. Unix's: the
 //! script is a `bash`.
 
+use std::collections::HashSet;
 use std::thread;
+use std::time::Duration;
 
 use cf_e2e::rig::{Project, Rig};
+use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::{config, secs, Outcome};
@@ -63,6 +79,10 @@ fn until_the_status_line_runs(rig: &Rig) -> Outcome {
     Ok(())
 }
 
+/// How long after its first look the host looks again, and names only what both looks find
+/// (`background::SETTLE`): a process it names has lived at least so long.
+const SETTLE: Duration = Duration::from_secs(2);
+
 /// What the chief has been told that says work was left, or names the status line: the
 /// notes of its inbox that do.
 fn told_of_work(project: &Project) -> cf_e2e::Result<Vec<String>> {
@@ -72,6 +92,63 @@ fn told_of_work(project: &Project) -> cf_e2e::Result<Vec<String>> {
         .filter_map(|message| message["body"].as_str().map(str::to_owned))
         .filter(|body| body.contains("background work") || body.contains("statusline"))
         .collect())
+}
+
+/// What the host named as work left that it should not have: nothing the notes of the chief's
+/// inbox say of work or of the status line, except a run of the status line that lived as long
+/// as the host's second look (see the head of this file), and, where such a run lived, the
+/// processes a run starts. A run that was named and lived less is the rule broken, and so is a
+/// process named that no run could have started.
+fn named_wrongly(rig: &Rig, project: &Project) -> cf_e2e::Result<Vec<String>> {
+    let told = told_of_work(project)?;
+    if told.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pid =
+        Regex::new(r"process (\d+)").map_err(|failed| cf_e2e::Error::Daemon(failed.to_string()))?;
+    let named: HashSet<u32> = told
+        .iter()
+        .flat_map(|body| pid.captures_iter(body))
+        .filter_map(|found| found[1].parse().ok())
+        .collect();
+    // The runs the note names were ended by the close that named them: each says how long it
+    // lived once it is gone.
+    rig.wait_for(
+        "the runs the note names to say how long they lived",
+        secs(60),
+        || {
+            Ok(rig
+                .jobs("statusline")
+                .iter()
+                .filter(|run| named.contains(&run.pid()))
+                .all(|run| run.lived().is_some()))
+        },
+    )?;
+    let runs = rig.jobs("statusline");
+    let outlived = runs
+        .iter()
+        .any(|run| run.lived().is_some_and(|lived| lived >= SETTLE));
+    let mut wrong = Vec::new();
+    for pid in &named {
+        match runs.iter().find(|run| run.pid() == *pid) {
+            Some(run) => {
+                if let Some(lived) = run.lived().filter(|lived| *lived < SETTLE) {
+                    wrong.push(format!(
+                        "run {pid} of the status line lived {lived:?}, less than the host's second look"
+                    ));
+                }
+            }
+            None if !outlived => wrong.push(format!(
+                "process {pid} is no run of the status line, and no run lived past the host's second look"
+            )),
+            None => {}
+        }
+    }
+    if named.is_empty() && !outlived {
+        wrong.extend(told);
+    }
+    wrong.sort();
+    Ok(wrong)
 }
 
 #[test]
@@ -90,7 +167,7 @@ fn a_claude_workers_status_line_in_a_group_of_its_own_is_no_work_its_turn_left_a
     })?;
     // What the daemon says of the end and of the close is said by now.
     thread::sleep(secs(3));
-    assert_eq!(told_of_work(&project)?, Vec::<String>::new());
+    assert_eq!(named_wrongly(&rig, &project)?, Vec::<String>::new());
     // The status line ran on all the while: the case holds nothing without it.
     assert!(
         rig.jobs("statusline").len() >= 4,
@@ -151,7 +228,7 @@ fn a_claude_workers_window_closed_while_its_task_works_says_no_work_was_left_for
                 .is_some_and(|body| body.contains("window closed"))
         }))
     })?;
-    assert_eq!(told_of_work(&project)?, Vec::<String>::new());
+    assert_eq!(named_wrongly(&rig, &project)?, Vec::<String>::new());
     rig.close()?;
     Ok(())
 }

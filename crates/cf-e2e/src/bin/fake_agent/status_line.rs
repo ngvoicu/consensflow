@@ -17,13 +17,21 @@
 //! CI on 9eb0eab2); `group` is a helper of the harness that stays in the group of the
 //! window's program, as its servers do, and goes on for longer than the host waits
 //! before it looks again.
+//!
+//! The host names a run that is still there at its second look, 2 s after the first
+//! (`background::SETTLE`), as it names any process, so a run of four tenths of a second is not
+//! named unless the machine is so loaded that it lasts past the look, which a loaded Mac does
+//! (T-1328: a suite at a load of 83, three of its runs in a close's note; T-1343). Each run
+//! therefore says how long it lived, in `<file>.lived` beside the job's `.pid`, in milliseconds,
+//! once it has ended, so that a case can tell a run the host was right to name (it lived past
+//! the look) from one it was not.
 
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cf_e2e::process::Run;
 
@@ -90,6 +98,10 @@ impl StatusLine {
     /// it gives up when the program that ran it has gone: a helper does not outlive the
     /// harness, and a window that closes does not wait for one.
     ///
+    /// It runs only what a run must: the `git` beside it, a `sleep` for each tenth, and builtins of
+    /// the shell for the rest (no `dirname`, no `seq`: a process started under a load of 80 takes
+    /// a moment of its own).
+    ///
     /// It runs the `git` beside it ([`GIT`]), not the machine's: GitHub's macOS runner has Xcode's
     /// shim for `/usr/bin/git`, which on a cold cache runs `xcodebuild -sdk … -find git` and takes
     /// seconds, so that a run of four tenths of a second outlasted the host's second look, 2 s
@@ -97,8 +109,8 @@ impl StatusLine {
     fn script(self) -> String {
         format!(
             "#!/bin/bash\n\
-             \"$(dirname \"$0\")/{GIT}\" -C \"$PWD\" --no-optional-locks branch --show-current 2>/dev/null\n\
-             for _ in $(seq {}); do\n  kill -0 \"$PPID\" 2>/dev/null || exit 0\n  /bin/sleep 0.1\ndone\n",
+             \"${{0%/*}}/{GIT}\" -C \"$PWD\" --no-optional-locks branch --show-current 2>/dev/null\n\
+             for ((tenth = 0; tenth < {}; tenth++)); do\n  kill -0 \"$PPID\" 2>/dev/null || exit 0\n  /bin/sleep 0.1\ndone\n",
             self.tenths()
         )
     }
@@ -141,14 +153,20 @@ impl StatusLine {
         if self == Self::InAGroupOfItsOwn {
             run = run.own_group();
         }
+        // The life of the run is counted from before it is started, and to the look that sees it
+        // ended, so that it is never counted shorter than it was.
+        let began = Instant::now();
         let mut shell = run.spawn().map_err(|failed| failed.to_string())?;
-        jobs.note(LABEL, shell.id())?;
+        let file = jobs.note(LABEL, shell.id())?;
         // The handle ends the program it is dropped with, so it is held until the run is
         // over.
         thread::spawn(move || {
             while !shell.has_exited() {
                 thread::sleep(LOOK);
             }
+            let lived = began.elapsed().as_millis();
+            let _ =
+                cf_e2e::files::write_whole(&file.with_extension("lived"), &format!("{lived}\n"));
         });
         Ok(())
     }
@@ -179,18 +197,53 @@ mod tests {
             own.contains("/git\" -C \"$PWD\" --no-optional-locks branch --show-current"),
             "{own}"
         );
-        assert!(own.contains("for _ in $(seq 4); do"), "{own}");
+        assert!(
+            own.contains("for ((tenth = 0; tenth < 4; tenth++)); do"),
+            "{own}"
+        );
+        assert!(
+            !own.contains("dirname") && !own.contains("seq"),
+            "no process for what the shell does: {own}"
+        );
         assert!(
             own.contains("kill -0 \"$PPID\""),
             "gone with its program: {own}"
         );
         assert!(StatusLine::InTheWindowsGroup
             .script()
-            .contains("for _ in $(seq 80); do"));
+            .contains("tenth < 80; tenth++"));
         // A run of the first is over well before the host looks again, 2 s on, and one
         // of the second is not.
         assert!(StatusLine::InAGroupOfItsOwn.tenths() * 4 <= 20);
         assert!(StatusLine::InTheWindowsGroup.tenths() > 20);
+    }
+
+    /// A run says how long it lived, beside its `.pid`, once it has ended: a case that finds
+    /// the host naming a run judges it by that, and not by what a loaded machine made of the
+    /// four tenths of a second the script goes on for (T-1343). It is never shorter than the
+    /// script's own sleeps.
+    #[cfg(unix)]
+    #[test]
+    fn a_run_says_how_long_it_lived_beside_its_pid_once_it_has_ended() {
+        let home = tempfile::tempdir().unwrap();
+        let jobs = Jobs::new(&home.path().join("consensflow"), 7);
+        let config = tempfile::tempdir().unwrap();
+        let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
+        StatusLine::InAGroupOfItsOwn.run(&script, &jobs).unwrap();
+        let folder = home.path().join("jobs");
+        let lived = folder.join("statusline-7-1.lived");
+        // Only a run that never ends runs out of this.
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !lived.exists() {
+            assert!(std::time::Instant::now() < deadline, "the run never ended");
+            thread::sleep(Duration::from_millis(20));
+        }
+        let ms: u64 = fs::read_to_string(&lived).unwrap().trim().parse().unwrap();
+        assert!(
+            ms >= 400,
+            "four tenths of a second of sleeps at least: {ms}"
+        );
+        assert!(folder.join("statusline-7-1.pid").is_file());
     }
 
     /// A run of the script takes the time of its kind whatever the machine's `git` takes to
@@ -203,7 +256,6 @@ mod tests {
     fn a_run_of_the_script_takes_the_time_of_its_kind_however_long_the_machines_git_takes_to_start()
     {
         use std::os::unix::fs::PermissionsExt;
-        use std::time::Instant;
 
         let machine = tempfile::tempdir().unwrap();
         let slow = machine.path().join("git");
@@ -211,7 +263,6 @@ mod tests {
         fs::set_permissions(&slow, fs::Permissions::from_mode(0o755)).unwrap();
         let config = tempfile::tempdir().unwrap();
         let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
-        let started = Instant::now();
         let ran = Run::new("/bin/bash")
             .arg(&script)
             .cwd(config.path())
@@ -222,15 +273,11 @@ mod tests {
             .closed_input()
             .run()
             .unwrap();
-        let took = started.elapsed();
         assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-        // It shows the branch of the folder, as the owner's does.
+        // It shows the branch of the folder, as the owner's does, from its own `git`: the
+        // machine's, three seconds slow and first on the PATH, would have said "machine" (and
+        // no time of the machine's is in the case: how long a run takes is what the run says of
+        // itself, `.lived`).
         assert_eq!(ran.stdout.trim(), "main");
-        // Four tenths of a second and the turns of its loop, and well under the host's second
-        // look, 2 s on, which a run still there at is the turn's work.
-        assert!(
-            took < Duration::from_millis(1500),
-            "the machine's git took the run: {took:?}"
-        );
     }
 }

@@ -1899,7 +1899,7 @@ replace = '        (!servers.is_unknown() && group.is_some()).then_some(Self { g
 
 [[plant]]
 name = "turn-end-min host: where there are no groups every process is a server by where it is"
-meant = "where_the_platform_has_no_groups_a_command_is_a_shell_the_harness_started_and_no_server_is"
+meant = "a_group_the_platform_does_not_say_makes_no_process_a_server_by_where_it_is"
 runs = ["tem-panes-background"]
 
 [[plant.edit]]
