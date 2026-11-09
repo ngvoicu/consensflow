@@ -2569,3 +2569,54 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = "if ([IO.Path]::GetTempPath().StartsWith($env:USERPROFILE.TrimEnd('\\') + '\\', [StringComparison]::OrdinalIgnoreCase)) {"
 replace = "if ($true) {"
+
+# The logs of the tasks, `.runs/<task>`, are kept in the copy (T-1342): the copy is one folder that every
+# tree's runs share and cannot tell which tree wrote a file that is no tree's, so a run's sweep took nine
+# of T-1329's logs while it worked (T-1328's run, zeewin2, 2026-11-08). `.runs` is kept whole, by its exact
+# name, and what is older than a fortnight in it is removed by a pass of the sweep.
+
+[[plant]]
+name = "windows runner: the sweep takes the logs another tree's task left in .runs"
+meant = "a_run_of_another_tree_leaves_the_logs_the_first_left_in_its_runs_folder_and_takes_the_rest"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''    ".runs",
+];'''
+replace = '''    ".runs-kept-nowhere",
+];'''
+
+[[plant]]
+name = "windows runner: the sweep keeps the logs in .runs for ever"
+meant = "a_run_of_another_tree_leaves_the_logs_the_first_left_in_its_runs_folder_and_takes_the_rest"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''  $folder = Get-Item -Force -LiteralPath $runs
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }'''
+replace = '''  $folder = Get-Item -Force -LiteralPath $runs
+  if ($false) { $null = Clear-Old $folder }'''
+
+[[plant]]
+name = "windows runner: the sweep takes the logs in .runs younger than their fortnight"
+meant = "a_run_of_another_tree_leaves_the_logs_the_first_left_in_its_runs_folder_and_takes_the_rest"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "pub const RUNS_KEPT_DAYS: u32 = 14;"
+replace = "pub const RUNS_KEPT_DAYS: u32 = 0;"
+
+[[plant]]
+name = "windows runner: the sweep keeps every folder whose name begins like .runs"
+meant = "a_run_of_another_tree_leaves_the_logs_the_first_left_in_its_runs_folder_and_takes_the_rest"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''    ".runs",
+];'''
+replace = '''    ".runs*",
+];'''

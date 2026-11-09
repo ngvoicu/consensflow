@@ -96,7 +96,7 @@ pub const RUN: &str = ".windows-run.ps1";
 /// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
 /// wherever it came from: a run of another tree left 87 files there no sync listed,
 /// which a test of the `cli` suite named (zeewin, 2026-10-16).
-pub const KEPT: [&str; 18] = [
+pub const KEPT: [&str; 19] = [
     // The run's own: the list of what went over, the tree's identity, the sweep and the run
     // script (the tarball holds them beside the files, and the list names the files only),
     // the lock taken before the unpack, the records beside it, the command's batch file.
@@ -134,6 +134,13 @@ pub const KEPT: [&str; 18] = [
     // the next run's sweep took a long run's from the copy (zeewin, 2026-10-20). What is
     // older than [`REPORTS_KEPT_DAYS`] is removed there, by its own pass of the sweep.
     "evals/reports",
+    // The logs of the tasks, `.runs/<task>`, which the tree of a task holds untracked (so they go
+    // over with its files) and which a job on the machine writes into as well. The copy is one
+    // folder that every tree's runs share and it cannot tell which tree wrote a file that is no
+    // tree's, so a sweep took a task's logs while it was still working (T-1328's run took nine of
+    // T-1329's, zeewin2, 2026-11-08). The folder is one per task by the board's own way, kept
+    // whole, and what is older than [`RUNS_KEPT_DAYS`] is removed there, by a pass of its own.
+    ".runs",
 ];
 
 /// How long what a run left in `evals/reports` stays there, in days: a file or a folder last
@@ -146,6 +153,15 @@ pub const KEPT: [&str; 18] = [
 /// run going on among them; none does while the sweep runs, which is under the lock,
 /// before the run's script does anything else.
 pub const REPORTS_KEPT_DAYS: u32 = 14;
+
+/// How long what a task left in `.runs` stays there, in days (T-1342): a file or a folder last
+/// written longer ago than this is removed by the next run's sweep, by the rule of
+/// [`REPORTS_KEPT_DAYS`] (a folder is judged by what is in it, a link is not entered). No run that
+/// is queued or going wants it: a run waits a day at most (`--wait`), and a task that has not
+/// written a log in two weeks has its facts in the brain, where the board's cleaning puts them. A
+/// job still writing keeps its log young. The same fortnight as the reports', which are the same
+/// kind of thing.
+pub const RUNS_KEPT_DAYS: u32 = 14;
 
 /// How old a folder of the test families in the user's Temp is before the sweep takes it away, in
 /// days (T-1333): by the last change of the folder itself. The sweep runs under the lock, so no run
@@ -499,6 +515,10 @@ fn limits_of(limits: Option<Limits>) -> String {
 ///   folder itself when it is one. What cannot be removed there is said and does not end
 ///   the run: it is no file of the tree. (The matrix's `windows/` folders are written on the
 ///   Mac, not here.)
+/// - And `.runs`, which is kept as well ([`RUNS_KEPT_DAYS`]), by the same pass with its own
+///   cutoff: the logs of the tasks that share the copy are not taken by the run of another
+///   tree, and are not kept for ever. Only the folder named `.runs` is: `.runs-other` is no
+///   task's.
 /// - Then the files unpacked are held to the tree that was sent: a SHA-256 over the files
 ///   the list names (in its order, each as the length of its name, its name, its kind and,
 ///   for a file, its bytes; a link or a folder is `other`, with no bytes), its first 16 hex
@@ -539,6 +559,7 @@ pub fn sweep_script() -> String {
             ("kept", &kept.join(", ")),
             ("excluded", &excluded.join(", ")),
             ("days", &REPORTS_KEPT_DAYS.to_string()),
+            ("runs_days", &RUNS_KEPT_DAYS.to_string()),
             ("temp", &temp_sweep()),
         ],
     )
@@ -984,9 +1005,15 @@ if (Test-Path -LiteralPath $reports -PathType Container) {
   $folder = Get-Item -LiteralPath $reports
   if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }
 }
+$cutoff = (Get-Date).ToUniversalTime().AddDays(-«runs_days»)
+$runs = Join-Path $dir '.runs'
+if (Test-Path -LiteralPath $runs -PathType Container) {
+  $folder = Get-Item -Force -LiteralPath $runs
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }
+}
 foreach ($name in $removed) { Write-Output "== removed $name" }
 if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
-if ($unpruned.Count) { Write-Output "What the reports held past their age could not be removed: $($unpruned -join '; ')" }
+if ($unpruned.Count) { Write-Output "What the reports and the logs of the tasks held past their age could not be removed: $($unpruned -join '; ')" }
 $sha = [Security.Cryptography.SHA256]::Create()
 $utf8 = [Text.UTF8Encoding]::new($false)
 foreach ($name in @(Get-Content -Encoding UTF8 (Join-Path $dir '«synced»'))) {

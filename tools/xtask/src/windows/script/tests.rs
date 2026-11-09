@@ -9,6 +9,7 @@ mod lock;
 mod packages;
 mod powershell;
 mod reports;
+mod runs;
 #[cfg(windows)]
 mod stage;
 #[cfg(windows)]
