@@ -8,6 +8,10 @@
 # command, a repair of another home's, a daemon that is not the cf the log
 # names).
 #
+# The last ones are the smoke's own work since T-1338: the daemon is told by what it writes, a
+# ledger kept by hand is looked at whole where the migrations' own drops are no loss, and what a
+# live update leaves of the stored values is compared too.
+#
 # They need the smoke's builds to have been made once, at the paths below, in
 # app/src-tauri/target/updater-smoke of the checkout: the installed flip app, the
 # update, the installed bridge app (whose terminal command is the old shape, the one
@@ -40,6 +44,13 @@ smoke-bridge-refused = ["cargo", "xtask", "smoke-updater", "--from", "bridge", "
 # restart is the planted build's. Nothing is exported, so the cache may be in the checkout.
 smoke-own-update = ["cargo", "xtask", "smoke-updater", "--from", "flip", "--flip", ".", "--to-app", "app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app", "--cache", "app/src-tauri/target/updater-smoke-sweep-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
 smoke-bridge-update = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app", "--from-release", "bridge", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
+# The same run, by an xtask built from the planted sources: `cargo xtask` is the xtask that runs the
+# plants (the runner starts its own binary), so a plant in the smoke's own source needs one built
+# beside it, in the folder the xtask tests are built in.
+smoke-bridge-update-by-the-planted-xtask = ["cargo", "run", "--locked", "--quiet", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "--package", "xtask", "--bin", "xtask", "--", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app", "--from-release", "bridge", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
+# An app replaced by hand, with the app quit: the ledger it kept is looked at whole.
+smoke-flip-by-hand = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/flip/ConsensFlow.app", "--from-release", "flip", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "replaced by hand", "--timeout", "60000"]
+smoke-bridge-by-hand = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app", "--from-release", "bridge", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "replaced by hand", "--timeout", "60000"]
 
 # Readiness: what the smoke reads of an app that started its daemon.
 [[plant]]
@@ -259,3 +270,113 @@ requires = ["app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app"]
 file = "app/src-tauri/src/updates.rs"
 find = "                let _ = INSTALLED.set(target);"
 replace = "                let _ = target;"
+
+# The daemon the update's app started is told by the daemon: the process the machine shows, and
+# the version it wrote in its own start line (T-1338). A daemon that says another version than the
+# build it is in is not the one the update shipped.
+[[plant]]
+name = "updater product: the daemon says another version than its own"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+        "start pid {} rust {VERSION} home {}",
+        std::process::id(),'''
+replace = '''
+        "start pid {} rust 0.0.0 home {}",
+        std::process::id(),'''
+
+# A ledger kept by hand is looked at whole: a value the update's daemon rewrites that no migration
+# says to, on a ledger of the flip release's schema and of the bridge's (T-1338).
+[[plant]]
+name = "updater product: the update rewrites what a project was created with (the flip's ledger)"
+meant = "replaced by hand"
+runs = ["smoke-flip-by-hand"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        migrate(&db, &MIGRATIONS)
+    })();'''
+replace = '''
+        migrate(&db, &MIGRATIONS)?;
+        db.execute_batch("UPDATE project SET created_at = ''")?;
+        Ok(())
+    })();'''
+
+[[plant]]
+name = "updater product: the update rewrites what a project was created with (the bridge's ledger)"
+meant = "replaced by hand"
+runs = ["smoke-bridge-by-hand"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        migrate(&db, &MIGRATIONS)
+    })();'''
+replace = '''
+        migrate(&db, &MIGRATIONS)?;
+        db.execute_batch("UPDATE project SET created_at = ''")?;
+        Ok(())
+    })();'''
+
+# A live update is looked at for what it keeps of the ledger it found, value for value, as an app
+# replaced by hand is (T-1338): the update's daemon empties what a project is called.
+[[plant]]
+name = "updater product: the update empties what a project is called (the live update, the flip's)"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        migrate(&db, &MIGRATIONS)
+    })();'''
+replace = '''
+        migrate(&db, &MIGRATIONS)?;
+        db.execute_batch("UPDATE project SET name = ''")?;
+        Ok(())
+    })();'''
+
+[[plant]]
+name = "updater product: the update empties what a project is called (the live update, the bridge's)"
+meant = "the update installs and restarts"
+runs = ["smoke-bridge-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        migrate(&db, &MIGRATIONS)
+    })();'''
+replace = '''
+        migrate(&db, &MIGRATIONS)?;
+        db.execute_batch("UPDATE project SET name = ''")?;
+        Ok(())
+    })();'''
+
+# What the bridge is let hand on is a list, and a file the bridge holds that is not on it is a fault
+# in its update: the list takes out one of the two files of the Metal renderer that the real
+# bridge hands on, and the real update from the real bridge must fail on it (T-1338). The plant is
+# in the smoke, not in the product, and its run builds nothing of the product's.
+[[plant]]
+name = "updater product: the bridge's list of what it hands on misses a file it hands on"
+meant = "the update installs and restarts"
+runs = ["smoke-bridge-update-by-the-planted-xtask"]
+requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = '    files: &["default.metallib", "PixelConverter.metallib"],'
+replace = '    files: &["default.metallib"],'

@@ -20,6 +20,9 @@ pub struct ChiefSwitch {
     pub model: String,
     /// The effort it runs its model at; none for its harness's own.
     pub effort: Option<String>,
+    /// What the harness's list calls the model, its id (Devin's `swe-2` for the `swe-2-high` its
+    /// launch is given); none where the list was never read.
+    pub model_name: Option<String>,
     pub cut: bool,
 }
 
@@ -29,10 +32,12 @@ impl ChiefSwitch {
         let harness = model::parse_harness(value.get("harness"))?;
         let model = model::parse_model_id(value.get("model"))?;
         let effort = model::parse_effort(value.get("effort"))?;
+        let model_name = model::parse_model_name(value.get("modelName"))?;
         Ok(Self {
             harness: harness.to_string(),
             model,
             effort,
+            model_name,
             cut: value.get("cut") == Some(&Value::Bool(true)),
         })
     }
@@ -133,10 +138,11 @@ pub(crate) fn switch_chief(
 ) -> Result<ProjectView, LedgerError> {
     model::require_harness(&switch.harness)?;
     model::require_model_id(&switch.model)?;
+    model::parse_model_name(switch.model_name.as_ref().map(|name| json!(name)).as_ref())?;
     store.write(|store| {
         let chief = store.participant_by_handle(project_id, "chief")?;
         store.db.execute(
-            "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = NULL, agent = NULL, launched_model = NULL,
+            "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, agent = NULL, launched_model = NULL,
            gone_model = NULL, out_until = NULL, needs_edit = 0, switched_from_harness = ?, switched_from_model = ?,
            switched_from_agent = ?, switched_from_cut = ?
          WHERE id = ?",
@@ -144,6 +150,7 @@ pub(crate) fn switch_chief(
                 switch.harness,
                 switch.model,
                 switch.effort,
+                switch.model_name,
                 chief.harness,
                 chief.model,
                 chief.agent,
@@ -222,7 +229,7 @@ pub(crate) fn chief_ran_on(
     model::require_model_id(model)?;
     store.write(|store| {
         store.db.execute(
-            "UPDATE participant SET model = ?, effort = ?, needs_edit = 0
+            "UPDATE participant SET model = ?, effort = ?, model_name = NULL, needs_edit = 0
               WHERE id = ? AND role = 'chief'",
             params![model, effort, participant_id],
         )?;
@@ -266,7 +273,7 @@ pub(crate) fn chief_gone(
     }
     store.write(|store| {
         store.db.execute(
-            "UPDATE participant SET model = ?, gone_model = ?, launched_model = NULL
+            "UPDATE participant SET model = ?, model_name = NULL, gone_model = ?, launched_model = NULL
              WHERE id = ? AND role = 'chief'",
             params![model, gone, participant_id],
         )?;

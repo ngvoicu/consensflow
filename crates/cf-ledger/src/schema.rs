@@ -242,6 +242,91 @@ mod tests {
         );
     }
 
+    /// What each migration takes out of the schema, as the migrations themselves do it: a
+    /// column of a table that is there before and after, or a whole table, by the number of the
+    /// migration. The updater smoke does not take a column gone from a ledger it kept for a loss
+    /// where this list says a migration took it out on purpose (`migrations/dropped.json`,
+    /// T-1338), so the list is held to the migrations both ways: a migration that drops what
+    /// the list does not name, and a name that no migration drops, each fail here.
+    #[test]
+    fn the_list_of_what_the_migrations_drop_is_what_they_drop() {
+        use std::collections::BTreeMap;
+
+        fn schema(db: &Connection) -> BTreeMap<String, Vec<String>> {
+            let tables: Vec<String> = db
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            tables
+                .into_iter()
+                .map(|table| {
+                    let columns = db
+                        .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+                        .unwrap()
+                        .query_map([], |row| row.get::<_, String>(1))
+                        .unwrap()
+                        .collect::<Result<_, _>>()
+                        .unwrap();
+                    (table, columns)
+                })
+                .collect()
+        }
+
+        let db = Connection::open_in_memory().unwrap();
+        let mut seen: Vec<(u64, String, Option<String>)> = Vec::new();
+        let mut added: BTreeMap<(u64, String), Vec<String>> = BTreeMap::new();
+        let mut before = schema(&db);
+        for number in 1..=MIGRATIONS.len() {
+            migrate(&db, &MIGRATIONS[..number]).unwrap();
+            let now = schema(&db);
+            let number = number as u64;
+            for (table, was) in &before {
+                match now.get(table) {
+                    None => seen.push((number, table.clone(), None)),
+                    Some(is) => {
+                        for column in was.iter().filter(|column| !is.contains(column)) {
+                            seen.push((number, table.clone(), Some(column.clone())));
+                            let new = is.iter().filter(|column| !was.contains(column)).cloned();
+                            added.insert((number, table.clone()), new.collect());
+                        }
+                    }
+                }
+            }
+            before = now;
+        }
+        let listed: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../migrations/dropped.json")).unwrap();
+        let mut named: Vec<(u64, String, Option<String>)> = Vec::new();
+        for entry in &listed {
+            let text = |key: &str| entry.get(key).and_then(|value| value.as_str());
+            let number = entry["migration"].as_u64().expect("the migration's number");
+            let table = text("table").expect("the table").to_string();
+            let column = text("column").map(str::to_string);
+            assert!(
+                text("why").is_some_and(|why| !why.trim().is_empty()),
+                "migration {number} drops {table}.{column:?} and does not say why"
+            );
+            if let Some(new) = text("renamed_to") {
+                assert!(
+                    added
+                        .get(&(number, table.clone()))
+                        .is_some_and(|added| added.iter().any(|column| column == new)),
+                    "migration {number} does not add {table}.{new}, which {table}.{column:?} was renamed to"
+                );
+            }
+            named.push((number, table, column));
+        }
+        seen.sort();
+        named.sort();
+        assert_eq!(
+            named, seen,
+            "migrations/dropped.json names what the migrations drop (migration, table, column), and nothing else"
+        );
+    }
+
     #[test]
     fn makes_a_new_ledger_at_the_current_version_and_a_current_one_is_left_alone() {
         let db = Connection::open_in_memory().unwrap();

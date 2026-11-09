@@ -4,9 +4,11 @@
 use super::{ledger_of, projects_of, quit, BRIDGE_SCHEMA};
 use crate::updater_smoke::bundle::{cf_of, copy_over, digest_manifest, remove_all, verify_seal};
 use crate::updater_smoke::case::{boot_evidence, held_evidence, Case};
-use crate::updater_smoke::evidence::{app_log, assert_started_daemon, Kind};
+use crate::updater_smoke::evidence::{
+    app_log, assert_daemon_is, assert_started_daemon_since, mark, Kind,
+};
 use crate::updater_smoke::launchers::{assert_repaired, plant_commands, Repaired};
-use crate::updater_smoke::ledger::{assert_kept, assert_projects, assert_sound};
+use crate::updater_smoke::ledger::{assert_kept, assert_projects, assert_sound, dropped_in};
 use crate::updater_smoke::Result;
 
 /// How the update's app got where the old one was.
@@ -51,6 +53,8 @@ pub(super) fn by_hand(kase: &mut Case, how: How) -> Result {
         left.code,
         left.signal
     );
+    // The installed app is gone: what its log holds is its, and what the update's app writes is past it.
+    let log_mark = mark(&app_log(&kase.sandbox));
     let before = ledger_of(kase)?;
     assert_sound(&before, BRIDGE_SCHEMA)?;
     assert_projects(&before, &projects_of(kase))?;
@@ -97,7 +101,8 @@ pub(super) fn by_hand(kase: &mut Case, how: How) -> Result {
         "the first start ran {}",
         second.daemon.runtime
     );
-    assert_started_daemon(&app_log(&kase.sandbox), &cf)?;
+    assert_started_daemon_since(&app_log(&kase.sandbox), log_mark, &cf)?;
+    assert_daemon_is(&second.daemon, &cf, inputs.daemon_version.as_deref())?;
     let version = second.daemon.runtime.split(' ').nth(1).unwrap_or_default();
     assert_repaired(&Repaired {
         sandbox: &kase.sandbox,
@@ -113,7 +118,7 @@ pub(super) fn by_hand(kase: &mut Case, how: How) -> Result {
     ));
     quit(kase, &[second.daemon.pid])?;
     let after = ledger_of(kase)?;
-    assert_kept(&before, &after)?;
+    assert_kept(&before, &after, &dropped_in(&inputs.checkout)?, &[])?;
     kase.note(format!(
         "the ledger: schema {} then {}, every row it had is there",
         before.version, after.version

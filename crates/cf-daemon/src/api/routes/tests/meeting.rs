@@ -318,6 +318,7 @@ async fn the_history_says_of_what_a_meeting_holds_the_line_a_thread_does() {
                     model: "other".to_owned(),
                     effort: None,
                     cut: false,
+                    model_name: None,
                 },
             )
             .unwrap();

@@ -86,6 +86,7 @@ fn inputs(folder: &Path, release: Release, waits: Waits) -> Option<Inputs> {
             waits,
             machines: &folder.join("machines"),
             checkout: &root,
+            daemon_version: None,
             env: &env,
         })
         .unwrap(),

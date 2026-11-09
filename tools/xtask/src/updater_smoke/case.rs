@@ -53,6 +53,9 @@ pub struct Inputs {
     pub machines: PathBuf,
     /// The checkout whose Tauri CLI signs.
     pub checkout: PathBuf,
+    /// The version the update's daemon says it is, where this run built the update from the
+    /// checkout (the sources' version, which the app's version can be given another than).
+    pub daemon_version: Option<String>,
     pub env: Env,
 }
 
@@ -66,6 +69,7 @@ pub struct Given<'a> {
     pub waits: Waits,
     pub machines: &'a Path,
     pub checkout: &'a Path,
+    pub daemon_version: Option<&'a str>,
     pub env: &'a Env,
 }
 
@@ -130,6 +134,7 @@ impl Inputs {
             waits: given.waits,
             machines: given.machines.to_path_buf(),
             checkout: given.checkout.to_path_buf(),
+            daemon_version: given.daemon_version.map(str::to_string),
             env: given.env.clone(),
         })
     }

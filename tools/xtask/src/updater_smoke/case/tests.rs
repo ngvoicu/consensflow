@@ -69,6 +69,7 @@ fn load(folder: &Path, root: &Path, key: &Key, from: &Path, to: &Path) -> Result
         waits: Waits::new(Duration::from_secs(1)),
         machines: &folder.join("machines"),
         checkout: root,
+        daemon_version: None,
         env: &env(),
     })
 }

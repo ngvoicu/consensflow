@@ -20,6 +20,7 @@ fn project() -> NewProject {
             harness: "claude-code".into(),
             model: None,
             effort: None,
+            model_name: None,
         },
         staff: Vec::new(),
         gate: false,

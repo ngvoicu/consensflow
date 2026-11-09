@@ -40,6 +40,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
                 harness: "claude-code".into(),
                 model: Some("claude-opus-5-5".into()),
                 effort: None,
+                model_name: None,
             },
             staff,
             gate: false,

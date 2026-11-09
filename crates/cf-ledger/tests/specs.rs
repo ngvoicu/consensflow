@@ -30,6 +30,7 @@ fn project(ledger: &mut Ledger, name: &str) -> ProjectView {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: Vec::new(),
             gate: false,

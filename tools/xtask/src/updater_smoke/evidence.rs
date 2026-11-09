@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use super::bundle::under;
-use super::processes::{process_table, Row, Waits};
+use super::processes::{process_table, programs_of, Row, Waits};
 use super::sandbox::Sandbox;
 use super::{Error, Result};
 
@@ -351,6 +351,61 @@ pub fn assert_started_daemon(app_log_text: &str, cf: &Path) -> Result {
         app_log_text.split('\n').any(|line| line.ends_with(&said)),
         "app.log does not say the app started the bundle's cf ({said}):\n{}",
         tail(app_log_text, 2000)
+    );
+    Ok(())
+}
+
+/// How much the app's log held at some moment: what the app of the update wrote is what it
+/// holds past it (T-1338).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mark(usize);
+
+/// The log as it is now, to be asked later what was written since.
+pub fn mark(log: &str) -> Mark {
+    Mark(log.len())
+}
+
+/// The app's log text past `mark`: the lines written since.
+pub fn since(log: &str, mark: Mark) -> &str {
+    log.get(mark.0..).unwrap_or_default()
+}
+
+/// `assert_started_daemon` of the lines written since `mark`: the app of the update says it
+/// started the bundle's `cf`, in a line of its own. The log is written on by every app of the
+/// home, and the installed app, which was started on the same bundle's path, says the same.
+pub fn assert_started_daemon_since(log: &str, mark: Mark, cf: &Path) -> Result {
+    assert_started_daemon(since(log, mark), cf)
+}
+
+/// The daemon the app started is the update's `cf`, by what the daemon itself shows: the process
+/// table has it running `cf` (not another program, nor another bundle's), and its own start line,
+/// written by the process of that pid, says it is the native daemon and, where the version the
+/// update's sources give is known (`version`: the run built the update from them), that version.
+pub fn assert_daemon_is(daemon: &Daemon, cf: &Path, version: Option<&str>) -> Result {
+    let runs = programs_of(cf)
+        .iter()
+        .any(|program| daemon.command == format!("{program} {DAEMON_ARGUMENTS}"));
+    ensure!(
+        runs,
+        "the daemon (pid {}) runs {}, and not the update's cf {}",
+        daemon.pid,
+        daemon.command,
+        cf.display()
+    );
+    let wanted = version.map_or_else(|| "rust ".to_string(), |version| format!("rust {version}"));
+    ensure!(
+        if version.is_some() {
+            daemon.runtime == wanted
+        } else {
+            daemon.runtime.starts_with(&wanted)
+        },
+        "the daemon (pid {}) says it is {}, and the update's is {}",
+        daemon.pid,
+        daemon.runtime,
+        version.map_or_else(
+            || "the native one".to_string(),
+            |version| format!("rust {version}")
+        )
     );
     Ok(())
 }

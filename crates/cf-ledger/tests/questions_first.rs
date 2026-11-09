@@ -22,6 +22,7 @@ fn ledger() -> (tempfile::TempDir, Ledger, i64, i64) {
                 harness: "claude-code".to_owned(),
                 model: Some("claude-sonnet-5-5".to_owned()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,

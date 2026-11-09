@@ -1,0 +1,966 @@
+{
+  "probe": "tools/probes/key-reader/src/codex_windows_keys.rs: crossterm's EventStream (openai-oss-forks/crossterm ed1cdab335221515706178d68495bba2aed1924f) inside Codex 0.167.0's WindowsKeySequence (codex-rs/tui/src/tui/windows_key_sequence.rs at rust-v0.167.0, copied as it is)",
+  "system": "zeewin2, Windows 10.0.26200; the console host the app ships (ConPTY 1.25.260930003 beside its OpenConsole.exe) through cf-panes' PaneTable; the reader waits wait_ms, then reads until nothing has come for 600 ms; recorded 2026-11-09 with `node tools/probes/key-reader/run-windows.cjs`",
+  "reading": "keys are the key presses other than x (Code/Modifiers), chars the x presses; behind is how many x are written in the same write before the key (the console host reads 4,096 bytes at a time); gap_ms is [bytes written first, pause in ms] where the key was written in two parts",
+  "cases": [
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 0,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": [
+        1,
+        300
+      ],
+      "keys": [
+        "Esc/NONE",
+        "Char('[')/NONE",
+        "Char('1')/NONE",
+        "Char('3')/NONE",
+        "Char(';')/NONE",
+        "Char('2')/NONE",
+        "Char('u')/NONE"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_kitty_sequence_cut_by_more_than_fifty_milliseconds_as_a_lone_escape"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 0,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": [
+        1,
+        10
+      ],
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_kitty_sequence_cut_by_more_than_fifty_milliseconds_as_a_lone_escape"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 0,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 0,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 0,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 0,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4089,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4089,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4089,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4089,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4089,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4089,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4089,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4089,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4090,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4090,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4090,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4090,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4090,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4090,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4090,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4090,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4091,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4091,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4091,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4091,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4091,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4091,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4091,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4091,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4092,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4092,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4092,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4092,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4092,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4092,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4092,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4092,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4093,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4093,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4093,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4093,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4093,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4093,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4093,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4093,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4094,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Char('[')/ALT",
+        "Char('1')/NONE",
+        "Char('3')/NONE",
+        "Char(';')/NONE",
+        "Char('2')/NONE",
+        "Char('u')/NONE"
+      ],
+      "chars": 4094,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4094,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Char('[')/ALT",
+        "Char('1')/NONE",
+        "Char('3')/NONE",
+        "Char(';')/NONE",
+        "Char('2')/NONE",
+        "Char('u')/NONE"
+      ],
+      "chars": 4094,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4094,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Char('[')/ALT",
+        "Char('1')/NONE",
+        "Char('3')/NONE",
+        "Char(';')/NONE",
+        "Char('2')/NONE",
+        "Char('u')/NONE"
+      ],
+      "chars": 4094,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4094,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Char('[')/ALT",
+        "Char('1')/NONE",
+        "Char('3')/NONE",
+        "Char(';')/NONE",
+        "Char('2')/NONE",
+        "Char('u')/NONE"
+      ],
+      "chars": 4094,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4095,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4095,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4095,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4095,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4095,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4095,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4095,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4095,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4096,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4096,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4096,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4096,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4096,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4096,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 4096,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 4096,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 8189,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 8189,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 8189,
+      "wait_ms": 0,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 8189,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 8189,
+      "wait_ms": 200,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 8189,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "behind": 8189,
+      "wait_ms": 200,
+      "human": true,
+      "gap_ms": null,
+      "keys": [
+        "Enter/SHIFT"
+      ],
+      "chars": 8189,
+      "test": "codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket"
+    },
+    {
+      "key": [
+        27,
+        13
+      ],
+      "behind": 0,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/ALT"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_other_new_line_bytes_as_these_keys"
+    },
+    {
+      "key": [
+        27,
+        13
+      ],
+      "behind": 4095,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Esc/NONE",
+        "Enter/NONE"
+      ],
+      "chars": 4095,
+      "test": "codex_on_windows_reads_the_other_new_line_bytes_as_these_keys"
+    },
+    {
+      "key": [
+        10
+      ],
+      "behind": 0,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/CONTROL"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_other_new_line_bytes_as_these_keys"
+    },
+    {
+      "key": [
+        10
+      ],
+      "behind": 4096,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/CONTROL"
+      ],
+      "chars": 4096,
+      "test": "codex_on_windows_reads_the_other_new_line_bytes_as_these_keys"
+    },
+    {
+      "key": [
+        10
+      ],
+      "behind": 4095,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/CONTROL"
+      ],
+      "chars": 4095,
+      "test": "codex_on_windows_reads_the_other_new_line_bytes_as_these_keys"
+    },
+    {
+      "key": [
+        13
+      ],
+      "behind": 0,
+      "wait_ms": 0,
+      "human": false,
+      "gap_ms": null,
+      "keys": [
+        "Enter/NONE"
+      ],
+      "chars": 0,
+      "test": "codex_on_windows_reads_the_other_new_line_bytes_as_these_keys"
+    }
+  ]
+}

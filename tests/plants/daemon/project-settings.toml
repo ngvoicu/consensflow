@@ -281,9 +281,9 @@ meant = "a_setting_the_daemon_refuses_refuses_the_whole_start_in_the_dialogs_wor
 runs = ["daemon-opening-page"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/page/projects.rs"
-find = '        specs: SpecsChange::from_opening(request.get("specs")).ok()?,'
-replace = '        specs: SpecsChange::from_opening(request.get("specs")).unwrap_or_default(),'
+file = "crates/cf-ledger/src/projects.rs"
+find = '            specs: SpecsChange::from_opening(value.get("specs"))?,'
+replace = '            specs: SpecsChange::from_opening(value.get("specs")).unwrap_or_default(),'
 
 [[plant]]
 name = "project settings: the page leaves the calls out of the request it makes to the ledger"
@@ -549,6 +549,9 @@ file = "app/ui/core/dialogs.js"
 find = "          if (!this.#dialog.open) throw cause\n"
 replace = ""
 
+# Two guards hold the Enter of the specs' folder from the form of New project: the folder's own
+# (specs.js) and the one every field of a section has (`holdEnter`, project-sections.js, T-1268).
+# Each alone is invisible to the page test, so the plant takes both out.
 [[plant]]
 name = "project settings: Enter in the specs folder of New project starts the project"
 meant = "Enter in the number of the wake-up calls or in the specs folder of New project starts no project, and Start does"
@@ -559,6 +562,14 @@ file = "app/ui/core/specs.js"
 find = '''      event.preventDefault()
       if (page !== null) void this.#save()'''
 replace = '''      if (page !== null) void this.#save()'''
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = '''    if (event.target.matches('input:not([type=button], [type=submit], [type=reset]), select')) {
+      event.preventDefault()
+    }
+'''
+replace = ''''''
 
 [[plant]]
 name = "project settings: the specs of a project are saved with the approval's tick"

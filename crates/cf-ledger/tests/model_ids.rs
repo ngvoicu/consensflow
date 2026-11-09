@@ -143,6 +143,7 @@ fn edit_member_names_a_member_and_its_windows_by_the_model_it_runs_now() {
                 harness: "claude-code".into(),
                 model: Some("claude-opus-5-5".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![member],
             gate: false,
@@ -239,6 +240,7 @@ fn chief() -> NewChief {
         harness: "claude-code".into(),
         model: Some("claude-opus-5-5".into()),
         effort: None,
+        model_name: None,
     }
 }
 

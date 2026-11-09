@@ -125,6 +125,7 @@ fn opens_no_project_member_or_chief_on_it() {
                 harness: "pi".to_owned(),
                 model: "leto".to_owned(),
                 effort: None,
+                model_name: None,
             },
             SwitchWhen::Now,
             false,

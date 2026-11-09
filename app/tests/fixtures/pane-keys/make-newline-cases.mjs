@@ -1,0 +1,474 @@
+#!/usr/bin/env node
+/**
+ * Regenerates `newline-cases.json`: what the page writes to a window for a Shift+Enter, and what
+ * each harness's input box does with the bytes a pane might write for it (T-1330, T-1336). No
+ * harness starts, no model runs and no provider is called.
+ *
+ * - `sends` is what the page writes, by harness and by platform (`mac`, `windows`): the page's
+ *   Shift+Enter (app/ui/term.js, `SHIFT_ENTER`), which the page tests hold it to and which the real-pty
+ *   test of `crates/cf-panes/src/pty/keys.rs` reads its bytes from. **A pane's key never starts with
+ *   Escape** (T-1336): a program takes a lone Escape for "stop", and a read that ends in the middle of a
+ *   two-byte write (a pty's input queue nearly full, the console host's 4,096-byte read) reads the
+ *   Escape alone, then the rest. A single byte cannot be split, so it is a line feed in every harness
+ *   on both platforms (T-1348). `shiftEnter` is what that does in each harness's input box, by
+ *   platform: `"newline"`, or `"nothing"` where a harness's console key reader has no key for a line
+ *   feed (Codex, Devin and Muse on Windows: Enter with Control), never a send, a follow-up or a stop.
+ * - `rows` is, for each harness and platform, a case `{ id, bytes, does, whileBusy }` for each byte
+ *   string a pane might write: what the input box does with it at rest and while a turn runs
+ *   (`"newline"`, `"submit"`, `"follow-up"`, `"interrupt"`, `"types"` when its characters are typed
+ *   into the message, `"nothing"`).
+ * - `evidence` says, for each harness, which rows were **run** and which were **read from source or
+ *   documentation**, and the same for what happens while a turn runs.
+ *
+ * What is run here:
+ *
+ * - **Pi 1.5.0**: its installed `CustomEditor` and `KeybindingsManager`, with callback stubs for
+ *   submit, interrupt and follow-up, at rest and "busy" (Pi's follow-up action queues while a turn
+ *   runs), with the Mac bindings (`alt+enter` follows up) and the Windows ones (`ctrl+q`), which are
+ *   selected explicitly on the Mac running this. It does not run the interactive mode's own handlers
+ *   (`interactive-mode.js:3720-3749`): that "busy" is what those callbacks are told, not a turn.
+ *
+ * What is only read (no harness's input box can start without a login, and the closed-source ones
+ * are binaries):
+ *
+ * - **Claude Code 2.1.319**: **its key reader `Mr` is run**: sliced out of the installed binary's JavaScript when this
+ *   runs (from `var CE=`, the regexes `Ua` and `_c`, to the end of `Mr`; nothing of it is kept here), in a
+ *   sandbox that stubs nothing `Mr` asks for. `\r` is `return`, `ESC CR` is `return` with `meta`, `\n` is
+ *   `enter`, `CSI 13;2u` and `CSI 27;2;13~` are `return` with `shift`, `ESC` is `escape`. Its **text
+ *   input is read** (`return` with `meta` or `shift`, and `enter`, insert a new line; `return` alone
+ *   sends; no branch of it asks whether a turn runs; an `escape` stops a turn). Windows: virtual-terminal
+ *   input hands it the bytes as they were written.
+ * - **Codex 0.167.0**: `codex-rs/tui/src/keymap.rs` (`insert_newline` is Ctrl+J, Ctrl+M, Enter, Shift+Enter
+ *   and Alt+Enter; the composer takes Enter for `submit` first), `textarea.rs`, `bottom_pane/mod.rs`
+ *   (while a turn runs and no popup is open a plain Escape interrupts it before the composer is
+ *   asked) and crossterm's readers (`event/sys/unix/parse.rs`: `\n` in raw mode is Ctrl+J, `ESC CR` is
+ *   Alt+Enter, `CSI 13;2u` is Shift+Enter whatever flags were pushed, no `CSI 27;2;13~`; a read that
+ *   ends in an Escape is a lone Escape); **the Mac reader is run** here from `tools/probes/key-reader/results.json`
+ *   (`run.py`: the pinned fork's own `event::read` through a real pty), the bindings read;
+ *   `event/sys/windows/parse.rs`: the Enter key with the modifiers the console says). On Windows
+ *   Codex's `tui/windows_key_sequence.rs` rebuilds `ESC [ 1 3 ; 2 u` from seven console key events,
+ *   within 50 ms, as Shift+Enter; it does not rescue `ESC CR`.
+ * - **Devin 3000.12.28**: its documentation (`docs.devin.ai/cli/reference/keyboard-shortcuts`:
+ *   `editor.insert_newline` is `shift-enter`, `alt-enter`, `ctrl-j`) and its binary (crossterm).
+ *   How its input handler orders a busy turn's keys is not established.
+ * - **Muse Code 1.4.14**: the binary's composer keymap (`newline`: `shift+enter`, `ctrl+j`, `ctrl+m`,
+ *   `alt+enter`; `submit`, `queue`, `cancel` apart) (crossterm). How it orders a busy turn's keys
+ *   is not established.
+ *
+ * **Windows** differs where the console host turns the bytes into key events first: Codex, Devin and
+ * Muse read the console's key events (input mode 0x1f0, crossterm) and are given a key; Claude Code
+ * and Pi set virtual-terminal input (0x208) and are given the bytes again. `WINDOWS_READINGS` is what
+ * the shipped console host (ConPTY 1.25) made of each byte string on zeewin2 (`cargo test -p cf-panes
+ * --lib pty::keys`, which holds them). A key crossterm reads is `KeyCode::Enter` with the console's
+ * modifiers (`parse_key_event_record`): the line feed is Enter with Control, which none of the three
+ * binds; `CSI 13;2u` is seven key events that Codex's own adapter rebuilds, except where a read of the
+ * console host ends after `ESC [`, and Devin and Muse are not known to rebuild. **Codex's Windows
+ * rows are run** (`tools/probes/key-reader/results-windows.json`, `run-windows.cjs`: crossterm's
+ * `EventStream` inside Codex's own `WindowsKeySequence`, through the shipped console host).
+ *
+ * Run: `node app/tests/fixtures/pane-keys/make-newline-cases.mjs` (Pi installed).
+ */
+import { readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import vm from 'node:vm'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+
+const ESC_CR = [27, 13]
+const LF = [10]
+
+/**
+ * What the page writes for a Shift+Enter, by harness and platform: `SHIFT_ENTER` in app/ui/term.js.
+ */
+const SENDS = {
+  'claude-code': { mac: LF, windows: LF },
+  // Codex, Devin and Muse on Windows read the console's key events, which make a line feed the Enter
+  // key with Control, bound to nothing by any of them: Shift+Enter does nothing there, safely (T-1348).
+  // No single byte is their new line there, and a key that begins with Escape can reach them as an
+  // Escape alone and then an Enter, which stops a turn and sends the message (T-1336): ESC CR (Alt+Enter)
+  // and, for Codex, the kitty protocol's CSI 13;2u, whose seven key events its own reader rebuilds
+  // as Shift+Enter, except where a read of the console host ends after `ESC [` (T-1348).
+  codex: { mac: LF, windows: LF },
+  pi: { mac: LF, windows: LF },
+  devin: { mac: LF, windows: LF },
+  muse: { mac: LF, windows: LF },
+}
+
+/** The bytes a pane might write for a Shift+Enter, and what each is as a key. */
+const CANDIDATES = [
+  { id: 'cr', key: 'Enter', bytes: [13] },
+  { id: 'lf', key: 'Ctrl+J', bytes: LF },
+  { id: 'esc-cr', key: 'Alt+Enter', bytes: ESC_CR },
+  { id: 'csi-u', key: 'Shift+Enter (CSI u)', bytes: [27, 91, 49, 51, 59, 50, 117] },
+  {
+    id: 'modify-other-keys',
+    key: 'Shift+Enter (modifyOtherKeys)',
+    bytes: [27, 91, 50, 55, 59, 50, 59, 49, 51, 126],
+  },
+  { id: 'esc', key: 'Escape (a read that ends in the Escape of an Escape-led key)', bytes: [27] },
+]
+
+// --- Pi: its editor, run -------------------------------------------------------------------------
+
+const PI_VERSION = process.env.PI_VERSION ?? '1.5.0'
+const PI_ROOT = join(
+  homedir(),
+  '.pi',
+  'agent',
+  'install',
+  'releases',
+  PI_VERSION,
+  'node_modules',
+  '@earendil-works',
+)
+
+async function piRows(windows) {
+  const { CustomEditor } = await import(
+    join(PI_ROOT, 'pi-coding-agent/dist/modes/interactive/components/custom-editor.js')
+  )
+  const { KeybindingsManager } = await import(
+    join(PI_ROOT, 'pi-coding-agent/dist/core/keybindings.js')
+  )
+  const { setKittyProtocolActive } = await import(join(PI_ROOT, 'pi-tui/dist/keys.js'))
+  // Pi's keyboard protocol is off in a pane: xterm.js 6 answers no kitty query.
+  setKittyProtocolActive(false)
+  const run = (bytes, busy) => {
+    const text = String.fromCharCode(...bytes)
+    const kb = new KeybindingsManager({
+      'app.message.followUp': windows ? 'ctrl+q' : 'alt+enter',
+    })
+    const calls = []
+    const editor = new CustomEditor({ requestRender() {} }, { borderColor: (s) => s }, kb)
+    editor.onSubmit = () => calls.push('submit')
+    editor.onEscape = () => calls.push('interrupt')
+    editor.onAction('app.message.followUp', () => calls.push(busy ? 'follow-up' : 'submit'))
+    editor.setText('draft')
+    editor.handleInput(text)
+    if (calls.length > 0) return calls[0]
+    if (editor.getText() === 'draft\n') return 'newline'
+    if (editor.getText() === 'draft') return 'nothing'
+    return 'types'
+  }
+  return CANDIDATES.map(({ id, bytes }) => ({
+    id,
+    bytes,
+    does: run(bytes, false),
+    whileBusy: run(bytes, true),
+  }))
+}
+
+// --- Claude Code's key reader, run ----------------------------------------------------------------
+
+const CLAUDE_VERSION = process.env.CLAUDE_VERSION ?? '2.1.319'
+
+/** The end of the `{` block that opens at `start` in `source`: strings, templates and regex literals skipped. */
+function blockEnd(source, start) {
+  let depth = 0
+  for (let at = start; at < source.length; at += 1) {
+    const char = source[at]
+    if (char === '"' || char === "'" || char === '`') {
+      at += 1
+      while (source[at] !== char) at += source[at] === '\\' ? 2 : 1
+    } else if (char === '/' && source[at + 1] !== '/' && source[at + 1] !== '*') {
+      if ('(,=:[!&|?{};'.includes(source.slice(0, at).trimEnd().slice(-1))) {
+        let inClass = false
+        at += 1
+        while (inClass || source[at] !== '/') {
+          if (source[at] === '\\') at += 1
+          else if (source[at] === '[') inClass = true
+          else if (source[at] === ']') inClass = false
+          at += 1
+        }
+      }
+    } else if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return at + 1
+    }
+  }
+  throw new Error('no end of the block')
+}
+
+/** Claude Code's `Mr`, sliced from the installed binary and run with nothing stubbed. */
+function claudeReader() {
+  const binary = readFileSync(
+    join(homedir(), '.local', 'share', 'claude', 'versions', CLAUDE_VERSION),
+  )
+  const regexes = binary.indexOf(
+    Buffer.from(String.raw`Ua=/^\x1b\[(\d+)(?::(\d*)(?::(\d+))?)?(?:;(\d+))?u/`),
+  )
+  if (regexes < 0) {
+    throw new Error(`Claude Code ${CLAUDE_VERSION}: its key reader's regexes are not in the binary`)
+  }
+  const from = binary.lastIndexOf(Buffer.from('var CE=/'), regexes)
+  const text = binary.subarray(from, regexes + 16000).toString('utf8')
+  const reader = text.indexOf('function Mr(n="")')
+  const source = text.slice(0, blockEnd(text, text.indexOf('{', reader)))
+  const stubbed = new Set()
+  const outside = new Proxy(
+    {},
+    {
+      has: () => true,
+      get: (_target, key) => {
+        if (typeof key === 'symbol') return undefined
+        if (key in globalThis) return globalThis[key]
+        stubbed.add(key)
+        return () => false
+      },
+    },
+  )
+  const context = vm.createContext(Object.create(outside))
+  vm.runInContext(source, context)
+  return { read: vm.runInContext('Mr', context), stubbed }
+}
+
+/** What Claude Code's text input does with a key it read (read from its source): at rest, and while a turn runs. */
+function claudeDoes(key) {
+  if (key.name === 'return') {
+    if (key.ctrl) return ['nothing', 'nothing']
+    return key.meta || key.shift ? ['newline', 'newline'] : ['submit', 'submit']
+  }
+  if (key.name === 'enter') return ['newline', 'newline']
+  if (key.name === 'escape') return ['nothing', 'interrupt']
+  return ['nothing', 'nothing']
+}
+
+function claudeRows() {
+  const { read, stubbed } = claudeReader()
+  if (stubbed.size > 0) throw new Error(`Mr asked for ${[...stubbed]}: this stubs none`)
+  return CANDIDATES.map(({ id, bytes }) => {
+    const [does, whileBusy] = claudeDoes(read(String.fromCharCode(...bytes)))
+    return { id, bytes, does, whileBusy }
+  })
+}
+
+// --- The others: read ----------------------------------------------------------------------------
+
+/** `[does, whileBusy]` by candidate id, in CANDIDATES' order. */
+const rows = (...each) =>
+  CANDIDATES.map(({ id, bytes }, at) => ({ id, bytes, does: each[at][0], whileBusy: each[at][1] }))
+
+const same = (does) => [does, does]
+
+// --- Codex's reader, run ---------------------------------------------------------------------------
+
+/** What the pinned crossterm fork read of each byte string through a real pty (`run.py`). */
+const PROBE = JSON.parse(
+  readFileSync(join(HERE, '../../../../tools/probes/key-reader/results.json'), 'utf8'),
+)
+const PROBE_CASE = {
+  cr: 'nothing waiting, CR',
+  lf: 'nothing waiting, LF',
+  'esc-cr': 'nothing waiting, ESC CR',
+  'csi-u': 'nothing waiting, CSI u',
+  'modify-other-keys': 'nothing waiting, modifyOtherKeys',
+  esc: 'nothing waiting, ESC',
+}
+/** The keys the reader read for `id`, as `Code/Modifiers`. */
+const readOf = (id) => {
+  const row = PROBE.cases.find((each) => each.case === PROBE_CASE[id])
+  if (!row) throw new Error(`the probe has no case ${PROBE_CASE[id]}`)
+  return JSON.parse(row.result.match(/keys=(\[.*\])$/)[1])
+}
+/** What Codex's composer does with a key (`keymap.rs` at rust-v0.167.0, read): at rest, and while a turn runs. */
+const CODEX_KEYS = {
+  'Enter/KeyModifiers(0x0)': ['submit', 'submit'],
+  "Char('j')/KeyModifiers(CONTROL)": ['newline', 'newline'],
+  'Enter/KeyModifiers(ALT)': ['newline', 'newline'],
+  'Enter/KeyModifiers(SHIFT)': ['newline', 'newline'],
+  // A plain Escape does nothing at rest and interrupts the turn while one runs (`bottom_pane/mod.rs`).
+  'Esc/KeyModifiers(0x0)': ['nothing', 'interrupt'],
+}
+/** Codex on the Mac: the key its reader reads of each byte string (run), what its keymap does with it (read). */
+const CODEX_MAC = () =>
+  CANDIDATES.map(({ id, bytes }) => {
+    const keys = readOf(id)
+    const [does, whileBusy] = keys.length === 0 ? ['nothing', 'nothing'] : CODEX_KEYS[keys[0]]
+    if (keys.length > 1 || (keys.length === 1 && !CODEX_KEYS[keys[0]])) {
+      throw new Error(`the probe read ${keys} for ${id}: this table does not know it`)
+    }
+    return { id, bytes, does, whileBusy }
+  })
+
+/** What Codex's own reader on Windows read of each byte string through the shipped console host (`run-windows.cjs`). */
+const PROBE_WINDOWS = JSON.parse(
+  readFileSync(join(HERE, '../../../../tools/probes/key-reader/results-windows.json'), 'utf8'),
+)
+/** The keys Codex's reader read when `key` was written alone (nothing before it, in one write, read at once). */
+const windowsReadOf = (key) => {
+  const row = PROBE_WINDOWS.cases.find(
+    (each) =>
+      each.key.join() === key.join() &&
+      each.behind === 0 &&
+      each.gap_ms === null &&
+      each.wait_ms === 0 &&
+      each.human === false,
+  )
+  if (!row) throw new Error(`the Windows probe has no case for ${key}`)
+  return row.keys
+}
+/** What Codex's composer does with a key its Windows reader read (`keymap.rs`, read): the Enter key with Control is bound to nothing. */
+const CODEX_WINDOWS_KEYS = {
+  'Enter/NONE': ['submit', 'submit'],
+  'Enter/CONTROL': ['nothing', 'nothing'],
+  'Enter/ALT': ['newline', 'newline'],
+  'Enter/SHIFT': ['newline', 'newline'],
+}
+/** Codex on Windows: the rows its reader ran for the byte strings the probe wrote (cr, lf, esc-cr, csi-u), the others as the console reads them. */
+const CODEX_WINDOWS = () =>
+  CANDIDATES.map(({ id, bytes }) => {
+    if (!['cr', 'lf', 'esc-cr', 'csi-u'].includes(id)) {
+      const others = {
+        'modify-other-keys': ['nothing', 'nothing'],
+        esc: ['nothing', 'interrupt'],
+      }
+      const [does, whileBusy] = others[id]
+      return { id, bytes, does, whileBusy }
+    }
+    const keys = windowsReadOf(bytes)
+    if (keys.length !== 1 || !CODEX_WINDOWS_KEYS[keys[0]]) {
+      throw new Error(`Codex's Windows reader read ${keys} for ${id}: this table does not know it`)
+    }
+    const [does, whileBusy] = CODEX_WINDOWS_KEYS[keys[0]]
+    return { id, bytes, does, whileBusy }
+  })
+
+/** Devin and Muse on the Mac: their documented and listed new-line keys (read); crossterm, its version not established. */
+const CROSSTERM_MAC = () =>
+  rows(
+    ['submit', 'submit'],
+    ['newline', 'newline'],
+    ['newline', 'newline'],
+    ['newline', 'newline'],
+    ['nothing', 'nothing'],
+    ['nothing', 'interrupt'],
+  )
+
+/** Devin and Muse on Windows: the console's key events (WINDOWS_READINGS.keyEvents), read, not run: their line feed is Enter with Control. */
+const CROSSTERM_WINDOWS = (csiU) =>
+  rows(
+    ['submit', 'submit'],
+    ['nothing', 'nothing'],
+    ['newline', 'newline'],
+    csiU,
+    ['nothing', 'nothing'],
+    ['nothing', 'interrupt'],
+  )
+
+/** What the shipped console host made of each byte string, on zeewin2, 2026-11-08 (`keys.rs`). */
+const WINDOWS_READINGS = {
+  keyEvents: {
+    cr: 'Enter, char 13, no modifier',
+    lf: 'Enter, char 10, Control',
+    'esc-cr': 'Enter, char 13, Alt',
+    'csi-u': 'seven keys: ESC [ 1 3 ; 2 u, as characters (Codex rebuilds them as Shift+Enter)',
+    'modify-other-keys': 'no key',
+    esc: 'the Escape key, when it ends a read of the console host (4,096 bytes)',
+  },
+  virtualTerminalInput: {
+    cr: '\\r',
+    lf: '\\n',
+    'esc-cr': 'ESC \\r',
+    'csi-u': 'ESC [ 1 3 ; 2 u',
+    'modify-other-keys': 'ESC [ 2 7 ; 2 ; 1 3 ~',
+  },
+}
+
+const HARNESSES = {
+  'claude-code': {
+    version: CLAUDE_VERSION,
+    source:
+      "Mr (key reader) of the binary's JavaScript, run; the text input's Return handler, read; default keybinding ctrl+j: chat:newline",
+    evidence: {
+      ran: ["the key reader Mr, sliced out of the installed binary's JavaScript"],
+      read: ["the text input's rules for return, enter and escape", 'whileBusy', 'windows'],
+      note: 'its text input has no busy branch; the input handler itself was not run',
+    },
+    rows: { mac: claudeRows(), windows: claudeRows() },
+  },
+  codex: {
+    version: '0.167.0',
+    source:
+      'codex-rs/tui/src/keymap.rs, textarea.rs, bottom_pane/mod.rs, tui/windows_key_sequence.rs; crossterm event/sys/unix/parse.rs and event/sys/windows/parse.rs',
+    evidence: {
+      ran: [
+        'the Mac key reader: the pinned crossterm fork through a real pty (tools/probes/key-reader)',
+        "the Windows key reader: the pinned crossterm fork's EventStream inside Codex's own WindowsKeySequence, through the shipped console host (tools/probes/key-reader/results-windows.json)",
+      ],
+      read: ['the composer keymap', 'whileBusy'],
+      note: 'ESC CR written where the pty queue ends is read as Escape, Enter (tools/probes/key-reader/results.json); a line feed is Ctrl+J. On Windows a line feed is Enter with Control, bound to nothing; ESC CR where a console read ends after the Escape is Esc, then Enter (a stop and a send); the kitty CSI 13;2u is Shift+Enter except where a read ends after ESC [ (Alt+[ and 13;2u typed), and an Escape alone where a pause of more than 50 ms comes after its Escape (results-windows.json)',
+    },
+    rows: {
+      mac: CODEX_MAC(),
+      windows: CODEX_WINDOWS(),
+    },
+  },
+  pi: {
+    version: PI_VERSION,
+    source:
+      "the installed @earendil-works/pi-coding-agent CustomEditor and KeybindingsManager (pi-tui's keys.js matcher), with callback stubs",
+    evidence: {
+      ran: ['rows', 'whileBusy'],
+      read: [],
+      note: "the editor and its matcher were run (Mac and Windows follow-up bindings, selected explicitly); the interactive mode's own submit and follow-up handlers were not",
+    },
+    rows: { mac: await piRows(false), windows: await piRows(true) },
+  },
+  devin: {
+    version: '3000.12.28',
+    source:
+      'docs.devin.ai/cli/reference/keyboard-shortcuts (editor.insert_newline: shift-enter, alt-enter, ctrl-j); the binary is crossterm',
+    evidence: {
+      ran: [],
+      read: ['rows'],
+      note: "how its input handler orders a busy turn's keys is not established: whileBusy repeats the documented new-line action",
+    },
+    rows: {
+      mac: CROSSTERM_MAC(),
+      windows: CROSSTERM_WINDOWS(['types', 'types']),
+    },
+  },
+  muse: {
+    version: '1.4.14',
+    source:
+      "the binary's composer keymap (newline: shift+enter ctrl+j ctrl+m alt+enter; submit, queue and cancel apart); crossterm",
+    evidence: {
+      ran: [],
+      read: ['rows'],
+      note: "how its input handler orders a busy turn's keys is not established: whileBusy repeats the keymap's new-line action",
+    },
+    rows: {
+      mac: CROSSTERM_MAC(),
+      windows: CROSSTERM_WINDOWS(['types', 'types']),
+    },
+  },
+}
+
+/** Whatever a harness does with the bytes it is sent for Shift+Enter, it never sends the message, queues a follow-up or interrupts a turn. */
+const SAFE = ['newline', 'nothing']
+
+for (const [name, harness] of Object.entries(HARNESSES)) {
+  harness.sends = SENDS[name]
+  // What Shift+Enter does in the harness's input box, on each platform: the row of the bytes sent.
+  harness.shiftEnter = {}
+  for (const platform of ['mac', 'windows']) {
+    const sent = SENDS[name][platform].join()
+    const row = harness.rows[platform].find((each) => each.bytes.join() === sent)
+    if (!row) throw new Error(`${name} on ${platform}: no row for the bytes sent, ${sent}`)
+    if (row.does !== row.whileBusy) {
+      throw new Error(`${name} on ${platform}: ${row.does} at rest, ${row.whileBusy} while a turn runs`)
+    }
+    if (!SAFE.includes(row.does)) {
+      throw new Error(`${name} on ${platform}: Shift+Enter would be a ${row.does}`)
+    }
+    harness.shiftEnter[platform] = row.does
+  }
+}
+
+const out = { candidates: CANDIDATES, windowsReadings: WINDOWS_READINGS, harnesses: HARNESSES }
+writeFileSync(join(HERE, 'newline-cases.json'), `${JSON.stringify(out, null, 2)}\n`)
+process.stdout.write(
+  `newline-cases.json: ${Object.keys(HARNESSES).length} harnesses, ${CANDIDATES.length} byte strings each, two platforms\n`,
+)

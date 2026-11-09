@@ -381,6 +381,120 @@ mod the_apps_log {
         }
     }
 
+    /// The installed app, started on the bundle's path, says the same line as the update's app
+    /// (the flip release prints it too), and `app.log` is written on by both: only what was
+    /// written after the installed app was up is the update's (T-1338, T-1043's plant 1).
+    #[test]
+    fn takes_only_the_line_the_log_gained_since_the_mark() {
+        let installed = format!("{}\n", said(&cf()));
+        let marked = mark(&installed);
+        // Nothing was written since: the line before the mark is the installed app's.
+        let refused = assert_started_daemon_since(&installed, marked, &cf())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("does not say the app started"),
+            "{refused}"
+        );
+        // The update's app wrote other lines, and not that one.
+        let silent = format!("{installed}consensflow: the terminal command is repaired\n");
+        assert!(assert_started_daemon_since(&silent, marked, &cf()).is_err());
+        // The update's app wrote its own.
+        let said_again = format!("{silent}{}\n", said(&cf()));
+        assert_started_daemon_since(&said_again, marked, &cf()).unwrap();
+        assert_eq!(
+            since(&said_again, marked),
+            format!(
+                "consensflow: the terminal command is repaired\n{}\n",
+                said(&cf())
+            )
+        );
+        // A log that starts empty is read whole.
+        assert_started_daemon_since(&format!("{}\n", said(&cf())), mark(""), &cf()).unwrap();
+    }
+
+    #[test]
+    fn the_refusal_shows_what_was_written_since_the_mark_and_not_before_it() {
+        let before = format!("{}\nsome earlier line\n", said(&cf()));
+        let log = format!("{before}a later line\n");
+        let refused = assert_started_daemon_since(&log, mark(&before), &cf())
+            .unwrap_err()
+            .to_string();
+        assert!(refused.ends_with("a later line\n"), "{refused}");
+        assert!(!refused.contains("some earlier line"), "{refused}");
+    }
+
+    fn daemon(command: &str, runtime: &str) -> Daemon {
+        Daemon {
+            pid: 4242,
+            kind: Kind::Native,
+            runtime: runtime.to_string(),
+            command: command.to_string(),
+        }
+    }
+
+    /// The update's daemon is proven by the process that runs and the start line it wrote, not by
+    /// what the app says it started.
+    #[test]
+    fn proves_the_daemon_by_its_path_and_its_version() {
+        let cf = cf();
+        let run = format!("{} ui --json --no-open", cf.display());
+        assert_daemon_is(
+            &daemon(&run, "rust 3.0.7-alpha.4"),
+            &cf,
+            Some("3.0.7-alpha.4"),
+        )
+        .unwrap();
+        // The version is not known where the update was not built here: the native daemon is.
+        assert_daemon_is(&daemon(&run, "rust 3.0.7-alpha.3"), &cf, None).unwrap();
+        assert!(assert_daemon_is(&daemon(&run, "node v26.7.0"), &cf, None).is_err());
+        let other: std::path::PathBuf = [
+            "/box",
+            "Other.app",
+            "Contents",
+            "Resources",
+            "cli",
+            "bin",
+            "cf",
+        ]
+        .iter()
+        .collect();
+        for (what, daemon, words) in [
+            (
+                "another bundle's cf",
+                daemon(
+                    &format!("{} ui --json --no-open", other.display()),
+                    "rust 3.0.7-alpha.4",
+                ),
+                "runs",
+            ),
+            (
+                "another program",
+                daemon("/usr/bin/true ui --json --no-open", "rust 3.0.7-alpha.4"),
+                "runs",
+            ),
+            (
+                "the cf's name inside another path",
+                daemon(
+                    &format!("/x{} ui --json --no-open", cf.display()),
+                    "rust 3.0.7-alpha.4",
+                ),
+                "runs",
+            ),
+            (
+                "an older version",
+                daemon(&run, "rust 3.0.7-alpha.3"),
+                "says it is",
+            ),
+            ("Node's runtime", daemon(&run, "node v26.7.0"), "says it is"),
+        ] {
+            let refused = assert_daemon_is(&daemon, &cf, Some("3.0.7-alpha.4"))
+                .unwrap_err()
+                .to_string();
+            assert!(refused.contains(words), "{what}: {refused}");
+        }
+    }
+
     #[test]
     fn shows_the_end_of_a_long_log_when_it_does_not_say_it() {
         let long = format!("{}\nthe end\n", "x".repeat(5000));

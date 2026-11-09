@@ -27,6 +27,21 @@ if [ \"${1:-}\" = \"--version\" ]; then
   printf '@VERSION@\\n'
   exit 0
 fi
+# The daemon's read of the models Claude Code lists (`claude -p --input-format stream-json`: no
+# window, no turn) is answered with the model the page opens its projects on, and ends with its
+# input; it is no chief and records no pid (a project opens on a model the harness lists).
+if [ \"@NAME@\" = claude ] && [ \"${1:-}\" = \"-p\" ]; then
+  while IFS= read -r line; do
+    case \"$line\" in
+      *'\"subtype\":\"initialize\"'*)
+        id=${line#*'\"request_id\":\"'}
+        id=${id%%'\"'*}
+        printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{\"models\":[{\"value\":\"claude-fable-5-1\",\"displayName\":\"claude-fable-5-1\",\"resolvedModel\":\"claude-fable-5-1\",\"supportsEffort\":false}]}}}\\n' \"$id\"
+        ;;
+    esac
+  done
+  exit 0
+fi
 printf '%s\\n' \"$$\" > '@PIDS@'-$$.pid
 printf 'CFUPDATER-ALIVE %s\\n' \"$$\"
 while IFS= read -r _line; do
@@ -124,6 +139,7 @@ impl Sandbox {
     fn stand_in(&self, name: &str) -> Result {
         let version = if name == "claude" { "2.1.305" } else { "0.0.0" };
         let script = STAND_IN
+            .replace("@NAME@", name)
             .replace("@VERSION@", version)
             .replace("@PIDS@", &self.pids.join(name).to_string_lossy());
         let path = self.bin.join(name);

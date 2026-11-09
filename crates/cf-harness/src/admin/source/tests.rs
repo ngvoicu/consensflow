@@ -5,6 +5,10 @@
 use std::fs;
 
 use super::*;
+use crate::admin::tests::npm_windows::{
+    canonical, executable, lay_npm, lay_npm_cmd, package_of, windows_env,
+};
+use crate::admin::tests::standalone::{lay_down, lay_down_in, link_dir, release_in, Layout};
 
 /// What `path.join` makes of `parts` on this system.
 fn joined(parts: &[&str]) -> String {
@@ -380,6 +384,516 @@ fn pis_managed_install_in_an_agent_folder_the_human_named_is_updated_as_its_inst
         source(Harness::Codex, &executable, &Env::default()).update,
         None
     );
+}
+
+/// The environment of a person whose home is `home`: where Codex's home is, `.codex` in it, unless
+/// `CODEX_HOME` says another.
+fn env_of(home: &std::path::Path, codex_home: Option<&std::path::Path>) -> Env {
+    let mut vars = vec![
+        ("HOME", home.to_string_lossy().into_owned()),
+        ("USERPROFILE", home.to_string_lossy().into_owned()),
+    ];
+    if let Some(codex_home) = codex_home {
+        vars.push(("CODEX_HOME", codex_home.to_string_lossy().into_owned()));
+    }
+    Env::from_vars(vars)
+}
+
+/// What the admin says of the Codex at `executable`: its distribution and its update.
+fn codex_at(executable: &std::path::Path, env: &Env) -> (Option<String>, Option<Vec<String>>) {
+    let found = source(Harness::Codex, &executable.to_string_lossy(), env);
+    (found.distribution, found.update)
+}
+
+/// Codex's standalone install (`packages/standalone` under its home): the program is in a
+/// release, `current` leads to the release in use, and the folder on the PATH leads to what
+/// `current` leads to. `codex update` is Codex's own way to update it (it runs its installer,
+/// which moves `current` to the new release), so the update is that, run by the link the person
+/// runs.
+#[test]
+fn codex_installed_by_its_standalone_installer_is_updated_by_its_own_update_through_the_links() {
+    for layout in [Layout::Package, Layout::Legacy] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let visible = root
+            .path()
+            .join("local")
+            .join("Programs")
+            .join("OpenAI")
+            .join("Codex")
+            .join("bin");
+        let program = lay_down(&home, &visible, layout);
+        let executable = program.to_string_lossy().into_owned();
+        let found = source(Harness::Codex, &executable, &env_of(&home, None));
+        assert_eq!(
+            said(&found),
+            (
+                "https://registry.npmjs.org/@openai/codex/latest",
+                "npm",
+                Some("Codex's installer"),
+                Some(&[executable.clone(), "update".to_owned()][..]),
+            ),
+            "{layout:?}: the command runs the link the person runs, not the release it leads to"
+        );
+    }
+}
+
+/// Codex counts a program as standalone only under its own home: `CODEX_HOME` where that is set
+/// (it must exist), else `.codex` in the user's home, each read where it leads
+/// (`codex-install-context`, 0.167.0). The admin counts the same, so what it offers an Update of
+/// is what `codex update` will update, and a Codex whose home the environment names otherwise is
+/// not offered one that would answer "Could not detect the Codex installation method".
+#[test]
+fn codex_is_standalone_only_under_the_home_codex_reads_and_never_by_a_matching_folder_name() {
+    let layout = Layout::Package;
+    let root = tempfile::tempdir().unwrap();
+    let base = root.path();
+    let visible = |name: &str| base.join("visible").join(name);
+    let home = base.join("home");
+    // A home chosen by CODEX_HOME, a folder of any name that exists: its install is the one.
+    let chosen = base.join("elsewhere").join("codex-home");
+    let program = lay_down_in(&chosen, &visible("chosen"), layout);
+    assert_eq!(
+        codex_at(&program, &env_of(&home, Some(&chosen)))
+            .0
+            .as_deref(),
+        Some("Codex's installer"),
+        "CODEX_HOME names the home the install is under"
+    );
+    // The same install where the environment names no home (`.codex` in the user's is Codex's),
+    // or another one that exists, or one that does not: Codex finds no standalone install.
+    let other = base.join("other-codex-home");
+    std::fs::create_dir_all(&other).unwrap();
+    for (what, env) in [
+        ("no CODEX_HOME", env_of(&home, None)),
+        ("another CODEX_HOME", env_of(&home, Some(&other))),
+        (
+            "a CODEX_HOME that is not there",
+            env_of(&home, Some(&base.join("missing"))),
+        ),
+        ("no home at all", Env::default()),
+    ] {
+        assert_eq!(codex_at(&program, &env), (None, None), "{what}");
+    }
+    // And the install of `.codex` where CODEX_HOME names another home.
+    let program = lay_down(&home, &visible("default"), layout);
+    assert_eq!(
+        codex_at(&program, &env_of(&home, Some(&other))),
+        (None, None),
+        "CODEX_HOME names a home the install is not under"
+    );
+    assert_eq!(
+        codex_at(&program, &env_of(&home, None)).0.as_deref(),
+        Some("Codex's installer")
+    );
+    // A folder that merely has the names, and a daemon's package under an ancestor that has them:
+    // neither is under Codex's home.
+    let work = base.join("work").join("project");
+    let built = release_in(&standalone_of(&work), "build", Layout::Package);
+    assert_eq!(
+        codex_at(
+            &built.join("bin").join(program_name()),
+            &env_of(&home, None)
+        ),
+        (None, None),
+        "a folder of a project that has the names"
+    );
+    let nested_home = standalone_of(&work).join("releases").join("x").join("home");
+    let daemon = nested_home
+        .join(".codex")
+        .join("packages")
+        .join("app-server-daemon");
+    let packaged = release_in(&daemon, "0.167.0-x86_64-pc-windows-msvc", Layout::Package);
+    assert_eq!(
+        codex_at(
+            &packaged.join("bin").join(program_name()),
+            &env_of(&nested_home, None)
+        ),
+        (None, None),
+        "the daemon's package, under a folder that has the standalone names"
+    );
+}
+
+/// `packages/standalone` as a project folder has it, for a folder that is none of Codex's.
+fn standalone_of(folder: &std::path::Path) -> std::path::PathBuf {
+    folder.join("packages").join("standalone")
+}
+
+fn program_name() -> &'static str {
+    crate::admin::tests::standalone::program_name()
+}
+
+/// Where Codex finds the user's home (`dirs::home_dir()`, 0.167.0): on Windows the profile folder,
+/// which Git Bash's `HOME` (`/c/Users/me`, or anywhere a shell was told) does not name; elsewhere
+/// `HOME`. A daemon started from a Git Bash window has both, and the admin reads the one Codex does,
+/// so a `HOME` that is another folder neither hides the Update of the real profile's install nor
+/// offers one for a folder Codex would not read as standalone.
+#[test]
+fn the_home_codex_reads_is_the_windows_profile_on_windows_and_home_elsewhere() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = root_of(&temp);
+    let (profile, shell) = (base.join("profile"), base.join("git-bash-home"));
+    std::fs::create_dir_all(&shell).unwrap();
+    let in_profile = lay_down(&profile, &base.join("visible-profile"), Layout::Package);
+    let in_shell = lay_down(&shell, &base.join("visible-shell"), Layout::Package);
+    let windows = |home: &str, profile: &std::path::Path| {
+        Env::from_vars([
+            ("OS", "Windows_NT".to_owned()),
+            ("HOME", home.to_owned()),
+            ("USERPROFILE", profile.to_string_lossy().into_owned()),
+        ])
+    };
+    let shell_home = shell.to_string_lossy().into_owned();
+    assert_eq!(
+        codex_at(&in_profile, &windows(&shell_home, &profile))
+            .0
+            .as_deref(),
+        Some("Codex's installer"),
+        "Windows: the install in the profile, with a Git Bash HOME"
+    );
+    assert_eq!(
+        codex_at(&in_shell, &windows(&shell_home, &profile)),
+        (None, None),
+        "Windows: an install under the HOME of a shell is not under the profile"
+    );
+    // No profile in a Windows environment: nothing to read the home from, whatever HOME says.
+    assert_eq!(
+        codex_at(
+            &in_shell,
+            &Env::from_vars([
+                ("OS", "Windows_NT".to_owned()),
+                ("HOME", shell_home.clone())
+            ])
+        ),
+        (None, None),
+        "Windows: no profile"
+    );
+}
+
+/// Elsewhere HOME is the home and USERPROFILE, where a variable of that name is set, is not.
+#[cfg(unix)]
+#[test]
+fn off_windows_the_home_is_home_whatever_userprofile_says_and_an_empty_one_is_none() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = root_of(&temp);
+    let (home, other) = (base.join("home"), base.join("other"));
+    std::fs::create_dir_all(&other).unwrap();
+    let program = lay_down(&home, &base.join("visible"), Layout::Package);
+    let env = |home: &std::path::Path, profile: &std::path::Path| {
+        Env::from_vars([
+            ("HOME", home.to_string_lossy().into_owned()),
+            ("USERPROFILE", profile.to_string_lossy().into_owned()),
+        ])
+    };
+    assert_eq!(
+        codex_at(&program, &env(&home, &other)).0.as_deref(),
+        Some("Codex's installer")
+    );
+    assert_eq!(codex_at(&program, &env(&other, &home)), (None, None));
+    assert_eq!(
+        codex_at(
+            &program,
+            &Env::from_vars([("HOME", ""), ("USERPROFILE", &home.to_string_lossy())])
+        ),
+        (None, None),
+        "an empty HOME"
+    );
+}
+
+/// A relative `CODEX_HOME` is read against the folder Codex is started in, and the update does not
+/// start Codex where the admin looks: Codex reads it in the user's home, and the installer script
+/// it runs reads the same variable in a temporary folder `codex update` makes. Two homes for one
+/// install, so no Update is offered for it.
+#[cfg(unix)]
+#[test]
+fn a_relative_codex_home_is_offered_no_update() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = root_of(&temp);
+    let chosen = base.join("codex-home");
+    let program = lay_down_in(&chosen, &base.join("visible"), Layout::Package);
+    // The path to it from this test's folder, which is where a relative one would be read.
+    let here = std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
+    let mut common = 0;
+    let (a, b): (Vec<_>, Vec<_>) = (here.components().collect(), chosen.components().collect());
+    while common < a.len() && common < b.len() && a[common] == b[common] {
+        common += 1;
+    }
+    let relative: std::path::PathBuf = std::iter::repeat_n("..", a.len() - common)
+        .map(std::path::PathBuf::from)
+        .chain(
+            b[common..]
+                .iter()
+                .map(|part| std::path::PathBuf::from(part.as_os_str())),
+        )
+        .collect();
+    assert!(relative.is_relative() && relative.is_dir(), "{relative:?}");
+    let env = Env::from_vars([
+        ("HOME", base.join("nobody").to_string_lossy().into_owned()),
+        ("CODEX_HOME", relative.to_string_lossy().into_owned()),
+    ]);
+    assert_eq!(codex_at(&program, &env), (None, None));
+    // The same install by the absolute name is offered.
+    let env = env_of(&base.join("nobody"), Some(&chosen));
+    assert_eq!(
+        codex_at(&program, &env).0.as_deref(),
+        Some("Codex's installer")
+    );
+}
+
+/// Codex reads its home where it leads, and so does the admin: a user's home that is a link, or a
+/// `CODEX_HOME` that is, is the home it leads to, and so is the folder the install is read in.
+#[test]
+fn a_home_that_is_a_link_is_the_home_it_leads_to_as_codex_reads_it() {
+    let root = tempfile::tempdir().unwrap();
+    let base = root.path();
+    // The user's home is a link to the folder that holds `.codex`.
+    let real_home = base.join("real-home");
+    std::fs::create_dir_all(&real_home).unwrap();
+    let program = lay_down(&real_home, &base.join("visible-a"), Layout::Package);
+    let linked_home = base.join("linked-home");
+    link_dir(&linked_home, &real_home);
+    assert_eq!(
+        codex_at(&program, &env_of(&linked_home, None)).0.as_deref(),
+        Some("Codex's installer"),
+        "the user's home is a link"
+    );
+    // CODEX_HOME is a link to the folder the install is in.
+    let real_codex = base.join("real-codex");
+    let program = lay_down_in(&real_codex, &base.join("visible-b"), Layout::Package);
+    let linked_codex = base.join("linked-codex");
+    link_dir(&linked_codex, &real_codex);
+    assert_eq!(
+        codex_at(&program, &env_of(&base.join("nobody"), Some(&linked_codex)))
+            .0
+            .as_deref(),
+        Some("Codex's installer"),
+        "CODEX_HOME is a link"
+    );
+}
+
+/// What is no standalone CLI is left to the human: the daemon's own packages (a release of
+/// `codex` the background server runs, which no `codex update` of the CLI moves), under the home
+/// Codex reads, and the standalone folder with no release in it.
+#[test]
+fn what_codex_keeps_beside_its_standalone_cli_is_no_install_to_update() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let codex_home = home.join(".codex");
+    let daemon = release_in(
+        &codex_home.join("packages").join("app-server-daemon"),
+        "0.167.0-x86_64-pc-windows-msvc",
+        Layout::Package,
+    );
+    let beside = codex_home
+        .join("packages")
+        .join("standalone")
+        .join("current");
+    std::fs::create_dir_all(beside.join("bin")).unwrap();
+    std::fs::write(beside.join("bin").join(program_name()), "").unwrap();
+    for executable in [
+        daemon.join("bin").join(program_name()),
+        beside.join("bin").join(program_name()),
+    ] {
+        assert_eq!(
+            codex_at(&executable, &env_of(&home, None)),
+            (None, None),
+            "{}",
+            executable.display()
+        );
+    }
+}
+
+/// The folder a test lays its Windows files in, where links are not what `canonicalize` would
+/// change the spelling of.
+fn root_of(temp: &tempfile::TempDir) -> std::path::PathBuf {
+    canonical(temp.path())
+}
+
+/// npm's global install on Windows: the prefix holds the shims and `node_modules` beside them, the
+/// Node installer's npm is in another folder, and the update is that npm's, told the prefix (so
+/// the install is updated where it is, whatever prefix the npm found on the PATH is set to).
+#[test]
+fn a_global_npm_install_on_windows_is_told_by_its_shim_beside_node_modules_and_updated_into_its_prefix(
+) {
+    for harness in [Harness::Codex, Harness::Claude, Harness::Pi] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = root_of(&temp);
+        let prefix = root.join("AppData").join("Roaming").join("npm");
+        let nodejs = root.join("Program Files").join("nodejs");
+        let shim = lay_npm(&prefix, harness);
+        let npm = lay_npm_cmd(&nodejs);
+        let env = windows_env(&[&nodejs], &root);
+        let (package, _) = package_of(harness);
+        let found = source(harness, &shim.to_string_lossy(), &env);
+        assert_eq!(
+            (found.distribution.as_deref(), found.update.as_deref()),
+            (
+                Some("npm"),
+                Some(
+                    &[
+                        joined(&[&npm.to_string_lossy()]),
+                        "install".to_owned(),
+                        "-g".to_owned(),
+                        "--prefix".to_owned(),
+                        joined(&[&prefix.to_string_lossy()]),
+                        format!("{package}@latest"),
+                    ][..]
+                )
+            ),
+            "{harness:?}"
+        );
+        // The shell script and the PowerShell script beside the shim are the same install.
+        for other in [
+            harness.as_str().to_owned(),
+            format!("{}.ps1", harness.as_str()),
+        ] {
+            let found = source(harness, &prefix.join(&other).to_string_lossy(), &env);
+            assert_eq!(found.distribution.as_deref(), Some("npm"), "{other}");
+        }
+    }
+}
+
+/// A prefix of its own (`npm config set prefix`, a portable Node folder, nvm-windows's) with its
+/// npm in it: that npm is the one run, whatever npm the PATH has first; and where no npm is found
+/// the install is named and no command is given.
+#[test]
+fn the_npm_beside_a_custom_prefix_is_the_one_run_and_none_found_gives_no_command() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = root_of(&temp);
+    let prefix = root.join("tools").join("npm-global");
+    let nodejs = root.join("Program Files").join("nodejs");
+    let shim = lay_npm(&prefix, Harness::Pi);
+    let own = lay_npm_cmd(&prefix);
+    lay_npm_cmd(&nodejs);
+    let found = source(
+        Harness::Pi,
+        &shim.to_string_lossy(),
+        &windows_env(&[&nodejs], &root),
+    );
+    assert_eq!(
+        found.update.as_deref().map(|argv| argv[0].clone()),
+        Some(joined(&[&own.to_string_lossy()])),
+        "the npm in the prefix"
+    );
+    // No npm in the prefix and none on the PATH.
+    let bare = root.join("bare");
+    let shim = lay_npm(&bare, Harness::Pi);
+    let found = source(
+        Harness::Pi,
+        &shim.to_string_lossy(),
+        &windows_env(&[], &root),
+    );
+    assert_eq!(
+        (found.distribution.as_deref(), found.update),
+        (Some("npm"), None)
+    );
+}
+
+/// What is no global install is left to the human: a project's own (`node_modules\.bin` holds its
+/// shims, never the folder beside `node_modules`), a shim whose package is not there or is another
+/// harness's, a package folder's own file with no shim beside the folder, and a harness npm
+/// installs nothing of (Devin, Muse Code: their own installers).
+#[test]
+fn what_is_no_global_npm_install_on_windows_is_the_humans_to_update() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = root_of(&temp);
+    let nodejs = root.join("Program Files").join("nodejs");
+    lay_npm_cmd(&nodejs);
+    let env = windows_env(&[&nodejs], &root);
+    let say = |harness: Harness, path: &std::path::Path| {
+        let found = source(harness, &path.to_string_lossy(), &env);
+        (found.distribution, found.update)
+    };
+    // A project's own install: the shim is in `.bin`.
+    let project = root.join("work").join("project");
+    lay_npm(&project, Harness::Codex);
+    let bin = project.join("node_modules").join(".bin");
+    fs::create_dir_all(&bin).unwrap();
+    executable(&bin.join("codex.cmd"), "");
+    assert_eq!(
+        say(Harness::Codex, &bin.join("codex.cmd")),
+        (None, None),
+        "a project's shim"
+    );
+    // A shim of Pi's beside a prefix that holds Codex's package only.
+    let prefix = root.join("AppData").join("Roaming").join("npm");
+    lay_npm(&prefix, Harness::Codex);
+    executable(&prefix.join("pi.cmd"), "");
+    assert_eq!(
+        say(Harness::Pi, &prefix.join("pi.cmd")),
+        (None, None),
+        "no package of Pi's"
+    );
+    // A shim of another command beside the harness's package is no shim of the harness.
+    executable(&prefix.join("other.cmd"), "");
+    assert_eq!(
+        say(Harness::Codex, &prefix.join("other.cmd")),
+        (None, None),
+        "another command"
+    );
+    // The package's own file, where no shim of the harness is beside `node_modules`.
+    let module = prefix.join("node_modules").join("@openai").join("codex");
+    fs::remove_file(prefix.join("codex.cmd")).unwrap();
+    assert_eq!(
+        say(Harness::Codex, &module.join("bin").join("codex.js")),
+        (None, None),
+        "no shim"
+    );
+    // Devin and Muse Code have no npm package: a shim of theirs in an npm prefix is nothing.
+    for harness in [Harness::Devin, Harness::Muse] {
+        let folder = root.join(harness.as_str());
+        let shim = folder.join(format!("{}.cmd", harness.as_str()));
+        fs::create_dir_all(folder.join("node_modules").join(harness.as_str())).unwrap();
+        fs::write(
+            folder
+                .join("node_modules")
+                .join(harness.as_str())
+                .join("package.json"),
+            "{}",
+        )
+        .unwrap();
+        executable(&shim, "");
+        assert_eq!(say(harness, &shim).1, None, "{harness:?}");
+    }
+}
+
+/// The package's own file is a global install's when its shim is beside `node_modules` (the path
+/// of a CLI that is read where its link leads, as a Unix npm's is).
+#[test]
+fn the_file_of_a_global_package_is_the_install_where_its_shim_is_beside_node_modules() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = root_of(&temp);
+    let prefix = root.join("AppData").join("Roaming").join("npm");
+    let nodejs = root.join("Program Files").join("nodejs");
+    lay_npm(&prefix, Harness::Codex);
+    lay_npm_cmd(&nodejs);
+    let env = windows_env(&[&nodejs], &root);
+    let file = prefix
+        .join("node_modules")
+        .join("@openai")
+        .join("codex")
+        .join("bin")
+        .join("codex.js");
+    let found = source(Harness::Codex, &file.to_string_lossy(), &env);
+    assert_eq!(found.distribution.as_deref(), Some("npm"));
+    assert_eq!(
+        found.update.unwrap()[4],
+        joined(&[&prefix.to_string_lossy()]),
+        "the prefix is where `node_modules` is"
+    );
+}
+
+/// Only on Windows: a Unix npm has its shims in `bin` and its packages in `lib/node_modules`, and
+/// a folder that merely looks like Windows' is no npm there.
+#[cfg(unix)]
+#[test]
+fn the_windows_layout_is_read_only_where_the_environment_is_windows() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = root_of(&temp);
+    let prefix = root.join("npm");
+    let shim = lay_npm(&prefix, Harness::Codex);
+    let found = source(Harness::Codex, &shim.to_string_lossy(), &Env::default());
+    assert_eq!((found.distribution, found.update), (None, None));
 }
 
 #[test]
