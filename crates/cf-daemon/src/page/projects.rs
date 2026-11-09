@@ -37,13 +37,17 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         None | Some(Value::Null) => json!(basename(directory)?),
         Some(name) => name.clone(),
     };
-    let chief = chief_asked(page, body, false)?;
+    let chief = chief_asked(page, body, false).await?;
     let staff = match body.get("staff") {
         None => last_staff(page)?,
-        Some(Value::Array(members)) => members
-            .iter()
-            .map(|member| Ok(member_json(&picked_member(page, Body::new(member), false)?)))
-            .collect::<Result<Vec<_>, Said>>()?,
+        Some(Value::Array(members)) => {
+            let mut staff = Vec::new();
+            for member in members {
+                let picked = picked_member(page, Body::new(member), false).await?;
+                staff.push(member_json(&picked));
+            }
+            staff
+        }
         // `staff.map` of what is no list.
         Some(other) => {
             return Err(Said(format!(

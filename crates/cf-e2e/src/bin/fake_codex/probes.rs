@@ -5,8 +5,11 @@
 //! for its configuration).
 
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
+use cf_e2e::process::own_var;
+use cf_e2e::stand_in_lists;
 use serde_json::{json, Value};
 
 /// What Codex's own instructions say.
@@ -24,7 +27,7 @@ pub fn queue_help() -> ExitCode {
 
 /// `codex app-server` with no address to listen on: it answers each request of
 /// its standard input with a line of its standard output, the configuration with
-/// Codex's instructions, and ends when its input does.
+/// Codex's instructions and its models the rig's stand-ins list, and ends when its input does.
 pub fn configuration() -> ExitCode {
     let mut out = io::stdout().lock();
     for line in io::stdin().lock().lines().map_while(Result::ok) {
@@ -35,10 +38,16 @@ pub fn configuration() -> ExitCode {
         let Some(id) = request.get("id") else {
             continue;
         };
-        let result = if request["method"] == "config/read" {
-            json!({ "config": { "developer_instructions": INSTRUCTIONS } })
-        } else {
-            json!({})
+        let result = match request["method"].as_str() {
+            Some("config/read") => {
+                json!({ "config": { "developer_instructions": INSTRUCTIONS } })
+            }
+            // The models the daemon reads as a dialog opens: the rig's stand-ins list.
+            Some("model/list") => stand_in_lists::codex_page(&stand_in_lists::listed(
+                "codex",
+                Path::new(&own_var("CONSENSFLOW_HOME").unwrap_or_default()),
+            )),
+            _ => json!({}),
         };
         let answered =
             writeln!(out, "{}", json!({ "id": id, "result": result })).and_then(|()| out.flush());

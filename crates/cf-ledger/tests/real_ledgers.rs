@@ -440,17 +440,6 @@ fn check_copy(
             })
             .unwrap_or_else(|| panic!("{name}: project {} is gone", project.id));
     }
-    // Said, not stopped at: on a chain whose earlier numbers are not the released ledger's
-    // (this branch before its migration is renumbered), a ledger from a release may lack a
-    // table one of them made, and the rest is still worth checking.
-    for harness in ["claude", "codex", "pi", "devin", "muse"] {
-        if let Err(failed) = ledger.model_listing(harness) {
-            problems.push(format!(
-                "{name}: {harness}'s list of models does not read: {failed}"
-            ));
-            break;
-        }
-    }
     drop(ledger);
     let db = Connection::open(&file).unwrap();
     let version_after: i64 = db

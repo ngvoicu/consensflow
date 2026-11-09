@@ -25,6 +25,27 @@
 # in columns, is filled in by the smoke where the loops below name it.
 LC_ALL=C
 export LC_ALL
+# The daemon's read of the models Claude Code lists (`claude -p --input-format stream-json`: no
+# window, no turn) is answered here with the models the rig seats on the script, and ends with
+# the input; it draws nothing and notes no pid of a window (A4-28, T-1329).
+if [ "$1" = "-p" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      *'"subtype":"initialize"'*)
+        id=${line#*'"request_id":"'}
+        id=${id%%'"'*}
+        printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"models":[' "$id"
+        sep=''
+        for model in fake fake-2 fake-chief chief worker; do
+          printf '%s{"value":"%s","displayName":"%s","resolvedModel":"%s","supportsEffort":false}' "$sep" "$model" "$model" "$model"
+          sep=','
+        done
+        printf ']}}}\n'
+        ;;
+    esac
+  done
+  exit 0
+fi
 echo $$ >> "$CFSMOKE_PIDFILE"
 session=''
 while [ $# -gt 0 ]; do

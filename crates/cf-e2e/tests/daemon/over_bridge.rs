@@ -64,8 +64,13 @@ impl OverBridge {
         for folder in [home.consensflow(), home.workspace()] {
             files::make_dir(&folder)?;
         }
-        // Never run: the test is the pane host, and answers each window's opening itself.
+        // Never run as a window: the test is the pane host, and answers each window's opening
+        // itself. It answers the daemon's read of the models Claude Code lists, from the
+        // roster of the members the cases seat.
         home.window_stand_in("claude", Path::new(AGENT))?;
+        home.stand_ins(&json!({ "agents": [
+            { "id": "mybuilder", "kind": "claude-code", "model": "mybuilder" },
+        ]}))?;
         let mut daemon = home.daemon()?;
         let handle = daemon.handle(WITHIN)?;
 

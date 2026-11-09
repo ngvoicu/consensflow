@@ -25,6 +25,11 @@ use crate::{files, Result};
 pub const ISOLATION: [&str; 2] = ["--strict-mcp-config", "--no-chrome"];
 
 /// What a live test's wrapper says of itself: why it is there.
+/// The words of the daemon's read of the models Claude Code lists (`claude -p --input-format
+/// stream-json`, no window and no model): the stand-in answers it, as it lists what the case
+/// seats, the real models as well.
+const LIST_READ: &str = "-p --input-format stream-json";
+
 const WHY: &str = "Written by a live test: its Claude windows reach no MCP server and no browser.";
 
 /// A program called `claude-isolated` that runs the real Claude Code at `claude`
@@ -176,8 +181,12 @@ fn relay(why: &str, argv: &[String], stand_in: Option<&Path>) -> String {
         Some(agent) => [
             format!("const real = {}", json!(argv)),
             format!("const stand_in = {}", json!([agent.to_string_lossy()])),
+            // The daemon's read of the models Claude Code lists (`claude -p --input-format
+            // stream-json`, no window and no model) is the stand-in's, which lists what the
+            // case seats, the real models too: the real Claude's list holds no stand-in's model.
+            format!("const lists = process.argv.slice(2, 5).join(' ') === '{LIST_READ}'"),
             format!(
-                "const fake = process.argv.slice(2).some((word) => {})",
+                "const fake = lists || process.argv.slice(2).some((word) => {})",
                 [
                     STAND_IN_WORKER_MODEL,
                     STAND_IN_CHIEF_MODEL,
@@ -238,7 +247,12 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
          # Written by a live test: a window whose model is fake, fake-chief or worker (the\n\
          # stand-in member's) is the stand-in's, which writes its records where the daemon\n\
          # reads Claude's (the folder CLAUDE_CONFIG_DIR names, as it does for the real\n\
-         # Claude); every other Claude window reaches no MCP server and no browser.\n\
+         # Claude); every other Claude window reaches no MCP server and no browser. The\n\
+         # daemon's read of the models Claude lists is the stand-in's too: it lists what the\n\
+         # case seats, the real models as well.\n\
+         case \" $* \" in\n\
+         \x20 *\" {LIST_READ} \"*) exec {stand_in} \"$@\" ;;\n\
+         esac\n\
          for arg in \"$@\"; do\n\
          \x20 case \"$arg\" in\n\
          \x20   {}) exec {} \"$@\" ;;\n\
@@ -253,7 +267,8 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
         .join(" | "),
         shell_word(&stand_in.to_string_lossy()),
         shell_word(&claude.to_string_lossy()),
-        ISOLATION.join(" ")
+        ISOLATION.join(" "),
+        stand_in = shell_word(&stand_in.to_string_lossy()),
     )
 }
 
@@ -366,6 +381,42 @@ mod tests {
             .run()
             .unwrap()
             .stdout
+    }
+
+    /// The daemon's read of the models Claude Code lists names no model, and is the stand-in's
+    /// whatever Claude is the real one on the machine: the stand-in lists what the case seats,
+    /// and the real Claude's list holds none of a stand-in's models (A4-28, T-1329). A `-p` that
+    /// is no such read, and a window of the real Claude, are the real one's.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_of_the_models_claude_lists_is_the_stand_ins_though_no_word_of_it_is_a_fake_model() {
+        let folder = tempfile::tempdir().unwrap();
+        let agent = folder.path().join("agent");
+        crate::files::write_executable(&agent, "#!/bin/sh\necho \"stand-in $*\"\n").unwrap();
+        let shim = shimmed_claude(folder.path(), Path::new("/bin/echo"), &agent).unwrap();
+        let ran = |words: &[&str]| {
+            crate::process::Run::new("/bin/sh")
+                .arg(&shim)
+                .args(words)
+                .run()
+                .unwrap()
+                .stdout
+        };
+        assert_eq!(
+            ran(&["-p", "--input-format", "stream-json", "--verbose"]),
+            "stand-in -p --input-format stream-json --verbose\n"
+        );
+        for real in [
+            &["--model", "claude-sonnet-5-5"][..],
+            &["-p", "say hello"],
+            &["--input-format", "stream-json", "-p"],
+        ] {
+            let said = ran(real);
+            assert!(
+                said.starts_with("--strict-mcp-config --no-chrome"),
+                "{real:?}: {said}"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -561,7 +612,14 @@ mod tests {
         // A word that is the model of a stand-in, as the shell script reads it.
         assert!(
             text.contains(
-                "const fake = process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief' || word === 'worker')"
+                "const fake = lists || process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief' || word === 'worker')"
+            ),
+            "{text}"
+        );
+        // And the daemon's read of the models Claude lists, which names no model at all.
+        assert!(
+            text.contains(
+                "const lists = process.argv.slice(2, 5).join(' ') === '-p --input-format stream-json'"
             ),
             "{text}"
         );
