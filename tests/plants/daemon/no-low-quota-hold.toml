@@ -688,3 +688,31 @@ find = '''
 replace = '''
 'unavailable until you say it works again'
 '''
+
+[[plant]]
+name = "no low hold: the human's word on a member whose model is busy shortens its back-off"
+meant = "the_humans_word_on_a_member_whose_model_is_busy_leaves_its_back_off_says_so_and_still_clears_the_others_on_its_login"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        let back = if busy.is_some() {
+'''
+replace = '''
+        let back = if false {
+'''
+
+[[plant]]
+name = "no low hold: a message waiting for a busy member is told to the human as out of quota with the button"
+meant = "a_message_waiting_for_a_window_of_a_member_whose_model_is_busy_is_told_to_the_human_as_busy_with_no_button"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        let body = if self.kind_of_hold(owner.id, &until) == Held::Busy {
+'''
+replace = '''
+        let body = if false {
+'''

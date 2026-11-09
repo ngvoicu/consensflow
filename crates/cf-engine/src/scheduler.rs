@@ -992,19 +992,31 @@ impl Dispatcher {
             return Ok(());
         }
         let until = owner.out_until.clone().unwrap_or_default();
+        // A busy model is tried again after a back-off no press shortens: nothing for the human
+        // to press, and not a quota (T-1357).
+        let body = if self.kind_of_hold(owner.id, &until) == Held::Busy {
+            format!(
+                "@{}'s model is busy, and m-{} ({}) waits for it, as does whatever is sent to it until ConsensFlow tries it again at {until}.",
+                participant.handle,
+                waiting.id,
+                what_it_is(&waiting.kind, waiting.task_number),
+            )
+        } else {
+            format!(
+                "@{} is out of quota until {until}, and m-{} ({}) waits for it, as does whatever is sent to it until then. If its account has quota again (another account, a bigger plan), press Try again now on @{}: what waits is typed in once it is back.",
+                participant.handle,
+                waiting.id,
+                what_it_is(&waiting.kind, waiting.task_number),
+                owner.handle
+            )
+        };
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
                 to: "human".to_owned(),
                 task: None,
-                body: format!(
-                    "@{} is out of quota until {until}, and m-{} ({}) waits for it, as does whatever is sent to it until then. If its account has quota again (another account, a bigger plan), press Try again now on @{}: what waits is typed in once it is back.",
-                    participant.handle,
-                    waiting.id,
-                    what_it_is(&waiting.kind, waiting.task_number),
-                    owner.handle
-                ),
+                body,
             },
         )?;
         self.changed();

@@ -422,7 +422,11 @@ impl Dispatcher {
         self.project_now(project)
     }
 
-    /// The human says a member, or the chief, out of quota is back before its reset.
+    /// The human says a member, or the chief, out of quota is back before its reset: the
+    /// login works again, for every member on it in every project. A member whose model is
+    /// busy for a moment is none of that (T-1357): it is left to its back-off, and the
+    /// answer says so, so a stale row's button, or a call of the API, spends no try of its
+    /// task for nothing; the others on its login are cleared all the same.
     pub fn back_from_quota(
         &self,
         project: i64,
@@ -440,11 +444,15 @@ impl Dispatcher {
                 )
             })?;
         let member = self.member_of(&found, participant);
-        let back = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .mark_back(member.id, "by @human")?;
+        let busy = self.model_busy_until(&member);
+        let back = if busy.is_some() {
+            member.clone()
+        } else {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .mark_back(member.id, "by @human")?
+        };
         // The quota the human renewed is the account's: every project's members on the
         // harness's one login are back (T-1357), this project's first.
         let projects: Vec<i64> = self
@@ -460,7 +468,13 @@ impl Dispatcher {
             self.back_on_its_account(other, &member, &News::Human)?;
         }
         self.changed();
-        Ok(back)
+        match busy {
+            Some(until) => Err(EngineError::said(
+                "model-busy",
+                format!("Its model is busy: ConsensFlow tries it again at {until}"),
+            )),
+            None => Ok(back),
+        }
     }
 
     /// The human gives a task in a window to another member of its tier. Its

@@ -230,11 +230,26 @@ replace = '''        let waiting = waiting;'''
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''                    waiting.id,
-                    what_it_is(&waiting.kind, waiting.task_number),
+find = '''                waiting.id,
+                what_it_is(&waiting.kind, waiting.task_number),
+                owner.handle
 '''
-replace = '''                    waiting.as_ref().map_or(0, |waiting| waiting.id),
-                    waiting.as_ref().map_or_else(String::new, |waiting| what_it_is(&waiting.kind, waiting.task_number)),
+replace = '''                waiting.as_ref().map_or(0, |waiting| waiting.id),
+                waiting.as_ref().map_or_else(String::new, |waiting| what_it_is(&waiting.kind, waiting.task_number)),
+                owner.handle
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                waiting.id,
+                what_it_is(&waiting.kind, waiting.task_number),
+            )
+        } else {
+'''
+replace = '''                waiting.as_ref().map_or(0, |waiting| waiting.id),
+                waiting.as_ref().map_or_else(String::new, |waiting| what_it_is(&waiting.kind, waiting.task_number)),
+            )
+        } else {
 '''
 
 [[plant]]

@@ -462,3 +462,133 @@ fn the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_
         "tried again when the minute is out"
     );
 }
+
+/// zeus at work on T-1 in a window the human has open, a note waiting for that window, and
+/// zeus, the member, then marked out by `mark` (given the project and the member's id and
+/// the time it is out until): the notes the human was given.
+fn the_human_told_what_waits(mark: impl Fn(&Context, i64, i64, &str)) -> Vec<String> {
+    let context = Context::new();
+    let tiers = crate::background::working(&context);
+    context
+        .open_window(tiers.project.id, "zeus-amber-pine")
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .note(
+            tiers.project.id,
+            &cf_ledger::NewNote {
+                from: Some("chief".to_owned()),
+                to: "zeus-amber-pine".to_owned(),
+                task: Some(1),
+                body: "Mind the lexer too".to_owned(),
+            },
+        )
+        .unwrap();
+    mark(
+        &context,
+        tiers.project.id,
+        tiers.id("zeus"),
+        &soon(&context, 3),
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    tiers.notes("human")
+}
+
+#[test]
+fn a_message_waiting_for_a_window_of_a_member_out_of_quota_is_told_to_the_human_with_the_button() {
+    let said = the_human_told_what_waits(|context, _, member, until| {
+        context
+            .ledger
+            .borrow_mut()
+            .mark_out(member, until, "out of quota")
+            .unwrap();
+    });
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_match(
+        &said[0],
+        r"^@zeus-amber-pine is out of quota until \S+, and m-\d+ \(a note on T-1\) waits for it, as does whatever is sent to it until then\. If its account has quota again \(another account, a bigger plan\), press Try again now on @zeus: what waits is typed in once it is back\.$",
+    );
+}
+
+#[test]
+fn a_message_waiting_for_a_window_of_a_member_whose_model_is_busy_is_told_to_the_human_as_busy_with_no_button(
+) {
+    // Not out of quota, and nothing for the human to press: ConsensFlow tries it again (T-1357).
+    let said = the_human_told_what_waits(|context, _, member, until| {
+        context.mark_out_busy(member, until);
+    });
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_match(
+        &said[0],
+        r"^@zeus-amber-pine's model is busy, and m-\d+ \(a note on T-1\) waits for it, as does whatever is sent to it until ConsensFlow tries it again at \S+\.$",
+    );
+    assert!(!said[0].contains("quota"), "{said:?}");
+    assert!(!said[0].contains("Try again now"), "{said:?}");
+}
+
+#[test]
+fn the_humans_word_on_a_member_whose_model_is_busy_leaves_its_back_off_says_so_and_still_clears_the_others_on_its_login(
+) {
+    // A stale row's button, or a call of the API: the member was out of quota when the page
+    // was drawn and is busy now. The press does not shorten its back-off (a try is spent for
+    // nothing), and says why; the others on the login are cleared all the same.
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    context.codex.one_login.set(true);
+    let first = project_of(&context, "/work/first", &[("apollo", "codex")]);
+    let second = project_of(&context, "/work/second", &[("diana", "codex")]);
+    context.give(first, "apollo", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context
+        .task(first, 1)
+        .task
+        .assignee
+        .expect("T-1 given to apollo");
+    let tried_at = crate::fixtures::after(&context, 60_000);
+    context.codex.refuse(
+        &session,
+        Quota::Busy {
+            at: Some(now(&context)),
+            because: "Selected model is at capacity.".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    mark_out(&context, second, "diana", &soon(&context, 3));
+
+    let refused = context.back_from_quota(first, "apollo").unwrap_err();
+
+    assert_eq!(
+        refused.to_string(),
+        format!("Its model is busy: ConsensFlow tries it again at {tried_at}")
+    );
+    assert_eq!(
+        out_until(&context, first, "apollo").as_deref(),
+        Some(tried_at.as_str()),
+        "its back-off is its own"
+    );
+    let held = context.task(first, 1).task;
+    assert_eq!(
+        (held.state.as_str(), held.held_until.as_deref()),
+        ("paused", Some(tried_at.as_str())),
+        "its task is still held"
+    );
+    assert_eq!(
+        out_until(&context, second, "diana"),
+        None,
+        "the others are cleared"
+    );
+    context.advance(30_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(first, 1).task.state, "paused", "30 s on");
+    context.advance(31_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(first, 1).task.state, "working", "a minute on");
+}
