@@ -380,12 +380,12 @@ impl Copied {
 
 /// The home of a run, once it is made.
 struct Made {
-    /// The folder, removed when this is dropped: with the run, however it ends.
-    folder: TempDir,
     /// The logins in it, as they were copied.
     copied: Vec<Copied>,
     /// The owner's setup when it was made.
     owner: Seen,
+    /// The folder, removed when this is dropped: with the run, however it ends.
+    folder: TempDir,
 }
 
 /// The home a harness's windows run on for a run: made when the rig first asks for it, with a

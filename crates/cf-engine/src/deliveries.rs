@@ -31,7 +31,7 @@ use crate::record::Record;
 use crate::role_change::Prelude;
 use crate::runtime::returning;
 use crate::seams::EngineError;
-use crate::shown::{after_words, words_key, Paste, Shown};
+use crate::shown::{after_words, words_key, Evidence, Paste, Shown};
 use crate::windows::pane_body_drawn;
 
 /// What ends the words of a failed message sent back to whoever sent them where they
@@ -1462,7 +1462,7 @@ impl Dispatcher {
         }
         // Its record's own words, never the screen `why` falls back on (Calliope's P1, T-955).
         let refused = observed.failure().unwrap_or_default();
-        if let Some(gone) = self.gone_model(participant, refused)? {
+        if let Some(gone) = self.gone_model(participant, &Evidence::of_record(refused))? {
             let pane = record.window.borrow().pane.clone();
             if let Some(pane) = pane {
                 if !self.close_own(record, &pane).await? {

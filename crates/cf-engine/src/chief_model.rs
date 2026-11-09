@@ -15,7 +15,7 @@
 
 use std::rc::Rc;
 
-use cf_harness::contract::{Adapter, Agent, Used};
+use cf_harness::contract::{Adapter, Agent, NoDefault, Used};
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 
 use crate::deliveries::Delivering;
@@ -23,6 +23,7 @@ use crate::dispatcher::Dispatcher;
 use crate::handoff::name_of;
 use crate::record::Record;
 use crate::seams::EngineError;
+use crate::shown::Evidence;
 use crate::windows::Relaunch;
 
 /// The model, and the effort or thinking, a chief's launch asks its harness for; none of
@@ -180,11 +181,14 @@ impl Dispatcher {
     /// where the launch asked for none. `words` are the record's own of a failed turn, or the
     /// screen of a launch that ended with a code of failure before it came up, never a
     /// screen else: a chief's screen may show anything (it grepped for the words), and only
-    /// a refusal at launch has no record to say it in (Calliope's P1, T-955).
+    /// a refusal at launch has no record to say it in (Calliope's P1, T-955). They are
+    /// [`Evidence`], what the window showed and not the text made for a note: that one is
+    /// withheld, masked and cut for what it is told to, and says ConsensFlow's own words of how a
+    /// window ended (T-1328, the third reading of T-1322).
     pub(crate) fn gone_model(
         &self,
         chief: &ParticipantView,
-        words: &str,
+        words: &Evidence,
     ) -> Result<Option<String>, EngineError> {
         let now = self.known_project(chief.project_id)?;
         let Some(asked) = now
@@ -199,7 +203,7 @@ impl Dispatcher {
         let Some(adapter) = self.seams.adapters.adapter(harness) else {
             return Ok(None);
         };
-        Ok(adapter.model_gone(words, &asked).then_some(asked))
+        Ok(adapter.model_gone(words.as_str(), &asked).then_some(asked))
     }
 
     /// The chief opens again at once, its model `gone`: its next launch starts on its
@@ -247,9 +251,9 @@ impl Dispatcher {
         // A default that is the very model found gone is no other to start on: the chief is
         // held, and told so (Calliope's P2b, T-994).
         let started = match adapter.default_model().await {
-            Ok(Some(model)) if model == gone => {
-                Err("its default is the model that is gone".to_owned())
-            }
+            Ok(Some(model)) if model == gone => Err(NoDefault::NoneOffered(
+                "its default is the model that is gone",
+            )),
             started => started,
         };
         let body = match &started {
@@ -260,13 +264,16 @@ impl Dispatcher {
                 "The chief's model, {gone}, is no longer available in {harness}: the chief starts on {harness}'s own default model instead. Switch the chief to pick another."
             ),
             // What the harness said (a Pi read that failed quotes Pi's error stream) can carry
-            // a credential it was given: the words of the program are screened whole before
-            // they are cut or a note (`quotable`), and the note is one paragraph.
+            // a credential it was given, and so can the path of its program: the note says the
+            // kind of failure and its code, and no word of a program's (`NoDefault`, T-1328).
+            // The full words stay on the page, where the person reads them.
             Err(why) => format!(
                 "The chief's model, {gone}, is no longer available in {harness}, and ConsensFlow found no other to start it on ({}): switch the chief to another model.",
-                crate::shown::quotable(why)
-                    .replacen(cf_proto::models::IT_SAID, "; it said: ", 1)
-                    .replace('\n', " / ")
+                match why {
+                    NoDefault::NoneOffered(words) => (*words).to_owned(),
+                    NoDefault::Unread(Some(failure)) => failure.words(harness),
+                    NoDefault::Unread(None) => format!("{harness}'s model list could not be read"),
+                }
             ),
         };
         self.seams.ledger.borrow_mut().note(

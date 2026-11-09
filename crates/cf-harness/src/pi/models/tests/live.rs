@@ -45,9 +45,9 @@ fn lines(lists: &[&[&str]], asks: usize) -> Vec<String> {
 }
 
 struct Window {
-    _folder: tempfile::TempDir,
     adapter: Rc<PiAdapter>,
     fakes: Fakes,
+    _folder: tempfile::TempDir,
 }
 
 /// A Pi that answers with `lines` and `ends` as given, as the page's adapter reads it.
@@ -64,9 +64,9 @@ fn window(lines: Vec<String>, ends: Ends) -> Window {
     fakes.processes.child("pi", ChildScript { lines, ends });
     let services = fakes.services(&env, folder.path());
     Window {
-        _folder: folder,
         adapter: Rc::new(PiAdapter::new(&services)),
         fakes,
+        _folder: folder,
     }
 }
 

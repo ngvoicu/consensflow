@@ -21,13 +21,13 @@ const AGENTS: &str = r#"[
 
 /// The page over a project the human closed, with a task waiting for zeus.
 struct Closed {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
     /// The brief of zeus's task, which waits for the Resume.
     brief: i64,
+    _home: tempfile::TempDir,
 }
 
 fn closed() -> Closed {

@@ -26,11 +26,11 @@ use crate::console::Console;
 use crate::testing::{worked, Said, Worked};
 
 struct Rig {
-    home: tempfile::TempDir,
     stopping: Stopping,
     exited: Rc<RefCell<Vec<i32>>>,
     /// What the daemon's children are started through, and ended with.
     processes: Rc<SystemProcesses>,
+    home: tempfile::TempDir,
 }
 
 /// A daemon's parts to stop, over a home of their own: an API whose handler

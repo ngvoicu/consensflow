@@ -67,10 +67,10 @@ fn script() -> String {
 
 /// A runner's checkout: the tool where the build leaves it, `gh` on a PATH of its own, and its answers.
 struct Runner {
-    _temp: tempfile::TempDir,
     root: PathBuf,
     bin: PathBuf,
     fake: PathBuf,
+    _temp: tempfile::TempDir,
 }
 
 impl Runner {

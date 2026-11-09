@@ -30,6 +30,7 @@ harness-claude-interrupts = ["cargo", "test", "--offline", "-p", "cf-harness", "
 # The cases of the rig, found by the start of their names.
 rig-approval-decided = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_result_the_human_passed_on_while_the_chief_was_in_a_turn_is_withdrawn"]
 rig-approval-refused = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_chief_that_accepts_a_task_whose_result_waits_at_the_gate"]
+rig-approval-declined-answer = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "approval::a_declined_answer_leaves_the_question_open"]
 # How long the stand-in agent waits, as its variables tell it.
 fake-agent-waits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-agent", "tests::a_wait_is_the_milliseconds"]
 
@@ -408,6 +409,31 @@ file = "crates/cf-daemon/src/api/routes/task.rs"
 find = '''            .filter(|message| message.state != "gated")
             .filter_map(|message| waits.in_thread(message))'''
 replace = '''            .filter_map(|message| waits.in_thread(message))'''
+
+[[plant]]
+name = "approval rig: a declined answer takes its question with it"
+meant = "a_declined_answer_leaves_the_question_open_and_the_chief_answers_it_again"
+runs = ["rig-approval-declined-answer"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '            reopen_question(store, question)?;'
+replace = '''            store.db.execute(
+                "UPDATE message SET state = 'cancelled' WHERE id = ?",
+                [question],
+            )?;'''
+
+[[plant]]
+name = "approval rig: whoever sent a declined answer is not told to answer it again"
+meant = "a_declined_answer_leaves_the_question_open_and_the_chief_answers_it_again"
+runs = ["rig-approval-declined-answer"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '        if told.as_deref() != Some(by) {'
+replace = '        if false {'
 
 # --- the stand-in agent: how long it waits, as its variables tell it ---
 # (the knob a case sets to have a turn cut by the app's quit, on any machine; the

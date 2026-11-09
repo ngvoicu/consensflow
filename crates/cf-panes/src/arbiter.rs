@@ -219,6 +219,13 @@ impl OutputClock {
         }
     }
 
+    /// [`OutputClock::note`] for a test of another crate that plays the pane host's output
+    /// side: the window printed (T-1332).
+    #[cfg(feature = "test-support")]
+    pub fn note_output(&self, changed: bool) {
+        self.note(changed);
+    }
+
     /// How long the pane had printed nothing at `now`, once it has printed anything.
     fn quiet_ms(&self, now: Instant) -> Option<u64> {
         self.since(&self.printed, now)
@@ -3447,6 +3454,88 @@ mod tests {
         use crate::pty::conpty_test::{line_echo, open, powershell, read_until, take};
         use crate::pty::{serial_pty_test, PaneTable};
 
+        /// How long a console case waits before it calls its child hung. A busy runner's
+        /// PowerShell has taken more than 20 s to print its READY (`read_until` waits a minute
+        /// for it), and one that reads a long paste key by key reads it more slowly still when the
+        /// machine is loaded: zeewin2 under 32 busy processes, 1 run in 4, did not get through the
+        /// slow reader's 4,000 keys in the 43 s the case allowed (T-1332). So nothing here is quick
+        /// or slow by it: only a child that has not sent in this long, printing or not, runs out
+        /// of it.
+        const HANG: Duration = Duration::from_secs(180);
+
+        /// How long the child may print nothing, having sent nothing, before the human presses
+        /// Enter again, as the engine does for a paste its window did not send (10 s with the
+        /// window unshown, 3 s of quiet: `arrival.rs`). It counts from the child's last print and
+        /// not from the paste: a window that still reads prints as it goes, and a slow machine
+        /// makes it slower and not quiet.
+        const QUIET_BEFORE_AGAIN: Duration = Duration::from_secs(13);
+
+        /// The quiet a console case's window must show before the human's Enter goes: two
+        /// seconds, well above the gap in which a busy machine's PowerShell prints nothing while
+        /// it still reads (T-1332: zeewin2 under 60 busy processes, 500 ms was not).
+        const QUIET_MS: u64 = 2_000;
+
+        /// The most a console case's window may be given to take a paste in: two minutes, past
+        /// anything a loaded machine's PowerShell takes to read what these cases give it, so
+        /// that the Enter goes because the window has read the paste and gone quiet, and not
+        /// because the cap came while it read (zeewin2 under 60 busy processes: the slow reader's
+        /// 4,000 keys took more than the 13 s the cap was). The rule that the host's own cap
+        /// is too short for a window that reads a long paste is the plant's, in the case of the
+        /// slow reader.
+        const MOST_MS: u64 = 120_000;
+
+        /// What a pane's child has printed, and when it last did.
+        #[derive(Clone)]
+        struct Printed {
+            text: Arc<Mutex<String>>,
+            last: Arc<Mutex<Instant>>,
+        }
+
+        impl Printed {
+            fn new() -> Self {
+                Self {
+                    text: Arc::new(Mutex::new(String::new())),
+                    last: Arc::new(Mutex::new(Instant::now())),
+                }
+            }
+
+            fn push(&self, more: &str) {
+                self.text.lock().expect("printed").push_str(more);
+                *self.last.lock().expect("printed") = Instant::now();
+            }
+
+            fn text(&self) -> String {
+                self.text.lock().expect("printed").clone()
+            }
+
+            /// Waits until the child has sent (what it printed says so, `]#`), and says how long
+            /// after `from` that was. None where it printed nothing for `quiet` first, counted
+            /// from the later of its last print and `from`: it read what it was given and sent
+            /// nothing. A child that has not sent in [`HANG`] is hung, whatever it printed.
+            fn sent_or_quiet(&self, from: Instant, quiet: Duration) -> Option<Duration> {
+                loop {
+                    if self.text().contains("]#") {
+                        return Some(from.elapsed());
+                    }
+                    let silent = self
+                        .last
+                        .lock()
+                        .expect("printed")
+                        .elapsed()
+                        .min(from.elapsed());
+                    if silent >= quiet {
+                        return None;
+                    }
+                    assert!(
+                        from.elapsed() < HANG,
+                        "the reader neither sent nor went quiet in {HANG:?}: {:?}",
+                        self.text()
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+
         /// A child that says READY and reads the console's key presses as Codex reads a paste
         /// on Windows (its `paste_burst`): an Enter within 120 ms of the key before it is a
         /// line break in the text, a later one sends it, and it says how many line breaks the
@@ -3477,34 +3566,24 @@ mod tests {
             let silent = SilentPaste {
                 pace_us_per_character: 0,
                 drawn_after_ms: 0,
-                quiet_ms: 500,
-                most_ms: 20_000,
+                quiet_ms: QUIET_MS,
+                most_ms: MOST_MS,
                 most_us_per_character: 0,
             };
             let clock = arbiter
                 .register_with(&key, Some(silent))
                 .expect("register pane");
             read_until(&table, &key, &output, "READY");
-            let seen = Arc::new(Mutex::new(String::new()));
+            let seen = Printed::new();
             let reader = {
-                let (table, key, seen) = (Arc::clone(&table), key.clone(), Arc::clone(&seen));
+                let (table, key, seen) = (Arc::clone(&table), key.clone(), seen.clone());
                 thread::spawn(move || {
                     while let Ok(chunk) = output.recv_timeout(Duration::from_secs(60)) {
                         clock.note(true);
                         let text = take(&table, &key, &chunk);
-                        seen.lock().expect("seen").push_str(&text);
+                        seen.push(&text);
                     }
                 })
-            };
-            let has_sent = |within: Duration| {
-                let deadline = Instant::now() + within;
-                while Instant::now() < deadline {
-                    if seen.lock().expect("seen").contains("]#") {
-                        return true;
-                    }
-                    thread::sleep(Duration::from_millis(20));
-                }
-                false
             };
             for (pause, write) in writes {
                 thread::sleep(*pause);
@@ -3512,16 +3591,20 @@ mod tests {
                     .write_typed(&table, &key, write)
                     .expect("the human's keys");
             }
-            let again = !has_sent(Duration::from_secs(10));
+            // Where the child read what it was given and sent nothing, the human presses
+            // Enter again.
+            let again = seen
+                .sent_or_quiet(Instant::now(), QUIET_BEFORE_AGAIN)
+                .is_none();
             if again {
                 arbiter
                     .write_typed(&table, &key, b"\r")
                     .expect("the human's Enter again");
-                has_sent(Duration::from_secs(10));
+                seen.sent_or_quiet(Instant::now(), QUIET_BEFORE_AGAIN);
             }
             table.kill(&key).expect("kill the pane");
             reader.join().expect("the pane's reader");
-            let seen = seen.lock().expect("seen").clone();
+            let seen = seen.text();
             let sent = seen
                 .split_once("SENT=")
                 .and_then(|(_, rest)| rest.split_once('#'))
@@ -3571,39 +3654,32 @@ mod tests {
             let arbiter = InputArbiter::new(ENTER);
             let clock = arbiter.register_with(&key, silent).expect("register pane");
             read_until(&table, &key, &output, "READY");
-            let seen = Arc::new(Mutex::new(String::new()));
+            let seen = Printed::new();
             let reader = {
-                let (table, key, seen) = (Arc::clone(&table), key.clone(), Arc::clone(&seen));
+                let (table, key, seen) = (Arc::clone(&table), key.clone(), seen.clone());
                 thread::spawn(move || {
                     while let Ok(chunk) = output.recv_timeout(Duration::from_secs(90)) {
                         clock.note(true);
                         let text = take(&table, &key, &chunk);
-                        seen.lock().expect("seen").push_str(&text);
+                        seen.push(&text);
                     }
                 })
-            };
-            let sent_within = |from: Instant, within: Duration| {
-                while from.elapsed() < within {
-                    if seen.lock().expect("seen").contains("]#") {
-                        return Some(from.elapsed());
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
-                None
             };
             let pasted = Instant::now();
             arbiter
                 .write_paste(&table, &key, brief, None)
                 .expect("the delivery");
             let entered = pasted.elapsed();
-            let mut sent = sent_within(pasted, Duration::from_secs(13));
+            // A paste its window did not send, having read it, is pressed Enter on again, as the
+            // engine does.
+            let mut sent = seen.sent_or_quiet(pasted, QUIET_BEFORE_AGAIN);
             if sent.is_none() {
                 arbiter.write(&table, &key, b"\r").expect("the Enter again");
-                sent_within(Instant::now(), Duration::from_secs(30));
+                seen.sent_or_quiet(Instant::now(), QUIET_BEFORE_AGAIN);
             }
             table.kill(&key).expect("kill the pane");
             reader.join().expect("the pane's reader");
-            let seen = seen.lock().expect("seen").clone();
+            let seen = seen.text();
             let breaks = seen
                 .split_once("SENT=")
                 .and_then(|(_, rest)| rest.split_once('#'))
@@ -3617,15 +3693,15 @@ mod tests {
         }
 
         /// How a window declares that it reads a paste at 0.5 ms a character and draws as it
-        /// reads (Muse's measure on Windows, T-954), with a quiet spell well above a busy
-        /// machine's scheduling gap, as the burst reader's test has it, and a cap that gives a
-        /// slow machine's PowerShell room.
+        /// reads (Muse's measure on Windows, T-954), with the quiet spell and the cap of the burst
+        /// reader's test: well above a busy machine's scheduling gap, and past the time its
+        /// PowerShell takes to read 4,000 keys.
         const SLOW: SilentPaste = SilentPaste {
             pace_us_per_character: 500,
             drawn_after_ms: 0,
-            quiet_ms: 500,
-            most_ms: 1_000,
-            most_us_per_character: 3_000,
+            quiet_ms: QUIET_MS,
+            most_ms: MOST_MS,
+            most_us_per_character: 0,
         };
 
         /// A brief of 4,000 characters delivered into a window that reads each of them in 0.7 ms
@@ -3645,7 +3721,7 @@ mod tests {
                 "{delivered:?}: the Enter was a line break"
             );
             assert!(
-                delivered.sent.is_some_and(|sent| sent < Duration::from_secs(12)),
+                delivered.sent.is_some(),
                 "{delivered:?}: the brief stayed in the window's box until the Enter was pressed again"
             );
             // Never sooner than the window could have read it at its declared pace: 4,000

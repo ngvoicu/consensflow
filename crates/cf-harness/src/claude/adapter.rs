@@ -82,8 +82,8 @@ use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
     Adapter, Admission, Decline, Dialog, DialogSign, FirstMessage, Held, Input, Launch, LaunchId,
-    Observed, Over, Pane, PaneHost, Prepared, Question, Readiness, Records, ServersChosen, Skill,
-    Specs, Trusts, Used, Waiting, Window, Work,
+    NoDefault, Observed, Over, Pane, PaneHost, Prepared, Question, Readiness, Records,
+    ServersChosen, Skill, Specs, Trusts, Used, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Boundary, Options, Reading, Settlement};
@@ -233,7 +233,7 @@ impl Adapter for ClaudeAdapter {
         super::models::gone(words, asked)
     }
 
-    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         Box::pin(super::models::default_model(
             &self.env,
             &*self.processes,

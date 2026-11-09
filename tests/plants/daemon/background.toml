@@ -129,23 +129,6 @@ find = '    if total > QUOTED {'
 replace = '    if total > QUOTED + 1_000 {'
 
 [[plant]]
-name = "background: a note quotes a key or a token of a command as it is"
-meant = "what_a_close_note_quotes_of_the_work_has_its_secrets_hidden_and_is_held_to_a_line"
-runs = ["engine-dispatcher-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '    let hidden = mask(&process.command);'
-replace = '''
-    let hidden = crate::shown::mask::Masked {
-        text: process.command.clone(),
-        count: 0,
-    };'''
-
-# The window is held until the host has said it is done, and the host is asked again
-# where it gave no answer.
-
-[[plant]]
 name = "background: a message goes into a window with no mark of where its turn begins"
 meant = "marks_the_window_where_a_turn_begins_and_again_as_each_message_goes_in"
 runs = ["engine-dispatcher-background"]

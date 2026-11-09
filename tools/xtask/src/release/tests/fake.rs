@@ -201,12 +201,12 @@ pub fn conf(version: &str, key: &str) -> String {
 
 /// A checkout and its two remotes, in a temporary tree, and the notes of a release.
 pub struct World {
-    /// The tree everything is in, removed with the world.
-    _temp: tempfile::TempDir,
     pub root: PathBuf,
     pub origin: PathBuf,
     pub upstream: PathBuf,
     pub notes: PathBuf,
+    /// The tree everything is in, removed with the world.
+    _temp: tempfile::TempDir,
 }
 
 impl World {

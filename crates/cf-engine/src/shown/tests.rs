@@ -27,6 +27,8 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         pasted: false,
         part: Part::Unknown,
         last_call: None,
+        own_session: None,
+        start: None,
     }
 }
 
@@ -755,4 +757,87 @@ fn the_last_tool_call_is_said_before_the_screen_and_a_host_that_sent_no_screen_h
             .after("gone"),
         "gone (exit code 2); its last tool call was Bash"
     );
+}
+
+/// T-1328, the third reading of T-1322: what the engine classifies a window's end by is what the
+/// window showed, and never the text made for a note. A note leaves a screen that names a secret
+/// out whole and replaces a start that failed with its kind, and a classifier that read it lost a
+/// model its harness no longer has.
+#[test]
+fn the_evidence_of_a_window_is_what_it_showed_and_never_the_note_made_of_it() {
+    const GONE: &str =
+        "The 'retired' model is not supported when using Codex with a ChatGPT account";
+    let rows = [GONE, "Token usage: 0"];
+    let screen = shown(Some(1), None, Some(&rows));
+    // The note leaves the whole screen out, and the evidence is all of it, as it was.
+    let note = screen.after("@zeus's window closed");
+    assert!(
+        note.contains(LEFT_OUT) && !note.contains("retired"),
+        "{note}"
+    );
+    assert_eq!(
+        screen.evidence().as_str(),
+        format!("{GONE}\nToken usage: 0")
+    );
+    // A start that failed replaces the note's screen with its kind, and the evidence stays.
+    let started = screen.clone().with_start(
+        Some(StartFailure::of(cf_base::startup::StartKind::NotFound)),
+        "Codex",
+    );
+    let note = started.after("@zeus's window closed");
+    assert!(
+        !note.contains("retired") && note.contains("Codex's program was not found"),
+        "{note}"
+    );
+    assert_eq!(started.evidence(), screen.evidence());
+    // A secret on the screen, masked in a quote, is as it was in the evidence: the classifier
+    // reads the model's id whole.
+    let id = shown(
+        Some(1),
+        None,
+        Some(&["Unknown model: sk-abcdefghijklmnopqrstuvwxyz0123456789"]),
+    );
+    assert!(id
+        .evidence()
+        .as_str()
+        .contains("sk-abcdefghijklmnopqrstuvwxyz0123456789"));
+}
+
+/// Words in a note that no window showed are no evidence: a window the host said nothing of, or
+/// whose screen was empty, has none, whatever its note says (the engine's own `because` is the note's).
+#[test]
+fn words_in_a_note_that_no_window_showed_are_no_evidence() {
+    let said = "the 'retired' model is not supported";
+    for screen in [
+        Shown::default(),
+        shown(Some(1), None, None),
+        shown(Some(1), None, Some(&[])),
+        shown(Some(1), None, Some(&["", "   ", "───"])),
+    ] {
+        assert!(screen.after(said).contains("retired"), "the note says it");
+        assert_eq!(screen.evidence().as_str(), "", "{screen:?}");
+    }
+    // Words a harness's record gave of a failure are its own, and say what they say.
+    assert_eq!(Evidence::of_record(said).as_str(), said);
+}
+
+/// The evidence is the lines a quote would keep, whole: not cut at the quote's bound, and not
+/// reworded.
+#[test]
+fn the_evidence_is_the_last_lines_with_a_word_in_them_and_is_not_cut_as_a_quote_is() {
+    let long = format!("Error: Unknown model: '{}'", "m".repeat(2 * QUOTE_CHARS));
+    let mut rows: Vec<String> = (1..=10).map(|n| format!("line {n}")).collect();
+    rows.insert(3, "   ".to_owned());
+    rows.push("═════".to_owned());
+    rows.push(long.clone());
+    let borrowed: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let evidence = shown(Some(1), None, Some(&borrowed)).evidence();
+    let kept: Vec<&str> = evidence.as_str().lines().collect();
+    assert_eq!(kept.len(), QUOTE_LINES);
+    assert_eq!(
+        kept.last().copied(),
+        Some(long.as_str()),
+        "the long line whole"
+    );
+    assert_eq!(kept.first().copied(), Some("line 6"));
 }

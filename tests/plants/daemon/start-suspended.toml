@@ -285,8 +285,11 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Some(TurnLeft::Cut(opening)) => Some(coming.words(opening.as_ref())),'''
-replace = '''            Some(TurnLeft::Cut(_)) => None,'''
+find = '''                Some(coming.words(turn.as_ref()))
+'''
+replace = '''                let _ = turn;
+                None
+'''
 
 [[plant]]
 name = "start suspended: a member whose record cannot tell a cut is told nothing"

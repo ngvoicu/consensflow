@@ -77,7 +77,8 @@ fn tree(file: &Path, #[cfg_attr(windows, allow(unused_variables))] lets_them_go:
             "-Command".to_owned(),
             format!(
                 "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE' -ArgumentList '-n','{lives}','127.0.0.1'; \
-                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' '); Start-Sleep {lives}",
+                 try {{ Set-Content -ErrorAction Stop -Path '{}' -Value (@($PID, $p.Id) -join ' ') }} catch {{ Stop-Process -Id $p.Id -Force; throw }}; \
+                 Start-Sleep {lives}",
                 file.display().to_string().replace('\'', "''")
             ),
         ],
@@ -140,6 +141,97 @@ impl Drop for Left {
             }
         }
     }
+}
+
+/// The pings a PowerShell started (`PING.EXE`, its children) that are still running.
+#[cfg(windows)]
+#[allow(clippy::disallowed_methods)]
+fn pings_of(parent: u32) -> Vec<u32> {
+    let listing = std::process::Command::new(
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
+    .args(["-NoProfile", "-NonInteractive", "-Command"])
+    .arg(format!(
+        "Get-CimInstance Win32_Process -Filter \"ParentProcessId={parent} AND Name='PING.EXE'\" | ForEach-Object {{ $_.ProcessId }}"
+    ))
+    .output()
+    .expect("PowerShell lists the processes");
+    String::from_utf8_lossy(&listing.stdout)
+        .split_whitespace()
+        .filter_map(|word| word.parse().ok())
+        .collect()
+}
+
+/// What a test that fails with a tree whose pids were never written ends as it goes: the
+/// program, and the pings it started, which nothing else knows of.
+#[cfg(windows)]
+struct Unwritten(u32);
+
+#[cfg(windows)]
+impl Drop for Unwritten {
+    fn drop(&mut self) {
+        for pid in pings_of(self.0).into_iter().chain([self.0]) {
+            if alive(pid) {
+                terminate(pid, Ending::Forced);
+            }
+        }
+    }
+}
+
+/// How long a tree whose write failed is given to end by itself: far less than the ten minutes
+/// it would sleep, and more than a cold PowerShell takes to start.
+#[cfg(windows)]
+const ENDS_BY_ITSELF_WITHIN: Duration = Duration::from_secs(60);
+
+/// A tree's write of its pids fails after its ping started (a PowerShell whose `Set-Content`
+/// failed): the test fails without the pids, and the pings, which nothing knows of by then,
+/// outlived it by up to ten minutes (T-138, the stop test's P2 of 2026-10-17). The tree ends
+/// the ping itself, and ends.
+#[cfg(windows)]
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn a_tree_whose_write_of_its_pids_failed_ends_the_ping_it_started_and_itself() {
+    use std::process::Stdio;
+
+    let dir = tempfile::tempdir().unwrap();
+    // Its folder is not there: the write fails once the ping has started.
+    let file = dir.path().join("no-such-folder").join("pids");
+    let program = tree(&file, false);
+    let mut child = std::process::Command::new(&program.executable)
+        .args(&program.args)
+        .env_clear()
+        .envs(program.env.iter())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the tree starts");
+    let parent = child.id();
+    let _left = Unwritten(parent);
+    let until = Instant::now() + ENDS_BY_ITSELF_WITHIN;
+    let ended = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if Instant::now() >= until {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let status = ended.unwrap_or_else(|| {
+        panic!("the program went on sleeping {ENDS_BY_ITSELF_WITHIN:?} after its write failed")
+    });
+    assert!(!status.success(), "it failed, and said so: {status}");
+    let until = Instant::now() + GONE_WITHIN;
+    let mut pings = pings_of(parent);
+    while !pings.is_empty() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(200));
+        pings = pings_of(parent);
+    }
+    assert!(
+        pings.is_empty(),
+        "the ping the program started is still running: {pings:?}"
+    );
 }
 
 #[tokio::test]

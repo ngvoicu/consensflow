@@ -118,3 +118,19 @@ mod unix {
         }
     }
 }
+
+#[test]
+fn a_name_read_back_from_text_is_one_of_the_tables_and_no_other_word() {
+    assert_eq!(known_code("ENOENT"), Some("ENOENT"));
+    assert_eq!(known_code("EACCES"), Some("EACCES"));
+    for word in [
+        "",
+        "enoent",
+        "ENOENT ",
+        "hunter22",
+        "sk-abc defg",
+        "C:\\tools\\pi.cmd",
+    ] {
+        assert_eq!(known_code(word), None, "{word:?}");
+    }
+}

@@ -200,10 +200,10 @@ runs = ["runnable", "npm-shims"]
 file = "crates/cf-process/src/runnable.rs"
 find = '''
 Make the harness's Node \
-         visible to ConsensFlow, or install'''
+             visible to ConsensFlow, or install'''
 replace = '''
 Install \
-         the harness, or install'''
+             the harness, or install'''
 
 [[plant]]
 name = "deletion: a Codex that is an npm shim with no Node is said to be a server that did not start"
@@ -418,8 +418,8 @@ runs = ["runnable"]
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
 find = '''none is beside it, none is \
-             in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, and none is on \
-             the PATH ConsensFlow runs with. Install'''
+                 in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, and none is on \
+                 the PATH ConsensFlow runs with. Install'''
 replace = '''none is beside it, none is \
-             on the PATH ConsensFlow runs with, and none is in %LOCALAPPDATA%\\pi-node\\current, \
-             where Pi's installer puts one. Install'''
+                 on the PATH ConsensFlow runs with, and none is in %LOCALAPPDATA%\\pi-node\\current, \
+                 where Pi's installer puts one. Install'''

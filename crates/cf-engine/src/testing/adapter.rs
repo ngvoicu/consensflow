@@ -23,8 +23,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, LaunchId, Opening, Over,
-    Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window, Work,
+    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, LaunchId, NoDefault,
+    Opening, Over, Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window,
+    Work,
 };
 use cf_harness::records::{Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::{Servers, SilentPaste};
@@ -210,7 +211,7 @@ pub struct FakeAdapter {
     pub gone_words: RefCell<Option<String>>,
     /// The model its harness starts on where none is named (`Adapter::default_model`):
     /// left to the harness, unless a test says one, or that there is none.
-    pub default: RefCell<Result<Option<String>, String>>,
+    pub default: RefCell<Result<Option<String>, NoDefault>>,
     /// The test's items are numbered across its adapters.
     items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
@@ -706,12 +707,11 @@ impl FakeAdapter {
     }
 
     /// Its record, read with no window open, shows the turn it is in begun by the
-    /// message of `words`, which came at `at`, where a time is given.
+    /// message of `words`, which came at `at`, where a time is given. The harness reads the
+    /// opening from the words as it reads a record's ([`Opening::began_with`]): of them it keeps
+    /// the delivery whose header begins them, and no word.
     pub fn turn_began_with(&self, handle: &str, at: Option<&str>, words: &str) {
-        let opening = Opening {
-            at: at.map(str::to_owned),
-            words: words.to_owned(),
-        };
+        let opening = Opening::began_with(words, at.map(str::to_owned));
         self.with(handle, |agent| agent.opening = Some(opening.clone()));
     }
 
@@ -1302,6 +1302,15 @@ impl Asked {
 }
 
 impl Adapter for Asked {
+    /// The fake of Codex ends its window as Codex's does: with the status of why when the
+    /// supervisor could not start Codex.
+    fn never_ran(&self, status: u32) -> Option<cf_base::startup::StartFailure> {
+        (self.harness == "codex")
+            .then(|| cf_base::startup::StartKind::of_exit_status(i64::from(status)))
+            .flatten()
+            .map(cf_base::startup::StartFailure::of)
+    }
+
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         let seam = format!("adapter:{}", self.harness);
         let mut asked = json!({
@@ -1374,7 +1383,7 @@ impl Adapter for Asked {
 
     /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
     /// in a trace.
-    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         self.fake
             .defaults_asked
             .set(self.fake.defaults_asked.get() + 1);

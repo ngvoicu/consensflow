@@ -45,8 +45,8 @@ use cf_proto::specs::Variant;
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, Dialog, FirstMessage, Held, Launch, LaunchId, Observed, Over, Pane,
-    PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
+    Adapter, Admission, Agent, Dialog, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed,
+    Over, Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -194,7 +194,17 @@ impl Adapter for CodexAdapter {
         super::models::gone(words, asked)
     }
 
-    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+    /// A Codex window is `cf codex-session`, which ends with the status of why when it could
+    /// not get Codex ready (`cf_base::startup::StartKind::exit_status`). Those statuses are its
+    /// own: a status Codex returned in that range is reported as 1
+    /// (`cf_base::startup::harness_exit`), so that a window that ended with one could not have
+    /// been ended by Codex.
+    fn never_ran(&self, status: u32) -> Option<cf_base::startup::StartFailure> {
+        cf_base::startup::StartKind::of_exit_status(i64::from(status))
+            .map(cf_base::startup::StartFailure::of)
+    }
+
+    fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         Box::pin(super::models::default_model(
             &self.services.env,
             &*self.services.processes,

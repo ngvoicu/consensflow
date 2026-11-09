@@ -15,6 +15,7 @@ use std::task::{Context, Poll, Waker};
 
 use cf_base::env::Env;
 use cf_base::file::error_code;
+use cf_base::startup::{StartFailure, StartKind, StartRefusal};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 
@@ -22,6 +23,18 @@ use crate::job::Job;
 use crate::live::Live;
 use crate::terminate::{end, Reach};
 use crate::{Ending, Run};
+
+/// Why the system would not start `program`: Node's words (`spawn <file> ENOENT`) for the
+/// person's own screen, and for a note the kind of failure and the system's name for it, which
+/// the table of `error_code` holds (T-1328: `spawn pi hunter22.cmd ENOENT` is a note of
+/// `ENOENT` and no file).
+pub fn not_spawned(program: &Path, failed: &std::io::Error) -> StartRefusal {
+    let code = error_code(failed);
+    StartRefusal::new(
+        StartFailure::of_errno(code),
+        format!("spawn {} {code}", program.to_string_lossy()),
+    )
+}
 
 /// What a child's streams are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,9 +102,14 @@ impl Kept {
 }
 
 /// Starts `run` in `cwd` with the environment `env`, all of it and nothing
-/// inherited: the child, or Node's words for why it did not start
-/// (`spawn <file> ENOENT`).
-pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Result<Child, String> {
+/// inherited: the child, or why it did not start: Node's words (`spawn <file> ENOENT`) for the
+/// person's own screen, and the kind and the code a note says (`cf_base::startup`).
+pub fn spawn(
+    run: &Run,
+    cwd: Option<&Path>,
+    env: &Env,
+    streams: Streams,
+) -> Result<Child, StartRefusal> {
     let mut command = tokio::process::Command::from(run.command());
     // It runs for as long as this does, and holds what it is left to its end.
     crate::descriptors::hold_only_the_streams(command.as_std_mut());
@@ -118,20 +136,18 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
         crate::group::lead(&mut command);
     }
     crate::job::start_in_job(&mut command);
-    let mut process = crate::spawning::one_at_a_time(|| command.spawn()).map_err(|failed| {
-        format!(
-            "spawn {} {}",
-            run.program.to_string_lossy(),
-            error_code(&failed)
-        )
-    })?;
+    let mut process = crate::spawning::one_at_a_time(|| command.spawn())
+        .map_err(|failed| not_spawned(&run.program, &failed))?;
     // In a job of its own before it runs, which ends it and all it starts with the child, and
     // with this process. A program that could not be let run did not start.
     let job = match Job::of(&process, false) {
         Ok(job) => job,
         Err(why) => {
             let _ = process.start_kill();
-            return Err(format!("spawn {} {why}", run.program.to_string_lossy()));
+            return Err(StartRefusal::new(
+                StartFailure::of(StartKind::NotStarted),
+                format!("spawn {} {why}", run.program.to_string_lossy()),
+            ));
         }
     };
     // Read and let go while the child lives, whoever waits on it: one that
@@ -648,7 +664,33 @@ mod tests {
             verbatim: false,
         };
         let failed = block_on(async { spawn(&run, None, &system_env(), Streams::Quiet).err() });
-        assert_eq!(failed.as_deref(), Some("spawn /nonexistent/cli ENOENT"));
+        let failed = failed.expect("the program was not there");
+        assert_eq!(failed.words(), "spawn /nonexistent/cli ENOENT");
+    }
+
+    /// What a note says of a program the system would not start: the kind and the code, and no
+    /// file (T-1328: `spawn pi hunter22 ENOENT` lost the code with the path; a `.cmd` of that
+    /// name starts on Windows, through cmd.exe, so the name has no extension).
+    #[test]
+    fn a_start_the_system_refused_says_the_kind_and_the_code_a_note_says_and_not_the_file() {
+        let run = Run {
+            program: PathBuf::from("/nonexistent/pi hunter22"),
+            args: Vec::new(),
+            verbatim: false,
+        };
+        let failed = block_on(async { spawn(&run, None, &system_env(), Streams::Quiet).err() })
+            .expect("the program was not there");
+        assert_eq!(failed.words(), "spawn /nonexistent/pi hunter22 ENOENT");
+        assert_eq!(
+            failed.failure(),
+            StartFailure::of(StartKind::NotFound).with_errno("ENOENT")
+        );
+        let said = failed.failure().words("Pi");
+        assert_eq!(
+            said,
+            "Pi's program was not found (ENOENT); check that Pi is installed and that ConsensFlow can find it"
+        );
+        assert!(!said.contains("hunter22") && !said.contains('/'), "{said}");
     }
 
     #[cfg(unix)]

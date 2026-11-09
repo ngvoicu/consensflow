@@ -22,9 +22,9 @@ const WORDS: &str =
 /// A window of a board: its Codex home in a folder of its own, which has the memories folder
 /// (and the project folder, a window's working folder).
 struct Window {
-    root: tempfile::TempDir,
     api: ScriptedApi,
     env: Env,
+    root: tempfile::TempDir,
 }
 
 impl Window {

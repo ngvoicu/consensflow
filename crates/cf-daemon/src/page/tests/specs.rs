@@ -13,11 +13,11 @@ use crate::testing::{request, said, scene};
 /// The page over a project with a worker, on a bridge, and a home whose agents
 /// file is empty (the board reads it).
 struct Asked {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
+    _home: tempfile::TempDir,
 }
 
 fn asked() -> Asked {

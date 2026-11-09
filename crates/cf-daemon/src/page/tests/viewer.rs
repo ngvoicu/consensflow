@@ -27,10 +27,10 @@ struct Asked {
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
-    folder: tempfile::TempDir,
-    home: tempfile::TempDir,
     project: i64,
     opened: Rc<RefCell<Vec<PathBuf>>>,
+    folder: tempfile::TempDir,
+    home: tempfile::TempDir,
 }
 
 fn asked(specs: Value, files: &[(&str, &str)]) -> Asked {

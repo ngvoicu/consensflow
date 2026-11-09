@@ -5,7 +5,9 @@
 //! (`messages/continuations.rs`; the lead's design of 2026-10-17, after both
 //! reviews of round 7).
 
-use cf_ledger::{continuation, continuation_in, cut_turn, GivenUp, HandOver, MessageView, NewNote};
+use cf_ledger::{
+    continuation, continuation_in, cut_turn_unquoted, GivenUp, HandOver, MessageView, NewNote,
+};
 
 use crate::fixture::{world, World};
 
@@ -404,7 +406,7 @@ fn a_continuation_that_names_its_turn_goes_with_a_pause_of_its_task_as_any_does(
                 from: None,
                 to: session,
                 task: Some(number),
-                body: continuation_in(number, &cut_turn(None, "Write the lexer")),
+                body: continuation_in(number, &cut_turn_unquoted(None)),
             },
         )
         .expect("the continuation");

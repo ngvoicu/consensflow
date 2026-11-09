@@ -69,8 +69,8 @@ fn session_of(log: &str) -> String {
 
 /// A Muse data folder with one session's log, written as Muse writes it.
 struct Stage {
-    home: tempfile::TempDir,
     session: String,
+    home: tempfile::TempDir,
 }
 
 impl Stage {

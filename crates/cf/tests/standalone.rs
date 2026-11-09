@@ -77,9 +77,9 @@ fn a_json_word_is_the_verbs_own_and_is_not_taken_out_before_the_verb_reads_it() 
 /// folder of their own, with no harness on the PATH: what `setup` makes and
 /// `doctor` reads is all in it.
 struct User {
+    root: PathBuf,
     /// Kept for as long as the user is, and removed with them.
     _folder: tempfile::TempDir,
-    root: PathBuf,
 }
 
 impl User {

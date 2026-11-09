@@ -206,7 +206,6 @@ pub fn signature_for(archive: &str) -> String {
 /// at a checkout, the app it built and the archive made from it, its signature,
 /// the notes, and where the entry goes. All in a folder of its own.
 pub struct Release {
-    pub dir: TempDir,
     pub repo: PathBuf,
     pub bundle: PathBuf,
     pub archive: PathBuf,
@@ -215,6 +214,7 @@ pub struct Release {
     pub output: PathBuf,
     /// The app as the archive holds it.
     pub archived: App,
+    pub dir: TempDir,
 }
 
 impl Release {

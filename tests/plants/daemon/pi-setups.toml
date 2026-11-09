@@ -499,8 +499,23 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = '    match arm(time, WAIT_MS).bound(answered).await {'
-replace = '    match Some(answered.await) {'
+find = '''        let got = waited
+            .bound(async {
+                answered
+                    .wait_for(Option::is_some)
+                    .await
+                    .ok()
+                    .and_then(|got| got.clone())
+            })
+            .await;'''
+replace = '''        let _ = &waited;
+        let got = Some(
+            answered
+                .wait_for(Option::is_some)
+                .await
+                .ok()
+                .and_then(|got| got.clone()),
+        );'''
 
 [[plant]]
 name = "pi-setups: a stalled read is read beside"
@@ -509,8 +524,10 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = '    if reading.swap(true, Ordering::SeqCst) {'
-replace = '    if reading.swap(true, Ordering::SeqCst) && false {'
+find = '''                Some(going) if going.asked == asked => Turn::Share(going.answer.clone()),
+                Some(going) => Turn::Wait(going.answer.clone()),
+                None => {'''
+replace = '                _ => {'
 
 [[plant]]
 name = "pi-setups: a read that has ended still holds the folder"
@@ -519,8 +536,38 @@ runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = '        self.0.store(false, Ordering::SeqCst);'
-replace = '        self.0.store(true, Ordering::SeqCst);'
+find = '        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;'
+replace = '        let _ = &self.0;'
+
+[[plant]]
+name = "pi-setups: an ask that overlaps a read is told the folder was late at once"
+meant = "a_default_model_lookup_that_overlaps_a_listing_is_told_what_the_folder_holds"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '                Some(going) if going.asked == asked => Turn::Share(going.answer.clone()),'
+replace = '                Some(going) if going.asked == asked => return Setup::late(),'
+
+[[plant]]
+name = "pi-setups: an ask for another folder takes the answer of the read in flight"
+meant = "an_ask_for_another_folder_takes_no_answer_that_is_not_its_own"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '                Some(going) => Turn::Wait(going.answer.clone()),'
+replace = '                Some(going) => Turn::Share(going.answer.clone()),'
+
+[[plant]]
+name = "pi-setups: an ask for the same folder reads it again beside the read in flight"
+meant = "two_asks_for_the_folder_that_overlap_take_the_answer_of_the_one_read"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '                Some(going) if going.asked == asked => Turn::Share(going.answer.clone()),'
+replace = '                Some(going) if going.asked == asked && false => Turn::Share(going.answer.clone()),'
 
 [[plant]]
 name = "pi-setups: a folder not read in time is called empty"
@@ -659,9 +706,9 @@ runs = ["ps-quotable"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
 find = '''    let rows: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
-    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'''
+    screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)'''
 replace = '''    lines.iter().any(|line| {
-        screen::withheld(&[(*line).to_owned()]).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))
+        screen::withheld(&[(*line).to_owned()], None).is_some() || screen::names_a_value(lines)
     })'''
 
 [[plant]]
@@ -671,8 +718,8 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'
-replace = '    screen::withheld(&rows).is_some() || lines.iter().any(|line| NAMED_VALUE.is_match(line))'
+find = '    screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)'
+replace = '    screen::withheld(&rows, None).is_some() || lines.iter().any(|line| screen::names_a_value(&[line]))'
 
 [[plant]]
 name = "pi-setups: the block does not apply the rule of a screen"
@@ -681,8 +728,8 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'
-replace = '    NAMED_VALUE.is_match(&lines.join("\n"))'
+find = '    screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)'
+replace = '    screen::names_a_value(lines)'
 
 [[plant]]
 name = "pi-setups: the block does not look for a credential's word with a value"
@@ -691,8 +738,8 @@ runs = ["ps-quotable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/quotable.rs"
-find = '    screen::withheld(&rows).is_some() || NAMED_VALUE.is_match(&lines.join("\n"))'
-replace = '    screen::withheld(&rows).is_some()'
+find = '    screen::withheld(&rows, None).is_some() || screen::names_a_value(lines)'
+replace = '    screen::withheld(&rows, None).is_some()'
 
 [[plant]]
 name = "pi-setups: a credential's word with no value after it withholds the block"
@@ -700,7 +747,7 @@ meant = "the_words_of_pi_that_hold_no_credential_are_quoted_as_they_were"
 runs = ["ps-quotable"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/shown/quotable.rs"
+file = "crates/cf-engine/src/shown/screen.rs"
 find = '''s?["']?\s*[:=]\s*["']?[^\s"']"#,'''
 replace = '''s?["']?\s*[:=]?\s*["']?[^\s"']"#,'''
 
@@ -861,28 +908,68 @@ find = '                format!("pi refused get_available_models{IT_SAID}{said}"
 replace = '                format!("pi refused get_available_models: {said}")'
 
 [[plant]]
-name = "pi-setups: a note quotes a credential the harness said"
-meant = "the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said"
+name = "pi-setups: a note of a gone model quotes what the harness said"
+meant = "the_note_of_a_gone_model_says_the_kind_of_failure_and_no_word_a_program_said"
 runs = ["ps-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_model.rs"
-find = '''                crate::shown::quotable(why)
-                    .replacen(cf_proto::models::IT_SAID, "; it said: ", 1)
-                    .replace('\n', " / ")'''
-replace = '                why'
+find = '''                    NoDefault::Unread(Some(failure)) => failure.words(harness),'''
+replace = '''                    NoDefault::Unread(Some(failure)) => format!("{failure:?}"),'''
 
 [[plant]]
-name = "pi-setups: a note runs over lines"
-meant = "the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said"
+name = "pi-setups: a note of a gone model loses the kind of failure"
+meant = "the_note_of_a_gone_model_says_the_kind_of_failure_and_no_word_a_program_said"
 runs = ["ps-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_model.rs"
-find = '''                crate::shown::quotable(why)
-                    .replacen(cf_proto::models::IT_SAID, "; it said: ", 1)
-                    .replace('\n', " / ")'''
-replace = '                crate::shown::quotable(why)'
+find = '''                    NoDefault::Unread(Some(failure)) => failure.words(harness),'''
+replace = '''                    NoDefault::Unread(Some(_)) => format!("{harness}'s model list could not be read"),'''
+
+[[plant]]
+name = "pi-setups: a Pi that cannot be started loses its kind on the way to the lookup of the default"
+meant = "a_pi_shim_with_no_node_says_its_kind_to_the_chiefs_note_and_its_path_to_the_page_alone"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/models.rs"
+find = '''        .map_err(|said| NoDefault::Unread(said.failure))?;'''
+replace = '''        .map_err(|_| NoDefault::Unread(None))?;'''
+
+[[plant]]
+name = "pi-setups: a refusal to start Pi loses its kind on the way to the read"
+meant = "a_pi_shim_with_no_node_says_its_kind_to_the_chiefs_note_and_its_path_to_the_page_alone"
+runs = ["ps-one-shot", "ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/one_shot.rs"
+find = '''            failure: Some(refusal.failure()),
+            words: refusal.into(),'''
+replace = '''            failure: None,
+            words: refusal.into(),'''
+
+[[plant]]
+name = "pi-setups: the page loses the words of a Pi that cannot be started"
+meant = "a_pi_shim_with_no_node_says_its_kind_to_the_chiefs_note_and_its_path_to_the_page_alone"
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/one_shot.rs"
+find = '''            failure: Some(refusal.failure()),
+            words: refusal.into(),'''
+replace = '''            failure: Some(refusal.failure()),
+            words: "Pi could not be started".to_owned(),'''
+
+[[plant]]
+name = "pi-setups: a program that ended with an error says no status"
+meant = "a_conversation_that_failed_carries_its_kind_and_its_status_beside_its_words"
+runs = ["ps-one-shot"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/one_shot.rs"
+find = '''        Some(code) if kind.kind() == StartKind::Failed => kind.with_exit(i64::from(code)),'''
+replace = '''        Some(_) if kind.kind() == StartKind::Failed => kind,'''
 
 [[plant]]
 name = "pi-setups: a line that begins with at is taken for a frame"

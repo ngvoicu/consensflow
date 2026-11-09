@@ -126,6 +126,17 @@ impl Endpoint {
         })
     }
 
+    /// Loopback, as [`Endpoint::loopback`], and a folder that goes with the session as a socket's
+    /// does: a window that ran on a server that is up, whose folder a test makes impossible to remove
+    /// (a test of Unix's, where a folder can be made so).
+    #[cfg(all(test, unix))]
+    pub(crate) fn loopback_with_folder(folder: PathBuf) -> Result<Self, EndpointError> {
+        Ok(Self {
+            directory: Some(folder),
+            ..Self::loopback()?
+        })
+    }
+
     /// The private folder of the socket, which goes with the session.
     pub(crate) fn directory(&self) -> Option<&Path> {
         self.directory.as_deref()

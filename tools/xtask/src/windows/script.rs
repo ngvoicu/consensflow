@@ -96,7 +96,7 @@ pub const RUN: &str = ".windows-run.ps1";
 /// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
 /// wherever it came from: a run of another tree left 87 files there no sync listed,
 /// which a test of the `cli` suite named (zeewin, 2026-10-16).
-pub const KEPT: [&str; 18] = [
+pub const KEPT: [&str; 19] = [
     // The run's own: the list of what went over, the tree's identity, the sweep and the run
     // script (the tarball holds them beside the files, and the list names the files only),
     // the lock taken before the unpack, the records beside it, the command's batch file.
@@ -134,6 +134,13 @@ pub const KEPT: [&str; 18] = [
     // the next run's sweep took a long run's from the copy (zeewin, 2026-10-20). What is
     // older than [`REPORTS_KEPT_DAYS`] is removed there, by its own pass of the sweep.
     "evals/reports",
+    // The logs of the tasks, `.runs/<task>`, which the tree of a task holds untracked (so they go
+    // over with its files) and which a job on the machine writes into as well. The copy is one
+    // folder that every tree's runs share and it cannot tell which tree wrote a file that is no
+    // tree's, so a sweep took a task's logs while it was still working (T-1328's run took nine of
+    // T-1329's, zeewin2, 2026-11-08). The folder is one per task by the board's own way, kept
+    // whole, and what is older than [`RUNS_KEPT_DAYS`] is removed there, by a pass of its own.
+    ".runs",
 ];
 
 /// How long what a run left in `evals/reports` stays there, in days: a file or a folder last
@@ -146,6 +153,27 @@ pub const KEPT: [&str; 18] = [
 /// run going on among them; none does while the sweep runs, which is under the lock,
 /// before the run's script does anything else.
 pub const REPORTS_KEPT_DAYS: u32 = 14;
+
+/// How long what a task left in `.runs` stays there, in days (T-1342): a file or a folder last
+/// written longer ago than this is removed by the next run's sweep, by the rule of
+/// [`REPORTS_KEPT_DAYS`] (a folder is judged by what is in it, a link is not entered). No run that
+/// is queued or going wants it: a run waits a day at most (`--wait`), and a task that has not
+/// written a log in two weeks has its facts in the brain, where the board's cleaning puts them. A
+/// job still writing keeps its log young. The same fortnight as the reports', which are the same
+/// kind of thing.
+pub const RUNS_KEPT_DAYS: u32 = 14;
+
+/// How old a folder of the test families in the user's Temp is before the sweep takes it away, in
+/// days (T-1333): by the last change of the folder itself. The sweep runs under the lock, so no run
+/// of this runner (or Kluris's) is using one, and a test folder that is a day old is a dead
+/// run's: a test whose `TempDir` could not be removed (Windows will not remove a folder from under
+/// a file a program has open) or a process that was killed before it dropped it.
+pub const TEMP_KEPT_DAYS: u32 = 1;
+
+/// The most folders of those families one sweep takes away, oldest first: a machine that has not
+/// been swept holds tens of thousands (zeewin and zeewin2 held 45,000 on 2026-11-07), and a run is
+/// not held up for all of them. The next run takes the next ones.
+pub const TEMP_SWEPT_AT_MOST: u32 = 3000;
 
 /// What `--build` runs first: the packages, the page, a pane's cf.exe and the pane host.
 pub const BUILD_STEPS: [&str; 6] = [
@@ -419,9 +447,16 @@ pub fn run_script(script: &Script) -> String {
             )
         })
         .collect();
+    // A run that installs the packages itself (`--build`) has nothing to hold them to.
+    let packages = if script.steps.iter().any(|step| step.starts_with("npm ci")) {
+        String::new()
+    } else {
+        packages_check()
+    };
     fill(
         RUN_TEMPLATE,
         &[
+            ("packages", &packages),
             ("job", JOB_SOURCE),
             ("node", script.node),
             ("in_job", IN_JOB),
@@ -480,6 +515,10 @@ fn limits_of(limits: Option<Limits>) -> String {
 ///   folder itself when it is one. What cannot be removed there is said and does not end
 ///   the run: it is no file of the tree. (The matrix's `windows/` folders are written on the
 ///   Mac, not here.)
+/// - And `.runs`, which is kept as well ([`RUNS_KEPT_DAYS`]), by the same pass with its own
+///   cutoff: the logs of the tasks that share the copy are not taken by the run of another
+///   tree, and are not kept for ever. Only the folder named `.runs` is: `.runs-other` is no
+///   task's.
 /// - Then the files unpacked are held to the tree that was sent: a SHA-256 over the files
 ///   the list names (in its order, each as the length of its name, its name, its kind and,
 ///   for a file, its bytes; a link or a folder is `other`, with no bytes), its first 16 hex
@@ -520,6 +559,36 @@ pub fn sweep_script() -> String {
             ("kept", &kept.join(", ")),
             ("excluded", &excluded.join(", ")),
             ("days", &REPORTS_KEPT_DAYS.to_string()),
+            ("runs_days", &RUNS_KEPT_DAYS.to_string()),
+            ("temp", &temp_sweep()),
+        ],
+    )
+}
+
+/// The sweep of the test families in the user's Temp, as the sweep holds it (T-1333): the
+/// function that takes them away and its call. The marks around the function are what the tests
+/// take it out by.
+///
+/// Which folders are ours is told by their names alone, and the whole name: `cf-dispatch-` and
+/// `consensflow-integration-` and six letters or digits (a folder, and the `-left.txt` file beside
+/// the second), `cf-pane-probe-…`, `T-<number>-…` (a task's probe), and `.tmp` and six letters or
+/// digits (the `tempfile` crate's own name, which every program that uses it shares) when the
+/// folder is empty or holds only what ConsensFlow's tests make in one: the ledger and its files,
+/// the log and the trace, the stand-in homes of the harnesses. Nothing else in Temp is looked at
+/// (zeewin2's, which is Gabriel's, held 4,416 such `.tmp` folders on 2026-11-08, every one of
+/// them one of these, and a Codex, a Chrome, a Muse and PostgreSQL's installer besides).
+///
+/// A folder is taken only when it is a day old ([`TEMP_KEPT_DAYS`]) and no program runs from it
+/// or has its name on its command line; where the programs cannot be listed nothing is taken.
+/// Windows refuses to remove a folder with a file open in it, which is the last word. Only a Temp
+/// that is under the user's profile is swept. At most
+/// [`TEMP_SWEPT_AT_MOST`] go in a sweep. What cannot be taken is said and never ends the run.
+fn temp_sweep() -> String {
+    fill(
+        TEMP_SWEEP,
+        &[
+            ("days", &TEMP_KEPT_DAYS.to_string()),
+            ("most", &TEMP_SWEPT_AT_MOST.to_string()),
         ],
     )
 }
@@ -716,7 +785,8 @@ Set-Location $dir
 $ErrorActionPreference = 'Continue'
 $env:«test_machine» = «machine»
 Write-Output "== test machine: $env:«test_machine»"
-«limits»foreach ($step in @(«steps»)) {
+«limits»$steps = @(«steps»)
+«packages»foreach ($step in $steps) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
@@ -734,6 +804,114 @@ $run = Join-Path $dir '«command_file»'
 [IO.File]::WriteAllText($run, "@echo off«crlf»" + '«command»' + "«crlf»")
 cmd /c "$run 2>&1"
 Exit-Run $LASTEXITCODE
+"##;
+
+/// What the packages of a run without `--build` are held to ([`packages_check`]): the program,
+/// in Node (the lockfiles are JSON, and Windows PowerShell 5.1 reads little of it), that the check
+/// pipes to `node - <folder>`. It prints one line and ends with 1 where the folder's
+/// `node_modules` are not what its `package-lock.json` says, and ends with 0, saying nothing,
+/// where they are or the folder has no lockfile.
+///
+/// - npm's own record of what it installed (`node_modules/.package-lock.json`, with no entry for
+///   the root) is compared with the lockfile the run shipped: a package missing, at another
+///   version or integrity, or left that the lockfile has dropped.
+/// - What the lockfile lists and `npm ci` leaves out is not missing: a package marked optional,
+///   and one for another system or processor than the one Node runs on (`esbuild`'s binaries for
+///   every system are listed, and Windows installs its own). Were it, every run would be refused.
+/// - A lockfile it cannot read is a difference too, said.
+const PACKAGES_JS: &str = r#"const fs = require('fs')
+const root = process.argv[2]
+const read = (file) => {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8')).packages || {}
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+}
+const another = (list, mine) => {
+  if (!Array.isArray(list) || list.length === 0) return false
+  if (list.includes('!' + mine)) return true
+  const allowed = list.filter((word) => !word.startsWith('!'))
+  return allowed.length > 0 && !allowed.includes(mine)
+}
+const list = (words) => words.slice(0, 3).join(', ') + (words.length > 3 ? ' and ' + (words.length - 3) + ' more' : '')
+const name = (key) => key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length)
+try {
+  const shipped = read(root + '/package-lock.json')
+  if (shipped === null) process.exit(0)
+  const installed = read(root + '/node_modules/.package-lock.json')
+  if (installed === null) {
+    console.log('node_modules holds no .package-lock.json: no npm ci has been run there')
+    process.exit(1)
+  }
+  const missing = []
+  const changed = []
+  const extra = []
+  for (const [key, entry] of Object.entries(shipped)) {
+    if (!key.startsWith('node_modules/')) continue
+    const have = installed[key]
+    if (!have) {
+      const left = entry.optional === true || another(entry.os, process.platform) || another(entry.cpu, process.arch)
+      if (!left) missing.push(name(key) + ' ' + entry.version)
+    } else if (have.version !== entry.version || (have.integrity && entry.integrity && have.integrity !== entry.integrity)) {
+      changed.push(name(key) + ' ' + have.version + ' where the lockfile says ' + entry.version)
+    }
+  }
+  for (const key of Object.keys(installed)) {
+    if (key.startsWith('node_modules/') && !(key in shipped)) extra.push(name(key))
+  }
+  const said = []
+  if (missing.length) said.push('missing: ' + list(missing))
+  if (changed.length) said.push('changed: ' + list(changed))
+  if (extra.length) said.push('extra: ' + list(extra))
+  if (said.length) {
+    console.log(said.join('; '))
+    process.exit(1)
+  }
+} catch (error) {
+  console.log('could not be compared: ' + error.message)
+  process.exit(1)
+}
+"#;
+
+/// The check of a run without `--build` (T-1333, T-138): each folder whose `node_modules` are not
+/// what its lockfile says gets its own `npm ci`, among the run's steps, and a line that says why.
+/// It ends the question the build's `npm ci` answers, for the runs that do not build: `--build`
+/// installs the packages and a run without it used whatever an earlier build had installed, saying
+/// nothing (12 UI plants failed on zeewin, 2026-10-17, "Could not resolve mermaid").
+///
+/// It makes the packages so and does not refuse, as [`PREPARE_STEPS`] does for the crates and the
+/// console host: a copy that nobody has built in is not left to run on what happens to be there,
+/// the step is idempotent, and the run says what it did. A refusal would cost a run's wait for the
+/// machine twice, and `--build` also builds the page and the bundle, which a run of tests does not
+/// need. The step is the build's own line, so it runs as it does there, and a run whose `npm ci`
+/// fails ends with its status. A tree with no lockfile in a folder has no `npm ci` to run there.
+///
+/// The marks around it are what the tests take the check out by.
+pub fn packages_check() -> String {
+    fill(
+        PACKAGES_TEMPLATE,
+        &[
+            ("js", PACKAGES_JS),
+            ("root", BUILD_STEPS[0]),
+            ("app", BUILD_STEPS[1]),
+        ],
+    )
+}
+
+const PACKAGES_TEMPLATE: &str = r##"# packages: begin
+$packagesJs = @'
+«js»'@
+foreach ($package in @(@('.', 'node_modules', '«root»'), @('app', 'app/node_modules', '«app»'))) {
+  $differs = (@($packagesJs | node - $package[0] 2>&1 | ForEach-Object { "$_" }) -join ' ').Trim()
+  if ($LASTEXITCODE -ne 0) {
+    if (-not $differs) { $differs = 'node could not compare them' }
+    Write-Output "== packages: $($package[1]) is not what the lockfile says ($differs), so its npm ci runs first"
+    $steps += $package[2]
+  }
+}
+# packages: end
 "##;
 
 /// The C# that `Add-Type` makes of the job in the run script: a job that ends every
@@ -827,9 +1005,15 @@ if (Test-Path -LiteralPath $reports -PathType Container) {
   $folder = Get-Item -LiteralPath $reports
   if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }
 }
+$cutoff = (Get-Date).ToUniversalTime().AddDays(-«runs_days»)
+$runs = Join-Path $dir '.runs'
+if (Test-Path -LiteralPath $runs -PathType Container) {
+  $folder = Get-Item -Force -LiteralPath $runs
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }
+}
 foreach ($name in $removed) { Write-Output "== removed $name" }
 if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
-if ($unpruned.Count) { Write-Output "What the reports held past their age could not be removed: $($unpruned -join '; ')" }
+if ($unpruned.Count) { Write-Output "What the reports and the logs of the tasks held past their age could not be removed: $($unpruned -join '; ')" }
 $sha = [Security.Cryptography.SHA256]::Create()
 $utf8 = [Text.UTF8Encoding]::new($false)
 foreach ($name in @(Get-Content -Encoding UTF8 (Join-Path $dir '«synced»'))) {
@@ -868,6 +1052,72 @@ $own = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'
 $left = '^(?<folder>.+)\.[0-9a-f]{8}-[0-9a-f]{8}\.tgz$'
 try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $own -and $_.LastWriteTime -lt (Get-Date).AddHours(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
 try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $left -and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) -and $_.LastWriteTime -lt (Get-Date).AddDays(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
+«temp»"##;
+
+/// The sweep of the test families in Temp ([`temp_sweep`]).
+const TEMP_SWEEP: &str = r##"# temp: begin
+function Clear-TestTemp {
+  param([string]$Temp, $Processes, [DateTime]$Now, [int]$Cap, [switch]$DryRun)
+  $result = [pscustomobject]@{ Removed = 0; Held = 0; Failed = @(); Left = 0; Skipped = $false; Taken = [Collections.Generic.List[string]]::new() }
+  if ($null -eq $Processes) { $result.Skipped = $true; return $result }
+  $cutoff = $Now.ToUniversalTime().AddDays(-«days»)
+  $made = @('consensflow.db', 'consensflow.db-wal', 'consensflow.db-shm', 'consensflow.db-journal', 'events.jsonl', 'events.jsonl.lock', 'daemon.log', 'daemon.log.lock', 'data', 'home', 'consensflow', 'profile', 'tree', 'sessions.db', 'wire.jsonl')
+  $found = [Collections.Generic.List[IO.FileSystemInfo]]::new()
+  foreach ($item in ([IO.DirectoryInfo]::new($Temp)).GetFileSystemInfos()) {
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+    $name = $item.Name
+    $folder = $item -is [IO.DirectoryInfo]
+    $ours = $false
+    if ($folder -and $name -cmatch '^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$') { $ours = $true }
+    elseif (-not $folder -and $name -cmatch '^consensflow-integration-[A-Za-z0-9]{6}-left\.txt$') { $ours = $true }
+    elseif ($folder -and $name -cmatch '^cf-pane-probe-[A-Za-z0-9._-]+$') { $ours = $true }
+    elseif ($folder -and $name -cmatch '^T-[0-9]{2,5}-[A-Za-z0-9._-]+$') { $ours = $true }
+    elseif ($folder -and $name -cmatch '^\.tmp[A-Za-z0-9]{6}$') {
+      $ours = $true
+      try { foreach ($inside in $item.GetFileSystemInfos()) { if ($made -notcontains $inside.Name.ToLowerInvariant()) { $ours = $false; break } } } catch { $ours = $false }
+    }
+    if ($ours -and $item.LastWriteTimeUtc -lt $cutoff) { $found.Add($item) }
+  }
+  $order = @($found | Sort-Object LastWriteTimeUtc)
+  $result.Left = [Math]::Max(0, $order.Count - $Cap)
+  foreach ($item in ($order | Select-Object -First $Cap)) {
+    $path = $item.FullName
+    # By its name, which has its random part in it: a path may be written as 8.3 short names (GitHub's
+    # runner) by a program and as long ones by .NET Framework, and a program that names the folder
+    # runs from it or in it.
+    $name = $item.Name
+    $holds = @($Processes | Where-Object { ($_.ExecutablePath -and $_.ExecutablePath.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.CommandLine -and $_.CommandLine.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) })
+    if ($holds.Count) { $result.Held++; continue }
+    try {
+      if ($DryRun) { }
+      elseif ($item -is [IO.FileInfo]) { $item.Attributes = [IO.FileAttributes]::Normal; $item.Delete() }
+      else {
+        try { $item.Delete($true) } catch {
+          foreach ($inner in Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue) { try { $inner.Attributes = [IO.FileAttributes]::Normal } catch {} }
+          $item.Delete($true)
+        }
+      }
+      $result.Removed++
+      $result.Taken.Add($item.Name)
+    } catch { $result.Failed += $item.Name }
+  }
+  $result
+}
+# temp: end
+$swept = $null
+# Only the Temp that is under the user's profile, which is the user's own (the tests of this
+# program give a case a profile of its own, and must not sweep the Temp of the person running them).
+if ([IO.Path]::GetTempPath().StartsWith($env:USERPROFILE.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+  try {
+    $running = try { @(Get-CimInstance Win32_Process -ErrorAction Stop) } catch { $null }
+    $swept = Clear-TestTemp -Temp ([IO.Path]::GetTempPath()) -Processes $running -Now (Get-Date) -Cap «most»
+  } catch { Write-Output "The test folders in Temp could not be looked at: $($_.Exception.Message)" }
+}
+if ($swept -and $swept.Skipped) { Write-Output '== temp: the programs of this machine could not be listed, so no test folder of the user''s Temp was taken away' }
+elseif ($swept -and ($swept.Removed -or $swept.Held -or $swept.Failed.Count -or $swept.Left)) {
+  Write-Output "== temp: $($swept.Removed) test folders a day old or more taken away from the user's Temp, $($swept.Held) kept (a program runs from them), $($swept.Failed.Count) that Windows would not remove, $($swept.Left) left for the next run"
+  if ($swept.Failed.Count) { Write-Output "The test folders in Temp that could not be removed: $(@($swept.Failed | Select-Object -First 5) -join '; ')" }
+}
 "##;
 
 /// The script that lists the reports, with a mark where the copy's folder goes.

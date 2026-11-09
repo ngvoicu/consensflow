@@ -35,7 +35,8 @@ use super::paths;
 use super::session_hook;
 use super::window::{MuseWindow, CLEAR_INPUT};
 use crate::contract::{
-    Adapter, FirstMessage, Input, Launch, LaunchId, Prepared, Records, Skill, Specs, Used, Work,
+    Adapter, FirstMessage, Input, Launch, LaunchId, NoDefault, Prepared, Records, Skill, Specs,
+    Used, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -136,7 +137,7 @@ impl Adapter for MuseAdapter {
         super::models::gone(words, asked)
     }
 
-    fn default_model(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn default_model(&self) -> Work<'_, Result<Option<String>, NoDefault>> {
         Box::pin(super::models::default_model(
             self.env(),
             &*self.services.processes,

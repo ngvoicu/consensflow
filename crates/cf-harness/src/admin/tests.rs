@@ -22,12 +22,12 @@ mod real;
 /// An admin over a throwaway home, on a clock and with programs and feeds the
 /// test scripts.
 pub(super) struct Fixture {
-    pub(super) root: tempfile::TempDir,
     pub(super) env: Env,
     pub(super) time: Rc<ManualTime>,
     pub(super) capture: Rc<ScriptedCapture>,
     pub(super) latest: Rc<ScriptedLatest>,
     pub(super) admin: Rc<HarnessAdmin>,
+    pub(super) root: tempfile::TempDir,
 }
 
 impl Fixture {

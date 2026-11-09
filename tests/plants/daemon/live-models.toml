@@ -121,8 +121,8 @@ runs = ["lm-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/models.rs"
-find = "    let listing = listed(env, processes, time, false, Settle::No).await?;"
-replace = "    let listing = listed(env, processes, time, false, Settle::WaitForProviders).await?;"
+find = "    let listing = listed(env, processes, time, false, Settle::No)\n"
+replace = "    let listing = listed(env, processes, time, false, Settle::WaitForProviders)\n"
 
 [[plant]]
 name = "live models: the wait takes the whole cap from a read that began slowly"

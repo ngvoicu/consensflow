@@ -20,9 +20,9 @@ fn pane() -> Pane {
 
 /// A home with Muse's data folder in it, and the fakes a window runs on.
 struct Home {
-    dir: tempfile::TempDir,
     env: Env,
     fakes: Fakes,
+    dir: tempfile::TempDir,
 }
 
 impl Home {

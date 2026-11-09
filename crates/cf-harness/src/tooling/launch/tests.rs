@@ -21,9 +21,9 @@ const DEVIN: &str = "devin 3000.11.3 (9c803229faa4)";
 /// A home of its own, with a stand-in `devin` on its `PATH` that the fakes say
 /// `version` for.
 struct Home {
-    dir: tempfile::TempDir,
     env: Env,
     fakes: Fakes,
+    dir: tempfile::TempDir,
 }
 
 impl Home {

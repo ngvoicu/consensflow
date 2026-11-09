@@ -9,11 +9,11 @@ use super::reading::home_with;
 use super::*;
 
 struct Meeting {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
+    _home: tempfile::TempDir,
 }
 
 fn meeting() -> Meeting {

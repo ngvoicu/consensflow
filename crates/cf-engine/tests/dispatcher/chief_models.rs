@@ -8,9 +8,10 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::Context;
+use cf_base::startup::{StartFailure, StartKind};
+use cf_engine::testing::{Context, Made};
 use cf_engine::SwitchWhen;
-use cf_harness::contract::Used;
+use cf_harness::contract::{NoDefault, Used};
 use serde_json::{json, Value};
 
 use crate::chiefs::{chief_of, to, to_human};
@@ -114,7 +115,7 @@ fn a_fresh_chief_after_a_switch_opens_on_the_model_picked_and_reads_no_record() 
 
 /// A project whose chief's harness says `gone_words` of a model it does not have, and
 /// starts on `default` where none is named.
-fn harness_without_the_model(default: Result<Option<String>, String>) -> Context {
+fn harness_without_the_model(default: Result<Option<String>, NoDefault>) -> Context {
     let context = Context::new();
     *context.adapter.gone_words.borrow_mut() = Some("Unknown model".to_owned());
     *context.adapter.default.borrow_mut() = default;
@@ -190,9 +191,9 @@ fn a_reopen_never_asks_for_a_gone_model_again_though_the_record_still_names_it()
 
 #[test]
 fn a_gone_model_the_harness_has_no_default_for_keeps_the_chief_closed_until_a_switch() {
-    let context = harness_without_the_model(Err(
-        "Pi offers no model that is not a contributor model".to_owned(),
-    ));
+    let context = harness_without_the_model(Err(NoDefault::NoneOffered(
+        "Pi offers no model that is not a contributor model",
+    )));
     let project = opened_on_a_gone_model(&context);
     for _ in 0..3 {
         context.pass().unwrap();
@@ -220,100 +221,49 @@ fn a_gone_model_the_harness_has_no_default_for_keeps_the_chief_closed_until_a_sw
     assert_eq!(launched["agent"], agent("gpt-5.6-luna", None));
 }
 
-/// The words of a harness that found no default (a Pi read that failed quotes what Pi said,
-/// and what Pi said can carry a credential) reach the human's note without it (T-1270). **The
-/// words of Pi are screened whole, before any cut** (the third reading, F2): if anything in
-/// what was kept of them may hold a credential, none of them is quoted, whatever line it is on
-/// and however a value runs over lines. The description of the failure and its exit code stay,
-/// in the note's one paragraph.
+/// A harness whose list could not be read says why to the human's note by the kind of failure and
+/// its code, which its producer typed (`NoDefault`, T-1328), and by no word of the program's: a
+/// Pi read that failed carried what Pi said on its error stream, and that can carry a credential
+/// it was given (T-1270, then the joint review T-1322); and its program's path can name one. The
+/// full words stay on the page.
 #[test]
-fn the_note_of_a_gone_model_never_quotes_a_credential_the_harness_said() {
-    for (said, hidden) in [
+fn the_note_of_a_gone_model_says_the_kind_of_failure_and_no_word_a_program_said() {
+    for (why, said) in [
         (
-            "Error: Failed to load extension\nextension failed: API_KEY: sk-abcd efghijkl mnopqrst\n\
-             password: correct horse battery staple\nAuthorization: Bearer SYNTHETICSTDERRTOKEN0123456789",
-            vec!["sk-abcd", "efghijkl", "mnopqrst", "horse", "battery", "staple", "SYNTHETICSTDERRTOKEN"],
-        ),
-        // The third reading's probes: a value that runs over lines, and a label that five lines
-        // in a row would have lost to a cut.
-        (
-            "Error: extension failed\nAPI_KEY: sk-abcd\nefghijkl\nmnopqrst",
-            vec!["sk-abcd", "efghijkl", "mnopqrst"],
+            NoDefault::Unread(Some(StartFailure::of(StartKind::Failed).with_exit(1))),
+            "Claude Code's program ended with an error (exit code 1)",
         ),
         (
-            "password: correct\nhorse\nbattery\nstaple\nprovider unavailable",
-            vec!["correct", "horse", "battery", "staple"],
+            NoDefault::Unread(Some(StartFailure::of(StartKind::NoNodeForPi))),
+            "Node.js was not found for Claude Code; install Node 22.19 or newer, or run Pi's installer again",
         ),
         (
-            "{\n  \"error\": {\n    \"apiKey\": \"sk-abcd efghijkl\"\n  }\n}",
-            vec!["sk-abcd", "efghijkl"],
-        ),
-        // T-1276: a label in a line of the shape of a stack frame, and a URL's user and
-        // password that a line end splits.
-        (
-            "at password: correct (native)\nhorse\nbattery\nstaple",
-            vec!["correct", "horse", "battery", "staple"],
+            NoDefault::Unread(Some(
+                StartFailure::of(StartKind::NotFound).with_errno("ENOENT"),
+            )),
+            "Claude Code's program was not found (ENOENT); check that Claude Code is installed and that ConsensFlow can find it",
         ),
         (
-            "FetchError: https://alder:copper\nwillow@host.invalid/catalog",
-            vec!["alder", "copper", "willow"],
+            NoDefault::Unread(Some(StartFailure::of(StartKind::NoAnswer))),
+            "Claude Code's program did not answer in time",
         ),
-        // T-1276: what a read of Pi that kept only the end of what Pi said puts in place of it.
-        (cf_proto::models::WORDS_WITHHELD, vec![]),
+        (
+            NoDefault::Unread(None),
+            "Claude Code's model list could not be read",
+        ),
     ] {
-        let context = harness_without_the_model(Err(format!(
-            "pi --mode rpc ended before it answered (exit 1); it said:\n{said}"
-        )));
+        let context = harness_without_the_model(Err(why));
         let project = opened_on_a_gone_model(&context);
         context.pass().unwrap();
         let told: Vec<String> = to_human(&context, project)
             .into_iter()
             .filter(|body| body.contains("no longer available"))
             .collect();
-        assert_eq!(told.len(), 1, "{told:?}");
-        for leaked in hidden {
-            assert!(!told[0].contains(leaked), "{leaked} in {}", told[0]);
-        }
-        assert!(
-            told[0].contains("(Pi's words withheld: they may hold a credential)"),
-            "Pi's words were withheld: {}",
-            told[0]
+        assert_eq!(
+            told,
+            [format!("The chief's model, claude-opus-5, is no longer available in Claude Code, and ConsensFlow found no other to start it on ({said}): switch the chief to another model.")]
         );
-        assert!(
-            told[0].contains("ended before it answered (exit 1)"),
-            "the description and the exit code are said: {}",
-            told[0]
-        );
-        assert!(!told[0].contains('\n'), "a note is one paragraph: {}", told[0]);
     }
-}
-
-/// The words of Pi that hold no credential are in the note, as they were.
-#[test]
-fn the_note_of_a_gone_model_quotes_the_words_of_pi_that_hold_no_credential() {
-    let context = harness_without_the_model(Err(
-        "pi --mode rpc ended before it answered (exit 1); it said:\nError: Failed to load \
-         extension \"/x/e.ts\": boom\nHint: Start without extensions using \"pi -ne\"."
-            .to_owned(),
-    ));
-    let project = opened_on_a_gone_model(&context);
-    context.pass().unwrap();
-    let told: Vec<String> = to_human(&context, project)
-        .into_iter()
-        .filter(|body| body.contains("no longer available"))
-        .collect();
-    assert_eq!(told.len(), 1, "{told:?}");
-    assert!(
-        told[0].contains("Error: Failed to load extension \"/x/e.ts\": boom")
-            && told[0].contains("Hint: Start without extensions using \"pi -ne\"."),
-        "{}",
-        told[0]
-    );
-    assert!(
-        !told[0].contains("withheld") && !told[0].contains('\n'),
-        "{}",
-        told[0]
-    );
 }
 
 #[test]
@@ -342,7 +292,7 @@ fn a_turn_that_fails_on_a_gone_model_closes_the_window_and_starts_the_chief_on_t
 
 #[test]
 fn what_waits_for_a_chief_held_on_a_gone_model_waits_for_the_chief_switched_in() {
-    let context = harness_without_the_model(Err("no model to start on".to_owned()));
+    let context = harness_without_the_model(Err(NoDefault::NoneOffered("no model to start on")));
     let project = opened_on_a_gone_model(&context);
     // The human's word to the chief, queued before its window opens again.
     let note = context.note_from_consensflow(project, "chief", "Look at T-1");
@@ -493,11 +443,19 @@ fn a_window_given_up_on_with_a_gone_models_words_is_tried_again_and_keeps_its_mo
     assert!(to_human(&context, project.id)
         .iter()
         .all(|body| !body.contains("no longer available")));
-    assert!(context
-        .adapter
-        .prepared()
+    // Tried again at the backoff, on the model it asked for: a given-up launch is no refusal.
+    context.advance(10_000);
+    context.pass().unwrap();
+    let launches = context.adapter.prepared();
+    assert!(launches.len() >= 2, "{launches:?}");
+    assert!(launches
         .iter()
         .all(|launch| launch["agent"] == agent("claude-opus-5", None)));
+    let chief = chief_of(&context, project.id);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("claude-opus-5"), None)
+    );
 }
 
 /// A failed turn is read in its record's own words, never its screen's.
@@ -550,7 +508,7 @@ fn a_failed_turn_whose_record_names_another_gone_model_keeps_the_chiefs() {
 /// model stays the human's pick: never none, which would be the harness's own default.
 #[test]
 fn a_chief_held_for_no_default_stays_held_across_a_restart_and_is_told_once() {
-    let context = harness_without_the_model(Err("no model to start on".to_owned()));
+    let context = harness_without_the_model(Err(NoDefault::NoneOffered("no model to start on")));
     let project = opened_on_a_gone_model(&context);
     for _ in 0..3 {
         context.pass().unwrap();
@@ -740,7 +698,7 @@ fn costs(context: &Context) -> (i64, usize, usize, usize, usize) {
 /// no launch reads its harness (Calliope's P2a, T-994).
 #[test]
 fn a_held_chief_with_a_queued_message_costs_a_pass_nothing() {
-    let context = harness_without_the_model(Err("no model to start on".to_owned()));
+    let context = harness_without_the_model(Err(NoDefault::NoneOffered("no model to start on")));
     let project = opened_on_a_gone_model(&context);
     for _ in 0..3 {
         context.pass().unwrap();
@@ -990,4 +948,125 @@ fn a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief() {
         "queued",
         "what waited went in"
     );
+}
+
+/// A Codex chief launched on `retired`, whose window ends as it opens with `status` and `rows` on
+/// its screen, within the launch's budget and before it took a message, on a harness whose default
+/// is `gpt-5.6-luna`. Where the chief goes on: the project's id.
+fn codex_chief_refused_its_model(status: u32, rows: &[&str]) -> (Context, i64) {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    *context.codex.gone_words.borrow_mut() = Some("model is not supported".to_owned());
+    *context.codex.default.borrow_mut() = Ok(Some("gpt-5.6-luna".to_owned()));
+    context.host.exits_showing(Some(status), None, Some(rows));
+    *context.host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "codex", "model": "retired" },
+            "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
+        }))
+        .unwrap()
+        .unwrap()
+        .id;
+    context.host.exits_showing(None, None, None);
+    (context, project)
+}
+
+/// That the chief was opened again at once on the harness's default, its model gone.
+fn recovered_on_the_default(context: &Context, project: i64, said: &str) {
+    assert_eq!(
+        context.project(project).state,
+        "open",
+        "{said}: nothing closed"
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let launches = context.codex.prepared();
+    assert_eq!(launches.len(), 2, "{said}: {launches:?}");
+    assert_eq!(launches[0]["agent"], agent("retired", None), "{said}");
+    assert_eq!(launches[1]["agent"], agent("gpt-5.6-luna", None), "{said}");
+    let chief = chief_of(context, project);
+    assert_eq!(
+        (chief.model.as_deref(), chief.gone_model.as_deref()),
+        (Some("gpt-5.6-luna"), Some("retired")),
+        "{said}"
+    );
+}
+
+/// T-1328, the third reading of T-1322: a window ConsensFlow's own program ended with one of the
+/// statuses it uses for a start that failed (70 to 80) had its words replaced by the typed note,
+/// and the engine read that note, not the screen, for a model the harness no longer has: the
+/// chief was not opened again on the default. Recovery reads what the window showed, whatever
+/// status it ended with and whatever the note says of it.
+#[test]
+fn a_retired_model_is_recovered_whatever_status_the_codex_window_ended_with() {
+    let words = "The 'retired' model is not supported when using Codex with a ChatGPT account";
+    for status in (70..=80).chain([1, 2, 69, 81, 127, 255]) {
+        let (context, project) = codex_chief_refused_its_model(status, &[words]);
+        recovered_on_the_default(&context, project, &format!("status {status}"));
+    }
+}
+
+/// The same recovery on a screen that also names a secret-like word (a footer that counts
+/// tokens): the note quotes none of such a screen, and recovery is not the note's.
+#[test]
+fn a_retired_model_is_recovered_though_its_screen_also_names_a_secret_like_word() {
+    let rows = [
+        "The 'retired' model is not supported when using Codex with a ChatGPT account",
+        "Token usage: 0",
+    ];
+    for status in [1, 70] {
+        let (context, project) = codex_chief_refused_its_model(status, &rows);
+        recovered_on_the_default(
+            &context,
+            project,
+            &format!("status {status}, a screen naming a token"),
+        );
+    }
+}
+
+/// A window that showed nothing of a gone model has no evidence of one, whatever its note says: a
+/// Codex chief whose window ended with a status of why (a start that failed, the note names its
+/// kind) and whose screen the host did not send (or was empty) is not opened again on the default.
+/// Recovery is the window's own words; a note is made after them, and is no evidence of its own.
+#[test]
+fn a_chief_whose_window_showed_nothing_of_a_gone_model_is_not_recovered_whatever_the_note_says() {
+    for rows in [None, Some(&[][..]), Some(&["Codex is starting"][..])] {
+        let context = Context::made(Made {
+            codex: true,
+            ..Made::default()
+        });
+        *context.codex.gone_words.borrow_mut() = Some("model is not supported".to_owned());
+        *context.codex.default.borrow_mut() = Ok(Some("gpt-5.6-luna".to_owned()));
+        context.host.exits_showing(Some(72), None, rows);
+        *context.host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "codex", "model": "retired" },
+                "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
+            }))
+            .unwrap()
+            .unwrap()
+            .id;
+        context.host.exits_showing(None, None, None);
+        context.pass().unwrap();
+        let chief = chief_of(&context, project);
+        assert_eq!(
+            (chief.model.as_deref(), chief.gone_model.as_deref()),
+            (Some("retired"), None),
+            "{rows:?}: the model is kept"
+        );
+        assert_eq!(context.project(project).state, "suspended", "{rows:?}");
+        assert_eq!(
+            context.codex.prepared().len(),
+            1,
+            "{rows:?}: not opened again"
+        );
+    }
 }

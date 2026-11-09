@@ -19,6 +19,7 @@ use cf_proto::agents::Harness;
 use cf_proto::models::{ModelChoice, ModelListing};
 use serde_json::{json, Value};
 
+use crate::contract::NoDefault;
 use crate::detect::executable;
 use crate::seams::processes::{Processes, Program};
 use crate::seams::Time;
@@ -173,7 +174,7 @@ pub(crate) async fn default_model(
     env: &Env,
     processes: &dyn Processes,
     time: &dyn Time,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, NoDefault> {
     Ok(listed(env, processes, time)
         .await
         .ok()

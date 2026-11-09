@@ -25,13 +25,13 @@ pub(super) fn answer(request: &str, ids: &[&str]) -> String {
 }
 
 pub(super) struct StandIn {
-    _folder: tempfile::TempDir,
     /// Pi's folder: the pipe tests, which only Unix has, make a file of it a pipe.
     #[cfg_attr(not(unix), allow(dead_code))]
     pub agent: PathBuf,
     pub env: Env,
     pub processes: Rc<ScriptedProcesses>,
     pub time: Rc<ManualTime>,
+    _folder: tempfile::TempDir,
 }
 
 impl StandIn {
@@ -90,13 +90,11 @@ impl StandIn {
 
     /// The read, for a Pi that needs no clock.
     pub fn read(&self, fetch: bool) -> Result<ModelListing, String> {
-        eventually(Box::pin(listed(
-            &self.env,
-            &*self.processes,
-            &*self.time,
-            fetch,
-            Settle::No,
-        )))
+        eventually(Box::pin(async {
+            listed(&self.env, &*self.processes, &*self.time, fetch, Settle::No)
+                .await
+                .map_err(String::from)
+        }))
     }
 
     /// The read, begun, for a Pi that waits on the clock.
@@ -108,7 +106,9 @@ impl StandIn {
         );
         let mut driver = Driver::default();
         driver.begin(0, async move {
-            listed(&env, &*processes, &*time, fetch, Settle::No).await
+            listed(&env, &*processes, &*time, fetch, Settle::No)
+                .await
+                .map_err(String::from)
         });
         driver
     }

@@ -85,7 +85,7 @@ fn fails_what_was_given_to_a_member_on_it_by_name_and_its_requester_hears_why() 
     let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
     assert_match(
         &note.body,
-        r"^T-1 failed: the launch failed: ConsensFlow cannot open pi windows\.",
+        r"^T-1 failed: the launch failed: ConsensFlow cannot open Pi windows\.",
     );
     held_to(
         context.close(),

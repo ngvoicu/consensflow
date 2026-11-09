@@ -5,9 +5,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use cf_base::startup::StartKind;
 use cf_engine::testing::Context;
 use serde_json::{json, Value};
 
+use crate::chiefs::with_codex;
 use crate::fixtures::{assert_match, native_of, Tiers};
 use crate::traces::held_to;
 
@@ -141,12 +143,37 @@ fn paused_note(
     screen: &[&str],
     call: Option<std::sync::Arc<cf_harness::records::LastCall>>,
 ) -> String {
+    paused_note_on(code, screen, call, None)
+}
+
+/// [`paused_note`] for a window whose conversation runs in the harness's session `session`, as
+/// Claude Code's does (the id its quit line prints), where one is given.
+fn paused_note_on(
+    code: u32,
+    screen: &[&str],
+    call: Option<std::sync::Arc<cf_harness::records::LastCall>>,
+    session: Option<&str>,
+) -> String {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
     context.pass().unwrap();
     context.adapter.with("zeus", |agent| agent.last_call = call);
+    if let Some(session) = session {
+        let id = context.id(project.id, "zeus");
+        let conversation = context
+            .ledger
+            .borrow()
+            .current_conversation(id)
+            .unwrap()
+            .expect("its conversation");
+        context
+            .ledger
+            .borrow_mut()
+            .bind_conversation(conversation.id, session)
+            .unwrap();
+    }
     context.host.exits_showing(Some(code), None, Some(screen));
     context.exit("zeus");
     let task = context.task(project.id, 1);
@@ -430,6 +457,298 @@ fn a_pause_note_the_ledger_holds_says_none_of_a_secret_split_grouped_framed_or_p
         );
         assert!(!note.contains(value), "{screen:?}");
     }
+}
+
+/// The note the ledger holds for a screen that is quoted, `quote` between its marks, with
+/// `masked` strings hidden in it.
+fn quoted_note(quote: &str, masked: usize) -> String {
+    let hid = match masked {
+        0 => String::new(),
+        1 => " (1 key- or token-like string masked)".to_owned(),
+        count => format!(" ({count} key- or token-like strings masked)"),
+    };
+    format!(
+        "T-1 is paused: @zeus's window closed (exit code 1); its screen ended with: \
+         \"{quote}\"{hid}. {RESUME}"
+    )
+}
+
+/// The cases of `cases` whose pause note, as the ledger holds it, is not the whole-screen
+/// withholding `named` says (a secret named, else what may be a key), or has a piece of its
+/// value in it: one line for each, so that a red run lists every shape and not the first.
+fn not_withheld(cases: &[(&[&str], &str)], named: bool) -> Vec<String> {
+    let mut failed = Vec::new();
+    for (screen, value) in cases {
+        // The screen alone, and between rows that name nothing.
+        for rows in [
+            screen.to_vec(),
+            [&["pad one"][..], screen, &["pad two"][..]].concat(),
+        ] {
+            let note = paused_note(1, &rows, None);
+            let wanted = if named { named_note() } else { key_note() };
+            if note != wanted || note.contains(value) {
+                failed.push(format!("{rows:?}: {note}"));
+            }
+        }
+    }
+    failed
+}
+
+/// T-1227 found these shapes of a value in groups still quoted, and main quoted them too: groups
+/// parted by `_`, `:` or `.`, hex parted by a tab or two blanks.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_value_in_groups_parted_by_any_one_character_or_any_blanks(
+) {
+    let failed = not_withheld(
+        &[
+            (&["abcd_efgh_ijkl_mnop"], "efgh_ijkl"),
+            (&["abcd:efgh:ijkl:mnop"], "efgh:ijkl"),
+            (&["abcd.efgh.ijkl.mnop"], "efgh.ijkl"),
+            (&["deadbeef\tcafebabe\tfeedface\tabcdefab"], "cafebabe"),
+            (&["deadbeef  cafebabe  feedface  abcdefab"], "cafebabe"),
+            (
+                &["deadbeef", "cafebabe", "feedface", "abcdefab"],
+                "cafebabe",
+            ),
+        ],
+        false,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: four words of unequal length in a row of their own are a passphrase as much as four
+/// of one length.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_four_words_in_a_row_of_their_own() {
+    let failed = not_withheld(
+        &[
+            (&["abcd efghi jklmno pqrstuv"], "efghi"),
+            (&["correct horse battery staple"], "horse battery"),
+        ],
+        false,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: a short body with a `/` in it, alone or above another, is a key's body as much as
+/// one with a digit in it.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_short_body_with_a_slash_in_it() {
+    let failed = not_withheld(
+        &[
+            (&["abcd/efghijkl"], "efghijkl"),
+            (&["abcd/efghijkl", "mnopqrst/uvw"], "mnopqrst"),
+        ],
+        false,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: the beginning of a token of a known kind, followed by fewer than four letters or
+/// digits, or by punctuation, and the rest of it in groups.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_token_prefix_cut_short_or_followed_by_punctuation()
+{
+    let failed = not_withheld(
+        &[
+            (&["sk-abc defg hijk lmno"], "defg hijk"),
+            (&["sk-_abc defg hijk lmno"], "defg hijk"),
+            (&["ghp_ab cdef ghij klmn"], "cdef ghij"),
+            (&["glpat-.ab cdef ghij klmn"], "cdef ghij"),
+        ],
+        true,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: a URL's user with no password is a token as often as a name (`https://TOKEN@host`):
+/// it is masked where it stands, and the screen is withheld where the window's wrap cut the
+/// URL in two or its characters are written in percent signs.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_the_user_of_a_url_that_has_no_password() {
+    let mut failed = Vec::new();
+    for (row, quoted) in [
+        (
+            "cloned from https://swordfish@vault",
+            "cloned from https://[masked]@vault",
+        ),
+        (
+            "https://swordfish@vault.example.test/x.git",
+            "https://[masked]@vault.example.test/x.git",
+        ),
+    ] {
+        let note = paused_note(1, &[row], None);
+        if note != quoted_note(quoted, 1) {
+            failed.push(format!("{row}: {note}"));
+        }
+    }
+    // A name on ssh is a name: the account of `git clone`.
+    let note = paused_note(1, &["cloned from ssh://git@vault/repo"], None);
+    if note != quoted_note("cloned from ssh://git@vault/repo", 0) {
+        failed.push(format!("ssh: {note}"));
+    }
+    // The wrap cut the URL: the masker sees no URL in either row.
+    failed.extend(not_withheld(
+        &[
+            (&["https://swordfi", "sh@vault"], "swordfi"),
+            (&["https://alice:swo", "rdfish@vault"], "rdfish"),
+            (&["https%3A%2F%2Fswordfish%40vault"], "swordfish"),
+        ],
+        true,
+    ));
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: percent signs nested (`%25` for the sign), and a value that is nothing but them.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_percent_signs_nested_or_alone() {
+    let mut failed = not_withheld(
+        &[
+            (&["api%255Fkey%253Dredgreenblue"], "redgreenblue"),
+            (&["sk%252Dabcdefgh%2520ijklmnop"], "ijklmnop"),
+            (&["%2570assword%25253Dhunter22"], "hunter22"),
+        ],
+        true,
+    );
+    failed.extend(not_withheld(
+        &[(&["cobalt%2Dviolet%2Dindigo"], "violet")],
+        false,
+    ));
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// T-1227: `Authentication failed` names a secret as `token` does.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_what_follows_an_authentication_word() {
+    let failed = not_withheld(
+        &[
+            (&["Authentication failed", "redgreenblue"], "redgreenblue"),
+            (
+                &["authenticate with the registry", "redgreenblue"],
+                "redgreenblue",
+            ),
+            (&["Unauthenticated: redgreenblue"], "redgreenblue"),
+        ],
+        true,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A Claude Code window that quit printed `claude --resume <its session>`: that id is not a
+/// secret, and the screen is quoted around it. Any other id in the screen still withholds it
+/// whole, and so does the same id on a window whose session ConsensFlow does not know.
+#[test]
+fn a_pause_note_the_ledger_holds_quotes_the_screen_of_a_claude_window_that_quit_with_its_own_resume_line(
+) {
+    const OWN: &str = "123e4567-e89b-12d3-a456-426614174000";
+    const OTHER: &str = "9f2c1d3e-7a4b-4c5d-8e6f-0a1b2c3d4e5f";
+    let resume = format!("Resume this conversation with: claude --resume {OWN}");
+    let mut failed = Vec::new();
+    // Its own: quoted, and the id is masked as any long id is.
+    let note = paused_note_on(1, &["Goodbye!", &resume], None, Some(OWN));
+    if note
+        != quoted_note(
+            "Goodbye! / Resume this conversation with: claude --resume [masked]",
+            1,
+        )
+    {
+        failed.push(format!("its own: {note}"));
+    }
+    // As a harness may print it in capitals.
+    let loud = resume.to_uppercase();
+    let note = paused_note_on(1, &["Goodbye!", &loud], None, Some(OWN));
+    if !note.contains("its screen ended with") {
+        failed.push(format!("its own, in capitals: {note}"));
+    }
+    // Another id withholds the screen, beside the window's own or alone; and so does the
+    // window's own where ConsensFlow does not know it, or where it is another window's.
+    let other = format!("claude --resume {OTHER}");
+    for (rows, session) in [
+        (vec!["Goodbye!", other.as_str()], Some(OWN)),
+        (vec![resume.as_str(), other.as_str()], Some(OWN)),
+        (vec!["Goodbye!", other.as_str()], None),
+        (vec!["Goodbye!", resume.as_str()], None),
+        (vec!["Goodbye!", resume.as_str()], Some(OTHER)),
+    ] {
+        let note = paused_note_on(1, &rows, None, session);
+        if note != key_note() || note.contains("a456") || note.contains("8e6f") {
+            failed.push(format!("{rows:?} {session:?}: {note}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// What the new rules leave alone, through the same path: the screens of an ordinary day are
+/// quoted in the note the ledger holds, as before (cargo's test names, a Rust error, git's log,
+/// a connection error, a URL an account clones from, a URL written in percent signs, a quit
+/// line with the window's own id on it).
+#[test]
+fn a_pause_note_the_ledger_holds_still_quotes_the_screens_of_an_ordinary_day() {
+    let mut failed = Vec::new();
+    for rows in [
+        vec![
+            "test windows::a_host_shut_down_with_windows_open_tells_the_exit ... ok",
+            "test result: ok. 238 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+        ],
+        vec![
+            "error[E0308]: mismatched types",
+            " --> crates/cf-engine/src/shown.rs:258:20",
+            "expected `Vec<&str>`, found `Vec<String>`",
+        ],
+        vec![
+            "3e25960a1 A short body with a point. and the rest",
+            "error: failed to connect to 127.0.0.1:8080: Connection refused (os error 61)",
+        ],
+        vec![
+            "cloned from ssh://git@vault/repo",
+            "file:///My%20Folder/a%2Fb.txt",
+        ],
+        vec!["Compiling cf-engine v3.0.7-alpha.3 (/Users/me/consensflow/crates/cf-engine)"],
+    ] {
+        let note = paused_note(1, &rows, None);
+        if !note.contains("its screen ended with") || note.contains("[masked]") {
+            failed.push(format!("{rows:?}: {note}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The joint review T-1322, blocker 1: the window's own session id is exempt from the rule of a
+/// value in groups only. Taken out of the rows before every check, as it was, it made `https://<id>:swo`
+/// / `rdfish@vault` two rows with no URL in either, and the password in them was quoted. Every
+/// other check looks at the rows as they were drawn.
+#[test]
+fn a_pause_note_the_ledger_holds_says_none_of_a_credential_the_windows_own_id_sits_beside() {
+    const OWN: &str = "01234567-89ab-4def-8123-456789abcdef";
+    let url = format!("https://{OWN}:swo");
+    let token = format!("sk-{OWN}");
+    let basic = format!("Basic {OWN}");
+    let slot = format!("password: {OWN}");
+    let mut failed = Vec::new();
+    for (rows, value) in [
+        // The user of a URL is the id, the password cut in two by the window's wrap.
+        (vec![url.as_str(), "rdfish@vault"], "rdfish"),
+        (
+            vec!["pad one", url.as_str(), "rdfish@vault", "pad two"],
+            "rdfish",
+        ),
+        // The id as the body of a token, of a Basic credential, and in a password's slot.
+        (vec![token.as_str()], "-89ab"),
+        (vec![basic.as_str()], "89ab"),
+        (vec![slot.as_str()], "89ab"),
+    ] {
+        let note = paused_note_on(1, &rows, None, Some(OWN));
+        if note != named_note() || note.contains(value) {
+            failed.push(format!("{rows:?}: {note}"));
+        }
+    }
+    // The id alone, as a harness prints it when it quits, still passes.
+    let resume = format!("claude --resume {OWN}");
+    let note = paused_note_on(1, &["Goodbye!", &resume], None, Some(OWN));
+    if !note.contains("its screen ended with") {
+        failed.push(format!("its own: {note}"));
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// The files a tool worked on are never said in a pause note (T-1224, finding 2): a token split
@@ -770,7 +1089,7 @@ fn a_worker_window_that_ends_mid_task_with_work_running_says_both() {
     let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
     assert_match(
         &note.body,
-        r#"^T-1 is paused: @zeus's window closed \(exit code 1\) with background work running, which its close ended: npm test -- --watch; its screen ended with: "Killed"\. Resume it with"#,
+        r#"^T-1 is paused: @zeus's window closed \(exit code 1\) with background work running, which its close ended: npm …; its screen ended with: "Killed"\. Resume it with"#,
     );
 }
 
@@ -887,7 +1206,7 @@ fn fails_the_task_when_the_worker_window_cannot_open() {
     assert_eq!(task.task.state, "failed");
     assert_match(
         task.messages[0].reason.as_deref().unwrap(),
-        "refused by the test",
+        "the window did not open: the host would not open it",
     );
     held_to(
         context.close(),
@@ -970,7 +1289,7 @@ fn fails_the_first_message_at_once_when_the_harness_cannot_take_it_after_the_win
     assert_eq!(task.task.state, "failed");
     assert_match(
         task.messages[0].reason.as_deref().unwrap(),
-        "the server never answered",
+        "the window could not take its first message \\(its cause is in ConsensFlow's log\\)",
     );
     assert_eq!(
         context.host.killed().last().unwrap().id,
@@ -981,4 +1300,329 @@ fn fails_the_first_message_at_once_when_the_harness_cannot_take_it_after_the_win
         SUITES,
         "fails the first message at once when the harness cannot take it after the window opens",
     );
+}
+
+/// What `cf codex-session` writes on its terminal when it could not open Codex because the npm
+/// shim has no Node to run on (`ConsensFlow could not open Codex: …`, the person's own words).
+fn codex_could_not_open(shim: &str) -> String {
+    format!(
+        "ConsensFlow could not open Codex: {shim} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node visible to ConsensFlow, or install the harness's own build instead of the npm one."
+    )
+}
+
+/// `text` as a terminal of `columns` columns draws it: hard wrapped, a row of its own each.
+fn hard_wrapped(text: &str, columns: usize) -> Vec<String> {
+    text.chars()
+        .collect::<Vec<_>>()
+        .chunks(columns)
+        .map(|row| row.iter().collect())
+        .collect()
+}
+
+/// T-1328, the second reading of T-1322: a Codex window whose program (`cf codex-session`) could not
+/// open Codex names the shim it tried on its screen, and a screen note quoted it at every width,
+/// `hunter22` and all. The window ends with the status of why (72, no Node), which the engine reads:
+/// the harness never ran, and the note says what failed and what to do, from the status, and quotes
+/// nothing of the screen. A Codex window that ends with any other status, or another harness's with
+/// this one, is quoted as before.
+#[test]
+fn a_codex_window_that_could_not_open_codex_says_why_from_how_it_ended_and_quotes_no_screen() {
+    let shim = r"C:\tools\hunter22\codex.cmd";
+    let words = codex_could_not_open(shim);
+    let said = "Node.js was not found for Codex; make the harness's Node visible to ConsensFlow, or install the harness's own build instead of the npm one";
+    let mut failed = Vec::new();
+    for columns in [80, 120, 160] {
+        let screen = hard_wrapped(&words, columns);
+        let rows: Vec<&str> = screen.iter().map(String::as_str).collect();
+        let context = with_codex();
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+                "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+            }))
+            .unwrap()
+            .expect("the project")
+            .id;
+        context.pool_task(project, "worker", "Write the parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let session = context.task(project, 1).task.assignee.expect("its session");
+        context.host.exits_showing(Some(72), None, Some(&rows));
+        context.exit(&session);
+        let note = context
+            .task(project, 1)
+            .messages
+            .iter()
+            .find(|message| message.kind == "note")
+            .map(|message| message.body.clone())
+            .unwrap_or_default();
+        if !note.contains(&format!("(exit code 72); {said}")) {
+            failed.push(format!("{columns} columns, not said: {note}"));
+        }
+        for word in [
+            "hunter22",
+            "tools",
+            "codex.cmd",
+            "ConsensFlow could not open",
+        ] {
+            if note.contains(word) {
+                failed.push(format!("{columns} columns: `{word}` is in {note}"));
+            }
+        }
+        context.close();
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The note the requester of T-1 is told when a Codex worker's window ends with `status` and `rows`
+/// on its screen, as it opens.
+fn note_of_a_codex_worker_that_ended(status: u32, rows: &[&str]) -> String {
+    let context = with_codex();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+            "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project")
+        .id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.expect("its session");
+    context.host.exits_showing(Some(status), None, Some(rows));
+    context.exit(&session);
+    let note = context
+        .task(project, 1)
+        .messages
+        .iter()
+        .find(|message| message.kind == "note")
+        .map(|message| message.body.clone())
+        .unwrap_or_default();
+    context.close();
+    note
+}
+
+/// T-1328, the third reading of T-1322: Codex's server that ended before it was ready wrote its
+/// reason, a path of the person's, on its error stream, and `cf codex-session` printed it on the
+/// window's screen, `ConsensFlow could not open Codex: Codex server could not start (…): …`, and ended
+/// with 1: a screen the note quoted, `hunter22` and all, at every width. Every way the supervisor
+/// did not get Codex ready now ends the window with a status of its own, which the engine reads: the
+/// note says what failed and where to look, and quotes nothing of the screen.
+#[test]
+fn a_codex_window_that_did_not_get_codex_ready_says_why_from_how_it_ended_and_quotes_no_screen() {
+    let words = "ConsensFlow could not open Codex: Codex server could not start (it ended with status 127): /opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory";
+    let mut failed = Vec::new();
+    for (kind, said) in [
+        (
+            StartKind::ServerStopped,
+            "Codex's server stopped before it was ready; its cause is in ConsensFlow's log",
+        ),
+        (
+            StartKind::ServerSilent,
+            "Codex's server did not come up in time; its cause is in ConsensFlow's log",
+        ),
+        (
+            StartKind::NotSetUp,
+            "ConsensFlow could not set up Codex's window; its cause is in ConsensFlow's log",
+        ),
+    ] {
+        let status = u32::try_from(kind.exit_status()).unwrap();
+        for columns in [80, 120, 160] {
+            let screen = hard_wrapped(words, columns);
+            let rows: Vec<&str> = screen.iter().map(String::as_str).collect();
+            let note = note_of_a_codex_worker_that_ended(status, &rows);
+            if !note.contains(&format!("(exit code {status}); {said}")) {
+                failed.push(format!("{kind:?} at {columns} columns, not said: {note}"));
+            }
+            for word in [
+                "hunter22",
+                "/opt",
+                "codex:",
+                "No such file",
+                "ConsensFlow could not open",
+            ] {
+                if note.contains(word) {
+                    failed.push(format!(
+                        "{kind:?} at {columns} columns: `{word}` is in {note}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The note says only the kind of a start that failed, so what the window showed is in the log
+/// for whoever must find out why: masked, as every quote is, and whole of a screen that names a
+/// secret-like word (the log is the person's own file).
+#[test]
+fn the_screen_of_a_codex_window_that_did_not_get_codex_ready_is_in_the_log_and_not_in_the_note() {
+    let rows = [
+        "ConsensFlow could not open Codex: Codex server could not start (it ended with status 127):",
+        "/opt/hunter22/codex: line 2: /opt/hunter22/bin/codex: No such file or directory",
+        "token sk-abcdefghijklmnopqrstuvwxyz0123456789",
+    ];
+    let status = u32::try_from(StartKind::ServerStopped.exit_status()).unwrap();
+    let context = with_codex();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+            "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project")
+        .id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.expect("its session");
+    context.host.exits_showing(Some(status), None, Some(&rows));
+    context.exit(&session);
+    let logged: Vec<String> = context
+        .log
+        .warnings
+        .borrow()
+        .iter()
+        .filter(|line| line.contains("never ran Codex"))
+        .cloned()
+        .collect();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    let line = &logged[0];
+    assert!(
+        line.contains("'s window never ran Codex: Codex's server stopped before it was ready; its cause is in ConsensFlow's log; its screen ended with: \""),
+        "{line}"
+    );
+    assert!(
+        line.contains("/opt/hunter22/codex: line 2"),
+        "the cause is in the log: {line}"
+    );
+    assert!(
+        line.contains("(1 key- or token-like string masked)") && !line.contains("sk-abcdefghijkl"),
+        "masked as every quote is: {line}"
+    );
+    context.close();
+}
+
+/// T-1337, the fourth reading of T-1322: a window that ran and could not remove its socket folder
+/// said `ConsensFlow could not open Codex: could not remove the Codex socket folder /opt/hunter22/…`
+/// on its screen, and the note quoted it at every width. The window now says only that the folder is
+/// left (`SOCKET_FOLDER_LEFT`, no path, no cause: ConsensFlow's log has both), and the note quotes
+/// those words whole, whatever the width, beside the status of the TUI. A guard: the words are no
+/// shape the screen checks withhold.
+#[test]
+fn a_codex_window_that_left_its_socket_folder_says_so_in_the_note_with_no_path_at_every_width() {
+    let mut failed = Vec::new();
+    for columns in [80, 120, 160] {
+        let screen = hard_wrapped(cf_base::startup::SOCKET_FOLDER_LEFT, columns);
+        let rows: Vec<&str> = screen.iter().map(String::as_str).collect();
+        let note = note_of_a_codex_worker_that_ended(7, &rows);
+        if !note.contains("(exit code 7); its screen ended with:") {
+            failed.push(format!("{columns} columns, not quoted: {note}"));
+        }
+        // The rows are joined with " / ": a word the terminal cut in two is whole without them.
+        if !note
+            .replace(" / ", "")
+            .replace(' ', "")
+            .contains(&cf_base::startup::SOCKET_FOLDER_LEFT.replace(' ', ""))
+        {
+            failed.push(format!("{columns} columns, not whole: {note}"));
+        }
+        for word in ["hunter22", "/opt", "codex-", "Permission denied"] {
+            if note.contains(word) {
+                failed.push(format!("{columns} columns: `{word}` is in {note}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A Codex window a signal ended is not one that could not start Codex, whatever code the host
+/// also named: the status of why is read only where no signal ended the program.
+#[test]
+fn a_status_of_why_is_not_read_of_a_window_a_signal_ended() {
+    let context = with_codex();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+            "staff": [{ "agent": "diana", "harness": "codex", "roles": ["worker"], "tier": "standard" }],
+        }))
+        .unwrap()
+        .expect("the project")
+        .id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.expect("its session");
+    context.host.exits_showing(
+        Some(72),
+        Some("SIGTERM"),
+        Some(&["Running the workspace tests"]),
+    );
+    context.exit(&session);
+    let note = context
+        .task(project, 1)
+        .messages
+        .iter()
+        .find(|message| message.kind == "note")
+        .map(|message| message.body.clone())
+        .unwrap_or_default();
+    assert!(!note.contains("Node.js was not found"), "{note}");
+    assert!(note.contains("Running the workspace tests"), "{note}");
+    context.close();
+}
+
+/// The same status from a window of any other harness is that harness's own: its screen is quoted
+/// as it is, and a Codex window's other statuses are Codex's own.
+#[test]
+fn a_status_of_why_is_read_only_of_a_codex_window() {
+    for (harness, code) in [
+        ("claude-code", 72),
+        ("codex", 1),
+        ("codex", 69),
+        ("codex", 81),
+    ] {
+        let context = with_codex();
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+                "staff": [{ "agent": "diana", "harness": harness, "roles": ["worker"], "tier": "standard" }],
+            }))
+            .unwrap()
+            .expect("the project")
+            .id;
+        context.pool_task(project, "worker", "Write the parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let session = context.task(project, 1).task.assignee.expect("its session");
+        context
+            .host
+            .exits_showing(Some(code), None, Some(&["Running the workspace tests"]));
+        context.exit(&session);
+        let note = context
+            .task(project, 1)
+            .messages
+            .iter()
+            .find(|message| message.kind == "note")
+            .map(|message| message.body.clone())
+            .unwrap_or_default();
+        assert!(
+            note.contains(&format!(
+                "(exit code {code}); its screen ended with: \"Running the workspace tests\""
+            )),
+            "{harness} {code}: {note}"
+        );
+        assert!(!note.contains("Node.js was not found"), "{note}");
+        context.close();
+    }
 }

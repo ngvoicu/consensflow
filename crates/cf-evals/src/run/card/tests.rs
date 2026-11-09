@@ -161,9 +161,9 @@ fn say() -> Step {
 
 /// A run's looks at a workspace with one page in it, and what they kept of the page.
 struct Looks {
-    workspace: tempfile::TempDir,
     read: std::cell::RefCell<BTreeMap<String, FileRead>>,
     kept: std::cell::Cell<bool>,
+    workspace: tempfile::TempDir,
 }
 
 impl Looks {

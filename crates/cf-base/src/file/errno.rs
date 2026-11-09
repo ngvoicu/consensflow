@@ -244,6 +244,16 @@ pub fn error_code(error: &io::Error) -> &'static str {
     errno_name(error).unwrap_or(UNKNOWN.0)
 }
 
+/// `name` as the table holds it: the code of a failure that crossed a process boundary as text
+/// (the pane host's answer to an open) turned back into one of the names above, so that what a
+/// reader has is a name of this table and no word of anyone's (T-1328). None for any other text.
+pub fn known_code(name: &str) -> Option<&'static str> {
+    WORDS
+        .iter()
+        .map(|(code, _)| *code)
+        .find(|code| *code == name)
+}
+
 /// Whether `error` says there is no such file, as Node's `ENOENT` does.
 pub fn is_missing(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::NotFound || errno_name(error) == Some("ENOENT")

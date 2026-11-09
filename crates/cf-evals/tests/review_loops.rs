@@ -46,7 +46,6 @@ fn member<'a>(agent: &'a str, roles: &'a [&'a str]) -> Member<'a> {
 
 /// A board a scripted chief works on.
 struct Board {
-    folder: Folder,
     db: Connection,
     project: i64,
     clock: u32,
@@ -54,6 +53,8 @@ struct Board {
     /// The turns of the chief that ended with words, and whether its conversation is begun.
     turns: i64,
     talking: bool,
+    // Last: the folder goes after the ledger file open in it, which Windows will not remove from under it.
+    folder: Folder,
 }
 
 impl Board {

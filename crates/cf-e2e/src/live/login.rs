@@ -441,8 +441,6 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
 
 /// The folder a run's Claude windows run on, once it is made.
 struct Made {
-    /// The folder, removed when this is dropped: with the run, however it ends.
-    folder: TempDir,
     /// The login as it was copied: the machine's, without what renews it ([`RENEWING`]).
     oauth: Value,
     /// The machine's login as it was read, refresh token and all: what the machine's file is
@@ -454,6 +452,8 @@ struct Made {
     services: Option<BTreeSet<String>>,
     /// What the renewal of the login came to, where the login had run short on a test machine.
     renewed: Option<Renewed>,
+    /// The folder, removed when this is dropped: with the run, however it ends.
+    folder: TempDir,
 }
 
 /// What lets a login renew itself, and is never given to a run's copy: the refresh token and when it

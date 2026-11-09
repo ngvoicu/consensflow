@@ -50,10 +50,10 @@ const DEAD: u32 = 999_999;
 
 /// A throwaway home, Claude config folder and a stand-in `claude` on PATH.
 struct Home {
-    _dir: TempDir,
     root: String,
     vars: Vec<(String, String)>,
     executable: String,
+    _dir: TempDir,
 }
 
 /// An adapter of windows that run with `env`, served by fakes, its bundle

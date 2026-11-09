@@ -135,16 +135,22 @@ pub fn register_pane_handlers(
             pixel_width: 0,
             pixel_height: 0,
         };
-        let streamed = open_panes
-            .open_streamed_at(
-                key,
-                &request.cwd,
-                &request.argv,
-                PaneEnvironment::new(&request.env, &request.drop_env),
-                size,
-                request.backlog_bytes,
-            )
-            .map_err(|error| error.to_string())?;
+        let streamed = match open_panes.open_streamed_at(
+            key,
+            &request.cwd,
+            &request.argv,
+            PaneEnvironment::new(&request.env, &request.drop_env),
+            size,
+            request.backlog_bytes,
+        ) {
+            Ok(streamed) => streamed,
+            // The system would not start the program, and named why: the answer says so beside
+            // its words, as a name of libuv's table and nothing else of anyone's.
+            Err(error) if error.code().is_some() => {
+                return Ok(json!({"ok":false,"error":error.to_string(),"code":error.code()}));
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         let printed = match open_arbiter
             .register_with(&streamed.key, request.silent_paste)
             .map_err(|error| error.to_string())
@@ -916,12 +922,17 @@ mod tests {
 
     /// The terminal's answer over the bridge (`pane.reply`) goes past the human's keys held
     /// after their paste (`pane.typed`), in a window whose harness reads a paste silently
-    /// (T-1048): the reply is answered at once, while the human's paste and Enter still wait.
+    /// (T-1048): the program reads the paste and says so by a file (the human's Enter is held
+    /// behind it), reads the answer, and draws only then. So the reply sent once the program has
+    /// the paste is answered and read before the Enter, or the program never draws and the
+    /// Enter waits for its cap, two minutes: no time of the machine's is in it.
     #[cfg(unix)]
     #[test]
     fn a_reply_over_the_bridge_goes_past_the_humans_keys_held_after_their_paste() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
+
+        use crate::testing::{hex, SilentReader, HELD_FOR_MS, LIVENESS};
 
         let _pty_guard = crate::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
@@ -943,6 +954,10 @@ mod tests {
         let connected = builder
             .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
             .expect("connect bridge");
+        // A read that waits past the liveness bound is a hang: the answers come at once.
+        node_stream
+            .set_read_timeout(Some(LIVENESS))
+            .expect("a read timeout");
         let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
         let mut send = |id: &str, op: &str, body: Value| {
             let mut frame =
@@ -954,7 +969,9 @@ mod tests {
         let answered = |reader: &mut BufReader<UnixStream>| -> String {
             loop {
                 let mut line = String::new();
-                reader.read_line(&mut line).expect("read response");
+                reader
+                    .read_line(&mut line)
+                    .expect("a response within the liveness bound");
                 let frame: Value = serde_json::from_str(line.trim()).expect("response JSON");
                 if frame["kind"] == "res" {
                     assert_eq!(frame["body"]["ok"], true, "{frame}");
@@ -962,29 +979,33 @@ mod tests {
                 }
             }
         };
+        let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
+        let program = SilentReader::new("reply-bridge", paste.len());
         send(
             "n-open",
             "pane.open",
             json!({"id":"replied-pane","generation":1,"cwd":"/tmp",
-                   "argv":["/bin/sh","-c","stty raw -echo; printf ready; sleep 30"],
+                   "argv":["/bin/sh","-c",program.script()],
                    "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024,
                    "silentPaste":{"paceUsPerCharacter":0,"drawnAfterMs":0,"quietMs":100,
-                                  "mostMs":1500,"mostUsPerCharacter":0}}),
+                                  "mostMs":HELD_FOR_MS,"mostUsPerCharacter":0}}),
         );
         assert_eq!(answered(&mut reader), "n-open");
         // Once the program reads raw and echoes nothing: an echo of the paste would be the
         // window's draw of it, and let the human's Enter go before the reply is sent.
         let key = PaneKey::new("replied-pane", 1);
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        while !panes
-            .tail(&key, 5)
-            .is_ok_and(|lines| lines.iter().any(|line| line.contains("ready")))
-        {
+        let shows = |words: &str| {
+            panes
+                .tail(&key, 5)
+                .is_ok_and(|lines| lines.iter().any(|line| line.contains(words)))
+        };
+        let deadline = std::time::Instant::now() + LIVENESS;
+        while !shows("ready") {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the program never got ready"
             );
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(5));
         }
         let pane = json!({"id":"replied-pane","generation":1});
         let with = |bytes: &[u8]| {
@@ -992,47 +1013,36 @@ mod tests {
             body["bytes"] = json!(bytes);
             body
         };
-        // The reply goes once the paste is written: each request is handled on a thread of its
-        // own, and a reply sent sooner could be queued ahead of the human's keys under load.
-        let idle_ms = || {
-            panes
-                .list()
-                .expect("list the panes")
-                .into_iter()
-                .find(|pane| pane.id == key.id)
-                .map_or(u64::MAX, |pane| pane.idle_ms)
-        };
-        while idle_ms() < 150 {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        send("n-typed", "pane.typed", with(b"\x1b[200~ab\x1b[201~\r"));
-        while idle_ms() >= 150 {
+        send("n-typed", "pane.typed", with(&[paste, b"\r"].concat()));
+        // The paste is in the program: the human's Enter is held behind it. Each request is
+        // handled on a thread of its own, so a reply sent sooner could be written ahead of the
+        // human's keys, and prove nothing of them.
+        program.wait_pasted();
+        send("n-reply", "pane.reply", with(b"R"));
+        // Neither answer is awaited in an order: a reply queued behind the Enter is answered a
+        // moment after it, and the program's record says which was written first.
+        let mut answers = vec![answered(&mut reader), answered(&mut reader)];
+        answers.sort();
+        assert_eq!(answers, ["n-reply", "n-typed"]);
+
+        let record = format!("drawn{}520d", hex(paste));
+        let deadline = std::time::Instant::now() + LIVENESS;
+        loop {
+            let seen: String = panes
+                .tail(&key, 5)
+                .unwrap_or_default()
+                .concat()
+                .split_whitespace()
+                .collect();
+            if seen.contains(&record) {
+                break;
+            }
             assert!(
                 std::time::Instant::now() < deadline,
-                "the paste was never written"
+                "the program's record is not the paste, the answer and then the Enter: {seen}"
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        send("n-reply", "pane.reply", with(b"R"));
-        // How long the reply took to be answered: held, it waits for the human's Enter, which
-        // waits 1.5 s for a draw that never comes. (Which of the two is answered first says
-        // nothing: a reply queued behind the Enter is answered a moment after it.)
-        let replied = std::time::Instant::now();
-        let mut answers = vec![answered(&mut reader)];
-        let reply_took = loop {
-            if answers.last().is_some_and(|id| id == "n-reply") {
-                break replied.elapsed();
-            }
-            answers.push(answered(&mut reader));
-        };
-        assert!(
-            reply_took < Duration::from_millis(1_000),
-            "{reply_took:?}: the reply waited behind the human's held Enter"
-        );
-        if !answers.iter().any(|id| id == "n-typed") {
-            answers.push(answered(&mut reader));
-        }
-        assert!(answers.iter().any(|id| id == "n-typed"), "{answers:?}");
 
         panes.kill(&key).expect("kill the pane");
         inputs.close_and_drain();
@@ -1193,6 +1203,71 @@ repaint 80 '> Ask anything'; repaint 1200 '> Tsk anything'"#;
             "the pane kept its input"
         );
         assert!(matches!(arbiter.snapshot(&key), Err(ArbiterError::Stale)));
+
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// T-1328: a program the system will not start is answered with the system's name for why,
+    /// beside the host's words (which name the program), so that the daemon can say the kind of
+    /// failure in a note and no word of the file; any other refusal names none.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_the_system_cannot_start_answers_with_its_code() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            Arc::clone(&arbiter),
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut number = 0;
+        let mut ask = |argv: Value| -> Value {
+            number += 1;
+            let id = format!("n-open-{number}");
+            let mut frame = serde_json::to_vec(&json!({
+                "v":1,"id":id,"kind":"req","op":"pane.open",
+                "body":{"id":format!("p-{number}"),"generation":1,"cwd":"/tmp","argv":argv,
+                        "env":{},"size":{"rows":24,"cols":80},"backlogBytes":1024},
+            }))
+            .expect("serialize the open");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("ask for the open");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read a frame");
+                let frame: Value = serde_json::from_str(line.trim()).expect("frame JSON");
+                if frame["kind"] == "res" && frame["id"] == id.as_str() {
+                    return frame["body"].clone();
+                }
+            }
+        };
+
+        let missing = ask(json!(["/nonexistent/hunter22 program"]));
+        assert_eq!(missing["ok"], false, "{missing}");
+        assert_eq!(missing["code"], "ENOENT", "{missing}");
+        assert!(missing["error"].is_string(), "{missing}");
+        // A refusal the system did not make names no code.
+        let relative = ask(json!(["program"]));
+        assert_eq!(relative["ok"], false, "{relative}");
+        assert!(relative.get("code").is_none(), "{relative}");
 
         inputs.close_and_drain();
         drop(reader);

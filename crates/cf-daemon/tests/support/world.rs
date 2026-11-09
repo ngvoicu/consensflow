@@ -21,8 +21,8 @@ const GIVEN: &str = "2026-01-01T00:00:00.000Z";
 
 /// The folder, in a temporary place that goes with it, and the variables set.
 pub struct World {
-    dir: tempfile::TempDir,
     env: BTreeMap<String, String>,
+    dir: tempfile::TempDir,
 }
 
 impl World {
