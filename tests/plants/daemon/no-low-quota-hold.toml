@@ -39,6 +39,8 @@ no-low-hold-renewed = ["cargo", "test", "--offline", "-p", "cf-engine", "--test"
 no-low-hold-busy = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
 no-low-hold-login = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "one_login"]
 no-low-hold-page-lane = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "shows a member out of quota"]
+no-low-hold-page-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::busy"]
+no-low-hold-page-holds = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a member out of quota says so, to renew|a member held for its account says|a member whose model is busy"]
 no-low-hold-page-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the staff in Project settings says a member is out"]
 no-low-hold-page-card = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a task held while its member is out of quota says when it goes on"]
 
@@ -62,14 +64,14 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                format!("@{} is out of quota until {until}", member.handle)
+                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
             });
         }
         None
     }
 '''
 replace = '''
-                format!("@{} is out of quota until {until}", member.handle)
+                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
             });
         }
         let until = self
@@ -117,14 +119,14 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                format!("@{} is out of quota until {until}", member.handle)
+                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
             });
         }
         None
     }
 '''
 replace = '''
-                format!("@{} is out of quota until {until}", member.handle)
+                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
             });
         }
         let until = self
@@ -172,14 +174,14 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                format!("@{} is out of quota until {until}", member.handle)
+                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
             });
         }
         None
     }
 '''
 replace = '''
-                format!("@{} is out of quota until {until}", member.handle)
+                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
             });
         }
         let until = self
@@ -275,62 +277,6 @@ find = '''
 '''
 replace = '''
         for other in projects.into_iter().filter(|_| false) {
-'''
-
-[[plant]]
-name = "no low hold: a wait for a member out of quota says nothing of a renewal"
-meant = "a_wait_for_a_member_out_of_quota_says_to_press_try_again_now_if_it_was_renewed_early"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                let renewed = if renewable.is_empty() {
-'''
-replace = '''
-                let renewed = if true {
-'''
-
-[[plant]]
-name = "no low hold: a wait for a member held for its account or its model says to renew its quota"
-meant = "a_wait_for_a_member_held_for_its_account_or_its_model_names_no_renewal_of_a_quota"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-        !never(until) && self.busy_until(member).as_deref() != Some(until)
-'''
-replace = '''
-        self.busy_until(member).as_deref() != Some(until)
-'''
-
-[[plant]]
-name = "no low hold: a wait for a member whose model is busy says to renew its quota"
-meant = "the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota"
-runs = ["no-low-hold-busy"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-        !never(until) && self.busy_until(member).as_deref() != Some(until)
-'''
-replace = '''
-        !never(until)
-'''
-
-[[plant]]
-name = "no low hold: a wait names a member that is not out"
-meant = "a_wait_names_for_a_renewal_only_the_members_out_now"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-        let Some(until) = out_until.filter(|until| self.out(Some(until))) else {
-'''
-replace = '''
-        let Some(until) = out_until else {
 '''
 
 [[plant]]
@@ -483,4 +429,262 @@ find = '''
 '''
 replace = '''
           await page.daemon('member.noted', {
+'''
+
+[[plant]]
+name = "no low hold: a wait for a member out of quota says nothing of a renewal"
+meant = "a_wait_for_a_member_out_of_quota_says_to_press_try_again_now_if_it_was_renewed_early"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    (Held::Quota, "the quota was renewed early"),
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "no low hold: a wait for a member held for its account says nothing of the login or the billing"
+meant = "a_wait_for_a_member_held_for_its_account_says_to_press_try_again_now_if_the_login_or_billing_was_fixed"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    (Held::Account, "the login or the billing was fixed"),
+'''
+replace = '''
+
+'''
+
+[[plant]]
+name = "no low hold: a wait for a member whose model moved says to press the button"
+meant = "a_wait_for_a_member_whose_model_moved_names_no_button_for_the_human_has_one_for_that_member_alone"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    (Held::Account, "the login or the billing was fixed"),
+'''
+replace = '''
+                    (Held::Account, "the login or the billing was fixed"),
+                    (Held::Moved, "the model was put back"),
+'''
+
+[[plant]]
+name = "no low hold: a wait for a member whose model is busy says to press the button"
+meant = "the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota"
+runs = ["no-low-hold-busy"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    (Held::Account, "the login or the billing was fixed"),
+'''
+replace = '''
+                    (Held::Account, "the login or the billing was fixed"),
+                    (Held::Busy, "the model was at capacity"),
+'''
+
+[[plant]]
+name = "no low hold: a wait names a member that is not out"
+meant = "a_wait_names_for_a_renewal_only_the_members_out_now"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    self.out(Some(until)) && self.kind_of_hold(candidate.member.id, until) == held
+'''
+replace = '''
+                    self.kind_of_hold(candidate.member.id, until) == held
+'''
+
+[[plant]]
+name = "no low hold: the human's word clears a member whose model is busy"
+meant = "the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) == Held::Busy {
+'''
+replace = '''
+            if false && self.kind_of_hold(other.id, &until) == Held::Busy {
+'''
+
+[[plant]]
+name = "no low hold: the human's word clears only a quota, not an account"
+meant = "the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) == Held::Busy {
+'''
+replace = '''
+            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) != Held::Quota {
+'''
+
+[[plant]]
+name = "no low hold: the human's word clears a member whose model moved"
+meant = "the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held"
+runs = ["no-low-hold-renewed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if moved_hold(&until) {
+                continue;
+            }
+'''
+replace = '''
+            if false {
+                continue;
+            }
+'''
+
+[[plant]]
+name = "no low hold: a member out of quota counts as busy for the page"
+meant = "a_lane_of_a_member_out_of_quota_has_no_busy"
+runs = ["no-low-hold-page-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        (self.kind_of_hold(member.id, until) == Held::Busy).then(|| until.to_owned())
+'''
+replace = '''
+        (self.kind_of_hold(member.id, until) != Held::Moved).then(|| until.to_owned())
+'''
+
+[[plant]]
+name = "no low hold: a lane never says its member's model is busy"
+meant = "a_lane_has_busy_while_its_members_model_is_busy_and_in_no_other_lane_or_time"
+runs = ["no-low-hold-page-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = '''
+            fields.insert("busy".to_owned(), json!(until));
+'''
+replace = '''
+            let _ = until;
+'''
+
+[[plant]]
+name = "no low hold: a session's lane does not say its member's model is busy"
+meant = "a_lane_has_busy_while_its_members_model_is_busy_and_in_no_other_lane_or_time"
+runs = ["no-low-hold-page-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = '''
+        let owner = lane.participant.member_id.unwrap_or(id);
+'''
+replace = '''
+        let owner = id;
+'''
+
+[[plant]]
+name = "no low hold: a busy member's row says it is out of quota"
+meant = "a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list"
+runs = ["no-low-hold-page-holds"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+  if (typeof busy === 'string') {
+'''
+replace = '''
+  if (false) {
+'''
+
+[[plant]]
+name = "no low hold: a busy member's row has the button"
+meant = "a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list"
+runs = ["no-low-hold-page-holds"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+      if (state === 'out' && !lane.busy && acts(board)) {
+'''
+replace = '''
+      if (state === 'out' && acts(board)) {
+'''
+
+[[plant]]
+name = "no low hold: a busy member's chief card has the button"
+meant = "a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list"
+runs = ["no-low-hold-page-holds"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''
+  if (state === 'out' && !lane.busy) {
+'''
+replace = '''
+  if (state === 'out') {
+'''
+
+[[plant]]
+name = "no low hold: a busy member's staff row has the button"
+meant = "a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list"
+runs = ["no-low-hold-page-holds"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    if (lane.busy) return
+'''
+replace = '''
+    if (false) return
+'''
+
+[[plant]]
+name = "no low hold: a busy member's held task says it is out of quota"
+meant = "a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list"
+runs = ["no-low-hold-page-holds"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+    const busyHold = busy !== null && Date.parse(task.heldUntil) <= Date.parse(busy)
+'''
+replace = '''
+    const busyHold = false
+'''
+
+[[plant]]
+name = "no low hold: an account's words do not say to log in again or pay"
+meant = "a member held for its account says so, to log in again or pay, on its row, the chief’s card, its held task and the staff list, with the button"
+runs = ["no-low-hold-page-holds"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+Logged in again, or paid? Press Try again now`
+'''
+replace = '''
+Press Try again now`
+'''
+
+[[plant]]
+name = "no low hold: a held task's card for an account does not say what to press"
+meant = "a member held for its account says so, to log in again or pay, on its row, the chief’s card, its held task and the staff list, with the button"
+runs = ["no-low-hold-page-holds"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''
+'unavailable until you say its login or billing works again: Try its member again now'
+'''
+replace = '''
+'unavailable until you say it works again'
 '''

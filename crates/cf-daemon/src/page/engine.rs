@@ -134,6 +134,11 @@ pub trait Engine {
     /// `{task, jobs, agents}`, none when it waits on nothing, which is nearly
     /// always. A lane says it only then, as it says an ignored stop.
     fn held(&self, participant: i64) -> Option<Value>;
+
+    /// Until when `member` is out because its model is busy for a moment, while it is
+    /// (`model_busy_until`, T-1357): none when it is not out, or out for anything else.
+    /// A lane of the member says it only then, as it says an ignored stop.
+    fn model_busy_until(&self, member: &ParticipantView) -> Option<String>;
 }
 
 /// An activity as Node's dispatcher wrote its object: `{state}`, `{state,
@@ -278,6 +283,10 @@ impl Engine for Rc<Dispatcher> {
     fn held(&self, participant: i64) -> Option<Value> {
         Dispatcher::held_for(self, participant)
             .map(|hold| json!({ "task": hold.task, "jobs": hold.jobs, "agents": hold.agents }))
+    }
+
+    fn model_busy_until(&self, member: &ParticipantView) -> Option<String> {
+        Dispatcher::model_busy_until(self, member)
     }
 }
 

@@ -1493,9 +1493,10 @@ export class ProjectSettingsDialog {
     if (words === null) return
     const page = this.#page
     const { participant } = lane
+    cell.append(element('br'), element('span', 'member-out', words))
+    // A busy model is tried again after a back-off no press shortens (T-1357).
+    if (lane.busy) return
     cell.append(
-      element('br'),
-      element('span', 'member-out', words),
       tryAgain(participant, () =>
         page.act(async () => {
           await page.daemon('member.back', {

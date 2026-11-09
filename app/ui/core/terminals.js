@@ -16,7 +16,10 @@ function about(lane, board, now, onTryAgain) {
   status.dataset.state = state
   const line = element('div', 'terminal-about')
   line.append(status, element('span', 'terminal-meta', identity(lane.participant)))
-  if (state === 'out') line.append(tryAgain(lane.participant, () => onTryAgain(lane.participant)))
+  // A busy model is tried again after a back-off no press shortens (T-1357).
+  if (state === 'out' && !lane.busy) {
+    line.append(tryAgain(lane.participant, () => onTryAgain(lane.participant)))
+  }
   return line
 }
 

@@ -1521,7 +1521,7 @@ test('says an account that refused for its billing or login is unavailable, with
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
   await expect(diana.locator('.row-status')).toHaveText(
-    'Unavailable: its account was refused for billing or login. Press Try again now once it works',
+    'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now',
   )
   await diana.getByRole('button', { name: 'Try @diana again now, once its account works' }).click()
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
@@ -1627,6 +1627,90 @@ test('the staff in Project settings says a member is out of quota and tries it a
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
 })
 
+/**
+ * A board where zeus, the chief and one task of zeus's are held for `kind`, and the page
+ * showing it with Project settings open. Three holds look alike by their time and are three
+ * things (T-1357): a quota, which the human may have renewed by hand; an account whose login
+ * or billing was refused, which they may have fixed; and a model busy for a moment, which
+ * ConsensFlow tries again after a back-off of its own and no press shortens.
+ */
+async function heldFor(page, kind) {
+  const data = model()
+  const soon = new Date(Date.now() + 90 * 60_000).toISOString()
+  const until = kind === 'account' ? '9999-12-31T23:59:59.998Z' : soon
+  const lanes = data.boards[1].lanes
+  for (const handle of ['zeus', 'chief']) {
+    const lane = lanes.find((lane) => lane.participant.handle === handle)
+    lane.participant.outUntil = until
+    if (kind === 'busy') lane.busy = soon
+  }
+  const zeus = lanes.find((lane) => lane.participant.handle === 'zeus')
+  zeus.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: until }))
+  await open(page, data)
+  return {
+    row: page.locator('tr[data-handle="zeus"]'),
+    chief: page.locator('#stage .terminal-card[data-handle="chief"]'),
+    card: page.locator('button.card[data-task="9"] .card-route'),
+    async staff() {
+      await page.getByRole('button', { name: 'Project settings' }).click()
+      return page
+        .getByRole('dialog', { name: 'Project settings' })
+        .locator('#staff-members tr[data-handle="zeus"]')
+    },
+  }
+}
+
+test('a member out of quota says so, to renew early, on its row, the chief’s card, its held task and the staff list, with the button', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'quota')
+  const said = /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/
+  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.locator('.try-again')).toHaveCount(1)
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
+  await expect(shown.chief.locator('.try-again')).toHaveCount(1)
+  await expect(shown.card).toHaveText(
+    /^out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try its member again now · from /,
+  )
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await expect(staff.locator('.try-again')).toHaveCount(1)
+})
+
+test('a member held for its account says so, to log in again or pay, on its row, the chief’s card, its held task and the staff list, with the button', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'account')
+  const said =
+    'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now'
+  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.locator('.try-again')).toHaveCount(1)
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
+  await expect(shown.chief.locator('.try-again')).toHaveCount(1)
+  await expect(shown.card).toHaveText(
+    /^unavailable until you say its login or billing works again: Try its member again now · from /,
+  )
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await expect(staff.locator('.try-again')).toHaveCount(1)
+})
+
+test('a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'busy')
+  const said = /^Its model is busy: ConsensFlow tries it again at (\S+ )?\d\d:\d\d$/
+  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(shown.row.locator('.try-again')).toHaveCount(0)
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
+  await expect(shown.chief.locator('.try-again')).toHaveCount(0)
+  await expect(shown.card).toHaveText(/^model busy, tried again at (\S+ )?\d\d:\d\d · from /)
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await expect(staff.locator('.try-again')).toHaveCount(0)
+})
+
 test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
   const data = model()
   const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
@@ -1654,7 +1738,7 @@ test('a task held for an account no time resets says it waits for the human, not
   )
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
-    /^unavailable until you say it works again · from /,
+    /^unavailable until you say its login or billing works again: Try its member again now · from /,
   )
   await expect(page.locator('button.card[data-task="10"] .card-route')).toHaveText(
     /^held until you say its model may go on · from /,

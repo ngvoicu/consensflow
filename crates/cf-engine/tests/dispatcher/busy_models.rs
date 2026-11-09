@@ -209,8 +209,9 @@ fn the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota() {
         )),
         "{waits:?}"
     );
-    // A renewed quota does not end it: nothing for the human to press.
-    assert!(!waits[0].contains("renewed"), "{waits:?}");
+    // A renewed quota does not end it, and the press is not about it: nothing for the human
+    // to press (T-1357).
+    assert!(!waits[0].contains("Try again now"), "{waits:?}");
 }
 
 #[test]

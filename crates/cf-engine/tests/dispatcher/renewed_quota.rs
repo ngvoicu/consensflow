@@ -7,6 +7,7 @@
 //! press. Held to no Node trace: Node's dispatcher had neither.
 
 use cf_engine::testing::{Context, Made};
+use cf_harness::records::Quota;
 use cf_ledger::{NewMember, NewTask};
 use serde_json::{json, Value};
 
@@ -69,22 +70,67 @@ fn a_wait_for_a_member_out_of_quota_says_to_press_try_again_now_if_it_was_renewe
     );
 }
 
+/// What a member is marked out until when its account refused for what no wait cures, and
+/// when its harness moved its window's model on its own (`scheduler.rs`: `NEVER`, `MOVED`).
+const ACCOUNT_HELD: &str = "9999-12-31T23:59:59.998Z";
+const MODEL_MOVED: &str = "9999-12-31T23:59:59.999Z";
+
+/// The note the chief was given that T-1 waits for a free standard worker, when `held` marks
+/// `zeus`, the only one, out.
+fn the_wait_for_a_member_held(held: &str) -> String {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    mark_out(&context, tiers.project.id, "zeus", held);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let notes = tiers.notes("chief");
+    assert_eq!(notes.len(), 1, "{held}: {notes:?}");
+    assert_match(&notes[0], "^T-1 waits for a free standard worker: @zeus's ");
+    notes[0].clone()
+}
+
 #[test]
-fn a_wait_for_a_member_held_for_its_account_or_its_model_names_no_renewal_of_a_quota() {
-    // A renewed quota ends neither: an account that refused for its billing or its login, and a
-    // model its harness moved, wait for what the human does about them, and say so elsewhere.
-    for held in ["9999-12-31T23:59:59.998Z", "9999-12-31T23:59:59.999Z"] {
-        let context = Context::new();
-        let tiers = Tiers::new(&context, &["zeus"]);
-        mark_out(&context, tiers.project.id, "zeus", held);
-        tiers.open();
-        context.pass().unwrap();
-        context.pass().unwrap();
-        let notes = tiers.notes("chief");
-        assert_eq!(notes.len(), 1, "{held}: {notes:?}");
-        assert_match(&notes[0], "^T-1 waits for a free standard worker: @zeus's ");
-        assert!(!notes[0].contains("renewed"), "{held}: {}", notes[0]);
-    }
+fn a_wait_for_a_member_held_for_its_account_says_to_press_try_again_now_if_the_login_or_billing_was_fixed(
+) {
+    // The human's Try again now means the login works again (Gabriel, 2026-11-10): it ends this
+    // hold too, and the wait says so.
+    let note = the_wait_for_a_member_held(ACCOUNT_HELD);
+    assert!(
+        note.ends_with(
+            " If the login or the billing was fixed, the human presses Try again now on @zeus."
+        ),
+        "{note}"
+    );
+    assert!(!note.contains("quota was renewed"), "{note}");
+}
+
+#[test]
+fn a_wait_for_a_member_whose_model_moved_names_no_button_for_the_human_has_one_for_that_member_alone(
+) {
+    // Only the human's word for that member ends it, and its own words say what to do.
+    let note = the_wait_for_a_member_held(MODEL_MOVED);
+    assert!(!note.contains("Try again now"), "{note}");
+}
+
+#[test]
+fn a_wait_for_members_held_for_a_quota_and_for_an_account_says_which_button_is_for_which() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    let until = soon(&context, 3);
+    mark_out(&context, tiers.project.id, "zeus", &until);
+    mark_out(&context, tiers.project.id, "diana", ACCOUNT_HELD);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let notes = tiers.notes("chief");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].ends_with(
+            " If the quota was renewed early, the human presses Try again now on @zeus. If the login or the billing was fixed, the human presses Try again now on @diana."
+        ),
+        "{notes:?}"
+    );
 }
 
 #[test]
@@ -108,9 +154,10 @@ fn a_member_the_human_says_is_back_is_given_the_next_task_at_once_and_a_refusal_
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working", "given at once");
 
-    // The quota was not renewed after all: its harness refuses, a minute on, and zeus is out
-    // again. (A refusal dated before the human's word is history.)
-    context.advance(60_000);
+    // The quota was not renewed after all: its harness refuses, and zeus is out again. A
+    // refusal is taken when it is dated strictly after the human's word (`refused_here`), so the
+    // clock goes on by the smallest step, one millisecond.
+    context.advance(1);
     let resets_at = soon(&context, 2);
     context
         .adapter
@@ -292,5 +339,126 @@ fn the_humans_word_gives_every_member_it_brought_back_the_work_that_waited_for_i
         (by("zeus-"), by("diana-")),
         (1, 1),
         "one task each, diana's quota being back as zeus's: {first:?} {second:?}"
+    );
+}
+
+#[test]
+fn a_refusal_stamped_at_the_very_moment_of_the_humans_word_is_history_and_one_a_millisecond_later_is_not(
+) {
+    // The boundary of `refused_here`: it takes a refusal only when it is strictly later than
+    // the mark-back, so what the harness wrote at that instant (the refusal the human is
+    // answering) is not held again. A real refusal of the next turn is dated after it.
+    for (gap_ms, refused_again) in [(0, false), (1, true)] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus"]);
+        mark_out(&context, tiers.project.id, "zeus", &soon(&context, 3));
+        tiers.open();
+        context.pass().unwrap();
+        context.back_from_quota(tiers.project.id, "zeus").unwrap();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        let session = tiers.assignee(1);
+        let stamped = crate::fixtures::after(&context, gap_ms);
+        context.advance(gap_ms);
+        context.adapter.refuse(
+            &session,
+            exhausted(Some(&stamped), Some(&soon(&context, 2))),
+        );
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(
+            out_until(&context, tiers.project.id, "zeus").is_some(),
+            refused_again,
+            "a refusal {gap_ms} ms after the human's word"
+        );
+    }
+}
+
+#[test]
+fn the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held(
+) {
+    // The word means "this login works again" (quota renewed, logged in again, credit bought).
+    // It is not about a model busy for a moment, whose back-off is its own, nor about a model
+    // its harness moved, which only the human's word for that member ends.
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    context.codex.one_login.set(true);
+    let first = project_of(&context, "/work/first", &[("zeus", "codex")]);
+    let second = project_of(
+        &context,
+        "/work/second",
+        &[
+            ("apollo", "codex"),
+            ("ares", "codex"),
+            ("diana", "codex"),
+            ("hermes", "codex"),
+        ],
+    );
+    // apollo's model is busy for a moment, at work on T-1.
+    context.give(second, "apollo", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context
+        .task(second, 1)
+        .task
+        .assignee
+        .expect("T-1 given to apollo");
+    let tried_at = crate::fixtures::after(&context, 60_000);
+    context.codex.refuse(
+        &session,
+        Quota::Busy {
+            at: Some(now(&context)),
+            because: "Selected model is at capacity.".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let held = context.task(second, 1).task;
+    assert_eq!(
+        (held.state.as_str(), held.held_until.as_deref()),
+        ("paused", Some(tried_at.as_str())),
+        "held a minute with its window"
+    );
+    // The others: out of quota, its account refused, its model moved; zeus is out of quota too.
+    let until = soon(&context, 3);
+    mark_out(&context, first, "zeus", &until);
+    mark_out(&context, second, "diana", &until);
+    mark_out(&context, second, "ares", ACCOUNT_HELD);
+    mark_out(&context, second, "hermes", MODEL_MOVED);
+
+    context.back_from_quota(first, "zeus").unwrap();
+
+    assert_eq!(out_until(&context, first, "zeus"), None);
+    assert_eq!(out_until(&context, second, "diana"), None, "quota");
+    assert_eq!(out_until(&context, second, "ares"), None, "account");
+    assert_eq!(
+        out_until(&context, second, "hermes").as_deref(),
+        Some(MODEL_MOVED),
+        "a moved model waits for its own word"
+    );
+    assert_eq!(
+        out_until(&context, second, "apollo").as_deref(),
+        Some(tried_at.as_str()),
+        "a busy model keeps its back-off"
+    );
+    let held = context.task(second, 1).task;
+    assert_eq!(
+        (held.state.as_str(), held.held_until.as_deref()),
+        ("paused", Some(tried_at.as_str())),
+        "its task is still held until the minute is out"
+    );
+    context.advance(30_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(second, 1).task.state, "paused", "30 s on");
+    context.advance(31_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        context.task(second, 1).task.state,
+        "working",
+        "tried again when the minute is out"
     );
 }

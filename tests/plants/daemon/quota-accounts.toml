@@ -94,8 +94,8 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''            .is_some_and(|adapter| adapter.one_account());'''
-replace = '''            .is_some();'''
+find = '''                News::Turn { .. } => adapter.one_account(),'''
+replace = '''                News::Turn { .. } => true,'''
 
 [[plant]]
 name = "quota-accounts: news of an account brings back those out on any harness"
