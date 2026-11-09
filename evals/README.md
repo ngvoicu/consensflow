@@ -40,9 +40,13 @@ with a refresh token that no longer works. Using Claude Code now does not refres
 has hours left: run again after the owner's own Claude Code has refreshed it, or make the run
 shorter (`--hours`, `--timeout-min`, `--repeat`); nothing refreshes it by hand, and nothing
 writes the Keychain). A token that ends in a run all the same is refreshed by Claude Code in the
-copy; the run goes on, and its report says the owner's login may be stale (and a Keychain item
-`Claude Code-credentials-<hash>` it left is named for the owner to delete; the kit never deletes
-it). The run says where its Claude records are (`claude config: …`); when the run's home is kept
+copy; the run goes on, and its report says the owner's login may be stale. A Keychain item
+`Claude Code-credentials-<hash>` that its Claude Code made for the run's folder is named for the
+owner to delete, and the kit never deletes it (Claude Code makes one when it connects to an MCP
+server that asks for OAuth, and carries the folder's login into it: the windows start with
+`--strict-mcp-config` so that it has none to connect to, `live keychain` shows it on the
+machine's Claude Code; an item another process made is a note of the run, and the guard of the
+launchers fails the rig for it). The run says where its Claude records are (`claude config: …`); when the run's home is kept
 (the report's `home`, the rig's `CONSENSFLOW_HOME`, is `<root>/consensflow`) its conversations are
 copied beside it, into `<root>/home/.claude/projects` and `sessions` (never the login, nor the
 `.key` files of a session's socket); `cargo xtask watch --tokens --claude-config DIR` reads them in

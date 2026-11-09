@@ -197,3 +197,12 @@ fn a_report_has_a_check_that_the_owners_claude_was_left_as_it_was_for_a_run_that
         "{said}"
     );
 }
+
+#[test]
+fn an_evals_config_keeps_its_findings_so_the_guard_of_the_keychain_leaves_the_keychain_to_it() {
+    // The scenario evals end the rig with `?`: a guard that failed it for an item another process
+    // made in the machine's Keychain would cost them the report (T-1044, T-1102). The guard asks the
+    // config; the one that keeps its findings for the report is the one it leaves it to.
+    let config = Throwaway::over(Says::once(vec![None]));
+    assert!(config.keeps_its_findings());
+}

@@ -54,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 20] = [
+const BY_HAND: [(&str, &str, &str); 23] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -167,6 +167,28 @@ const BY_HAND: [(&str, &str, &str); 20] = [
         "crates/cf-e2e/tests/live_history_items.rs",
         "XDG_DATA_HOME",
         "the same copy of the records, for another harness",
+    ),
+    (
+        "crates/cf-e2e/tests/live_keychain.rs",
+        "HOME",
+        "it runs the machine's Claude Code by itself, in no rig and on no login of the owner's, to show what a \
+         throwaway CLAUDE_CONFIG_DIR leaves in the owner's login Keychain (T-1102): HOME is the owner's, as \
+         `security` needs it to find the Keychain, and CLAUDE_CONFIG_DIR a folder of the case's own, holding a \
+         made-up login. Nothing of the owner's is read there, and `live::launcher::Guard` holds the owner's \
+         launcher and Keychain around the whole case",
+    ),
+    (
+        "crates/cf-e2e/tests/live_keychain.rs",
+        "CLAUDE_CONFIG_DIR",
+        "the same: the folder is the thing it shows the Keychain item of",
+    ),
+    (
+        "crates/cf-e2e/tests/live_launcher.rs",
+        "XDG_DATA_HOME",
+        "it gives a window the incident's environment on purpose (T-1082): the owner's HOME and a \
+         throwaway XDG_DATA_HOME, which a seat for Muse gives every window, so that Claude Code's \
+         updater finds its versions apart from its launcher. The folder is the run's own and nothing \
+         of the owner's is read there; `live::launcher` is what holds the owner's launcher",
     ),
 ];
 

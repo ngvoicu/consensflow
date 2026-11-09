@@ -34,6 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::isolation::{lasting, Isolation};
+use super::launcher::Guard;
 use super::login::Login;
 use super::PLANNED;
 use crate::process::{own_var, Run};
@@ -286,9 +287,16 @@ impl Installed {
         } else {
             "--version"
         };
+        // The probe runs the owner's own program with the owner's environment, and a launcher
+        // that updates itself when it is run (Muse's, hourly) would do it here: it is told not to.
         let ran = Run::new(&self.command)
             .arg(word)
             .inheriting_env()
+            .vars(
+                super::launcher::updates_off_of(self.harness)
+                    .iter()
+                    .copied(),
+            )
             .run()
             .ok()
             .filter(|ran| ran.code == Some(0));
@@ -564,6 +572,21 @@ fn rig_keeping_claude_in(
         if let Some(isolation) = install.isolation() {
             config = config.isolated(Arc::clone(isolation) as Arc<dyn HarnessHome>);
         }
+        // The owner's launcher of every harness the rig seats is looked at when the rig starts
+        // and when it ends, whatever home the harness runs on (T-1082).
+        let guard = Guard::new(install.harness, &install.command, &install.home);
+        // A Claude Code whose config keeps its findings for the run's report (an eval's) is watched
+        // there, which names the item of its own folder: a guard that failed the rig for the
+        // machine's other items too would end an eval with its rig's error and cost it its report
+        // (T-1102).
+        let login_watches = install
+            .claude_config()
+            .is_some_and(|config| config.keeps_its_findings());
+        config = config.isolated(Arc::new(if login_watches {
+            guard.leaving_the_keychain_to_the_login()
+        } else {
+            guard
+        }));
         if install.harness == Harness::Muse {
             config = config.muse_live(muse_of(install), &install.home);
         }

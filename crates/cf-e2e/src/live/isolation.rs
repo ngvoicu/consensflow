@@ -67,6 +67,9 @@
 //! the window was kept open (16 of 16, T-1038); a window closed once its result is taken keeps
 //! "Typing" on either. A `HOME` spelled through `/var` is the one variable it does not try. A
 //! harness that wrote in `HOME` anyway is found by the hashes.
+//! The launchers are among them: a harness that installs itself writes the person's `~/.local/bin`,
+//! so every window is told to update nothing and the launcher of every harness the rig seats is hashed
+//! around the run ([`super::launcher`], T-1082).
 //!
 //! **A case that is its own home.** A case that gives its windows a `HOME` of its own, with
 //! the harness's folder in it ([`Installed::on_own_home`]), is none of this kit's: it reads

@@ -192,20 +192,119 @@ fn the_items_claude_code_keeps_are_the_ones_of_its_service_and_the_ones_named_af
 }
 
 #[test]
-fn a_new_keychain_item_is_what_a_refresh_leaves() {
+fn the_item_claude_code_made_for_the_runs_folder_is_the_runs_and_a_failure_with_the_command_that_deletes_it(
+) {
+    let folder = Path::new("/tmp/cf-keychain-vector-1");
+    let own = "Claude Code-credentials-b0d4aa31";
     let had = BTreeSet::from(["Claude Code-credentials".to_owned()]);
-    assert!(gained(&had, &had).is_empty());
+    assert_eq!(keychain_of(folder, &had, &had), Kept::default());
+    let now = BTreeSet::from(["Claude Code-credentials".to_owned(), own.to_owned()]);
+    let kept = keychain_of(folder, &had, &now);
+    assert_eq!(kept.own.len(), 1, "{kept:?}");
+    assert!(kept.own[0].contains(&format!("`{own}`")), "{kept:?}");
+    assert!(
+        kept.own[0].contains(&format!("security delete-generic-password -s \"{own}\"")),
+        "{kept:?}"
+    );
+    assert!(kept.own[0].contains("--strict-mcp-config"), "{kept:?}");
+    assert!(kept.others.is_empty(), "{kept:?}");
+}
+
+#[test]
+fn an_item_another_process_made_is_a_note_of_this_run_and_not_its_failure() {
+    // T-1044: an eval was failed, and told its Claude Code had refreshed its login, for an item that
+    // another run on the machine made (the Keychain is the whole machine's).
+    let folder = Path::new("/tmp/cf-keychain-vector-1");
+    let had = BTreeSet::from(["Claude Code-credentials".to_owned()]);
     let now = BTreeSet::from([
         "Claude Code-credentials".to_owned(),
-        "Claude Code-credentials-0badc0de".to_owned(),
+        "Claude Code-credentials-f2cee134".to_owned(),
     ]);
-    let said = gained(&had, &now);
-    assert_eq!(said.len(), 1);
+    let kept = keychain_of(folder, &had, &now);
+    assert!(kept.own.is_empty(), "{kept:?}");
+    assert_eq!(kept.others.len(), 1, "{kept:?}");
     assert!(
-        said[0].contains("Claude Code-credentials-0badc0de"),
-        "{said:?}"
+        kept.others[0].contains("Claude Code-credentials-f2cee134"),
+        "{kept:?}"
     );
-    assert!(said[0].contains("delete-generic-password"), "{said:?}");
+    assert!(!kept.others[0].contains("refresh"), "{kept:?}");
+    // An item the Keychain had before the run is no one's of the run, whatever its name.
+    let both = BTreeSet::from(["Claude Code-credentials-b0d4aa31".to_owned()]);
+    assert_eq!(keychain_of(folder, &both, &both), Kept::default());
+}
+
+/// A Keychain item of the name Claude Code gives `folder`, made here and deleted by that name when this
+/// is dropped (the Keychain is the machine's: a test of the run's own folder is the only way to see
+/// `finish` look at it).
+#[cfg(target_os = "macos")]
+struct Item {
+    name: String,
+    user: String,
+}
+
+#[cfg(target_os = "macos")]
+impl Item {
+    fn make(folder: &Path) -> Self {
+        let name = keychain::item_of(folder);
+        let user = own_var("USER").unwrap();
+        let made = Run::new("/usr/bin/security")
+            .args([
+                "add-generic-password",
+                "-s",
+                &name,
+                "-a",
+                &user,
+                "-w",
+                "a made-up value",
+            ])
+            .inheriting_env()
+            .run()
+            .unwrap();
+        assert_eq!(made.code, Some(0), "{}", made.stderr);
+        Self { name, user }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for Item {
+    fn drop(&mut self) {
+        let _ = Run::new("/usr/bin/security")
+            .args([
+                "delete-generic-password",
+                "-s",
+                &self.name,
+                "-a",
+                &self.user,
+            ])
+            .inheriting_env()
+            .run();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_run_whose_claude_code_moved_the_login_into_the_keychain_is_told_so_and_not_that_it_refreshed_it(
+) {
+    let person = Person::new();
+    let parent = tempfile::tempdir().unwrap();
+    let login = login(&machine_text(hours(5)), person.home.path(), parent.path());
+    let folder = login.folder_at(at(NOW)).unwrap();
+    // What Claude Code did to a folder in the probe of T-1102: its secure storage into the
+    // folder's item, and the login out of the folder's file.
+    let item = Item::make(&folder);
+    std::fs::remove_file(folder.join(".credentials.json")).unwrap();
+    let said = login.finish().unwrap_err().to_string();
+    assert!(
+        said.contains("LEFT ITS SECURE STORAGE IN THE OWNER'S KEYCHAIN"),
+        "{said}"
+    );
+    assert!(said.contains(&format!("`{}`", item.name)), "{said}");
+    // The login did not go stale, and the file is not "gone": it is in the item, said once.
+    assert!(!said.contains("REFRESHED"), "{said}");
+    assert!(!said.contains("gone or no longer holds a login"), "{said}");
+    for secret in SECRETS {
+        assert!(!said.contains(secret), "{said}");
+    }
 }
 
 #[test]
@@ -638,6 +737,7 @@ fn what_is_said_of_a_run_that_did_both_says_both() {
     let said = said(
         &["~/.claude/settings.json is not as it was".to_owned()],
         &["the copy changed".to_owned()],
+        &["the item `Claude Code-credentials-b0d4aa31` is the run's".to_owned()],
     );
     assert!(
         said.contains("THE RUN CHANGED THE OWNER'S CLAUDE SETUP"),
@@ -649,6 +749,14 @@ fn what_is_said_of_a_run_that_did_both_says_both() {
     );
     assert!(said.contains("REFRESHED ITS COPY"), "{said}");
     assert!(said.contains("  - the copy changed"), "{said}");
+    assert!(
+        said.contains("LEFT ITS SECURE STORAGE IN THE OWNER'S KEYCHAIN"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  - the item `Claude Code-credentials-b0d4aa31` is the run's"),
+        "{said}"
+    );
     assert!(said.contains(&"!".repeat(78)), "{said}");
 }
 
