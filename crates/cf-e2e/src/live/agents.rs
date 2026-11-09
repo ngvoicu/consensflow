@@ -253,7 +253,7 @@ struct PiOn {
 /// model on that login and ran Pi 6 of 6 there (T-1136). The owner's Mac's Pi 1.5.0 holds
 /// one `cliproxyapi` login, the local CLIProxyAPI proxy's, and no other; its model is the
 /// contributor the cheap Muse model is, whose allowance may be used to 100% (T-1172;
-/// Gabriel, 2026-11-03: "Pi on this Mac can be used with the models pi has now"). A machine
+/// the owner, 2026-11-03: "Pi on this Mac can be used with the models pi has now"). A machine
 /// this has no row for keeps the cheap model, and the kit's isolation refuses the run
 /// before anything is spent, naming the logins Pi has.
 const PI_ON: [PiOn; 3] = [
@@ -829,7 +829,7 @@ mod tests {
     /// The owner's Mac's Pi holds one login, `cliproxyapi` — the local CLIProxyAPI proxy's — and
     /// none for the cheap model's provider, OpenRouter, so it runs on the model that login serves:
     /// the contributor model the cheap Muse model is, at `minimal` effort, and the run says why
-    /// (T-1172; Gabriel, 2026-11-03: "Pi on this Mac can be used with the models pi has now"; the
+    /// (T-1172; the owner, 2026-11-03: "Pi on this Mac can be used with the models pi has now"; the
     /// contributor model's allowance may be used to 100%, 2026-11-02).
     #[test]
     fn the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so()
