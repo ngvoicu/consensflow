@@ -21,9 +21,10 @@
 //!    nothing. *Then the kit's own*: a window held as long, whose link must be as it was and
 //!    whose `XDG_DATA_HOME` must hold no `claude` (no version was installed) and whose rig must
 //!    end clean.
-//! 2. **The owner's own** (`--stage real`, only after stage 1 held): one window of the real
-//!    Claude Code on the owner's login and home, with the incident's environment, held as
-//!    long, whose launcher the guard hashed before and looks at after.
+//! 2. **The owner's own**, only after stage 1 held in the same run and on the same version of
+//!    Claude Code (`--stage real` alone is refused): one window of the real Claude Code on the
+//!    owner's login and home, with the incident's environment, held as long, whose launcher the
+//!    guard hashed before and looks at after.
 //!
 //! ```text
 //! cargo xtask live launcher                  both stages
@@ -152,10 +153,15 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
 /// One window of the real Claude Code, on the owner's own home and login, in the incident's
 /// environment, held as long as the updater needs: the guard of the rig hashed the owner's
 /// launcher before it started and looks at it as the rig ends.
-fn owner_own(log: &Log) -> Result<(PathBuf, bool, Result)> {
+fn owner_own(log: &Log, proved: &str) -> Result<(PathBuf, bool, Result)> {
     // The stage takes about three minutes (the window opens in under a minute and is held
     // `HELD`): the kit's planned length of a case and its margin, which the login is asked to last.
     let real = log.found(Harness::Claude)?;
+    // The version is read again before any window: the owner's Claude Code may have updated
+    // itself since the pretend owner's stage showed the switches honoured.
+    if let Some(refused) = refusal("both", Some(proved), &real.version()) {
+        return Err(Error::Daemon(refused));
+    }
     let link = real.home().join(".local/bin/claude");
     let was = points(&link)?;
     log.say(format!(
@@ -233,10 +239,18 @@ fn claude_code_honours_the_switches_the_kit_sets_and_a_real_window_leaves_the_ow
         ));
     }
     let honoured = checks.iter().all(|check| check.ok);
-    // The owner's own launcher is risked only by a Claude Code that was shown to honour the
-    // switches on this machine, in this run.
-    if stage != "fake" && (stage == "real" || honoured) {
-        let (was, changed, closed) = owner_own(&log)?;
+    let proved = (stage != "real" && honoured).then(|| version.clone());
+    if stage == "fake" {
+        return report::conclude(&log, "what the owner's launcher came to", &checks);
+    }
+    if let Some(refused) = refusal(&stage, proved.as_deref(), &version) {
+        checks.push(Check::failed(
+            "claude",
+            "a real window on the owner's login",
+            &refused,
+        ));
+    } else {
+        let (was, changed, closed) = owner_own(&log, &version)?;
         checks.push(Check::new(
             "claude",
             "a real window on the owner's login, in the incident's environment, leaves the owner's launcher as it was",
@@ -249,12 +263,51 @@ fn claude_code_honours_the_switches_the_kit_sets_and_a_real_window_leaves_the_ow
                     .map_or_else(ToString::to_string, |()| "clean".to_owned())
             ),
         ));
-    } else if stage != "fake" {
-        checks.push(Check::failed(
-            "claude",
-            "a real window on the owner's login",
-            "not run: the switches were not shown to be honoured, and the owner's launcher is not risked",
-        ));
     }
     report::conclude(&log, "what the owner's launcher came to", &checks)
+}
+
+/// Why the owner's own stage is not run, asked as `stage`, where the pretend owner's stage of
+/// this run showed the Claude Code of version `proved` to honour the switches (none where it
+/// did not run or did not show it), and the machine's Claude Code is of version `now`: none
+/// where it may run.
+fn refusal(stage: &str, proved: Option<&str>, now: &str) -> Option<String> {
+    match proved {
+        Some(proved) if proved == now => None,
+        Some(proved) => Some(format!(
+            "not run: the pretend owner's stage showed Claude Code {proved} honours the update \
+             switches, and the machine's Claude Code is {now} now; the owner's launcher is risked \
+             only on a version shown in the same run (run --stage both again)"
+        )),
+        None if stage == "real" => Some(format!(
+            "not run: --stage real alone would open Claude Code {now} on the owner's home with \
+             nothing in this run showing that it honours the update switches, and one that does \
+             not re-points ~/.local/bin/claude; run --stage both, which runs the pretend owner's \
+             stage first"
+        )),
+        None => Some(format!(
+            "not run: the pretend owner's stage did not show that Claude Code {now} honours the \
+             update switches, and the owner's launcher is not risked"
+        )),
+    }
+}
+
+#[test]
+fn the_owners_stage_runs_only_after_the_pretend_owners_showed_this_version_honours_the_switches() {
+    // Asked alone, it never runs: nothing in this run has shown the switches honoured.
+    let alone = refusal("real", None, "2.1.321").expect("refused");
+    assert!(
+        alone.contains("--stage both") && alone.contains("2.1.321"),
+        "{alone}"
+    );
+    // After a pretend owner that did not show it, it does not run.
+    assert!(refusal("both", None, "2.1.321").is_some());
+    // Shown on another version than the machine's now (an update in between), it does not run.
+    let other = refusal("both", Some("2.1.319"), "2.1.321").expect("refused");
+    assert!(
+        other.contains("2.1.319") && other.contains("2.1.321"),
+        "{other}"
+    );
+    // Shown on this version, in this run: it runs.
+    assert_eq!(refusal("both", Some("2.1.321"), "2.1.321"), None);
 }
