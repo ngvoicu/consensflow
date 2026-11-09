@@ -554,14 +554,17 @@ mod conpty {
         }
     }
 
-    /// What the console host makes of the bytes the page writes for Shift+Enter (T-1330), for the
+    /// What the console host makes of the three bytes a pane could write for a new line, for the
     /// harnesses that read the console's key events (Codex, Devin and Muse, through crossterm,
     /// which reads the Enter key with the modifiers the console says): ESC CR is the Enter key
-    /// with Alt, the new line each lists; a line feed is the Enter key with Control, which none
-    /// lists (their new-line keys are Shift+Enter, Alt+Enter and Ctrl+J), so the page does not
-    /// write it for them; and a plain Enter, the message sent, is the Enter key alone.
+    /// with Alt, the new line each lists, **which the page does not write** (a read can split it:
+    /// above); a line feed is the Enter key with Control, **which the page writes** (T-1348): none
+    /// lists it (their new-line keys are Shift+Enter, Alt+Enter and Ctrl+J), so Shift+Enter does
+    /// nothing in them on Windows, safely; and a plain Enter, the message sent, is the Enter key
+    /// alone.
     #[test]
-    fn the_new_line_key_the_page_writes_reaches_a_key_reader_as_enter_with_alt() {
+    fn the_bytes_a_pane_could_write_for_a_new_line_reach_a_key_reader_as_enter_with_alt_control_or_none(
+    ) {
         let key_of = |character: u32, modifiers: u32| KeyRead {
             number: 1,
             key: "Enter".to_owned(),
@@ -580,8 +583,11 @@ mod conpty {
 
     /// Why the page never writes the kitty protocol's Shift+Enter (`CSI 13;2u`) on Windows: the
     /// console host knows no such sequence, and a program that reads key events is given its
-    /// seven characters as keys of typed text, into the message. If this fails, the host reads it,
-    /// and it is worth a look whether it is the one key for every harness.
+    /// seven characters as keys of typed text, into the message. Codex's own reader rebuilds
+    /// the seven as Shift+Enter, except where a read ends after `ESC [`
+    /// (`codex_on_windows_reads_the_kitty_shift_enter_whole_except_where_the_console_hosts_read_ends_after_esc_and_a_bracket`);
+    /// Devin and Muse are not known to. If this fails, the host reads it, and it is worth a look
+    /// whether it is the one key for every harness.
     #[test]
     fn a_csi_u_shift_enter_reaches_a_key_reader_as_seven_typed_characters() {
         let (keys, seen) = keys_of(b"\x1b[13;2u", 8);
