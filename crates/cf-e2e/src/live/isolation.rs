@@ -150,26 +150,25 @@ enum Seed {
         to: PathBuf,
         provider: &'static pi::Provider,
     },
-    /// A link in `to` to each entry of the owner's folder `from` but those named in `except`:
-    /// what other programs of the rig keep in a folder the variables move (another tool's login
-    /// in `XDG_DATA_HOME`), left as it is for them; never a harness's of the kit's own, which
-    /// has a home of the run's (Muse's, whose sessions the daemon reads in the folder: T-1152).
-    /// Where the folders are links' (Devin's, on Unix).
-    #[cfg(unix)]
-    Reach {
+    /// A copy in `to` of each of the folders `only` of the owner's folder `from` that is there:
+    /// what another program of the rig reads in a folder the variables move. A copy, never a
+    /// link: a link was a way for every program of the rig to write in the owner's folder (the
+    /// owner's `~/.local/share/claude`, where Claude Code's updater writes its versions, was a
+    /// Devin run's `$XDG_DATA_HOME/claude`, T-1373), and before that the owner's Muse was the
+    /// rig's (T-1081).
+    Carry {
         from: PathBuf,
         to: PathBuf,
-        except: &'static [&'static str],
+        only: &'static [&'static str],
     },
 }
 
-/// The folders the harnesses on the XDG layout keep below its config and data folders, which
-/// a home that moves those folders reaches none of: each is that harness's, the run's own or
-/// the rig's, never the owner's through a link. Devin's home reached the owner's Muse so, and
-/// a rig that seated both read the owner's Muse settings and sessions in place of the rig's
-/// Muse's (T-1081).
+/// The folders of the owner's XDG config folder a Devin run carries: git's, whose `config` a
+/// window's git reads there besides `~/.gitconfig`. Devin's own login and config are copied by
+/// name; nothing else of the owner's config or data folders is any harness's of the rig's
+/// (Claude Code, Codex and Pi keep theirs below `HOME`, Muse has a home of the run's).
 #[cfg(unix)]
-const XDG_HARNESSES: [&str; 2] = ["devin", "muse"];
+const XDG_CARRIED: [&str; 1] = ["git"];
 
 /// What a harness's home is made of, and what is watched of the owner's.
 #[derive(Debug, Clone)]
@@ -325,9 +324,7 @@ impl Plan {
 
     /// Devin: the four folders of the XDG layout, where it keeps its login and config (and its
     /// sessions, logs and cache); the login (`credentials.toml`, an API key) and `config.json`
-    /// are copied. Whatever else the owner keeps in the config and data folders is reached
-    /// through a link, for the other programs of the rig that read it there, but the folders
-    /// of the harnesses on the XDG layout ([`XDG_HARNESSES`]).
+    /// are copied, and git's config ([`XDG_CARRIED`]). Nothing of the owner's is linked.
     #[cfg(unix)]
     fn devin(config: &Path, data: &Path) -> Self {
         Self {
@@ -352,15 +349,10 @@ impl Plan {
                     to: "config/devin/config.json".into(),
                     login: false,
                 },
-                Seed::Reach {
+                Seed::Carry {
                     from: config.to_path_buf(),
                     to: "config".into(),
-                    except: &XDG_HARNESSES,
-                },
-                Seed::Reach {
-                    from: data.to_path_buf(),
-                    to: "data".into(),
-                    except: &XDG_HARNESSES,
+                    only: &XDG_CARRIED,
                 },
             ],
             watched: vec![
@@ -752,12 +744,14 @@ impl Isolation {
                 }])
             }
             Seed::PiProvider { from, to, provider } => self.pi_provider(from, to, provider),
-            #[cfg(unix)]
-            Seed::Reach { from, to, except } => Ok(vec![Placed::Links {
-                from: from.clone(),
-                to: to.clone(),
-                except,
-            }]),
+            Seed::Carry { from, to, only } => Ok(only
+                .iter()
+                .filter(|name| from.join(name).is_dir())
+                .map(|name| Placed::Tree {
+                    from: from.join(name),
+                    to: to.join(name),
+                })
+                .collect()),
         }
     }
 
@@ -1001,12 +995,6 @@ enum Placed {
     /// The folder `from`, copied under `to` whole: the package a provider of Pi's is loaded
     /// from ([`pi::Provider`]), whose files the owner was hashed not to change.
     Tree { from: PathBuf, to: PathBuf },
-    #[cfg(unix)]
-    Links {
-        from: PathBuf,
-        to: PathBuf,
-        except: &'static [&'static str],
-    },
 }
 
 impl Placed {
@@ -1023,11 +1011,6 @@ impl Placed {
             }
             Self::Tree { from, to } => {
                 copy_tree(&from, &home.join(to))?;
-                Ok(None)
-            }
-            #[cfg(unix)]
-            Self::Links { from, to, except } => {
-                link_each(&from, &home.join(to), except)?;
                 Ok(None)
             }
         }
@@ -1064,23 +1047,6 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
         } else {
             files::copy(&entry_from, &entry_to)?;
         }
-    }
-    Ok(())
-}
-
-/// A link in `into` to each entry of `from` but those named in `except`: the program that
-/// reads the folder where the variables moved it finds what it had.
-#[cfg(unix)]
-fn link_each(from: &Path, into: &Path, except: &[&str]) -> Result {
-    let Ok(entries) = fs::read_dir(from) else {
-        return Ok(());
-    };
-    for entry in entries.flatten() {
-        if except.iter().any(|name| entry.file_name() == *name) {
-            continue;
-        }
-        let link = into.join(entry.file_name());
-        std::os::unix::fs::symlink(entry.path(), &link).map_err(Error::file("link", &link))?;
     }
     Ok(())
 }

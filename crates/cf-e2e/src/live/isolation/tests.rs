@@ -1092,7 +1092,7 @@ fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
 }
 
 #[test]
-fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_other_programs_ones() {
+fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_none_of_the_other_programs_ones() {
     let owner = Owner::new();
     let isolation = owner.devin();
     let home = isolation.made_at(at(NOW)).unwrap();
@@ -1118,18 +1118,10 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
     assert!(home.join("config/devin/config.json").is_file());
     assert!(!home.join("data/devin/cli").exists());
     assert_eq!(mode(&home.join("data/devin/credentials.toml")), 0o600);
-    // What other programs keep there is reached through a link, as it was, and Devin's own
-    // folders are not: Devin writes in the run's.
-    let link = home.join("data/other-tool");
-    assert!(fs::symlink_metadata(&link)
-        .unwrap()
-        .file_type()
-        .is_symlink());
-    assert_eq!(
-        fs::read_link(&link).unwrap(),
-        owner.path(".local/share/other-tool")
-    );
-    assert!(fs::symlink_metadata(home.join("config/other-tool")).is_ok());
+    // What other programs keep there is not in the run's (T-1373): neither linked nor copied.
+    for below in ["data/other-tool", "config/other-tool"] {
+        assert!(fs::symlink_metadata(home.join(below)).is_err(), "{below}");
+    }
     write(
         &home.join("data/devin/cli/sessions.db"),
         "the run's session",
@@ -1146,9 +1138,50 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
         isolation.finish().is_ok(),
         "the run wrote in its own folders only"
     );
-    // Dropping the home takes the links away, and none of what they reach.
+    // Dropping the home takes none of the owner's.
     drop(isolation);
     assert!(owner.path(".local/share/other-tool/auth.json").is_file());
+}
+
+/// A link in the run's XDG folders to a folder of the owner's is a way for any program of the rig
+/// to write there: the owner's `~/.local/share/claude` (Claude Code's versions, which its updater
+/// writes) was the run's `$XDG_DATA_HOME/claude` in a rig that seated Devin and Claude (T-1373).
+/// A Devin home holds no link, and none of the owner's but Devin's own login and config and a
+/// copy of git's config, which a window's git reads below `XDG_CONFIG_HOME`.
+#[cfg(unix)]
+#[test]
+fn a_devin_home_holds_no_link_to_the_owners_folders_and_copies_gits_config_alone() {
+    let owner = Owner::new();
+    write(
+        &owner.path(".local/share/claude/versions/2.1.321"),
+        "the owner's Claude Code",
+    );
+    write(
+        &owner.path(".config/git/config"),
+        "[user]\n\tname = the owner\n",
+    );
+    let isolation = owner.devin();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let mut links = Vec::new();
+    let mut folders = vec![home.clone()];
+    while let Some(folder) = folders.pop() {
+        for entry in fs::read_dir(&folder).unwrap().flatten() {
+            let kind = entry.file_type().unwrap();
+            if kind.is_symlink() {
+                links.push(entry.path());
+            } else if kind.is_dir() {
+                folders.push(entry.path());
+            }
+        }
+    }
+    assert_eq!(links, Vec::<PathBuf>::new(), "links to the owner's folders");
+    assert!(fs::symlink_metadata(home.join("data/claude")).is_err());
+    let git = home.join("config/git/config");
+    assert!(fs::symlink_metadata(&git).unwrap().is_file());
+    assert_eq!(
+        fs::read_to_string(&git).unwrap(),
+        "[user]\n\tname = the owner\n"
+    );
 }
 
 /// T-1081: Devin's home moves the XDG folders, and Muse keeps its settings and sessions below
@@ -1168,8 +1201,6 @@ fn a_devin_home_reaches_none_of_the_owners_muse() {
             "{below} is in the run's home"
         );
     }
-    // What another program keeps there is still reached.
-    assert!(fs::symlink_metadata(home.join("data/other-tool")).is_ok());
 }
 
 #[test]

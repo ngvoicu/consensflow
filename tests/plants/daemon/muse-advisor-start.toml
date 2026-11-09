@@ -8,7 +8,7 @@
 #   (`crates/cf-e2e/src/rig/install.rs`, `give_muse_its_folders`), and puts back a link a rig
 #   before it left in the same home.
 # - Devin's home reaches none of the owner's Muse (`crates/cf-e2e/src/live/isolation.rs`,
-#   `XDG_HARNESSES`).
+#   `XDG_CARRIED`).
 # - The rig's Muse on echo keeps its folders in the rig's home, as the live one does
 #   (`crates/cf-e2e/src/muse.rs`, `write_stand_in`).
 #
@@ -61,8 +61,8 @@ runs = ["muse-advisor-start-isolation"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''const XDG_HARNESSES: [&str; 2] = ["devin", "muse"];'''
-replace = '''const XDG_HARNESSES: [&str; 2] = ["devin", "devin"];'''
+find = '''const XDG_CARRIED: [&str; 1] = ["git"];'''
+replace = '''const XDG_CARRIED: [&str; 2] = ["git", "muse"];'''
 
 [[plant]]
 name = "muse advisor start: the rig's Muse on echo keeps its folders where a home moved them"
