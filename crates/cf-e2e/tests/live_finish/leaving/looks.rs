@@ -12,8 +12,11 @@
 //! ([`Identity`]: a number another process takes afterwards is another). One seen with the
 //! command's words and found absent from the second listing of a look whose task, read after both,
 //! was not over, ended while the turn ran: the task being over is final, and the window closes
-//! only after it. An absence read from a look the task was over at, one the machine did not
-//! answer, and a process never seen by identity say nothing.
+//! only after it. So did a number the pane host listed that no process of the machine has at such
+//! a look (no identity is needed where nobody has the number, and the pane host's look is the one
+//! that catches what lives under a second: the machine's listing on Windows is a PowerShell that
+//! takes about one). An absence read from a look the task was over at, one the machine did not
+//! answer, and a process never seen by either say nothing.
 
 use cf_e2e::live::members::{Identity, Running};
 use cf_e2e::live::tree::Proc;
@@ -30,6 +33,10 @@ struct Seen {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Looks {
     seen: Vec<Seen>,
+    /// The numbers the pane host listed, at any look.
+    listed: Vec<u64>,
+    /// Those of `listed` that no process of the machine had at a look of the turn.
+    absent: Vec<u64>,
 }
 
 impl Looks {
@@ -39,10 +46,16 @@ impl Looks {
     pub fn look(
         &mut self,
         before: Option<&[Running]>,
+        host: &[u64],
         after: Option<&[Running]>,
         in_turn: bool,
         mark: &str,
     ) {
+        for pid in host {
+            if !self.listed.contains(pid) {
+                self.listed.push(*pid);
+            }
+        }
         // Seen alive, by identity, wherever the look fell: an identity is no claim of when.
         for running in before.into_iter().chain(after).flatten() {
             if running.command.contains(mark)
@@ -70,13 +83,28 @@ impl Looks {
                     seen.ended_in_turn = true;
                 }
             }
+            // And a number the pane host listed, at this look or before, that no process of the
+            // machine has: the process that had it is gone, whether or not the machine ever
+            // showed it (a PowerShell's listing takes about a second, and Codex's wrapper of a
+            // tool call lives less). A number another process has, whatever it runs, is no
+            // evidence: the machine says nothing of the one that had it.
+            for pid in &self.listed {
+                if !self.absent.contains(pid)
+                    && !after
+                        .iter()
+                        .any(|running| u64::from(running.identity.pid) == *pid)
+                {
+                    self.absent.push(*pid);
+                }
+            }
         }
     }
 
     /// The numbers of the processes of `listed` that ended in the turn: those the run saw by
-    /// identity and found, each, gone from a look of the turn. A listed number the run never saw
-    /// a process of has none to follow, and is not among them; one that two processes had, in
-    /// turn, is where both ended.
+    /// identity and found, each, gone from a look of the turn, and those whose number no process
+    /// of the machine had at a look of the turn after the host listed it. A listed number the run
+    /// never saw a process of, and that no look found nobody's, is not among them; one that two
+    /// processes had, in turn, is where both ended.
     pub fn gone_of(&self, listed: &[Proc]) -> Vec<u64> {
         listed
             .iter()
@@ -86,7 +114,8 @@ impl Looks {
                     .iter()
                     .filter(|seen| u64::from(seen.identity.pid) == process.pid)
                     .collect();
-                !had.is_empty() && had.iter().all(|seen| seen.ended_in_turn)
+                self.absent.contains(&process.pid)
+                    || (!had.is_empty() && had.iter().all(|seen| seen.ended_in_turn))
             })
             .map(|process| process.pid)
             .collect()

@@ -566,7 +566,18 @@ fn job(pid: u32, started: u64) -> Running {
 
 /// A look the turn ran through (`in_turn`), or one the task was over at.
 fn look(looks: &mut Looks, before: &[Running], after: &[Running], in_turn: bool) {
-    looks.look(Some(before), Some(after), in_turn, "4711");
+    looks.look(Some(before), &[], Some(after), in_turn, "4711");
+}
+
+/// A look at which the pane host listed the processes `host` (by their numbers) as well.
+fn look_listed(
+    looks: &mut Looks,
+    host: &[u64],
+    before: &[Running],
+    after: &[Running],
+    in_turn: bool,
+) {
+    looks.look(Some(before), host, Some(after), in_turn, "4711");
 }
 
 /// What the run had at the end of its observation of the listed process `pid`, with nothing
@@ -661,15 +672,71 @@ fn a_look_that_was_not_made_in_the_turn_or_not_answered_waives_nothing() {
     // The look after it was made in the turn but the machine did not answer the second time.
     let mut silent = Looks::default();
     look(&mut silent, &[job(7740, 5)], &[job(7740, 5)], true);
-    silent.look(Some(&[]), None, true, "4711");
+    silent.look(Some(&[]), &[], None, true, "4711");
     assert!(silent.gone_of(&listed).is_empty());
     // Nor the first time: nothing was ever seen, so nothing is known of its identity.
     let mut deaf = Looks::default();
-    deaf.look(None, None, true, "4711");
-    deaf.look(None, None, true, "4711");
+    deaf.look(None, &[], None, true, "4711");
+    deaf.look(None, &[], None, true, "4711");
     assert!(deaf.gone_of(&listed).is_empty());
     // And a run that never looked has none gone.
     assert!(Looks::default().gone_of(&listed).is_empty());
+}
+
+/// The wrapper of Codex's tool call lives under a second, and on Windows the machine's listing is a
+/// PowerShell that takes about one: the host's look, a Job walk, lists the wrapper, and the machine's
+/// two listings, before and after, never have it. What shows it ended is what the host listed and no
+/// process of the machine has, at a look the task was read as not over after: the number is nobody's.
+#[test]
+fn a_process_the_host_listed_and_no_process_of_the_machine_has_at_a_look_of_the_turn_ended_in_it() {
+    let listed = [proc(7740, "ping -n 4711")];
+    let mut looks = Looks::default();
+    look_listed(&mut looks, &[7740], &[], &[], true);
+    assert_eq!(looks.gone_of(&listed), [7740]);
+    for exit in [None, Some(nothing_at_exit())] {
+        let left = judged(&looks, 7740, exit.as_ref());
+        assert_eq!(judge(&left, Expect::Ended), Ok(()), "{exit:?}");
+    }
+    // Listed at a look, and gone at the next look of the turn.
+    let mut later = Looks::default();
+    look_listed(&mut later, &[7740], &[], &[running(1, 1, 0, "init")], true);
+    look(&mut later, &[], &[running(1, 1, 0, "init")], true);
+    assert_eq!(later.gone_of(&listed), [7740]);
+}
+
+/// What the machine shows of the number says nothing of an ending, where the look was not of the turn
+/// (the close may have ended it: T-1339's probe, with the host having listed it), where the machine
+/// did not answer, where the host never listed it, and where any process has the number now.
+#[test]
+fn a_listed_number_is_no_ending_where_the_look_was_not_in_the_turn_or_any_process_has_it() {
+    let listed = [proc(7740, "ping -n 4711")];
+    // The look the task was over at: the window's close may have ended it already.
+    let mut over = Looks::default();
+    look_listed(&mut over, &[7740], &[], &[], false);
+    assert!(over.gone_of(&listed).is_empty());
+    // The probe, with the host's own listing of the command at the look before the close.
+    let mut probe = Looks::default();
+    look_listed(&mut probe, &[8612], &[job(8612, 5)], &[job(8612, 5)], true);
+    look_listed(&mut probe, &[], &[], &[], false);
+    assert!(probe.gone_of(&[proc(8612, "ping -n 4711")]).is_empty());
+    // The machine did not answer after the host's look.
+    let mut silent = Looks::default();
+    silent.look(Some(&[]), &[7740], None, true, "4711");
+    assert!(silent.gone_of(&listed).is_empty());
+    // Another process has the number, whatever it runs.
+    let mut taken = Looks::default();
+    look_listed(
+        &mut taken,
+        &[7740],
+        &[],
+        &[running(7740, 900, 1, "notepad.exe")],
+        true,
+    );
+    assert!(taken.gone_of(&listed).is_empty());
+    // The host never listed it: a process nobody saw is no ending.
+    let mut never = Looks::default();
+    look_listed(&mut never, &[], &[], &[], true);
+    assert!(never.gone_of(&listed).is_empty());
 }
 
 /// A process is the one that began when it began: the number it had is another's once it is gone.

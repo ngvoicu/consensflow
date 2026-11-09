@@ -625,7 +625,21 @@ fn observe(
         let after = ThisMachine.processes();
         let thread = members.task(number)?;
         let over = is_over(&thread) || goes_on(members, number)?;
-        looks.look(before.as_deref().ok(), after.as_deref().ok(), !over, &mark);
+        let host: Vec<u64> = match &listing {
+            Some(Ok(tree)) => tree
+                .holding(&mark)
+                .iter()
+                .map(|process| process.pid)
+                .collect(),
+            _ => Vec::new(),
+        };
+        looks.look(
+            before.as_deref().ok(),
+            &host,
+            after.as_deref().ok(),
+            !over,
+            &mark,
+        );
         progress.say(log, progress_line(number, &thread, &lane, listing.as_ref()));
         left.state = text(&thread["state"]);
         let now = log.elapsed();

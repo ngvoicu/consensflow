@@ -153,8 +153,8 @@ runs = ["codex-finish-leaving"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving/looks.rs"
-find = "                !had.is_empty() && had.iter().all(|seen| seen.ended_in_turn)"
-replace = "                had.iter().all(|seen| seen.ended_in_turn)"
+find = "                    || (!had.is_empty() && had.iter().all(|seen| seen.ended_in_turn))"
+replace = "                    || (had.iter().all(|seen| seen.ended_in_turn))"
 
 [[plant]]
 name = "codex-windows: a number two processes had is gone where one of them ended"
@@ -163,8 +163,8 @@ runs = ["codex-finish-leaving"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving/looks.rs"
-find = "                !had.is_empty() && had.iter().all(|seen| seen.ended_in_turn)"
-replace = "                !had.is_empty() && had.iter().any(|seen| seen.ended_in_turn)"
+find = "                    || (!had.is_empty() && had.iter().all(|seen| seen.ended_in_turn))"
+replace = "                    || (!had.is_empty() && had.iter().any(|seen| seen.ended_in_turn))"
 
 [[plant]]
 name = "codex-windows: a number another process took keeps the command running"
@@ -234,3 +234,33 @@ replace = '''
     let _ = (exit, mark);
     Vec::new()
 '''
+
+[[plant]]
+name = "codex-windows: a process the host listed that the machine never showed is held to the note"
+meant = "a_process_the_host_listed_and_no_process_of_the_machine_has_at_a_look_of_the_turn_ended_in_it"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving/looks.rs"
+find = "                self.absent.contains(&process.pid)"
+replace = "                false"
+
+[[plant]]
+name = "codex-windows: a number another process has is gone while its command differs"
+meant = "a_listed_number_is_no_ending_where_the_look_was_not_in_the_turn_or_any_process_has_it"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving/looks.rs"
+find = "                        .any(|running| u64::from(running.identity.pid) == *pid)"
+replace = "                        .any(|running| u64::from(running.identity.pid) == *pid && running.command.contains(mark))"
+
+[[plant]]
+name = "codex-windows: a number is found nobody's at a look the task was over at"
+meant = "a_listed_number_is_no_ending_where_the_look_was_not_in_the_turn_or_any_process_has_it"
+runs = ["codex-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving/looks.rs"
+find = "        if let (true, Some(after)) = (in_turn, after) {"
+replace = "        if let (_, Some(after)) = (in_turn, after) {"
