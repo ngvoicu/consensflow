@@ -255,6 +255,7 @@ mod running {
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "", 0);
         one_shot(
+            Harness::Pi,
             &program,
             &["-p".to_owned(), "one word".to_owned(), String::new()],
         )
@@ -278,16 +279,16 @@ mod running {
         let printing = format!("echo {SECRET}; echo 'Not   logged in' >&2");
         let program = stand_in(scratch.path(), &log, &printing, 3);
         // It ran and ended badly: how, not an error (the renewal is judged by the login it left).
-        let said = one_shot(&program, &[]).unwrap().unwrap();
+        let said = one_shot(Harness::Pi, &program, &[]).unwrap().unwrap();
         assert!(said.contains("it ended 3 (Not logged in)"), "{said}");
         assert!(!said.contains(SECRET), "{said}");
         let silent = stand_in(scratch.path(), &log, "", 1);
-        let said = one_shot(&silent, &[]).unwrap().unwrap();
+        let said = one_shot(Harness::Pi, &silent, &[]).unwrap().unwrap();
         assert!(said.contains("it ended 1 (saying nothing)"), "{said}");
         // One that ended well says nothing; one that is no program is the error.
         let well = stand_in(scratch.path(), &log, "", 0);
-        assert_eq!(one_shot(&well, &[]).unwrap(), None);
-        assert!(one_shot(&scratch.path().join("none"), &[]).is_err());
+        assert_eq!(one_shot(Harness::Pi, &well, &[]).unwrap(), None);
+        assert!(one_shot(Harness::Pi, &scratch.path().join("none"), &[]).is_err());
     }
 
     #[test]
@@ -296,7 +297,7 @@ mod running {
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "sleep 30", 0);
         let started = Instant::now();
-        let said = one_shot_within(&program, &[], Duration::from_secs(1), &[])
+        let said = one_shot_within(Harness::Pi, &program, &[], Duration::from_secs(1), &[])
             .unwrap()
             .unwrap();
         assert!(said.contains("it was ended after 1 s"), "{said}");

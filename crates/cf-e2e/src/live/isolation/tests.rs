@@ -1656,6 +1656,27 @@ fn a_pi_run_on_two_providers_is_not_renewed_and_its_refusal_says_two_are_not_sup
     assert_eq!(run.owner.made(), 0);
 }
 
+/// The renewal runs the owner's Pi on the owner's own agent folder, before any home of the run's
+/// exists: Pi installs a package its settings name and has not got at its start unless it is told
+/// not to, and `--no-extensions` is applied after the packages are resolved (T-1378). It starts
+/// with `PI_OFFLINE=1`, as every Pi the kit starts does.
+#[test]
+fn the_renewal_runs_pi_with_pi_offline_so_it_installs_nothing_in_the_owners_folder() {
+    let run = Renewing::new();
+    let body = format!(
+        "printf 'PI_OFFLINE=%s\\n' \"$PI_OFFLINE\" >> '{}'\n{}",
+        run.log().display(),
+        run.renews()
+    );
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &body, 0);
+    isolation.made_at(at(NOW)).unwrap();
+    let started = run.started().unwrap();
+    assert!(
+        started.iter().any(|line| line == "PI_OFFLINE=1"),
+        "the renewal's Pi was started with: {started:?}"
+    );
+}
+
 #[test]
 fn a_renewal_that_fails_refuses_the_pi_run_in_words_that_say_so_and_makes_no_home() {
     let run = Renewing::new();

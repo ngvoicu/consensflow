@@ -60,7 +60,10 @@ fn the_switches_are_claude_codes_two_and_muses_one_and_every_window_has_all_thre
         updates_off_of(Harness::Muse),
         [("MUSE_NO_AUTO_UPDATE", "1")]
     );
-    for other in [Harness::Codex, Harness::Pi, Harness::Devin] {
+    // Pi installs a package its settings name and has not got at its start (Pi 1.5.0's
+    // `dist/core/package-manager.js`, T-1378): every Pi the kit starts is told not to.
+    assert_eq!(updates_off_of(Harness::Pi), [("PI_OFFLINE", "1")]);
+    for other in [Harness::Codex, Harness::Devin] {
         assert!(updates_off_of(other).is_empty(), "{other:?}");
     }
     let every: Vec<_> = updates_off().collect();
@@ -70,6 +73,7 @@ fn the_switches_are_claude_codes_two_and_muses_one_and_every_window_has_all_thre
             ("DISABLE_AUTOUPDATER", "1"),
             ("DISABLE_UPDATES", "1"),
             ("MUSE_NO_AUTO_UPDATE", "1"),
+            ("PI_OFFLINE", "1"),
         ]
     );
 }

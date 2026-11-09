@@ -65,21 +65,33 @@ pub const CLAUDE_UPDATES_OFF: [(&str, &str); 2] =
 /// launcher, the binary and the version line beside it.
 pub const MUSE_UPDATES_OFF: [(&str, &str); 1] = [("MUSE_NO_AUTO_UPDATE", "1")];
 
-/// The variables that keep `harness` from updating itself, as the kit gives them to it. Codex,
-/// Pi and Devin have none here: Codex and Devin are told by their own configuration
-/// (`check_for_update_on_startup=false`, `auto_update: false`), and Pi installs only on `pi update`.
+/// What Pi is told, so that it installs nothing at its start: Pi 1.5.0 installs a package its
+/// settings name and has not got, or whose version drifted, before it applies `--no-extensions`
+/// (`dist/core/package-manager.js`: `installMissing` returns before installing when `PI_OFFLINE`
+/// is set, line 1069; it also skips Pi's update check and catalog refresh). Every Pi the kit
+/// starts has it: a rig's windows, the version probe and the login renewal, which runs on the
+/// owner's own agent folder (T-1378).
+pub const PI_UPDATES_OFF: [(&str, &str); 1] = [("PI_OFFLINE", "1")];
+
+/// The variables that keep `harness` from updating or installing anything itself, as the kit
+/// gives them to it. Codex and Devin have none here: they are told by their own configuration
+/// (`check_for_update_on_startup=false`, `auto_update: false`).
 pub const fn updates_off_of(harness: Harness) -> &'static [(&'static str, &'static str)] {
     match harness {
         Harness::Claude => &CLAUDE_UPDATES_OFF,
         Harness::Muse => &MUSE_UPDATES_OFF,
-        Harness::Codex | Harness::Pi | Harness::Devin => &[],
+        Harness::Pi => &PI_UPDATES_OFF,
+        Harness::Codex | Harness::Devin => &[],
     }
 }
 
 /// The variables of every harness's, which every window of a rig has (a harmless variable to
 /// the others).
 pub fn updates_off() -> impl Iterator<Item = (&'static str, &'static str)> {
-    CLAUDE_UPDATES_OFF.into_iter().chain(MUSE_UPDATES_OFF)
+    CLAUDE_UPDATES_OFF
+        .into_iter()
+        .chain(MUSE_UPDATES_OFF)
+        .chain(PI_UPDATES_OFF)
 }
 
 /// What to look at for one harness.

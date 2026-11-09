@@ -44,6 +44,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::login::span;
+use super::machine::Harness;
 use crate::process::{own_var, Run};
 use crate::{Error, Result};
 
@@ -270,20 +271,28 @@ impl Renewal {
 /// [`LIMIT`]. None where it ended well; how it ended where it did not, in what it said and never
 /// what it printed (the renewal is judged by the login it left, [`Renewal::renew`]); an error where
 /// it could not be run at all.
-pub fn one_shot(program: &Path, words: &[String]) -> Result<Option<String>> {
-    one_shot_within(program, words, LIMIT, &[])
+pub fn one_shot(harness: Harness, program: &Path, words: &[String]) -> Result<Option<String>> {
+    one_shot_within(harness, program, words, LIMIT, &[])
 }
 
 /// [`one_shot`], whose own folder is also taken out of the owner's `records` when it ended: a
 /// harness that keeps something of the folder it was started in there (Claude Code's
 /// `projects/<the folder's path>/memory`, even with no session saved) leaves nothing of the
 /// renewal's behind, so that the owner's setup is compared with what it was ([`FOLDER`] names it).
-pub fn one_shot_in(program: &Path, words: &[String], records: &[&Path]) -> Result<Option<String>> {
-    one_shot_within(program, words, LIMIT, records)
+pub fn one_shot_in(
+    harness: Harness,
+    program: &Path,
+    words: &[String],
+    records: &[&Path],
+) -> Result<Option<String>> {
+    one_shot_within(harness, program, words, LIMIT, records)
 }
 
-/// [`one_shot`], ended after `limit`, and its record in each of `records` taken away.
+/// [`one_shot`], ended after `limit`, and its record in each of `records` taken away. The harness
+/// is told what every window of the kit's is ([`super::launcher::updates_off_of`]): it runs on the
+/// owner's own folders, where an update or an install would land in what is theirs.
 fn one_shot_within(
+    harness: Harness,
     program: &Path,
     words: &[String],
     limit: Duration,
@@ -300,6 +309,7 @@ fn one_shot_within(
     let ran = Run::new(program)
         .args(words)
         .inheriting_env()
+        .vars(super::launcher::updates_off_of(harness).iter().copied())
         .finding_programs()
         .cwd(folder.path())
         .closed_input()

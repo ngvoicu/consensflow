@@ -19,6 +19,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::super::login::span;
+use super::super::machine::Harness;
 use super::super::renew::{self, Renewal, TestMachine};
 use super::watch::Seen;
 use crate::{Error, Result};
@@ -207,7 +208,7 @@ pub fn renewal(
             .into();
         let records = [agent.join("sessions")];
         let before = Seen::look(&files, &records);
-        let ended = renew::one_shot(&program, &renew::pi_words(&model))?;
+        let ended = renew::one_shot(Harness::Pi, &program, &renew::pi_words(&model))?;
         let changed = before.changes_to(&Seen::look(&files, &records), &home);
         if changed.is_empty() {
             return Ok(ended);

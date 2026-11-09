@@ -742,6 +742,7 @@ fn claude_renewal(
             let before = owner.look();
             let projects = home.join(".claude").join("projects");
             let ended = renew::one_shot_in(
+                Harness::Claude,
                 &program,
                 &renew::claude_words(&model),
                 &[projects.as_path()],
