@@ -98,8 +98,13 @@ fn a_pane_and_a_waiting_switch_are_written_as_the_dispatcher_writes_them() {
         generation: 1_791_194_400_123,
     };
     assert_eq!(
-        pane_value(&pane).to_string(),
-        r#"{"id":"p1-chief","generation":1791194400123}"#
+        pane_value(&pane, Some("codex")).to_string(),
+        r#"{"id":"p1-chief","generation":1791194400123,"harness":"codex"}"#
+    );
+    assert_eq!(
+        pane_value(&pane, None).to_string(),
+        r#"{"id":"p1-chief","generation":1791194400123}"#,
+        "a launch that did not say its harness says none"
     );
     let to = SwitchTo {
         harness: "codex".to_owned(),
@@ -154,7 +159,10 @@ fn a_project_opens_its_chief_window_and_closes_it_through_the_trait() {
         .as_object()
         .map(|pane| pane.keys().map(String::as_str).collect())
         .unwrap_or_default();
-    assert_eq!(keys, ["id", "generation"], "{pane}");
+    // The harness the window was launched with rides with its pane (T-1336): the page's keys for
+    // the window follow it, where the member's own harness is what its next window will run.
+    assert_eq!(keys, ["id", "generation", "harness"], "{pane}");
+    assert_eq!(pane["harness"], "claude-code", "{pane}");
     assert_ne!(engine.activity(chief.id), json!({ "state": "closed" }));
 
     let closed = {

@@ -1,0 +1,124 @@
+{
+  "crossterm": "openai-oss-forks/crossterm ed1cdab335221515706178d68495bba2aed1924f (Codex 0.167.0)",
+  "system": "macOS pty, raw mode, the reader waits 200 ms",
+  "cases": [
+    {
+      "case": "nothing waiting, CR",
+      "key": [
+        13
+      ],
+      "key_write_bytes": 1,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=0 keys=[\"Enter/KeyModifiers(0x0)\"]"
+    },
+    {
+      "case": "nothing waiting, ESC",
+      "key": [
+        27
+      ],
+      "key_write_bytes": 1,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=0 keys=[\"Esc/KeyModifiers(0x0)\"]"
+    },
+    {
+      "case": "nothing waiting, ESC CR",
+      "key": [
+        27,
+        13
+      ],
+      "key_write_bytes": 2,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=0 keys=[\"Enter/KeyModifiers(ALT)\"]"
+    },
+    {
+      "case": "nothing waiting, LF",
+      "key": [
+        10
+      ],
+      "key_write_bytes": 1,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=0 keys=[\"Char('j')/KeyModifiers(CONTROL)\"]"
+    },
+    {
+      "case": "nothing waiting, CSI u",
+      "key": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ],
+      "key_write_bytes": 7,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=0 keys=[\"Enter/KeyModifiers(SHIFT)\"]"
+    },
+    {
+      "case": "nothing waiting, modifyOtherKeys",
+      "key": [
+        27,
+        91,
+        50,
+        55,
+        59,
+        50,
+        59,
+        49,
+        51,
+        126
+      ],
+      "key_write_bytes": 10,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=0 keys=[]"
+    },
+    {
+      "case": "1020 typed characters, ESC CR",
+      "key": [
+        27,
+        13
+      ],
+      "key_write_bytes": 2,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=1020 keys=[\"Enter/KeyModifiers(ALT)\"]"
+    },
+    {
+      "case": "1021 typed characters, ESC CR",
+      "key": [
+        27,
+        13
+      ],
+      "key_write_bytes": 2,
+      "key_write_ms": 204.2,
+      "result": "RESULT chars=1021 keys=[\"Esc/KeyModifiers(0x0)\", \"Enter/KeyModifiers(0x0)\"]"
+    },
+    {
+      "case": "1021 typed characters, LF",
+      "key": [
+        10
+      ],
+      "key_write_bytes": 1,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=1021 keys=[\"Char('j')/KeyModifiers(CONTROL)\"]"
+    },
+    {
+      "case": "a 1,009-character bracketed paste, ESC CR",
+      "key": [
+        27,
+        13
+      ],
+      "key_write_bytes": 2,
+      "key_write_ms": 209.1,
+      "result": "RESULT chars=0 keys=[\"Esc/KeyModifiers(0x0)\", \"Enter/KeyModifiers(0x0)\"]"
+    },
+    {
+      "case": "a 1,009-character bracketed paste, LF",
+      "key": [
+        10
+      ],
+      "key_write_bytes": 1,
+      "key_write_ms": 0.0,
+      "result": "RESULT chars=0 keys=[\"Char('j')/KeyModifiers(CONTROL)\"]"
+    }
+  ]
+}

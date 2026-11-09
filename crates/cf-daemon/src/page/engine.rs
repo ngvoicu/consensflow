@@ -120,8 +120,9 @@ pub trait Engine {
     /// `{harness, agent}`, none when nothing waits.
     fn pending_switch(&self, participant: i64) -> Option<Value>;
 
-    /// The participant's live window (`pane`): `{id, generation}`, none when
-    /// it has none.
+    /// The participant's live window (`pane`): `{id, generation, harness}`, none when it has
+    /// none; `harness` is the one the window was launched with (T-1336), left out where
+    /// its launch did not say.
     fn pane(&self, participant: i64) -> Option<Value>;
 
     /// A stop its window ignored in every round and has not paid, the host
@@ -155,9 +156,15 @@ fn activity_value(activity: &Activity) -> Value {
     Value::Object(shown)
 }
 
-/// A pane as the dispatcher holds it: `{id, generation}`.
-fn pane_value(pane: &Pane) -> Value {
-    json!({ "id": pane.id, "generation": pane.generation })
+/// A pane as the dispatcher holds it, `{id, generation}`, and the harness its window was launched
+/// with where that is known: the page's keys for the window are that harness's, not the
+/// harness the member is configured to run now.
+fn pane_value(pane: &Pane, harness: Option<&str>) -> Value {
+    let mut shown = json!({ "id": pane.id, "generation": pane.generation });
+    if let (Some(harness), Some(fields)) = (harness, shown.as_object_mut()) {
+        fields.insert("harness".to_owned(), json!(harness));
+    }
+    shown
 }
 
 /// A Switch chief waiting for the turn to end: `{harness, model}`.
@@ -267,7 +274,10 @@ impl Engine for Rc<Dispatcher> {
     }
 
     fn pane(&self, participant: i64) -> Option<Value> {
-        Dispatcher::pane(self, participant).as_ref().map(pane_value)
+        let harness = Dispatcher::window_harness(self, participant);
+        Dispatcher::pane(self, participant)
+            .as_ref()
+            .map(|pane| pane_value(pane, harness.as_deref()))
     }
 
     fn unstopped(&self, participant: i64) -> Option<Value> {

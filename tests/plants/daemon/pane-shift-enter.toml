@@ -1,0 +1,342 @@
+# Shift+Enter in a window is a line feed (T-1330, T-1336, T-1348). xterm.js 6 has no kitty keyboard
+# protocol and no modifyOtherKeys and sends the plain Enter's CR for Shift+Enter, so a message was
+# sent where the human asked for a new line, in every harness. The page now sends (`SHIFT_ENTER`,
+# app/ui/term.js):
+#
+# - **one byte, a line feed (Ctrl+J), in every harness on a Mac and on Windows**: a key that begins
+#   with Escape can reach a window as an Escape alone (a pty's input queue nearly full behind a long
+#   paste, the console host's 4,096-byte read), which stops a running turn, and then the rest, which
+#   may send the message. Claude Code, Codex, Devin, Muse and Pi list Ctrl+J as a new line on a Mac, and
+#   Claude Code and Pi on Windows. Codex, Devin and Muse on Windows read the console's key events, which
+#   make a line feed the Enter key with Control, bound to nothing: Shift+Enter does nothing there, safely;
+# - only for Shift+Enter alone, typed and not chosen in an input method, once, as the human's own
+#   key (a reply of the emulator would take another road), with nothing left for xterm to send
+#   after it; Alt+Enter and Ctrl+J typed stay xterm's;
+# - the arbiter counts a line feed as a character of the draft, not an Enter that clears it, so a
+#   delivery stays held behind a Shift+Enter;
+# - the daemon says the harness a window was **launched** with, with its pane (`pane.harness`), and the
+#   page takes what a file dropped on the window may carry from it, not from the harness the member is
+#   configured to run now (a member edited while its window is open runs the new harness from its next
+#   window).
+#
+# `app/tests/fixtures/pane-keys/newline-cases.json` says what the page writes (`sends`), what that does in
+# each harness's input box (`shiftEnter`), and what each harness's input box does with each byte string a
+# pane might write (`make-newline-cases.mjs`: Pi's editor and Codex's key readers run, the others read from
+# their source and documentation), and the page tests are held to it, in a real xterm, on a Mac's user agent
+# and on Windows'. The real-pty test of `cf-panes` (`pty/keys.rs`, `boundary`) reads the same `sends`. What the
+# console host makes of the bytes is the Windows tests' of `cf-panes`, which need a Windows machine (no plant
+# of them). A guard in the pane host that waited for an empty pipe before an Escape-led write was built and
+# taken out again (T-1336, T-1348): its plants went with it.
+#
+# One plant takes one rule out; a test of it fails. Every name holds `pane shift enter`, so
+# `npm run plants:daemon -- "pane shift enter"` runs them all.
+
+[run]
+pse-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Shift.Enter in a window|goes by .*, which a window was launched with"]
+pse-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::"]
+pse-boundary = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::boundary"]
+pse-sends = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::keys::sends"]
+pse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launched_harness"]
+pse-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::engine::tests"]
+
+[[plant]]
+name = "pane shift enter: any Enter is a Shift+Enter"
+meant = "Shift+Enter in a window, on a Mac › Enter alone is still the message sent, in every harness"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  event.shiftKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: every window is sent Alt+Enter, which queues a follow-up in Pi and which a read can split"
+meant = "Shift+Enter in a window, on a Mac › is a new line in a pi window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''const SHIFT_ENTER = '\n''''
+replace = '''const SHIFT_ENTER = '\x1b\r''''
+
+[[plant]]
+name = "pane shift enter: Shift+Enter is sent as a plain Enter"
+meant = "Shift+Enter in a window, on a Mac › is a new line in a claude-code window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''const SHIFT_ENTER = '\n''''
+replace = '''const SHIFT_ENTER = '\r''''
+
+[[plant]]
+name = "pane shift enter: a Windows window is sent Alt+Enter, which a read of the console host can split"
+meant = "Shift+Enter in a window, on Windows › is one byte, never an Escape, for a codex window"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''const SHIFT_ENTER = '\n''''
+replace = '''const SHIFT_ENTER = /Windows/.test(globalThis.navigator?.userAgent ?? '') ? '\x1b\r' : '\n''''
+
+[[plant]]
+name = "pane shift enter: a Windows window is sent the kitty protocol's CSI u, which Devin and Muse type as text"
+meant = "Shift+Enter in a window, on Windows › is no key at all in a devin window, and Enter is still the message sent"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''const SHIFT_ENTER = '\n''''
+replace = '''const SHIFT_ENTER = /Windows/.test(globalThis.navigator?.userAgent ?? '') ? '\x1b[13;2u' : '\n''''
+
+[[plant]]
+name = "pane shift enter: xterm sends its Enter after the new line"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''      return false
+    }
+    if (event.type !== 'keydown' || !event.ctrlKey'''
+replace = '''      return true
+    }
+    if (event.type !== 'keydown' || !event.ctrlKey'''
+
+
+[[plant]]
+name = "pane shift enter: Shift+Enter with Alt is taken too"
+meant = "The keys around Shift+Enter in a window › Shift+Alt+Enter is not Shift+Enter"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.altKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: Shift+Enter with Ctrl is taken too"
+meant = "The keys around Shift+Enter in a window › Shift+Control+Enter is not Shift+Enter"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.ctrlKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: Shift+Enter with Cmd is taken too"
+meant = "The keys around Shift+Enter in a window › Shift+Meta+Enter is not Shift+Enter"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.metaKey &&
+'''
+replace = '''  true &&
+'''
+
+[[plant]]
+name = "pane shift enter: an input method's Shift+Enter is taken too"
+meant = "The keys around Shift+Enter in a window › an input method choosing a candidate with Shift+Enter is not a new line"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''  !event.isComposing
+'''
+replace = '''  true
+'''
+
+
+[[plant]]
+name = "pane shift enter: the key's own action is left to the textarea"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''        event.preventDefault()
+        this.terminal.input(SHIFT_ENTER)'''
+replace = '        this.terminal.input(SHIFT_ENTER)'
+
+
+[[plant]]
+name = "pane shift enter: the new line is typed on every event of the key"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''      if (event.type === 'keydown') {
+        event.preventDefault()'''
+replace = '''      if (event.type !== 'never') {
+        event.preventDefault()'''
+
+
+[[plant]]
+name = "pane shift enter: the new line is the emulator's reply, not the human's key"
+meant = "The keys around Shift+Enter in a window › Shift+Enter is typed once, as the human typed it, and no Enter comes after it"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = 'this.terminal.input(SHIFT_ENTER)'
+replace = 'this.terminal.input(SHIFT_ENTER, false)'
+
+
+[[plant]]
+name = "pane shift enter: xterm answers a keyboard-protocol query"
+meant = "The keys around Shift+Enter in a window › xterm answers no keyboard-protocol query: a Pi that asked is sent Ctrl+J all the same"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))\n"
+replace = '''    this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
+    this.terminal.parser.registerCsiHandler({ prefix: '?', final: 'u' }, () => {
+      this.terminal.input('\x1b[?0u', false)
+      return true
+    })
+'''
+
+
+[[plant]]
+name = "pane shift enter: a window takes the harness its member is configured to run, not the one it was launched with"
+meant = "file drop on Windows › goes by devin, which a window was launched with, and not codex, which its member is set to run now"
+runs = ["pse-page"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      entry.harness = pane.harness ?? lane.participant.harness\n"
+replace = "      entry.harness = lane.participant.harness\n"
+
+
+[[plant]]
+name = "pane shift enter: a line feed clears the draft the arbiter counts"
+meant = "a_new_line_in_the_draft_is_part_of_the_draft_and_a_delivery_stays_held"
+runs = ["pse-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''            b'\n' => {
+                classes.with("text");
+                unsent += 1;
+            }
+'''
+replace = '''            b'\n' => {
+                classes.with("enter");
+                unsent = 0;
+            }
+'''
+
+
+[[plant]]
+name = "pane shift enter: a line feed is no character of the draft"
+meant = "unsent_counts_what_the_keys_leave_in_the_input"
+runs = ["pse-arbiter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = '''                classes.with("text");
+                unsent += 1;
+            }
+            0x03 => {'''
+replace = '''                classes.with("text");
+            }
+            0x03 => {'''
+
+
+[[plant]]
+name = "pane shift enter: the pane does not say the harness its window was launched with"
+meant = "a_project_opens_its_chief_window_and_closes_it_through_the_trait"
+runs = ["pse-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/engine.rs"
+find = '''        fields.insert("harness".to_owned(), json!(harness));
+'''
+replace = ""
+
+
+[[plant]]
+name = "pane shift enter: a window's harness is not the one it was launched with"
+meant = "a_member_edited_to_another_harness_leaves_the_window_open_on_the_one_it_was_launched_with"
+runs = ["pse-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                .map(|harness| harness.kind().to_owned())"
+replace = "                .map(|_| \"pi\".to_owned())"
+
+
+[[plant]]
+name = "pane shift enter: Codex on a Mac is sent the Alt+Enter a full pty queue splits"
+meant = "shift_enter_is_never_read_as_a_lone_escape_behind_a_full_queue"
+runs = ["pse-boundary"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/tests/fixtures/pane-keys/newline-cases.json"
+find = '''        "mac": [
+          10
+        ],
+        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
+      }
+    },
+    "pi": {'''
+replace = '''        "mac": [
+          27,
+          13
+        ],
+        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
+      }
+    },
+    "pi": {'''
+
+[[plant]]
+name = "pane shift enter: the fixture says Devin is sent Alt+Enter on Windows, which a read of the console host can split"
+meant = "shift_enter_is_one_line_feed_in_every_harness_on_both_platforms"
+runs = ["pse-sends"]
+
+[[plant.edit]]
+file = "app/tests/fixtures/pane-keys/newline-cases.json"
+find = '''        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
+      }
+    },
+    "muse": {'''
+replace = '''        "windows": [
+          27,
+          13
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
+      }
+    },
+    "muse": {'''

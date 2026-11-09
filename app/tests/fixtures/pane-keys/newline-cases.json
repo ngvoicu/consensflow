@@ -1,0 +1,875 @@
+{
+  "candidates": [
+    {
+      "id": "cr",
+      "key": "Enter",
+      "bytes": [
+        13
+      ]
+    },
+    {
+      "id": "lf",
+      "key": "Ctrl+J",
+      "bytes": [
+        10
+      ]
+    },
+    {
+      "id": "esc-cr",
+      "key": "Alt+Enter",
+      "bytes": [
+        27,
+        13
+      ]
+    },
+    {
+      "id": "csi-u",
+      "key": "Shift+Enter (CSI u)",
+      "bytes": [
+        27,
+        91,
+        49,
+        51,
+        59,
+        50,
+        117
+      ]
+    },
+    {
+      "id": "modify-other-keys",
+      "key": "Shift+Enter (modifyOtherKeys)",
+      "bytes": [
+        27,
+        91,
+        50,
+        55,
+        59,
+        50,
+        59,
+        49,
+        51,
+        126
+      ]
+    },
+    {
+      "id": "esc",
+      "key": "Escape (a read that ends in the Escape of an Escape-led key)",
+      "bytes": [
+        27
+      ]
+    }
+  ],
+  "windowsReadings": {
+    "keyEvents": {
+      "cr": "Enter, char 13, no modifier",
+      "lf": "Enter, char 10, Control",
+      "esc-cr": "Enter, char 13, Alt",
+      "csi-u": "seven keys: ESC [ 1 3 ; 2 u, as characters (Codex rebuilds them as Shift+Enter)",
+      "modify-other-keys": "no key",
+      "esc": "the Escape key, when it ends a read of the console host (4,096 bytes)"
+    },
+    "virtualTerminalInput": {
+      "cr": "\\r",
+      "lf": "\\n",
+      "esc-cr": "ESC \\r",
+      "csi-u": "ESC [ 1 3 ; 2 u",
+      "modify-other-keys": "ESC [ 2 7 ; 2 ; 1 3 ~"
+    }
+  },
+  "harnesses": {
+    "claude-code": {
+      "version": "2.1.319",
+      "source": "Mr (key reader) of the binary's JavaScript, run; the text input's Return handler, read; default keybinding ctrl+j: chat:newline",
+      "evidence": {
+        "ran": [
+          "the key reader Mr, sliced out of the installed binary's JavaScript"
+        ],
+        "read": [
+          "the text input's rules for return, enter and escape",
+          "whileBusy",
+          "windows"
+        ],
+        "note": "its text input has no busy branch; the input handler itself was not run"
+      },
+      "rows": {
+        "mac": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ],
+        "windows": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ]
+      },
+      "sends": {
+        "mac": [
+          10
+        ],
+        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "newline"
+      }
+    },
+    "codex": {
+      "version": "0.167.0",
+      "source": "codex-rs/tui/src/keymap.rs, textarea.rs, bottom_pane/mod.rs, tui/windows_key_sequence.rs; crossterm event/sys/unix/parse.rs and event/sys/windows/parse.rs",
+      "evidence": {
+        "ran": [
+          "the Mac key reader: the pinned crossterm fork through a real pty (tools/probes/key-reader)",
+          "the Windows key reader: the pinned crossterm fork's EventStream inside Codex's own WindowsKeySequence, through the shipped console host (tools/probes/key-reader/results-windows.json)"
+        ],
+        "read": [
+          "the composer keymap",
+          "whileBusy"
+        ],
+        "note": "ESC CR written where the pty queue ends is read as Escape, Enter (tools/probes/key-reader/results.json); a line feed is Ctrl+J. On Windows a line feed is Enter with Control, bound to nothing; ESC CR where a console read ends after the Escape is Esc, then Enter (a stop and a send); the kitty CSI 13;2u is Shift+Enter except where a read ends after ESC [ (Alt+[ and 13;2u typed), and an Escape alone where a pause of more than 50 ms comes after its Escape (results-windows.json)"
+      },
+      "rows": {
+        "mac": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ],
+        "windows": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ]
+      },
+      "sends": {
+        "mac": [
+          10
+        ],
+        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
+      }
+    },
+    "pi": {
+      "version": "1.5.0",
+      "source": "the installed @earendil-works/pi-coding-agent CustomEditor and KeybindingsManager (pi-tui's keys.js matcher), with callback stubs",
+      "evidence": {
+        "ran": [
+          "rows",
+          "whileBusy"
+        ],
+        "read": [],
+        "note": "the editor and its matcher were run (Mac and Windows follow-up bindings, selected explicitly); the interactive mode's own submit and follow-up handlers were not"
+      },
+      "rows": {
+        "mac": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "follow-up"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "interrupt",
+            "whileBusy": "interrupt"
+          }
+        ],
+        "windows": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "interrupt",
+            "whileBusy": "interrupt"
+          }
+        ]
+      },
+      "sends": {
+        "mac": [
+          10
+        ],
+        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "newline"
+      }
+    },
+    "devin": {
+      "version": "3000.12.28",
+      "source": "docs.devin.ai/cli/reference/keyboard-shortcuts (editor.insert_newline: shift-enter, alt-enter, ctrl-j); the binary is crossterm",
+      "evidence": {
+        "ran": [],
+        "read": [
+          "rows"
+        ],
+        "note": "how its input handler orders a busy turn's keys is not established: whileBusy repeats the documented new-line action"
+      },
+      "rows": {
+        "mac": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ],
+        "windows": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "types",
+            "whileBusy": "types"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ]
+      },
+      "sends": {
+        "mac": [
+          10
+        ],
+        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
+      }
+    },
+    "muse": {
+      "version": "1.4.14",
+      "source": "the binary's composer keymap (newline: shift+enter ctrl+j ctrl+m alt+enter; submit, queue and cancel apart); crossterm",
+      "evidence": {
+        "ran": [],
+        "read": [
+          "rows"
+        ],
+        "note": "how its input handler orders a busy turn's keys is not established: whileBusy repeats the keymap's new-line action"
+      },
+      "rows": {
+        "mac": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ],
+        "windows": [
+          {
+            "id": "cr",
+            "bytes": [
+              13
+            ],
+            "does": "submit",
+            "whileBusy": "submit"
+          },
+          {
+            "id": "lf",
+            "bytes": [
+              10
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc-cr",
+            "bytes": [
+              27,
+              13
+            ],
+            "does": "newline",
+            "whileBusy": "newline"
+          },
+          {
+            "id": "csi-u",
+            "bytes": [
+              27,
+              91,
+              49,
+              51,
+              59,
+              50,
+              117
+            ],
+            "does": "types",
+            "whileBusy": "types"
+          },
+          {
+            "id": "modify-other-keys",
+            "bytes": [
+              27,
+              91,
+              50,
+              55,
+              59,
+              50,
+              59,
+              49,
+              51,
+              126
+            ],
+            "does": "nothing",
+            "whileBusy": "nothing"
+          },
+          {
+            "id": "esc",
+            "bytes": [
+              27
+            ],
+            "does": "nothing",
+            "whileBusy": "interrupt"
+          }
+        ]
+      },
+      "sends": {
+        "mac": [
+          10
+        ],
+        "windows": [
+          10
+        ]
+      },
+      "shiftEnter": {
+        "mac": "newline",
+        "windows": "nothing"
+      }
+    }
+  }
+}
