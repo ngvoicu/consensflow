@@ -29,13 +29,13 @@ fn old_shape(home: &Path) -> String {
 
 /// A machine as the repair leaves it, with a `cf` that says its version.
 struct Machine {
-    _parent: tempfile::TempDir,
     sandbox: Sandbox,
     planted: Planted,
     cf: PathBuf,
     /// What the app's log says.
     log: String,
     release: Release,
+    _parent: tempfile::TempDir,
 }
 
 /// Writes `text` as the file `file`, with `mode`.

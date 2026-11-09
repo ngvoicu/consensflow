@@ -126,12 +126,12 @@ pub(super) fn upsert(db: &Connection, table: &str, row: &Value) {
 /// one clock.
 pub(super) struct Rig {
     name: String,
-    pub(super) root: TempDir,
     time: Rc<ManualTime>,
     pub(super) through: Thread,
     beside: LocalRecords,
     looks: usize,
     last: Option<Arc<Reading>>,
+    pub(super) root: TempDir,
 }
 
 impl Rig {

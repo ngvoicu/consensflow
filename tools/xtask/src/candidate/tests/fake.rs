@@ -80,9 +80,9 @@ impl Clock for Fixed {
 /// A user's machine in a temporary tree: a checkout, a home, and the system's
 /// applications with the live app installed, which has a roster in the live home.
 pub struct World {
-    pub temp: tempfile::TempDir,
     pub context: Context,
     pub applications: PathBuf,
+    pub temp: tempfile::TempDir,
 }
 
 impl World {

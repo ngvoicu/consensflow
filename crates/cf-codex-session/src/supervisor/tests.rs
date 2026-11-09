@@ -23,8 +23,8 @@ const BRIDGE: &str =
 
 /// A home for one test and the environment that names it and a broker.
 struct Home {
-    dir: tempfile::TempDir,
     env: Env,
+    dir: tempfile::TempDir,
 }
 
 impl Home {

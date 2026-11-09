@@ -56,6 +56,21 @@ const shells = [
 
 const setupName = (version) => `ConsensFlow_${version}_x64-setup.exe`
 
+// PowerShell writes a file of this kind into TEMP every time it starts a script, and removes it itself
+// (`__PSScriptPolicyTest_myzyvayh.elf.ps1`): a test that takes any sole entry of TEMP for the installer's
+// folder found it, and failed (CI run 42055791085, job checks (windows-latest)).
+const POWERSHELL_OWN_FILE = '__PSScriptPolicyTest_te5t1ngx.tmp.ps1'
+const POWERSHELL_OWN = /^__PSScriptPolicyTest_.*\.ps1$/i
+
+/** What is in `folder` (a case's TEMP), but for the files PowerShell writes there and removes itself. */
+const inTemp = (folder) => readdirSync(folder).filter((name) => !POWERSHELL_OWN.test(name))
+
+/** The folder the run of process `pid` made in `temp`, by what the installer names it, once it has. */
+const folderOfRun = (temp, pid) =>
+  inTemp(temp).find((name) =>
+    new RegExp(`^consensflow-install\\.${pid}\\.[0-9a-f]{12}$`).test(name),
+  )
+
 /**
  * The folder `dir` as `shell` reads it when it is TEMP: the script names its folders by
  * `[IO.Path]::GetTempPath()`, which gives the long form of a TEMP given in its short one
@@ -137,6 +152,9 @@ for (const [label, shell] of shells) {
         ...replacements,
       ])
       for (const folder of ['tmp', 'local']) mkdirSync(path.join(dir, folder))
+      // What PowerShell writes into TEMP itself and removes, here left in it: what a case reads of
+      // TEMP is the installer's, and this is none of it (CI run 42055791085, T-1244).
+      writeFileSync(path.join(dir, 'tmp', POWERSHELL_OWN_FILE), '')
       return {
         dir,
         script,
@@ -202,7 +220,7 @@ for (const [label, shell] of shells) {
       assert.notEqual(ran.status, 0, ran.out)
       assert.match(ran.out, words)
       assert.match(ran.out, /nothing was installed/)
-      assert.deepEqual(readdirSync(at.tmp), [], "the run's own folder is gone")
+      assert.deepEqual(inTemp(at.tmp), [], "the run's own folder is gone")
     }
 
     before(async () => {
@@ -475,7 +493,7 @@ for (const [label, shell] of shells) {
           assert.match(ran.out, /consensflow-test: HELD/)
           assert.match(ran.out, /consensflow-test: KEPT/)
           assert.match(ran.out, /Windows lists ConsensFlow as version 'nothing'/)
-          assert.deepEqual(readdirSync(at.tmp), [], "the run's own folder is gone")
+          assert.deepEqual(inTemp(at.tmp), [], "the run's own folder is gone")
         })
       })
 
@@ -688,7 +706,7 @@ for (const [label, shell] of shells) {
           assert.notEqual(ran.status, 0, ran.out)
           assert.match(ran.out, /nothing was installed/)
           assert.deepEqual(
-            readdirSync(at.tmp).sort(),
+            inTemp(at.tmp).sort(),
             [
               path.basename(kept),
               path.basename(huge),
@@ -855,7 +873,7 @@ for (const [label, shell] of shells) {
           assert.match(ran.out, new RegExp(`removed ${exact(gone)}`))
           assert.match(ran.out, /ConsensFlow 3\.0\.6 has no signed SHA256SUMS/)
           assert.deepEqual(
-            readdirSync(at.tmp),
+            inTemp(at.tmp),
             [],
             'nothing is left, and the run reached its own refusal',
           )
@@ -879,15 +897,14 @@ for (const [label, shell] of shells) {
             },
           })
           try {
-            await waitFor(() => readdirSync(at.tmp).length === 1, 'the run making its folder')
-            const [folder] = readdirSync(at.tmp)
-            assert.match(folder, new RegExp(`^consensflow-install\\.${child.pid}\\.[0-9a-f]{12}$`))
+            await waitFor(() => folderOfRun(at.tmp, child.pid), 'the run making its folder')
+            const folder = folderOfRun(at.tmp, child.pid)
             child.kill()
             await first
-            assert.deepEqual(readdirSync(at.tmp), [folder], 'the kill left it')
+            assert.deepEqual(inTemp(at.tmp), [folder], 'the kill left it')
             const ran = await install(at, ['--version', '3.0.6'])
             assert.match(ran.out, new RegExp(`removed ${exact(path.join(at.tmp, folder))}`))
-            assert.deepEqual(readdirSync(at.tmp), [], 'the next run took it away, and its own')
+            assert.deepEqual(inTemp(at.tmp), [], 'the next run took it away, and its own')
           } finally {
             child?.kill()
             for (const socket of sockets) socket.destroy()

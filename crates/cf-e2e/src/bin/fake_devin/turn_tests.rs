@@ -207,8 +207,8 @@ fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_
 
 /// A window on a store and a wire of a folder of its own, and what it said on its screen.
 struct Case {
-    folder: tempfile::TempDir,
     window: Window<Vec<u8>>,
+    folder: tempfile::TempDir,
 }
 
 fn case() -> Case {

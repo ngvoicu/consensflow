@@ -52,6 +52,7 @@ fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
             "bin/cf.exe",
             "bin/cf.exe.old-*",
             "evals/reports",
+            ".runs",
         ][..]
     );
     // The sweep is given each of them, as PowerShell reads a string between single quotes.
@@ -461,7 +462,7 @@ fn the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched() 
         "{text}"
     );
     assert!(
-        text.contains("if ($unpruned.Count) { Write-Output \"What the reports held past their age could not be removed: $($unpruned -join '; ')\" }"),
+        text.contains("if ($unpruned.Count) { Write-Output \"What the reports and the logs of the tasks held past their age could not be removed: $($unpruned -join '; ')\" }"),
         "{text}"
     );
     // The limit is the sweep's own to say.

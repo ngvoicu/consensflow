@@ -559,7 +559,10 @@ fn a_matrix_runs_each_pair_on_the_machine_builds_it_once_and_keeps_a_log_of_each
     );
     // Built once: before the first run, and not before the second.
     assert!(first.contains("'npm ci --no-audit --no-fund', "), "{first}");
-    assert!(second.contains("foreach ($step in @())"), "{second}");
+    assert!(second.contains("$steps = @()\n"), "{second}");
+    // And what a run that did not build stands on is held to the lockfiles (T-1333).
+    assert!(!first.contains("# packages: begin"), "{first}");
+    assert!(second.contains("# packages: begin"), "{second}");
 }
 
 /// A program of a folder that is this script (the system's shell runs it).

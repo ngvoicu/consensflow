@@ -31,7 +31,6 @@ pub enum Answers {
 /// An extension watching an inbox and an acknowledgement folder of a launch's
 /// own, until it is finished with or dropped.
 pub struct Window {
-    root: TempDir,
     pub inbox: PathBuf,
     pub ack: PathBuf,
     extension: JoinHandle<()>,
@@ -41,6 +40,7 @@ pub struct Window {
     /// the extension found them (Unix).
     #[cfg_attr(not(unix), allow(dead_code))]
     pub modes: Rc<RefCell<Vec<[u32; 3]>>>,
+    root: TempDir,
 }
 
 impl Window {

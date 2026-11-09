@@ -31,20 +31,20 @@ mod the_publish_job_run_as_written {
     /// What the jobs built `release` into: a folder, its archive laid out as the old apps check for.
     struct Built {
         release: String,
-        dir: TempDir,
         latest: String,
+        dir: TempDir,
     }
 
     /// The publish job's machine: GitHub, a `gh` that asks it, and `$RUNNER_TEMP` with the
     /// publisher downloaded into it.
     struct World {
         github: Github,
-        gh: TempDir,
-        runner_temp: TempDir,
         /// What the publisher hashes to, as the job that built it reported.
         sha256: String,
         /// The bridge the repository records, built.
         bridge: Built,
+        gh: TempDir,
+        runner_temp: TempDir,
     }
 
     fn built(github: &Github, release: &str) -> Built {

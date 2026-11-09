@@ -26,13 +26,13 @@ fn recorded(harness: &str) -> ModelListing {
 /// A page over a project with no staff, whose kit opens windows of every harness, and
 /// whose home keeps the listing each harness was recorded giving.
 struct Staffing {
-    _home: tempfile::TempDir,
     _daemon: Bridge,
     app: Bridge,
     rig: Rig,
     project: i64,
     /// What each harness lists, by its kind, as the page reads it: the recorded listings.
     lists: Vec<(&'static str, Rc<crate::models::tests::Listing>)>,
+    _home: tempfile::TempDir,
 }
 
 fn staffing() -> Staffing {

@@ -76,11 +76,11 @@ fn a_version_is_the_first_number_of_three_parts_and_what_sticks_to_it() {
 
 /// A CLI in a folder of its own, scripted programs, and the services of both.
 struct Stage {
-    _dir: TempDir,
     cli: String,
     fakes: Fakes,
     watching: Rc<Watching>,
     services: Services,
+    _dir: TempDir,
 }
 
 impl Stage {

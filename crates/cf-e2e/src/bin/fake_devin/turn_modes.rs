@@ -16,9 +16,9 @@ use crate::permission::{Answer, CANCELED, SKIPPED};
 /// A window on a store and a wire of a folder of its own, in the normal mode or in full
 /// permission, and what it said on its screen.
 struct Case {
-    folder: tempfile::TempDir,
     permission: Arc<Permission>,
     window: Window<Vec<u8>>,
+    folder: tempfile::TempDir,
 }
 
 fn case(bypass: bool) -> Case {

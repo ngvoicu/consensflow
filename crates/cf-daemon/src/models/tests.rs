@@ -120,8 +120,8 @@ fn models(ids: &[&str], at: i64) -> ModelListing {
 
 /// A home with `installed` on its PATH.
 struct Home {
-    _folder: tempfile::TempDir,
     env: Env,
+    _folder: tempfile::TempDir,
 }
 
 fn home(installed: &[&str]) -> Home {

@@ -25,9 +25,9 @@ const SESSION: &str = "calm-river";
 
 /// A session's store, and the launches' folder, under a root of their own.
 struct Staged {
-    root: tempfile::TempDir,
     env: Env,
     store: Connection,
+    root: tempfile::TempDir,
 }
 
 impl Staged {

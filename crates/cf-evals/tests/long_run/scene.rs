@@ -33,9 +33,10 @@ pub const CHIEF: i64 = 2;
 /// A ledger of a project with a Claude Code chief and the members `staff`, each an
 /// agent on a harness, a worker of standard tier.
 pub struct Scene {
-    _folder: Folder,
     pub db: Connection,
     pub project: i64,
+    // Last: the folder goes after the ledger file open in it, which Windows will not remove from under it.
+    _folder: Folder,
 }
 
 impl Scene {

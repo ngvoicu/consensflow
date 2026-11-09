@@ -72,8 +72,8 @@ fn local() -> TimeZone {
 /// A transcript in a config folder of its own, and the reader of its
 /// session, which is the same reader look after look.
 struct Stage {
-    root: TempDir,
     reader: Box<dyn Look + Send>,
+    root: TempDir,
 }
 
 impl Stage {

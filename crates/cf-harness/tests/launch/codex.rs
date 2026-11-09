@@ -61,11 +61,11 @@ const LUNA: Agent = Agent {
 
 /// A throwaway home, ConsensFlow's folder and a stand-in `codex` on PATH.
 struct Home {
-    _dir: TempDir,
     root: String,
     vars: Vec<(String, String)>,
     /// Where the stand-in `codex` is found.
     executable: String,
+    _dir: TempDir,
 }
 
 impl Home {

@@ -17,8 +17,8 @@ const MINUTE: i64 = 60_000;
 
 /// A wire log of its own, and a look at it.
 struct Log {
-    _dir: TempDir,
     wire: WireLog,
+    _dir: TempDir,
 }
 
 impl Log {

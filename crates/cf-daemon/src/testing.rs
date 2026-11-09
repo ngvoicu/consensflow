@@ -36,9 +36,9 @@ use crate::seams::DaemonSpawn;
 /// Where the engine's work runs in a test: the daemon's own, on a home of its
 /// own, with its driver spawned on the local set the caller is in.
 pub struct Worked {
+    pub spawn: Rc<DaemonSpawn>,
     /// The home, which holds the log and the trace until it goes.
     pub home: tempfile::TempDir,
-    pub spawn: Rc<DaemonSpawn>,
 }
 
 /// The engine's work for a test, run by the daemon's executor and its driver.
@@ -115,8 +115,6 @@ pub struct Finishings {
 
 /// A project of two windows and a question waiting.
 pub struct Scene {
-    /// The home, which holds the ledger, the log and the trace until the scene goes.
-    pub _home: tempfile::TempDir,
     pub context: Rc<Context>,
     /// How many times the dispatcher was woken.
     pub kicks: Rc<Cell<u32>>,
@@ -129,6 +127,19 @@ pub struct Scene {
     pub zeus: String,
     /// The question `zeus` asked the chief, which waits for an answer.
     pub question: MessageView,
+    /// The home, which holds the ledger, the log and the trace until the scene goes.
+    pub _home: tempfile::TempDir,
+}
+
+impl Drop for Scene {
+    /// The test is over: the ledger lets go of its file before the home is removed, whatever else
+    /// still holds the ledger (the finishing closure, a task left in a local set): Windows will
+    /// not remove a folder from under a file that is open.
+    fn drop(&mut self) {
+        if let Ok(mut ledger) = self.context.ledger.try_borrow_mut() {
+            ledger.let_go_of_its_file();
+        }
+    }
 }
 
 impl Scene {
@@ -363,5 +374,30 @@ pub fn said(answer: Result<Answer, Failure>) -> (u16, serde_json::Value) {
     match answer.content {
         Content::Json(body) => (answer.status, body),
         other => panic!("not JSON: {other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Windows will not remove a folder from under a file that is open, and the scene's closures
+    /// and a task left in a local set hold its ledger when the scene goes: the home stayed for
+    /// good, with its `consensflow.db` (T-1333). The ledger lets go of its file with the scene.
+    #[test]
+    fn a_scene_leaves_nothing_of_its_home_though_something_still_holds_its_ledger() {
+        let scene = scene();
+        let home = scene._home.path().to_path_buf();
+        assert!(
+            home.join("consensflow.db").exists(),
+            "the ledger's file is there"
+        );
+        let held = Rc::clone(&scene.context.ledger);
+        drop(scene);
+        assert!(
+            !home.exists(),
+            "the home of the scene is gone, the ledger held or not: {home:?}"
+        );
+        drop(held);
     }
 }
