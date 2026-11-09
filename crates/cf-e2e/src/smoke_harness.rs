@@ -19,6 +19,58 @@ pub fn script(lines: usize, width: usize) -> String {
 mod tests {
     use super::*;
 
+    /// The models the page's self-test opens its project with (`app/ui/selftest.js`, the
+    /// `project.open` it asks the daemon): the chief's and each worker's.
+    fn models_the_selftest_asks_for() -> Vec<String> {
+        let page = std::fs::read_to_string(crate::checkout::path("app/ui/selftest.js")).unwrap();
+        let from = page
+            .find("daemon('project.open'")
+            .expect("the self-test opens a project");
+        let call = &page[from..];
+        let call = &call[..call.find("})\n").expect("the call ends")];
+        let model = regex::Regex::new(r"model: '([^']+)'").unwrap();
+        model
+            .captures_iter(call)
+            .map(|found| found[1].to_owned())
+            .collect()
+    }
+
+    /// The models the script lists when the daemon reads them (its `for model in …` line).
+    fn models_the_script_lists() -> Vec<String> {
+        let line = SCRIPT
+            .lines()
+            .find(|line| line.trim_start().starts_with("for model in "))
+            .expect("the script lists models");
+        let words = line.trim_start().strip_prefix("for model in ").unwrap();
+        words
+            .trim_end_matches("; do")
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The daemon takes no model its harness does not list (A4-28, T-1329): the page's self-test
+    /// opens its project in the built app on this script, so the script lists the models the
+    /// self-test names, or `project.open` is refused and the smoke is red on a built app and
+    /// nowhere else. (The rig runs the script too, with the models its own cases name.)
+    #[test]
+    fn the_script_lists_every_model_the_pages_selftest_opens_its_project_with() {
+        let asked = models_the_selftest_asks_for();
+        assert!(
+            asked.len() >= 2,
+            "the self-test names a chief's model and a worker's: {asked:?}"
+        );
+        let listed = models_the_script_lists();
+        let missing: Vec<&String> = asked
+            .iter()
+            .filter(|model| !listed.contains(model))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "the script lists {listed:?}, and the self-test opens its project with {asked:?}"
+        );
+    }
+
     #[test]
     fn the_script_has_its_flood_sized_and_nothing_left_marked() {
         let script = script(7, 9);

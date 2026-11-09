@@ -20,6 +20,8 @@
 [run]
 # The tests of the smoke's parts: the bundle, the machine, the app, the extension.
 smoke-parts = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--test", "smoke"]
+# The models the stand-in harness lists when the daemon reads them, against the ones the page's self-test asks for.
+smoke-harness-lists = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--lib", "--", "smoke_harness::"]
 # The reader of a large paste that the stand-in harness runs.
 smoke-paste-reader = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--bin", "smoke-paste-reader"]
 # The command that runs the smoke: its own tests, the packaged smoke's and not the updater's.
@@ -282,6 +284,38 @@ runs = ["smoke-command"]
 file = "tools/xtask/src/smoke.rs"
 find = "    tests(context, app, &[])"
 replace = "    tests(context, None, &[])"
+
+# The models the stand-in lists (T-1362): the page's self-test opens its project in the built app with a
+# chief's model and a worker's, and the daemon takes no model its harness does not list (A4-28).
+[[plant]]
+name = "packaged smoke: the stand-in harness lists neither model the page's self-test opens its project with"
+meant = "the_script_lists_every_model_the_pages_selftest_opens_its_project_with"
+runs = ["smoke-harness-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-harness.sh"
+find = "chief worker claude-fable-5-1 terpsichore; do"
+replace = "chief worker; do"
+
+[[plant]]
+name = "packaged smoke: the stand-in harness lists the chief's model and not the worker's"
+meant = "the_script_lists_every_model_the_pages_selftest_opens_its_project_with"
+runs = ["smoke-harness-lists"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/fixtures/smoke-harness.sh"
+find = " claude-fable-5-1 terpsichore; do"
+replace = " claude-fable-5-1; do"
+
+[[plant]]
+name = "packaged smoke: the page's self-test opens its project with a model the stand-in does not list"
+meant = "the_script_lists_every_model_the_pages_selftest_opens_its_project_with"
+runs = ["smoke-harness-lists"]
+
+[[plant.edit]]
+file = "app/ui/selftest.js"
+find = "      model: 'claude-fable-5-1',\n"
+replace = "      model: 'claude-fable-6-0',\n"
 
 # The cases it leaves out (CONSENSFLOW_SMOKE_SKIP): CI's packaged job leaves out the hidden
 # window's until alpha.5's host-display core (T-1362).
