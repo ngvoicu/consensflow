@@ -7738,6 +7738,29 @@ function closedFoundry() {
   return data
 }
 
+/**
+ * The key that takes the keyboard to the next control, a button too. Chromium's Tab does. WebKit's
+ * passes a button or a link by, and stops at fields and what has a `tabindex`, unless the system's
+ * Full Keyboard Access is on (off in a Mac's defaults): then Option+Tab is the one that passes them
+ * by. So it is found as the engine has it, by a Tab from a button to the one beside it.
+ */
+async function nextControlKey(page) {
+  await page.evaluate(() => {
+    const pair = document.createElement('div')
+    pair.id = 'tab-probe'
+    pair.innerHTML =
+      '<button id="tab-first" type="button">1</button><button type="button">2</button>'
+    document.body.append(pair)
+    document.querySelector('#tab-first').focus()
+  })
+  await page.keyboard.press('Tab')
+  const reached = await page.evaluate(
+    () => document.activeElement?.previousElementSibling?.id === 'tab-first',
+  )
+  await page.evaluate(() => document.querySelector('#tab-probe').remove())
+  return reached ? 'Tab' : 'Alt+Tab'
+}
+
 test('shows a closed project read-only: it reads, nothing on it acts, and a banner resumes it', async ({
   page,
 }) => {
@@ -7769,10 +7792,11 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
     name: 'Switch the chief to another harness or model',
   })
   await expect(switchChief).toHaveCount(0)
+  const next = await nextControlKey(page)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
   for (let press = 0; press < 4; press += 1) {
-    await page.keyboard.press('Tab')
+    await page.keyboard.press(next)
     reached.push(
       await page.evaluate(
         () =>
@@ -8033,6 +8057,34 @@ test('project menu: Escape closes it, and so does a click elsewhere, the keyboar
   // None of it asked the daemon for a change.
   expect(await calls(page, 'project.rename')).toEqual([])
   expect(await calls(page, 'project.describe')).toEqual([])
+})
+
+test('a click gives the control it lands on the keyboard, in every engine: a button, a checkbox, a radio button', async ({
+  page,
+}) => {
+  await open(page)
+  // Controls of its own, so that what the page draws does not decide what is measured.
+  await page.evaluate(() => {
+    const scratch = document.createElement('div')
+    scratch.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 9999; background: white;'
+    scratch.innerHTML = `<button id="s-button" type="button">press</button>
+      <input id="s-check" type="checkbox" aria-label="check">
+      <input id="s-radio" type="radio" name="s" aria-label="radio">
+      <span id="s-text">text</span>`
+    document.body.append(scratch)
+  })
+  // WebKit leaves each of them unfocused when a click lands on it; Chromium focuses it.
+  for (const id of ['#s-button', '#s-check', '#s-radio', '#s-button']) {
+    await page.locator(id).click()
+    await expect(page.locator(id)).toBeFocused()
+  }
+  // A click a script makes moves nothing: only a person's click gives the keyboard.
+  await page.locator('#s-button').focus()
+  await page.evaluate(() => document.querySelector('#s-check').click())
+  await expect(page.locator('#s-button')).toBeFocused()
+  // A click on words is no control's: it gives the keyboard to nothing.
+  await page.locator('#s-text').click()
+  await expect(page.locator('#s-button')).not.toBeFocused()
 })
 
 test('project menu: a board drawn again leaves the menu open, and Escape then goes back to the project as it is drawn now', async ({
