@@ -3519,16 +3519,18 @@ for (const [platform, agent] of [
       // A read that ends between the two bytes of a key's write (a pty's input queue nearly full, the
       // console host's 4,096-byte read) reads an Escape alone, which stops a running turn: only a
       // single byte cannot be read in two (T-1336; `crates/cf-panes/src/pty/keys.rs` holds the reads).
-      test(`never starts with an Escape for a ${harness} window`, async ({ page }) => {
-        // Codex, Devin and Muse read the console's key events on Windows: no single byte is their new
-        // line there (a line feed is the Enter key with Control, which none binds), so they are sent
-        // ESC CR until the human decides (T-1336). This case is skipped until then.
-        test.skip(
-          platform === 'windows' && ['codex', 'devin', 'muse'].includes(harness),
-          "pending the human's decision: no byte that is not an Escape's is their new line on Windows",
-        )
+      // The one place the page writes an Escape-led key is Codex, Devin and Muse on Windows, which read
+      // the console's key events: no single byte is their new line there (a line feed is the Enter key
+      // with Control, which none binds), so they are sent ESC CR, and **the pane host writes every
+      // Escape-led key of a Windows window into an input that holds nothing unread**, so the console
+      // host reads its bytes together (`conpty/unread.rs`, held by the Windows tests of `cf-panes`).
+      const guarded = platform === 'windows' && ['codex', 'devin', 'muse'].includes(harness)
+      test(`${guarded ? 'is the Alt+Enter the pane host writes whole' : 'never starts with an Escape'} for a ${harness} window`, async ({
+        page,
+      }) => {
         const shifted = await sentByPress(page, harness, (input) => input.press('Shift+Enter'))
-        expect(shifted[0], `${harness} was sent ${JSON.stringify(shifted)}`).not.toBe(27)
+        if (guarded) expect(shifted, `${harness} on Windows`).toEqual([27, 13])
+        else expect(shifted[0], `${harness} was sent ${JSON.stringify(shifted)}`).not.toBe(27)
       })
     }
 

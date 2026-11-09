@@ -39,11 +39,12 @@ const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
  *   `chat:newline`, Codex's and Muse's keymaps, Devin's `ctrl-j`, Pi's `tui.input.newLine`), and
  *   a program in raw mode reads it as the key it is. On Windows it is Pi's and Claude Code's too: they
  *   set the console's virtual-terminal input, which hands it on whole.
- * - **Alt+Enter, ESC CR,** to Codex, Devin and Muse on Windows, **until the human decides**
- *   (T-1336): they read the console's key events, which make a line feed the Enter key with
- *   Control, bound to nothing, and the kitty protocol's `CSI 13;2u` seven characters (Codex alone
- *   rebuilds them), so no single byte is their new line there. ESC CR is, and a console host read
- *   that ends after the Escape reads it alone (`cf-panes` `pty/keys.rs` measured it).
+ * - **Alt+Enter, ESC CR,** to Codex, Devin and Muse on Windows (the chief's decision, T-1336): they read
+ *   the console's key events, which make a line feed the Enter key with Control, bound to nothing, and the
+ *   kitty protocol's `CSI 13;2u` seven characters (Codex alone rebuilds them), so no single byte is
+ *   their new line there. ESC CR is, and **the pane host writes every key that begins with Escape
+ *   into the Windows console's input only when it holds nothing unread**, so the console host's
+ *   4,096-byte read cannot end after the Escape (`cf-panes` `pty/conpty/unread.rs`).
  *
  * Alt+Enter and Ctrl+J typed by the human stay xterm's. A window whose harness the board has not
  * said yet is sent a line feed, the one key no harness takes for a send.

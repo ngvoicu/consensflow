@@ -7,9 +7,9 @@
  * - `sends` is what the page writes, by harness and by platform (`mac`, `windows`): the page's
  *   `shiftEnterFor` (app/ui/term.js), which the page tests hold it to and which the real-pty test of
  *   `crates/cf-panes/src/pty/keys.rs` reads its bytes from. **A pane's key never starts with
- *   Escape** (T-1336): a program takes a lone Escape for "stop", and a read that ends in the middle of
- *   a two-byte write (a pty's input queue nearly full, the console host's 4,096-byte read) reads
- *   the Escape alone, then the rest. A single byte cannot be split.
+ *   Escape** (T-1336), but for Codex, Devin and Muse on Windows: a program takes a lone Escape for "stop", and a read that ends
+ *   in the middle of a two-byte write (a pty's input queue nearly full, the console host's 4,096-byte read) reads
+ *   the Escape alone, then the rest. A single byte cannot be split; on Windows the pane host guards the Escape-led ones.
  * - `rows` is, for each harness and platform, a case `{ id, bytes, does, whileBusy }` for each byte
  *   string a pane might write: what the input box does with it at rest and while a turn runs
  *   (`"newline"`, `"submit"`, `"follow-up"`, `"interrupt"`, `"types"` when its characters are typed
@@ -80,8 +80,9 @@ const LF = [10]
 const SENDS = {
   'claude-code': { mac: LF, windows: LF },
   // Codex, Devin and Muse on Windows read the console's key events: no single byte is their new
-  // line there (a line feed is Enter with Control, bound to nothing), so ESC CR is sent until the
-  // human decides (T-1336).
+  // line there (a line feed is Enter with Control, bound to nothing), so ESC CR is sent, and the pane
+  // host writes every Escape-led key of a Windows window into an input that holds nothing unread, so
+  // the console host reads it together (T-1336; `crates/cf-panes/src/pty/conpty/unread.rs`).
   codex: { mac: LF, windows: ESC_CR },
   pi: { mac: LF, windows: LF },
   devin: { mac: LF, windows: ESC_CR },

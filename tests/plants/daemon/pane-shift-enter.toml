@@ -8,8 +8,9 @@
 #   Escape alone, which stops a running turn. So Ctrl+J, a line feed, on a Mac in every harness and on
 #   Windows for Claude Code and Pi;
 # - Alt+Enter (ESC CR) to Codex, Devin and Muse on Windows, which read key events there (a line feed is
-#   the Enter key with Control, bound to nothing; `CSI 13;2u` is seven typed characters), **until the
-#   human decides** (T-1336);
+#   the Enter key with Control, bound to nothing; `CSI 13;2u` is seven typed characters), and the pane
+#   host writes every Escape-led key of a Windows window into an input that holds nothing unread, so
+#   the console host reads it together (T-1336, `conpty/unread.rs`: the `windows-guard` plants);
 # - only for Shift+Enter alone, typed and not chosen in an input method, once, as the human's own
 #   key (a reply of the emulator would take another road), with nothing left for xterm to send
 #   after it; Alt+Enter and Ctrl+J typed stay xterm's;
