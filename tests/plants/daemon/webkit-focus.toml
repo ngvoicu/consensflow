@@ -1,0 +1,119 @@
+# A click gives the control it lands on the keyboard, in WebKit too (T-1331; `issues/five-page-cases-
+# fail-in-webkit-and-pass-in-chromium.md` in consensflow-sme). WebKit, the engine of the app's own
+# window on a Mac, leaves a button, a checkbox or a radio button unfocused when a click lands on it,
+# so a dialog that a click opened had nothing to give the keyboard back to as it closed, and a menu
+# shut by a click on a control left the keyboard on the project, not on the control. The page does
+# what Chromium does (`app/ui/core/click-focus.js`, called from `app/ui/core/app.js`), before the
+# control's own handler runs.
+#
+# A menu's items are left out: the one that was clicked is the opener of a dialog about to be gone,
+# and in WebKit the menu's own return of the keyboard to the project then does nothing once the
+# dialog is saved.
+#
+# The plants are caught only in a WebKit run (`wf-webkit`, as `tl-ui-webkit` is), the script's click
+# also in Chromium (`wf-chromium`). Each plant's `prepare` bundles the page's xterm first, as
+# `npm run test:ui` does. Every name holds `webkit focus`, so `cargo xtask plants daemon "webkit
+# focus"` runs them all.
+
+[run]
+wf-webkit = ["node", "app/node_modules/@playwright/test/cli.js", "test", "--config", "app/playwright.webkit.config.mjs", "app/tests/core-page.spec.mjs", "-g", "a click gives the control it lands on the keyboard|lists a stack's tasks in a dialog|Project settings… on a project the board does not show|project menu: Escape closes it|project menu: Rename… saves with Enter"]
+wf-chromium = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a click gives the control it lands on the keyboard"]
+
+[[plant]]
+name = "webkit focus: a click focuses no control"
+meant = "a click gives the control it lands on the keyboard, in every engine: a button, a checkbox, a radio button"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = "      control.focus({ preventScroll: true })"
+replace = "      void control"
+
+[[plant]]
+name = "webkit focus: a click focuses no control, and a stack's dialog has no tile to give the keyboard back to"
+meant = "lists a stack's tasks in a dialog, the newest first, and opens the one chosen in the drawer"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = "      control.focus({ preventScroll: true })"
+replace = "      void control"
+
+[[plant]]
+name = "webkit focus: a click focuses no control, and Project settings has no button to give the keyboard back to"
+meant = "project menu: Project settings… on a project the board does not show shows it first, and opens the dialog on it"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = "      control.focus({ preventScroll: true })"
+replace = "      void control"
+
+[[plant]]
+name = "webkit focus: a click focuses no control, and a menu shut by a click on a control leaves the keyboard on the project"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = "      control.focus({ preventScroll: true })"
+replace = "      void control"
+
+[[plant]]
+name = "webkit focus: a click a script makes gives the keyboard too"
+meant = "a click gives the control it lands on the keyboard, in every engine: a button, a checkbox, a radio button"
+runs = ["wf-chromium"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = "      if (event.detail === 0) return\n"
+replace = ""
+
+[[plant]]
+name = "webkit focus: only a button is given the keyboard"
+meant = "a click gives the control it lands on the keyboard, in every engine: a button, a checkbox, a radio button"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = "const CONTROLS = 'button, input[type=\"checkbox\"], input[type=\"radio\"]'"
+replace = "const CONTROLS = 'button'"
+
+[[plant]]
+name = "webkit focus: the control is focused after its own handler has opened the dialog"
+meant = "lists a stack's tasks in a dialog, the newest first, and opens the one chosen in the drawer"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = "    },\n    true,\n  )"
+replace = "    },\n    false,\n  )"
+
+[[plant]]
+name = "webkit focus: the page never listens for a click"
+meant = "a click gives the control it lands on the keyboard, in every engine: a button, a checkbox, a radio button"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "focusWhatIsClicked()\n\nconst tauri = window.__TAURI__ ?? {}"
+replace = "const tauri = window.__TAURI__ ?? {}"
+
+[[plant]]
+name = "webkit focus: a menu's item is given the keyboard too, and the project loses it when a dialog is saved"
+meant = "project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it"
+runs = ["wf-webkit"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/click-focus.js"
+find = " || control.closest('[role=\"menu\"]')"
+replace = ""

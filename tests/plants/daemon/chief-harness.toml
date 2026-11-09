@@ -2,8 +2,8 @@
 # models with no model turn (`Adapter::models`, crates/cf-harness/src/{claude,codex,pi,devin,muse}/models.rs
 # over shared/one_shot.rs), one `ModelListing` type (crates/cf-proto/src/models.rs) whose default is
 # never a contributor model, a disabled one or one of a stale listing, kept in the home ledger
-# (migration 0027, crates/cf-ledger/src/model_lists.rs), and read by the daemon at the first ask of
-# its life and at the human's Refresh, one harness at a time (crates/cf-daemon/src/models.rs).
+# (migration 0027, crates/cf-ledger/src/model_lists.rs), and read by the daemon at each ask (A4-28),
+# one harness at a time (crates/cf-daemon/src/models.rs).
 # Phase 1's plants follow T-727's, their names holding `chief:`; phases 2 and 3 add their own.
 #
 # CHF-03's names hold `listing:` and Phase 1's (CHF-04 to CHF-10, with Muse's rows and the
@@ -156,16 +156,6 @@ runs = ["ch-proto"]
 file = "crates/cf-proto/src/models.rs"
 find = '            .and_then(|effort| self.launch_ids.get(effort))'
 replace = '            .and_then(|effort| self.launch_ids.get(effort).filter(|_| false))'
-
-[[plant]]
-name = 'listing: a failed read drops the listing kept before'
-meant = "a_failed_read_keeps_the_listing_read_before_stale_for_its_reason"
-runs = ["ch-proto"]
-
-[[plant.edit]]
-file = "crates/cf-proto/src/models.rs"
-find = '            kept.unwrap_or(Self {'
-replace = '            kept.filter(|_| false).unwrap_or(Self {'
 
 [[plant]]
 name = 'listing: claude: the default pointer is listed as a model'
@@ -328,16 +318,6 @@ find = '        if answers(&answer) {'
 replace = '        if answers(&answer) || true {'
 
 [[plant]]
-name = 'listing: ledger: a stale listing is kept fresh'
-meant = "a_harness_s_listing_is_kept_whole_and_a_failed_read_keeps_the_one_before_stale"
-runs = ["ch-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/model_lists.rs"
-find = '        Freshness::Stale { why } => Some(why.as_str()),'
-replace = '        Freshness::Stale { .. } => None::<&str>,'
-
-[[plant]]
 name = "listing: ledger: the players compare the model list table with Node's"
 meant = "takes_the_model_list_table_and_its_schema_out_and_nothing_else"
 runs = ["ch-ledger-testing"]
@@ -346,16 +326,6 @@ runs = ["ch-ledger-testing"]
 file = "crates/cf-ledger/src/testing.rs"
 find = '        .chain([model_list::TABLE, drawn_items::TABLE])'
 replace = '        .chain(["no such table", drawn_items::TABLE])'
-
-[[plant]]
-name = 'listing: daemon: every ask reads the harness again'
-meant = "a_harness_is_read_at_the_first_ask_of_a_daemon_s_life_then_kept_and_read_again_at_refresh"
-runs = ["ch-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/models.rs"
-find = '        if refresh || !self.read.borrow().contains(&harness) {'
-replace = '        if true {'
 
 [[plant]]
 name = 'listing: daemon: a harness not installed here is asked'
@@ -377,15 +347,6 @@ file = "crates/cf-daemon/src/models.rs"
 find = '        let _turn = turn.lock().await;'
 replace = '        let _turn = turn.try_lock().ok();'
 
-[[plant]]
-name = 'listing: daemon: a failed read drops the listing kept before'
-meant = "a_new_daemon_reads_again_at_its_first_ask_and_a_failure_keeps_the_listing_before_stale"
-runs = ["ch-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/models.rs"
-find = '        let listing = without_credentials(ModelListing::after(kept, adapter.models(refresh).await));'
-replace = '        let listing = without_credentials(ModelListing::after(kept.filter(|_| false), adapter.models(refresh).await));'
 
 # A chief is a harness and a model (Phase 1, CHF-04 to CHF-10, T-729): the ledger's chief
 # model and its switch (crates/cf-ledger), each harness's last_used reader and its words for a
@@ -733,12 +694,8 @@ runs = ["chm-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
-find = '''
-        .filter(|listing| !listing.models.is_empty());
-    let Some(listing) = kept else {'''
-replace = '''
-        .filter(|_| false);
-    let Some(listing) = kept else {'''
+find = "    let Some(listing) = checked else {"
+replace = "    let Some(listing) = checked.filter(|_| false) else {"
 
 [[plant]]
 name = "chief: the page says no contributor warning for the chief's model"

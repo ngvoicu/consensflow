@@ -10,6 +10,7 @@ use cf_proto::models::WORDS_WITHHELD;
 
 mod failures;
 mod homes;
+mod live;
 mod off_thread;
 mod refresh;
 mod standin;
@@ -208,7 +209,14 @@ fn listed_with(
     let (asked_env, asked_processes, asked_time) =
         (env.clone(), Rc::clone(&processes), Rc::clone(&time));
     driver.begin(0, async move {
-        listed(&asked_env, &*asked_processes, &*asked_time, fetch).await
+        listed(
+            &asked_env,
+            &*asked_processes,
+            &*asked_time,
+            fetch,
+            Settle::No,
+        )
+        .await
     });
     let listed = driver.run().remove(0).1;
     let ran = processes

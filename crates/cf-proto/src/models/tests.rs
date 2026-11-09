@@ -139,34 +139,17 @@ fn an_effort_inside_the_id_launches_the_exact_id_listed_never_a_join() {
 }
 
 #[test]
-fn a_failed_read_keeps_the_listing_read_before_stale_for_its_reason() {
-    let read = listed(vec![marked("swe-2")]);
-    let first = ModelListing::after(None, Ok(read.clone()));
-    assert_eq!(first, read);
-    assert_eq!((first.read_at, first.is_stale()), (Some(10), false));
-    let second = ModelListing::after(Some(first), Err("Not logged in".to_owned()));
-    assert_eq!(second.models, read.models);
-    assert_eq!((second.read_at, second.how.as_str()), (Some(10), "a test"));
+fn a_failed_read_lists_no_model_and_says_why() {
+    let listing = ModelListing::failed("Not logged in");
+    assert!(listing.models.is_empty());
+    assert_eq!((listing.read_at, listing.is_stale()), (None, true));
     assert_eq!(
-        second.freshness,
+        listing.freshness,
         Freshness::Stale {
             why: "Not logged in".to_owned()
         }
     );
-    assert_eq!(second.default_model(), None, "stale: no default");
-
-    let third = ModelListing::after(Some(second), Ok(listed(vec![marked("swe-3")])));
-    assert_eq!(
-        (third.is_stale(), third.models[0].id.as_str()),
-        (false, "swe-3")
-    );
-}
-
-#[test]
-fn a_failed_first_read_keeps_an_empty_listing_stale_for_its_reason() {
-    let listing = ModelListing::after(None, Err("Not logged in".to_owned()));
-    assert!(listing.models.is_empty());
-    assert_eq!((listing.read_at, listing.is_stale()), (None, true));
+    assert_eq!(listing.default_model(), None, "stale: no default");
 }
 
 #[test]

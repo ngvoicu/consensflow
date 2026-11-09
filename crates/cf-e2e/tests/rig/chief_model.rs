@@ -158,11 +158,12 @@ fn a_chief_whose_model_is_gone_starts_on_its_harnesss_default_and_the_human_is_t
     assert_eq!(after(&first, "--model"), "fake-chief");
     // Its window opens, as Claude Code's does on a model the account lacks, and its first
     // turn fails in Claude Code's words, its record a `<synthetic>` API error naming the
-    // model: the window is closed and the chief opens again at once on Claude Code's own
-    // default, which the stand-in's list cannot name: no `--model`.
+    // model: the window is closed and the chief opens again at once on the harness's default,
+    // which the stand-in's list gives (A4-28, T-1329: it marks none, so the first model it
+    // lists, `fake`, is the default of a list that marks none).
     rig.tell(project, "Reply with exactly: HELLO")?;
     let again = chief_window(&rig, project, 2)?;
-    assert_eq!(after(&again, "--model"), "", "{:?}", again["argv"]);
+    assert_eq!(after(&again, "--model"), "fake", "{:?}", again["argv"]);
     let board = Project::new(&rig, project);
     assert_eq!(board.board()?["project"]["state"], "open", "nothing closed");
     let told: Vec<String> = board
@@ -173,7 +174,7 @@ fn a_chief_whose_model_is_gone_starts_on_its_harnesss_default_and_the_human_is_t
         .collect();
     assert_eq!(
         told,
-        ["The chief's model, fake-chief, is no longer available in Claude Code: the chief starts on Claude Code's own default model instead. Switch the chief to pick another."]
+        ["The chief's model, fake-chief, is no longer available in Claude Code: the chief starts on fake, Claude Code's default model, instead. Switch the chief to pick another."]
     );
     // And no third window: the default comes up.
     std::thread::sleep(Duration::from_secs(3));
