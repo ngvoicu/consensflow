@@ -19,6 +19,7 @@ use serde_json::Value;
 
 use crate::process::{Run, Signal, Sink, Spawned};
 use crate::wire::{self, First};
+
 use crate::{bundle, cf, checkout, files, serial, Error, Result, ScratchHome};
 
 /// How long a daemon has to say it is ready.
@@ -43,6 +44,16 @@ impl Home {
             scratch: ScratchHome::new()?,
             _turn: turn,
         })
+    }
+
+    /// The roster the stand-in harnesses of this home list their models from
+    /// ([`crate::stand_in_lists`]): the members a case seats, which the daemon checks against
+    /// what their harness lists. The case's own file beside the home, never the daemon's.
+    pub fn stand_ins(&self, roster: &Value) -> Result<()> {
+        files::write(
+            &self.scratch.root().join(crate::stand_in_lists::ROSTER),
+            format!("{roster}\n"),
+        )
     }
 
     /// The folder a project's work is in.

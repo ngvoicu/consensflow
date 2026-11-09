@@ -31,6 +31,8 @@ struct Staffing {
     app: Bridge,
     rig: Rig,
     project: i64,
+    /// What each harness lists, by its kind, as the page reads it: the recorded listings.
+    lists: Vec<(&'static str, Rc<crate::models::tests::Listing>)>,
 }
 
 fn staffing() -> Staffing {
@@ -41,14 +43,23 @@ fn staffing() -> Staffing {
     });
     let opens_nothing: crate::page::Opener =
         Rc::new(|_, _| Box::pin(async { Err("a test opens no file".to_owned()) }));
-    let rig = rig_of(env, None, Specs::opening_with(opens_nothing), kit);
-    for harness in ["claude", "codex", "pi", "devin", "muse"] {
-        rig.kit
-            .ledger
-            .borrow_mut()
-            .keep_model_listing(harness, &recorded(harness))
-            .unwrap();
-    }
+    let lists: Vec<(&'static str, Rc<crate::models::tests::Listing>)> = [
+        ("claude-code", "claude"),
+        ("codex", "codex"),
+        ("pi", "pi"),
+        ("devin", "devin"),
+        ("muse", "muse"),
+    ]
+    .into_iter()
+    .map(|(kind, name)| {
+        (
+            kind,
+            crate::models::tests::Listing::repeating(recorded(name)),
+        )
+    })
+    .collect();
+    let adapters = Rc::new(crate::models::tests::ByKind(lists.clone()));
+    let rig = rig_listing(env, None, Specs::opening_with(opens_nothing), kit, adapters);
     let (daemon, app) = bridge_pair_over(&rig.spawn);
     register(&daemon, &rig.page, &rig.spawn);
     let project = rig.kit.with_staff(&[]).id;
@@ -58,10 +69,16 @@ fn staffing() -> Staffing {
         app,
         rig,
         project,
+        lists,
     }
 }
 
 impl Staffing {
+    /// The listing the harness of `kind` answers with, which a test can change.
+    fn lists_of(&self, kind: &str) -> &crate::models::tests::Listing {
+        &self.lists.iter().find(|(of, _)| *of == kind).unwrap().1
+    }
+
     async fn add(&self, fields: Value) -> Value {
         let mut body = json!({ "project": self.project });
         body.as_object_mut()
@@ -416,13 +433,7 @@ async fn a_member_on_a_listed_model_with_a_long_id_is_added_and_starts_a_project
                 model.efforts = vec!["high".to_owned()];
                 listing.models.push(model);
             }
-            staffing
-                .rig
-                .kit
-                .ledger
-                .borrow_mut()
-                .keep_model_listing("pi", &listing)
-                .unwrap();
+            staffing.lists_of("pi").set(listing);
             for len in [129, 256] {
                 let added = staffing
                     .add(json!({ "harness": "pi", "model": long(len), "effort": "high", "tier": "complex" }))
@@ -726,6 +737,7 @@ async fn a_chief_is_held_and_launched_on_the_model_and_effort_picked_on_each_har
             // keeps what it is handed, `chief_switch`).
             let asked = json!({ "project": 1, "harness": "devin", "model": "swe-2", "effort": "high", "when": "now" });
             let target = crate::page::chief::chief_asked(&staffing.rig.page, crate::page::body::Body::new(&asked), true)
+                .await
                 .expect("a switch");
             assert_eq!(
                 (target.harness.as_str(), target.model.as_str(), target.effort.as_deref()),
@@ -772,4 +784,337 @@ impl Staffing {
             .rfind(|launch| launch["role"] == "chief" && launch["project"]["id"] == project)
             .unwrap_or_else(|| panic!("no launch of project {project}'s chief"))
     }
+}
+
+// --- a submission is checked against the list its picker was shown (A4-28, T-1321) ---
+
+impl Staffing {
+    /// `models.get` of `kind`'s harness (by its program's name, `devin`): the answer, which names
+    /// the read the page's picker shows.
+    async fn reads(&self, harness: &str) -> Value {
+        ask(&self.app, "models.get", json!({ "harness": harness })).await
+    }
+
+    /// How many members of the project have `word` in their handle.
+    fn members_named_after(&self, word: &str) -> usize {
+        self.rig
+            .kit
+            .ledger
+            .borrow()
+            .project(self.project)
+            .unwrap()
+            .unwrap()
+            .participants
+            .iter()
+            .filter(|participant| participant.handle.contains(word))
+            .count()
+    }
+
+    /// How many times the harness of `kind` was asked for its models.
+    fn asked_of(&self, kind: &str) -> usize {
+        self.lists_of(kind).asked.borrow().len()
+    }
+}
+
+/// Devin's model and effort as the recorded listing has them: `claude-opus-5-5-fast` at `medium`
+/// is launched as `claude-opus-5-5-medium-fast`.
+fn devin_pick(extra: Value) -> Value {
+    let mut body = json!({
+        "harness": "devin",
+        "model": "claude-opus-5-5-fast",
+        "effort": "medium",
+        "tier": "standard",
+    });
+    body.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    body
+}
+
+const DEVIN_RUNS: (&str, &str, &str, &str) = (
+    "devin",
+    "claude-opus-5-5-medium-fast",
+    "medium",
+    "claude-opus-5-5-fast",
+);
+
+fn runs_of(staffing: &Staffing, handle: &str) -> (String, String, String, String) {
+    let (harness, model, effort, name) = staffing.runs(handle);
+    (
+        harness,
+        model.unwrap_or_default(),
+        effort.unwrap_or_default(),
+        name.unwrap_or_default(),
+    )
+}
+
+/// The token of a read of another daemon's life, whose count is the one this daemon's first read
+/// has: a dialog that was open as the daemon restarted holds one (T-1329, A).
+const FOREIGN_READ: &str = "0000000000000000.1";
+
+#[tokio::test]
+async fn a_submission_is_checked_against_the_read_its_picker_was_shown_not_the_last_one() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let first = staffing.reads("devin").await;
+            assert_eq!(first["ok"], true, "{first}");
+            let shown = first["read"].as_str().expect("a read token").to_owned();
+            // Another dialog reads Devin after it changed what it lists.
+            let mut later = recorded("devin");
+            later.models.retain(|model| model.id == "adaptive");
+            staffing.lists_of("devin").set(later);
+            let second = staffing.reads("devin").await;
+            let last = second["read"].as_str().expect("a read token").to_owned();
+            assert_ne!(shown, last, "each read has an id of its own");
+
+            // The pick made from the first list is checked against it, and holds Devin's exact id.
+            let added = staffing.add(devin_pick(json!({ "read": shown }))).await;
+            assert_eq!(added["ok"], true, "{added}");
+            let handle = added["member"]["handle"].as_str().unwrap().to_owned();
+            let (harness, model, effort, name) = DEVIN_RUNS;
+            assert_eq!(
+                runs_of(&staffing, &handle),
+                (harness.into(), model.into(), effort.into(), name.into())
+            );
+            // The same pick from the list read last is refused: it lists no such model.
+            let refused = staffing.add(devin_pick(json!({ "read": last }))).await;
+            assert_eq!(
+                refused["error"],
+                "devin does not list claude-opus-5-5-fast: pick one of its models",
+                "{refused}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_submission_naming_no_read_the_daemon_keeps_reads_the_harness_again_and_is_checked_against_that(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            assert_eq!(staffing.asked_of("devin"), 0);
+            // No read named: the harness is read for the submission.
+            let added = staffing.add(devin_pick(json!({}))).await;
+            assert_eq!(added["ok"], true, "{added}");
+            assert_eq!(
+                staffing.asked_of("devin"),
+                1,
+                "a read made for the submission"
+            );
+            // A read this daemon does not keep (or never made) is no read at all: a token of another
+            // daemon's life is one, whatever count it carries (a dialog open as the daemon restarted),
+            // and the count of this daemon's first read, "1", is no exception (T-1329, A).
+            let again = staffing
+                .add(devin_pick(json!({ "read": FOREIGN_READ, "tier": "light" })))
+                .await;
+            assert_eq!(again["ok"], true, "{again}");
+            assert_eq!(
+                staffing.asked_of("devin"),
+                2,
+                "read again, not taken at the page's word"
+            );
+            // And what that read does not list is refused.
+            let mut changed = recorded("devin");
+            changed.models.retain(|model| model.id == "adaptive");
+            staffing.lists_of("devin").set(changed);
+            let refused = staffing
+                .add(devin_pick(json!({ "read": FOREIGN_READ })))
+                .await;
+            assert_eq!(
+                refused["error"],
+                "devin does not list claude-opus-5-5-fast: pick one of its models",
+                "{refused}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_failed_read_is_no_list_to_check_against_the_harness_is_read_again_and_devins_mapping_holds(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            // The picker's read failed: it showed no model, and its read names no list.
+            staffing.lists_of("devin").fail("Not logged in");
+            let failed = staffing.reads("devin").await;
+            assert_eq!(failed["listing"]["models"], json!([]), "{failed}");
+            let failed_read = failed["read"].as_str().unwrap().to_owned();
+
+            // Devin can be read again: the pick is checked against that read, and is Devin's
+            // exact id for the effort, never `swe-2` and `high` taken verbatim.
+            staffing.lists_of("devin").set(recorded("devin"));
+            let added = staffing
+                .add(devin_pick(json!({ "read": failed_read })))
+                .await;
+            assert_eq!(added["ok"], true, "{added}");
+            let handle = added["member"]["handle"].as_str().unwrap().to_owned();
+            let (harness, model, effort, name) = DEVIN_RUNS;
+            assert_eq!(
+                runs_of(&staffing, &handle),
+                (harness.into(), model.into(), effort.into(), name.into()),
+                "the mapping holds on the failed-read path"
+            );
+
+            // Devin still cannot be read: nothing is accepted unchecked, and no member is made.
+            staffing.lists_of("devin").fail("Not logged in");
+            let before = staffing.members_named_after("claude-opus-5-5");
+            let refused = staffing
+                .add(devin_pick(json!({ "read": failed_read, "tier": "light" })))
+                .await;
+            assert_eq!(
+                refused["error"],
+                "devin's models could not be read, so claude-opus-5-5-fast cannot be checked: Not logged in",
+                "{refused}"
+            );
+            assert_eq!(staffing.members_named_after("claude-opus-5-5"), before);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn an_edit_that_leaves_the_model_and_effort_as_they_are_saves_the_stored_choice_with_no_list()
+{
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let added = staffing.add(devin_pick(json!({}))).await;
+            let handle = added["member"]["handle"].as_str().unwrap().to_owned();
+            staffing.lists_of("devin").fail("Not logged in");
+            let edit = |extra: Value| {
+                let mut body = devin_pick(json!({ "project": staffing.project, "member": handle, "tier": "light" }));
+                body.as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                ask(&staffing.app, "member.edit", body)
+            };
+            // Unchanged: the member's own, already resolved launch choice is saved; only the tier moves.
+            let saved = edit(json!({ "unchanged": true })).await;
+            assert_eq!(saved["ok"], true, "{saved}");
+            let (harness, model, effort, name) = DEVIN_RUNS;
+            assert_eq!(
+                runs_of(&staffing, saved["member"]["handle"].as_str().unwrap()),
+                (harness.into(), model.into(), effort.into(), name.into())
+            );
+            assert_eq!(
+                staffing.tier_of(saved["member"]["handle"].as_str().unwrap()),
+                Some("light".to_owned())
+            );
+            // Not said to be unchanged, the same words are a pick, which nothing can check.
+            let unchecked = edit(json!({})).await;
+            assert_eq!(
+                unchecked["error"],
+                "devin's models could not be read, so claude-opus-5-5-fast cannot be checked: Not logged in",
+                "{unchecked}"
+            );
+            // And unchanged names the member's own harness, no other.
+            let other = edit(json!({ "unchanged": true, "harness": "codex" })).await;
+            assert_eq!(
+                other["error"],
+                "an edit that leaves the model unchanged keeps the member's own harness",
+                "{other}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_read_that_is_no_token_is_refused() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            for read in [json!(5), json!(""), json!(["a.1"]), json!(true)] {
+                let refused = staffing.add(devin_pick(json!({ "read": read }))).await;
+                assert_eq!(
+                    refused["error"], "read is the token models.get answered with",
+                    "{read}: {refused}"
+                );
+            }
+        })
+        .await;
+}
+
+/// Devin's `swe-2` at `high` is launched as the exact id it lists, `swe-2-high`, on every path a
+/// pick takes and whatever read id it names: the read its picker was shown, an id the daemon
+/// never made (another daemon's, FOREIGN_READ), the read of a harness that failed, and none
+/// (T-1329, C: the reviewer's four states). No variable makes a daemon take the pair verbatim.
+#[tokio::test]
+async fn swe_2_at_high_is_checked_and_launched_as_swe_2_high_on_every_pick_path_and_read_state() {
+    LocalSet::new()
+        .run_until(async {
+            for state in ["known", "unknown", "failed", "none"] {
+                let s = staffing();
+                if state == "failed" {
+                    s.lists_of("devin").fail("Not logged in");
+                }
+                let read = match state {
+                    "known" | "failed" => s.reads("devin").await["read"].clone(),
+                    "unknown" => json!(FOREIGN_READ),
+                    _ => Value::Null,
+                };
+                s.lists_of("devin").set(recorded("devin"));
+                let choice = json!({
+                    "harness": "devin", "model": "swe-2", "effort": "high",
+                    "tier": "standard", "read": read,
+                });
+                // Add member.
+                let added = s.add(choice.clone()).await;
+                assert_eq!(added["ok"], true, "{state}: {added}");
+                let handle = added["member"]["handle"].as_str().unwrap().to_owned();
+                assert_eq!(s.runs(&handle).1.as_deref(), Some("swe-2-high"), "{state}");
+                // Edit member and Project settings: the same pick, changed in its tier.
+                let mut edit = choice.clone();
+                edit["project"] = json!(s.project);
+                edit["member"] = json!(handle);
+                edit["tier"] = json!("light");
+                let edited = ask(&s.app, "member.edit", edit).await;
+                assert_eq!(edited["ok"], true, "{state}: {edited}");
+                let edited_handle = edited["member"]["handle"].as_str().unwrap().to_owned();
+                assert_eq!(
+                    s.runs(&edited_handle).1.as_deref(),
+                    Some("swe-2-high"),
+                    "{state}"
+                );
+                // New project: the chief and a staff member.
+                let mut member = choice.clone();
+                member["roles"] = json!(["worker"]);
+                let mut opening = choice.clone();
+                opening["directory"] = json!(format!("/work/four-states-{state}"));
+                opening["staff"] = json!([member]);
+                let opened = ask(&s.app, "project.open", opening).await;
+                assert_eq!(opened["ok"], true, "{state}: {opened}");
+                let project = opened["project"]["id"].as_i64().unwrap();
+                assert_eq!(s.chief_of(project).model.as_deref(), Some("swe-2-high"));
+                let staff = s
+                    .rig
+                    .kit
+                    .ledger
+                    .borrow()
+                    .project(project)
+                    .unwrap()
+                    .unwrap()
+                    .participants;
+                assert!(
+                    staff
+                        .iter()
+                        .any(|p| p.role == "worker" && p.model.as_deref() == Some("swe-2-high")),
+                    "{state}"
+                );
+                // Switch chief.
+                let mut switch = choice.clone();
+                switch["project"] = json!(s.project);
+                switch["when"] = json!("now");
+                let target = crate::page::chief::chief_asked(
+                    &s.rig.page,
+                    crate::page::body::Body::new(&switch),
+                    true,
+                )
+                .await
+                .unwrap();
+                assert_eq!(target.model, "swe-2-high", "{state}");
+            }
+        })
+        .await;
 }

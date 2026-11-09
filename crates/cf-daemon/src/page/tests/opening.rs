@@ -342,12 +342,8 @@ async fn a_chief_on_a_model_its_harness_does_not_list_or_will_not_run_is_refused
                 1_793_000_000_000,
                 "the test's",
             );
-            held.rig
-                .kit
-                .ledger
-                .borrow_mut()
-                .keep_model_listing("claude", &listing)
-                .unwrap();
+            // The list the picker showed, whose read the page names with what it submits.
+            let read = held.rig.page.models.record(cf_proto::agents::Harness::Claude, listing);
             for (model, said) in [
                 (
                     "claude-gone-9",
@@ -358,10 +354,15 @@ async fn a_chief_on_a_model_its_harness_does_not_list_or_will_not_run_is_refused
                     "claude-code lists claude-opus-9 but will not run it: pick another of its models",
                 ),
             ] {
-                let answer = ask(&held.app, "project.open", opening(json!({ "model": model }))).await;
+                let answer = ask(
+                    &held.app,
+                    "project.open",
+                    opening(json!({ "model": model, "read": read })),
+                )
+                .await;
                 assert_eq!(answer, json!({ "ok": false, "error": said }), "{model}");
             }
-            let answer = ask(&held.app, "project.open", opening(json!({}))).await;
+            let answer = ask(&held.app, "project.open", opening(json!({ "read": read }))).await;
             assert_eq!(answer["ok"], true, "a model it lists: {answer}");
         })
         .await;
@@ -380,16 +381,11 @@ async fn a_chief_on_muse_is_its_harness_and_a_model_muse_lists() {
                 1_793_000_000_000,
                 "the test's",
             );
-            held.rig
-                .kit
-                .ledger
-                .borrow_mut()
-                .keep_model_listing("muse", &listing)
-                .unwrap();
+            let read = held.rig.page.models.record(cf_proto::agents::Harness::Muse, listing);
             let refused = ask(
                 &held.app,
                 "project.open",
-                opening(json!({ "harness": "muse", "model": "muse-gone-9" })),
+                opening(json!({ "harness": "muse", "model": "muse-gone-9", "read": read })),
             )
             .await;
             assert_eq!(
@@ -401,7 +397,7 @@ async fn a_chief_on_muse_is_its_harness_and_a_model_muse_lists() {
             let taken = ask(
                 &held.app,
                 "project.open",
-                opening(json!({ "harness": "muse", "model": "muse-spark-1.3" })),
+                opening(json!({ "harness": "muse", "model": "muse-spark-1.3", "read": read })),
             )
             .await;
             assert_eq!(

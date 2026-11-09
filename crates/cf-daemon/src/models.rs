@@ -1,108 +1,216 @@
-//! The models each harness lists, as the home keeps them (CHF-03): read from the harness
-//! itself ([`Adapter::models`]) at the first ask of this daemon's life and again at the
-//! human's Refresh, never in the background, one read of a harness at a time; between, what
-//! the ledger kept answers, **at once, whatever is being read**: a Pi Refresh takes as long as
-//! `pi update --models` and the read take, and a Claude list the home kept does not wait for it
-//! (the review T-1270, second reading, F8). A read that fails keeps the listing read before,
-//! stale for its reason ([`ModelListing::after`]).
+//! The models each harness lists, **read when the page asks** (A4-28, T-1321): a dialog opens
+//! and asks, and what the harness offers at that moment is what it shows, whatever an earlier
+//! ask read. Nothing is read in the background, and nothing is answered from a read before: a
+//! harness that cannot be read lists no model and says why ([`ModelListing::failed`]); the list
+//! it offered an hour ago is not put in its place. Reads of different harnesses run side by
+//! side, each under the bound its adapter gives it.
 //!
-//! Read at the first ask, not as the daemon starts: a daemon a test starts would run every
+//! **A read serves only the asks that came before it began.** One harness is read one ask at
+//! a time (two probes of one harness have hung); an ask that arrives while a read of its
+//! harness is on its way waits for the next read, which it begins itself, and the asks already
+//! waiting when that read begins share it. Each read has an id, which the page sends back with
+//! what it submits from the list it showed: **a submission is checked against that read**
+//! ([`ModelLists::checked`]), kept for this daemon's life (the last [`KEPT_READS`] of each
+//! harness), never against whichever read was made last. Where there is no such read (none in
+//! this daemon's life, one evicted, or one that failed) the harness is read again and the
+//! submission is checked against that; nothing is accepted unchecked. **An id is a token of
+//! this daemon's life** (its nonce, then the count of its reads): a dialog that was open as the
+//! daemon restarted holds the token of a daemon that is gone, which no later daemon knows
+//! whatever its count has reached (T-1329).
+//!
+//! Nothing is kept in the ledger: what an earlier daemon's life wrote of the lists is forgotten
+//! as it starts ([`crate::start`]).
+//!
+//! Read at the ask, not as the daemon starts: a daemon a test starts would run every
 //! harness its PATH and the system's folders find, and the human who opens no picker
 //! waits for nothing.
 
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_engine::seams::Adapters;
 use cf_harness::detect::harness_path;
-use cf_ledger::Ledger;
 use cf_proto::agents::Harness;
 use cf_proto::models::{Freshness, ModelListing};
 use tokio::sync::Mutex;
+
+/// How many of the reads of each harness a submission can still be checked against.
+pub const KEPT_READS: usize = 8;
+
+/// One read of a harness: the listing it answered, and the id the page sends back with a
+/// submission made from it: a token of this daemon's life (`<nonce>.<count>`), a text that no
+/// other daemon's reads carry. It is a text, not a number: the page is JavaScript, whose numbers
+/// are exact to 2^53, and a nonce is as long as it is to be no other daemon's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRead {
+    pub id: String,
+    pub listing: ModelListing,
+}
 
 /// The harnesses' model lists of this daemon's life.
 pub struct ModelLists {
     adapters: Rc<dyn Adapters>,
     env: Env,
-    /// The harnesses read since the daemon started.
-    read: RefCell<HashSet<Harness>>,
+    /// What makes the ids of this daemon's reads its own: random, once, as it is built.
+    nonce: String,
     /// One turn for each harness, held through each read of it: two probes of one harness at
-    /// once have hung (two Pi's). The harnesses do not wait for one another, and a list the
-    /// home kept waits for no turn at all.
+    /// once have hung (two Pi's). The harnesses do not wait for one another.
     reading: RefCell<HashMap<Harness, Rc<Mutex<()>>>>,
+    /// How many reads of each harness have begun.
+    begun: RefCell<HashMap<Harness, u64>>,
+    /// The last read of each harness that ended, and which read it was (by how many had begun
+    /// when it did): an ask that arrived before that read began, and waited, takes it.
+    last: RefCell<HashMap<Harness, (u64, ModelRead)>>,
+    /// The count the next read takes in its id.
+    next: Cell<u64>,
+    /// The last reads of each harness, oldest first, for a submission to be checked against.
+    kept: RefCell<HashMap<Harness, VecDeque<ModelRead>>>,
 }
 
 impl ModelLists {
+    /// The lists of a daemon that has read none.
     pub fn new(adapters: Rc<dyn Adapters>, env: Env) -> Self {
         Self {
             adapters,
+            nonce: nonce(),
             env,
-            read: RefCell::new(HashSet::new()),
             reading: RefCell::new(HashMap::new()),
+            begun: RefCell::new(HashMap::new()),
+            last: RefCell::new(HashMap::new()),
+            next: Cell::new(1),
+            kept: RefCell::new(HashMap::new()),
         }
     }
 
-    /// The listing of `harness`, read from it first where this daemon has not read it yet or
-    /// `refresh` asks (the human's Refresh, which also has a harness fetch the catalog it
-    /// keeps), and kept. Fails where the harness is not installed here, or the ledger
-    /// fails.
-    pub async fn get(
-        &self,
-        ledger: &RefCell<Ledger>,
-        harness: Harness,
-        refresh: bool,
-    ) -> Result<ModelListing, String> {
+    /// The listing of `harness`, read from it now ([`ModelLists::read`]).
+    pub async fn get(&self, harness: Harness, refresh: bool) -> Result<ModelListing, String> {
+        self.read(harness, refresh).await.map(|read| read.listing)
+    }
+
+    /// `harness`, read from it now (`refresh` is the human's Refresh, which also has a harness
+    /// fetch the catalog it keeps), and kept by the id it is given. A read that fails is a
+    /// listing of no model that says why. Fails where the harness is not installed here.
+    pub async fn read(&self, harness: Harness, refresh: bool) -> Result<ModelRead, String> {
         if harness_path(harness, &self.env).is_none() {
             return Err(format!("{} is not installed here", harness.as_str()));
         }
-        // What the home kept answers a list asked for with no Refresh, with no turn to wait for:
-        // a read of this harness, or of another, may be in flight for as long as a Pi update.
-        if let Some(kept) = self.cached(ledger, harness, refresh)? {
-            return Ok(kept);
-        }
+        let arrived = self.begun_reads(harness);
         let turn = Rc::clone(self.reading.borrow_mut().entry(harness).or_default());
         let _turn = turn.lock().await;
-        // The read this ask waited for may have kept the list it wants.
-        if let Some(kept) = self.cached(ledger, harness, refresh)? {
-            return Ok(kept);
+        // A read that began after this ask came, and ended while it waited for the turn, is the
+        // read begun for the asks waiting then: this ask is one of them. A Refresh reads for
+        // itself.
+        if !refresh {
+            if let Some((began, read)) = self.last.borrow().get(&harness) {
+                if *began > arrived {
+                    return Ok(read.clone());
+                }
+            }
         }
-        let kept = Self::kept(ledger, harness)?;
+        let began = self.begun_reads(harness) + 1;
+        self.begun.borrow_mut().insert(harness, began);
         let adapter = self
             .adapters
             .adapter(harness.kind())
             .ok_or_else(|| format!("{} has no adapter", harness.as_str()))?;
-        let listing = without_credentials(ModelListing::after(kept, adapter.models(refresh).await));
-        ledger
+        let listing = without_credentials(
+            adapter
+                .models(refresh)
+                .await
+                .unwrap_or_else(ModelListing::failed),
+        );
+        let read = self.keep(harness, listing);
+        self.last
             .borrow_mut()
-            .keep_model_listing(harness.as_str(), &listing)
-            .map_err(|failed| failed.to_string())?;
-        self.read.borrow_mut().insert(harness);
-        Ok(listing)
+            .insert(harness, (began, read.clone()));
+        Ok(read)
     }
 
-    /// What the home kept of `harness`, for an ask with no Refresh that this daemon has read the
-    /// harness for already: none where it asks for one, has not read it, or kept nothing.
-    fn cached(
+    /// Keeps `listing` as a read of `harness`, which takes the next id.
+    fn keep(&self, harness: Harness, listing: ModelListing) -> ModelRead {
+        let count = self.next.get();
+        self.next.set(count + 1);
+        let read = ModelRead {
+            id: format!("{}.{count}", self.nonce),
+            listing,
+        };
+        let mut kept = self.kept.borrow_mut();
+        let reads = kept.entry(harness).or_default();
+        reads.push_back(read.clone());
+        while reads.len() > KEPT_READS {
+            reads.pop_front();
+        }
+        read
+    }
+
+    /// How many reads of `harness` have begun in this daemon's life.
+    fn begun_reads(&self, harness: Harness) -> u64 {
+        self.begun.borrow().get(&harness).copied().unwrap_or(0)
+    }
+
+    /// The read `id` of `harness`, if this daemon still keeps it.
+    pub fn shown(&self, harness: Harness, id: &str) -> Option<ModelListing> {
+        self.kept
+            .borrow()
+            .get(&harness)?
+            .iter()
+            .find(|read| read.id == id)
+            .map(|read| read.listing.clone())
+    }
+
+    /// The listing a submission on `harness` is checked against: the read `read` names (the one
+    /// its picker showed) where this daemon keeps it and it listed models; else a read made now
+    /// (the harness is read again, an ask that began after any read before it). Fails, with why,
+    /// where that read lists no model: nothing is checked against no list, and nothing is
+    /// accepted unchecked. None where ConsensFlow has no adapter to read the harness with (the
+    /// five harnesses all have one), so that there is no list to check against at all.
+    pub async fn checked(
         &self,
-        ledger: &RefCell<Ledger>,
         harness: Harness,
-        refresh: bool,
+        read: Option<&str>,
     ) -> Result<Option<ModelListing>, String> {
-        if refresh || !self.read.borrow().contains(&harness) {
+        if let Some(listing) = read
+            .and_then(|id| self.shown(harness, id))
+            .filter(|listing| !listing.models.is_empty())
+        {
+            return Ok(Some(listing));
+        }
+        // A harness with no adapter has no list at all (the five all have one).
+        if self.adapters.adapter(harness.kind()).is_none() {
             return Ok(None);
         }
-        Ok(Self::kept(ledger, harness)?.map(without_credentials))
+        let listing = self.get(harness, false).await?;
+        if listing.models.is_empty() {
+            return Err(match &listing.freshness {
+                Freshness::Stale { why } => why.clone(),
+                Freshness::Fresh => "it lists no model".to_owned(),
+            });
+        }
+        Ok(Some(listing))
     }
 
-    /// What the home kept of `harness`.
-    fn kept(ledger: &RefCell<Ledger>, harness: Harness) -> Result<Option<ModelListing>, String> {
-        ledger
-            .borrow()
-            .model_listing(harness.as_str())
-            .map_err(|failed| failed.to_string())
+    /// Records `listing` as a read of `harness`, as the page would have been shown it: what a
+    /// test checks a submission against with no adapter to read from.
+    #[cfg(test)]
+    pub(crate) fn record(&self, harness: Harness, listing: ModelListing) -> String {
+        self.keep(harness, listing).id
     }
+}
+
+/// What makes one daemon's read ids its own: 64 random bits, in hex. Where the system gives no
+/// random bytes (it always does), the process's own id and a count in this process: no two
+/// daemons running at once share either, and one that follows another has another process id.
+fn nonce() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static BUILT: AtomicU64 = AtomicU64::new(0);
+    let mut random = [0u8; 8];
+    let bits = match getrandom::fill(&mut random) {
+        Ok(()) => u64::from_be_bytes(random),
+        Err(_) => (u64::from(std::process::id()) << 32) | BUILT.fetch_add(1, Ordering::Relaxed),
+    };
+    format!("{bits:016x}")
 }
 
 /// `listing` with its stale reason as it may be kept and told ([`cf_engine::quotable`]). A harness
@@ -110,7 +218,7 @@ impl ModelLists {
 /// was given: Pi's words (after the mark a failure of Pi's read carries) are screened whole and
 /// withheld whole if anything in them may hold a credential, then cut; the reason of any other
 /// harness, which has none, is only masked, and says what it said (`Invalid API key · Please run
-/// /login`). The reason is kept in the ledger, which the page reads, and told to the human.
+/// /login`). The reason is kept with the read and told to the human.
 fn without_credentials(mut listing: ModelListing) -> ModelListing {
     if let Freshness::Stale { why } = &listing.freshness {
         listing.freshness = Freshness::Stale {
@@ -150,4 +258,4 @@ pub(crate) mod tests_support {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

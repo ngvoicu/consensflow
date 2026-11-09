@@ -137,27 +137,69 @@ const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
 
 const NO_HARNESS = 'No harness is installed here: install one from Agents, Harnesses.'
 
+/** Every harness installed here, by kind: what a dialog reads as it opens, whatever its pickers offer. */
+const installedKinds = (missing) =>
+  Object.keys(HARNESS_NAMES).filter((kind) => !missing.includes(harnessOf(kind)))
+
+/**
+ * A dialog's reads, started as it opens (A4-28): what each harness lists now, every installed
+ * one at once and side by side, whatever role or harness the form was left on. The reads of an
+ * earlier opening are forgotten.
+ */
+function readEveryHarness(lists, missing) {
+  lists.clear()
+  lists.start(installedKinds(missing))
+}
+
 /** What `--model` takes for a listed model: Pi's provider and id joined, the id else. */
 const modelOf = (model) => (model.provider ? `${model.provider}/${model.id}` : model.id)
 
 /**
- * The models each harness lists of itself (`models.get`, CHF-03), read once per harness
- * while a dialog is open: the dialog that asks a harness again is answered from that read,
- * until the human's Refresh reads it again. A read that is refused is not kept, so the
- * next ask reads again. The chief's picker and Add member share one per dialog.
+ * The models each harness lists of itself (`models.get`, CHF-03), read as a dialog opens
+ * (A4-28): each installed harness is asked at once ([`start`]), side by side, and what a
+ * harness answers is what the dialog shows of it, until the human's Refresh reads it again.
+ * Nothing is kept past the dialog: each opening starts its reads afresh ([`clear`]), and no
+ * list read before is shown as the harness's own now. A read that is refused is not kept,
+ * so the next ask reads again. **Every picker of a harness in a dialog shows the one read of
+ * it**: a Refresh in one is told to the others ([`onRefreshed`]), and what a picker submits
+ * names the read it showed (`read`, [`readOf`]), which the daemon checks it against.
  */
 export class ModelLists {
   #daemon
   /** Each harness's answer, as asked: a promise, kept from the moment it is asked. */
   #answers = new Map()
+  /** Each harness's answer once it came, which its pickers show: it carries its read's id. */
+  #came = new Map()
+  /** Who is told of a Refresh, with the harness and the picker that asked it. */
+  #listeners = new Set()
 
   constructor(daemon) {
     this.#daemon = daemon
   }
 
-  /** Forgets every read: a dialog opening reads each harness again at its first ask. */
+  /** Forgets every read: a dialog opening reads each harness again. */
   clear() {
     this.#answers.clear()
+    this.#came.clear()
+  }
+
+  /** The id of the read the pickers of `harness` show now, once it came; none else. */
+  readOf(harness) {
+    return this.#came.get(harness)?.read ?? null
+  }
+
+  /** `listener(harness, source)` is told when a Refresh of `harness` that `source` asked has come. */
+  onRefreshed(listener) {
+    this.#listeners.add(listener)
+  }
+
+  /**
+   * Asks each of `kinds` (by kind, `claude-code`) that this dialog has no read of, all at
+   * once: the reads of the harnesses run side by side, each under its own bound, and a pick
+   * of one of them finds its read made or on its way.
+   */
+  start(kinds) {
+    for (const kind of kinds) this.get(harnessOf(kind))
   }
 
   /** `harness`'s answer (by its program's name, `claude`): the one read already, or a read. */
@@ -165,17 +207,29 @@ export class ModelLists {
     return this.#answers.get(harness) ?? this.#ask(harness, false)
   }
 
-  /** The human's Refresh: `harness`'s list read again from the harness itself. */
-  refresh(harness) {
-    return this.#ask(harness, true)
+  /** The human's Refresh: `harness`'s list read again from the harness itself, for every picker of it. */
+  refresh(harness, source = null) {
+    const asked = this.#ask(harness, true)
+    asked.then(
+      () => {
+        for (const listener of this.#listeners) listener(harness, source)
+      },
+      () => {},
+    )
+    return asked
   }
 
   #ask(harness, refresh) {
     const asked = this.#daemon('models.get', refresh ? { harness, refresh } : { harness })
     this.#answers.set(harness, asked)
-    asked.catch(() => {
-      if (this.#answers.get(harness) === asked) this.#answers.delete(harness)
-    })
+    asked.then(
+      (answer) => {
+        if (this.#answers.get(harness) === asked) this.#came.set(harness, answer)
+      },
+      () => {
+        if (this.#answers.get(harness) === asked) this.#answers.delete(harness)
+      },
+    )
     return asked
   }
 }
@@ -191,6 +245,15 @@ function whereListed(models, member) {
     }
   }
   return null
+}
+
+/**
+ * The id a launch passes for `model` at `effort`: Devin's listed id for that effort
+ * (`launchIds`), else the model's own. It is what an edited member stores, so that a pick can
+ * be compared with the member's stored choice by what it launches, not by how it is shown.
+ */
+function launchIdOf(model, effort) {
+  return (effort ? model.launchIds?.[effort] : undefined) ?? modelOf(model)
 }
 
 /**
@@ -230,6 +293,10 @@ class ModelPicker {
   #takenOff
   /** The listing read for the harness picked now, and the answer's words. */
   #answer = null
+  /** Whether the select holds a member's own model, for want of a list to pick from. */
+  #kept = false
+  /** The member's own `{model, effort}` the last `show` was given, held for a re-show. */
+  #current = null
   /** Which read the model select waits for: an answer to an older one is let go. */
   #asked = 0
 
@@ -262,6 +329,12 @@ class ModelPicker {
     model.addEventListener('change', () => {
       this.#sayHelp()
       this.#changed()
+    })
+    // A Refresh another picker asked of the harness this one shows is the read this one shows now.
+    lists.onRefreshed((refreshed, source) => {
+      const kind = this.kind
+      if (source === this || kind === '' || !this.reads || harnessOf(kind) !== refreshed) return
+      void this.show(kind, { wanted: this.#model.value || null, current: this.#current })
     })
   }
 
@@ -301,33 +374,47 @@ class ModelPicker {
     return !this.#model.disabled
   }
 
+  /** Whether the select holds the member's own model, no list having come to pick from. */
+  get keeping() {
+    return this.#kept
+  }
+
+  /** The id of the read whose list the select shows; none where it shows none (no list came). */
+  get read() {
+    return this.#answer?.read ?? null
+  }
+
   /**
-   * `kind`'s models, read once while the dialog is open, or read again (`refresh`, the
-   * human's Refresh); `wanted` is picked where it is listed (`{model, effort}`'s model's
-   * name). Answers whether the models came: a later pick of another harness wins.
+   * `kind`'s models, as the read made as the dialog opened answers, or read again
+   * (`refresh`, the human's Refresh); `wanted` is picked where it is listed (`{model,
+   * effort}`'s model's name). Where no list comes (the harness could not be read, or lists
+   * none) the select says why and holds no old list; a member's own model (`current`, its
+   * `{model, effort}`) stays in it as the member's value, so that its form loses nothing.
+   * Answers whether the models came: a later pick of another harness wins.
    */
-  async show(kind, { refresh = false, wanted = null } = {}) {
+  async show(kind, { refresh = false, wanted = null, current = null } = {}) {
     this.#harness.value = kind
     const name = HARNESS_NAMES[kind]
     this.#asked += 1
     const asked = this.#asked
+    this.#current = current
     this.#none(`Reading ${name}'s models…`, '')
     let answer
     try {
       const harness = harnessOf(kind)
-      answer = await (refresh ? this.#lists.refresh(harness) : this.#lists.get(harness))
+      answer = await (refresh ? this.#lists.refresh(harness, this) : this.#lists.get(harness))
     } catch (cause) {
       if (asked !== this.#asked) return false
-      this.#none(
-        'No model to pick',
+      this.#unlisted(
         `${name}'s models could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+        current,
       )
       return false
     }
     if (asked !== this.#asked) return false
     const stale = staleWhy(answer.listing)
     if (answer.listing.models.length === 0) {
-      this.#none('No model to pick', `${name} lists no model${stale ? `: ${stale}` : ''}.`)
+      this.#unlisted(`${name} lists no model${stale ? `: ${stale}` : ''}.`, current)
       return false
     }
     const ask = new Option('Pick a model', '')
@@ -343,8 +430,16 @@ class ModelPicker {
     })
     this.#model.replaceChildren(ask, ...options)
     this.#model.value = ''
-    if (wanted !== null && options.some((option) => option.value === wanted && !option.disabled)) {
-      this.#model.value = wanted
+    this.#kept = false
+    // The member's own stored model, kept in the select while its harness could not be read
+    // (Devin's `swe-2-high`), is picked again as the family and effort the list gives it.
+    let pick = wanted
+    if (pick !== null && current !== null && pick === current.model) {
+      const found = whereListed(answer.listing.models, current)
+      if (found) pick = modelOf(found.model)
+    }
+    if (pick !== null && options.some((option) => option.value === pick && !option.disabled)) {
+      this.#model.value = pick
     }
     this.#model.disabled = false
     this.#answer = answer
@@ -353,8 +448,41 @@ class ModelPicker {
     return true
   }
 
+  /**
+   * No list to pick from, and why: the select holds `current`, the member's own model, where
+   * there is one (it stays the member's value, at the effort it had), else nothing to pick.
+   */
+  #unlisted(why, current) {
+    if (!current) {
+      this.#none('No model to pick', why)
+      return
+    }
+    const option = new Option(current.model, current.model)
+    this.#model.replaceChildren(option)
+    this.#model.value = current.model
+    this.#model.disabled = false
+    this.#answer = {
+      listing: {
+        models: [
+          {
+            id: current.model,
+            efforts: current.effort ? [current.effort] : [],
+            launchIds: {},
+            contributor: false,
+            disabled: false,
+          },
+        ],
+        freshness: { state: 'stale', why },
+      },
+    }
+    this.#kept = true
+    this.#say(`${why} ${current.model} stays as the model it runs.`)
+    this.#changed()
+  }
+
   /** No model to pick, and why. */
   #none(words, why) {
+    this.#kept = false
     const ask = new Option(words, '')
     ask.disabled = true
     this.#model.replaceChildren(ask)
@@ -403,10 +531,10 @@ class ChiefPicker {
   /** The `{harness, model}` the chief is on: no switch. */
   #current = null
 
-  constructor(form, daemon) {
+  constructor(form, lists) {
     this.#help = form.querySelector('.chief-help')
     this.#effort = form.elements.chiefEffort
-    this.#lists = new ModelLists(daemon)
+    this.#lists = lists
     this.#picker = new ModelPicker({
       harness: form.elements.chiefHarness,
       model: form.elements.chiefModel,
@@ -423,12 +551,11 @@ class ChiefPicker {
 
   /**
    * The harnesses installed here, none picked; with none it refuses, and says where to
-   * get one. `current` is the chief's own harness and model, which no switch is to. Each
-   * opening reads the harnesses' models afresh at their first ask.
+   * get one. `current` is the chief's own harness and model, which no switch is to. The
+   * dialog reads the harnesses' models as it opens ([`ModelLists`]).
    */
   fill(missing, current = null) {
     this.#current = current
-    this.#lists.clear()
     this.#picker.fill(missing)
   }
 
@@ -437,6 +564,8 @@ class ChiefPicker {
     const model = this.#picker.model()
     const picked = { harness: this.#picker.kind, model: model ? modelOf(model) : '' }
     if (this.#effort.value !== '') picked.effort = this.#effort.value
+    // The read the model was picked from: the daemon checks the pick against that list.
+    if (this.#picker.read !== null) picked.read = this.#picker.read
     return picked
   }
 
@@ -499,6 +628,16 @@ class MemberPicker {
   /** What the add button says while the form adds a member. */
   #adds
 
+  /** The member being edited, as its form was first drawn: its own `{model, effort}`, none else. */
+  #current = null
+
+  /**
+   * What the form held once the member being edited was drawn in it: its harness, model and
+   * effort. A save that leaves these as they are saves the member's own launch choice, with no
+   * list asked for what did not change.
+   */
+  #origin = null
+
   /** The controls of a model, an effort and a tier, which an image designer is given none of. */
   #modelControls
 
@@ -560,6 +699,8 @@ class MemberPicker {
     this.#submit.textContent = this.#adds
     this.#cancel.hidden = true
     this.#tier.value = ''
+    this.#current = null
+    this.#origin = null
     this.say('')
     this.#fillHarnesses()
   }
@@ -570,6 +711,8 @@ class MemberPicker {
    */
   async edit(member) {
     this.editing = member.handle
+    this.#current = member.model ? { model: member.model, effort: member.effort ?? null } : null
+    this.#origin = null
     this.#legend.textContent = `Edit @${member.handle}`
     this.#role.disabled = true
     this.#submit.textContent = 'Save member'
@@ -586,12 +729,26 @@ class MemberPicker {
     }
     if (this.editing !== member.handle) return
     const found = answer && member.model ? whereListed(answer.listing.models, member) : null
-    await this.#picker.show(kind, { wanted: found ? modelOf(found.model) : null })
+    // Where its harness's list does not come, the member's own model stays in the form.
+    const current = member.model ? { model: member.model, effort: member.effort ?? null } : null
+    await this.#picker.show(kind, { wanted: found ? modelOf(found.model) : null, current })
     if (this.editing !== member.handle) return
-    if ([...this.#effort.options].some((option) => option.value === found?.effort)) {
-      this.#effort.value = found.effort
+    const effort = found?.effort ?? (this.#picker.keeping ? current?.effort : null)
+    if ([...this.#effort.options].some((option) => option.value === effort)) {
+      this.#effort.value = effort
     }
     this.#tier.value = member.tier ?? ''
+    this.#origin = this.#held(kind)
+  }
+
+  /** The harness, model and effort the form holds now, as an edit compares them. */
+  #held(kind) {
+    const model = this.#picker.model()
+    return {
+      kind,
+      model: model ? modelOf(model) : null,
+      effort: this.#effort.value === '' ? null : this.#effort.value,
+    }
   }
 
   /** The role picked. */
@@ -623,13 +780,34 @@ class MemberPicker {
       return say("Pick the member's tier: the work the chief gives it, from critical to light.")
     }
     this.say('')
-    return {
+    const values = {
       harness: kind,
       model: modelOf(model),
       effort: this.#effort.value === '' ? null : this.#effort.value,
       tier: this.#tier.value,
       modelName: modelOf(model),
     }
+    // The read the model was picked from: the daemon checks the pick against that list.
+    if (this.#picker.read !== null) values.read = this.#picker.read
+    // An edit that leaves the member's model and effort as they were saves its own, already
+    // resolved launch choice: the daemon checks nothing that did not change. They were left
+    // when the form holds what it drew, or the member's own stored choice by what it launches
+    // (Devin's `swe-2` at `high` is the `swe-2-high` it stores, and a Refresh that fails
+    // puts that id back in the form as it is).
+    const origin = this.#origin
+    const stored = this.#current
+    if (
+      this.editing !== null &&
+      origin !== null &&
+      origin.kind === kind &&
+      ((origin.model === values.model && origin.effort === values.effort) ||
+        (stored !== null &&
+          launchIdOf(model, values.effort) === stored.model &&
+          values.effort === (stored.effort ?? null)))
+    ) {
+      values.unchanged = true
+    }
+    return values
   }
 
   /** The human's Refresh: the picked harness's models read again from the harness itself. */
@@ -640,10 +818,18 @@ class MemberPicker {
       return
     }
     const wanted = this.#picker.model()
+    const effort = this.#effort.value
+    // A member being edited keeps its own model, effort and tier through a Refresh that fails.
+    const current = this.editing !== null && kind === this.#origin?.kind ? this.#current : null
     const shown = await this.#picker.show(kind, {
       refresh: true,
       wanted: wanted ? modelOf(wanted) : null,
+      current,
     })
+    const kept = shown ? effort : this.#picker.keeping ? current?.effort : null
+    if (kept && [...this.#effort.options].some((option) => option.value === kept)) {
+      this.#effort.value = kept
+    }
     if (shown) this.#refreshed(kind)
   }
 
@@ -705,6 +891,8 @@ export class NewProjectDialog {
   #page
   #chief
   #member
+  /** The dialog's reads of what each harness lists: its pickers share them. */
+  #lists
   /** The harnesses not installed here, as the dialog last read them. */
   #missing = []
   /**
@@ -741,8 +929,11 @@ export class NewProjectDialog {
       },
     )
     this.#page = page
-    this.#chief = new ChiefPicker(this.#form, page.daemon)
-    this.#member = new MemberPicker(this.#form, new ModelLists(page.daemon), () => {})
+    // One set of reads for the dialog: the chief's picker and the members' share them.
+    const lists = new ModelLists(page.daemon)
+    this.#lists = lists
+    this.#chief = new ChiefPicker(this.#form, lists)
+    this.#member = new MemberPicker(this.#form, lists, () => {})
     // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
     this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
     this.#form.elements.memberAdd.addEventListener('click', () => {
@@ -780,6 +971,7 @@ export class NewProjectDialog {
     ])
     this.#missing = missing
     this.#sections.computerUse.show(screen)
+    readEveryHarness(this.#lists, missing)
     this.#chief.fill(missing)
     this.#member.reset(missing)
     this.#pickLast(staff)
@@ -924,11 +1116,16 @@ export class NewProjectDialog {
   /** The picked rows as the daemon takes a staff: each member once, with its roles. */
   #pickedStaff() {
     const staff = new Map()
-    for (const { harness, model, effort, tier, role } of this.#picked) {
+    for (const { harness, model, effort, tier, role, read } of this.#picked) {
       // An image designer holds no other role: it is a member of its own beside a worker.
       const key = `${harness} ${model} ${effort ?? ''} ${role === 'designer'}`
       if (!staff.has(key)) staff.set(key, { harness, model, effort, tier, roles: [] })
-      staff.get(key).roles.push(role)
+      const member = staff.get(key)
+      member.roles.push(role)
+      // The read the pick was made from (a pick copied from the last staff was made from none:
+      // it is checked against the read the dialog shows of its harness, else the daemon reads).
+      const named = read ?? (model ? this.#lists.readOf(harnessOf(harness)) : null)
+      if (named !== null && member.read === undefined) member.read = named
     }
     return [...staff.values()]
   }
@@ -943,6 +1140,8 @@ export class SwitchChiefDialog {
   #form
   #page
   #chief
+  /** The dialog's reads of what each harness lists. */
+  #lists
   /** The project whose chief the dialog switches: the one it was opened for. */
   #project = null
 
@@ -955,7 +1154,8 @@ export class SwitchChiefDialog {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
     this.#page = page
-    this.#chief = new ChiefPicker(this.#form, page.daemon)
+    this.#lists = new ModelLists(page.daemon)
+    this.#chief = new ChiefPicker(this.#form, this.#lists)
     const form = this.#form
     form.addEventListener('submit', (event) => {
       event.preventDefault()
@@ -984,6 +1184,7 @@ export class SwitchChiefDialog {
     // Asked for in a project the human has left since: it stays shut.
     if (this.#page.selected() !== chief.projectId) return
     const form = this.#form
+    readEveryHarness(this.#lists, missing)
     this.#chief.fill(missing, { harness: chief.harness, model: chief.ranOn ?? chief.model })
     // Each switch starts from the gentle one: the chief finishes its turn, unasked.
     form.elements.when.value = 'turn'
@@ -1183,7 +1384,7 @@ export class ProjectSettingsDialog {
     this.#board = board
     this.#removing = null
     this.#missing = missing
-    this.#lists.clear()
+    readEveryHarness(this.#lists, missing)
     this.#gone = new Map()
     this.#member.reset(missing)
     this.#wakeUp.show(calls)
