@@ -112,10 +112,14 @@ fn a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed() {
     assert_eq!(walks, 2, "{text}");
     // Nor is the reports folder itself, when it is one: it would be walked to where it goes
     // (T-141, P3-8).
-    assert!(
-        text.contains(
+    // The same line guards the logs' folder (`.runs`), so it stands twice: counted, or the one that
+    // is left would satisfy a `contains` for the one that is gone.
+    assert_eq!(
+        text.matches(
             "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
-        ),
+        )
+        .count(),
+        2,
         "{text}"
     );
     // A folder is walked, and kept only where something is left in it.
@@ -419,8 +423,11 @@ fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
 #[test]
 fn the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched() {
     let text = sweep_script();
+    // The reports' limit stands before the walk's own function. The logs' limit (`runs.rs`) is as
+    // old and stands after the reports' block, and must not stand in for this one.
+    let (before_walk, _) = text.split_once("function Clear-Old").unwrap();
     assert!(
-        text.contains("$cutoff = (Get-Date).ToUniversalTime().AddDays(-14)"),
+        before_walk.contains("$cutoff = (Get-Date).ToUniversalTime().AddDays(-14)"),
         "{text}"
     );
     // Only that folder is walked, and only what is in it is removed, never the folder.
@@ -428,13 +435,18 @@ fn the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched() 
         text.contains("$reports = Join-Path $dir 'evals/reports'\n"),
         "{text}"
     );
-    // After the tree's stale files, and before what was removed is said.
-    let (stale, old, said) = (
+    // After the tree's stale files, and before what was removed is said: the reports' own prune,
+    // which stands before the logs' block, where the same line stands again.
+    let reports = text
+        .find("$reports = Join-Path $dir 'evals/reports'\n")
+        .unwrap();
+    let (stale, old, runs, said) = (
         text.find("$null = Clear-Stale $root").unwrap(),
-        text.find("$null = Clear-Old $folder").unwrap(),
+        reports + text[reports..].find("$null = Clear-Old $folder").unwrap(),
+        text.find("$runs = Join-Path $dir '.runs'").unwrap(),
         text.find("foreach ($name in $removed)").unwrap(),
     );
-    assert!(stale < old && old < said, "{text}");
+    assert!(stale < reports && old < runs && runs < said, "{text}");
     // A file or a folder as new as the limit stays, and so does a folder with something
     // left in it. Every folder is walked first, whatever its own time, which is when an entry
     // was last added to it: a `long` folder a recent run wrote into holds old reports too.
