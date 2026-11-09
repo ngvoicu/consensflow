@@ -183,9 +183,18 @@ impl Owner {
         );
         write(&package.join("LICENSE"), "the package's license");
         write(&package.join("README.md"), "the package's readme");
-        write(&package.join("extensions/index.ts"), "the provider's extension");
-        write(&package.join("extensions/lib.ts"), "the extension's library");
-        write(&package.join("extensions/tps.ts"), "the provider's second extension");
+        write(
+            &package.join("extensions/index.ts"),
+            "the provider's extension",
+        );
+        write(
+            &package.join("extensions/lib.ts"),
+            "the extension's library",
+        );
+        write(
+            &package.join("extensions/tps.ts"),
+            "the provider's second extension",
+        );
     }
 
     /// Pi's, on the models `models`, for a run of `run`.
@@ -508,7 +517,10 @@ fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_lo
             "expires": ends(hours(876_600)),
         } })
     );
-    assert!(!copied.contains(PROXY_META), "the refresh was copied: {copied}");
+    assert!(
+        !copied.contains(PROXY_META),
+        "the refresh was copied: {copied}"
+    );
     // The config and the models come whole; the settings name the provider's package alone.
     assert_eq!(
         fs::read_to_string(home.join("pi/agent/cliproxyapi.json")).unwrap(),
@@ -530,7 +542,10 @@ fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_lo
         "npm/package-lock.json",
         "npm/node_modules/@router-for-me/pi-cliproxyapi-provider/package.json",
     ] {
-        assert!(said.contains(&format!("~/.pi/agent/{file}")), "{file}: {said}");
+        assert!(
+            said.contains(&format!("~/.pi/agent/{file}")),
+            "{file}: {said}"
+        );
     }
     assert!(isolation.finish().is_ok());
 }

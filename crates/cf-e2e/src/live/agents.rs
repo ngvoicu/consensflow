@@ -607,10 +607,7 @@ mod tests {
         for harness in Harness::ALL {
             let model = model(harness);
             if harness == Harness::Pi && here.of(harness) != &Model::cheap(harness) {
-                assert!(
-                    PI_ON.iter().any(|row| row.model == model.name),
-                    "{model}"
-                );
+                assert!(PI_ON.iter().any(|row| row.model == model.name), "{model}");
             } else {
                 assert_eq!(model, Model::cheap(harness), "{harness:?}");
             }
@@ -835,7 +832,8 @@ mod tests {
     /// (T-1172; Gabriel, 2026-11-03: "Pi on this Mac can be used with the models pi has now"; the
     /// contributor model's allowance may be used to 100%, 2026-11-02).
     #[test]
-    fn the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so() {
+    fn the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so()
+    {
         let have = |providers: &[&str]| {
             providers
                 .iter()

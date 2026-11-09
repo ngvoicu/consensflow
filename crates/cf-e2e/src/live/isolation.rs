@@ -218,10 +218,15 @@ impl Plan {
             providers: providers.clone(),
             left,
         }];
-        let mut watched: Vec<PathBuf> = ["auth.json", "settings.json", "models.json", "mcp-auth.json"]
-            .map(|name| owner.join(name))
-            .into();
-        for provider in providers.iter().flatten().filter_map(|name| pi::provider(name)) {
+        let mut watched: Vec<PathBuf> =
+            ["auth.json", "settings.json", "models.json", "mcp-auth.json"]
+                .map(|name| owner.join(name))
+                .into();
+        for provider in providers
+            .iter()
+            .flatten()
+            .filter_map(|name| pi::provider(name))
+        {
             seeds.push(Seed::PiProvider {
                 from: owner.to_path_buf(),
                 to: "pi/agent".into(),
@@ -744,9 +749,8 @@ impl Isolation {
         };
         let mut placed = vec![Placed::File {
             to: to.join(provider.config),
-            bytes: fs::read(from.join(provider.config)).map_err(|_| {
-                missing(&format!("{} is missing", provider.config))
-            })?,
+            bytes: fs::read(from.join(provider.config))
+                .map_err(|_| missing(&format!("{} is missing", provider.config)))?,
             login: false,
         }];
         for file in provider.required.iter().chain(provider.optional.iter()) {
@@ -775,11 +779,7 @@ impl Isolation {
                 provider.spec
             )));
         }
-        if !from
-            .join(provider.package)
-            .join("package.json")
-            .is_file()
-        {
+        if !from.join(provider.package).join("package.json").is_file() {
             return Err(missing(&format!(
                 "{}/package.json is missing",
                 provider.package
@@ -1005,7 +1005,10 @@ fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
 /// kept on the entries where the copy can have them.
 fn copy_tree(from: &Path, to: &Path) -> Result {
     files::make_dir(to)?;
-    for entry in fs::read_dir(from).map_err(Error::file("read", from))?.flatten() {
+    for entry in fs::read_dir(from)
+        .map_err(Error::file("read", from))?
+        .flatten()
+    {
         let (entry_from, entry_to) = (entry.path(), to.join(entry.file_name()));
         if entry
             .file_type()
