@@ -399,7 +399,7 @@ fn an_eval_machines_real_windows_run_on_the_kits_homes_and_its_rig_names_no_code
 }
 
 /// An eval's Pi home holds the login of its own windows' model (T-785: not the live kit's asked
-/// model), for the run's planned length and the kit's 30 minutes, once: a login that lasts an hour
+/// model), for the run's planned length and the evals' 30 minutes, once: a login that lasts an hour
 /// and 45 minutes fits a run of an hour, and is refused for one of an hour and a half.
 #[test]
 fn an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour() {
@@ -430,6 +430,15 @@ fn an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_h
     assert!(
         copied.contains("openai") && !copied.contains("openrouter"),
         "{copied}"
+    );
+    // The eval's margin, not the kit's on top of it: a run of 70 minutes fits the login (70 and
+    // 30 minutes), which the kit's 10 more would not.
+    let seventy = isolation(Harness::Pi, owner.path(), &on(70))
+        .unwrap()
+        .unwrap();
+    assert!(
+        seventy.vars().is_ok(),
+        "70 minutes and the evals' half hour fit"
     );
     let longer = isolation(Harness::Pi, owner.path(), &on(90))
         .unwrap()

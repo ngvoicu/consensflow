@@ -53,8 +53,8 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''                pi.renewal = test_machine.map(|machine| {'''
-replace = '''                pi.renewal = Some(test_machine.unwrap_or_else(|| TestMachine::signalled(Some("mac")).unwrap())).map(|machine| {'''
+find = '''                made.renewal = test_machine.zip(pi.first()).map(|(machine, model)| {'''
+replace = '''                made.renewal = Some(test_machine.unwrap_or_else(|| TestMachine::signalled(Some("mac")).unwrap())).zip(pi.first()).map(|(machine, model)| {'''
 
 [[plant]]
 name = "kit renews logins: the runner gives its command no word of the machine"

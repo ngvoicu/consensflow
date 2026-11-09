@@ -198,9 +198,8 @@ runs = ["pi-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''            bytes: fs::read(from.join(provider.config)).map_err(|_| {
-                missing(&format!("{} is missing", provider.config))
-            })?,'''
+find = '''            bytes: fs::read(from.join(provider.config))
+                .map_err(|_| missing(&format!("{} is missing", provider.config)))?,'''
 replace = '''            bytes: fs::read(from.join(provider.config)).unwrap_or_default(),'''
 
 [[plant]]

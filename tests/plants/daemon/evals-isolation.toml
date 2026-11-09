@@ -69,8 +69,8 @@ runs = ["ei-evals-machine"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/run/machine.rs"
-find = '''seated.planned, &seated.models(Harness::Pi))?;'''
-replace = '''super::login::lasting(seated.planned), &seated.models(Harness::Pi))?;'''
+find = '''    let run = super::login::lasting(seated.planned).saturating_sub(cf_e2e::live::isolation::MARGIN);'''
+replace = '''    let run = super::login::lasting(seated.planned);'''
 
 [[plant]]
 name = "evals isolation: Pi's home is given none of the eval's Pi models"
