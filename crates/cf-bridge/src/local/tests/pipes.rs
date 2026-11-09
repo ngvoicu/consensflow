@@ -21,7 +21,7 @@ use serde_json::json;
 use tokio::sync::oneshot;
 use tokio::task::LocalSet;
 
-use crate::local::{Bridge, BridgeBuilder, Ended};
+use crate::local::{read_ahead, Bridge, BridgeBuilder, Ended};
 use crate::{Bridge as HostBridge, BridgeBuilder as HostBuilder, BridgeError};
 
 #[cfg(unix)]
@@ -419,6 +419,109 @@ fn an_output_nobody_reads_any_more_is_told_as_a_failure_while_the_input_stays_op
             !daemon.event("later", json!({})),
             "nothing more is queued once it failed"
         );
+        drop(host_output);
+    });
+}
+
+/// The daemon's input as the process makes it: read ahead on a thread of its own.
+fn daemon_input(end: std::io::PipeReader) -> impl tokio::io::AsyncRead + Unpin + 'static {
+    read_ahead(end)
+}
+
+/// What the host's writes come to while the daemon's one thread is busy and
+/// polls nothing (a pass that holds it for `busy`): whether the host's thread
+/// had finished writing by the end of it, and what the daemon heard after.
+fn the_host_writes_while_the_daemons_thread_is_busy(
+    events: i64,
+    busy: Duration,
+) -> (bool, Vec<i64>, bool) {
+    run_real(async move {
+        let (daemon_input_end, host_output) = pipe().expect("the host's output pipe");
+        let (host_input, mut daemon_output) = pipe().expect("the daemon's output pipe");
+        writeln!(
+            daemon_output,
+            "{}",
+            json!({ "url": "http://127.0.0.1:1", "token": "t" })
+        )
+        .expect("the handle line");
+        let connected = host_builder()
+            .connect(host_input, host_output)
+            .expect("the host connects");
+        let (daemon, connection) =
+            daemon_builder().connect(daemon_input(daemon_input_end), stream(daemon_output));
+        tokio::task::spawn_local(connection);
+        let heard: Rc<RefCell<Vec<i64>>> = Rc::default();
+        let sink = Rc::clone(&heard);
+        daemon.on_event("tick", move |body| {
+            sink.borrow_mut().extend(body["n"].as_i64());
+        });
+        // Eight pipes' worth, in frames of 4 KiB, from a thread of the host's own.
+        let host = connected.bridge.clone();
+        let mut sent = on_a_thread(move || {
+            for n in 0..events {
+                host.event("tick", json!({ "n": n, "pad": "x".repeat(4096) }))
+                    .expect("an event");
+            }
+        });
+        // The daemon's thread is held, as a pass holds it: nothing here polls.
+        std::thread::sleep(busy);
+        let written_meanwhile = sent.try_recv().is_ok();
+        if !written_meanwhile {
+            within_real(sent).await.expect("the host's thread");
+        }
+        let count = usize::try_from(events).expect("a count");
+        wait_for_real(|| heard.borrow().len() == count).await;
+        let open = !connected.bridge.is_closed() && !daemon.closed();
+        let heard = heard.borrow().clone();
+        connected.bridge.close_input();
+        (written_meanwhile, heard, open)
+    })
+}
+
+#[test]
+fn a_busy_daemon_thread_does_not_hold_up_the_hosts_writes_and_every_frame_arrives_in_order() {
+    let (written_meanwhile, heard, open) =
+        the_host_writes_while_the_daemons_thread_is_busy(128, Duration::from_millis(1500));
+    assert!(
+        written_meanwhile,
+        "the host's writes waited for the daemon's thread to read its pipe"
+    );
+    assert!(open, "the bridge closed under a busy daemon");
+    assert_eq!(heard, (0..128).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_host_that_reads_nothing_leaves_the_daemons_bridge_open_and_every_frame_arrives_in_order() {
+    run_real(async {
+        let (daemon_input_end, host_output) = pipe().expect("the host's output pipe");
+        let (host_input, daemon_output) = pipe().expect("the daemon's output pipe");
+        let (daemon, connection) =
+            daemon_builder().connect(daemon_input(daemon_input_end), stream(daemon_output));
+        tokio::task::spawn_local(connection);
+        // Eight times what the output pipe holds, while nobody reads it.
+        for n in 0..128 {
+            assert!(daemon.event("tick", json!({ "n": n, "pad": "x".repeat(4096) })));
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!daemon.closed(), "an output nobody reads closed the bridge");
+
+        let read = on_a_thread(move || {
+            BufReader::new(host_input)
+                .lines()
+                .take(128)
+                .collect::<Result<Vec<_>, _>>()
+        });
+        let lines = within_real(read)
+            .await
+            .expect("the reading thread")
+            .expect("lines of text");
+        let order: Vec<i64> = lines
+            .iter()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("a frame"))
+            .filter_map(|frame| frame["body"]["n"].as_i64())
+            .collect();
+        assert_eq!(order, (0..128).collect::<Vec<_>>());
+        assert!(!daemon.closed());
         drop(host_output);
     });
 }

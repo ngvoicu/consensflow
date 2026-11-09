@@ -13,6 +13,9 @@
 #[cfg(feature = "local")]
 pub mod local;
 
+#[cfg(test)]
+mod queue_tests;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -31,6 +34,18 @@ const WRITER_QUEUE_CAPACITY: usize = 32;
 /// room behind a burst of pane output.
 const STREAM_QUEUE_SHARE: usize = WRITER_QUEUE_CAPACITY / 2;
 const DEFAULT_REQUEST_DEADLINE_MS: u64 = 30_000;
+/// How long a response waits for room in the writer queue before it is dropped
+/// (never the transport): twice the longest wait the daemon gives a plain
+/// request (`pane.open`'s 60 s), so the request it answers has stopped waiting
+/// for it by then, and a late answer is dropped by the peer in any case.
+const RESPONSE_WAIT_MS: u64 = 120_000;
+/// How many responses may wait for room at once, each on the thread of its
+/// handler: four queues' worth, well above any burst of the daemon's passes. A
+/// response past it is dropped at once, as one that waited out its time is.
+const MAX_WAITING_RESPONSES: usize = 4 * WRITER_QUEUE_CAPACITY;
+/// How often a frame that waits for room says so, to `on_error`: a peer that
+/// takes nothing is a busy one until it is told of, and the log says it.
+const STALL_REPORT_MS: u64 = 30_000;
 
 type RequestHandler = dyn Fn(Bridge, Value) -> Result<Value, String> + Send + Sync;
 type EventHandler = dyn Fn(Value) + Send + Sync;
@@ -119,6 +134,14 @@ struct BridgeInner {
     transport_shutdown: Arc<TransportShutdown>,
     max_frame_bytes: usize,
     default_request_deadline: Duration,
+    /// How long a response waits for room ([`RESPONSE_WAIT_MS`]).
+    response_wait: Duration,
+    /// The responses waiting for room now ([`MAX_WAITING_RESPONSES`]).
+    responses_waiting: AtomicUsize,
+    /// When a frame that waited for room last said so ([`STALL_REPORT_MS`]), in
+    /// milliseconds since the bridge was built: 0 before any did.
+    stalled_told: AtomicU64,
+    built: Instant,
 }
 
 impl BridgeInner {
@@ -150,6 +173,7 @@ pub struct BridgeBuilder {
     keeps_output: bool,
     max_frame_bytes: usize,
     default_request_deadline: Duration,
+    response_wait: Duration,
 }
 
 impl BridgeBuilder {
@@ -164,7 +188,14 @@ impl BridgeBuilder {
             keeps_output: false,
             max_frame_bytes,
             default_request_deadline: Duration::from_millis(DEFAULT_REQUEST_DEADLINE_MS),
+            response_wait: Duration::from_millis(RESPONSE_WAIT_MS),
         }
+    }
+
+    #[cfg(test)]
+    fn with_response_wait_ms(mut self, milliseconds: u64) -> Self {
+        self.response_wait = Duration::from_millis(milliseconds);
+        self
     }
 
     #[cfg(test)]
@@ -389,6 +420,10 @@ impl BridgeBuilder {
                 transport_shutdown: shutdown,
                 max_frame_bytes: self.max_frame_bytes,
                 default_request_deadline: self.default_request_deadline,
+                response_wait: self.response_wait,
+                responses_waiting: AtomicUsize::new(0),
+                stalled_told: AtomicU64::new(0),
+                built: Instant::now(),
             }),
         };
         let inner = Arc::downgrade(&bridge.inner);
@@ -467,12 +502,22 @@ impl Bridge {
         }
     }
 
+    /// Tells the peer of `op`, which it never answers. It waits for room in the
+    /// writer queue for as long as the transport is open, and is never refused for
+    /// the queue being full: what comes of it (a window's exit, a privacy dialog)
+    /// is not to be lost, the callers are few and each is a thread of its own, and
+    /// a peer that reads nothing is a busy one, not a broken one. Only the
+    /// transport's end refuses it.
     pub fn event(&self, op: impl Into<String>, body: Value) -> Result<bool, BridgeError> {
         let Some(encoded) = self.encode_event(op.into(), body)? else {
             return Ok(false);
         };
-        self.write_encoded(encoded)?;
-        Ok(true)
+        self.enqueue_encoded(
+            encoded,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            WRITER_QUEUE_CAPACITY,
+        )
     }
 
     /// An event from a stream the peer must not lose, such as pane output. It
@@ -509,6 +554,12 @@ impl Bridge {
 
     pub fn is_closed(&self) -> bool {
         self.inner.closed.load(Ordering::Acquire)
+    }
+
+    /// How many responses wait for room in the writer queue now.
+    #[cfg(test)]
+    fn waiting_responses(&self) -> usize {
+        self.inner.responses_waiting.load(Ordering::Acquire)
     }
 
     /// Ends the peer's input, the way a parent tells a child it is done:
@@ -708,7 +759,12 @@ impl Bridge {
 
     fn dispatch_request(&self, frame: Frame) {
         let Some(entry) = self.inner.handlers.get(&frame.op).cloned() else {
-            self.respond_or_report(frame.id, frame.op, unknown_op_body());
+            // Its answer may wait for room in the writer queue, which the reader
+            // must not: it goes on to the frames after this one.
+            let bridge = self.clone();
+            thread::spawn(move || {
+                bridge.respond_or_report(frame.id, frame.op, unknown_op_body());
+            });
             return;
         };
         let Some(admission) = self.admit_handler(entry.launches_panes) else {
@@ -824,7 +880,7 @@ impl Bridge {
                 return Err(error);
             }
         }
-        self.write_encoded(encoded)
+        self.write_response(encoded)
     }
 
     fn respond_or_report(&self, id: String, op: String, body: Value) {
@@ -839,18 +895,53 @@ impl Bridge {
         serde_json::to_vec(frame).map_err(|error| BridgeError::MalformedFrame(error.to_string()))
     }
 
-    fn write_encoded(&self, encoded: Vec<u8>) -> Result<(), BridgeError> {
-        if self.enqueue_encoded(
+    /// Queues a response. A full writer queue never ends the transport: the
+    /// response waits for room, at most [`RESPONSE_WAIT_MS`] (the peer has stopped
+    /// waiting for it by then, and drops a late one anyway), and no more than
+    /// [`MAX_WAITING_RESPONSES`] wait at once, one thread each. A response that
+    /// does not get in is dropped and told of (`on_error`, at most once in
+    /// [`STALL_REPORT_MS`]): its request ends at its own deadline.
+    fn write_response(&self, encoded: Vec<u8>) -> Result<(), BridgeError> {
+        let inner = &self.inner;
+        let waiting = inner.responses_waiting.fetch_add(1, Ordering::AcqRel) + 1;
+        let _counted = WaitingResponse(&inner.responses_waiting);
+        let wait = if waiting > MAX_WAITING_RESPONSES {
+            Duration::ZERO
+        } else {
+            inner.response_wait
+        };
+        let admitted = self.enqueue_encoded(
             encoded,
             Arc::new(AtomicBool::new(false)),
-            Some(Instant::now()),
+            Some(Instant::now() + wait),
             WRITER_QUEUE_CAPACITY,
-        )? {
-            return Ok(());
+        )?;
+        if !admitted {
+            self.tell_stall(&format!(
+                "a response was dropped: the writer queue stayed full ({waiting} responses were waiting)"
+            ));
         }
-        let error = BridgeError::Io("bridge writer queue is full".to_string());
-        self.fail_transport(error.clone());
-        Err(error)
+        Ok(())
+    }
+
+    /// Tells `on_error` that the peer is not taking frames, at most once in
+    /// [`STALL_REPORT_MS`]: the log says a peer is slow, the transport does not end.
+    fn tell_stall(&self, words: &str) {
+        let inner = &self.inner;
+        let now = u64::try_from(inner.built.elapsed().as_millis())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        let told = inner.stalled_told.load(Ordering::Acquire);
+        if told != 0 && now.saturating_sub(told) < STALL_REPORT_MS {
+            return;
+        }
+        if inner
+            .stalled_told
+            .compare_exchange(told, now, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.report(BridgeError::Io(words.to_string()));
+        }
     }
 
     /// Queues a frame once fewer than `depth` frames are waiting, retrying
@@ -868,6 +959,7 @@ impl Bridge {
             bytes: encoded,
             canceled,
         };
+        let waiting_since = Instant::now();
         loop {
             if self.inner.output_closed() {
                 return Err(BridgeError::Eof);
@@ -902,6 +994,12 @@ impl Bridge {
                 Err(mpsc::TrySendError::Full(returned)) => {
                     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         return Ok(false);
+                    }
+                    if waiting_since.elapsed() >= Duration::from_millis(STALL_REPORT_MS) {
+                        self.tell_stall(&format!(
+                            "the peer has taken no frame for {} s",
+                            waiting_since.elapsed().as_secs()
+                        ));
                     }
                     job = returned;
                     thread::sleep(Duration::from_millis(1));
@@ -1006,6 +1104,15 @@ impl Drop for BridgeInner {
 struct HandlerAdmission {
     bridge: Bridge,
     launches_panes: bool,
+}
+
+/// A response waiting for room, counted for as long as it waits.
+struct WaitingResponse<'a>(&'a AtomicUsize);
+
+impl Drop for WaitingResponse<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 struct TransportWorker {
@@ -2158,49 +2265,6 @@ mod tests {
             assert!(
                 settled_on_time,
                 "reader dispatch stalled behind an outbound refusal"
-            );
-        }
-
-        #[test]
-        fn saturated_response_queue_closes_instead_of_accumulating_waiters() {
-            let max_frame_bytes = 9 * 1024 * 1024;
-            let (connected, mut peer_input, peer_output, input_probe, mut output_probe) =
-                connect_tracked_split(BridgeBuilder::new(Role::Host, max_frame_bytes));
-            occupy_real_output(&connected.bridge, &mut output_probe);
-
-            for index in 0..=WRITER_QUEUE_CAPACITY {
-                send_frame(
-                    &mut peer_input,
-                    json!({
-                        "v":1,
-                        "id":format!("n-unknown-{index}"),
-                        "kind":"req",
-                        "op":"unknown",
-                        "body":null
-                    }),
-                );
-            }
-            let deadline = Instant::now() + Duration::from_millis(250);
-            while !connected.bridge.is_closed() && Instant::now() < deadline {
-                thread::yield_now();
-            }
-            let closed_while_output_was_blocked = connected.bridge.is_closed();
-            connected
-                .bridge
-                .wait_closed()
-                .expect("wait for queue-failed bridge closure");
-            let input_released_before_peer_cleanup = input_probe.is_dropped();
-            let output_released_before_peer_cleanup = output_probe.is_dropped();
-
-            drop(peer_input);
-            drop(peer_output);
-            assert!(
-                closed_while_output_was_blocked,
-                "response admission accumulated waiters beyond its bounded queue"
-            );
-            assert!(
-                input_released_before_peer_cleanup && output_released_before_peer_cleanup,
-                "wait_closed returned before queue failure terminated both transport workers"
             );
         }
 

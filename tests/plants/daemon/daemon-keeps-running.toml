@@ -1,0 +1,200 @@
+# A daemon that stops under load is not the end of the board (Gabriel's field bug of 2026-11-09,
+# T-1344): the Mac was at a load of 100 to 170, the daemon's passes took five seconds each and
+# its windows' steps half a minute, the app's writer queue to the daemon (32 frames) filled, a
+# full queue closed the bridge, the daemon's input ended, it exited 0, and the person was told
+# to quit the app and open it again, which ends every window that is working.
+#
+# What stands against it:
+#
+# - the app's end of the bridge (`crates/cf-bridge/src/lib.rs`) never ends the transport for a
+#   full queue: an event waits, a response waits at most `RESPONSE_WAIT_MS` and is dropped and
+#   told of past it, and no more than `MAX_WAITING_RESPONSES` wait at once; its tests are
+#   `queue_tests`;
+# - the daemon's input is read on a thread of its own (`cf_bridge::local::read_ahead`), so a
+#   pass that holds the daemon's one thread leaves nothing unread in the pipe;
+# - a window a pass went on without is slow, and the passes after it do not wait for it again
+#   (`crates/cf-engine/src/steps.rs`);
+# - the app starts a daemon that stopped again, with its windows closed first, and asks the
+#   person to quit only when the restarts do not hold (`app/src-tauri/src/daemon.rs`).
+
+[run]
+bridge-queue = ["cargo", "test", "--offline", "-p", "cf-bridge", "--lib", "queue_tests::"]
+bridge-read-ahead = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::tests::read_ahead::"]
+daemon-input = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::input::"]
+engine-slow-window = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unknown_looks::a_window_a_pass_went_on_without"]
+app-daemon-restart = ["cargo", "xtask", "app", "test", "daemon::tests::a_daemon_that"]
+
+[[plant]]
+name = "daemon keeps running: a response that does not get into the writer queue closes the transport"
+meant = "a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+        if !admitted {
+            self.tell_stall(&format!('''
+replace = '''
+        if !admitted {
+            self.fail_transport(BridgeError::Io("bridge writer queue is full".to_string()));
+            self.tell_stall(&format!('''
+
+[[plant]]
+name = "daemon keeps running: an event is refused when the writer queue is full"
+meant = "events_wait_for_a_peer_that_reads_nothing_and_arrive_in_order"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+            None,
+            WRITER_QUEUE_CAPACITY,
+        )
+    }
+
+    /// An event from a stream'''
+replace = '''
+            Some(Instant::now()),
+            WRITER_QUEUE_CAPACITY,
+        )
+    }
+
+    /// An event from a stream'''
+
+[[plant]]
+name = "daemon keeps running: the answer to an op nobody handles waits for room on the bridge's reader"
+meant = "responses_wait_for_room_and_the_reader_goes_on"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = '''
+            thread::spawn(move || {
+                bridge.respond_or_report(frame.id, frame.op, unknown_op_body());
+            });'''
+replace = '''
+            bridge.respond_or_report(frame.id, frame.op, unknown_op_body());'''
+
+[[plant]]
+name = "daemon keeps running: the responses that wait for room are not capped"
+meant = "the_responses_waiting_for_room_are_capped"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = "        let wait = if waiting > MAX_WAITING_RESPONSES {"
+replace = "        let wait = if false && waiting > MAX_WAITING_RESPONSES {"
+
+[[plant]]
+name = "daemon keeps running: a response waits for room for ever"
+meant = "a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = "            Some(Instant::now() + wait),"
+replace = "            None,"
+
+[[plant]]
+name = "daemon keeps running: a peer that takes no frame is never told of"
+meant = "a_response_that_waits_out_its_time_is_dropped_and_told_never_the_bridge"
+runs = ["bridge-queue"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/lib.rs"
+find = "            self.report(BridgeError::Io(words.to_string()));"
+replace = "            let _ = words;"
+
+[[plant]]
+name = "daemon keeps running: the daemon's input takes more off the pipe than its bound"
+meant = "it_stops_taking_bytes_at_its_bound_and_goes_on_as_they_are_read"
+runs = ["bridge-read-ahead"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/read_ahead.rs"
+find = "mpsc::channel(READ_AHEAD_CHUNKS)"
+replace = "mpsc::channel(READ_AHEAD_CHUNKS * 4)"
+
+[[plant]]
+name = "daemon keeps running: a failed read of the daemon's input is not told"
+meant = "a_failed_read_is_told_once_and_then_the_input_has_ended"
+runs = ["bridge-read-ahead"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/read_ahead.rs"
+find = "                let _ = chunks.blocking_send(Err(error));"
+replace = "                let _ = error;"
+
+[[plant]]
+name = "daemon keeps running: the process's input is not the one it was given"
+meant = "the_process_input_is_taken_off_its_pipe_while_nothing_reads_it"
+runs = ["daemon-input"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "            input: Box::new(cf_bridge::local::read_ahead(input)),"
+replace = "            input: Box::new(cf_bridge::local::read_ahead(io::empty())),"
+
+[[plant]]
+name = "daemon keeps running: a pass does not remember the window it went on without"
+meant = "a_window_a_pass_went_on_without_does_not_make_the_passes_after_it_wait_again"
+runs = ["engine-slow-window"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = '''
+                    self.steps
+                        .slow
+                        .borrow_mut()
+                        .extend(left.iter().map(|(_, record)| record.id));'''
+replace = ""
+
+[[plant]]
+name = "daemon keeps running: a window that answered is gone on without for ever"
+meant = "a_window_a_pass_went_on_without_does_not_make_the_passes_after_it_wait_again"
+runs = ["engine-slow-window"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = "                this.steps.slow.borrow_mut().remove(&record.id);"
+replace = "                let _ = &record;"
+
+[[plant]]
+name = "daemon keeps running: a daemon that stops mid-session is not started again"
+meant = "a_daemon_that_stops_mid_session_is_started_again_after_its_windows_are_closed"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        let Some(restart) = state.restart.clone() else {"
+replace = "        let Some(restart) = state.restart.clone().filter(|_| false) else {"
+
+[[plant]]
+name = "daemon keeps running: the windows stay open when the daemon is started again"
+meant = "a_daemon_that_stops_mid_session_is_started_again_after_its_windows_are_closed"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        reap_all(&restart.panes);"
+replace = "        let _ = &restart.panes;"
+
+[[plant]]
+name = "daemon keeps running: a daemon is started again for ever"
+meant = "a_daemon_that_keeps_stopping_is_given_up_on_and_the_person_asked_to_quit"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        if state.restarts > restart.backoff.restarts {"
+replace = "        if false {"
+
+[[plant]]
+name = "daemon keeps running: a daemon that stayed up is counted against the next restart"
+meant = "a_daemon_that_stayed_up_is_not_counted_against_the_next_restart"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        state.restarts = if stayed_up { 1 } else { state.restarts + 1 };"
+replace = "        state.restarts += 1;"

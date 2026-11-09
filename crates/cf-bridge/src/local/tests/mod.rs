@@ -13,6 +13,7 @@ mod input;
 mod lifecycle;
 mod limits;
 mod pipes;
+mod read_ahead;
 mod reads;
 mod requests;
 mod wire;

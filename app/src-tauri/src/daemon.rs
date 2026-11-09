@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use cf_bridge::{Bridge, BridgeBuilder, BridgeError};
+use cf_panes::headless::reap_all;
 use cf_panes::pty::PaneTable;
 
 use crate::daemon_command::LoginLookup;
@@ -24,8 +25,16 @@ pub(crate) const DAEMON_STATUS_EVENT: &str = "daemon-status";
 pub(crate) const DAEMON_RESTART: Backoff = Backoff {
     first: Duration::from_secs(1),
     most: Duration::from_secs(30),
+    restarts: 3,
+    stable: Duration::from_secs(60),
 };
 const DAEMON_STOPPED: &str = "ConsensFlow's daemon stopped while the app was running";
+/// What the person is told once, plainly, while the app starts the daemon again: why the
+/// windows closed and what is paused, before anything else (the page adds that it is
+/// starting it again).
+const DAEMON_STOPPED_RESTARTING: &str = "ConsensFlow's daemon stopped while the app was running, so its windows were closed and your open projects are paused until you resume them";
+/// What the person is told when the app gave up: the restarts did not hold.
+const DAEMON_KEEPS_STOPPING: &str = "ConsensFlow's daemon keeps stopping: it was started again three times, and each time it stopped within a minute";
 /// How long a daemon has to say it is ready (its handle line) before its
 /// start counts as failed. It opens its ledger first and migrates it, and
 /// each step of a migration rebuilds a table and checks every reference in
@@ -97,11 +106,15 @@ pub(crate) type DaemonStarter =
 pub(crate) type DaemonReport = Arc<dyn Fn(&DaemonStatus) + Send + Sync>;
 
 /// The waits between starts: the first, then twice as long each time, up to
-/// the most.
+/// the most. And how often a daemon that stopped while the app ran is started again:
+/// `restarts` times in a row, each a start that failed or a daemon that stopped within
+/// `stable` of coming up. A daemon that stayed up longer than that begins the count again.
 #[derive(Clone, Copy)]
 pub(crate) struct Backoff {
     first: Duration,
     most: Duration,
+    restarts: u32,
+    stable: Duration,
 }
 
 /// The daemon as the app holds it, and what the page knows of it.
@@ -112,8 +125,16 @@ pub(crate) struct Backoff {
 /// read; a daemon that died mid-session closed its bridge without a word and
 /// the board froze. Now the page is told every change, and a failed start is
 /// tried again: it ended before its handle line, so it left no window behind
-/// it. A daemon that stops later is not started again, because its windows
-/// still run in the pane host.
+/// it.
+///
+/// A daemon that stops later is started again too (T-1344: a Mac at a load of 170 left
+/// a daemon's bridge full, the bridge closed, the daemon ended, and the person was told to
+/// quit and open the app, whose quit ends every window that is working). Its windows are
+/// closed first, as a quit closes them: each was launched with the dead daemon's token,
+/// which no other knows, and told what the board was, which went with it. The new daemon
+/// takes the board from the ledger as at any start, with each open project suspended for the
+/// person to resume. The person is told once, plainly, and asked to quit only when the
+/// restarts do not hold ([`Backoff::restarts`]).
 pub(crate) struct Daemon {
     state: Mutex<DaemonState>,
     /// Woken when the first start has its outcome, or the app stops.
@@ -137,6 +158,21 @@ struct DaemonState {
     starts: u64,
     current: u64,
     stopping: bool,
+    /// What a start again needs, once the first start was asked for.
+    restart: Option<Restart>,
+    /// When the daemon in hand came up: a stop that comes sooner than
+    /// [`Backoff::stable`] after it counts against the restarts in a row.
+    up_since: Option<Instant>,
+    /// The restarts in a row ([`Backoff::restarts`]).
+    restarts: u32,
+}
+
+/// How a daemon that stopped is started again.
+#[derive(Clone)]
+struct Restart {
+    starter: DaemonStarter,
+    panes: Arc<PaneTable>,
+    backoff: Backoff,
 }
 
 impl Daemon {
@@ -151,6 +187,9 @@ impl Daemon {
                 starts: 0,
                 current: 0,
                 stopping: false,
+                restart: None,
+                up_since: None,
+                restarts: 0,
             }),
             settled: Condvar::new(),
             report,
@@ -180,6 +219,11 @@ impl Daemon {
         backoff: Backoff,
     ) {
         let daemon = Arc::clone(self);
+        self.lock().restart = Some(Restart {
+            starter: Arc::clone(&starter),
+            panes: Arc::clone(&panes),
+            backoff,
+        });
         if let Err(error) = thread::Builder::new()
             .name("consensflow-daemon-start".to_string())
             .spawn(move || {
@@ -259,16 +303,17 @@ impl Daemon {
         }
         // A process that ended before it was in hand was not yet the one
         // held when its bridge closed, so its end is read here.
-        let status = if started.bridge.is_closed() {
-            DaemonStatus::down(DAEMON_STOPPED, false)
-        } else {
-            DaemonStatus::up()
-        };
+        let ended = started.bridge.is_closed();
         state.current = start;
         state.daemon = Some(started.daemon);
         state.bridge = Some(started.bridge);
         state.roster = Some(started.roster);
-        self.change(&mut state, status);
+        state.up_since = Some(Instant::now());
+        if ended {
+            self.stopped(state);
+            return Ok(());
+        }
+        self.change(&mut state, DaemonStatus::up());
         Ok(())
     }
 
@@ -278,13 +323,85 @@ impl Daemon {
     }
 
     /// A start's bridge closed: if it is the daemon's, the daemon stopped.
-    fn closed(&self, start: u64) {
-        let mut state = self.lock();
+    fn closed(self: &Arc<Self>, start: u64) {
+        let state = self.lock();
         if state.stopping || state.current != start || !state.status.available {
             return;
         }
+        self.stopped(state);
+    }
+
+    /// The daemon in hand stopped while the app runs: the person is told, once, and the
+    /// app starts it again ([`Daemon::restart`]) unless it has stopped again and again
+    /// ([`Backoff::restarts`]), when the person is asked to quit.
+    fn stopped(self: &Arc<Self>, mut state: MutexGuard<'_, DaemonState>) {
         eprintln!("consensflow: {DAEMON_STOPPED}");
-        self.change(&mut state, DaemonStatus::down(DAEMON_STOPPED, false));
+        let Some(restart) = state.restart.clone() else {
+            self.change(&mut state, DaemonStatus::down(DAEMON_STOPPED, false));
+            return;
+        };
+        let stayed_up = state
+            .up_since
+            .is_some_and(|since| since.elapsed() >= restart.backoff.stable);
+        state.restarts = if stayed_up { 1 } else { state.restarts + 1 };
+        if state.restarts > restart.backoff.restarts {
+            self.change(&mut state, DaemonStatus::down(DAEMON_KEEPS_STOPPING, false));
+            return;
+        }
+        self.change(
+            &mut state,
+            DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
+        );
+        let old = state.daemon.take();
+        drop(state);
+        let daemon = Arc::clone(self);
+        let spawned = thread::Builder::new()
+            .name("consensflow-daemon-restart".to_string())
+            .spawn(move || daemon.restart(&restart, old));
+        if let Err(error) = spawned {
+            self.fail(&DaemonFailure {
+                cause: format!("ConsensFlow's daemon could not be started again: {error}"),
+                retry: false,
+            });
+        }
+    }
+
+    /// Starts the daemon again after it stopped: what is left of it ends, the windows close
+    /// as a quit closes them (no other daemon knows what they were told, or the token each
+    /// holds), and a start follows, waiting longer after each that fails, until the
+    /// restarts in a row are spent.
+    fn restart(self: &Arc<Self>, restart: &Restart, old: Option<Child>) {
+        if let Some(mut old) = old {
+            stop_daemon(&mut old);
+        }
+        reap_all(&restart.panes);
+        let mut wait = restart.backoff.first;
+        loop {
+            if self.lock().stopping {
+                return;
+            }
+            let Err(failure) = self.attempt(&restart.starter) else {
+                return;
+            };
+            let spent = {
+                let mut state = self.lock();
+                state.restarts += 1;
+                state.restarts > restart.backoff.restarts || !failure.retry
+            };
+            if spent {
+                self.fail(&DaemonFailure {
+                    cause: format!(
+                        "ConsensFlow's daemon stopped and could not be started again: {}",
+                        failure.cause
+                    ),
+                    retry: false,
+                });
+                return;
+            }
+            self.fail(&failure);
+            thread::sleep(wait);
+            wait = (wait * 2).min(restart.backoff.most);
+        }
     }
 
     /// A change, told to the page, unless the app is stopping.
@@ -560,6 +677,8 @@ mod tests {
     const QUICK: Backoff = Backoff {
         first: Duration::from_millis(10),
         most: Duration::from_millis(40),
+        restarts: 3,
+        stable: Duration::from_secs(30),
     };
 
     /// What the page hears of the daemon, as a test hears it.
@@ -859,33 +978,166 @@ mod tests {
         daemon.stop();
     }
 
-    /// A daemon that stops while the app runs is not started again (its
-    /// windows still run in the pane host), and the page is told.
+    /// A daemon that stops while the app runs is started again by the app, without a word
+    /// from the person: its windows cannot go on with another daemon (the token each was
+    /// launched with is the old one's, and what it was told the board was is gone with it), so
+    /// they are closed as a quit closes them first, the new daemon takes the board from the
+    /// ledger as at any start, and the page is told, once, in plain words.
     #[cfg(unix)]
     #[test]
-    fn a_daemon_that_stops_mid_session_is_told_and_not_started_again() {
+    fn a_daemon_that_stops_mid_session_is_started_again_after_its_windows_are_closed() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        panes
+            .open(
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "sleep 30".to_string(),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open a window");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let windows_at_start = Arc::new(Mutex::new(Vec::new()));
+        let (counted, seen, table) = (
+            Arc::clone(&starts),
+            Arc::clone(&windows_at_start),
+            Arc::clone(&panes),
+        );
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            let start = counted.fetch_add(1, Ordering::SeqCst);
+            seen.lock()
+                .expect("seen")
+                .push(table.list().map_or(usize::MAX, |open| open.len()));
+            if start == 0 {
+                stand_in_core(true, "sleep 0.3", closed)
+            } else {
+                stand_in_core(true, "while read -r line; do :; done", closed)
+            }
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+
+        let mut told = Vec::new();
+        for _ in 0..3 {
+            told.push(heard.recv_timeout(Duration::from_secs(10)).expect("told"));
+        }
+        assert_eq!(
+            told,
+            [
+                DaemonStatus::up(),
+                DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
+                DaemonStatus::up(),
+            ]
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 2, "started once more");
+        assert_eq!(
+            *windows_at_start.lock().expect("seen"),
+            [1, 0],
+            "the windows were closed before the new daemon started"
+        );
+        assert!(daemon.connection().is_ok());
+        assert!(daemon.roster().is_some());
+        assert!(
+            heard.recv_timeout(Duration::from_millis(300)).is_err(),
+            "the person was told more than once"
+        );
+        let (child, bridge) = daemon.stop().expect("the app stops");
+        if let Some(bridge) = bridge {
+            bridge.close_input();
+        }
+        if let Some(mut child) = child {
+            stop_daemon(&mut child);
+        }
+    }
+
+    /// A daemon that stops again and again is given up on: the person is asked to quit only
+    /// after `restarts` starts in a row ended within `stable` of their beginning, and the
+    /// words say so.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_that_keeps_stopping_is_given_up_on_and_the_person_asked_to_quit() {
         let starts = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&starts);
         let starter: DaemonStarter = Arc::new(move |closed| {
             counted.fetch_add(1, Ordering::SeqCst);
-            stand_in_core(true, "sleep 0.5", closed)
+            stand_in_core(true, "sleep 0.1", closed)
         });
         let (report, heard) = listener();
         let daemon = Daemon::new(report);
         daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
 
-        assert_eq!(
-            heard.recv_timeout(Duration::from_secs(5)).expect("up"),
-            DaemonStatus::up()
+        let mut told = Vec::new();
+        for _ in 0..8 {
+            told.push(heard.recv_timeout(Duration::from_secs(10)).expect("told"));
+        }
+        let (up, restarting) = (
+            DaemonStatus::up(),
+            DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
         );
         assert_eq!(
-            heard.recv_timeout(Duration::from_secs(5)).expect("stopped"),
-            DaemonStatus::down(DAEMON_STOPPED, false)
+            told,
+            [
+                up.clone(),
+                restarting.clone(),
+                up.clone(),
+                restarting.clone(),
+                up.clone(),
+                restarting,
+                up,
+                DaemonStatus::down(DAEMON_KEEPS_STOPPING, false),
+            ]
         );
-        thread::sleep(Duration::from_millis(200));
-        assert_eq!(starts.load(Ordering::SeqCst), 1, "started again");
-        assert_eq!(daemon.connection().err().as_deref(), Some(DAEMON_STOPPED));
-        assert!(daemon.roster().is_none());
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(starts.load(Ordering::SeqCst), 4, "the first and three more");
+        assert_eq!(
+            daemon.connection().err().as_deref(),
+            Some(DAEMON_KEEPS_STOPPING)
+        );
+    }
+
+    /// A daemon that stayed up for `stable` has its stops begin the count again: a board that
+    /// runs for days and has its daemon stop now and then is started again every time.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_that_stayed_up_is_not_counted_against_the_next_restart() {
+        let backoff = Backoff {
+            restarts: 1,
+            stable: Duration::from_millis(100),
+            ..QUICK
+        };
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            stand_in_core(true, "sleep 0.4", closed)
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::new(PaneTable::new()), backoff);
+
+        // Three stops, each after more than `stable`: one restart allowed, and each is given.
+        for _ in 0..6 {
+            let told = heard.recv_timeout(Duration::from_secs(10)).expect("told");
+            assert_ne!(told, DaemonStatus::down(DAEMON_KEEPS_STOPPING, false));
+        }
+        assert!(starts.load(Ordering::SeqCst) >= 3);
+        let (child, bridge) = daemon.stop().expect("the app stops");
+        if let Some(bridge) = bridge {
+            bridge.close_input();
+        }
+        if let Some(mut child) = child {
+            stop_daemon(&mut child);
+        }
     }
 
     /// A runtime missing from the app does not come back: the page is told,
