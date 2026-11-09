@@ -12240,7 +12240,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12258,7 +12261,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12278,7 +12284,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12298,7 +12307,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12316,7 +12328,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12334,7 +12349,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12352,7 +12370,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12370,7 +12391,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12388,7 +12412,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12406,7 +12433,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12759,7 +12789,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12780,7 +12813,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12803,7 +12839,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12826,7 +12865,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12847,7 +12889,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12868,7 +12913,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12889,7 +12937,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12910,7 +12961,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12931,7 +12985,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -12952,7 +13009,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13336,7 +13396,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13358,7 +13421,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13382,7 +13448,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13406,7 +13475,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13428,7 +13500,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13450,7 +13525,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13472,7 +13550,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13494,7 +13575,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13516,7 +13600,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13538,7 +13625,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13924,7 +14014,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13948,7 +14041,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -13974,7 +14070,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14000,7 +14099,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14024,7 +14126,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14048,7 +14153,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14072,7 +14180,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14096,7 +14207,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14120,7 +14234,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14144,7 +14261,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14561,7 +14681,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14586,7 +14709,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14613,7 +14739,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14640,7 +14769,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14665,7 +14797,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14690,7 +14825,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14715,7 +14853,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14740,7 +14881,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14765,7 +14909,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -14790,7 +14937,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15141,7 +15291,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15160,7 +15313,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15181,7 +15337,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15202,7 +15361,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15221,7 +15383,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15240,7 +15405,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15259,7 +15427,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15278,7 +15449,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15297,7 +15471,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15316,7 +15493,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15669,7 +15849,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15690,7 +15873,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15713,7 +15899,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15736,7 +15925,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15757,7 +15949,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15778,7 +15973,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15799,7 +15997,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15820,7 +16021,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15841,7 +16045,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -15862,7 +16069,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16213,7 +16423,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16232,7 +16445,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16253,7 +16469,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16274,7 +16493,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16293,7 +16515,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16312,7 +16537,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16331,7 +16559,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16350,7 +16581,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16369,7 +16603,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16388,7 +16625,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16772,7 +17012,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16794,7 +17037,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16818,7 +17064,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16842,7 +17091,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16864,7 +17116,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16886,7 +17141,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16908,7 +17166,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16930,7 +17191,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16952,7 +17216,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {
@@ -16974,7 +17241,10 @@
           "--approve"
         ],
         "env": {},
-        "dropEnv": []
+        "dropEnv": [
+          "CLIPROXYAPI_BASE_URL",
+          "CLIPROXYAPI_API_KEY"
+        ]
       }
     },
     {

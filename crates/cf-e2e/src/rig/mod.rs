@@ -61,6 +61,8 @@ pub use names::project_name;
 pub use project::{chief_body, chief_of, member_body, write_staff, Project};
 pub use route::{Held, Pasted};
 
+#[cfg(test)]
+pub(crate) use homes::clashing;
 pub(crate) use observe::events_of;
 
 use homes::Homes;

@@ -78,8 +78,9 @@ pub const COMMANDS: &[Command] = &[Command {
 /// `windows`: the typed marks and the interrupt after them in a Codex and a Devin member's box
 /// (`parity`, T-548), the member's shell finding its window's own `cf` (`own-cf`), and a
 /// human's paste into a Codex window sent by its Enter (`paste-enter`). Devin's and Muse's
-/// windows on Windows run on the owner's own folders (the kit knows no home of the run's own
-/// for them there): a run that names them reads and writes the owner's Devin or Muse store.
+/// windows on Windows run on a home of the run's own, as the others' do (T-1084, T-1136:
+/// `seat` seats all five in one rig on zeewin2); `seat` is no part of the set, which it would
+/// make spend the allowance of every harness each time.
 pub const SETS: &[(&str, &[&str])] = &[(
     "windows",
     &[
