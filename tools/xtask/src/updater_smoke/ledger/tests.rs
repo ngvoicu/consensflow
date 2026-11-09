@@ -131,7 +131,7 @@ fn is_whole_sound_its_projects_there_and_nothing_it_held_lost_or_changed() {
             "PRAGMA user_version = 11",
         ],
     );
-    assert_kept(&before, &after).unwrap();
+    assert_kept(&before, &after, &[]).unwrap();
 }
 
 #[test]
@@ -172,9 +172,210 @@ fn is_no_longer_whole_when_a_row_is_gone_a_stable_column_changed_a_table_lost_or
         let folder = tempfile::tempdir().unwrap();
         let file = ledger_file(folder.path(), 10, &ROWS);
         let before = read_ledger(&file).unwrap();
-        let said = refusal(assert_kept(&before, &changed(&file, statements)));
+        let said = refusal(assert_kept(&before, &changed(&file, statements), &[]));
         assert!(said.contains(words), "{what}: {said}");
     }
+}
+
+/// A ledger of the smoke's tables at schema 10, as the bridge's daemon leaves it, with
+/// `project.resume_on_start` (migration 0013 took it out), read.
+fn bridges_ledger(folder: &Path) -> (PathBuf, Ledger) {
+    let file = ledger_file(folder, 10, &ROWS);
+    let db = Connection::open(&file).unwrap();
+    db.execute_batch("ALTER TABLE project ADD COLUMN resume_on_start INTEGER NOT NULL DEFAULT 0")
+        .unwrap();
+    drop(db);
+    let before = read_ledger(&file).unwrap();
+    (file, before)
+}
+
+/// T-1338: a bridge-era ledger has `project.resume_on_start`, and the daemon of the update takes
+/// it out, as migration 0013 says to. That is no loss.
+#[test]
+fn a_column_a_migration_between_the_two_versions_took_out_is_no_loss() {
+    let folder = tempfile::tempdir().unwrap();
+    let (file, before) = bridges_ledger(folder.path());
+    let after = changed(
+        &file,
+        &[
+            "ALTER TABLE project DROP COLUMN resume_on_start",
+            "PRAGMA user_version = 13",
+        ],
+    );
+    assert_kept(&before, &after, &dropped(RESUME_ON_START)).unwrap();
+}
+
+/// The entry of the list that migration 0013 is.
+const RESUME_ON_START: &str =
+    r#"{"migration": 13, "table": "project", "column": "resume_on_start", "why": "x"}"#;
+
+/// The list as `entries` (JSON objects) say it.
+fn dropped(entries: &str) -> Vec<Dropped> {
+    read_dropped(&format!("[{entries}]")).unwrap()
+}
+
+/// What the list excuses is what its migrations took out between the two ledgers, and nothing
+/// else: a column no migration drops, one a migration the first ledger was already past dropped,
+/// one a later migration than the second ledger's drops, and the same column of another table
+/// each are still a loss.
+#[test]
+fn only_the_columns_the_migrations_between_the_two_versions_took_out_are_no_loss() {
+    for (what, version_before, version_after, entries, drop_column, words) in [
+        (
+            "a column no migration drops",
+            10,
+            13,
+            RESUME_ON_START,
+            "ALTER TABLE project DROP COLUMN name",
+            "project 1: name was \"a\" and is undefined",
+        ),
+        (
+            "a drop of a migration the first ledger was past",
+            13,
+            14,
+            RESUME_ON_START,
+            "ALTER TABLE project DROP COLUMN resume_on_start",
+            "project 1: resume_on_start was 0 and is undefined",
+        ),
+        (
+            "a drop of a migration the second ledger has not run",
+            10,
+            12,
+            RESUME_ON_START,
+            "ALTER TABLE project DROP COLUMN resume_on_start",
+            "project 1: resume_on_start was 0 and is undefined",
+        ),
+        (
+            "the column of another table",
+            10,
+            13,
+            r#"{"migration": 13, "table": "participant", "column": "resume_on_start", "why": "x"}"#,
+            "ALTER TABLE project DROP COLUMN resume_on_start",
+            "project 1: resume_on_start was 0 and is undefined",
+        ),
+    ] {
+        let folder = tempfile::tempdir().unwrap();
+        let (file, _) = bridges_ledger(folder.path());
+        let db = Connection::open(&file).unwrap();
+        db.execute_batch(&format!("PRAGMA user_version = {version_before}"))
+            .unwrap();
+        drop(db);
+        let before = read_ledger(&file).unwrap();
+        let after = changed(
+            &file,
+            &[
+                drop_column,
+                &format!("PRAGMA user_version = {version_after}"),
+            ],
+        );
+        let said = refusal(assert_kept(&before, &after, &dropped(entries)));
+        assert!(said.contains(words), "{what}: {said}");
+    }
+}
+
+/// Excusing a column is not excusing the rows it was in, nor the other columns of them.
+#[test]
+fn a_row_or_a_value_lost_beside_a_dropped_column_is_still_a_loss() {
+    let folder = tempfile::tempdir().unwrap();
+    let (file, before) = bridges_ledger(folder.path());
+    let list = dropped(RESUME_ON_START);
+    let after = changed(
+        &file,
+        &[
+            "ALTER TABLE project DROP COLUMN resume_on_start",
+            "UPDATE project SET directory = '/w/other' WHERE id = 1",
+            "PRAGMA user_version = 13",
+        ],
+    );
+    let said = refusal(assert_kept(&before, &after, &list));
+    assert!(
+        said.contains("project 1: directory was \"/w/a\" and is \"/w/other\""),
+        "{said}"
+    );
+    let other = tempfile::tempdir().unwrap();
+    let (file, before) = bridges_ledger(other.path());
+    let after = changed(
+        &file,
+        &[
+            "ALTER TABLE project DROP COLUMN resume_on_start",
+            "DELETE FROM event WHERE project_id = 2",
+            "DELETE FROM participant WHERE project_id = 2",
+            "DELETE FROM project WHERE id = 2",
+            "PRAGMA user_version = 13",
+        ],
+    );
+    assert!(refusal(assert_kept(&before, &after, &list)).contains("2 is gone"));
+}
+
+/// A column renamed keeps its values under the new name, which is looked at; a table a
+/// migration takes out whole is not looked for.
+#[test]
+fn a_renamed_column_keeps_its_values_and_a_table_taken_out_whole_is_no_loss() {
+    let renamed = dropped(
+        r#"{"migration": 11, "table": "project", "column": "name", "renamed_to": "title", "why": "x"}"#,
+    );
+    let folder = tempfile::tempdir().unwrap();
+    let (file, before) = bridges_ledger(folder.path());
+    let kept = changed(
+        &file,
+        &[
+            "ALTER TABLE project RENAME COLUMN name TO title",
+            "PRAGMA user_version = 11",
+        ],
+    );
+    assert_kept(&before, &kept, &renamed).unwrap();
+    let changed_value = changed(&file, &["UPDATE project SET title = 'z' WHERE id = 1"]);
+    let said = refusal(assert_kept(&before, &changed_value, &renamed));
+    assert!(
+        said.contains("project 1: name was \"a\" and is \"z\""),
+        "{said}"
+    );
+
+    let folder = tempfile::tempdir().unwrap();
+    let (file, before) = bridges_ledger(folder.path());
+    let table = dropped(r#"{"migration": 12, "table": "event", "why": "x"}"#);
+    let after = changed(&file, &["DROP TABLE event", "PRAGMA user_version = 12"]);
+    assert_kept(&before, &after, &table).unwrap();
+    assert!(refusal(assert_kept(&before, &after, &[])).contains("lost its event table"));
+}
+
+/// The list the product keeps with its migrations is read as it is written, and every entry says
+/// why (cf-ledger holds it to the migrations).
+#[test]
+fn reads_the_list_the_checkout_keeps_with_its_migrations() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let list = dropped_in(&root).unwrap();
+    assert!(
+        list.iter().any(|each| each.migration == 13
+            && each.table == "project"
+            && each.column.as_deref() == Some("resume_on_start")),
+        "{list:?}"
+    );
+    assert!(list.iter().all(|each| !each.why.trim().is_empty()));
+    let renamed = list
+        .iter()
+        .find(|each| each.migration == 34)
+        .expect("0034 renames a column");
+    assert_eq!(renamed.renamed_to.as_deref(), Some("compaction"));
+}
+
+#[test]
+fn refuses_a_list_that_is_none() {
+    for text in [
+        "",
+        "{}",
+        "[{\"migration\": 13}]",
+        "[{\"table\": \"project\", \"why\": \"x\"}]",
+    ] {
+        let said = read_dropped(text).unwrap_err().to_string();
+        assert!(
+            said.contains("the list of what the migrations drop"),
+            "{text}: {said}"
+        );
+    }
+    let nowhere = tempfile::tempdir().unwrap();
+    let said = dropped_in(nowhere.path()).unwrap_err().to_string();
+    assert!(said.starts_with("could not read "), "{said}");
 }
 
 #[test]
@@ -191,7 +392,7 @@ fn says_the_row_that_is_gone_whole() {
         ],
     );
     // The tables are read in order of their names: the event goes first.
-    let said = refusal(assert_kept(&before, &after));
+    let said = refusal(assert_kept(&before, &after, &[]));
     assert_eq!(
         said,
         "event 2 is gone: {\"id\":2,\"project_id\":2,\"at\":\"t2\",\"kind\":\"project.created\",\"data\":\"{\\\"name\\\":\\\"b\\\"}\"}"
@@ -211,9 +412,9 @@ fn takes_a_row_of_a_table_with_no_id_by_what_it_holds() {
     .unwrap();
     drop(db);
     let before = read_ledger(&file).unwrap();
-    assert_kept(&before, &before).unwrap();
+    assert_kept(&before, &before, &[]).unwrap();
     let after = changed(&file, &["DELETE FROM task_need WHERE task_id = 3"]);
-    assert!(refusal(assert_kept(&before, &after)).contains("task_need undefined is gone"));
+    assert!(refusal(assert_kept(&before, &after, &[])).contains("task_need undefined is gone"));
 }
 
 #[test]

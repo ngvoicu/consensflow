@@ -13,13 +13,51 @@
 //! and when it was last touched.
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use super::{Error, Result};
+use super::{files, Error, Result};
+
+/// Where, in a checkout, the list of what its migrations take out on purpose is: it sits with
+/// them, and the ledger's own tests hold it to what they drop (cf-ledger's `schema.rs`).
+pub const DROPPED: &str = "crates/cf-ledger/migrations/dropped.json";
+
+/// A column (or a whole table) a migration takes out of the ledger on purpose: the state of a
+/// ledger the daemon of the update opens is its migrations', and a column that is gone because
+/// one of them says so is no loss.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Dropped {
+    /// The number of the migration, as `PRAGMA user_version` counts them.
+    pub migration: i64,
+    pub table: String,
+    /// None where the whole table goes.
+    #[serde(default)]
+    pub column: Option<String>,
+    /// The column this one was renamed to, where its values are kept under another name.
+    #[serde(default)]
+    pub renamed_to: Option<String>,
+    pub why: String,
+}
+
+/// The list as `text` says it.
+pub fn read_dropped(text: &str) -> Result<Vec<Dropped>> {
+    serde_json::from_str(text).map_err(|cause| {
+        Error::new(format!(
+            "the list of what the migrations drop is not what it should be ({DROPPED}): {cause}"
+        ))
+    })
+}
+
+/// The list of the checkout `root`.
+pub fn dropped_in(root: &Path) -> Result<Vec<Dropped>> {
+    let file = root.join(DROPPED);
+    read_dropped(&fs::read_to_string(&file).map_err(files("read", &file))?)
+}
 
 /// The columns a daemon rewrites when it starts, or a window when it ends.
 const REWRITTEN: [&str; 11] = [
@@ -240,11 +278,25 @@ pub fn assert_projects(ledger: &Ledger, directories: &[PathBuf]) -> Result {
 /// Nothing the ledger held is gone or changed: each row `before` had is there
 /// after, by its `id`, with each column it had, bar the ones a restart rewrites; and
 /// the schema has not gone back. A table with no `id` (a link between two others)
-/// has its rows by what they hold.
-pub fn assert_kept(before: &Ledger, after: &Ledger) -> Result {
+/// has its rows by what they hold. A column is not looked for where a migration that
+/// ran between the two versions takes it out (`dropped`); one renamed has its values
+/// under the new name. Whatever else is gone is lost.
+pub fn assert_kept(before: &Ledger, after: &Ledger, dropped: &[Dropped]) -> Result {
     assert_sound(after, before.version)?;
+    // What the migrations that ran between the two ledgers took out.
+    let taken_out = |table: &str, column: Option<&str>| {
+        dropped.iter().find(|each| {
+            each.table == table
+                && each.column.as_deref() == column
+                && before.version < each.migration
+                && each.migration <= after.version
+        })
+    };
     for (table, rows) in &before.tables {
         let Some(now) = after.tables.get(table) else {
+            if taken_out(table, None).is_some() {
+                continue;
+            }
             return Err(Error::new(format!("the ledger lost its {table} table")));
         };
         for row in rows {
@@ -263,13 +315,22 @@ pub fn assert_kept(before: &Ledger, after: &Ledger) -> Result {
                 if REWRITTEN.contains(&column.as_str()) {
                     continue;
                 }
+                let held = match (kept.get(column), taken_out(table, Some(column))) {
+                    (Some(held), _) => Some(held),
+                    // A column a migration took out is not there, and is no loss: its values
+                    // are under another name where it was renamed.
+                    (None, Some(dropped)) => match &dropped.renamed_to {
+                        None => continue,
+                        Some(new) => kept.get(new),
+                    },
+                    (None, None) => None,
+                };
                 ensure!(
-                    kept.get(column) == Some(value),
+                    held == Some(value),
                     "{table} {}: {column} was {} and is {}",
                     row.id(),
                     value.json(),
-                    kept.get(column)
-                        .map_or_else(|| "undefined".to_string(), |cell| cell.json().to_string())
+                    held.map_or_else(|| "undefined".to_string(), |cell| cell.json().to_string())
                 );
             }
         }

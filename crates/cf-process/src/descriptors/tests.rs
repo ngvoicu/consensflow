@@ -454,6 +454,64 @@ fn swept() {
     );
 }
 
+/// A program's first code closes what it was left by the program that started it: the descriptors
+/// that are open and not close-on-exec (a few, and a crowd of them, more than one listing holds,
+/// and one far above), and answers their numbers. It closes nothing else: not the standard
+/// streams, and not a descriptor that is close-on-exec, which is the program's own (what it opened
+/// itself, or the system did for it before its first code), and would have been closed at an exec.
+/// The app of an update that a bridge release started holds them otherwise, for as long as it
+/// runs (T-1338).
+#[test]
+fn what_the_process_was_left_is_closed_and_what_is_its_own_is_not() {
+    crate::testing::alone(&[], "descriptors::tests::left");
+}
+
+#[test]
+#[ignore = "run alone, by the test above it"]
+fn left() {
+    use nix::sys::resource::{getrlimit, setrlimit, Resource};
+    if !crate::testing::is_alone() {
+        return;
+    }
+    let _ran = crate::testing::Ran;
+    let (_, most) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+    setrlimit(Resource::RLIMIT_NOFILE, most.min(16_384), most).unwrap();
+    let null = File::open("/dev/null").unwrap();
+    let left: Vec<i32> = (CROWD_FROM..CROWD_FROM + CROWD)
+        .chain([FAR])
+        .map(|fd| nix::unistd::dup2(null.as_raw_fd(), fd).unwrap())
+        .collect();
+    // The program's own: close-on-exec, as std opens a file.
+    let own = nix::unistd::dup(null.as_raw_fd()).unwrap();
+    fcntl(own, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)).unwrap();
+    let is_open = |fd: i32| fcntl(fd, FcntlArg::F_GETFD).is_ok();
+    assert!(left.iter().all(|fd| is_open(*fd)), "they are left open");
+
+    let closed = crate::close_inherited().unwrap();
+
+    let not_closed: Vec<i32> = left
+        .iter()
+        .copied()
+        .filter(|fd| !closed.contains(&u64::try_from(*fd).unwrap()) || is_open(*fd))
+        .collect();
+    assert!(
+        not_closed.is_empty(),
+        "{} of {} left open: {:?}",
+        not_closed.len(),
+        left.len(),
+        &not_closed[..not_closed.len().min(10)]
+    );
+    for own in [own, null.as_raw_fd(), 0, 1, 2] {
+        assert!(is_open(own), "{own} is the program's own, and was closed");
+        assert!(
+            !closed.contains(&u64::try_from(own).unwrap()),
+            "{own} is the program's own, and was said to be left"
+        );
+    }
+    // Nothing is left to close the second time.
+    assert_eq!(crate::close_inherited().unwrap(), Vec::<u64>::new());
+}
+
 /// The programs the tests start (and the tests [`crate::testing::alone`] runs again) hold
 /// nothing of the tests' but their streams: the tests run side by side.
 #[test]

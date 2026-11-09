@@ -376,6 +376,8 @@ fn smoke_in(
         );
     }
 
+    // What the update's daemon says it is, known where this run builds the update from the checkout.
+    let mut daemon_version = None;
     let update = match (&options.to_app, take_kept("update")) {
         (Some(named), _) => in_the_checkout(named),
         (None, Some(found)) => {
@@ -392,6 +394,7 @@ fn smoke_in(
             let versions: Vec<&str> = versions.iter().map(String::as_str).collect();
             let own = source_version(root).map_err(|cause| Error::new(cause.to_string()))?;
             let version = update_version(&own, &versions)?;
+            daemon_version = Some(own);
             talk(
                 say,
                 format!("building the update from {} as {version}", root.display()),
@@ -434,6 +437,7 @@ fn smoke_in(
             waits,
             machines: &machines,
             checkout: root,
+            daemon_version: daemon_version.as_deref(),
             env,
         }) {
             Ok(inputs) => {

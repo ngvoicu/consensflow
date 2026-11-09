@@ -80,6 +80,28 @@ pub fn hold_only_the_streams(command: &mut Command) {
     let _ = command;
 }
 
+/// Closes every descriptor this process was left by the program that started it, above the
+/// standard streams, and answers their numbers (a handle's value on Windows). For the first
+/// code of a program, before it has opened anything or started a thread: what is open and not
+/// close-on-exec then is not the program's own. A program that starts another leaves it, bare,
+/// whatever it holds that is not close-on-exec: the app an update installed is started by Tauri's
+/// restart, which `close_all_on_exec` prepares in the app that ends, but an app of a release that
+/// never did it (the bridge, `v3.0.0-alpha.81`) hands its successor every descriptor it holds,
+/// for as long as the successor runs: a file it wrote, a pipe whose reader waits for the end of
+/// it. The program that is started closes them itself, so that it never depends on who started it.
+///
+/// On Windows the handles that a child may inherit (a process created with inheritance on is
+/// given every one of its parent's marked so) and that are none of the standard streams, a
+/// console's or a device's. On Linux nothing: the app is not shipped there.
+pub fn close_inherited() -> std::io::Result<Vec<u64>> {
+    #[cfg(target_os = "macos")]
+    return macos::close_left();
+    #[cfg(windows)]
+    return windows::close_inherited();
+    #[cfg(not(any(target_os = "macos", windows)))]
+    Ok(Vec::new())
+}
+
 /// Makes every descriptor of this process above the standard streams close-on-exec, so that a
 /// program started after, by any start (one that is not this crate's: Tauri's restart of the
 /// app), is left none of them. For a process about to end: what it opens or is passed after is
@@ -104,6 +126,18 @@ mod macos {
     /// asking for each. The listing is on the stack, for the new process may not allocate.
     const LISTED: usize = 4096;
 
+    /// Closes every descriptor above the standard streams that is open and not close-on-exec,
+    /// and answers their numbers: what this process was left (see [`super::close_inherited`]).
+    pub(super) fn close_left() -> io::Result<Vec<u64>> {
+        let mut closed = Vec::new();
+        each_above_the_streams(|fd| {
+            if let_go(fd) {
+                closed.push(u64::try_from(fd).unwrap_or_default());
+            }
+        })?;
+        Ok(closed)
+    }
+
     pub(super) fn hold_only_the_streams(command: &mut Command) {
         // SAFETY: the closure runs in the new process, between fork and exec, where only
         // functions that are safe to call from a signal handler may be called, and it
@@ -111,13 +145,17 @@ mod macos {
         // It allocates nothing and takes no lock; its listing is on the stack.
         #[allow(unsafe_code)]
         unsafe {
-            command.pre_exec(|| each_above_the_streams(let_go));
+            command.pre_exec(|| {
+                each_above_the_streams(|fd| {
+                    let _ = let_go(fd);
+                })
+            });
         }
     }
 
     /// Does `act` to every descriptor this process holds above the standard streams, and to
     /// numbers that are none (it asks first). Safe to call between fork and exec when `act` is.
-    pub(super) fn each_above_the_streams(act: fn(c_int)) -> io::Result<()> {
+    pub(super) fn each_above_the_streams(mut act: impl FnMut(c_int)) -> io::Result<()> {
         let mut listing = [proc_fdinfo {
             proc_fd: 0,
             proc_fdtype: 0,
@@ -178,7 +216,7 @@ mod macos {
     }
 
     /// Every descriptor from `first` to below `end`, asked for one by one.
-    fn scan(first: c_int, end: c_int, act: fn(c_int)) {
+    fn scan(first: c_int, end: c_int, mut act: impl FnMut(c_int)) {
         for fd in first..end {
             act(fd);
         }
@@ -202,10 +240,10 @@ mod macos {
     }
 
     /// Closes the descriptor `fd` if it is open, is not one of the standard streams and is
-    /// not close-on-exec.
-    fn let_go(fd: c_int) {
+    /// not close-on-exec, and says whether it did.
+    fn let_go(fd: c_int) -> bool {
         if fd <= 2 {
-            return;
+            return false;
         }
         // SAFETY: `fcntl` is asked about a number, and answers -1 for one that is not open;
         // what is closed is a copy this process's new self was left, of a descriptor that is
@@ -215,10 +253,76 @@ mod macos {
             let flags = libc::fcntl(fd, libc::F_GETFD);
             if flags >= 0 && flags & libc::FD_CLOEXEC == 0 {
                 libc::close(fd);
+                return true;
             }
         }
+        false
+    }
+}
+
+#[cfg(windows)]
+mod windows {
+    use std::io;
+
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{GetFileType, FILE_TYPE_CHAR};
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+
+    /// The most handle values looked at, however many the system says are open: a handle's
+    /// value is a multiple of four, and a process that holds a million has no use for this.
+    const FAR: usize = 1 << 22;
+
+    /// Closes every handle this process holds that a child may inherit and that is none of its
+    /// standard streams or a console's or a device's, and answers their values (see
+    /// [`super::close_inherited`]). The handles of a process are numbered from 4 up by fours,
+    /// and the system says how many are open, so the look ends when that many were found.
+    pub(super) fn close_inherited() -> io::Result<Vec<u64>> {
+        // SAFETY: asks for this process's own standard handles.
+        #[allow(unsafe_code)]
+        let streams = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+            .map(|which| unsafe { GetStdHandle(which) } as usize);
+        let mut open = 0_u32;
+        // SAFETY: the pseudo-handle of this process, and a number to write into.
+        #[allow(unsafe_code)]
+        let counted = unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut open) };
+        if counted == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut found = 0_u32;
+        let mut closed = Vec::new();
+        let mut value = 4_usize;
+        while found < open && value < FAR {
+            let handle = value as HANDLE;
+            let mut flags = 0_u32;
+            // SAFETY: asks about a value, and is answered 0 for one that is no handle.
+            #[allow(unsafe_code)]
+            let is_one = unsafe { GetHandleInformation(handle, &mut flags) } != 0;
+            if is_one {
+                found += 1;
+                // SAFETY: the type of a handle this process holds.
+                #[allow(unsafe_code)]
+                let a_device = unsafe { GetFileType(handle) } == FILE_TYPE_CHAR;
+                if flags & HANDLE_FLAG_INHERIT != 0 && !streams.contains(&value) && !a_device {
+                    // SAFETY: a handle this process was left, none of its own: it opened nothing yet.
+                    #[allow(unsafe_code)]
+                    unsafe {
+                        CloseHandle(handle);
+                    }
+                    closed.push(value as u64);
+                }
+            }
+            value += 4;
+        }
+        Ok(closed)
     }
 }
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, windows))]
+mod windows_tests;

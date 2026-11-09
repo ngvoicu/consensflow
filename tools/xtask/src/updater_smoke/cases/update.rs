@@ -5,34 +5,22 @@ use std::fs;
 use serde_json::json;
 
 use super::{ledger_of, offer_update, projects_of, quit, BRIDGE_SCHEMA};
-use crate::updater_smoke::bundle::{cf_of, digest_manifest, verify_seal};
+use crate::updater_smoke::bundle::{cf_of, digest_manifest, inspect_bundle, verify_seal};
 use crate::updater_smoke::case::{
     blocked_evidence, boot_evidence, held_evidence, release_panes, staging_left, Case,
 };
 #[cfg(unix)]
-use crate::updater_smoke::descriptors::{compare, held_by, Left, NOT_MARKED};
-use crate::updater_smoke::evidence::{app_log, assert_started_daemon, Kind};
+use crate::updater_smoke::descriptors::{closed_at_start, compare, held_by, Left, NOT_MARKED};
+use crate::updater_smoke::evidence::{
+    app_log, assert_daemon_is, assert_started_daemon_since, mark, Kind,
+};
 use crate::updater_smoke::launchers::{assert_repaired, plant_commands, Repaired};
 use crate::updater_smoke::ledger::{assert_projects, assert_sound, assert_traced, traced_events};
-use crate::updater_smoke::processes::{alive, gone, Watch};
+use crate::updater_smoke::processes::{alive, gone, programs_of, Watch};
 use crate::updater_smoke::{files, Result};
 
 /// How long after the installed app has exited a second start of the update is looked for.
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// The folders whose programs are the installed app's at `bundle`, as the process table names
-/// them: its `Contents/MacOS/`, by its path and by the path the system resolves it to (a
-/// temporary folder's `/var` is `/private/var`).
-fn programs_of(bundle: &std::path::Path) -> Vec<String> {
-    let mut folders = vec![format!("{}/Contents/MacOS/", bundle.display())];
-    if let Ok(real) = fs::canonicalize(bundle) {
-        let real = format!("{}/Contents/MacOS/", real.display());
-        if !folders.contains(&real) {
-            folders.push(real);
-        }
-    }
-    folders
-}
 
 /// The update from the installed app, install and restart, and what it leaves:
 /// the update's app on the bundle's `cf`, the ledger whole, and the terminal
@@ -73,6 +61,9 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
     let first = boot_evidence(kase, &app, &inputs.from.version, None)?;
     #[cfg(unix)]
     let first_held = held_by(first.app)?;
+    // What the installed app says it closed as it started: its log holds no other app's yet.
+    #[cfg(unix)]
+    let installed_closed = closed_at_start(&app_log(&kase.sandbox));
     let expected = if way_back {
         Kind::Node
     } else {
@@ -97,9 +88,15 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         "the daemon traced no ledger event before the update"
     );
 
-    // Every program started from the installed bundle from here on: the update's app is started
-    // once, by the installed app, and by nothing else (T-941).
-    let watch = Watch::start(programs_of(&kase.sandbox.copy));
+    // Every start of the bundle's app from here on: the update's app is started once, by the
+    // installed app, and by nothing else (T-941). The app, not the programs beside it: a bridge's
+    // bundle holds the Node its daemon runs on in the same folder, and that daemon runs already.
+    let watch = Watch::start(programs_of(
+        &inspect_bundle(&kase.sandbox.copy, "the app in place")?.binary,
+    ));
+    // What the app's log holds now is the installed app's: the line of the update's app that says
+    // which cf it started is the one written past it (the installed app's says the same).
+    let log_mark = mark(&app_log(&kase.sandbox));
     // Both windows close, the install goes through, and the app starts again as the update.
     release_panes(kase, &app, &chiefs)?;
     let second = boot_evidence(kase, &app, &inputs.to.version, Some(first.app))?;
@@ -151,7 +148,7 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
     // The new app holds nothing of the old one's but its streams.
     #[cfg(unix)]
     {
-        let (faults, notes) = compare(&first_held, &held_by(second.app)?, &left);
+        let (faults, notes) = compare(&first_held, &held_by(second.app)?, &left, &installed_closed);
         for note in notes {
             kase.note(note);
         }
@@ -190,7 +187,8 @@ pub(super) fn update_flow(kase: &mut Case, way_back: bool) -> Result {
         second.daemon.pid != first.daemon.pid,
         "the update's daemon is the installed app's"
     );
-    assert_started_daemon(&app_log(&kase.sandbox), &cf)?;
+    assert_started_daemon_since(&app_log(&kase.sandbox), log_mark, &cf)?;
+    assert_daemon_is(&second.daemon, &cf, inputs.daemon_version.as_deref())?;
     ensure!(
         way_back_file.exists() == way_back,
         "the way back to Node was taken or given back"

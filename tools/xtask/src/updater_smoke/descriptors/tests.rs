@@ -88,7 +88,7 @@ fn a_new_app_that_holds_none_of_the_old_ones_objects_has_no_fault_and_a_file_at_
             "default.metallib",
         ),
     ];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, &[]);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(notes.len(), 1, "{notes:?}");
 }
@@ -100,7 +100,7 @@ fn a_new_app_left_the_old_ones_descriptors_is_at_fault_for_each() {
     let old = old_with(&left);
     // Tauri's bare start, with nothing made close-on-exec: the new app holds them at their numbers.
     let new = old.clone();
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, &[]);
     // The file it was left is the fault; the pipe is the pipe's own check's
     // ([`Left::closed_everywhere`]).
     assert_eq!(
@@ -144,7 +144,7 @@ fn a_socket_at_an_address_the_old_app_had_with_another_peer_is_the_new_apps_own(
             "->0xa65099d04f5df15f",
         ),
     ];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, &[]);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(notes, Vec::<String>::new());
 }
@@ -164,7 +164,7 @@ fn a_socket_at_the_old_apps_address_with_its_peer_is_noted_with_both_numbers() {
         None,
         "->0x1e1b0426067da685",
     )];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, &[]);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(
         notes,
@@ -186,7 +186,7 @@ fn a_socket_at_the_old_apps_address_and_number_whose_peer_closed_is_noted() {
         None,
         "->(none)",
     )];
-    let (faults, notes) = compare(&old, &new, &left);
+    let (faults, notes) = compare(&old, &new, &left, &[]);
     assert_eq!(faults, Vec::<String>::new());
     assert_eq!(
         notes,
@@ -201,7 +201,7 @@ fn a_pipe_is_left_to_the_pipe_the_case_left() {
     let left = Left::make(folder.path()).unwrap();
     let old = old_with(&left);
     let new = vec![held(left.pipe, "PIPE", Some("0xaaaa"), None, "->0xbbbb")];
-    let (faults, _) = compare(&old, &new, &left);
+    let (faults, _) = compare(&old, &new, &left, &[]);
     assert_eq!(faults, Vec::<String>::new());
 }
 
@@ -209,11 +209,67 @@ fn a_pipe_is_left_to_the_pipe_the_case_left() {
 fn an_installed_app_that_was_not_left_the_two_makes_the_check_prove_nothing() {
     let folder = tempfile::tempdir().unwrap();
     let left = Left::make(folder.path()).unwrap();
-    let (faults, _) = compare(&parse_held(SHOWN), &[], &left);
+    let (faults, _) = compare(&parse_held(SHOWN), &[], &left, &[]);
     assert_eq!(faults.len(), 2, "{faults:?}");
     assert!(faults
         .iter()
         .all(|fault| fault.ends_with("the check proves nothing")));
+}
+
+/// An installed app of this checkout's closes what it is left as it starts, and says so: it is
+/// not one that failed to be left them, so the check is still what it was made to be, for the new
+/// app. One that holds one and closed the other, or says nothing, is judged for each.
+#[test]
+fn an_installed_app_that_closed_the_two_at_its_start_makes_the_check_prove_what_the_new_app_holds()
+{
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let both = [left.pipe, left.file_fd];
+    let (faults, notes) = compare(&parse_held(SHOWN), &[], &left, &both);
+    assert_eq!(faults, Vec::<String>::new());
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(
+        notes.iter().all(|note| note.contains("as it started")),
+        "{notes:?}"
+    );
+    // Only the pipe closed: the file it was left is not accounted for.
+    let (faults, _) = compare(&parse_held(SHOWN), &[], &left, &[left.pipe]);
+    assert_eq!(faults.len(), 1, "{faults:?}");
+    assert!(faults[0].contains("does not hold the file"), "{faults:?}");
+    // A number that is not one of the two excuses neither.
+    let (faults, _) = compare(&parse_held(SHOWN), &[], &left, &[left.pipe + 1000]);
+    assert_eq!(faults.len(), 2, "{faults:?}");
+    // The new app still holds the file the installed app was left: closed or not, it is at fault.
+    let new = vec![held(
+        7,
+        "REG",
+        None,
+        Some(("1,4", left.node)),
+        "/tmp/left-to-the-app",
+    )];
+    let (faults, _) = compare(&parse_held(SHOWN), &new, &left, &both);
+    assert!(
+        faults
+            .iter()
+            .any(|fault| fault.contains("the new app holds the file the installed app was left")),
+        "{faults:?}"
+    );
+}
+
+/// The app says, in its log, the descriptors it closed as it started; the smoke reads them.
+#[test]
+fn reads_the_descriptors_the_apps_log_says_it_closed_as_it_started() {
+    let log = "consensflow: starting the daemon: /x/cf ui --json --no-open\n\
+               consensflow: closed 2 descriptors it was left at its start: 6, 7\n\
+               consensflow: closed 1 descriptor it was left at its start: 12\n\
+               other: closed 3 descriptors it was left at its start: 99\n\
+               consensflow: could not close the descriptors it was left at its start: boom\n";
+    assert_eq!(closed_at_start(log), [6, 7, 12]);
+    assert_eq!(closed_at_start(""), Vec::<u32>::new());
+    assert_eq!(
+        closed_at_start("consensflow: terminal command now runs /x\n"),
+        Vec::<u32>::new()
+    );
 }
 
 /// Only this process holds the writing end, and then none. Run in a process of its own: the

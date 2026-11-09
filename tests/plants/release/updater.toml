@@ -233,11 +233,9 @@ runs = ["smoke-evidence"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/ledger.rs"
 find = '''
-        let Some(now) = after.tables.get(table) else {
             return Err(Error::new(format!("the ledger lost its {table} table")));
         };'''
 replace = '''
-        let Some(now) = after.tables.get(table) else {
             continue;
         };'''
 
@@ -1232,3 +1230,198 @@ runs = ["smoke-cache"]
 file = "tools/xtask/src/updater_smoke/cache.rs"
 find = "                    let _ = io::copy(&mut file, &mut digest);"
 replace = "                    let _ = &mut file;"
+
+# T-1338: the update's own line in the app's log, the daemon told by what it shows, the programs of
+# the installed bundle that are the app, and the ledger kept by hand held to what the migrations
+# drop.
+[[plant]]
+name = "updater evidence: the line the installed app wrote is taken for the update's"
+meant = "takes_only_the_line_the_log_gained_since_the_mark"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = "    log.get(mark.0..).unwrap_or_default()"
+replace = "    log"
+
+[[plant]]
+name = "updater evidence: a daemon that runs another program is taken for the update's cf"
+meant = "proves_the_daemon_by_its_path_and_its_version"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = '''
+        .any(|program| daemon.command == format!("{program} {DAEMON_ARGUMENTS}"));'''
+replace = '''
+        .any(|_| daemon.command.ends_with(DAEMON_ARGUMENTS));'''
+
+[[plant]]
+name = "updater evidence: a daemon that says another version is taken for the update's"
+meant = "proves_the_daemon_by_its_path_and_its_version"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/evidence.rs"
+find = "            daemon.runtime == wanted"
+replace = "            daemon.runtime.starts_with(\"rust \")"
+
+[[plant]]
+name = "updater evidence: a column no migration dropped is excused by the range of any"
+meant = "only_the_columns_the_migrations_between_the_two_versions_took_out_are_no_loss"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+                && before.version < each.migration
+                && each.migration <= after.version'''
+replace = '''
+                && before.version < each.migration + 1000'''
+
+[[plant]]
+name = "updater evidence: a column that is missing and listed by no migration is not looked for"
+meant = "only_the_columns_the_migrations_between_the_two_versions_took_out_are_no_loss"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "                    (None, None) => None,"
+replace = "                    (None, None) => continue,"
+
+[[plant]]
+name = "updater evidence: a column renamed by a migration is not looked for under its new name"
+meant = "a_renamed_column_keeps_its_values_and_a_table_taken_out_whole_is_no_loss"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "                        Some(new) => kept.get(new),"
+replace = "                        Some(_) => continue,"
+
+[[plant]]
+name = "updater evidence: a table that is gone is no loss whatever migration is said to drop it"
+meant = "a_renamed_column_keeps_its_values_and_a_table_taken_out_whole_is_no_loss"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "            if taken_out(table, None).is_some() {"
+replace = "            if true {"
+
+[[plant]]
+name = "updater evidence: the list of what the migrations drop is read from a file that is not there"
+meant = "reads_the_list_the_checkout_keeps_with_its_migrations"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = 'pub const DROPPED: &str = "crates/cf-ledger/migrations/dropped.json";'
+replace = 'pub const DROPPED: &str = "crates/cf-ledger/migrations/dropped.jsn";'
+
+[[plant]]
+name = "updater evidence: a program that begins with the app's name is taken for the app"
+meant = "a_program_the_bundle_ships_beside_its_app_is_no_start_of_the_app"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = "                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))"
+replace = "                    .is_some()"
+
+[[plant]]
+name = "updater evidence: the programs of an installed bundle are the whole of its programs folder"
+meant = "a_program_the_bundle_ships_beside_its_app_is_no_start_of_the_app"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = "    let mut names = vec![binary.display().to_string()];"
+replace = '''
+    let mut names = vec![format!("{}/", binary.parent().map_or_else(String::new, |folder| folder.display().to_string()))];'''
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = '''
+                    .strip_prefix(program.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))'''
+replace = '''
+                    .strip_prefix(program.as_str())
+                    .is_some()'''
+
+[[plant]]
+name = "updater evidence: an installed app that closed the two at its start is taken for one not left them"
+meant = "an_installed_app_that_closed_the_two_at_its_start_makes_the_check_prove_what_the_new_app_holds"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = "    } else if installed_closed.contains(&left.pipe) {"
+replace = "    } else if false {"
+
+[[plant]]
+name = "updater evidence: an installed app that closed some other descriptor is taken for one that closed the two"
+meant = "an_installed_app_that_closed_the_two_at_its_start_makes_the_check_prove_what_the_new_app_holds"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = "    } else if installed_closed.contains(&left.file_fd) {"
+replace = "    } else if !installed_closed.is_empty() {"
+
+[[plant]]
+name = "updater evidence: the line of another program is taken for what the app closed at its start"
+meant = "reads_the_descriptors_the_apps_log_says_it_closed_as_it_started"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = '        .filter(|line| line.starts_with("consensflow: closed "))'
+replace = '        .filter(|line| line.contains(" closed "))'
+
+[[plant]]
+name = "updater evidence: the list of what the migrations drop names a column no migration drops"
+meant = "the_list_of_what_the_migrations_drop_is_what_they_drop"
+runs = ["smoke-dropped"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/dropped.json"
+find = '"column": "resume_on_start",'
+replace = '"column": "resume_on_stat",'
+
+[[plant]]
+name = "updater evidence: the list of what the migrations drop forgets a column a migration drops"
+meant = "the_list_of_what_the_migrations_drop_is_what_they_drop"
+runs = ["smoke-dropped"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/dropped.json"
+find = '''
+  {
+    "migration": 31,
+    "table": "participant",
+    "column": "tier_chosen",
+    "why": "The tier is the human's, always: nothing follows it, so 0028's mark of a tier the human chose goes."
+  },
+'''
+replace = ""
+
+[[plant]]
+name = "updater evidence: an entry of the list of what the migrations drop does not say why"
+meant = "the_list_of_what_the_migrations_drop_is_what_they_drop"
+runs = ["smoke-dropped"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/dropped.json"
+find = "\"why\": \"The tier is the human's, always: nothing follows it, so 0028's mark of a tier the human chose goes.\""
+replace = "\"why\": \"\""
+
+[[plant]]
+name = "updater evidence: the list says a column was renamed to one the migration does not add"
+meant = "the_list_of_what_the_migrations_drop_is_what_they_drop"
+runs = ["smoke-dropped"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/dropped.json"
+find = '"renamed_to": "compaction",'
+replace = '"renamed_to": "compactions",'

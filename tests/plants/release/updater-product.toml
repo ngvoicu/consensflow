@@ -8,6 +8,10 @@
 # command, a repair of another home's, a daemon that is not the cf the log
 # names).
 #
+# The last four are the smoke's own work since T-1338: the app closes what it was left as it
+# starts (and the plant above it takes that close out with the rest), the daemon is told by what
+# it writes, and a ledger kept by hand is looked at whole, where the migrations' own drops are no loss.
+#
 # They need the smoke's builds to have been made once, at the paths below, in
 # app/src-tauri/target/updater-smoke of the checkout: the installed flip app, the
 # update, the installed bridge app (whose terminal command is the old shape, the one
@@ -40,6 +44,13 @@ smoke-bridge-refused = ["cargo", "xtask", "smoke-updater", "--from", "bridge", "
 # restart is the planted build's. Nothing is exported, so the cache may be in the checkout.
 smoke-own-update = ["cargo", "xtask", "smoke-updater", "--from", "flip", "--flip", ".", "--to-app", "app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app", "--cache", "app/src-tauri/target/updater-smoke-sweep-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
 smoke-bridge-update = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app", "--from-release", "bridge", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
+# The installed app and its update both built from the planted sources: the update closes what it
+# was left itself, and the installed app is the one that would have marked it, so a plant of both
+# is told by the two together.
+smoke-own-update-built = ["cargo", "xtask", "smoke-updater", "--from", "flip", "--flip", ".", "--cache", "app/src-tauri/target/updater-smoke-sweep-plants-built", "--only", "the update installs and restarts", "--timeout", "60000"]
+# An app replaced by hand, with the app quit: the ledger it kept is looked at whole.
+smoke-flip-by-hand = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/flip/ConsensFlow.app", "--from-release", "flip", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "replaced by hand", "--timeout", "60000"]
+smoke-bridge-by-hand = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app", "--from-release", "bridge", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "replaced by hand", "--timeout", "60000"]
 
 # Readiness: what the smoke reads of an app that started its daemon.
 [[plant]]
@@ -196,18 +207,19 @@ file = "app/src-tauri/src/daemon_command.rs"
 find = "    let mut command = Command::new(cf);"
 replace = '    let mut command = Command::new("/usr/bin/true");'
 
-# The new app holds nothing of the old one's: the old app starts it at its event loop's end
-# holding only its streams (`relaunch_installed`, T-930), marks every descriptor close-on-exec
-# first, in its last code (`at_exit`), and before a restart Tauri starts on the spot
-# (`restart_swept`). The three taken out, the new app holds the two descriptors the smoke left the
-# installed app (descriptors.rs of the smoke). Any one of them left in place is no fault: the
-# restart still holds none.
+# The new app holds nothing of the old one's: the app closes what it was left as its first code
+# (`close_inherited`, T-1338: the bridge release never made its descriptors close-on-exec and
+# hands the new app every one it holds), and the old app starts it at its event loop's end holding
+# only its streams (`relaunch_installed`, T-930), marks every descriptor close-on-exec first, in
+# its last code (`at_exit`), and before a restart Tauri starts on the spot (`restart_swept`).
+# Any one of them left in place is no fault: the new app holds none, so the plant takes all four
+# out, in the installed app and in the update, both built from the planted sources. The new app
+# then holds the two descriptors the smoke left the installed app (descriptors.rs of the smoke).
 [[plant]]
 name = "updater product: the app restarts holding every descriptor it was left"
 meant = "the update installs and restarts"
-runs = ["smoke-own-update"]
+runs = ["smoke-own-update-built"]
 builds = true
-requires = ["app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
@@ -230,6 +242,11 @@ find = """
     cf_process::hold_only_the_streams(&mut command);"""
 replace = """
     command.args(args);"""
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    let left = cf_process::close_inherited();"
+replace = "    let left: std::io::Result<Vec<u64>> = Ok(Vec::new());"
 
 # The update's app is started once (T-941): after the app's own start of it the exit follows, or
 # Tauri's restart starts it a second time, launchd's child with no input, which quits at once and
@@ -259,3 +276,76 @@ requires = ["app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app"]
 file = "app/src-tauri/src/updates.rs"
 find = "                let _ = INSTALLED.set(target);"
 replace = "                let _ = target;"
+
+# The app closes what it was left as its first code, whoever started it (T-1338): the bridge
+# release never made its descriptors close-on-exec, so the update from it is left every one the
+# bridge holds. Only this close stands between them and the new app, and the update is built from
+# the planted sources.
+[[plant]]
+name = "updater product: the app does not close what it was left at its start"
+meant = "the update installs and restarts"
+runs = ["smoke-bridge-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    let left = cf_process::close_inherited();"
+replace = "    let left: std::io::Result<Vec<u64>> = Ok(Vec::new());"
+
+# The daemon the update's app started is told by the daemon: the process the machine shows, and
+# the version it wrote in its own start line (T-1338). A daemon that says another version than the
+# build it is in is not the one the update shipped.
+[[plant]]
+name = "updater product: the daemon says another version than its own"
+meant = "the update installs and restarts"
+runs = ["smoke-flip-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+        "start pid {} rust {VERSION} home {}",
+        std::process::id(),'''
+replace = '''
+        "start pid {} rust 0.0.0 home {}",
+        std::process::id(),'''
+
+# A ledger kept by hand is looked at whole: a value the update's daemon rewrites that no migration
+# says to, on a ledger of the flip release's schema and of the bridge's (T-1338).
+[[plant]]
+name = "updater product: the update rewrites what a project was created with (the flip's ledger)"
+meant = "replaced by hand"
+runs = ["smoke-flip-by-hand"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        migrate(&db, &MIGRATIONS)
+    })();'''
+replace = '''
+        migrate(&db, &MIGRATIONS)?;
+        db.execute_batch("UPDATE project SET created_at = ''")?;
+        Ok(())
+    })();'''
+
+[[plant]]
+name = "updater product: the update rewrites what a project was created with (the bridge's ledger)"
+meant = "replaced by hand"
+runs = ["smoke-bridge-by-hand"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        migrate(&db, &MIGRATIONS)
+    })();'''
+replace = '''
+        migrate(&db, &MIGRATIONS)?;
+        db.execute_batch("UPDATE project SET created_at = ''")?;
+        Ok(())
+    })();'''

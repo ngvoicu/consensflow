@@ -162,12 +162,34 @@ pub fn alive(pid: u32) -> bool {
     shown.code == 0 && !state.is_empty() && !state.starts_with('Z')
 }
 
-/// The pids in `table` whose command is a program of one of `folders` (each a folder's path
-/// ending in `/`): what the process table shows started from there.
-pub fn started_from(table: &[Row], folders: &[String]) -> Vec<u32> {
+/// The names the process table may show the program `binary` under: its path, and the path the
+/// system resolves it to (a temporary folder's `/var` is `/private/var`).
+pub fn programs_of(binary: &Path) -> Vec<String> {
+    let mut names = vec![binary.display().to_string()];
+    if let Ok(real) = std::fs::canonicalize(binary) {
+        let real = real.display().to_string();
+        if !names.contains(&real) {
+            names.push(real);
+        }
+    }
+    names
+}
+
+/// The pids in `table` whose command is one of `programs` (each a program's path, see
+/// [`programs_of`]), with its arguments or none: what the process table shows started from
+/// there. A program beside it in the same folder (the Node a bridge's daemon runs on, which lives
+/// in the bundle's `Contents/MacOS/` beside the app) is another program, and one whose name only
+/// begins with the same letters is another.
+pub fn started_from(table: &[Row], programs: &[String]) -> Vec<u32> {
     table
         .iter()
-        .filter(|row| folders.iter().any(|folder| row.command.starts_with(folder)))
+        .filter(|row| {
+            programs.iter().any(|program| {
+                row.command
+                    .strip_prefix(program.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+            })
+        })
         .map(|row| row.pid)
         .collect()
 }
@@ -176,7 +198,7 @@ pub fn started_from(table: &[Row], folders: &[String]) -> Vec<u32> {
 /// quits at once, which one with no input does.
 const WATCH_EVERY: Duration = Duration::from_millis(50);
 
-/// Every process started from some folders while it runs, read from the process table on a
+/// Every process of some programs that runs while it does, read from the process table on a
 /// thread of its own: the smoke's count of the apps an update starts (T-941).
 pub struct Watch {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -184,15 +206,15 @@ pub struct Watch {
 }
 
 impl Watch {
-    /// Starts watching for programs of `folders` (see [`started_from`]).
-    pub fn start(folders: Vec<String>) -> Self {
+    /// Starts watching for the `programs` (see [`started_from`]).
+    pub fn start(programs: Vec<String>) -> Self {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = std::sync::Arc::clone(&stop);
         let seen = thread::spawn(move || {
             let mut seen = std::collections::BTreeSet::new();
             loop {
                 let last = stopped.load(std::sync::atomic::Ordering::Acquire);
-                seen.extend(started_from(&process_table()?, &folders));
+                seen.extend(started_from(&process_table()?, &programs));
                 if last {
                     return Ok(seen);
                 }

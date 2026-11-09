@@ -25,6 +25,8 @@ app-login-descriptors = ["cargo", "xtask", "app", "test", "the_login_shell_holds
 app-update-tools-descriptors = ["cargo", "xtask", "app", "test", "the_programs_an_update_is_checked_with"]
 app-restart-descriptors = ["cargo", "xtask", "app", "test", "the_app_restarts_with"]
 app-end-descriptors = ["cargo", "xtask", "app", "test", "the_apps_end_leaves_every_descriptor"]
+app-start-descriptors = ["cargo", "xtask", "app", "test", "the_app_closes_what_it_was_left_before_anything_else"]
+app-start-words-descriptors = ["cargo", "xtask", "app", "test", "the_app_says_the_descriptors_it_closed_at_its_start"]
 app-tests-descriptors = ["cargo", "xtask", "app", "test", "testing::tests::a_program_a_test_starts"]
 panes-tests-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "testing::a_program_a_test_starts"]
 cf-tests-descriptors = ["cargo", "test", "--offline", "-p", "cf", "--test", "process"]
@@ -484,3 +486,87 @@ find = """
 replace = """
             .any(|line| !name.is_empty() && line.starts_with('n') && line.ends_with("/dev/null"))
 """
+
+# What a program is left of its parent's it closes as its first code (`cf_process::close_inherited`,
+# T-1338): the app an update installed is started by Tauri's restart, and the bridge release that
+# restarts it never made its descriptors close-on-exec. Every descriptor above the standard streams
+# that is open and not close-on-exec is closed, and none that is close-on-exec; the app does it
+# before anything else, and says in its log which it closed.
+[[plant]]
+name = "descriptors: what a program was left is not closed as its first code"
+meant = "what_the_process_was_left_is_closed_and_what_is_its_own_is_not"
+runs = ["process-descriptors"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/descriptors.rs"
+find = "            if let_go(fd) {"
+replace = "            if false && let_go(fd) {"
+
+[[plant]]
+name = "descriptors: the program's own descriptor, close-on-exec, is closed as its first code"
+meant = "what_the_process_was_left_is_closed_and_what_is_its_own_is_not"
+runs = ["process-descriptors"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/descriptors.rs"
+find = "            if flags >= 0 && flags & libc::FD_CLOEXEC == 0 {\n                libc::close(fd);\n                return true;"
+replace = "            if flags >= 0 {\n                libc::close(fd);\n                return true;"
+
+[[plant]]
+name = "descriptors: the descriptors a program closed as its first code are not said"
+meant = "what_the_process_was_left_is_closed_and_what_is_its_own_is_not"
+runs = ["process-descriptors"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/descriptors.rs"
+find = "                closed.push(u64::try_from(fd).unwrap_or_default());"
+replace = ""
+
+[[plant]]
+name = "descriptors: the handles a Windows program was left are not closed as its first code"
+meant = "what_the_process_was_left_is_closed_and_what_is_its_own_is_not"
+runs = ["process-descriptors"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/descriptors.rs"
+find = "                if flags & HANDLE_FLAG_INHERIT != 0 && !streams.contains(&value) && !a_device {"
+replace = "                if false && flags & HANDLE_FLAG_INHERIT != 0 && !streams.contains(&value) && !a_device {"
+
+[[plant]]
+name = "descriptors: the app does not close what it was left"
+meant = "the_app_closes_what_it_was_left_before_anything_else"
+runs = ["app-start-descriptors"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    let left = cf_process::close_inherited();"
+replace = "    let left: std::io::Result<Vec<u64>> = Ok(Vec::new());"
+
+[[plant]]
+name = "descriptors: the app closes what it was left after its home is settled"
+meant = "the_app_closes_what_it_was_left_before_anything_else"
+runs = ["app-start-descriptors"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    let left = cf_process::close_inherited();"
+replace = "    let left: std::io::Result<Vec<u64>> = Ok(Vec::new());"
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = "    remove_inherited_variables();\n    // Every panic from here on"
+replace = "    remove_inherited_variables();\n    let _ = cf_process::close_inherited();\n    // Every panic from here on"
+
+[[plant]]
+name = "descriptors: the app does not say the descriptors it closed in the words the smoke reads"
+meant = "the_app_says_the_descriptors_it_closed_at_its_start_and_nothing_where_there_were_none"
+runs = ["app-start-words-descriptors"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '"closed {} {} it was left at its start: {}",'
+replace = '"closed {} {} it held at its start: {}",'

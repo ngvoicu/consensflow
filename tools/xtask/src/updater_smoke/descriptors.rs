@@ -15,6 +15,13 @@
 //! be one the new app was given there (the system reuses the address of an object that is gone,
 //! a peer such as a system service is many processes' alike, and a socket whose peer closed shows
 //! none).
+//!
+//! An app that was left descriptors does not go on holding them: it closes what it was left as its
+//! first code (`cf_process::close_inherited`), and says so in its log. The bridge release never
+//! made its descriptors close-on-exec, so it hands the new app every one it holds, and the new
+//! app's own close is what the update from it proves (T-1338). An installed app that is this
+//! checkout's closes the two at its own start: it is not left them to hold, its log says it
+//! closed them, and the check is only what the new app is left of it.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -36,6 +43,23 @@ const LSOF: &str = "/usr/sbin/lsof";
 
 /// What the app's log says when a descriptor could not be made close-on-exec as it ended.
 pub const NOT_MARKED: &str = "could not mark close-on-exec";
+
+/// What the app's log says after the descriptors it closed as it started, the numbers following
+/// (`consensflow: closed 2 descriptors it was left at its start: 6, 7`, lib.rs of the app).
+const LEFT_AT_START: &str = " it was left at its start: ";
+
+/// The numbers of the descriptors the app's log says it closed as it started.
+pub fn closed_at_start(log: &str) -> Vec<u32> {
+    log.lines()
+        .filter(|line| line.starts_with("consensflow: closed "))
+        .filter_map(|line| line.split_once(LEFT_AT_START))
+        .flat_map(|(_, numbers)| {
+            numbers
+                .split(", ")
+                .filter_map(|number| number.trim().parse().ok())
+        })
+        .collect()
+}
 
 /// One descriptor above the standard streams a process holds, as `lsof -F ftdDin` says it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,22 +245,43 @@ fn same_object(was: &Held, held: &Held) -> bool {
 /// the faults (the old app was not left the two, or the new one holds one of them), and what is
 /// only noted (a file at the same number in both, an object at the same address, which `lsof`
 /// cannot tell from one opened again).
-pub fn compare(old: &[Held], new: &[Held], left: &Left) -> (Vec<String>, Vec<String>) {
+pub fn compare(
+    old: &[Held],
+    new: &[Held],
+    left: &Left,
+    installed_closed: &[u32],
+) -> (Vec<String>, Vec<String>) {
     let mut faults = Vec::new();
     let mut notes = Vec::new();
+    // The installed app was left the two: it holds them (the bridge's and the older flips'), or
+    // its log says it closed them as it started (an app of this checkout's).
     let pipe = old.iter().find(|held| held.fd == left.pipe);
-    if !pipe.is_some_and(|held| held.kind == "PIPE") {
+    let held_pipe = pipe.is_some_and(|held| held.kind == "PIPE");
+    if held_pipe {
+    } else if installed_closed.contains(&left.pipe) {
+        notes.push(format!(
+            "the installed app closed the pipe it was left at fd {} as it started",
+            left.pipe
+        ));
+    } else {
         faults.push(format!(
             "the installed app does not hold the pipe it was left at fd {}: the check proves nothing",
             left.pipe
         ));
     }
     let file = old.iter().find(|held| held.fd == left.file_fd);
-    if !file.is_some_and(|held| {
+    let held_file = file.is_some_and(|held| {
         held.file
             .as_ref()
             .is_some_and(|(_, node)| *node == left.node)
-    }) {
+    });
+    if held_file {
+    } else if installed_closed.contains(&left.file_fd) {
+        notes.push(format!(
+            "the installed app closed the file it was left at fd {} as it started",
+            left.file_fd
+        ));
+    } else {
         faults.push(format!(
             "the installed app does not hold the file it was left at fd {}: the check proves nothing",
             left.file_fd
