@@ -7,7 +7,9 @@
 //! would be reached by hand again, or not at all.
 //!
 //! A case that must give its windows another is in [`BY_HAND`] with the reason, and a case
-//! whose window runs on the home of its own says so ([`OWN_HOME`]).
+//! whose window runs on the home of its own says so ([`OWN_HOME`]). The evals are held to it
+//! too since T-785: they gave every window the owner's `CODEX_HOME`, and their installs no home
+//! of the kit's.
 
 use cf_e2e::checkout;
 
@@ -54,7 +56,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 23] = [
+const BY_HAND: [(&str, &str, &str); 25] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -190,6 +192,18 @@ const BY_HAND: [(&str, &str, &str); 23] = [
          updater finds its versions apart from its launcher. The folder is the run's own and nothing \
          of the owner's is read there; `live::launcher` is what holds the owner's launcher",
     ),
+    (
+        "crates/cf-evals/src/run/machine.rs",
+        "HOME",
+        "the person's home as the place the eval's folders are (`~/.consensflow-candidate/evals`), \
+         over the one the kit gives each install (Codex's is its login folder): every real window \
+         reads its login from the kit's home of the run's own (T-785), none by HOME",
+    ),
+    (
+        "crates/cf-evals/src/run/machine.rs",
+        "USERPROFILE",
+        "the same home, as Windows names it",
+    ),
 ];
 
 /// The sources that call `on_own_home`, each with the reason.
@@ -197,16 +211,6 @@ const OWN_HOME: [(&str, &str); 1] = [(
     "crates/cf-e2e/tests/live_pi_parity.rs",
     "its HOME holds the Pi folder the case made, and none of the owner's is read or written",
 )];
-
-/// The sources the evals still run real harnesses from on the owner's logins: their own
-/// rig (`run/machine.rs`) names the owner's home and Codex's. The follow-up is to give the
-/// evals' installs the kit's homes, with their findings kept for the report as Claude's
-/// are (`run/login.rs`), not to fail a run of hours at its end.
-const EVALS: [(&str, &str); 3] = [
-    ("crates/cf-evals/src/run/machine.rs", "CODEX_HOME"),
-    ("crates/cf-evals/src/run/machine.rs", "HOME"),
-    ("crates/cf-evals/src/run/machine.rs", "USERPROFILE"),
-];
 
 /// Whether `text` sets the variable `name`: an entry of an environment, `("NAME", …)`,
 /// `("NAME".to_owned(), …)` or `.var("NAME", …)`.
@@ -329,10 +333,7 @@ fn no_live_source_makes_the_home_of_a_real_harness_by_hand() -> Outcome {
         for name in named {
             let allowed = BY_HAND
                 .iter()
-                .any(|(source, held, _)| source == file && *held == name)
-                || EVALS
-                    .iter()
-                    .any(|(source, held)| source == file && *held == name);
+                .any(|(source, held, _)| source == file && *held == name);
             if !allowed {
                 by_hand.push(format!("{file}: {name}"));
             }
@@ -350,12 +351,6 @@ fn no_live_source_makes_the_home_of_a_real_harness_by_hand() -> Outcome {
             sources.iter().any(|source| source == file)
                 && (sets(&text(file), name) || copies(&text(file), name)),
             "{file} no longer names {name} by hand: take it out of the table"
-        );
-    }
-    for (file, name) in EVALS {
-        assert!(
-            sets(&text(file), name),
-            "{file} no longer sets {name}: take it out of the table"
         );
     }
     Ok(())

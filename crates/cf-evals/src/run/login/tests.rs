@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cf_e2e::Error;
 
+use cf_e2e::live::isolation::Isolation;
+use cf_e2e::live::Installed;
+use cf_e2e::rig::HarnessHome;
+
 use super::*;
 use crate::plan::staff_for;
 
@@ -60,14 +64,17 @@ fn staff_on(harnesses: &[&str], models: &[(&str, &str)]) -> Staff {
     staff_for(harnesses, models, None).unwrap()
 }
 
+fn seated(chief: &str, model: &str, harnesses: &[&str], staff_model: &str) -> Seated {
+    let models: Vec<(&str, &str)> = harnesses.iter().map(|name| (*name, staff_model)).collect();
+    Seated::of(chief, model, &staff_on(harnesses, &models), HOUR)
+}
+
+const HOUR: Duration = Duration::from_secs(3600);
+
 #[test]
 fn a_run_has_a_real_claude_code_unless_every_one_of_its_windows_is_the_stand_in_agent() {
     let on = |chief: &str, model: &str, harnesses: &[&str], staff_model: &str| {
-        real_claude(
-            chief,
-            model,
-            &staff_on(harnesses, &[("claude", staff_model)]),
-        )
+        seated(chief, model, harnesses, staff_model).real(Harness::Claude)
     };
     // The dry runs: the stand-in's models, chief and staff.
     assert!(!on("claude", "fake-chief", &["claude"], "fake"));
@@ -93,6 +100,31 @@ fn a_run_has_a_real_claude_code_unless_every_one_of_its_windows_is_the_stand_in_
     assert!(!on("codex", "gpt", &["codex"], "fake"));
 }
 
+/// Every harness of a run is real or the stand-in by the models of its windows, as Claude Code
+/// is (T-785): the kit's homes are made for the real ones, and Pi's holds the logins of its
+/// windows' models, chief's and staff's, each once.
+#[test]
+fn every_harness_of_a_run_is_real_by_the_models_of_its_windows_and_pis_are_each_named_once() {
+    let staff = staff_on(
+        &["pi", "devin", "codex"],
+        &[("pi", "openai/gpt-6-luna"), ("codex", "fake")],
+    );
+    let run = Seated::of("pi", "openrouter/deepseek/v4", &staff, HOUR);
+    assert_eq!(run.planned, HOUR);
+    assert!(run.real(Harness::Pi) && run.real(Harness::Devin));
+    assert!(!run.real(Harness::Codex), "its one window is the stand-in");
+    assert!(!run.real(Harness::Claude) && !run.real(Harness::Muse));
+    assert_eq!(
+        run.models(Harness::Pi),
+        ["openrouter/deepseek/v4", "openai/gpt-6-luna"]
+    );
+    let again = Seated::of("pi", "openai/gpt-6-luna", &staff, HOUR);
+    assert_eq!(again.models(Harness::Pi), ["openai/gpt-6-luna"]);
+    // The dry runs: nothing is real, so no home is made for any harness.
+    let dry = seated("claude", "fake-chief", &["claude", "devin"], "fake");
+    assert!(Harness::ALL.into_iter().all(|harness| !dry.real(harness)));
+}
+
 #[test]
 fn the_login_must_last_the_runs_planned_time_and_the_margin_of_its_end() {
     assert_eq!(MARGIN, Duration::from_secs(30 * 60));
@@ -106,7 +138,7 @@ fn the_login_must_last_the_runs_planned_time_and_the_margin_of_its_end() {
 
 #[test]
 fn a_run_with_no_real_claude_code_has_no_login_and_starts_none() {
-    assert!(throwaway(false, Duration::from_secs(60)).is_none());
+    assert!(throwaway(&seated("codex", "gpt", &["claude"], "fake")).is_none());
 }
 
 #[test]
@@ -160,19 +192,25 @@ fn machine_on(login: Option<Arc<Throwaway>>) -> Machine {
     }
 }
 
-/// What the floor of a run says of the login, and the check the report gets.
+/// What the report keeps of the login: its check, and the lines of its log (the floor's), one to a
+/// line. A line the floor only printed is not in the report (T-785: the owner's hashes were not).
 fn reported(machine: &Machine) -> (Option<Check>, String) {
     let mut said = Vec::new();
-    let check = {
-        let mut floor = Floor::new(&mut said);
-        left_as_it_was(machine, &mut floor).unwrap()
-    };
-    (check, String::from_utf8(said).unwrap())
+    let mut floor = Floor::new(&mut said);
+    let check = left_as_it_was(machine, &mut floor).unwrap();
+    let kept: Vec<String> = floor
+        .log()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["line"].as_str().unwrap().to_owned())
+        .collect();
+    (check, kept.join("\n"))
 }
 
 #[test]
 fn a_report_has_a_check_that_the_owners_claude_was_left_as_it_was_for_a_run_that_had_a_throwaway() {
-    let name = "the owner's Claude setup and the machine's login were left as they were";
+    let name = "the owner's setups and logins of the run's harnesses were left as they were";
     // No throwaway, no such thing to leave.
     assert_eq!(reported(&machine_on(None)), (None, String::new()));
     // One that left everything be.
@@ -193,7 +231,62 @@ fn a_report_has_a_check_that_the_owners_claude_was_left_as_it_was_for_a_run_that
         Some((name.to_owned(), false))
     );
     assert!(
-        said.contains("the run left the owner's Claude setup or login changed: ~/.claude/settings.json is not as it was; "),
+        said.contains("the run left the owner's setup or login of a harness changed: ~/.claude/settings.json is not as it was; "),
+        "{said}"
+    );
+}
+
+/// An eval's Codex, Pi and Devin windows run for hours on the kit's homes (T-785). A file of the
+/// owner's that changes in the run is not the rig's error at its end, which would cost the run its
+/// report: the report's check fails, the floor names the file, and the owner's hashes before and
+/// after are on the floor (kept in the report's log) whether anything changed or not.
+#[test]
+fn a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_not_the_rig() {
+    let owner = tempfile::tempdir().unwrap();
+    let codex = owner.path().join(".codex");
+    std::fs::create_dir_all(&codex).unwrap();
+    std::fs::write(codex.join("auth.json"), r#"{"tokens":"the-owners"}"#).unwrap();
+    let isolation = Arc::new(Isolation::codex(owner.path(), &codex).keeping_what_it_finds());
+    let machine = Machine {
+        installs: vec![Installed::at(Harness::Codex, "/bin/codex", &codex)
+            .with_isolation(Arc::clone(&isolation))],
+        ..machine_on(None)
+    };
+    // The rig made the home and ended on it: the owner's login as it was.
+    let home = HarnessHome::vars(&*isolation).unwrap();
+    assert_eq!(home[0].0, "CODEX_HOME");
+    HarnessHome::finish(&*isolation).unwrap();
+    let name = "the owner's setups and logins of the run's harnesses were left as they were";
+    // The kit says a file below the home as `~/` and the path as the platform spells it.
+    let auth = format!("~/{}", Path::new(".codex").join("auth.json").display());
+    let (check, said) = reported(&machine);
+    assert_eq!(
+        check.map(|check| (check.name, check.ok)),
+        Some((name.to_owned(), true))
+    );
+    assert!(
+        said.contains(&format!(
+            "the owner's Codex setup, before the run and after it: {auth} "
+        )),
+        "{said}"
+    );
+    // The run's Codex refreshed the owner's login: the rig ends as it did, the report fails.
+    std::fs::write(codex.join("auth.json"), r#"{"tokens":"refreshed"}"#).unwrap();
+    assert!(HarnessHome::finish(&*isolation).is_ok());
+    let (check, said) = reported(&machine);
+    assert_eq!(check.map(|check| check.ok), Some(false));
+    assert!(
+        said.contains(&format!(
+            "the run left the owner's setup or login of a harness changed: {auth} is not as it was"
+        )),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("the owner's Codex setup before the run: {auth} ")),
+        "{said}"
+    );
+    assert!(
+        !said.contains("the-owners") && !said.contains("refreshed\""),
         "{said}"
     );
 }
