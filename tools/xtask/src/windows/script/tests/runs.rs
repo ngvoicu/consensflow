@@ -25,6 +25,8 @@ fn write(root: &Path, name: &str) {
 }
 
 /// The file `name` of `root`, last written `days` ago.
+// The time of day is read in one place of the product; a test says an age against the clock the files are stamped by.
+#[allow(clippy::disallowed_methods)]
 fn aged(root: &Path, name: &str, days: u64) {
     write(root, name);
     let file = fs::OpenOptions::new()
