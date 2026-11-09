@@ -88,7 +88,7 @@ use std::future::Future;
 use std::rc::Rc;
 
 pub use builder::{BridgeBuilder, Connection, DEFAULT_DEADLINE, DEFAULT_MAX_FRAME_BYTES};
-pub use read_ahead::{read_ahead, ReadAhead, READ_AHEAD_CHUNKS};
+pub use read_ahead::{read_ahead, ReadAhead, READ_AHEAD_BYTES};
 pub use registry::Subscription;
 use state::Inner;
 

@@ -641,16 +641,36 @@ fn a_window_a_pass_went_on_without_does_not_make_the_passes_after_it_wait_again(
         !waited(&context),
         "the pass waited again for @{zeus}, whose last step it had gone on without"
     );
-    // The window answers again: its step ends in no time, and the passes wait for it once more.
+    // The step goes on for half a minute and ends: the log says so, in a line of its own,
+    // since no pass named it, and the window is still one the passes do not wait for.
+    context.advance(31_000);
     second.open();
     second_on.set(false);
     context.settle();
-    let (third, _) = stuck("zeus");
+    assert_eq!(
+        logged(&context, "the step of"),
+        [
+            format!("the step of @{zeus} ended 0 s after its pass began"),
+            format!(
+                "the step of @{zeus}, which no pass waits for since one went on without it, ended 31 s after its pass began"
+            ),
+        ]
+    );
+    let (third, third_on) = stuck("zeus");
+    assert!(
+        !waited(&context),
+        "the pass waited for @{zeus} before one of its steps ended in time"
+    );
+    // The window answers again: its step ends in no time, and the passes wait for it once more.
+    third.open();
+    third_on.set(false);
+    context.settle();
+    let (fourth, _) = stuck("zeus");
     assert!(
         waited(&context),
         "a window that answered was still gone on without"
     );
-    third.open();
+    fourth.open();
     context.settle();
 }
 

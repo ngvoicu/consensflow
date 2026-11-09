@@ -22,7 +22,7 @@ bridge-queue = ["cargo", "test", "--offline", "-p", "cf-bridge", "--lib", "queue
 bridge-read-ahead = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::tests::read_ahead::"]
 daemon-input = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::input::"]
 engine-slow-window = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unknown_looks::a_window_a_pass_went_on_without"]
-app-daemon-restart = ["cargo", "xtask", "app", "test", "daemon::tests::a_daemon_that"]
+app-daemon-restart = ["cargo", "xtask", "app", "test", "daemon::tests::"]
 
 [[plant]]
 name = "daemon keeps running: a response that does not get into the writer queue closes the transport"
@@ -112,8 +112,8 @@ runs = ["bridge-read-ahead"]
 
 [[plant.edit]]
 file = "crates/cf-bridge/src/local/read_ahead.rs"
-find = "mpsc::channel(READ_AHEAD_CHUNKS)"
-replace = "mpsc::channel(READ_AHEAD_CHUNKS * 4)"
+find = "        while *queued >= READ_AHEAD_BYTES {"
+replace = "        while *queued >= READ_AHEAD_BYTES * 4 {"
 
 [[plant]]
 name = "daemon keeps running: a failed read of the daemon's input is not told"
@@ -122,7 +122,7 @@ runs = ["bridge-read-ahead"]
 
 [[plant.edit]]
 file = "crates/cf-bridge/src/local/read_ahead.rs"
-find = "                let _ = chunks.blocking_send(Err(error));"
+find = "                let _ = chunks.send(Err(error));"
 replace = "                let _ = error;"
 
 [[plant]]
@@ -198,3 +198,36 @@ runs = ["app-daemon-restart"]
 file = "app/src-tauri/src/daemon.rs"
 find = "        state.restarts = if stayed_up { 1 } else { state.restarts + 1 };"
 replace = "        state.restarts += 1;"
+
+[[plant]]
+name = "daemon keeps running: the daemon's input counts every read as a whole chunk, as a bound of reads did"
+meant = "it_counts_what_it_holds_in_bytes_not_in_reads"
+runs = ["bridge-read-ahead"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/read_ahead.rs"
+find = "        *queued += count;"
+replace = "        *queued += CHUNK_BYTES;"
+
+[[plant]]
+name = "daemon keeps running: a slow window's step that ends is never told"
+meant = "a_window_a_pass_went_on_without_does_not_make_the_passes_after_it_wait_again"
+runs = ["engine-slow-window"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/steps.rs"
+find = "                this.tell_slow(&handle, took / 1000);"
+replace = "                let _ = (&handle, took);"
+
+[[plant]]
+name = "daemon keeps running: a start again does not wait for a launch the old daemon had asked for"
+meant = "a_launch_admitted_when_the_daemon_stops_is_finished_before_the_windows_close"
+runs = ["app-daemon-restart"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''
+            finish_before_deadline(SHUTDOWN_DRAIN, move || {
+                let _ = bridge.wait_launches_closed();
+            });'''
+replace = "            let _ = bridge;"

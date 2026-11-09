@@ -16,6 +16,7 @@ use cf_panes::headless::reap_all;
 use cf_panes::pty::PaneTable;
 
 use crate::daemon_command::LoginLookup;
+use crate::runtime::{finish_before_deadline, SHUTDOWN_DRAIN};
 
 /// How long the daemon gets to stop on its own before it is killed.
 pub(crate) const DAEMON_STOP_GRACE: Duration = Duration::from_secs(2);
@@ -353,11 +354,12 @@ impl Daemon {
             DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true),
         );
         let old = state.daemon.take();
+        let bridge = state.bridge.clone();
         drop(state);
         let daemon = Arc::clone(self);
         let spawned = thread::Builder::new()
             .name("consensflow-daemon-restart".to_string())
-            .spawn(move || daemon.restart(&restart, old));
+            .spawn(move || daemon.restart(&restart, old, bridge));
         if let Err(error) = spawned {
             self.fail(&DaemonFailure {
                 cause: format!("ConsensFlow's daemon could not be started again: {error}"),
@@ -370,9 +372,16 @@ impl Daemon {
     /// as a quit closes them (no other daemon knows what they were told, or the token each
     /// holds), and a start follows, waiting longer after each that fails, until the
     /// restarts in a row are spent.
-    fn restart(self: &Arc<Self>, restart: &Restart, old: Option<Child>) {
+    fn restart(self: &Arc<Self>, restart: &Restart, old: Option<Child>, bridge: Option<Bridge>) {
         if let Some(mut old) = old {
             stop_daemon(&mut old);
+        }
+        // A launch the old daemon had asked for finishes first, as a quit's does: the pane it
+        // opens after the windows close would be a window of no daemon, running for good.
+        if let Some(bridge) = bridge {
+            finish_before_deadline(SHUTDOWN_DRAIN, move || {
+                let _ = bridge.wait_launches_closed();
+            });
         }
         reap_all(&restart.panes);
         let mut wait = restart.backoff.first;
@@ -1050,6 +1059,99 @@ mod tests {
         assert!(
             heard.recv_timeout(Duration::from_millis(300)).is_err(),
             "the person was told more than once"
+        );
+        let (child, bridge) = daemon.stop().expect("the app stops");
+        if let Some(bridge) = bridge {
+            bridge.close_input();
+        }
+        if let Some(mut child) = child {
+            stop_daemon(&mut child);
+        }
+    }
+
+    /// A launch the dead daemon had asked for is finished before the windows close: the pane it
+    /// opens after the close would be a window of no daemon, running for good. The quit waits for
+    /// its admitted launches as it reaps ([`AppRuntime::finish_shutdown`]); a start again does.
+    #[cfg(unix)]
+    #[test]
+    fn a_launch_admitted_when_the_daemon_stops_is_finished_before_the_windows_close() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let (entered, admitted) = mpsc::channel();
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (counted, table, held) = (
+            Arc::clone(&starts),
+            Arc::clone(&panes),
+            Arc::clone(&release),
+        );
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            if counted.fetch_add(1, Ordering::SeqCst) > 0 {
+                return stand_in_core(true, "while read -r line; do :; done", closed);
+            }
+            let (opening, held, entered) = (Arc::clone(&table), Arc::clone(&held), entered.clone());
+            let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+            builder.on_launch("pane.open", move |_bridge, _body| {
+                entered.send(()).expect("announce the launch");
+                held.wait();
+                let _reader = opening
+                    .open_at(
+                        cf_panes::pty::PaneKey::new("late-pane", 1),
+                        Path::new("/tmp"),
+                        &[
+                            "/bin/sh".to_string(),
+                            "-c".to_string(),
+                            "sleep 30".to_string(),
+                        ],
+                        &HashMap::new(),
+                        PtySize {
+                            rows: 24,
+                            cols: 80,
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+                Ok(json!({"ok":true}))
+            });
+            builder.on_close(closed);
+            let mut command = crate::testing::command("/bin/sh");
+            command.arg("-c").arg(
+                r#"printf '%s\n' '{"url":"http://localhost:1/","token":"t"}'; printf '%s\n' '{"v":1,"id":"n-open","kind":"req","op":"pane.open","body":{}}'; sleep 0.3"#,
+            );
+            connect_daemon(command, builder, Duration::from_secs(5))
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(10)).expect("up"),
+            DaemonStatus::up()
+        );
+        admitted
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the launch was admitted");
+        assert_eq!(
+            heard
+                .recv_timeout(Duration::from_secs(10))
+                .expect("stopped"),
+            DaemonStatus::down(DAEMON_STOPPED_RESTARTING, true)
+        );
+        // The launch is still held when the app begins to start the daemon again.
+        thread::sleep(Duration::from_millis(300));
+        release.wait();
+        assert_eq!(
+            heard
+                .recv_timeout(Duration::from_secs(10))
+                .expect("up again"),
+            DaemonStatus::up()
+        );
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            panes.list().map(|open| open.len()).ok(),
+            Some(0),
+            "the window a launch opened after the daemon stopped was left open"
         );
         let (child, bridge) = daemon.stop().expect("the app stops");
         if let Some(bridge) = bridge {

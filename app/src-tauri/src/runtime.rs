@@ -26,7 +26,7 @@ use cf_proto::bridge::Role;
 
 /// How long quitting, or installing an update, waits for what was admitted
 /// before the daemon stopped to finish.
-const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
+pub(crate) const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 /// How long quitting waits for every window's programs, asked to end, to have:
 /// they are given [`CLOSE_GRACE`] before what is left is killed, and a moment
 /// more to be. (On Windows nothing is asked and nothing waits: they are ended
@@ -170,7 +170,10 @@ impl Drop for AppRuntime {
 
 /// Runs `finish` on a thread of its own and waits for it until `timeout`:
 /// `false` when it failed or was not done by then.
-fn finish_before_deadline(timeout: Duration, finish: impl FnOnce() + Send + 'static) -> bool {
+pub(crate) fn finish_before_deadline(
+    timeout: Duration,
+    finish: impl FnOnce() + Send + 'static,
+) -> bool {
     let (sent, done) = mpsc::sync_channel(1);
     if thread::Builder::new()
         .name("consensflow-drain".into())

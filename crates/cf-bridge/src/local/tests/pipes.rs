@@ -434,7 +434,7 @@ fn daemon_input(end: std::io::PipeReader) -> impl tokio::io::AsyncRead + Unpin +
 fn the_host_writes_while_the_daemons_thread_is_busy(
     events: i64,
     busy: Duration,
-) -> (bool, Vec<i64>, bool) {
+) -> (bool, Vec<i64>, bool, Result<serde_json::Value, BridgeError>) {
     run_real(async move {
         let (daemon_input_end, host_output) = pipe().expect("the host's output pipe");
         let (host_input, mut daemon_output) = pipe().expect("the daemon's output pipe");
@@ -455,7 +455,9 @@ fn the_host_writes_while_the_daemons_thread_is_busy(
         daemon.on_event("tick", move |body| {
             sink.borrow_mut().extend(body["n"].as_i64());
         });
-        // Eight pipes' worth, in frames of 4 KiB, from a thread of the host's own.
+        daemon.on("ask", |_, _| async { Ok(json!({ "ok": true })) });
+        // Eight pipes' worth, in frames of 4 KiB, from a thread of the host's own, and a
+        // request behind them, which waits for the daemon's thread to be free to answer.
         let host = connected.bridge.clone();
         let mut sent = on_a_thread(move || {
             for n in 0..events {
@@ -463,6 +465,8 @@ fn the_host_writes_while_the_daemons_thread_is_busy(
                     .expect("an event");
             }
         });
+        let asking = connected.bridge.clone();
+        let asked = on_a_thread(move || asking.request("ask", json!({}), Some(20_000)));
         // The daemon's thread is held, as a pass holds it: nothing here polls.
         std::thread::sleep(busy);
         let written_meanwhile = sent.try_recv().is_ok();
@@ -471,16 +475,17 @@ fn the_host_writes_while_the_daemons_thread_is_busy(
         }
         let count = usize::try_from(events).expect("a count");
         wait_for_real(|| heard.borrow().len() == count).await;
+        let answer = within_real(asked).await.expect("the host's request");
         let open = !connected.bridge.is_closed() && !daemon.closed();
         let heard = heard.borrow().clone();
         connected.bridge.close_input();
-        (written_meanwhile, heard, open)
+        (written_meanwhile, heard, open, answer)
     })
 }
 
 #[test]
 fn a_busy_daemon_thread_does_not_hold_up_the_hosts_writes_and_every_frame_arrives_in_order() {
-    let (written_meanwhile, heard, open) =
+    let (written_meanwhile, heard, open, answer) =
         the_host_writes_while_the_daemons_thread_is_busy(128, Duration::from_millis(1500));
     assert!(
         written_meanwhile,
@@ -488,6 +493,8 @@ fn a_busy_daemon_thread_does_not_hold_up_the_hosts_writes_and_every_frame_arrive
     );
     assert!(open, "the bridge closed under a busy daemon");
     assert_eq!(heard, (0..128).collect::<Vec<_>>());
+    // The thread is free again: what was asked of it meanwhile is answered, in its turn.
+    assert_eq!(answer, Ok(json!({ "ok": true })));
 }
 
 #[test]

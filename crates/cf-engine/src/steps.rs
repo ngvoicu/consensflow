@@ -140,15 +140,38 @@ impl Dispatcher {
     fn go_on_slow(self: &Rc<Self>, step: Step, began: i64) {
         let this = Rc::clone(self);
         self.seams.spawn.spawn(Box::pin(async move {
-            let Step { record, begun, .. } = step;
+            let Step {
+                handle,
+                record,
+                begun,
+            } = step;
             if let Err(cause) = begun.await {
                 this.seams.log.error("a step failed", &cause.to_string());
             }
             let wait = i64::try_from(STEP_WAIT.as_millis()).unwrap_or(i64::MAX);
-            if this.now() - began < wait {
+            let took = this.now() - began;
+            if took < wait {
                 this.steps.slow.borrow_mut().remove(&record.id);
+            } else {
+                this.tell_slow(&handle, took / 1000);
             }
         }));
+    }
+
+    /// Says a step no pass waits for ended, still slow, in the log's one line in
+    /// [`LEFT_TOLD_MS`] (the line of [`Dispatcher::tell_left`] is the pass that went on
+    /// without it; this is the same window's next steps, which no pass names).
+    fn tell_slow(&self, handle: &str, took: i64) {
+        let now = self.now();
+        let state = &self.steps;
+        let last = state.told.get();
+        if last.is_some_and(|at| now - at < LEFT_TOLD_MS) {
+            return;
+        }
+        state.told.set(Some(now));
+        self.seams.log.warn(&format!(
+            "the step of @{handle}, which no pass waits for since one went on without it, ended {took} s after its pass began"
+        ));
     }
 
     /// The steps still `waiting` go on apart, and what each ends with is written

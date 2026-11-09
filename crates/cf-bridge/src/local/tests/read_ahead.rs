@@ -8,7 +8,13 @@ use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
 
-use crate::local::{read_ahead, READ_AHEAD_CHUNKS};
+use crate::local::{read_ahead, READ_AHEAD_BYTES};
+
+/// What the thread asks its input for at once.
+const CHUNK: usize = 64 * 1024;
+
+/// How long a test waits for an input to end: a read that never does is a failure, not a hang.
+const PATIENCE: Duration = Duration::from_secs(10);
 
 /// An input that never ends, and counts what it was asked for.
 struct Endless(Arc<AtomicUsize>);
@@ -21,19 +27,38 @@ impl Read for Endless {
     }
 }
 
+/// An input that gives a frame's worth at a time, as a Windows pipe does, and ends.
+struct Frames {
+    given: Arc<AtomicUsize>,
+    left: usize,
+}
+
+impl Read for Frames {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.left == 0 {
+            return Ok(0);
+        }
+        self.left -= 1;
+        self.given.fetch_add(1, Ordering::SeqCst);
+        bytes[..20].fill(b'f');
+        Ok(20)
+    }
+}
+
 #[tokio::test]
 async fn it_stops_taking_bytes_at_its_bound_and_goes_on_as_they_are_read() {
     let reads = Arc::new(AtomicUsize::new(0));
     let mut input = read_ahead(Endless(Arc::clone(&reads)));
     tokio::time::sleep(Duration::from_millis(300)).await;
     let at_rest = reads.load(Ordering::SeqCst);
+    let held = READ_AHEAD_BYTES / CHUNK;
     assert!(
-        at_rest <= READ_AHEAD_CHUNKS + 2,
+        at_rest <= held + 2,
         "{at_rest} chunks were taken with nobody reading"
     );
-    assert!(at_rest >= READ_AHEAD_CHUNKS, "{at_rest} chunks were taken");
+    assert!(at_rest >= held, "{at_rest} chunks were taken");
 
-    let mut chunk = vec![0; 64 * 1024];
+    let mut chunk = vec![0; CHUNK];
     for _ in 0..10 {
         input.read_exact(&mut chunk).await.expect("a chunk");
     }
@@ -43,6 +68,31 @@ async fn it_stops_taking_bytes_at_its_bound_and_goes_on_as_they_are_read() {
         after > at_rest,
         "reading what waited did not make room for more"
     );
+}
+
+/// A pipe that gives a few dozen bytes at a time (every frame the host writes, on Windows) is
+/// held by what it holds, not by how many reads it took: a bound of reads stopped at a few
+/// hundred frames, and the host's writer waited behind them again.
+#[tokio::test]
+async fn it_counts_what_it_holds_in_bytes_not_in_reads() {
+    let given = Arc::new(AtomicUsize::new(0));
+    let frames = 5_000;
+    let mut input = read_ahead(Frames {
+        given: Arc::clone(&given),
+        left: frames,
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        given.load(Ordering::SeqCst),
+        frames,
+        "the input was not taken off the pipe while nobody read it"
+    );
+    let mut all = Vec::new();
+    tokio::time::timeout(PATIENCE, input.read_to_end(&mut all))
+        .await
+        .expect("the input ended")
+        .expect("the input");
+    assert_eq!(all.len(), 20 * frames);
 }
 
 #[tokio::test]
@@ -57,7 +107,10 @@ async fn it_gives_the_bytes_in_order_across_chunks_and_ends_with_its_input() {
     });
     said.join().expect("the writer");
     let mut all = String::new();
-    input.read_to_string(&mut all).await.expect("the input");
+    tokio::time::timeout(PATIENCE, input.read_to_string(&mut all))
+        .await
+        .expect("the input ended")
+        .expect("the input");
     let want: String = (0..1000).map(|n| format!("line {n}\n")).collect();
     assert_eq!(all, want);
 }
